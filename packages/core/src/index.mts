@@ -477,6 +477,13 @@ export {
 	type LoggableError,
 	loggableError,
 } from "./logging/loggableError.mjs";
+// MFA (the MFA ADR): the coordinator slot and its absence policy; the stores,
+// their memory adapters, factories and modules
+export {
+	MFA_ABSENCE_POLICY,
+	type MfaCoordinator,
+	type PrimaryAuthentication,
+} from "./mfa/coordinator.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
 export type {
@@ -497,7 +504,6 @@ export type {
 	MfaFactorStore,
 	MfaFactorStoreFactory,
 } from "./mfa/factorStore.mjs";
-// MFA (the MFA ADR): the stores, their memory adapters, factories and modules
 export {
 	createMfaFactorStoreFactory,
 	createMfaTransactionStoreFactory,

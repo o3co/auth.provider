@@ -124,6 +124,7 @@ a composition root. Listed because a module may `require` them.
 | `keyStore` | `KeyStore` | required | `core/keys/KeyStore.mts` | Signing and verification keys. `sign()` is the seam a KMS/HSM implements without surrendering the private key (#303). |
 | `mfaFactorStore` | `MfaFactorStore` | optional | `core/mfa/factorStore.mts` | Enrolled second factors (the MFA ADR's D7): one record per factor, keyed by subject and id, whose `data` the coordinator seals before it arrives and every store keeps byte for byte without reading. `update` is a compare-and-set on the record's `version`; a store that cannot answer throws, because an outage read as "no factors" would open a first binding. Bundled adapter: memory (`memoryMfaFactorStoreModule`, single replica; a restart empties it, which it warns about). |
 | `mfaTransactionStore` | `MfaTransactionStore` | optional | `core/mfa/transactionStore.mts` | MFA transactions and the subject lock (the MFA ADR's D8, D21). A transaction is the single-use record of one second-factor ceremony, bound to the browser session that started it; every operation a race could split is atomic in the store — `reserveAttempt` spends an attempt before a proof is checked, `takeChallenge` answers a challenge once, `consume` gives the transaction to one verification. The subject state bounds guessable proofs across transactions on the time the caller passes: the consecutive run with its short backoff and hard limit, the weekly budget no success refunds, and the browsers an exempt success trusts against the weekly hold. No Store variant: this is verification state. Bundled adapter: memory (`memoryMfaTransactionStoreModule`, single replica). |
+| `mfaCoordinator` | `MfaCoordinator` | optional | `core/mfa/coordinator.mts` | Not an adapter seam: what the login route and `/authorize` consult about MFA (the MFA ADR's D8) — the `amr` values a step-up can reach, a decision after the primary authentication (none, challenge, enroll), and the login transaction bound to the regenerated session. Declared in core so neither `session` nor `oauth` imports an optional feature; filled by the MFA package. Optional to wire, not optional to decide once a module reading it attaches `MFA_ABSENCE_POLICY` (below). |
 | `oidcFederationConfigs` | `Readonly<Record<string, OidcProviderConfig>>` | optional | `federation-oidc/module.mts` | Config of every generic OpenID Connect federation instance, keyed by federation name; each `oidcFederationModule(<name>)` reads its own entry. `readOidcFederationConfigs` builds it from `config.federations` (#524). |
 | `rateLimiter` | `RateLimiter` | optional | `core/ratelimit/types.mts` | Shared counters for the OAuth endpoints and the login brute-force guard. |
 | `refreshTokenFamilyRevocation` | `RefreshTokenFamilyRevocation` | optional | `core/refresh-token-family/types.mts` | Family-wide revoke, used on replay detection and on the credential-change cascade. |
@@ -185,6 +186,13 @@ that safety.
 | `subjectRevocation` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `oauth.deviceAuthorization.store = "unsupported"` |
+
+Declared, and attached by no bundled module yet. The constant fixes the line an
+operator will be told to write once a module that reads the slot attaches it:
+
+| Policy | Declared absent by | For the slot |
+| --- | --- | --- |
+| `MFA_ABSENCE_POLICY` | `mfa.mode = "off"` | `mfaCoordinator` |
 
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than
