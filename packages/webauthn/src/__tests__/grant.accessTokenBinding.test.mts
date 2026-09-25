@@ -332,3 +332,48 @@ describe("createWebAuthnGrant — unbound requests are unchanged (#489)", () => 
 		expect(tokens.token_type).toBe("Bearer");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Only the member the binding's mechanism owns is stamped
+// ---------------------------------------------------------------------------
+
+describe("createWebAuthnGrant — stamps only the confirmation the binding's mechanism owns", () => {
+	// `Confirmation` is extensible by mechanism, and `ctx.tokenBinding` carries
+	// what the mechanism returned. A contributed kind presenting a DPoP or mTLS
+	// member, or a DPoP binding presenting an mTLS one, was validated by no
+	// mechanism that owns the member — core's `ownedConfirmation` is the rule.
+	const unowned: readonly (readonly [string, TokenBinding])[] = [
+		["a contributed kind presenting cnf.jkt", { kind: "acme", confirmation: { jkt: "ACME-JKT" } }],
+		[
+			"a contributed kind presenting cnf.x5t#S256",
+			{ kind: "acme", confirmation: { "x5t#S256": "ACME-X5T" } },
+		],
+		[
+			"a DPoP binding presenting cnf.x5t#S256",
+			{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
+		],
+	];
+
+	it.each(unowned)(
+		"mints an unbound access and refresh token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const tokens = await issue(await makeDeps(), makeCtx(makeClient(), { tokenBinding }));
+
+			expect(decodePayload(tokens.access_token).cnf).toBeUndefined();
+			expect(decodePayload(tokens.refresh_token as string).cnf).toBeUndefined();
+			expect(tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const compound = {
+			kind: "dpop",
+			confirmation: { jkt: PROOF_JKT, "x5t#S256": "STOWAWAY-X5T" },
+		} as unknown as TokenBinding;
+		const tokens = await issue(await makeDeps(), makeCtx(makeClient(), { tokenBinding: compound }));
+
+		expect(decodePayload(tokens.access_token).cnf).toEqual({ jkt: PROOF_JKT });
+		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: PROOF_JKT });
+		expect(tokens.token_type).toBe("DPoP");
+	});
+});

@@ -44,6 +44,7 @@ import {
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -506,5 +507,42 @@ describe("confidential-client RT binding — opt-in (#275)", () => {
 			const newRt = decodeJwt(result.tokens.refresh_token as string);
 			expect((newRt.cnf as { jkt?: string } | undefined)?.jkt).toBe("PROOF-JKT-PUB");
 		}
+	});
+});
+
+describe("refresh_token stamps only the confirmation the binding's mechanism owns", () => {
+	// A plain refresh token and a public client: row 2's opt-in upgrade, where
+	// the presented binding is what both new tokens would be bound to.
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access and refresh token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
+			const { result } = await createRefreshTokenGrant(mockDeps).handle(
+				buildCtx({ refreshToken: rt, authenticatedClient: publicAuthClient, tokenBinding }),
+			);
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			expect(decodeJwt(result.tokens.access_token).cnf).toBeUndefined();
+			expect(decodeJwt(result.tokens.refresh_token as string).cnf).toBeUndefined();
+			expect(result.tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
+		const { result } = await createRefreshTokenGrant(mockDeps).handle(
+			buildCtx({
+				refreshToken: rt,
+				authenticatedClient: publicAuthClient,
+				tokenBinding: COMPOUND_DPOP_BINDING,
+			}),
+		);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodeJwt(result.tokens.access_token).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(decodeJwt(result.tokens.refresh_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(result.tokens.token_type).toBe("DPoP");
 	});
 });

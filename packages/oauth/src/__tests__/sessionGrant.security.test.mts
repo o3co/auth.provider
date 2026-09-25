@@ -19,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
 
 const SID = "browser-session";
 const SUB = "user-1";
@@ -237,4 +238,23 @@ describe("session grant authentication and token binding", () => {
 			expect(result.body.token_type).toBe(binding.kind === "dpop" ? "DPoP" : "Bearer");
 		},
 	);
+});
+
+describe("session grant stamps only the confirmation the binding's mechanism owns", () => {
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access token, advertised as Bearer, for %s",
+		async (_label, binding) => {
+			const result = await mint(await buildApp(await liveStore(), binding));
+			expect(result.status).toBe(200);
+			expect(decodeJwt(result.body.access_token).cnf).toBeUndefined();
+			expect(result.body.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const result = await mint(await buildApp(await liveStore(), COMPOUND_DPOP_BINDING));
+		expect(result.status).toBe(200);
+		expect(decodeJwt(result.body.access_token).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(result.body.token_type).toBe("DPoP");
+	});
 });

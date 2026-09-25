@@ -42,6 +42,7 @@ import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -401,5 +402,43 @@ describe("confidential-client RT binding — opt-in, authorization_code (#275)",
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) expect.fail("Expected tokens in result");
 		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+});
+
+describe("authorization_code stamps only the confirmation the binding's mechanism owns", () => {
+	// A public client, so both the access and the refresh token are bound when
+	// anything is: the case where a stamped confirmation would reach furthest.
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access and refresh token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const handler = createAuthorizationGrant(
+				makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode })),
+			);
+			const { result } = await handler.handle({ ...baseCtxPublic, tokenBinding });
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			expect(decodePayload(result.tokens.access_token as string).cnf).toBeUndefined();
+			expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+			expect(result.tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const handler = createAuthorizationGrant(
+			makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode })),
+		);
+		const { result } = await handler.handle({
+			...baseCtxPublic,
+			tokenBinding: COMPOUND_DPOP_BINDING,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.access_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toEqual({
+			jkt: "OWNED-JKT",
+		});
+		expect(result.tokens.token_type).toBe("DPoP");
 	});
 });

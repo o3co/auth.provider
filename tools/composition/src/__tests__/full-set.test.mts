@@ -424,6 +424,37 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
 	});
 
+	it("DPoP: the device's poll with a proof gets a token bound to its key, advertised as DPoP (RFC 9449 §5)", async () => {
+		// The real DPoP mechanism beside the device grant. The grant stamped the
+		// proof's `cnf.jkt` and the envelope said Bearer, so a DPoP-aware device
+		// presented the token as a bearer token, which a resource server that
+		// enforces the binding refuses (§7.1).
+		const { app } = await boot();
+		const started = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({ client_id: TV.id });
+		const { agent, header, token } = await signedIn(app);
+		const approved = await agent
+			.post("/oauth/device/verification")
+			.set(header, token)
+			.send({ action: "approve", user_code: started.body.user_code });
+		expect(approved.status).toBe(200);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", dpopProof("POST", `${ISSUER}/oauth/token`))
+			.type("form")
+			.send({
+				grant_type: DEVICE_CODE_GRANT_TYPE,
+				client_id: TV.id,
+				device_code: started.body.device_code,
+			});
+		expect(res.status).toBe(200);
+		expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
+		expect(res.body.token_type).toBe("DPoP");
+	});
+
 	it("mTLS: a client_credentials token bound to the forwarded certificate", async () => {
 		const { app } = await boot();
 		const res = await request(app)

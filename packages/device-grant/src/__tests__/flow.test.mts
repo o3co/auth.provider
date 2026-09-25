@@ -31,6 +31,7 @@ import type {
 	GrantContext,
 	RateLimiter,
 	RateLimitFailMode,
+	TokenBinding,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -195,13 +196,18 @@ const makeHarness = (
 		now: clock.now,
 	});
 
-	const poll = (deviceCode: string, authenticated: AuthenticatedClient | null = client) =>
+	const poll = (
+		deviceCode: string,
+		authenticated: AuthenticatedClient | null = client,
+		tokenBinding?: TokenBinding,
+	) =>
 		grant.handle({
 			body: { device_code: deviceCode },
 			session: {},
 			metadata: {},
 			issuer: ISSUER,
 			authenticatedClient: authenticated,
+			...(tokenBinding === undefined ? {} : { tokenBinding }),
 		} as unknown as GrantContext);
 
 	return { app, store, clock, grant, poll, rateLimiter };
@@ -1142,5 +1148,76 @@ describe("store capacity (#445)", () => {
 			status: 400,
 			error: "authorization_pending",
 		});
+	});
+});
+
+describe("a sender-constrained poll", () => {
+	/** A started, approved device; the poll after the interval. */
+	const approvedPoll = async (tokenBinding: TokenBinding) => {
+		const { app, poll, clock } = makeHarness();
+		const started = await startDevice(app);
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+		clock.advance(10_000);
+		const { result } = await poll(started.body.device_code as string, client, tokenBinding);
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		const [, payloadB64] = result.tokens.access_token.split(".");
+		return {
+			tokens: result.tokens,
+			payload: JSON.parse(Buffer.from(payloadB64 as string, "base64url").toString()) as Record<
+				string,
+				unknown
+			>,
+		};
+	};
+
+	it("advertises a DPoP-bound access token as DPoP (RFC 9449 §5)", async () => {
+		// The token carried `cnf.jkt` and the envelope said Bearer, so a
+		// DPoP-aware device presented it as a bearer token — which a resource
+		// server enforcing the binding refuses (§7.1).
+		const { tokens, payload } = await approvedPoll({
+			kind: "dpop",
+			confirmation: { jkt: "DEVICE-JKT" },
+		});
+		expect(payload.cnf).toEqual({ jkt: "DEVICE-JKT" });
+		expect(tokens.token_type).toBe("DPoP");
+	});
+
+	it("keeps an mTLS-bound access token Bearer (RFC 8705 §3)", async () => {
+		const { tokens, payload } = await approvedPoll({
+			kind: "mtls",
+			confirmation: { "x5t#S256": "DEVICE-X5T" },
+		});
+		expect(payload.cnf).toEqual({ "x5t#S256": "DEVICE-X5T" });
+		expect(tokens.token_type).toBe("Bearer");
+	});
+
+	// Core's `ownedConfirmation`: only the member the binding's mechanism owns
+	// is stamped, since `ctx.tokenBinding` carries whatever a mechanism returned.
+	it.each([
+		["a contributed kind presenting cnf.jkt", { kind: "acme", confirmation: { jkt: "ACME-JKT" } }],
+		[
+			"a contributed kind presenting cnf.x5t#S256",
+			{ kind: "acme", confirmation: { "x5t#S256": "ACME-X5T" } },
+		],
+		[
+			"a DPoP binding presenting cnf.x5t#S256",
+			{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
+		],
+	] as const)(
+		"mints an unbound access token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const { tokens, payload } = await approvedPoll(tokenBinding as TokenBinding);
+			expect(payload.cnf).toBeUndefined();
+			expect(tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const { tokens, payload } = await approvedPoll({
+			kind: "dpop",
+			confirmation: { jkt: "DEVICE-JKT", "x5t#S256": "STOWAWAY-X5T" },
+		} as unknown as TokenBinding);
+		expect(payload.cnf).toEqual({ jkt: "DEVICE-JKT" });
+		expect(tokens.token_type).toBe("DPoP");
 	});
 });
