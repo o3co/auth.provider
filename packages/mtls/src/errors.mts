@@ -115,7 +115,7 @@ export class MtlsRevocationSourceError extends Error {
 	readonly url?: string;
 	/** The source's reason code (`fetch_failed`, `unparseable`, `stale`, …), which a projection keeps. */
 	readonly reason: string;
-	/** The subject of the certificate this source was asked about. */
+	/** The subject of the certificate this source was asked about, on one line (`O=Example Corp, CN=client`). */
 	readonly subject: string;
 
 	constructor(
@@ -153,7 +153,7 @@ export class MtlsRevocationSourceError extends Error {
  * library errors, the rest counted in `aggregateErrorsOmitted`.
  */
 export class MtlsRevocationUnavailableError extends AggregateError {
-	/** The subjects of the certificates whose status could not be determined, leaf first. */
+	/** The subjects of the certificates whose status could not be determined, leaf first, each on one line. */
 	readonly subjects: readonly string[];
 
 	constructor(subjects: readonly string[], sources: readonly MtlsRevocationSourceError[]) {

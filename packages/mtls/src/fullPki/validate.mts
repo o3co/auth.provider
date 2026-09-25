@@ -147,6 +147,7 @@ import {
 } from "./crl.mjs";
 import { createGuardedFetch } from "./fetchGuard.mjs";
 import { checkMustStaple, createOcspResolver, type OcspResolver } from "./ocsp.mjs";
+import { subjectLine } from "./subject.mjs";
 
 /** OID of `basicConstraints` (RFC 5280 §4.2.1.9). */
 const OID_BASIC_CONSTRAINTS = "2.5.29.19";
@@ -361,6 +362,9 @@ const toPkijs = (certificate: X509Certificate): pkijs.Certificate =>
 const toNode = (certificate: pkijs.Certificate): X509Certificate =>
 	new X509Certificate(Buffer.from(certificate.toSchema(true).toBER(false)));
 
+/** The certificate's subject on one line ({@link subjectLine}), as every line and detail here names it. */
+const subjectOf = (certificate: pkijs.Certificate): string => subjectLine(toNode(certificate));
+
 /**
  * `pathLenConstraint` bounds how many CA certificates may appear *below* a
  * CA in a path (RFC 5280 §4.2.1.9). `path` is leaf-first, so for the
@@ -563,9 +567,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
 			return {
 				kind: "revoked",
-				detail:
-					`${toNode(certificate).subject}: listed on the CRL published by ` +
-					toNode(issuer).subject,
+				detail: `${subjectOf(certificate)}: listed on the CRL published by ${subjectOf(issuer)}`,
 			};
 		}
 		return { kind: "determined", unavailable: lookup.unavailable };
@@ -605,7 +607,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
 			uncheckedResponders.add(lookup.responder);
 			options.logger?.warn(
-				{ responder: lookup.responder, subject: toNode(certificate).subject },
+				{ responder: lookup.responder, subject: subjectOf(certificate) },
 				"mtls_ocsp_responder_unchecked",
 			);
 		}
@@ -614,7 +616,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			return {
 				kind: "revoked",
 				detail:
-					`${toNode(certificate).subject}: reported revoked at ` +
+					`${subjectOf(certificate)}: reported revoked at ` +
 					`${lookup.status.revokedAt.toISOString()}${reason} by the OCSP responder at ` +
 					lookup.responder,
 			};
@@ -919,7 +921,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				}
 
 				if (outcome.kind === "unavailable") {
-					const subject = toNode(certificate).subject;
+					const subject = subjectOf(certificate);
 					if (revocation.onUnavailable === "reject" && outcome.outage) {
 						// Not logged here: the dispatcher that answers the 503 writes the
 						// outage's one line, with the cause built below.
@@ -959,7 +961,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				// the outage if another certificate's status could not be
 				// determined, nothing beside a verdict's own lines.
 				if (outcome.fallback !== undefined) {
-					const subject = toNode(certificate).subject;
+					const subject = subjectOf(certificate);
 					pending.push({
 						event: "mtls_revocation_ocsp_fallback",
 						subject,
@@ -986,7 +988,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				// against part of its revocation material" and "not checked at
 				// all" are different facts on an operator's dashboard.
 				if (outcome.unavailable.length > 0) {
-					const subject = toNode(certificate).subject;
+					const subject = subjectOf(certificate);
 					const last = outcome.unavailable[outcome.unavailable.length - 1] as CrlPointUnavailable;
 					const detail = describeUnavailable(outcome.unavailable);
 					if (
