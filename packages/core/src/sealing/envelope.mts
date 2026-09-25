@@ -95,7 +95,9 @@ const PURPOSE_PATTERN = /^[\x21-\x7E]{1,64}$/;
 const RING_SETTING = "sealing key ring";
 
 const header = (purpose: string): Buffer => {
-	if (!PURPOSE_PATTERN.test(purpose)) {
+	// A string first: `test` and the template literal below both coerce, so a
+	// JS caller's `undefined` would otherwise seal under the label "undefined".
+	if (typeof purpose !== "string" || !PURPOSE_PATTERN.test(purpose)) {
 		throw new RangeError(
 			"sealing purpose must be 1 to 64 printable ASCII characters, without a space",
 		);
