@@ -8,9 +8,11 @@ name: umbrella-e2e
 # runs the suite at the umbrella's develop, with only PROVIDER_REV overridden:
 # auth.proxy and auth.policy-verifier stay at the umbrella's pins.
 #
-# Red means this change breaks the umbrella's contract: fix the umbrella's
-# tests/ first, or change this PR. AGENTS.md ("Umbrella E2E") says how. Not a
-# required check; AGENTS.md also says what making it one takes.
+# Red means this change breaks the umbrella's contract — or the umbrella's
+# develop is itself red: check its latest e2e run first. For a broken contract,
+# fix the umbrella's tests/ first, or change this PR. AGENTS.md ("Umbrella
+# E2E") says how. Not a required check; AGENTS.md also says what making it
+# one takes.
 
 on:
   pull_request:

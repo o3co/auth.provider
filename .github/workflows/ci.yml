@@ -12,6 +12,15 @@ on:
   schedule:
     - cron: '17 3 * * *'
 
+# Least privilege for GITHUB_TOKEN, which no job here calls the API with: every
+# job only checks out and reads this repository (the PR steps' `git fetch`
+# included). Codecov authenticates with its own CODECOV_TOKEN secret, not with
+# GITHUB_TOKEN, and nothing uploads artifacts or writes a release — that is
+# release.yml, which declares its own permissions. A job that needs more
+# declares its own `permissions:` block for just that job.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     if: github.event_name != 'schedule'
