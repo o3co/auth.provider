@@ -94,9 +94,12 @@
  *
  * A fourth rule reads the same logger calls, and every `emitAuditEvent(...)`,
  * for the request itself: `req.body`, `req.query`, `req.params`, `req.path`,
- * `req.originalUrl`, `req.url`, `req.headers`, `req.cookies`, `req.ip`,
- * `req.ips`, `req.get(…)` or `req.header(…)` (on `req` or a member path
- * ending in it, `ctx.req`) — inside a template literal's `${…}` too —
+ * `req.originalUrl`, `req.url`, `req.baseUrl`, `req.headers`,
+ * `req.rawHeaders`, `req.cookies`, `req.signedCookies`, `req.hostname`,
+ * `req.host`, `req.subdomains`, `req.ip`, `req.ips`, `req.get(…)`,
+ * `req.header(…)` or any bracket access (`req["path"]`) — on `req` or a
+ * member path ending in it (`ctx.req`), behind `!` or `?.`, inside a
+ * template literal's `${…}` too —
  * anywhere but inside the parentheses of `auditErrorText(...)` or
  * `auditErrorList(...)`. What a
  * caller sent is put on a line sanitised and capped: a log line and an audit
@@ -118,7 +121,9 @@
  * hands them to `recordAuditEvent`).
  *
  * A fifth rule reads every source for a sink written directly —
- * `sink.record(…)`, `auditSink.record(…)`, `options.sink?.record(…)` — and
+ * `sink.record(…)`, `auditSink.record(…)`, `options.sink?.record(…)`,
+ * `sink!.record(…)`, `(sink as AuditSink).record(…)`, `sink?.record?.(…)`,
+ * `sinks[i].record(…)` — and
  * allows it only in core's `audit/factory.mts`, where `recordAuditEvent`
  * bounds an event's `ip` and `userAgent` before the sink is handed it. Every
  * built-in event reaches its sink through it: `emitAuditEvent` detached, or
@@ -201,10 +206,11 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
  * `consoleLogger`, `opts.logger`, `this.auditLogger` — or a parenthesised
  * fallback between two (`(opts.logger ?? console)`, `(logger ??
  * consoleLogger)`); with a non-null assertion (`logger!.warn`), optional
- * chaining (`logger?.warn`) or an optional call (`warn?.(`).
+ * chaining (`logger?.warn`) or an optional call (`warn?.(`); and with the
+ * chain broken across lines, before or after any dot (`logger\n.warn(`).
  */
 const LOGGER_CALL =
-	/(?:\b(?:[\w$]+[!?]?\.)*(?:log|console|\w*[Ll]ogger)|\(\s*[\w$.!?]+\s*\?\?\s*[\w$.!?]+\s*\))!?\??\.(?:trace|debug|info|warn|error|fatal|child|log)(?:\?\.)?\(/g;
+	/(?:\b(?:[\w$]+[!?]?\s*\.\s*)*(?:log|console|\w*[Ll]ogger)|\(\s*[\w$.!?]+\s*\?\?\s*[\w$.!?]+\s*\))\s*!?\??\s*\.\s*(?:trace|debug|info|warn|error|fatal|child|log)\s*(?:\?\.\s*)?\(/g;
 
 const IDENTIFIER = "[A-Za-z_$][\\w$]*";
 
@@ -879,10 +885,12 @@ const AUDIT_CALL = /\bemitAuditEvent\(/g;
 
 /**
  * A read of the request itself, on `req` or a member path ending in it
- * (`ctx.req`): what the caller sent, or a header it chose.
+ * (`ctx.req`): what the caller sent, or a header it chose — by name, behind
+ * `!` or `?.` (`req?.path`), or by any bracket (`req["path"]`, which literal
+ * blanking has already turned into `req[""]`).
  */
 const REQUEST_READ =
-	/(?<![\w$])req\s*\.\s*(?:(?:body|query|params|path|originalUrl|url|headers|cookies|ip|ips)(?![\w$])|(?:get|header)\s*\()/;
+	/(?<![\w$])req\s*!?\s*(?:(?:\?\.|\.)\s*(?:(?:body|query|params|path|originalUrl|url|baseUrl|headers|rawHeaders|cookies|signedCookies|hostname|host|subdomains|ip|ips)(?![\w$])|(?:get|header)\s*(?:\?\.\s*)?\()|(?:\?\.)?\s*\[)/;
 
 /**
  * An audit event's own `ip` or `userAgent`, written as the request field it
@@ -1074,8 +1082,14 @@ describe("a request value reaches a logger or an audit event only through auditE
 	});
 });
 
-/** A sink written directly: `sink.record(`, `auditSink.record(`, `options.sink?.record(`. */
-const SINK_WRITE = /\b\w*[sS]ink\??\.record\(/g;
+/**
+ * A sink written directly: `sink.record(`, `auditSink.record(`,
+ * `options.sink?.record(`, `sink!.record(`, `(sink as AuditSink).record(`,
+ * `sink?.record?.(`, `sinks[i].record(`, a chain broken across lines. A sink
+ * held under a name that does not end in `sink` / `Sink` is left to review.
+ */
+const SINK_WRITE =
+	/\b\w*[sS]inks?\s*(?:\[[^\]]*\]\s*)?(?:\s+as\s+[\w$.<>]+\s*\)\s*)?!?\s*(?:\?\.|\.)\s*record\s*(?:\?\.\s*)?\(/g;
 
 /** The one source that writes a sink, and how many times: core's `recordAuditEvent`. */
 const SINK_WRITERS: ReadonlyMap<string, number> = new Map([
