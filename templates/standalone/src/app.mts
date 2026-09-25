@@ -14,13 +14,7 @@
  * limitations under the License.
  */
 import { fileURLToPath } from "node:url";
-import {
-	type AppConfig,
-	AppConfigSchema,
-	createApp,
-	createHealthcheckRouter,
-	createReadinessRouter,
-} from "@o3co/auth-provider-core";
+import { type AppConfig, AppConfigSchema, createApp } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -30,8 +24,8 @@ import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPat
 import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
+import { mountRoutes } from "./routes.mjs";
 import { cleanupAllowanceFor, installGracefulShutdown } from "./shutdown.mjs";
-import { createTerminalErrorHandler } from "./terminalError.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
 // ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.
@@ -115,46 +109,19 @@ await (async (): Promise<void> => {
 		},
 	});
 
-	// Step 4: Wire host-level routes before the auth router so they remain
-	// reachable even when the auth pipeline is degraded — which is exactly when
-	// an operator needs an answer from them.
-	//
-	// Liveness: the process is up and its event loop is turning. Deliberately
-	// static — restarting the process would not bring Redis back, so a Redis
-	// outage must not read as "this container is broken, kill it".
-	app.use(createHealthcheckRouter(express));
-
-	// Readiness: can this replica serve right now? Redis backs sessions,
-	// authorization codes and refresh-token families in the deployable
-	// defaults, so a replica that has lost it answers 503 here and should be
-	// taken out of rotation. Probes are contributed by the builders that own
-	// each connection; a memory-only deployment registers none and is always
-	// ready.
-	app.use(
-		createReadinessRouter(express, {
-			probes: handle.readinessProbes,
-			timeoutMs: config.http.readinessTimeoutMs,
-			logger,
-		}),
-	);
-
-	// Prometheus scrape endpoint. Same reasoning as the probes above: it has to
-	// keep answering while the auth pipeline is degraded, because that is when
-	// the series matter.
-	app.use(
-		metrics.route(express, {
-			probes: handle.readinessProbes,
-			probeTimeoutMs: config.http.readinessTimeoutMs,
-		}),
-	);
-
-	// Step 5: Mount the composed auth router and start the HTTP server.
-	app.use(handle.router);
-	// Terminal error handler LAST (#293 item 8): Express routes an error only
-	// to handlers registered after the route that threw it. The composed
-	// router answers its own errors (core's terminal handler ends it), so
-	// this one catches the host routes' above. See `terminalError.mts`.
-	app.use(createTerminalErrorHandler(logger));
+	// Step 4: the host-level routes (liveness, readiness, metrics) ahead of the
+	// auth router so they remain reachable even when the auth pipeline is
+	// degraded — which is exactly when an operator needs an answer from them —
+	// then the composed auth router, then the terminal error handler. See
+	// `routes.mts` for what each is and why the order is what it is.
+	mountRoutes(app, {
+		router: handle.router,
+		probes: handle.readinessProbes,
+		readinessTimeoutMs: config.http.readinessTimeoutMs,
+		metrics,
+		logger,
+	});
+	// Step 5: start the HTTP server.
 	// Resolves once the socket is bound (`server_listening`); a port that
 	// cannot be bound rejects, and boot fails with that error (`listen.mts`).
 	const server = await listen(app, config.http.port, logger);
