@@ -49,4 +49,29 @@ describe("lineSafeText", () => {
 		expect(lineSafeText(undefined)).toBeUndefined();
 		expect(lineSafeText(42)).toBeUndefined();
 	});
+
+	it.each([0, 1, 3, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+		"refuses maxLength %s with a RangeError: the cut needs room for its own mark",
+		(maxLength) => {
+			expect(() => lineSafeText("abc", maxLength)).toThrow(RangeError);
+		},
+	);
+
+	it("cuts to exactly the length it is told, at the smallest one it takes", () => {
+		expect(lineSafeText("abcdef", 4)).toBe("a...");
+	});
+
+	it("replaces the directional marks U+200E, U+200F and U+061C", () => {
+		expect(lineSafeText("a\u200eb\u200fc\u061cd")).toBe("a?b?c?d");
+	});
+
+	it("never cuts through a surrogate pair", () => {
+		// 252 characters, then an emoji — two code units — straddling where
+		// the text is cut to make room for the mark.
+		const text = lineSafeText(`${"a".repeat(252)}😀${"b".repeat(10)}`);
+		expect({
+			loneHigh: /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(text),
+			text,
+		}).toEqual({ loneHigh: false, text: `${"a".repeat(252)}...` });
+	});
 });

@@ -232,6 +232,10 @@ describe("RFC 6749 error text", () => {
 			expect(auditErrorText(42)).toBeUndefined();
 		});
 
+		it("replaces the directional marks U+200E, U+200F and U+061C, which are not ASCII", () => {
+			expect(auditErrorText("a\u200eb\u200fc\u061cd")).toBe("a?b?c?d");
+		});
+
 		it("replaces the Unicode line separators and the bidi controls, which are not ASCII", () => {
 			expect(auditErrorText("a\u2028b\u2029c\u202ad\u202ee\u2066f\u2069g\u0085h")).toBe(
 				"a?b?c?d?e?f?g?h",

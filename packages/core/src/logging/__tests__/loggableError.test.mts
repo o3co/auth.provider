@@ -1262,4 +1262,34 @@ describe("loggableError — detail is one line of text", () => {
 		const err = new Error("outer", { cause: new Error("in\r\nner\u202e") });
 		expect(loggableError(err).cause?.detail).toBe("in??ner?");
 	});
+
+	it("replaces the directional marks U+200E, U+200F and U+061C", () => {
+		expect(loggableError(new Error("a\u200eb\u200fc\u061cd")).detail).toBe("a?b?c?d");
+	});
+
+	it("never cuts the 256-character detail through a surrogate pair", () => {
+		const detail = loggableError(new Error(`${"a".repeat(255)}😀`)).detail ?? "";
+		expect({
+			loneHigh: /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(detail),
+			length: detail.length,
+		}).toEqual({ loneHigh: false, length: 255 });
+	});
+});
+
+describe("loggableError — name, code and type are one line of text too", () => {
+	const UNSAFE = "\r\n\u0085\u2028\u202e\u200e";
+
+	it("replaces each line-breaking or reordering character in them with ?", () => {
+		const err = Object.assign(new Error("m"), {
+			code: `E${UNSAFE}CODE`,
+			type: `entity${UNSAFE}type`,
+		});
+		err.name = `Custom${UNSAFE}Error`;
+		const projected = loggableError(err);
+		expect({ name: projected.name, code: projected.code, type: projected.type }).toEqual({
+			name: "Custom??????Error",
+			code: "E??????CODE",
+			type: "entity??????type",
+		});
+	});
 });
