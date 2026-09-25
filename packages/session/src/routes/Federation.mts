@@ -49,7 +49,11 @@ import {
 	type FederationTransactionStore,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
-import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
+import {
+	abandonCookieSession,
+	SESSION_STORE_UNAVAILABLE,
+	USER_DIRECTORY_UNAVAILABLE,
+} from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
@@ -233,12 +237,6 @@ type FederationOutageEvent =
 	| "federation_start_store_unavailable"
 	| "federation_callback_store_unavailable"
 	| "federation_link_store_unavailable";
-
-/** What a user-directory outage answers. */
-const USER_DIRECTORY_UNAVAILABLE = {
-	error: "temporarily_unavailable",
-	error_description: "User directory temporarily unavailable",
-} as const;
 
 /**
  * A store a federation route cannot do without could not answer: the

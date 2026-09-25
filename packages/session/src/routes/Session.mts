@@ -40,7 +40,11 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
-import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
+import {
+	abandonCookieSession,
+	SESSION_STORE_UNAVAILABLE,
+	USER_DIRECTORY_UNAVAILABLE,
+} from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
@@ -430,10 +434,7 @@ export const createRouter = (
 					user = await userRepository.authenticate(username, password);
 				} catch (err) {
 					loginStoreUnavailable("user_repository", "authenticate", err);
-					return res.status(503).json({
-						error: "temporarily_unavailable",
-						error_description: "User directory temporarily unavailable",
-					});
+					return res.status(503).json(USER_DIRECTORY_UNAVAILABLE);
 				}
 				if (!user) {
 					return res.status(401).json({

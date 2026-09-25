@@ -17,9 +17,10 @@
 /**
  * The cookie session's store failing: how the express-session middleware this
  * package mounts answers it, how a route that met it keeps express-session
- * from trying again, and the one body every session-side store outage is
- * answered with. Internal to the package; `modules/sessionStoreModule.mts` and
- * the two routers are its callers.
+ * from trying again, and the bodies this package answers an outage with — one
+ * for every session-side store, one for the user directory. Internal to the
+ * package; `modules/sessionStoreModule.mts` and the two routers are its
+ * callers.
  */
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
@@ -34,6 +35,16 @@ import type { Request, RequestHandler } from "express";
 export const SESSION_STORE_UNAVAILABLE = Object.freeze({
 	error: "temporarily_unavailable",
 	error_description: "Session store unavailable",
+});
+
+/**
+ * What the session package answers, with `503`, when the user directory (the
+ * Store behind `UserRepository`) cannot answer — the password login, the
+ * federation callback's lookup, a `?link=1` link. One wording everywhere.
+ */
+export const USER_DIRECTORY_UNAVAILABLE = Object.freeze({
+	error: "temporarily_unavailable",
+	error_description: "User directory temporarily unavailable",
 });
 
 /**
