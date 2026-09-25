@@ -48,6 +48,9 @@
  * record. Revoking the upstream's own refresh token is the upstream's API and
  * a different failure domain — making a withdrawal depend on it would mean a
  * user cannot disconnect while somebody else's service is down.
+ *
+ * A grant store that cannot be read or written is `503`, logged once at error
+ * as `federation_grant_revoke_unavailable` with the `step` that failed.
  */
 
 import {
@@ -61,8 +64,8 @@ import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { markHandlerReached } from "./denialAudit.mjs";
+import { createFederationGrantLog } from "./log.mjs";
 import { parseFederationGrantRevokeRequest } from "./parse.mjs";
-import { createSanitizedReporter } from "./report.mjs";
 import { requestIdOf } from "./requestId.mjs";
 
 export interface FederationGrantRevokeHandlerOptions {
@@ -80,7 +83,7 @@ export function createFederationGrantRevokeHandler(
 	options: FederationGrantRevokeHandlerOptions,
 ): RequestHandler {
 	const now = options.now ?? (() => new Date());
-	const report = options.logger === undefined ? undefined : createSanitizedReporter(options.logger);
+	const log = createFederationGrantLog(options.logger);
 
 	return async (req, res) => {
 		const correlationId = requestIdOf(res);
@@ -127,6 +130,21 @@ export function createFederationGrantRevokeHandler(
 			);
 		};
 
+		/** The grant store could not answer `step`: one line at error, and the 503. */
+		const unavailable = (step: "find" | "revoke", error: unknown, subject: string): void => {
+			log.outage(
+				"federation_grant_revoke_unavailable",
+				{ grantId, correlationId, reason: "storage", store: "federation_grant", step },
+				error,
+			);
+			deny(
+				503,
+				{ error: "temporarily_unavailable", error_description: "storage" },
+				"temporarily_unavailable/storage",
+				subject,
+			);
+		};
+
 		const release = options.background.admit();
 		if (release === undefined) {
 			deny(
@@ -164,13 +182,7 @@ export function createFederationGrantRevokeHandler(
 			try {
 				grant = await options.store.find(grantId, now());
 			} catch (error) {
-				report?.({ during: "revoke_find", error, grantId, correlationId });
-				deny(
-					503,
-					{ error: "temporarily_unavailable", error_description: "storage" },
-					"temporarily_unavailable/storage",
-					subject,
-				);
+				unavailable("find", error, subject);
 				return;
 			}
 
@@ -192,13 +204,7 @@ export function createFederationGrantRevokeHandler(
 			try {
 				written = await options.store.revoke(grantId, "client", now());
 			} catch (error) {
-				report?.({ during: "revoke", error, grantId, correlationId });
-				deny(
-					503,
-					{ error: "temporarily_unavailable", error_description: "storage" },
-					"temporarily_unavailable/storage",
-					subject,
-				);
+				unavailable("revoke", error, subject);
 				return;
 			}
 
@@ -225,7 +231,7 @@ export function createFederationGrantRevokeHandler(
 			}
 			res.status(204).end();
 		} catch (error) {
-			report?.({ during: "handler", error, grantId, correlationId });
+			log.unexpected("revoke", { grantId, correlationId }, error);
 			deny(
 				500,
 				{ error: "server_error", error_description: "unexpected_error" },

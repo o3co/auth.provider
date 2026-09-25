@@ -33,8 +33,8 @@ import type {
 	FederationGrantCredentialState,
 	FederationGrantCredentials,
 	FederationGrantRefresher,
+	FederationGrantRetrievalLimits,
 	FederationGrantStore,
-	Logger,
 	RateLimiter,
 } from "@o3co/auth-provider-core";
 import {
@@ -53,6 +53,7 @@ import { vi } from "vitest";
 import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import { createFederationGrantRouter } from "#/routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "#/types.mjs";
+import { createLogSpy, type LoggedLine } from "./logSpy.mjs";
 
 export const MIN = 60_000;
 export const HOUR = 3_600_000;
@@ -101,6 +102,8 @@ export interface Harness {
 	readonly refresh: ReturnType<typeof vi.fn<FederationGrantRefresher["refreshDelegatedToken"]>>;
 	readonly events: AuditEvent[];
 	readonly logs: unknown[][];
+	/** Every line, with its level (`logSpy.mts`). */
+	readonly lines: LoggedLine[];
 	/** Mutable: what the world outside the provider answers. */
 	readonly world: {
 		connections: Map<string, FederationGrantConnection>;
@@ -115,6 +118,8 @@ export interface Harness {
 		 */
 		credentials: FederationGrantCredentialState;
 		client: Client;
+		/** What the client repository throws, when it is down. */
+		clientRepositoryDown: Error | undefined;
 		now: Date;
 		/** Slice 6: the lifetimes lodging offers. */
 		lifetimes: { defaultLifetimeMs: number; maxLifetimeMs: number };
@@ -134,6 +139,11 @@ export interface HarnessOptions {
 	readonly sink?: AuditSink;
 	readonly rateLimiter?: RateLimiter;
 	readonly background?: FederationGrantBackground;
+	/**
+	 * Retrieval limits over the defaults: short deadlines, so that a test can
+	 * reach a timeout through the real router on the real clock.
+	 */
+	readonly limits?: Partial<FederationGrantRetrievalLimits>;
 }
 
 export function harness(options: HarnessOptions = {}): Harness {
@@ -141,7 +151,6 @@ export function harness(options: HarnessOptions = {}): Harness {
 	const intents = createMemoryFederationGrantIntentStore();
 	const refresh = vi.fn<FederationGrantRefresher["refreshDelegatedToken"]>();
 	const events: AuditEvent[] = [];
-	const logs: unknown[][] = [];
 	const background = options.background ?? createFederationGrantBackground();
 
 	const world: Harness["world"] = {
@@ -149,6 +158,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 		boundary: null,
 		allowedConnections: [connection.name],
 		client: confidentialClient as unknown as Client,
+		clientRepositoryDown: undefined,
 		// Three days ahead of the system clock, the convention core's own
 		// retrieval harness set. Two reasons: a retrieval that read `new Date()`
 		// where it was handed `now()` would pass every test with the two in
@@ -162,8 +172,12 @@ export function harness(options: HarnessOptions = {}): Harness {
 	};
 
 	const clientRepository: ClientRepository = {
-		findById: async (id) => (id === CLIENT_ID ? ({ ...world.client } as unknown as never) : null),
+		findById: async (id) => {
+			if (world.clientRepositoryDown !== undefined) throw world.clientRepositoryDown;
+			return id === CLIENT_ID ? ({ ...world.client } as unknown as never) : null;
+		},
 		authenticate: async (id, secret) => {
+			if (world.clientRepositoryDown !== undefined) throw world.clientRepositoryDown;
 			if (id !== CLIENT_ID || secret !== CLIENT_SECRET) return null;
 			// The allowlist is applied over the record only while the fixture
 			// has one to apply: a record that simply lacks the field is what a
@@ -177,20 +191,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 		},
 	};
 
-	const capture =
-		() =>
-		(...args: unknown[]): void => {
-			logs.push(args);
-		};
-	const logger = {
-		trace: capture(),
-		debug: capture(),
-		info: capture(),
-		warn: capture(),
-		error: capture(),
-		fatal: capture(),
-		child: () => logger,
-	} as unknown as Logger;
+	const { logger, lines } = createLogSpy();
 
 	const sink: AuditSink | undefined =
 		options.withSink === false
@@ -220,7 +221,10 @@ export function harness(options: HarnessOptions = {}): Harness {
 		},
 	}) as FederationGrantStore;
 
-	const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
+	const limits = {
+		...resolveFederationGrantRetrievalLimits({ federationGrants: {} }),
+		...options.limits,
+	};
 
 	const app = express();
 	app.use(
@@ -275,7 +279,11 @@ export function harness(options: HarnessOptions = {}): Harness {
 		background,
 		refresh,
 		events,
-		logs,
+		// Every line's arguments, for a test that greps them all.
+		get logs() {
+			return lines.map((line) => [...line.args]);
+		},
+		lines,
 		world,
 		async seed(over = {}) {
 			const id = over.id ?? GRANT_ID;
@@ -339,12 +347,16 @@ export const refusingLimiter: RateLimiter = {
 };
 
 /**
- * A limiter whose backend is down, carrying a secret in its message — which is
- * what a driver does when a connection string fails to parse.
+ * A limiter whose backend is down, carrying a secret where a Redis client puts
+ * one: on the refused command's arguments, which core's projection never
+ * writes. (A message is written as it is — capped — by every route's throttle
+ * alike: it is the store's own text.)
  */
 export const brokenLimiter: RateLimiter = {
 	kind: "broken",
 	check: async () => {
-		throw new Error(`redis://user:${SECRET}@limiter:6379 refused the connection`);
+		throw Object.assign(new Error("Connection is closed."), {
+			command: { name: "evalsha", args: [SECRET] },
+		});
 	},
 };

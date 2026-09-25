@@ -101,6 +101,64 @@ whole provider out of audit and which the standalone does not offer. A Store
 that drives a revocation through the library without passing `audit` records
 nothing of it, by the same choice.
 
+### What is logged
+
+Through the deployment's `logger` component (the console when none is
+wired), every line object-first with its event name as the message, and a
+caught error on it as core's `loggableError` projection (`err`) — the name,
+the message (capped at 256 characters: whatever the library or the store
+wrote there is logged), a code, an upstream's `error`, the causes — never the
+error itself, so nothing a library put beside the message (a response body, a
+command's arguments, a token answer on a cause) reaches the line. Every string
+field is sanitised and capped at 200 characters: a grant id or a connection
+can be what the caller sent. The runbook's
+[federation-grants tables](../../docs/operator-runbook.md#federation-grants--what-each-answer-means-593)
+say what each one means and what to do.
+
+- **An outage** — a `503`, or the callback's `temporarily_unavailable`
+  redirect, because something could not answer — is exactly one line at
+  error, naming what failed: `federation_grant_token_unavailable`,
+  `federation_grant_status_unavailable`, `federation_grant_revoke_unavailable`,
+  `federation_grant_lodge_unavailable`, `federation_grant_connect_unavailable`,
+  `federation_grant_consent_unavailable`, `federation_grant_callback_unavailable`,
+  with `reason` (what the caller was answered, or `upstream`) and, where a
+  store failed, `store` (`federation_grant`, `federation_grant_intent`,
+  `revocation_boundary`, `user_session`, `user_directory`) and `step`. A key
+  missing from the ring is one of these with `reason: "key_unavailable"` and no
+  `err`: nothing was thrown. A store or an upstream that did not answer in
+  time is `err` "not answered in time; no longer waited for"; a credential
+  write retried within the persist budget is one line, with `attempts`. A
+  lodging's `connection_not_configured` names the `connection` — a renewal's
+  is its grant's.
+- **A client registry that cannot answer** is core's
+  `client_repository_unavailable`: `site: "federation_grants"` from client
+  authentication on the routes above, `federation_grant_connect` /
+  `federation_grant_consent` from the browser half.
+- **A failure that changed no answer** is one warn:
+  `federation_grant_token_step_failed` (a failure core absorbed, a different
+  kind of failure an earlier write attempt met, or work that failed after the
+  answer — a lock release, a use record, an audit, a refresh still persisting,
+  the upstream call the hard deadline abandoned), `federation_grant_status_step_failed`,
+  `federation_grant_lodge_step_failed` (every store error core met that the
+  answer does not stand for — a second write that threw and landed all the
+  same, a question that could not be asked, an intent it could not close — on
+  a `201` too), `federation_grant_consent_step_failed`,
+  `federation_grant_callback_step_failed`, and
+  `federation_grant_callback_exchange_refused` for an upstream that answered
+  the code exchange with a refusal. A token request answered `503` because
+  another replica holds the refresh (`lock_timeout`) or won the write
+  (`concurrent_update`) is `federation_grant_token_contended`, a warn: nothing
+  is down.
+- **What escaped a handler** is `federation_grants_unexpected_error`, at error,
+  with `site` and `err`: the handler that caught it (`token`, `status`,
+  `revoke`, `create`, `reauthorize`, `connect`, `consent`, `callback`), or the
+  router whose last error handler did (`federation_grants`,
+  `federation_grants_browser`).
+- **The throttles** log and audit a limiter outage through core with the
+  deployment's own logger and sink — `rate_limiter_failed_closed` /
+  `rate_limiter_failed_open` and `rate_limit.unavailable`, tagged
+  `federation_grants` or `federation_grants_browser`.
+
 ## Public API
 
 Exported from [`src/index.mts`](src/index.mts); the linked file holds each definition and its doc comment:
@@ -310,12 +368,23 @@ again, `429` slow down, `502` the upstream, `503` come back. `Retry-After` is
 present whenever the answer knew when — including on `502` and `503`, not only
 on `429`.
 
+A refresh against an upstream that could not be reached, did not answer in
+time, or answered with a 5xx is `503 temporarily_unavailable/upstream` — core's
+`isFederationUpstreamOutage` (the callback's own test, below) beside the
+refresh-error classifier's `network` — and one the upstream answered with a
+refusal is `502 upstream_rejected`, with its code when this provider knows it
+and `unknown` otherwise. The outage is decided first: a 5xx is never a verdict
+on the credential, whatever OAuth code its body names — a 503 saying
+`invalid_grant` does not end the credential, and one naming an interaction code
+is not the user's absence. A 429 is no outage.
+
 An unknown grant id, a grant belonging to another client and one belonging to
 another subject all answer the same `404` body, byte for byte.
 
 A refresh the upstream refused for the user's absence — `interaction_required`,
 `login_required`, `consent_required` or `account_selection_required`, read off
-the error's own code and never off a message — answers
+the error's own code and never off a message, beside any status but a 5xx
+(which is the outage above) — answers
 `410 reauthorization_required` with the code as the description
 (`upstream_consent_required`), with no `Retry-After` and no cached token:
 nothing said the refresh token is bad, so it is kept; nothing is mended by
@@ -495,8 +564,11 @@ nothing else; the grant keeps working.
 | The session was revoked, or predates the sessions boundary | 403 | `reauthentication_required` | `sign in again to continue` |
 | The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
 | A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
+| This deployment's own throttle (`federation_grants_browser`) | 429 | `rate_limited` | `provider` |
 | A store, the session store or the boundary could not answer | 503 | `temporarily_unavailable` | `storage` |
-| The upstream URL could not be built (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
+| The client registry could not answer — judging the question or describing the client | 503 | `temporarily_unavailable` | `client registry unavailable` |
+| The limiter backend is down, under `rateLimit.failMode = "closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
+| The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
 
 A challenge is not a bearer token: it is answerable only from the browser it
 was issued to, by the same durable session and subject, and every answer
@@ -532,7 +604,23 @@ It checks, in this order:
    endpoint, aborted at `upstreamHardTimeoutMs`. A response carrying any
    parameter twice is refused as malformed (`upstream_error`) before the code
    is exchanged, rather than having the copies dropped — a dropped `iss` would
-   leave RFC 9207's check to the issuer's metadata.
+   leave RFC 9207's check to the issuer's metadata. An exchange that got no
+   answer, or got a 5xx, is `temporarily_unavailable` — core's
+   `isFederationUpstreamOutage`, read off what the error is, never what its
+   text says: an `AbortError` or `TimeoutError` (openid-client's
+   `OAUTH_TIMEOUT` carries one), a connection code (`ECONNREFUSED`,
+   `ECONNRESET`, `ENOTFOUND`, `ETIMEDOUT`, `UND_ERR_SOCKET`, …) on the error
+   or its causes — a transport's code, under `fetch`'s `TypeError` or raised on
+   its own: a connection code, undici's (`UND_ERR_…`) or llhttp's (`HPE_…`),
+   Node's X509 verification codes, the TLS layer's (`ERR_TLS_…`, `ERR_SSL_…`),
+   or `ERR_INVALID_URL`; any other code, such as an adapter's validation error
+   wrapped in a `TypeError`, is not an outage — or a
+   5xx `status` on the error or on the `Response` it was raised over (an IdP
+   answering 503; a deployment's own `fetch` — npm undici's `Response` —
+   included) — each read only on what the library raised, never on the IdP's
+   parsed body. The token route's refresh reads the same shapes as an
+   outage (`503 upstream`). One the upstream answered with a refusal is
+   `upstream_error`.
 5. **The upstream account**: the connection's issuer; for a renewal, the
    account already on the grant; the client's `upstream_sub` if it sent one;
    and — unless `identityLookup = "unsupported"` — the Store's answer to who
@@ -713,10 +801,8 @@ this package's own:
   `400 invalid_request` (`malformed_path`). Only the parsers' errors, and
   that one, are read as the caller's mistake: anything else that escapes
   every handler is `500 server_error` (`unexpected_error`), logged as
-  `federation_grants_unexpected_error` with `event:
-  federation_grant.unexpected_error`, a `classification` and the error's
-  numeric `status` — nothing of the error's text, as for every report this
-  package writes.
+  `federation_grants_unexpected_error` with `site: "federation_grants"`, the
+  request's `correlationId` and the error's projection (`err`).
 
 So the list order of `federationGrantsModules` and `oauthModule` does not
 matter. This package declares no ordering edge against the OAuth router — it

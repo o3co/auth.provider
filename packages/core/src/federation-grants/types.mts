@@ -362,6 +362,37 @@ export type FederationGrantUnavailableReason =
 	| "key_unavailable";
 
 /**
+ * What went wrong where a retrieval turned a cause into a typed answer, or
+ * dropped one. For a logger; never for a response — the error may be an
+ * upstream's, and carry what the upstream echoed.
+ */
+export interface FederationGrantRetrievalFailure {
+	readonly during:
+		| "boundary"
+		| "open"
+		| "status"
+		| "backstop_revoke"
+		| "lock"
+		| "release"
+		| "upstream"
+		| "mark"
+		| "write"
+		| "touch"
+		| "audit"
+		| "background"
+		| "refresh";
+	readonly error: unknown;
+	readonly grantId: string;
+	readonly correlationId: string;
+	/**
+	 * How many attempts this failure stands for, when more than one: a retried
+	 * write reports each distinct kind of failure (its name and code) once,
+	 * with the last error of that kind and how many attempts failed so.
+	 */
+	readonly attempts?: number;
+}
+
+/**
  * One typed result for a token retrieval; one HTTP mapping is derived from it
  * (D11). The ADR's table lists codes with their reasons; here each code is an
  * object, so that a reason cannot be attached to a code that has none.
@@ -403,6 +434,18 @@ export type FederationGrantDenial =
 			readonly code: "temporarily_unavailable";
 			readonly reason: FederationGrantUnavailableReason;
 			readonly retryAfterSeconds?: number;
+			/**
+			 * The failure this answer was turned from, when a reported one was:
+			 * the very object the retrieval handed its `report` seam, so that the
+			 * route answering the 503 logs the outage once, with its cause, and
+			 * can tell it from the failures the answer did not carry. Absent for
+			 * a key missing from the ring, a deadline the upstream did not meet,
+			 * a backoff still standing, and contention — nothing was thrown.
+			 *
+			 * Not enumerable: a spread, `JSON.stringify` or a response built from
+			 * the answer never carries it.
+			 */
+			readonly failure?: FederationGrantRetrievalFailure;
 	  };
 
 export type FederationGrantTokenResult =

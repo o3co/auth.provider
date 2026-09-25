@@ -44,14 +44,28 @@
  * look in another grant or in the session-bound token store.
  *
  * It does not read `lastLook` either. That is core's private orchestration.
+ *
+ * ### What it logs
+ *
+ * Core tells this route every failure it turns into an answer or drops
+ * (`report`), and a `503` carries the one it was turned from (`failure`). The
+ * route holds what it is told until the answer is in: the failure the `503`
+ * carries is the outage, written once at error as
+ * `federation_grant_token_unavailable`; every other one — and whatever is
+ * told after the answer, the tail of a refresh — is one warn,
+ * `federation_grant_token_step_failed`. A `503` for contention (`lock_timeout`,
+ * `concurrent_update`) is a warn too, `federation_grant_token_contended`:
+ * nothing is down.
  */
 
 import {
 	type AuditSink,
 	type FederationGrantConnection,
 	type FederationGrantRefresher,
+	type FederationGrantRetrievalFailure,
 	type FederationGrantRetrievalLimits,
 	type FederationGrantStore,
+	type FederationGrantTokenResult,
 	type Logger,
 	retrieveFederationGrantToken,
 } from "@o3co/auth-provider-core";
@@ -59,9 +73,9 @@ import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { markHandlerReached } from "./denialAudit.mjs";
+import { createFederationGrantLog } from "./log.mjs";
 import { parseFederationGrantTokenRequest } from "./parse.mjs";
 import { allowedConnectionsOf } from "./permission.mjs";
-import { createSanitizedReporter } from "./report.mjs";
 import { requestIdOf } from "./requestId.mjs";
 import { serializeFederationGrantTokenResult } from "./serialize.mjs";
 
@@ -85,6 +99,37 @@ export interface FederationGrantTokenHandlerOptions {
 	readonly logger?: Logger;
 }
 
+/**
+ * The store a retrieval step asks, for the `store` field: the grant store,
+ * or the subject's grants boundary. Absent for a step that asks neither —
+ * the upstream, the audit sink, the drain's registry.
+ */
+const STORE_OF: Readonly<Partial<Record<FederationGrantRetrievalFailure["during"], string>>> = {
+	boundary: "revocation_boundary",
+	// A boundary that cannot be compared: what the boundary store answered.
+	status: "revocation_boundary",
+	open: "federation_grant",
+	backstop_revoke: "federation_grant",
+	lock: "federation_grant",
+	release: "federation_grant",
+	mark: "federation_grant",
+	write: "federation_grant",
+	touch: "federation_grant",
+};
+
+/**
+ * Where a retrieval failed, as a line names it: the step core names, its
+ * store, and — for a retried write — how many attempts failed so.
+ */
+const where = (failure: FederationGrantRetrievalFailure) => ({
+	store: STORE_OF[failure.during],
+	step: failure.during,
+	attempts: failure.attempts,
+});
+
+/** The reasons a `503` is contention rather than an outage: nothing is down. */
+const CONTENTION: ReadonlySet<string> = new Set(["lock_timeout", "concurrent_update"]);
+
 /** The body every exit of this package answers with, and the header it may carry. */
 interface Answer {
 	readonly status: number;
@@ -96,7 +141,7 @@ export function createFederationGrantTokenHandler(
 	options: FederationGrantTokenHandlerOptions,
 ): RequestHandler {
 	const now = options.now ?? (() => new Date());
-	const report = options.logger === undefined ? undefined : createSanitizedReporter(options.logger);
+	const log = createFederationGrantLog(options.logger);
 
 	return async (req, res) => {
 		// From here on this handler owns the denial; the chain's exit hook stands
@@ -138,6 +183,44 @@ export function createFederationGrantTokenHandler(
 				res.set("Retry-After", String(answer.retryAfterSeconds));
 			}
 			res.status(answer.status).json(answer.body);
+		};
+
+		/** A failure the answer did not carry: one warn. */
+		const stepFailed = (failure: FederationGrantRetrievalFailure): void =>
+			log.degraded(
+				"federation_grant_token_step_failed",
+				{ grantId, correlationId, ...where(failure) },
+				failure.error,
+			);
+		// Held until the answer is in, when it is known which one — if any —
+		// the answer carries; told after it, a failure is the tail's.
+		const held: FederationGrantRetrievalFailure[] = [];
+		let answered = false;
+		const report = (failure: FederationGrantRetrievalFailure): void => {
+			if (answered) stepFailed(failure);
+			else held.push(failure);
+		};
+		/** The held failures, each once, but the one the answer carries. */
+		const flush = (carried?: FederationGrantRetrievalFailure): void => {
+			answered = true;
+			for (const failure of held.splice(0)) if (failure !== carried) stepFailed(failure);
+		};
+		/** A `503`: the outage once, at error — or contention, at warn. */
+		const unavailable = (
+			result: Extract<FederationGrantTokenResult, { code: "temporarily_unavailable" }>,
+		): void => {
+			const { reason, retryAfterSeconds, failure } = result;
+			const fields = {
+				grantId,
+				correlationId,
+				reason,
+				...(failure === undefined ? {} : where(failure)),
+				retryAfterSeconds,
+			};
+			const cause: [] | [unknown] = failure === undefined ? [] : [failure.error];
+			if (CONTENTION.has(reason))
+				log.degraded("federation_grant_token_contended", fields, ...cause);
+			else log.outage("federation_grant_token_unavailable", fields, ...cause);
 		};
 
 		// Admitted, or refused: a request let in after the drain has begun would
@@ -184,7 +267,7 @@ export function createFederationGrantTokenHandler(
 					limits: options.limits,
 					background: (work) => options.background.register(work),
 					audit,
-					...(report === undefined ? {} : { report }),
+					report,
 				},
 				{
 					grantId,
@@ -202,13 +285,21 @@ export function createFederationGrantTokenHandler(
 						: { minTtlSeconds: parsed.value.minTtlSeconds }),
 				},
 			);
+			// The outage first, then what the answer did not carry.
+			if (!result.ok && result.code === "temporarily_unavailable") {
+				unavailable(result);
+				flush(result.failure);
+			} else {
+				flush();
+			}
 			// Core has already audited what it decided. A second event here would
 			// double every outcome in an operator's dashboard.
 			send(serializeFederationGrantTokenResult(result));
 		} catch (error) {
 			// Core did not conclude, so nothing audited this — which makes it the
 			// one failure the route owns.
-			report?.({ during: "handler", error, grantId, correlationId });
+			flush();
+			log.unexpected("token", { grantId, correlationId }, error);
 			deny({ status: 500, body: { error: "server_error" } }, "server_error");
 		} finally {
 			release();

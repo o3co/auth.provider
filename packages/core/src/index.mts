@@ -1034,11 +1034,15 @@ export {
 export {
 	type FederationGrantAcquisitionConnection,
 	type FederationGrantLodged,
+	type FederationGrantLodgingAbsorbedCarrier,
 	type FederationGrantLodgingClient,
 	type FederationGrantLodgingDeps,
+	type FederationGrantLodgingFailure,
 	type FederationGrantLodgingRefusal,
+	type FederationGrantLodgingRefused,
 	type FederationGrantLodgingRequest,
 	type FederationGrantLodgingResult,
+	type FederationGrantLodgingStepFailure,
 	type FederationGrantReauthorizationRequest,
 	type FederationGrantReauthorizationResult,
 	federationGrantRedirectUriReservedParameter,
@@ -1125,6 +1129,7 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
+export { isFederationUpstreamOutage } from "./federation-grants/upstreamOutage.mjs";
 // #593, D13: the two boundaries of a subject revocation, and how long each has
 // to be kept. The skew leaves `jwt/verify.mts` because the grants comparison
 // has to use the same allowance the watermark comparison already does.

@@ -84,7 +84,6 @@ import {
 	WORKER,
 	webTokens,
 	withLength,
-	withoutTheLine,
 } from "./all-modules-composition.fixture.mjs";
 
 let current: Composition | undefined;
@@ -805,9 +804,6 @@ const oidcCallback = async (app: express.Express, outage: Outage, c: Composition
 const VERIFIER_WARN =
 	"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the route's error line: two lines for one outage (the runbook's outage table documents both)";
 
-const FEDERATION_GRANTS_WARN =
-	'packages/federation-grants: the outage is answered 503 but logged at warn, as "federation grant operation failed" with a classification and no error projection';
-
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
@@ -1065,7 +1061,8 @@ const OUTAGES: readonly OutageCase[] = [
 				.send({ sub: ALICE.sub });
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: { ...withoutTheLine(FEDERATION_GRANTS_WARN), "no-warn": FEDERATION_GRANTS_WARN },
+		// store "federation_grant", step "inspect", the store error's projection.
+		event: "federation_grant_status_unavailable",
 	},
 	{
 		module: "federation-grants",
@@ -1076,7 +1073,8 @@ const OUTAGES: readonly OutageCase[] = [
 			return lodgeGrant(app);
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: { ...withoutTheLine(FEDERATION_GRANTS_WARN), "no-warn": FEDERATION_GRANTS_WARN },
+		// store "federation_grant_intent", step "put_intent", the store error's projection.
+		event: "federation_grant_lodge_unavailable",
 	},
 	{
 		module: "jwks",

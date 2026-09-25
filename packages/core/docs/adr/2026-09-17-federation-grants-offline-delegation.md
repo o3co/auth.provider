@@ -1186,6 +1186,13 @@ record, never from the error in hand: a stamp that could not be written
 answers an outage, or a stored token that still serves; one superseded by a
 renewal answers the renewal.
 
+**Amended in review of #690.** A code decides only beside an answer: beside a
+5xx — on the error, its Error causes or the Response it was raised over —
+neither an interaction code nor `invalid_grant` decides anything, and the
+refresh is the outage (`503 upstream`, stamped `unavailable`), because a 5xx
+is the IdP's failure and sending the user to connect again for it is
+destructive; beside a 429 an interaction code is still the user.
+
 ### D12 — Refresh is coordinated per grant, and fails safe
 
 The session-bound lock cannot be reused as it is: it is typed to
@@ -2453,6 +2460,25 @@ not boot — and a library composition that declared it has chosen. A Store
 that drives a revocation without passing `audit` records nothing of it, by
 the same choice; what it passes gets the correlation ID above.
 
+**Amended for the logging policy that followed `loggableError`.** "The
+package logs its name and its classification, never the error whole" was an
+allowlist that predated core's projection, and it cost what an operator
+needed: every outage was a warn carrying a classification, several `503`s
+were logged not at all, and the client-authentication and throttle lines
+were redacted to `"[redacted]"` although the same limiter and the same
+client registry were logged whole by every other route. The package now
+writes what the rest of the provider writes: an outage answered `503` or
+`temporarily_unavailable` is one line at error with `store` / `step` or the
+`reason`, and the error as `loggableError`'s projection — which drops what a
+library puts beside a message (a response body, a command's arguments, a
+token answer on a cause) and cuts an `error_description` before anything
+token-shaped, but keeps the message itself, capped. A retrieval's `503`
+carries the failure it reported (`failure`), and a lodging's `storage`
+refusal what failed, so the route logs the outage once. The sentinel
+criterion stands as the projection defines it: a secret a library carries on
+an error never reaches a log line; one an upstream writes into an error's
+message is that upstream's text, logged as every route logs it.
+
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
 An OBO assertion must be an access token issued for the middle-tier API that
@@ -2521,7 +2547,7 @@ accumulation this decision exists to avoid.
 | 1 | survives restart and session expiry | D1, D14, D16 | Redis adapter: new client instance, token returned (`redis.integration.test.mts`); and through the connect flow — the grant agreed, the browser session and its durable record deleted, the process disposed of, a fresh deployment on the same stores answering `/status` and `/token` (`acquisition.acceptance.test.mts`, "#593 AC1") |
 | 2 | not renewable without refresh credentials | D5 | callback with no `refresh_token`: no credential is stored, the grant never leaves `pending`, the redirect says `refresh_token_absent` |
 | 3 | wrong client / subject / connection / environment / resource / scopes denied, grant ID known | D4, D9, D10 | wrong client and wrong subject on all four grant-addressed routes, with "not yours" responses byte-identical; the connection allowlist on `/token`, `/status` and `/reauthorize` — `/revoke` ignores it on purpose, so that a client whose registration changed can still clean up; the assertions each route takes — `/token`: `connection`, `resource`, `scope` and `min_ttl`, checked against the grant and never widening it; `/reauthorize`: `connection`, checked against the grant's and never moving it, and `scope`, the set the renewal consents for, within the connection's; `/status` and `/revoke`: `sub` alone — anything else `unexpected_parameter`; `boundary` change reads as `connection_changed` everywhere the revisions are compared |
-| 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read. #616: the four interaction codes — `reauthorization_required` by the code's name at `/token` (410, no `Retry-After`, no cached token) and at `/status`, both tokens kept, no refresh while the stamp stands, never from a message, a code beside a 429 or a 5xx still the user (`retrieve.refresh.test.mts`, `effective-status.test.mts`, `tokenRoute.test.mts`, `statusRoute.test.mts`) |
+| 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read. #616: the four interaction codes — `reauthorization_required` by the code's name at `/token` (410, no `Retry-After`, no cached token) and at `/status`, both tokens kept, no refresh while the stamp stands, never from a message, a code beside a 429 still the user — beside a 5xx it is the outage, `503 upstream` (amended in review of #690: a 5xx is never a verdict) (`retrieve.refresh.test.mts`, `effective-status.test.mts`, `tokenRoute.test.mts`, `statusRoute.test.mts`) |
 | 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; the authorization unchanged in each. The refresh credential is unchanged where the upstream did not answer with a token (5xx, 429, storage throw, `invalid_client`, unreadable watermark), and deliberately rotated where it did — the over-long lifetime is a real refresh answer, and D5 persists its rotated refresh token while withholding the access token. The failure stamp and the ineligibility marker change by design. A rotating upstream that answers between the soft and the hard deadline: the late credential is persisted, `.refreshed` is audited, the next call succeeds. One that answers after the hard deadline: an acknowledged loss, handled as a persist failure. A starved grant calls the upstream once per retry interval, not once per request. #616: the interaction codes are outside the timed backoff — a persistent pause the record remembers, not a wait |
 | 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt`. #616: an interaction stamp that could not be written, that lost, that landed under a renewal, that was overtaken by a replacement whose token does not serve; a late one against an admitted refresh's outage and against its success; the lease kept on a timed-out write (`retrieve.refresh.test.mts`; the store contract, both copies) |
 | 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token, and G2's client is served by the same answer (`retrieve.refresh.test.mts`, "row 7: G1, G2"). Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it. #616: a grant starved of scope renewed for the wider set on the same id, the markers cleared only by the activation, a refused renewal leaving them; the other four ineligibilities refused before an intent is lodged (`lodge.test.mts`, `lodgeRoutes.test.mts`, `browserRoutes.test.mts`, `acquisition.acceptance.test.mts`). What holds regardless of `identityLookup`: an existing grant's upstream account is pinned, and a renewal from another account is refused. What holds under `required` with a Store that covers the registration: the first acquisition of an account the Store places with another user is refused. Under `unsupported` that first check is skipped, by the deployment's declaration (D7 check 5, #613) |

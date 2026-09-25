@@ -278,7 +278,9 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 		it("is not what an error nobody can read is: that one may have been processed, and is retried promptly like an outage", async () => {
 			await h.seed();
 			setNow(GONE);
-			h.refresh.mockRejectedValue(Object.assign(new Error("x"), { code: "ECONNRESET" }));
+			// A code nothing here knows: neither a refusal nor a known outage.
+			// (A reset connection used to stand for this; it is an outage now.)
+			h.refresh.mockRejectedValue(Object.assign(new Error("x"), { code: "E_SOMETHING_ELSE" }));
 			expect(await retrieve()).toMatchObject({ code: "upstream_rejected", reason: "unknown" });
 			expect(await stamp()).toMatchObject({ kind: "unavailable", count: 1 });
 		});

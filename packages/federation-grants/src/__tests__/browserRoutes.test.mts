@@ -43,7 +43,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createFederationGrantBackground } from "#/background.mjs";
+import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
@@ -51,6 +51,7 @@ import {
 	type FederationGrantDelegatedAuthorizer,
 } from "#/browserRoutes.mjs";
 import { brokenLimiter, refusingLimiter } from "./harness.mjs";
+import { createLogSpy, payloadOf, written } from "./logSpy.mjs";
 
 const ISSUER = "https://auth.test";
 const REDIRECT = "https://client.test/connected";
@@ -117,12 +118,14 @@ interface WorldOptions {
 	readonly identityLookup?: FederationGrantBrowserRouterOptions["identityLookup"];
 	/** Replaces the repository whose lookup records into `state.lookups`. */
 	readonly userRepository?: FederationGrantBrowserRouterOptions["userRepository"];
+	/** Replaces the drain registry: a composition's own, which may fail. */
+	readonly background?: FederationGrantBackground;
 }
 
 function world(options: WorldOptions = {}) {
 	const grants = createMemoryFederationGrantStore();
 	const intents = createMemoryFederationGrantIntentStore();
-	const background = createFederationGrantBackground();
+	const background = options.background ?? createFederationGrantBackground();
 	const events: AuditEvent[] = [];
 	const browsers = new Map<string, Browser>();
 	const durable = new Map<string, UserSession>();
@@ -170,10 +173,10 @@ function world(options: WorldOptions = {}) {
 		auditFails: false,
 		authorizerMissing: false,
 		configurationThrows: false,
-		/** What the router's sanitized reporter wrote. */
-		logged: [] as Record<string, unknown>[],
 	};
 	const now = () => state.now;
+	// Every line the router writes, with its level (`logSpy.mts`).
+	const spy = createLogSpy();
 
 	const intercept = async (name: string): Promise<void> => {
 		const hook = state.before.get(name);
@@ -273,14 +276,7 @@ function world(options: WorldOptions = {}) {
 				"userRepository" in options
 					? options.userRepository
 					: new Directory(state.owners, state.lookups, intercept),
-			logger: {
-				debug: () => undefined,
-				info: () => undefined,
-				warn: (payload: Record<string, unknown>) => {
-					state.logged.push(payload);
-				},
-				error: () => undefined,
-			} as never,
+			logger: spy.logger,
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
 				options.rateLimiter ??
@@ -377,6 +373,7 @@ function world(options: WorldOptions = {}) {
 		intents,
 		background,
 		events,
+		lines: spy.lines,
 		browsers,
 		durable,
 		authorized,
@@ -1440,8 +1437,12 @@ describe("what the adversarial review found", () => {
 	it("reads a connection that could not be made as an outage, not the upstream's fault", async () => {
 		const w = world();
 		const a = await approved(w, "b-1");
+		// As undici raises it: `fetch`'s TypeError, the socket's coded error as its
+		// cause. Read by the code, never by the text.
 		w.state.exchangeThrows = new TypeError("fetch failed", {
-			cause: new Error("connect ECONNREFUSED"),
+			cause: Object.assign(new Error("connect ECONNREFUSED 192.0.2.1:443"), {
+				code: "ECONNREFUSED",
+			}),
 		});
 		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
 			"temporarily_unavailable",
@@ -1943,9 +1944,10 @@ describe("the identity lookup (D7 check 5), when it cannot answer", () => {
 		expect(
 			returned(await callback(missing, { state: b.state, code: "c" }, "b-1")).get("error"),
 		).toBe("temporarily_unavailable");
-		expect(missing.state.logged).toContainEqual(
-			expect.objectContaining({ during: "callback_identity_lookup" }),
-		);
+		expect(payloadOf(missing.lines, "federation_grant_callback_unavailable")).toMatchObject({
+			store: "user_directory",
+			step: "find_subject_by_federated_identity",
+		});
 	});
 
 	it("asks nothing when the deployment recorded it cannot, and says so in the audit", async () => {
@@ -2173,7 +2175,7 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		expect(JSON.stringify(grant)).not.toContain("SENTINEL");
 		await w.background.drain();
 		expect(JSON.stringify(w.events)).not.toContain("SENTINEL");
-		expect(JSON.stringify(w.state.logged)).not.toContain("SENTINEL");
+		expect(JSON.stringify(w.lines)).not.toContain("SENTINEL");
 	});
 });
 
@@ -2262,9 +2264,11 @@ describe("#611: an answer that establishes no ownership refuses the delegation",
 				JSON.stringify(answer),
 			).toBe("temporarily_unavailable");
 			expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
-			expect(w.state.logged).toContainEqual(
-				expect.objectContaining({ during: "callback_identity_lookup" }),
-			);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+				store: "user_directory",
+				step: "find_subject_by_federated_identity",
+				err: { name: "TypeError" },
+			});
 		}
 	});
 
@@ -2370,5 +2374,520 @@ describe("a callback that carries a parameter twice (Copilot on #610)", () => {
 			.set("x-browser", "b-2");
 		expect(returned(other).get("error")).toBe("upstream_error");
 		expect(w.state.exchanged).toHaveLength(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// What each outage logs. One line, at error, object-first, naming what could
+// not answer (`store` / `step`, or the `reason`) with the error's projection —
+// for every 503 and every `temporarily_unavailable` redirect. A failure that
+// changed no answer is one warn.
+// ---------------------------------------------------------------------------
+
+/** Every line, once the work the answers handed over has finished. */
+const settledLines = async (w: World) => {
+	await w.background.drain();
+	return w.lines;
+};
+
+const injected = (name: string) =>
+	expect.objectContaining({ name: "Error", detail: `injected outage: ${name}` });
+
+describe("connect — what an outage logs", () => {
+	const connectWith = async (arrange: (w: World) => void) => {
+		const w = world();
+		const { handle, grantId } = await w.lodge();
+		w.signIn("b-1");
+		arrange(w);
+		const response = await w.connect(handle, "b-1");
+		return { w, response, grantId };
+	};
+
+	it.each([
+		["getIntent", "federation_grant_intent", "get_intent", false],
+		["parkConsent", "federation_grant_intent", "park_consent", true],
+		["userSessionStore.get", "user_session", "get", true],
+		["isCurrentIntent", "federation_grant", "is_current_intent", true],
+	] as const)(
+		"logs %s failing as one error line naming %s / %s",
+		async (method, store, step, named) => {
+			const { w, response, grantId } = await connectWith((w) => w.state.faults.set(method, 0));
+			expect(response.status).toBe(503);
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_connect_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toEqual({
+				...(named ? { grantId } : {}),
+				correlationId: expect.any(String),
+				reason: "storage",
+				store,
+				step,
+				err: injected(method),
+			});
+		},
+	);
+
+	it("names the sessions boundary, and a value from it that is not one", async () => {
+		for (const boundary of [new Error("boundary down"), "yesterday"]) {
+			const { w, response } = await connectWith((w) => {
+				w.state.sessionsBoundary = boundary as never;
+			});
+			expect(response.status).toBe(503);
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_connect_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toMatchObject({
+				store: "revocation_boundary",
+				step: "read",
+				err: { name: boundary instanceof Error ? "Error" : "TypeError" },
+			});
+		}
+	});
+
+	it("logs the client registry through core's one line, with this route as its site", async () => {
+		const { w, response } = await connectWith((w) => w.state.faults.set("findById", 0));
+		expect(response.status).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error client_repository_unavailable"]);
+		expect(payloadOf(w.lines, "client_repository_unavailable")).toEqual({
+			site: "federation_grant_connect",
+			step: "find",
+			clientId: CLIENT.clientId,
+			err: injected("findById"),
+		});
+	});
+
+	it("logs a failure nothing expected as an unexpected error", async () => {
+		const { w, response } = await connectWith((w) => {
+			w.state.configurationThrows = true;
+		});
+		expect(response.status).toBe(500);
+		expect(written(await settledLines(w))).toEqual(["error federation_grants_unexpected_error"]);
+		expect(payloadOf(w.lines, "federation_grants_unexpected_error")).toMatchObject({
+			site: "connect",
+			err: { name: "Error", detail: "injected: configuration unreadable" },
+		});
+	});
+});
+
+describe("consent — what an outage logs", () => {
+	/** A question parked for alice's browser `b-1`. */
+	async function asked(w: World) {
+		const lodged = await w.lodge();
+		w.signIn("b-1");
+		return { ...lodged, challenge: await w.challengeFor(lodged.handle, "b-1") };
+	}
+
+	it("logs the question that could not be read", async () => {
+		const w = world();
+		const { challenge } = await asked(w);
+		w.state.faults.set("getConsent", 0);
+		expect((await w.page(challenge, "b-1")).status).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_consent_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_consent_unavailable")).toEqual({
+			method: "GET",
+			correlationId: expect.any(String),
+			reason: "storage",
+			store: "federation_grant_intent",
+			step: "get_consent",
+			err: injected("getConsent"),
+		});
+	});
+
+	it("logs the judgement that could not be made, which it used to answer in silence", async () => {
+		const w = world();
+		const { challenge, grantId } = await asked(w);
+		w.state.sessionsBoundary = new Error("boundary down");
+		expect((await w.page(challenge, "b-1")).status).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_consent_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_consent_unavailable")).toMatchObject({
+			method: "GET",
+			grantId,
+			store: "revocation_boundary",
+			step: "read",
+			err: { name: "Error", detail: "boundary down" },
+		});
+	});
+
+	it("answers a client registry that cannot judge the question as the page's own lookup does, and logs it once", async () => {
+		// The judgement's read fails, on both methods: one answer for one
+		// outage, `/oauth/consent`'s — never `storage`, which names another store.
+		for (const method of ["GET", "POST"] as const) {
+			const w = world();
+			const { challenge } = await asked(w);
+			w.state.faults.set("findById", 0);
+			const response =
+				method === "GET"
+					? await w.page(challenge, "b-1")
+					: await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "client registry unavailable",
+			});
+			expect(written(await settledLines(w))).toEqual(["error client_repository_unavailable"]);
+			expect(payloadOf(w.lines, "client_repository_unavailable")).toMatchObject({
+				site: "federation_grant_consent",
+				step: "find",
+			});
+		}
+	});
+
+	it("logs the client registry that could not describe the client through core's one line", async () => {
+		const w = world();
+		const { challenge } = await asked(w);
+		// The judgement's own read succeeds; the description's fails.
+		w.state.faults.set("findById", 1);
+		expect((await w.page(challenge, "b-1")).status).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error client_repository_unavailable"]);
+		expect(payloadOf(w.lines, "client_repository_unavailable")).toEqual({
+			site: "federation_grant_consent",
+			step: "find",
+			clientId: CLIENT.clientId,
+			err: injected("findById"),
+		});
+	});
+
+	it("answers an intent store that cannot record the answer 503, not 500, and logs it", async () => {
+		for (const decision of ["accept", "deny"]) {
+			const w = world();
+			const { challenge } = await asked(w);
+			w.state.faults.set("answerConsent", 0);
+			const response = await w.answer({ challenge, decision }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_consent_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_consent_unavailable")).toMatchObject({
+				method: "POST",
+				reason: "storage",
+				store: "federation_grant_intent",
+				step: "answer_consent",
+				err: injected("answerConsent"),
+			});
+		}
+	});
+
+	it("logs an upstream state another flow already holds: a fault on this side", async () => {
+		const w = world();
+		const first = await asked(w);
+		w.state.ids.push("same-state", "nonce-1", "verifier-1");
+		expect((await w.answer({ challenge: first.challenge, decision: "accept" }, "b-1")).status).toBe(
+			303,
+		);
+		const second = await asked(w);
+		w.state.ids.push("same-state", "nonce-2", "verifier-2");
+		expect(
+			(await w.answer({ challenge: second.challenge, decision: "accept" }, "b-1")).status,
+		).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_consent_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_consent_unavailable")).toMatchObject({
+			method: "POST",
+			reason: "storage",
+			store: "federation_grant_intent",
+			step: "answer_consent",
+			refusal: "state_collision",
+		});
+	});
+
+	it("logs an upstream URL that could not be built, and a capability that has gone", async () => {
+		for (const [arrange, step, err] of [
+			[(w: World) => (w.state.authorizerThrows = true), "authorization_url", true],
+			[(w: World) => (w.state.authorizerMissing = true), "authorizer", false],
+		] as const) {
+			const w = world();
+			const { challenge } = await asked(w);
+			arrange(w);
+			expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(503);
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_consent_unavailable",
+			]);
+			const payload = payloadOf(w.lines, "federation_grant_consent_unavailable");
+			expect(payload).toMatchObject({ method: "POST", reason: "upstream_unavailable", step });
+			if (err) expect(payload.err).toMatchObject({ name: "Error", detail: "reserved parameter" });
+			else expect(payload).not.toHaveProperty("err");
+		}
+	});
+
+	it("logs a renewal's pointer it could not retire after a refusal as one warn", async () => {
+		const w = world();
+		const { challenge } = await renewalChallenge(w);
+		w.state.faults.set("retireIntent", 0);
+		expect((await w.answer({ challenge, decision: "deny" }, "b-2")).status).toBe(303);
+		expect(written(await settledLines(w))).toEqual(["warn federation_grant_consent_step_failed"]);
+		expect(payloadOf(w.lines, "federation_grant_consent_step_failed")).toMatchObject({
+			store: "federation_grant",
+			step: "retire_intent",
+			err: injected("retireIntent"),
+		});
+	});
+});
+
+describe("the callback — what an outage logs", () => {
+	const unavailable = async (w: World, arrange: () => void, browser = "b-1", state?: string) => {
+		const a = state === undefined ? await approved(w, browser) : { state, grantId: "" };
+		arrange();
+		const response = await callback(w, { state: a.state, code: "c" }, browser);
+		return { response, grantId: a.grantId };
+	};
+
+	it("logs a transaction that could not be spent as one error line", async () => {
+		const w = world();
+		const { response } = await unavailable(w, () => w.state.faults.set("consumeTransaction", 0));
+		expect(response.status).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_callback_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toEqual({
+			correlationId: expect.any(String),
+			reason: "storage",
+			store: "federation_grant_intent",
+			step: "consume_transaction",
+			err: injected("consumeTransaction"),
+		});
+	});
+
+	it.each([
+		["the grant store, at check 2", "isCurrentIntent", 0, "federation_grant", "is_current_intent"],
+		[
+			"the grant store, at the re-read",
+			"isCurrentIntent",
+			1,
+			"federation_grant",
+			"is_current_intent",
+		],
+		["the session store, at check 3", "userSessionStore.get", 0, "user_session", "get"],
+		["the activation", "activate", 0, "federation_grant", "activate"],
+		[
+			"the identity lookup",
+			"findSubjectByFederatedIdentity",
+			0,
+			"user_directory",
+			"find_subject_by_federated_identity",
+		],
+	] as const)(
+		"logs %s behind the temporarily_unavailable redirect",
+		async (_label, method, passes, store, step) => {
+			const w = world();
+			const { response, grantId } = await unavailable(w, () => w.state.faults.set(method, passes));
+			expect(returned(response).get("error")).toBe("temporarily_unavailable");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_callback_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toEqual({
+				grantId,
+				correlationId: expect.any(String),
+				reason: "storage",
+				store,
+				step,
+				err: injected(method),
+			});
+		},
+	);
+
+	it("logs the grants boundary that could not be read", async () => {
+		const w = world();
+		const { response } = await unavailable(w, () => {
+			w.state.grantsBoundary = new Error("boundary down");
+		});
+		expect(returned(response).get("error")).toBe("temporarily_unavailable");
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_callback_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+			store: "revocation_boundary",
+			step: "read",
+			err: { name: "Error", detail: "boundary down" },
+		});
+	});
+
+	it("logs a renewal's grant that could not be read, at the backstop or at the account check", async () => {
+		for (const passes of [0, 1]) {
+			const w = world();
+			const { state } = await renewal(w);
+			const { response } = await unavailable(
+				w,
+				() => w.state.faults.set("find", passes),
+				"b-2",
+				state,
+			);
+			expect(returned(response).get("error")).toBe("temporarily_unavailable");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_callback_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+				store: "federation_grant",
+				step: "find",
+				err: injected("find"),
+			});
+		}
+	});
+
+	it("logs a repository that lost the identity lookup: a composition fault", async () => {
+		const w = world({ userRepository: {} });
+		const { response } = await unavailable(w, () => undefined);
+		expect(returned(response).get("error")).toBe("temporarily_unavailable");
+		expect(written(await settledLines(w))).toEqual(["error federation_grant_callback_unavailable"]);
+		expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+			store: "user_directory",
+			step: "find_subject_by_federated_identity",
+			err: { name: "TypeError" },
+		});
+	});
+
+	it("logs an upstream it could not reach as the outage, classified by the error's name or code", async () => {
+		for (const thrown of [
+			Object.assign(new Error("timed out"), { name: "TimeoutError" }),
+			Object.assign(new TypeError("fetch failed"), {
+				cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+			}),
+		]) {
+			const w = world();
+			const { response } = await unavailable(w, () => {
+				w.state.exchangeThrows = thrown;
+			});
+			expect(returned(response).get("error")).toBe("temporarily_unavailable");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_callback_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+				reason: "upstream",
+				step: "exchange",
+				err: { name: thrown.name },
+			});
+		}
+	});
+
+	it("logs an upstream answering 5xx as the outage — as openid-client raises it — the reading the token route's refresh makes too", async () => {
+		// The shapes the real library throws (federation-oidc's
+		// delegated-outage.test.mts): a 503 or 502 that oauth4webapi will not
+		// read is a ClientError over the Response; an OAuth error body under a
+		// 5xx carries the status on the error.
+		for (const thrown of [
+			Object.assign(
+				new Error("unexpected HTTP response status code", {
+					cause: new Response("<html>down</html>", { status: 503 }),
+				}),
+				{ name: "ClientError", code: "OAUTH_RESPONSE_IS_NOT_CONFORM" },
+			),
+			Object.assign(new Error("server responded with an error in the response body"), {
+				name: "ResponseBodyError",
+				status: 503,
+				error: "temporarily_unavailable",
+			}),
+		]) {
+			const w = world();
+			const { response } = await unavailable(w, () => {
+				w.state.exchangeThrows = thrown;
+			});
+			expect(returned(response).get("error")).toBe("temporarily_unavailable");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_callback_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+				reason: "upstream",
+				step: "exchange",
+				err: { name: thrown.name },
+			});
+		}
+	});
+
+	it("reads what an error's text says as no outage: only its name and code classify it", async () => {
+		const w = world();
+		const { response } = await unavailable(w, () => {
+			w.state.exchangeThrows = new Error("connect ECONNREFUSED 192.0.2.1:443 (fetch failed)");
+		});
+		expect(returned(response).get("error")).toBe("upstream_error");
+		expect(written(await settledLines(w))).toEqual([
+			"warn federation_grant_callback_exchange_refused",
+		]);
+	});
+
+	it("logs the upstream refusing the code as one warn: it answered", async () => {
+		const w = world();
+		const { response, grantId } = await unavailable(w, () => {
+			w.state.exchangeThrows = Object.assign(new Error("bad code"), { error: "invalid_grant" });
+		});
+		expect(returned(response).get("error")).toBe("upstream_error");
+		expect(written(await settledLines(w))).toEqual([
+			"warn federation_grant_callback_exchange_refused",
+		]);
+		expect(payloadOf(w.lines, "federation_grant_callback_exchange_refused")).toMatchObject({
+			grantId,
+			step: "exchange",
+			err: { name: "Error", error: "invalid_grant" },
+		});
+	});
+
+	it("logs a flow it could not finish after activating as one warn", async () => {
+		const w = world();
+		const { response } = await unavailable(w, () => w.state.faults.set("finishIntent", 0));
+		expect(returned(response).has("error")).toBe(false);
+		expect(written(await settledLines(w))).toEqual(["warn federation_grant_callback_step_failed"]);
+		expect(payloadOf(w.lines, "federation_grant_callback_step_failed")).toMatchObject({
+			store: "federation_grant_intent",
+			step: "finish_intent",
+			err: injected("finishIntent"),
+		});
+	});
+
+	it("logs a failure nothing expected behind the redirect as an unexpected error", async () => {
+		const w = world();
+		const { response } = await unavailable(w, () => {
+			w.state.configurationThrows = true;
+		});
+		expect(returned(response).get("error")).toBe("temporarily_unavailable");
+		expect(written(await settledLines(w))).toEqual(["error federation_grants_unexpected_error"]);
+		expect(payloadOf(w.lines, "federation_grants_unexpected_error")).toMatchObject({
+			site: "callback",
+			err: { name: "Error", detail: "injected: configuration unreadable" },
+		});
+	});
+});
+
+describe("the callback, when the composition fails where nothing expected it", () => {
+	it("answers a registry that throws on the unknown-transaction exit a plain 500, logged as unexpected", async () => {
+		// The drain registry is the composition's component: one that throws
+		// when the refusal's audit is handed to it escapes the check-1 exits.
+		const real = createFederationGrantBackground();
+		const w = world({
+			background: {
+				...real,
+				register: () => {
+					throw new Error("registry closed");
+				},
+			},
+		});
+		const response = await callback(w, { state: "never-issued", code: "c" }, "b-1");
+		expect(response.status).toBe(500);
+		isPlain(response);
+		expect(written(await settledLines(w))).toEqual(["error federation_grants_unexpected_error"]);
+		expect(payloadOf(w.lines, "federation_grants_unexpected_error")).toMatchObject({
+			site: "callback",
+			err: { name: "Error", detail: "registry closed" },
+		});
+	});
+});
+
+describe("the browser throttle, when the limiter is down — what it logs and audits", () => {
+	it("logs through the deployment's own logger and records the audit event", async () => {
+		const w = world({
+			rateLimiter: {
+				kind: "down",
+				check: async () => {
+					throw new Error("limiter down");
+				},
+			},
+			failMode: "closed",
+		});
+		expect((await w.connect("any")).status).toBe(503);
+		expect(written(await settledLines(w))).toEqual(["error rate_limiter_failed_closed"]);
+		expect(payloadOf(w.lines, "rate_limiter_failed_closed")).toMatchObject({
+			tag: "federation_grants_browser",
+			error: "limiter down",
+		});
+		expect(w.events.find((event) => event.type === "rate_limit.unavailable")?.details).toEqual({
+			tag: "federation_grants_browser",
+			cause: { name: "Error" },
+		});
 	});
 });

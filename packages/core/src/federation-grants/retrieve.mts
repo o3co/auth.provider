@@ -21,6 +21,7 @@ import {
 import { parseScopeTokens } from "../federations/scope.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
+import { carryingFailure } from "./carry.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
@@ -41,10 +42,14 @@ import {
 	type FederationGrantDenial,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantRefreshFailureInput,
+	type FederationGrantRetrievalFailure,
 	type FederationGrantTokenResult,
 	type FederationGrantUnavailableReason,
 	hasFederationGrantAuthorization,
 } from "./types.mjs";
+import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
+
+export type { FederationGrantRetrievalFailure } from "./types.mjs";
 
 export interface FederationGrantRefresher {
 	refreshDelegatedToken(params: {
@@ -156,27 +161,6 @@ export interface FederationGrantRetrievalLimits {
  */
 export const FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS = 1_000;
 
-/** What went wrong where a cause is otherwise swallowed into a typed answer. For a logger; never for a response. */
-export interface FederationGrantRetrievalFailure {
-	readonly during:
-		| "boundary"
-		| "open"
-		| "status"
-		| "backstop_revoke"
-		| "lock"
-		| "release"
-		| "upstream"
-		| "mark"
-		| "write"
-		| "touch"
-		| "audit"
-		| "background"
-		| "refresh";
-	readonly error: unknown;
-	readonly grantId: string;
-	readonly correlationId: string;
-}
-
 export interface RetrieveFederationGrantTokenDeps {
 	readonly store: FederationGrantStore;
 	/** The connection as it is configured now; `undefined` when the operator removed it. */
@@ -212,7 +196,13 @@ export interface RetrieveFederationGrantTokenDeps {
 	 * Told the cause wherever one is turned into a typed answer, or dropped:
 	 * a 503 says that something failed, and an operator needs to know what. The
 	 * error may be an upstream's, and may carry what the upstream echoed: it is
-	 * for a logger that redacts, and never for a response.
+	 * for a logger that projects it (`loggableError`), and never for a
+	 * response. A 503 turned from one carries the same object as its
+	 * `failure`, so a caller can log that one as the outage and every other as
+	 * a failure the answer did not carry. A write retried within the persist
+	 * budget is told once per distinct kind of failure (name and code), with
+	 * the last error of that kind and `attempts`; a write, a mark or an
+	 * upstream call that did not answer in time is told too, as not answered.
 	 */
 	report?(failure: FederationGrantRetrievalFailure): void;
 }
@@ -370,6 +360,29 @@ const SIDE_EFFECT_WAIT_MS = 3_000;
 
 const NOT_ANSWERED = new Error("not answered in time; no longer waited for");
 
+/**
+ * What kind of failure `error` is, to tell one from another: its name and its
+ * code, read so that nothing throws. Two attempts that failed the same way
+ * are one kind, whatever their messages say.
+ */
+function kindOf(error: unknown): string {
+	if (error === null || (typeof error !== "object" && typeof error !== "function")) {
+		return `thrown:${typeof error}`;
+	}
+	const read = (key: string): unknown => {
+		try {
+			return (error as Record<string, unknown>)[key];
+		} catch {
+			return undefined;
+		}
+	};
+	const name = read("name");
+	const code = read("code");
+	return `${typeof name === "string" ? name : ""}\u0000${
+		typeof code === "string" || typeof code === "number" ? String(code) : ""
+	}`;
+}
+
 /** `work`, or `"elapsed"` when it has not settled within `ms`. No timer is left behind. */
 async function within<T>(work: Promise<T>, ms: number): Promise<T | "elapsed"> {
 	const limit = after(ms);
@@ -380,23 +393,31 @@ async function within<T>(work: Promise<T>, ms: number): Promise<T | "elapsed"> {
 	}
 }
 
-/** Tells the composer's logger what was swallowed. A reporter that throws is not worth an answer. */
+/**
+ * Tells the composer's logger what was swallowed, and answers with what it
+ * told it: a 503 turned from this failure carries the same object. A reporter
+ * that throws is not worth an answer.
+ */
 function report(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
 	during: FederationGrantRetrievalFailure["during"],
 	error: unknown,
-): void {
+	attempts = 1,
+): FederationGrantRetrievalFailure {
+	const failure: FederationGrantRetrievalFailure = {
+		during,
+		error,
+		grantId: request.grantId,
+		correlationId: request.correlationId,
+		...(attempts > 1 ? { attempts } : {}),
+	};
 	try {
-		deps.report?.({
-			during,
-			error,
-			grantId: request.grantId,
-			correlationId: request.correlationId,
-		});
+		deps.report?.(failure);
 	} catch {
 		// See above.
 	}
+	return failure;
 }
 
 /**
@@ -478,10 +499,20 @@ type Evaluation =
 			readonly stored?: string;
 	  };
 
-const unavailable = (reason: FederationGrantUnavailableReason): FederationGrantDenial => ({
-	code: "temporarily_unavailable",
-	reason,
-});
+/** `value`, carrying the failure it was turned from where nothing enumerates it (`carry.mts`). */
+const carrying = <T extends object>(
+	value: T,
+	failure: FederationGrantRetrievalFailure | undefined,
+): T => carryingFailure(value, failure);
+
+/** The failure a denial was turned from, when it is a 503 that carries one. */
+const failureOf = (denial: FederationGrantDenial): FederationGrantRetrievalFailure | undefined =>
+	denial.code === "temporarily_unavailable" ? denial.failure : undefined;
+
+const unavailable = (
+	reason: FederationGrantUnavailableReason,
+	failure?: FederationGrantRetrievalFailure,
+): FederationGrantDenial => carrying({ code: "temporarily_unavailable", reason }, failure);
 
 /** How far ahead of `now` a stored date is believed: what the refresh buffer absorbs, or replicas' clocks may differ by. */
 const dateAllowanceMs = (limits: FederationGrantRetrievalLimits): number =>
@@ -529,11 +560,15 @@ async function evaluate(
 	// Neither read is bounded here. A store or a boundary reader that can hang
 	// carries its own timeout; what this function bounds is what holds the lock.
 	const boundary = await settle(() => deps.grantsBoundary(request.subject));
-	if (!boundary.ok) report(deps, request, "boundary", boundary.error);
+	const boundaryFailure = boundary.ok
+		? undefined
+		: report(deps, request, "boundary", boundary.error);
 	const read = await settle(() => deps.store.open(request.grantId, deps.now()));
 	if (!read.ok) {
-		report(deps, request, "open", read.error);
-		return { kind: "deny", denial: unavailable("storage") };
+		return {
+			kind: "deny",
+			denial: unavailable("storage", report(deps, request, "open", read.error)),
+		};
 	}
 	const opened = read.value;
 	// After the awaited reads, not before them.
@@ -557,7 +592,7 @@ async function evaluate(
 	if (grant.status === "pending") {
 		return { kind: "deny", denial: { code: "authorization_pending" }, grant };
 	}
-	if (!boundary.ok) return { kind: "deny", denial: unavailable("storage"), grant };
+	if (!boundary.ok) return { kind: "deny", denial: unavailable("storage", boundaryFailure), grant };
 
 	const connection = deps.connection(grant.connection);
 	let status: ReturnType<typeof effectiveFederationGrantStatus>;
@@ -575,8 +610,11 @@ async function evaluate(
 		// way. Anything else that is thrown here is a bug, and is not dressed up
 		// as an outage.
 		if (!(error instanceof RangeError)) throw error;
-		report(deps, request, "status", error);
-		return { kind: "deny", denial: unavailable("storage"), grant };
+		return {
+			kind: "deny",
+			denial: unavailable("storage", report(deps, request, "status", error)),
+			grant,
+		};
 	}
 
 	if (status.status === "revoked") {
@@ -586,8 +624,11 @@ async function evaluate(
 		// means somebody else got there, and the answer stands.
 		const revoked = await settle(() => deps.store.revoke(grant.id, "backstop", now));
 		if (!revoked.ok) {
-			report(deps, request, "backstop_revoke", revoked.error);
-			return { kind: "deny", denial: unavailable("storage"), grant };
+			return {
+				kind: "deny",
+				denial: unavailable("storage", report(deps, request, "backstop_revoke", revoked.error)),
+				grant,
+			};
 		}
 		if (revoked.value.ok) {
 			// Not awaited: this look may be the one under the lock.
@@ -895,7 +936,8 @@ function conclude(
 		request,
 		audit(deps, request, "federation.grant.token.denied", outcomeOf(denial), evaluation.grant),
 	);
-	return { ok: false, ...denial };
+	// The spread leaves the failure behind: it is carried on again, as it was.
+	return carrying<FederationGrantTokenResult>({ ok: false, ...denial }, failureOf(denial));
 }
 
 // ---------------------------------------------------------------------------
@@ -1044,8 +1086,11 @@ async function refreshUnderLock(
 ): Promise<RefreshOutcome> {
 	const { grant, connection } = held;
 	const { limits } = deps;
-	const failed = (during: FederationGrantRetrievalFailure["during"], error: unknown): void =>
-		report(deps, request, during, error);
+	const failed = (
+		during: FederationGrantRetrievalFailure["during"],
+		error: unknown,
+		attempts?: number,
+	): FederationGrantRetrievalFailure => report(deps, request, during, error, attempts);
 
 	const controller = new AbortController();
 	const calledAt = deps.now().getTime();
@@ -1069,16 +1114,18 @@ async function refreshUnderLock(
 		// whether or not the abort ever settles. The stored refresh credential is
 		// not assumed to be still good: the next refresh decides.
 		controller.abort();
+		// Reported: the caller has usually been answered already, at the soft
+		// deadline, and this is what became of the call it was answered about.
 		return {
 			kind: "denied",
-			denial: unavailable("upstream"),
+			denial: unavailable("upstream", failed("upstream", NOT_ANSWERED)),
 			audits: [["federation.grant.refresh_persist_failed", "hard_timeout"]],
 			keepLock: true,
 		};
 	}
 
 	if (!settled.ok) {
-		failed("upstream", settled.error);
+		const upstreamFailure = failed("upstream", settled.error);
 		// The classifier is the session-bound route's, unchanged, and it can
 		// throw on a thing that cannot be made a string. The failure ARRIVED all
 		// the same, which is what matters below.
@@ -1088,10 +1135,21 @@ async function refreshUnderLock(
 		} catch {
 			classified = { reason: "unknown", structured: false };
 		}
+		// An outage first, before anything the body said: the upstream could not
+		// be reached, did not answer in time, or answered 5xx — on the error, its
+		// Error causes or the Response it was raised over. A 5xx is never a
+		// verdict on the credential, whatever OAuth code its body carries: a
+		// 503 saying `invalid_grant` must not send the user through consent
+		// again, nor one naming an interaction code stamp their absence. The
+		// refresh-error classifier alone knows a status only on the error
+		// itself and four connection codes, and reads an `error` field before
+		// the status; `isFederationUpstreamOutage` is the connect callback's
+		// own test. A 429 is no outage, and stays the rate limit below.
+		const outage = isFederationUpstreamOutage(settled.error);
 		// Only a STRUCTURED rejection ends the credentials. The classifier's
 		// message fallback is a guess, and a wrong one here would send a user
 		// through consent again for nothing.
-		if (classified.reason === "invalid_grant" && classified.structured) {
+		if (!outage && classified.reason === "invalid_grant" && classified.structured) {
 			const marked = await within(
 				settle(() =>
 					deps.store.requireReauthorization({
@@ -1103,10 +1161,12 @@ async function refreshUnderLock(
 				limits.persistRetryBudgetMs,
 			);
 			if (marked === "elapsed" || !marked.ok) {
-				if (marked !== "elapsed") failed("mark", marked.error);
 				return {
 					kind: "denied",
-					denial: unavailable("storage"),
+					denial: unavailable(
+						"storage",
+						failed("mark", marked === "elapsed" ? NOT_ANSWERED : marked.error),
+					),
 					audits: [["federation.grant.refresh_failed", "mark_not_written"]],
 				};
 			}
@@ -1124,14 +1184,15 @@ async function refreshUnderLock(
 		}
 		// The upstream asked for the user (#616, D11): one of the four interaction
 		// codes, read off the error's own field — the classifier puts nothing a
-		// message said there — and ahead of the transport it came with, since a
-		// 429 or a 5xx that names the user is the user. Nothing said the refresh
+		// message said there — and ahead of a 429 it came with, since a 429 that
+		// names the user is the user. Not beside an outage (above): a 5xx is never
+		// a verdict, whatever its body names (review of #690). Nothing said the refresh
 		// token is bad, so the credentials are kept; nothing is mended by waiting,
 		// so no wait is told. What is answered comes from the record: the stamp
 		// the record carries at the last look, or whatever replaced it — never
 		// the code in hand, which a renewal or a revocation may have overtaken
 		// while the stamp was being written.
-		if (isFederationGrantInteractionCode(classified.upstreamCode)) {
+		if (!outage && isFederationGrantInteractionCode(classified.upstreamCode)) {
 			const reason = `upstream_${classified.upstreamCode}` as const;
 			const noted = await stamp(
 				deps,
@@ -1140,7 +1201,7 @@ async function refreshUnderLock(
 				{ at: deps.now(), kind: "rejected", upstreamCode: classified.upstreamCode },
 				limits.persistRetryBudgetMs,
 			);
-			switch (noted) {
+			switch (noted.outcome) {
 				case "written":
 					// The last look reads it back as `reauthorization_required`. The
 					// fallback is for a record that no longer carries it.
@@ -1156,7 +1217,7 @@ async function refreshUnderLock(
 				case "failed":
 					return {
 						kind: "denied",
-						denial: unavailable("storage"),
+						denial: unavailable("storage", noted.failure),
 						audits: [["federation.grant.refresh_failed", "mark_not_written"]],
 					};
 				case "elapsed":
@@ -1164,7 +1225,7 @@ async function refreshUnderLock(
 					// land under the next holder's refresh (D12).
 					return {
 						kind: "denied",
-						denial: unavailable("storage"),
+						denial: unavailable("storage", noted.failure),
 						audits: [["federation.grant.refresh_failed", "mark_not_written"]],
 						keepLock: true,
 					};
@@ -1184,8 +1245,12 @@ async function refreshUnderLock(
 				kind: "rate_limited",
 				...(advice !== undefined ? { retryAfterSeconds: advice } : {}),
 			};
-		} else if (classified.reason === "network") {
-			denial = unavailable("upstream");
+		} else if (outage || classified.reason === "network") {
+			// The upstream could not be reached, did not answer in time, or said
+			// it is down: the outage this answer is (`outage`, above), or what the
+			// refresh-error classifier alone reads as one. Stamped `unavailable`
+			// either way, so the backoff is unchanged.
+			denial = unavailable("upstream", upstreamFailure);
 			failure = { at, kind: "unavailable" };
 		} else if (
 			classified.upstreamCode !== undefined &&
@@ -1222,7 +1287,10 @@ async function refreshUnderLock(
 				denial.code === "upstream_rejected" ||
 				denial.code === "temporarily_unavailable")
 		) {
-			denial = { ...denial, retryAfterSeconds: wouldStand.retryAfterSeconds };
+			denial = carrying(
+				{ ...denial, retryAfterSeconds: wouldStand.retryAfterSeconds },
+				failureOf(denial),
+			);
 		}
 		await stamp(deps, request, grant, failure, limits.persistRetryBudgetMs);
 		// The lock is let go of, whatever the failure was. A failure that ARRIVED
@@ -1305,6 +1373,26 @@ async function refreshUnderLock(
 		ineligible === null ? "success" : `upstream_token_ineligible/${ineligible.reason}`,
 	];
 	let threwBefore = false;
+	// What every attempt that threw threw. Told once the loop is done with
+	// them, and not once per attempt: the retries are one write. Each distinct
+	// kind of failure is told once, with how many attempts failed so; what is
+	// returned — for the answer to carry — is the kind the LAST attempt threw.
+	const thrown: unknown[] = [];
+	const reportWrite = (): FederationGrantRetrievalFailure | undefined => {
+		const last = thrown.at(-1);
+		if (thrown.length === 0) return undefined;
+		const kinds = new Map<string, { last: unknown; count: number }>();
+		for (const error of thrown.splice(0)) {
+			const kind = kindOf(error);
+			kinds.set(kind, { last: error, count: (kinds.get(kind)?.count ?? 0) + 1 });
+		}
+		const lastKind = kindOf(last);
+		for (const [kind, { last: error, count }] of kinds) {
+			if (kind !== lastKind) failed("write", error, count);
+		}
+		const carried = kinds.get(lastKind) as { last: unknown; count: number };
+		return failed("write", carried.last, carried.count);
+	};
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		const remaining = persistDeadline - deps.now().getTime();
 		if (remaining <= 0) break;
@@ -1325,14 +1413,19 @@ async function refreshUnderLock(
 		// later it is still guarded by the version — and until it has had the
 		// time to, nobody else is let at the refresh token it replaces.
 		if (result === "elapsed") {
+			// The answer is the write that did not answer; what attempts before
+			// it threw is told beside it, and not carried.
+			reportWrite();
 			return {
 				kind: "denied",
-				denial: unavailable("storage"),
+				denial: unavailable("storage", failed("write", NOT_ANSWERED)),
 				audits: [["federation.grant.refresh_persist_failed", "write_in_flight"]],
 				keepLock: true,
 			};
 		}
 		if (result.ok) {
+			// An attempt that threw before this one answered is told all the same.
+			reportWrite();
 			// A writer whose precondition fails does not use what it fetched (D2).
 			// That includes this call's own earlier attempt having landed with its
 			// acknowledgement lost: the last look then finds its token stored. The
@@ -1359,9 +1452,11 @@ async function refreshUnderLock(
 			};
 		}
 		threwBefore = true;
-		failed("write", result.error);
+		thrown.push(result.error);
 		await after(Math.min(PERSIST_RETRY_DELAY_MS, remaining)).elapsed;
 	}
+	// No attempt that threw means none was made in time: nothing answered.
+	const writeFailure = reportWrite() ?? failed("write", NOT_ANSWERED);
 	// The new credentials are dropped. The stored refresh credential is not
 	// assumed to be still good: the next refresh decides (D12). The failure is
 	// stamped all the same, best effort, with what is left of the persist
@@ -1372,7 +1467,7 @@ async function refreshUnderLock(
 	if (left > 0) await stamp(deps, request, grant, { at: deps.now(), kind: "unavailable" }, left);
 	return {
 		kind: "denied",
-		denial: unavailable("storage"),
+		denial: unavailable("storage", writeFailure),
 		audits: [["federation.grant.refresh_persist_failed", "storage"]],
 	};
 }
@@ -1384,7 +1479,8 @@ async function refreshUnderLock(
  * without it — and a store that will not take it is told to the logger. What
  * it came to is returned for the one stamp that IS the answer, the user's
  * absence (#616): `written`, `refused` on the guard, `failed` on a throw, or
- * `elapsed` past the budget, when the write may still land.
+ * `elapsed` past the budget, when the write may still land — the last two
+ * with the failure they were reported as.
  */
 async function stamp(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1392,7 +1488,10 @@ async function stamp(
 	grant: AuthorizedFederationGrant,
 	failure: FederationGrantRefreshFailureInput,
 	budgetMs: number,
-): Promise<"written" | "refused" | "failed" | "elapsed"> {
+): Promise<
+	| { readonly outcome: "written" | "refused" }
+	| { readonly outcome: "failed" | "elapsed"; readonly failure: FederationGrantRetrievalFailure }
+> {
 	const noted = await within(
 		settle(() =>
 			deps.store.noteRefreshFailure({
@@ -1406,16 +1505,14 @@ async function stamp(
 		budgetMs,
 	);
 	if (noted === "elapsed") {
-		report(deps, request, "mark", NOT_ANSWERED);
-		return "elapsed";
+		return { outcome: "elapsed", failure: report(deps, request, "mark", NOT_ANSWERED) };
 	}
 	if (!noted.ok) {
-		report(deps, request, "mark", noted.error);
-		return "failed";
+		return { outcome: "failed", failure: report(deps, request, "mark", noted.error) };
 	}
 	// Refused on the version, the stamp says nothing about the credentials the
 	// grant has now: nothing to report.
-	return noted.value.ok ? "written" : "refused";
+	return { outcome: noted.value.ok ? "written" : "refused" };
 }
 
 /** Lets go of a lock, waiting so long and no longer, and tells the logger when it could not. Never rejects. */
@@ -1492,8 +1589,13 @@ async function refresh(
 				handOver(deps, request, letGo(deps, request, late.value));
 			});
 		}
-		report(deps, request, "lock", asked === "elapsed" ? NOT_ANSWERED : asked.error);
-		return lastLook(deps, request, unavailable("storage"));
+		const lockFailure = report(
+			deps,
+			request,
+			"lock",
+			asked === "elapsed" ? NOT_ANSWERED : asked.error,
+		);
+		return lastLook(deps, request, unavailable("storage", lockFailure));
 	}
 	const lock = asked.value;
 	if (!lock.acquired) {
@@ -1527,13 +1629,13 @@ async function refresh(
 			!(askedAt + waitedMs <= acknowledgedAt + FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS)
 		) {
 			handOver(deps, request, release());
-			report(
+			const unmeasured = report(
 				deps,
 				request,
 				"lock",
 				new Error("the store did not say how long it waited for the lock"),
 			);
-			return lastLook(deps, request, unavailable("storage"));
+			return lastLook(deps, request, unavailable("storage", unmeasured));
 		}
 		leaseStartedAt = askedAt + waitedMs;
 		const again = await evaluate(deps, request);
@@ -1563,13 +1665,13 @@ async function refresh(
 			// and what was slow is the look under the lock, so that is what the
 			// answer names, and the logger is told.
 			handOver(deps, request, release());
-			report(
+			const spent = report(
 				deps,
 				request,
 				"refresh",
 				new Error("the look under the refresh lock used up the lease; the upstream was not asked"),
 			);
-			return lastLook(deps, request, unavailable("storage"));
+			return lastLook(deps, request, unavailable("storage", spent));
 		}
 		held = again;
 		refresher = found;
@@ -1593,10 +1695,9 @@ async function refresh(
 	).catch((error: unknown): RefreshOutcome => {
 		// Nothing in there is expected to reject. If something did, the upstream
 		// may have been asked, and nothing is known about what it did.
-		report(deps, request, "refresh", error);
 		return {
 			kind: "denied",
-			denial: unavailable("upstream"),
+			denial: unavailable("upstream", report(deps, request, "refresh", error)),
 			audits: [["federation.grant.refresh_failed", "internal_error"]],
 			keepLock: true,
 		};

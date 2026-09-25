@@ -543,14 +543,21 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				});
 			});
 
-			it("and beside a 503 as well: an outage that names the user is the user", async () => {
+			it("but not beside a 5xx: an outage is never a verdict, whatever code its body names", async () => {
+				// A 503 whose body says login_required is the IdP down, not the user
+				// gone: answering it as the user's absence would send the user to
+				// connect again because the IdP had an outage (review of #690). A
+				// 429 is no outage, and stays the user (above).
 				await h.seed();
 				setNow(DUE);
 				h.refresh.mockRejectedValue(asksFor("login_required", { status: 503 }));
-				expect(await retrieve()).toStrictEqual({
-					ok: false,
-					code: "reauthorization_required",
-					reason: "upstream_login_required",
+				// The stored token still serves, and a refresh that met an outage
+				// costs it nothing: it is answered, where the user's absence would
+				// have withheld it.
+				expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-0" });
+				expect(await h.store.find("g-1", DUE)).toMatchObject({
+					status: "active",
+					refreshFailure: { kind: "unavailable" },
 				});
 			});
 

@@ -433,7 +433,7 @@ Every other key is open, and is still expected to keep one type across the event
   An event written as an object literal is held to the two keys by the compiler. A `details` built first as a `Record<string, unknown>` is not, so an emitter that assembles one owns the rule itself.
 - **A custom sink** (an `AuditSink` implementation, or a wrapper that relays events):
   - may rely on `details.error` being a string and `details.cause` an `AuditedError` wherever they appear;
-  - if it transforms or redacts details, keeps those types: a `cause` it will not carry is replaced with an `AuditedError` (federation-grants' sanitised sink uses `{ name: "[redacted]" }`), never with a string or a message;
+  - if it transforms or redacts details, keeps those types: a `cause` it will not carry is replaced with an `AuditedError` (`{ name: "[redacted]" }`, say), never with a string or a message;
   - may drop a key, but should not change its type.
 
   Every name and code in an `AuditedError` is already held to printable ASCII without `"` and `\` and capped at 200 characters.
@@ -576,7 +576,7 @@ The canonical event URI every `logout_token`'s `events` claim carries, `http://s
 
 The structural, pino-compatible logger in [`src/logging/Logger.mts`](src/logging/Logger.mts): `trace` / `debug` / `info` / `warn` / `error` / `fatal`, each accepting an object-first or a string-first call, plus `child(bindings)`. A pino instance satisfies it without an adapter, and `consoleLogger` is the default. It is also the optional `logger` component slot.
 
-[`loggableError(err)`](src/logging/loggableError.mts) is what a call site hands the logger instead of an error that came out of a library or a store talking to another system. Every logger call that reports a caught error goes through it — in every workspace package's `src` and in the standalone template's — and [`src/__tests__/logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) keeps it so: its `SOURCE_ROOTS` lists the trees it reads, and a package added to the workspace fails it until it is listed. A file that hands a caught error to a stricter projection of its own instead is named there, with the reason (federation-grants' last error handler, which logs a classification and a status and nothing of the error's text).
+[`loggableError(err)`](src/logging/loggableError.mts) is what a call site hands the logger instead of an error that came out of a library or a store talking to another system. Every logger call that reports a caught error goes through it — in every workspace package's `src` and in the standalone template's — and [`src/__tests__/logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) keeps it so: its `SOURCE_ROOTS` lists the trees it reads, and a package added to the workspace fails it until it is listed. A file that hands a caught error to another projection at least as strict instead is named there, with the reason (core's token-binding dispatchers, whose `unavailableLogFields` is a refusal's `reason` and `loggableError` of its cause).
 
 Why: an error built from a parsed upstream response carries whatever that response said — an OAuth library puts the token answer it refused on the cause chain, a JSON parser quotes the text it could not parse, a Redis reply echoes the command it refused, and ioredis puts that command's arguments (a token record, for a store write under `allow-plaintext`) on the error. What the projection does:
 

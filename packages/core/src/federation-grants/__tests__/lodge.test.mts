@@ -882,3 +882,380 @@ describe("lodging without an id source of the caller's", () => {
 		expect(result.grantId).not.toBe(result.handle);
 	});
 });
+
+/**
+ * A `storage` refusal carries what failed (`failure`): which store, which
+ * operation, and what it threw or refused — so that the route answering it
+ * logs the outage once with its cause. Not enumerable: nothing that
+ * serialises the refusal can carry what a store put on its error.
+ */
+describe("what a storage refusal carries, for the route that answers it", () => {
+	const failureOf = (result: unknown) => (result as { failure?: Record<string, unknown> }).failure;
+	/** What the answer did not carry, and the route logs as warns: `absorbed`, or nothing. */
+	const absorbedOf = (result: unknown) =>
+		(result as { absorbed?: readonly Record<string, unknown>[] }).absorbed ?? [];
+	const connectionOf = (result: unknown) => (result as { connection?: unknown }).connection;
+
+	it("names the intent store and the error it threw", async () => {
+		const down = new Error("intent store down");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				intentStore: {
+					...intents,
+					putIntent: async () => {
+						throw down;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(result).toEqual({ ok: false, reason: "storage" });
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant_intent",
+			step: "put_intent",
+			error: down,
+		});
+		expect(Object.keys(result)).not.toContain("failure");
+		expect(JSON.stringify(result)).not.toContain("intent store down");
+	});
+
+	it("names a refusal on this side that nothing threw", async () => {
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				intentStore: {
+					...intents,
+					putIntent: async () => ({ outcome: "refused", reason: "collision" }),
+				},
+			}),
+			initial(),
+		);
+		expect(result).toEqual({ ok: false, reason: "storage" });
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant_intent",
+			step: "put_intent",
+			refusal: "collision",
+		});
+	});
+
+	it("names a second write that failed, and an intent it could not close after it", async () => {
+		const down = new Error("grant store down");
+		const closing = new Error("close failed");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				grantStore: {
+					...grants,
+					createPending: async () => {
+						throw down;
+					},
+					isCurrentIntent: async () => false,
+				},
+				intentStore: {
+					...intents,
+					finishIntent: async () => {
+						throw closing;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(result).toEqual({ ok: false, reason: "storage" });
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant",
+			step: "create_pending",
+			error: down,
+		});
+		// Its own list, beside the failure: the same one any answer carries.
+		expect(absorbedOf(result)).toEqual([
+			{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+		]);
+		expect(Object.keys(result)).not.toContain("absorbed");
+	});
+
+	it("carries a second write that threw and landed all the same, on the answer it let through", async () => {
+		const reset = new Error("connection reset");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				grantStore: {
+					...grants,
+					createPending: async (input) => {
+						await grants.createPending(input);
+						throw reset;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(result).toMatchObject({ ok: true, grantId: "id-1" });
+		expect(absorbedOf(result)).toEqual([
+			{ store: "federation_grant", step: "create_pending", error: reset },
+		]);
+		expect(Object.keys(result)).not.toContain("absorbed");
+	});
+
+	it("carries the question that could not be asked after a second write that threw", async () => {
+		const reset = new Error("connection reset");
+		const asked = new Error("still down");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				grantStore: {
+					...grants,
+					createPending: async () => {
+						throw reset;
+					},
+					isCurrentIntent: async () => {
+						throw asked;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant",
+			step: "create_pending",
+			error: reset,
+		});
+		expect(absorbedOf(result)).toEqual([
+			{ store: "federation_grant", step: "is_current_intent", error: asked },
+		]);
+	});
+
+	it("carries the connection a connection_not_configured refusal is about, where nothing enumerates it", async () => {
+		const client = { ...CLIENT, allowedFederationGrantConnections: ["okta-calendar", "retired"] };
+		const result = await lodgeFederationGrantIntent(
+			deps(),
+			initial({ client, connection: "retired" }),
+		);
+		expect(result).toEqual({ ok: false, reason: "connection_not_configured" });
+		expect(connectionOf(result)).toBe("retired");
+		expect(Object.keys(result)).not.toContain("connection");
+	});
+
+	it("names a second write the store refused", async () => {
+		const result = await lodgeFederationGrantIntent(
+			deps({ grantStore: { ...grants, createPending: async () => ({ ok: false }) } }),
+			initial(),
+		);
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant",
+			step: "create_pending",
+			refusal: "refused",
+		});
+	});
+
+	describe("a renewal", () => {
+		beforeEach(() => {
+			clock = at(2 * MIN);
+		});
+
+		it("names the grant store's read, the boundary's, and the backstop's write", async () => {
+			await establish();
+			const down = new Error("down");
+			const throwing = async () => {
+				throw down;
+			};
+			const unread = await lodgeFederationGrantReauthorization(
+				deps({ grantStore: { ...grants, inspect: throwing } }),
+				renewal(),
+			);
+			expect(failureOf(unread)).toEqual({
+				store: "federation_grant",
+				step: "inspect",
+				error: down,
+			});
+
+			const noBoundary = await lodgeFederationGrantReauthorization(
+				deps({ grantsRevokedBefore: throwing }),
+				renewal(),
+			);
+			expect(failureOf(noBoundary)).toEqual({
+				store: "revocation_boundary",
+				step: "read",
+				error: down,
+			});
+
+			const unrevoked = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: { ...grants, revoke: throwing },
+					grantsRevokedBefore: async () => at(2 * MIN),
+				}),
+				renewal(),
+			);
+			expect(failureOf(unrevoked)).toEqual({
+				store: "federation_grant",
+				step: "revoke",
+				error: down,
+			});
+		});
+
+		it("names a boundary that answered something that is not one", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({ grantsRevokedBefore: async () => "yesterday" as never }),
+				renewal(),
+			);
+			expect(failureOf(result)).toMatchObject({
+				store: "revocation_boundary",
+				step: "read",
+				error: expect.any(TypeError),
+			});
+		});
+
+		it("names a pointer write it could not confirm", async () => {
+			await establish();
+			const reset = new Error("connection reset");
+			const result = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: {
+						...grants,
+						nameIntent: async () => {
+							throw reset;
+						},
+						isCurrentIntent: async () => {
+							throw new Error("still down");
+						},
+					},
+				}),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(result)).toEqual({
+				store: "federation_grant",
+				step: "name_intent",
+				error: reset,
+			});
+			expect(absorbedOf(result)).toEqual([
+				{ store: "federation_grant", step: "is_current_intent", error: expect.any(Error) },
+			]);
+		});
+
+		it("carries a pointer write that threw and landed all the same, on the renewal it let through", async () => {
+			await establish();
+			const reset = new Error("connection reset");
+			const result = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: {
+						...grants,
+						nameIntent: async (input) => {
+							await grants.nameIntent(input);
+							throw reset;
+						},
+					},
+				}),
+				renewal(),
+			);
+			expect(result).toMatchObject({ ok: true, grantId: "g-est" });
+			expect(absorbedOf(result)).toEqual([
+				{ store: "federation_grant", step: "name_intent", error: reset },
+			]);
+		});
+
+		it("carries the renewed grant's connection when that connection is no longer configured", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({ connections: new Map() }),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "connection_not_configured" });
+			expect(connectionOf(result)).toBe("okta-calendar");
+		});
+
+		/**
+		 * A pointer write that lost, an intent that could not be closed after it,
+		 * and a re-read that answers as the grant is now — revoked, gone, or
+		 * still renewable. The answer is the re-read's; the intent that could
+		 * not be closed rides on it whichever answer it is.
+		 */
+		const reset = new Error("connection reset");
+		const lostAndUnclosed = (
+			reread: FederationGrantStore["inspect"],
+			closing: Error,
+		): FederationGrantLodgingDeps =>
+			deps({
+				grantStore: {
+					...grants,
+					nameIntent: async () => {
+						throw reset;
+					},
+					isCurrentIntent: async () => false,
+					inspect: (() => {
+						let reads = 0;
+						return async (id: string, when: Date) => {
+							reads += 1;
+							return reads === 1 ? await grants.inspect(id, when) : await reread(id, when);
+						};
+					})(),
+				},
+				intentStore: {
+					...intents,
+					finishIntent: async () => {
+						throw closing;
+					},
+				},
+			});
+
+		it.each([
+			[
+				"revoked meanwhile",
+				async (id: string, when: Date) => {
+					await grants.revoke(id, "subject", when);
+					return await grants.inspect(id, when);
+				},
+				{ ok: false, reason: "grant_revoked", revokedBy: "subject", revokedNow: false },
+			],
+			["gone", async () => null, { ok: false, reason: "grant_not_found" }],
+		] as const)(
+			"carries the write that threw and an intent it could not close on a re-read that answers the grant %s",
+			async (_label, reread, answered) => {
+				await establish();
+				const closing = new Error("close failed");
+				const result = await lodgeFederationGrantReauthorization(
+					lostAndUnclosed(reread, closing),
+					renewal(),
+				);
+				expect(result).toEqual(answered);
+				// The answer is the grant's; the write's error is not what it carries.
+				expect(absorbedOf(result)).toEqual([
+					{ store: "federation_grant", step: "name_intent", error: reset },
+					{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+				]);
+				expect(Object.keys(result)).not.toContain("absorbed");
+				expect(JSON.stringify(result)).not.toContain("close failed");
+			},
+		);
+
+		it("carries it on a storage answer beside what failed, and on a re-read that failed", async () => {
+			await establish();
+			const closing = new Error("close failed");
+			const stillRenewable = await lodgeFederationGrantReauthorization(
+				lostAndUnclosed((id, when) => grants.inspect(id, when), closing),
+				renewal(),
+			);
+			expect(stillRenewable).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(stillRenewable)).toMatchObject({
+				store: "federation_grant",
+				step: "name_intent",
+			});
+			expect(absorbedOf(stillRenewable)).toEqual([
+				{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+			]);
+
+			const down = new Error("re-read down");
+			const unread = await lodgeFederationGrantReauthorization(
+				lostAndUnclosed(async () => {
+					throw down;
+				}, closing),
+				renewal(),
+			);
+			expect(failureOf(unread)).toEqual({
+				store: "federation_grant",
+				step: "inspect",
+				error: down,
+			});
+			// The write that threw before the re-read is not lost behind it.
+			expect(absorbedOf(unread)).toEqual([
+				{ store: "federation_grant", step: "name_intent", error: reset },
+				{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+			]);
+		});
+	});
+});

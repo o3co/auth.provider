@@ -131,7 +131,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | パスワードログイン、`POST /session/login`（[`@o3co/auth-provider-session`](../session/README.ja.md)） | `503 temporarily_unavailable` | `login_store_unavailable`（error、`store: "user_repository"`、`err` 付き） |
 | フェデレーションのログインと `?link=1` のコールバック（session） | `503 temporarily_unavailable` | `federation_callback_store_unavailable` または `federation_link_store_unavailable`（error、`store: "user_repository"`、`err` 付き） |
 | jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)） | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable`（error、`err` 付き） |
-| federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant.failure`（warn）に `during: "callback_identity_lookup"` と `classification: "store_credential_refused"`（`StoreTransportError` なら `store_transport_failed`、`TimeoutError` なら `timeout`） — このレポーターは分類を出し、エラーのメッセージは決して出さない |
+| federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant_callback_unavailable`（error、`store: "user_directory"`、`err` 付き） |
 
 `err` がログに出る場合、`StoreCredentialRefusedError` のメッセージは Store の URL、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。`StoreTransportError` のメッセージは URL、何が失敗したか、せいぜい通信のコードを示す。
 

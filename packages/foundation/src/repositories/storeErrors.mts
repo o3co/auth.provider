@@ -30,10 +30,11 @@
  * any Store failure.
  *
  * `name` is part of the contract. A caller that does not depend on this
- * package recognises the refusal by it — federation-grants' sanitized
- * reporter classifies it `store_credential_refused`. The message names the
- * endpoint, the status and the option to check; never the token, and nothing
- * the Store wrote.
+ * package recognises the refusal by it — an operator reading the
+ * federation-grants callback's `federation_grant_callback_unavailable` line
+ * finds it as the projected error's `name`. The message names the endpoint,
+ * the status and the option to check; never the token, and nothing the Store
+ * wrote.
  *
  * The Store's status is `storeStatus`, never `status` or `statusCode`: those
  * are what Express's finalhandler, http-errors and the standalone's terminal
@@ -83,8 +84,8 @@ export type StoreTransportFailure =
  * The Store could not be reached, or what it answered could not be read — a
  * transport failure rather than an answer. Thrown so every caller answers it
  * as it answers any Store failure; `name` is part of the contract (the
- * federation-grants reporter classifies it `store_transport_failed`), as are
- * `reason` and `code`.
+ * federation-grants callback's outage line carries it as the projected
+ * error's `name`), as are `reason` and `code`.
  *
  * Built only from what an operator can act on: a fixed message naming the
  * endpoint and the failure, and `code` — a transport code from the allowlist

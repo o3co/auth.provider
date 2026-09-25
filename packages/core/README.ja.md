@@ -432,7 +432,7 @@ const userRepo = new InMemoryUserRepository(users);
   オブジェクトリテラルで書いたイベントは、この 2 つのキーについてコンパイラーが検査する。先に `Record<string, unknown>` として組み立てた `details` は検査されないので、それを組み立てる発行者は自分でこの規則を守る。
 - **独自のシンク**（`AuditSink` の実装、イベントを中継するラッパー）:
   - `details.error` は文字列、`details.cause` は `AuditedError` であることを前提にしてよい;
-  - details を変換・秘匿するときもその型を保つ: 運ばない `cause` は `AuditedError` に置き換える（federation-grants のサニタイズ済みシンクは `{ name: "[redacted]" }` を使う）。文字列やメッセージには置き換えない;
+  - details を変換・秘匿するときもその型を保つ: 運ばない `cause` は `AuditedError` に置き換える（たとえば `{ name: "[redacted]" }`）。文字列やメッセージには置き換えない;
   - キーを落としてもよいが、型を変えてはいけない。
 
   `AuditedError` の name と code はすべて、`"` と `\` を除く印字可能な ASCII に収められ、200 文字で切り詰め済みである。
@@ -575,7 +575,7 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 
 [`src/logging/Logger.mts`](src/logging/Logger.mts) にある、pino 互換の構造的ロガー: `trace` / `debug` / `info` / `warn` / `error` / `fatal`（それぞれオブジェクト先頭・文字列先頭のどちらの呼び出しも受け付ける）と `child(bindings)`。pino のインスタンスはアダプターなしでこれを満たし、デフォルトは `consoleLogger`。任意の `logger` コンポーネントスロットでもある。
 
-[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリやストアから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの。捕捉したエラーを報告するロガー呼び出しは — ワークスペースのすべてのパッケージの `src` でも、standalone テンプレートの `src` でも — すべてこれを通り、[`src/__tests__/logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) がそれを保つ: 読むツリーはその `SOURCE_ROOTS` に列挙してあり、ワークスペースに追加したパッケージは列挙するまでこのテストを落とす。捕捉したエラーを代わりに自前のより厳しい射影に渡すファイルは、理由とともにそこに名前を挙げてある（federation-grants の最後のエラーハンドラー。分類とステータスだけをログに出し、エラーのテキストは何も出さない）。
+[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリやストアから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの。捕捉したエラーを報告するロガー呼び出しは — ワークスペースのすべてのパッケージの `src` でも、standalone テンプレートの `src` でも — すべてこれを通り、[`src/__tests__/logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) がそれを保つ: 読むツリーはその `SOURCE_ROOTS` に列挙してあり、ワークスペースに追加したパッケージは列挙するまでこのテストを落とす。捕捉したエラーを代わりに少なくとも同じだけ厳しい別の射影に渡すファイルは、理由とともにそこに名前を挙げてある（core のトークンバインディングのディスパッチャー。その `unavailableLogFields` は拒否の `reason` と、その cause の `loggableError` だけを出す）。
 
 理由: 解析した上流の応答から作られたエラーは、その応答が言ったことを何でも運ぶ — OAuth ライブラリは拒否したトークン応答を cause の連鎖に載せ、JSON パーサーは解析できなかったテキストを引用し、Redis の応答は拒否したコマンドを反復し、ioredis はそのコマンドの引数（`allow-plaintext` でのストアへの書き込みならトークンレコード）をエラーに載せる。射影がすること:
 
