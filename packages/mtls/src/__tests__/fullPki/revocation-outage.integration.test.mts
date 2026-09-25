@@ -556,6 +556,37 @@ describe("the outage line's account survives a long subject", () => {
 	});
 });
 
+describe("more sources down than one line keeps", () => {
+	it("six points refused: the first five on the line, in the certificate's order, the sixth counted in aggregateErrorsOmitted", async () => {
+		// core's loggableError keeps an AggregateError's first five members
+		// (and sixteen projections in all: the error, five members, their
+		// errors and those errors' causes). The members are in path order —
+		// each certificate's OCSP responders, then its CRL points — so it is
+		// the tail of the last certificate's points that is counted, not
+		// shown.
+		const { root, int, leaf, leafPoint, morePoints } = await pki("refused", "127.0.0.1", false, {
+			morePoints: ["refused", "refused", "refused", "refused", "refused"],
+		});
+		const { app, calls } = appWith(root, "reject");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls).toHaveLength(1);
+		const line = calls[0]?.args[0] as {
+			err: { aggregateErrors: unknown[]; aggregateErrorsOmitted?: number };
+		};
+		expect(line.err.aggregateErrors).toEqual(
+			[leafPoint, ...morePoints.slice(0, 4)].map((url) =>
+				sourceMember("crl", url, "fetch_failed", REFUSED),
+			),
+		);
+		expect(line.err.aggregateErrorsOmitted).toBe(1);
+	});
+});
+
 describe("one outage line for the whole path", () => {
 	it("the leaf served on the CRL and the intermediate down under both: 503, the one error line, naming the leaf's responder too", async () => {
 		// A shared OCSP outage with the root's CRL down: the leaf's CRL answers,
