@@ -57,6 +57,7 @@ import {
 	type FederationTokenStore,
 	type FederationTokens,
 	isStorableLifetime,
+	type Logger,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -137,6 +138,12 @@ export interface RedisFederationTokenStoreOptions {
 	 * config it is handed, a direct caller passes it here.
 	 */
 	deploymentMode?: string;
+	/**
+	 * Where the `allow-plaintext` guard's notice goes (#473): the module
+	 * passes its optional `logger` slot, the builder its context's. Absent,
+	 * `consoleLogger`. The store logs nothing else.
+	 */
+	logger?: Logger;
 }
 
 const DEFAULT_TTL_SECONDS = 86400;
@@ -251,6 +258,7 @@ export function createRedisFederationTokenStore(
 	validateEncryptionMode("federation-tokens", opts.encryption.mode, {
 		environment: opts.environment,
 		deploymentMode: opts.deploymentMode,
+		...(opts.logger !== undefined ? { logger: opts.logger } : {}),
 	});
 	if (opts.encryption.mode === "required" && opts.encryption.key.length !== 32) {
 		throw new Error("FederationTokenStore redis: encryption key must be 32 bytes");
@@ -509,7 +517,7 @@ export function createRedisFederationTokenStore(
  */
 export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStore> = (
 	config,
-	_ctx,
+	ctx,
 ) => {
 	const cfg = config as {
 		client?: unknown;
@@ -549,14 +557,15 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		);
 	}
 	const mode = cfg.encryption?.mode ?? "required";
+	// OR-12: the hard production guard runs once, in the store factory below,
+	// with the context's logger. Nothing here can fail first: it acts only on
+	// `allow-plaintext`, and that mode reads no key. A second call here wrote
+	// the guard's notice twice per build.
 	const guard: EncryptionGuardContext = {
 		environment: cfg.environment,
 		deploymentMode: cfg.deploymentMode,
+		...(ctx?.logger !== undefined ? { logger: ctx.logger } : {}),
 	};
-	// OR-12: hard production guard (throws on plaintext in production unless
-	// FEDERATION_TOKENS_ALLOW_INSECURE=1). Validate before constructing the
-	// EncryptionConfig so the failure surfaces before any key parsing.
-	validateEncryptionMode("federation-tokens", mode, guard);
 	let encryption: EncryptionConfig;
 	if (mode === "required") {
 		const rawKey = cfg.encryption?.key;
@@ -634,7 +643,9 @@ export interface RedisFederationTokenStoreModuleOptions {
  * The `allow-plaintext` guard (#473) reads `deployment.mode` off the config
  * and the selected environment off `options` — the module cannot know how the
  * composition root chose its config file, so the root says so here rather
- * than this package learning the standalone's `CONFIG_ENV` convention.
+ * than this package learning the standalone's `CONFIG_ENV` convention. Its
+ * notice goes to the optional `logger` slot, so it reaches the deployment's
+ * log with every other line (`consoleLogger` when the slot is empty).
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},
@@ -642,6 +653,7 @@ export function redisFederationTokenStoreModuleFor(
 	return defineModule({
 		name: "redis-federation-token-store",
 		requires: ["federationTokenStoreClient", "config"] as const,
+		optional: ["logger"] as const,
 		configSchema: redisFederationTokenStoreConfigSchema,
 		provides: {
 			federationTokenStore: (deps) => {
@@ -666,7 +678,7 @@ export function redisFederationTokenStoreModuleFor(
 						environment: options.environment,
 						deploymentMode: config.deployment?.mode,
 					},
-					{},
+					deps.logger !== undefined ? { logger: deps.logger } : {},
 				);
 			},
 		},

@@ -965,7 +965,7 @@ export function resolveRedisFederationGrantStoreOptions(
  * The plaintext guard reads `deployment.mode` off the configuration and the
  * selected environment off `options`, for the reason the federation-token
  * store's does: the module cannot know how a composition root chose its
- * configuration file.
+ * configuration file. Its notice goes to the optional `logger` slot.
  */
 export function redisFederationGrantStoreModuleFor(
 	options: RedisFederationGrantStoreModuleOptions = {},
@@ -973,13 +973,20 @@ export function redisFederationGrantStoreModuleFor(
 	return defineModule({
 		name: "redis-federation-grant-store",
 		requires: ["federationGrantStoreClient", "config"] as const,
+		optional: ["logger"] as const,
 		configSchema: moduleConfigSchema,
 		provides: {
-			federationGrantStore: (deps) =>
-				createRedisFederationGrantStore({
+			federationGrantStore: (deps) => {
+				const resolved = resolveRedisFederationGrantStoreOptions(deps.config, options);
+				return createRedisFederationGrantStore({
 					client: deps.federationGrantStoreClient,
-					...resolveRedisFederationGrantStoreOptions(deps.config, options),
-				}),
+					...resolved,
+					guard: {
+						...resolved.guard,
+						...(deps.logger !== undefined ? { logger: deps.logger } : {}),
+					},
+				});
+			},
 		},
 	});
 }

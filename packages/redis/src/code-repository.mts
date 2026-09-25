@@ -217,8 +217,11 @@ export class RedisCodeRepository implements CodeRepository {
  * Migration: stop calling `factory.register("redis", redisCodeRepositoryBuilder)`;
  * instead include `redisCodeRepositoryModule` in the manifest and provide the
  * `codeRepositoryClient` slot from `makeIoredisClients()`.
+ *
+ * Each call logs `adapter_builder_deprecated` (warn, `builder`,
+ * `replacement`) on the factory context's logger, or on `consoleLogger`.
  */
-export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (config, _ctx) => {
+export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (config, ctx) => {
 	const c = config as {
 		client?: CodeRepositoryClient;
 		keyPrefix?: string;
@@ -231,8 +234,11 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 				"slot from makeIoredisClients() instead.",
 		);
 	}
-	consoleLogger.warn(
-		"redisCodeRepositoryBuilder is deprecated; use redisCodeRepositoryModule — see CHANGELOG for the removal version.",
+	// One object-first line on the logger the factory's context carries; the
+	// builder is called outside the boot planner too, where there is none.
+	(ctx?.logger ?? consoleLogger).warn(
+		{ builder: "redisCodeRepositoryBuilder", replacement: "redisCodeRepositoryModule" },
+		"adapter_builder_deprecated",
 	);
 	return new RedisCodeRepository(c.client, {
 		keyPrefix: c.keyPrefix,

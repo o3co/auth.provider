@@ -263,6 +263,12 @@ let pruneAndListScriptCached = false;
  * Shared by both EVALSHA call sites since #321 added the second one; a second
  * inline copy of the `instanceof` + `includes` pair is how the two would come
  * to disagree about what counts as a cache miss.
+ *
+ * It reads the message because nothing else says it: ioredis's `ReplyError`
+ * carries Redis's reply text and no code, and ioredis's own `Script` detects
+ * a cache miss by the same read. The text decides this boolean and nothing
+ * else — it is never logged or thrown; a miss falls back to `EVAL`, and any
+ * other error is rethrown as it is.
  */
 function isNoScriptError(err: unknown): boolean {
 	return err instanceof Error && err.message.includes("NOSCRIPT");
@@ -1297,8 +1303,13 @@ let scriptCached = false;
  * "conflict, retry". Turning that into a throw would break refresh-token
  * rotation under contention.
  *
- * The first failure wins — the reply is reported through `cause`, so the
- * driver's own message ("WRONGTYPE …", "OOM …") survives for the operator.
+ * The first failure wins. The thrown error names the operation in fixed
+ * words and carries the reply's error as `cause`, never its text: the reply
+ * is Redis's about the command it refused and can quote the command's
+ * arguments, and the message goes wherever the store's caller puts it. The
+ * driver's own words ("WRONGTYPE …", "OOM …") still reach the operator —
+ * through `loggableError`, which projects the cause and cuts the quoted
+ * arguments.
  */
 function assertPipelineSucceeded(reply: unknown[] | null, operation: string): unknown[] | null {
 	if (reply === null) return null;
@@ -1307,12 +1318,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
 		// error slot to find, which is correct rather than silently lenient.
 		const err = Array.isArray(entry) ? entry[0] : null;
 		if (err) {
-			throw new Error(
-				`${operation}: a queued command failed inside MULTI/EXEC — ${String(
-					err instanceof Error ? err.message : err,
-				)}`,
-				{ cause: err },
-			);
+			throw new Error(`${operation}: a queued command failed inside MULTI/EXEC`, { cause: err });
 		}
 	}
 	return reply;

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { consoleLogger, type Logger } from "@o3co/auth-provider-core";
+
 /**
  * The production guard on storing upstream refresh tokens unencrypted
  * (OR-12 / #473), shared by the two stores that hold them: the session-bound
@@ -24,6 +26,14 @@
  * would be doing. A second variable would let a deployment permit it for one
  * and be surprised by the other. The `label` is what the messages name, so
  * an operator is told which store refused.
+ *
+ * What it writes where plaintext goes ahead is one object-first line with an
+ * event name — `federation_store_plaintext` (warn) where plaintext is
+ * allowed, `federation_store_plaintext_override` (error) where only the
+ * escape hatch let it through — on the logger the composition handed the
+ * store, or `consoleLogger` when it handed none: a store is built by a
+ * module or a builder that may have the composition's logger, or by a
+ * caller that has none.
  */
 const PRODUCTION_ENVS = new Set(["production", "staging"]);
 
@@ -35,28 +45,32 @@ const PRODUCTION_ENVS = new Set(["production", "staging"]);
 export interface EncryptionGuardContext {
 	readonly environment?: string;
 	readonly deploymentMode?: string;
+	/**
+	 * Where the guard's notice goes — the composition's logger, which a module
+	 * reads from its optional `logger` slot and a builder from its context.
+	 * Absent, `consoleLogger`.
+	 */
+	readonly logger?: Logger;
 }
 
 /**
  * OR-12 / #473 — refuse to construct a federation-token store with
  * `mode = "allow-plaintext"` where plaintext is not acceptable, unless the
- * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Logs a
- * CRITICAL line when the escape hatch is active. Everywhere else it emits a
- * soft `console.warn` but does not throw.
+ * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Logs
+ * `federation_store_plaintext_override` at error when the escape hatch is
+ * active, naming what would have refused it. Everywhere else it logs
+ * `federation_store_plaintext` at warn but does not throw.
  *
  * Plaintext is refused when any of these holds:
  *   - the explicit `environment` is `production` or `staging`;
  *   - `NODE_ENV` is `production` or `staging` (always consulted; the sole
  *     signal when no environment is passed);
  *   - `deploymentMode` is `"multi"`.
- *
- * Runs at factory time before the DI container is fully wired, so direct
- * `console.*` is the appropriate emission channel (no Logger available yet).
  */
 export function validateEncryptionMode(
 	label: string,
 	mode: "required" | "allow-plaintext",
-	{ environment, deploymentMode }: EncryptionGuardContext,
+	{ environment, deploymentMode, logger = consoleLogger }: EncryptionGuardContext,
 ): void {
 	if (mode === "required") return;
 	const allowInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE === "1";
@@ -80,11 +94,17 @@ export function validateEncryptionMode(
 	if (reasons.length > 0) {
 		const because = reasons.join(" and ");
 		if (allowInsecure) {
-			// Factory-time emission, no Logger available yet.
-			console.error(
-				`[${label}] CRITICAL: running with mode="${mode}" although ${because}, ` +
-					"because FEDERATION_TOKENS_ALLOW_INSECURE=1. Federation tokens (IdP refresh tokens) " +
-					"are stored UNENCRYPTED. This is a security risk. Do NOT use in normal production.",
+			// Upstream refresh tokens stored unencrypted where that is refused:
+			// an error, on every boot, until the override is gone.
+			logger.error(
+				{
+					store: label,
+					mode,
+					...(productionEnvironment !== undefined ? { environment: productionEnvironment } : {}),
+					...(deploymentMode === "multi" ? { deploymentMode } : {}),
+					override: "FEDERATION_TOKENS_ALLOW_INSECURE",
+				},
+				"federation_store_plaintext_override",
 			);
 			return;
 		}
@@ -95,9 +115,6 @@ export function validateEncryptionMode(
 		);
 	}
 
-	// Dev/test: warn but do not throw. Factory-time emission, no Logger available yet.
-	console.warn(
-		`[${label}] WARNING: mode="${mode}" stores federation tokens (IdP refresh tokens) ` +
-			"unencrypted. Use only in development/test environments.",
-	);
+	// Dev/test: upstream refresh tokens stored unencrypted — allowed, and said.
+	logger.warn({ store: label, mode }, "federation_store_plaintext");
 }

@@ -317,7 +317,8 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 		const p = makeIoredisClients(io).sessionFamilyIndexClient.multi();
 		p.zAdd("k", { score: 1, value: "m" }, { NX: true });
 		await expect(p.exec()).rejects.toMatchObject(
-			queuedFailure("sessionFamilyIndexClient.exec", WRONGTYPE),
+			// The family and federation indexes share one sorted-set client.
+			queuedFailure("sessionSidSortedSetClient.exec", WRONGTYPE),
 		);
 	});
 

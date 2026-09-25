@@ -485,7 +485,7 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 		).toThrow(/mode "allow-plaintext" is refused because the environment is "staging"/);
 	});
 
-	it("succeeds in production with FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch (emits CRITICAL)", () => {
+	it("succeeds in production with FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch (logs federation_store_plaintext_override at error)", () => {
 		process.env.NODE_ENV = "production";
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
 		expect(() =>
@@ -658,7 +658,7 @@ describe("#473 — the plaintext guard reads the selected environment and deploy
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
-	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch for the multi refusal too, at CRITICAL", () => {
+	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch for the multi refusal too, logged at error", () => {
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
 		expect(() =>
 			createRedisFederationTokenStore({
