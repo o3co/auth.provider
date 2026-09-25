@@ -107,6 +107,15 @@ const routesModule = defineModule({
 						headers: { "WWW-Authenticate": 'Basic realm="api"', "X-Other": "dropped" },
 					});
 				});
+				router.get("/challenge/:length", (req) => {
+					throw Object.assign(new Error("login needed"), {
+						status: 401,
+						expose: true,
+						headers: {
+							"WWW-Authenticate": `Basic realm="${"r".repeat(Number(req.params.length) - 14)}"`,
+						},
+					});
+				});
 				router.get("/bad-header", () => {
 					throw Object.assign(new Error("login needed"), {
 						status: 401,
@@ -251,6 +260,22 @@ describe("createApp's router answers a body parser's refusal itself", () => {
 		await handle.dispose();
 	});
 
+	it("answers a brotli body that does not decompress as malformed_body", async () => {
+		// Node's brotli decoder reports a malformed stream as
+		// `ERR__ERROR_FORMAT_…`, which body-parser passes on untyped.
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+		const res = await request(app)
+			.post("/t/echo")
+			.set("Content-Type", "application/json")
+			.set("Content-Encoding", "br")
+			.send("this is not brotli at all");
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_body" });
+		expect(logger.error).not.toHaveBeenCalled();
+		await handle.dispose();
+	});
+
 	it("reads a body parser's refusal by its own type: a body that fails the parser's verify is malformed_body", async () => {
 		const logger = spyLogger();
 		const { app, handle } = await boot(logger);
@@ -285,6 +310,14 @@ describe("createApp's router answers a body parser's refusal itself", () => {
 		expect(login.headers["www-authenticate"]).toBe('Basic realm="api"');
 		expect(login.headers["x-other"]).toBeUndefined();
 		expect(login.body).toEqual({ error: "invalid_request", error_description: "request_refused" });
+
+		// A value up to 1 KiB is passed on; a longer one is dropped.
+		const atLimit = await request(app).get("/t/challenge/1024");
+		expect(atLimit.status).toBe(401);
+		expect(atLimit.headers["www-authenticate"]).toHaveLength(1024);
+		const overLimit = await request(app).get("/t/challenge/1025");
+		expect(overLimit.status).toBe(401);
+		expect(overLimit.headers["www-authenticate"]).toBeUndefined();
 
 		// A value that is not a header's is dropped, not written.
 		const bad = await request(app).get("/t/bad-header");
