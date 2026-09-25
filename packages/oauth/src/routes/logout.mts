@@ -31,6 +31,7 @@ import type {
 import {
 	auditErrorText,
 	auditedError,
+	checkRedirectUri,
 	emitAuditEvent,
 	isVerificationUnavailable,
 	JwtVerificationError,
@@ -343,11 +344,24 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	 * would keep the session, its refresh-token families and the relying
 	 * parties' sessions alive to protect a redirect, and OIDC RP-Initiated
 	 * Logout forbids only the redirect.
+	 *
+	 * A match is also held to the shape every registration is held to at boot
+	 * (core's `checkRedirectUri`: an absolute URL, no fragment or userinfo,
+	 * `https:` — `http:` on loopback — or a reverse-domain custom scheme).
+	 * `ClientEntrySchema` enforces it for the bundled repositories; a custom
+	 * `ClientRepository` bypasses that schema, and an entry it holds that the
+	 * parser cannot read, or in an executable scheme (`javascript:`), is no place
+	 * to send a browser: the first made the redirect's `new URL()` throw after
+	 * the cascade, the second ran on this origin from the front-channel page.
+	 * Such a match is dropped like an unregistered URI, and the logout goes on,
+	 * with one warn — `logout_registered_redirect_uri_refused`, naming `site`,
+	 * the client and the rejection's `reason`, never the entry — since it is a
+	 * registration the operator has to fix.
 	 */
 	const registeredPostLogoutRedirectUri = async (
 		requested: unknown,
 		clientId: string | null,
-		logger: Pick<Logger, "error">,
+		logger: Pick<Logger, "error" | "warn">,
 		site: "logout" | "federation_logout",
 	): Promise<string | undefined> => {
 		if (typeof requested !== "string" || requested.length === 0 || clientId === null) {
@@ -360,7 +374,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			logClientRepositoryUnavailable(logger, { site, step: "find", clientId }, error);
 			return undefined;
 		}
-		return client?.postLogoutRedirectUris?.includes(requested) === true ? requested : undefined;
+		if (client?.postLogoutRedirectUris?.includes(requested) !== true) return undefined;
+		const rejection = checkRedirectUri(requested);
+		if (rejection !== null) {
+			logger.warn(
+				{ site, clientId: auditErrorText(clientId), reason: rejection.reason },
+				"logout_registered_redirect_uri_refused",
+			);
+			return undefined;
+		}
+		return requested;
 	};
 
 	// POST /federation/:name/logout — mounted under /oauth → POST /oauth/federation/:name/logout

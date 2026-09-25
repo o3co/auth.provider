@@ -212,8 +212,10 @@ export interface EndSessionRequest {
 	 * Where the browser goes after the upstream logout. **A caller passes only
 	 * a URI it has already validated**: one that matched, exactly, a
 	 * `postLogoutRedirectUris` entry registered for the client that asked for
-	 * the logout (OIDC RP-Initiated Logout 1.0 §3) — or `undefined`. Never the
-	 * `post_logout_redirect_uri` a request carried, unchecked.
+	 * the logout (OIDC RP-Initiated Logout 1.0 §3), and that passes
+	 * `checkRedirectUri` — a custom `ClientRepository` can hold an entry that
+	 * does not — or `undefined`. Never the `post_logout_redirect_uri` a request
+	 * carried, unchecked.
 	 *
 	 * An adapter may therefore treat it as a trusted redirect target, and the
 	 * bundled ones do: where the upstream publishes no end-session endpoint and
