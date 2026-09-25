@@ -353,8 +353,10 @@ export function createRedisFederationGrantStore(
 ): FederationGrantStore {
 	const { client } = options;
 	const keyPrefix = options.keyPrefix ?? "fg:";
+	// A brace would move the hash tag a grant's three keys share. Refused as a
+	// RangeError, as every setting this store is given and cannot use is.
 	if (keyPrefix.includes("{") || keyPrefix.includes("}")) {
-		throw new Error('federation grant store: keyPrefix may not contain "{" or "}"');
+		throw RANGE('keyPrefix may not contain "{" or "}"');
 	}
 	// Both must end within the Date range (core's `isStorableLifetime`). The
 	// scripts write a record or its subject-index entry and set the key's
