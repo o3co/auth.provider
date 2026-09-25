@@ -307,7 +307,8 @@ function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
  * so the produced collector matches the narrowed `ContributionCollectorMap`
  * slot.
  *
- * Used for `auditHooks` and `grantPolicyHooks`. The `Set`-based identity
+ * Used for `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
+ * `tokenBindingMechanisms` and `discoveryMetadata`. The `Set`-based identity
  * check silently skips re-registration of the same reference per A2-α §4.5.
  *
  * @internal
