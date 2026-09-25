@@ -99,12 +99,16 @@ export interface BuilderContext {
 export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
 	/**
 	 * Drain all registered cleanups in LIFO order. Returns the array of
-	 * errors encountered (empty if all cleanups succeeded). Each error is
-	 * logged via the supplied logger as it occurs; the drain never throws.
+	 * errors encountered (empty if all cleanups succeeded). Each failure is
+	 * logged as it occurs, once, at error, object-first:
+	 * `{ cleanupIndex, err: loggableError(err) }` with the event
+	 * `adapter_lifecycle_cleanup_failed`. The drain never throws.
 	 *
 	 * @internal
 	 */
-	_drain(logger: { error(obj: unknown): void }): Promise<readonly unknown[]>;
+	_drain(logger: {
+		error(obj: Record<string, unknown>, event: string): void;
+	}): Promise<readonly unknown[]>;
 }
 
 /**
@@ -118,7 +122,9 @@ export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 		register(cleanup: () => Promise<void>): void {
 			cleanups.push(cleanup);
 		},
-		async _drain(logger: { error(obj: unknown): void }): Promise<readonly unknown[]> {
+		async _drain(logger: {
+			error(obj: Record<string, unknown>, event: string): void;
+		}): Promise<readonly unknown[]> {
 			const errors: unknown[] = [];
 			for (let i = cleanups.length - 1; i >= 0; i--) {
 				const cleanup = cleanups[i];
@@ -126,11 +132,10 @@ export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 				try {
 					await cleanup();
 				} catch (err) {
-					logger.error({
-						msg: "lifecycle cleanup failed",
-						cleanupIndex: i,
-						error: loggableError(err),
-					});
+					logger.error(
+						{ cleanupIndex: i, err: loggableError(err) },
+						"adapter_lifecycle_cleanup_failed",
+					);
 					errors.push(err);
 				}
 			}

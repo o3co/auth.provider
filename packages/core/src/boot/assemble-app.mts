@@ -31,6 +31,7 @@ import type { Express, Request, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { discoveryRouteFor, planDiscoveryDocument } from "../discovery/planRoute.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
 import { protectedResourceBindingMw } from "../middleware/protectedResourceBinding.mjs";
@@ -444,11 +445,10 @@ function buildDispose(
 			// outlive the component's own cleanup so the component can issue a
 			// final command if needed.
 			if (lifecycleReg !== undefined) {
-				const log = (frozen.components as Record<string, unknown>).logger as
-					| { error(obj: unknown): void }
-					| undefined;
-				const fallbackLogger = { error: (obj: unknown) => console.error(obj) };
-				const drainErrors = await lifecycleReg._drain(log ?? fallbackLogger);
+				// The logger component when one is wired, else `consoleLogger`:
+				// either way one object-first line per failed cleanup.
+				const log = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
+				const drainErrors = await lifecycleReg._drain(log ?? consoleLogger);
 				for (const err of drainErrors) {
 					errorsWithOrigin.push({
 						module: "(lifecycle-registrar)",

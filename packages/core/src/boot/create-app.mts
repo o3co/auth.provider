@@ -160,7 +160,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		await lifecycleReg._drain({
 			// Boot-failure path: no AppHandle exists yet, so no Logger slot to
 			// resolve. console.error is the only available emission channel.
-			error: (obj) => console.error("[boot-failure lifecycle drain]", obj),
+			error: (obj, event) => console.error("[boot-failure lifecycle drain]", event, obj),
 		});
 		throw err;
 	}
