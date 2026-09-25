@@ -251,6 +251,14 @@ describe("every setting the token store is given and cannot use is refused as a 
 				encryption: { mode: "required", key: Buffer.alloc(16, 7) },
 			}),
 		).toThrow(new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"));
+		// A 32-character string has the length, and would be used as its UTF-8
+		// bytes: 32 printable characters, not 32 bytes of key material.
+		expect(() =>
+			createRedisFederationTokenStore({
+				client,
+				encryption: { mode: "required", key: "k".repeat(32) as unknown as Buffer },
+			}),
+		).toThrow(new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"));
 		expect(() =>
 			createRedisFederationTokenStore({
 				client,
