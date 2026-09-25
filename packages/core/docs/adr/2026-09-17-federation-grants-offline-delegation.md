@@ -1186,6 +1186,13 @@ record, never from the error in hand: a stamp that could not be written
 answers an outage, or a stored token that still serves; one superseded by a
 renewal answers the renewal.
 
+**Amended in review of #690.** A code decides only beside an answer: beside a
+5xx — on the error, its Error causes or the Response it was raised over —
+neither an interaction code nor `invalid_grant` decides anything, and the
+refresh is the outage (`503 upstream`, stamped `unavailable`), because a 5xx
+is the IdP's failure and sending the user to connect again for it is
+destructive; beside a 429 an interaction code is still the user.
+
 ### D12 — Refresh is coordinated per grant, and fails safe
 
 The session-bound lock cannot be reused as it is: it is typed to

@@ -610,10 +610,11 @@ It checks, in this order:
    text says: an `AbortError` or `TimeoutError` (openid-client's
    `OAUTH_TIMEOUT` carries one), a connection code (`ECONNREFUSED`,
    `ECONNRESET`, `ENOTFOUND`, `ETIMEDOUT`, `UND_ERR_SOCKET`, …) on the error
-   or its causes, `fetch`'s `TypeError` over a transport's code — a connection
-   code, the TLS layer's (`CERT_…`, `ERR_TLS_…`, `ERR_SSL_…`, the certificate-
-   verification names), or `ERR_INVALID_URL`; any other code there, such as an
-   adapter's validation error wrapped in a `TypeError`, is not an outage — or a
+   or its causes — a transport's code, under `fetch`'s `TypeError` or raised on
+   its own: a connection code, undici's (`UND_ERR_…`) or llhttp's (`HPE_…`),
+   Node's X509 verification codes, the TLS layer's (`ERR_TLS_…`, `ERR_SSL_…`),
+   or `ERR_INVALID_URL`; any other code, such as an adapter's validation error
+   wrapped in a `TypeError`, is not an outage — or a
    5xx `status` on the error or on the `Response` it was raised over (an IdP
    answering 503; a deployment's own `fetch` — npm undici's `Response` —
    included) — each read only on what the library raised, never on the IdP's

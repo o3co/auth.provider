@@ -39,11 +39,11 @@
  *
  * - `AbortError` / `TimeoutError`, bare or as the cause of openid-client's
  *   `ClientError` `OAUTH_TIMEOUT` — a request given up on;
- * - a connection code from {@link UNREACHABLE} on any of them, or `fetch`'s
- *   `TypeError` over an Error whose code is a transport's
- *   ({@link isTransportCode}: a connection code, the TLS layer's, an
- *   unparseable URL) — nothing answered. Any other code under a `TypeError` —
- *   an adapter's validation error wrapped that way — is not an outage;
+ * - a transport's code on any of them ({@link isTransportCode}: a connection
+ *   code, a certificate that could not be verified, undici's, llhttp's, the
+ *   TLS layer's, an unparseable URL), whether under `fetch`'s `TypeError` or
+ *   raised on its own — nothing answered. Any other code — an adapter's
+ *   validation error, even wrapped in a `TypeError` — is not an outage;
  * - a `status` from 500 to 599 on the error (an OAuth error body under a 5xx)
  *   or on its cause (oauth4webapi's `OAUTH_RESPONSE_IS_NOT_CONFORM` over the
  *   `Response` it would not read) — the upstream answered that it is down.
@@ -54,52 +54,92 @@
 /** The names a request that was given up on is raised under: `AbortSignal.timeout` raises `TimeoutError`. */
 const ABANDONED: ReadonlySet<string> = new Set(["AbortError", "TimeoutError"]);
 
-/** Node's and undici's codes for a connection that could not be made, or was lost. */
-const UNREACHABLE: ReadonlySet<string> = new Set([
+/** The codes a socket reports for a connection that could not be made, or was lost. */
+const CONNECTION: ReadonlySet<string> = new Set([
 	"ECONNREFUSED",
 	"ECONNRESET",
+	"ECONNABORTED",
 	"ENOTFOUND",
 	"ETIMEDOUT",
 	"EAI_AGAIN",
 	"EHOSTUNREACH",
+	"EHOSTDOWN",
 	"ENETUNREACH",
+	"ENETDOWN",
+	"ENETRESET",
 	"EPIPE",
-	"UND_ERR_CONNECT_TIMEOUT",
-	"UND_ERR_HEADERS_TIMEOUT",
-	"UND_ERR_BODY_TIMEOUT",
-	"UND_ERR_SOCKET",
+	"EPROTO",
 ]);
 
 /**
- * The TLS layer's codes, as Node raises them under `fetch`'s `TypeError`: the
- * certificate-verification names OpenSSL gives without a common prefix. The
- * rest of the family is matched by {@link TLS_PREFIXES}.
+ * Node's X509 verification codes — OpenSSL's `X509_V_ERR_*` names as Node
+ * reports them on a TLS error, all of them: the certificate chain could not
+ * be verified, so nothing was asked of the upstream.
  */
-const TLS_VERIFICATION: ReadonlySet<string> = new Set([
-	"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+const X509_VERIFICATION: ReadonlySet<string> = new Set([
 	"UNABLE_TO_GET_ISSUER_CERT",
-	"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+	"UNABLE_TO_GET_CRL",
+	"UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+	"UNABLE_TO_DECRYPT_CRL_SIGNATURE",
+	"UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY",
+	"CERT_SIGNATURE_FAILURE",
+	"CRL_SIGNATURE_FAILURE",
+	"CERT_NOT_YET_VALID",
+	"CERT_HAS_EXPIRED",
+	"CRL_NOT_YET_VALID",
+	"CRL_HAS_EXPIRED",
+	"ERROR_IN_CERT_NOT_BEFORE_FIELD",
+	"ERROR_IN_CERT_NOT_AFTER_FIELD",
+	"ERROR_IN_CRL_LAST_UPDATE_FIELD",
+	"ERROR_IN_CRL_NEXT_UPDATE_FIELD",
+	"OUT_OF_MEM",
 	"DEPTH_ZERO_SELF_SIGNED_CERT",
 	"SELF_SIGNED_CERT_IN_CHAIN",
+	"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+	"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+	"CERT_CHAIN_TOO_LONG",
+	"CERT_REVOKED",
+	"INVALID_CA",
+	"PATH_LENGTH_EXCEEDED",
+	"INVALID_PURPOSE",
+	"CERT_UNTRUSTED",
+	"CERT_REJECTED",
 	"HOSTNAME_MISMATCH",
 ]);
 
-/** The TLS families by prefix: `CERT_HAS_EXPIRED`, `ERR_TLS_CERT_ALTNAME_INVALID`, `ERR_SSL_WRONG_VERSION_NUMBER`. */
-const TLS_PREFIXES: readonly string[] = ["CERT_", "ERR_TLS_", "ERR_SSL_"];
+/**
+ * Families of codes, each the closed vocabulary of its producer, bounded so
+ * that a value which merely starts like one is not one: undici's own
+ * (`UND_ERR_SOCKET`, `UND_ERR_CLOSED`, … — this server's transport or its
+ * composition, a 503 whichever member), llhttp's parser errors
+ * (`HPE_INVALID_CONSTANT`, undici's `HTTPParserError`), Node's TLS codes
+ * (`ERR_TLS_CERT_ALTNAME_INVALID`) and OpenSSL's (`ERR_SSL_WRONG_VERSION_NUMBER`;
+ * OpenSSL 3's `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE`, one slash in it).
+ * foundation's Store transport (`repositories/storeErrors.mts`) keeps the same
+ * families for what it may say of a Store it could not reach.
+ */
+const FAMILIES: readonly RegExp[] = [
+	/^UND_ERR_[A-Z_]{1,48}$/,
+	/^HPE_[A-Z_]{1,48}$/,
+	/^ERR_TLS_[A-Z_]{1,64}$/,
+	/^ERR_SSL_[A-Z0-9_]{1,64}(?:\/[A-Z0-9_]{1,64})?$/,
+];
 
 /**
- * Whether `code`, on the cause of `fetch`'s `TypeError`, says the request
- * never got an answer: a connection code ({@link UNREACHABLE}), the TLS
- * layer's, or `ERR_INVALID_URL` (a URL `fetch` could not parse — nothing was
- * sent). An explicit set: a `TypeError` is also what wraps an adapter's own
- * validation error, whose code says nothing about the transport.
+ * Whether `code` says the request never got an answer: a connection code
+ * ({@link CONNECTION}), a certificate that could not be verified
+ * ({@link X509_VERIFICATION}), a member of a transport family
+ * ({@link FAMILIES}), or `ERR_INVALID_URL` (a URL `fetch` could not parse —
+ * nothing was sent). A closed vocabulary: any other code — an adapter's
+ * validation error, a token library's, a programming error — says nothing
+ * about the transport, even under `fetch`'s `TypeError`.
  */
 const isTransportCode = (code: unknown): boolean =>
 	typeof code === "string" &&
-	(UNREACHABLE.has(code) ||
-		TLS_VERIFICATION.has(code) ||
+	(CONNECTION.has(code) ||
+		X509_VERIFICATION.has(code) ||
 		code === "ERR_INVALID_URL" ||
-		TLS_PREFIXES.some((prefix) => code.startsWith(prefix)));
+		FAMILIES.some((family) => family.test(code)));
 
 /** How many causes deep the chain is followed: the libraries nest two or three. */
 const MAX_CAUSE_DEPTH = 4;
@@ -169,13 +209,11 @@ export function isFederationUpstreamOutage(error: unknown): boolean {
 		const name = field(current, "name");
 		const code = field(current, "code");
 		if (typeof name === "string" && ABANDONED.has(name)) return true;
-		if (typeof code === "string" && UNREACHABLE.has(code)) return true;
+		if (isTransportCode(code)) return true;
 		if (serverError(field(current, "status"))) return true;
-		const cause = field(current, "cause");
-		if (name === "TypeError" && isError(cause) && isTransportCode(field(cause, "code"))) {
-			return true;
-		}
-		current = cause;
+		// `fetch`'s TypeError says only that the request failed; its cause, one
+		// step down, is read by the same rule on the next turn.
+		current = field(current, "cause");
 	}
 	return false;
 }
