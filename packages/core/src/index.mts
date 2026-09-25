@@ -706,6 +706,11 @@ export {
 	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
+export {
+	MFA_EMAIL_RATE_LIMIT_PREFIX,
+	MFA_RATE_LIMIT_PREFIX,
+	resolveMfaLimitSpecs,
+} from "./ratelimit/mfaSpec.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 export { resolveSeededLimitSpecs } from "./ratelimit/seededSpecs.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in

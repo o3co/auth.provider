@@ -452,6 +452,7 @@ const userRepo = new InMemoryUserRepository(users);
 - `RateLimiter.check(key, ctx)` で atomic check + increment
 - Factory: `createRateLimiterFactory()`。`registerBuiltinRateLimiters()` が登録するのは `"memory"` だけ。`"redis"` バックエンドは `@o3co/auth-provider-redis`（`redisRateLimiterBuilder`、または宣言的な `redisRateLimiterModule`）にあり、ここで登録されないことを `ratelimit/__tests__/factory.test.mts` が検査している
 - deny 時には core が 429 + `Retry-After` で応答。判定の `reason` を RFC 6749 の文字の範囲で `error_description` とし、ないとき・空のとき・文字列でないときは `Rate limit exceeded` とする
+- 同梱の 2 つのリミッターは、それぞれの設定セクションにあるエンドポイントごとの予算を seed する（`resolveSeededLimitSpecs`、[`src/ratelimit/seededSpecs.mts`](src/ratelimit/seededSpecs.mts)）。その中に MFA のプレフィックス `mfa`（`MFA_RATE_LIMIT_PREFIX`、`mfa.rateLimit.routes` から）と `mfa-email`（`MFA_EMAIL_RATE_LIMIT_PREFIX`、`mfa.factors.email.sendLimit` から）がある — [`src/ratelimit/mfaSpec.mts`](src/ratelimit/mfaSpec.mts)。プレフィックスに対するオペレーター自身の `limits` の項目が優先する。与えられていないキーは何も seed しない。与えられたが使えないキーは、そのキーを名指しする `RangeError` で起動を拒否する
 
 #### リフレッシュトークンファミリー（RFC 6819 §5.2.2.3 の replay 検出）
 

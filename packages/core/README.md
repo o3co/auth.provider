@@ -453,6 +453,7 @@ Every other key is open, and is still expected to keep one type across the event
 - `RateLimiter.check(key, ctx)` atomic check + increment
 - Factory: `createRateLimiterFactory()`; `registerBuiltinRateLimiters()` registers `"memory"` only. The `"redis"` backend is `@o3co/auth-provider-redis` (`redisRateLimiterBuilder`, or the declarative `redisRateLimiterModule`); `ratelimit/__tests__/factory.test.mts` asserts it is not registered here
 - 429 + `Retry-After` emitted by core on denial; the decision's `reason` is the `error_description`, within RFC 6749's characters, and `Rate limit exceeded` when it is absent, empty or not a string
+- Both bundled limiters seed the per-endpoint budgets that live in their own config sections (`resolveSeededLimitSpecs`, [`src/ratelimit/seededSpecs.mts`](src/ratelimit/seededSpecs.mts)), among them the MFA prefixes `mfa` (`MFA_RATE_LIMIT_PREFIX`, from `mfa.rateLimit.routes`) and `mfa-email` (`MFA_EMAIL_RATE_LIMIT_PREFIX`, from `mfa.factors.email.sendLimit`) — [`src/ratelimit/mfaSpec.mts`](src/ratelimit/mfaSpec.mts). An operator's own `limits` entry for a prefix wins; a key not given seeds nothing; a key given but unusable refuses boot with a `RangeError` naming it
 
 #### Refresh-token families (RFC 6819 §5.2.2.3 replay detection)
 
