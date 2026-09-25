@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -194,6 +194,17 @@ So of two requests carrying one proof, exactly one is accepted.
   that answers with its own contract error (a `RangeError`, or
   `expired-at-issue`) is broken rather than down: the same 503, with reason
   `replay_store_fault`, because the fix is in the composition, not in Redis.
+  A seen-set that is full refuses the write the same way, as
+  `replay_store_unavailable`: core's in-process set at its cap
+  (`ReplaySeenSetFullError`, `reason: "full"`; `maxEntries`, a million records
+  by default), or a Redis at `maxmemory` under `noeviction`. Every proof is
+  recorded before the token endpoint's rate limit and before a protected
+  resource verifies the access token, so the rate that fills it,
+  `maxEntries / replay-store-ttl-seconds`, is a rate anyone can send; a longer
+  TTL lowers it in proportion. A Redis whose eviction policy deletes keys
+  instead (`allkeys-*`, `volatile-*`) makes room by dropping replay records,
+  and a dropped record is a proof that can be replayed within its window
+  ([the redis package's Requirements](../redis/README.md#requirements)).
   Either way the mechanism hands the store's error upward as the refusal's
   `cause` and logs nothing itself: core's dispatcher that answers the 503
   writes the outage's one line at error level — `token_binding_unavailable`

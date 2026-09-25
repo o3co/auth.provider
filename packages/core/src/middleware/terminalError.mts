@@ -32,13 +32,14 @@
  *   send one at will): body-parser's errors are `http-errors` with `expose:
  *   true` and a 4xx `status` — a body over the limit or with too many
  *   parameters is `413 body_too_large`, a charset or `Content-Encoding` it
- *   cannot decode `415 unsupported_encoding`, anything else it refused (JSON
- *   it cannot read, a body that does not decompress) `400 malformed_body`. A
- *   path parameter Express could not decode is `400 malformed_path`. Only
- *   `expose`, `status` and `type` are read, never the message, which quotes
- *   the body. It is the same reading as those two routers' `parserRefusals`;
- *   at this position an `expose`d 4xx from elsewhere is read the same way,
- *   which is what `expose` says of an `http-errors` error.
+ *   cannot decode `415 unsupported_encoding`, anything else it refused with
+ *   `400` (JSON it cannot read, a body that does not decompress) `400
+ *   malformed_body`. A path parameter Express could not decode is `400
+ *   malformed_path`. Only `expose`, `status` and `type` are read, never the
+ *   message, which quotes the body — the reading of those two routers'
+ *   `parserRefusals`. Any other `expose`d 4xx is an `http-errors` refusal
+ *   that says it is the client's (a 404, a 401): it keeps its status,
+ *   answered `invalid_request` / `request_refused`, logged nowhere.
  * - Anything else is `500 server_error` (`unexpected_error`), logged once at
  *   error as `unhandled_request_error` with `endpoint` (the path, through
  *   `auditErrorText`) and the error's `loggableError` projection — never the
@@ -60,7 +61,8 @@ import { guardedRead, loggableError } from "../logging/loggableError.mjs";
 
 /** What a refusal that is the client's mistake is answered with. */
 interface CallerMistake {
-	readonly status: 400 | 413 | 415;
+	/** A 4xx: the parsers' 400, 413 or 415, or another `expose`d refusal's own. */
+	readonly status: number;
 	readonly description: string;
 }
 
@@ -83,19 +85,25 @@ const callerMistakeOf = (error: unknown): CallerMistake | null => {
 	const expose = field(error, "expose");
 	const status = field(error, "status");
 	const type = field(error, "type");
-	if (expose !== true || typeof status !== "number" || status < 400 || status >= 500) return null;
+	if (expose !== true || !Number.isInteger(status)) return null;
+	const code = status as number;
+	if (code < 400 || code >= 500) return null;
 	if (type === "entity.too.large" || type === "parameters.too.many") {
 		return { status: 413, description: "body_too_large" };
 	}
 	if (type === "charset.unsupported" || type === "encoding.unsupported") {
 		return { status: 415, description: "unsupported_encoding" };
 	}
-	return { status: 400, description: "malformed_body" };
+	if (code === 400) return { status: 400, description: "malformed_body" };
+	return { status: code, description: "request_refused" };
 };
 
 /**
  * The handler `assembleApp` mounts last on the router it builds, logging on
  * `logger` — the composition's `logger` component, or `consoleLogger`.
+ * Exported for a host that mounts routes of its own beside that router (a
+ * health check, a metrics scrape): mounted after them, it gives their errors
+ * the same answer.
  */
 export const terminalErrorHandler =
 	(logger: Logger): ErrorRequestHandler =>

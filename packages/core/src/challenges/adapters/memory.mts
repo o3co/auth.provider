@@ -87,10 +87,14 @@ export function createMemoryChallengeStore(
 	options: MemoryChallengeStoreOptions = {},
 ): MemoryChallengeStore {
 	const map = new Map<string, { expiresAtMs: number }>();
-	const schedule = createAmortizedSweep(options, {
-		sweepInterval: DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
-		minSweepIntervalMs: DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
-	});
+	const schedule = createAmortizedSweep(
+		options,
+		{
+			sweepInterval: DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
+			minSweepIntervalMs: DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
+		},
+		"createMemoryChallengeStore",
+	);
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);

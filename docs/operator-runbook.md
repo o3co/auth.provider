@@ -907,12 +907,21 @@ each sweeps on its writes, at most once per 1000 writes and once per ten
 seconds (`packages/core/src/single-use/sweep.mts`), so a WebAuthn ceremony
 the user abandons, or an options request repeated in a loop, costs an entry
 for its lifetime and not until the process restarts. The replay seen-set is
-also capped at 100 000 records (about 20 MB; `maxEntries` in
-`packages/core/src/replay-seen-set/adapters/memory.mts`). At the cap it
+also capped at a million records (`maxEntries` in
+`packages/core/src/replay-seen-set/adapters/memory.mts`): about 200 MB with
+the UUID `jti`s clients send, up to about 700 MB if every `jti` is a
+256-character one outside Latin-1. It fills at `maxEntries /
+oauth.dpop.replay-store-ttl-seconds` records a second — about 3 300 fresh
+DPoP proofs a second at the default 300 s, roughly what one process can
+verify — and a longer TTL lowers that rate in proportion. At the cap it
 reclaims what has expired, at most once per ten seconds, and otherwise
-refuses the new record rather than evict a live one: DPoP and
-`private_key_jwt` answer `503 temporarily_unavailable` until records expire,
-logged as `token_binding_unavailable` / `client_assertion_refused` with
+refuses the new record rather than evict a live one. Every consumer shares
+the set, so all of them answer `503 temporarily_unavailable` until records
+expire: DPoP at the token endpoint and at protected resources, logged as
+`token_binding_unavailable` / `protected_resource_binding_unavailable`, and
+`private_key_jwt`, ID-JAG and WebAuthn ceremonies, logged as
+`client_assertion_refused`, `jwt_bearer_assertion_verifier_unavailable` and
+`webauthn_ceremony_store_unavailable` — each with
 `err.name: "ReplaySeenSetFullError"`. Sustained, that is a flood of fresh
 DPoP proofs, or more traffic than one replica's seen-set should carry: move
 to `REPLAY_SEEN_SET_ADAPTER=redis`.

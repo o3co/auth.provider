@@ -37,14 +37,18 @@
  * the live entries plus at most those that expired within one interval.
  */
 
-/** How a store's sweep is paced. A bad value falls back to the store's default rather than disabling the sweep. */
+/**
+ * How a store's sweep is paced; each absent value takes the store's default.
+ * A value given that cannot be used is a `RangeError` naming the store and
+ * the option — never replaced by the default, which would leave a setting
+ * that says one thing and a store that does another.
+ */
 export interface AmortizedSweepOptions {
-	/** Writes between sweeps. A non-integer or non-positive value falls back to the default. */
+	/** Writes between sweeps: a positive whole number. */
 	readonly sweepInterval?: number;
 	/**
-	 * The least time between two sweeps, in milliseconds. `0` sweeps on the
-	 * write interval alone. A negative or non-integer value falls back to the
-	 * default rather than being read as no floor.
+	 * The least time between two sweeps: a whole number of milliseconds, `0`
+	 * or more. `0` sweeps on the write interval alone.
 	 */
 	readonly minSweepIntervalMs?: number;
 }
@@ -62,22 +66,27 @@ export interface AmortizedSweep {
 	due(): boolean;
 }
 
+/**
+ * The pacing for a store: `owner` names it (the factory the options were
+ * given to) in the refusal of an option it cannot use.
+ */
 export function createAmortizedSweep(
 	options: AmortizedSweepOptions,
 	defaults: { readonly sweepInterval: number; readonly minSweepIntervalMs: number },
+	owner: string,
 ): AmortizedSweep {
-	const sweepInterval =
-		typeof options.sweepInterval === "number" &&
-		Number.isInteger(options.sweepInterval) &&
-		options.sweepInterval > 0
-			? options.sweepInterval
-			: defaults.sweepInterval;
-	const minSweepIntervalMs =
-		typeof options.minSweepIntervalMs === "number" &&
-		Number.isInteger(options.minSweepIntervalMs) &&
-		options.minSweepIntervalMs >= 0
-			? options.minSweepIntervalMs
-			: defaults.minSweepIntervalMs;
+	const sweepInterval = options.sweepInterval ?? defaults.sweepInterval;
+	if (!Number.isInteger(sweepInterval) || sweepInterval <= 0) {
+		throw new RangeError(
+			`${owner}: sweepInterval must be a positive whole number (got ${String(sweepInterval)})`,
+		);
+	}
+	const minSweepIntervalMs = options.minSweepIntervalMs ?? defaults.minSweepIntervalMs;
+	if (!Number.isInteger(minSweepIntervalMs) || minSweepIntervalMs < 0) {
+		throw new RangeError(
+			`${owner}: minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got ${String(minSweepIntervalMs)})`,
+		);
+	}
 	let writesSinceSweep = 0;
 	let lastSweepAtMonotonicMs = Number.NEGATIVE_INFINITY;
 

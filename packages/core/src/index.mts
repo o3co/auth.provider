@@ -516,6 +516,8 @@ export {
 	type ProtectedResourceBindingOptions,
 	protectedResourceBindingMw,
 } from "./middleware/protectedResourceBinding.mjs";
+// Middleware — the answer to an error a route let through; `createApp` ends its router with it
+export { terminalErrorHandler } from "./middleware/terminalError.mjs";
 // Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
 export {
 	type DispatchPolicy,

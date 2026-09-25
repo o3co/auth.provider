@@ -100,7 +100,7 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   evict keys that carry a TTL, which every replay record does. Keep the
   seen-set on a server whose policy is `noeviction`, or on one sized never
   to reach `maxmemory`. Core's in-process seen-set has a cap of its own
-  (`createMemoryReplaySeenSet`'s `maxEntries`, 100 000 records by default)
+  (`createMemoryReplaySeenSet`'s `maxEntries`, a million records by default)
   and refuses at it the same way.
 
 ## Adapters

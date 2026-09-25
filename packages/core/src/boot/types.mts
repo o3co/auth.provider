@@ -32,11 +32,13 @@
  */
 
 import type { Server as HttpServer } from "node:http";
+import { type InspectOptions, inspect } from "node:util";
 import type { RequestHandler, Router } from "express";
 import type { z } from "zod";
 import type { LifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
@@ -1108,7 +1110,8 @@ export type BootErrorDetails =
  * a discriminated `reason` field.
  *
  * Codex Session 03 verdict: single class, discriminated reason, stage field.
- * `cause` is preserved verbatim for *-factory-failed reasons (verdict C3).
+ * `cause` is preserved verbatim for *-factory-failed reasons (verdict C3);
+ * printed, it is projected (see the `util.inspect.custom` method).
  *
  * Per A2-β §6.1.
  */
@@ -1133,6 +1136,50 @@ export class BootError extends Error {
 		this.reason = args.reason;
 		this.stage = args.stage;
 		this.details = args.details;
+	}
+
+	/**
+	 * How a boot failure prints — Node's unhandled-rejection printer,
+	 * `console.error`, `util.inspect` — which is where one ends up: its name
+	 * and message (which names the error behind it by `failureSummary`), its
+	 * stack frames, `reason`, `stage` and `details`, and every error it
+	 * carries — the `cause`, `details.originalError`, each
+	 * `details.cleanupErrors[].error` — as its `loggableError` projection.
+	 * The errors themselves stay on the object for a caller that reads them
+	 * (the `cause` contract above); printed whole they would write what a
+	 * parser quoted, a Redis reply's arguments or a thrown string to the log
+	 * the process ends in.
+	 */
+	[inspect.custom](_depth: number, options: InspectOptions, print: typeof inspect): string {
+		const details = this.details as unknown as Record<string, unknown>;
+		const cleanupErrors = details.cleanupErrors;
+		const shown = {
+			reason: this.reason,
+			stage: this.stage,
+			details: {
+				...details,
+				...("originalError" in details
+					? { originalError: loggableError(details.originalError) }
+					: {}),
+				...(Array.isArray(cleanupErrors)
+					? {
+							cleanupErrors: cleanupErrors.map((entry: Record<string, unknown>) => ({
+								...entry,
+								error: loggableError(entry.error),
+							})),
+						}
+					: {}),
+			},
+			...(this.cause !== undefined ? { cause: loggableError(this.cause) } : {}),
+		};
+		const frames =
+			typeof this.stack === "string"
+				? this.stack
+						.split("\n")
+						.filter((line) => /^ {4}at /.test(line))
+						.join("\n")
+				: "";
+		return `${this.name}: ${this.message}${frames === "" ? "" : `\n${frames}`} ${print(shown, options)}`;
 	}
 }
 

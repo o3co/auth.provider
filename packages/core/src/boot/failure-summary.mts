@@ -31,7 +31,9 @@
  * character cap: a boot refusal's advice — the config key to set, the module
  * to wire — is often longer, and its end is what an operator acts on. The
  * error itself stays on the BootError as `cause` (and
- * `details.originalError`), for a caller that inspects it.
+ * `details.originalError`), for a caller that reads it; printed, a BootError
+ * shows it by its projection (its `util.inspect.custom`, in `types.mts`), so
+ * the message is not the only safe part of what the process ends with.
  */
 
 import { loggableError, uncappedDetail } from "../logging/loggableError.mjs";

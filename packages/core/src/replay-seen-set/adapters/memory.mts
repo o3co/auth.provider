@@ -46,13 +46,23 @@ export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
 
 /**
- * The most records the set holds by default. At about 200 bytes a record
- * that is some 20 MB, and it is more than DPoP's default 300-second window
- * fills at 300 recorded proofs a second on the single replica this set is
- * for (a deployment of more uses the Redis seen-set). Raise it with
- * `maxEntries` in a module of your own that builds the set.
+ * The most records the set holds by default.
+ *
+ * The set fills at `maxEntries / window` records a second, the window being
+ * the longest a consumer keeps a record — DPoP's
+ * `oauth.dpop.replay-store-ttl-seconds`, 300 s by default. At a million that
+ * is about 3 300 fresh DPoP proofs a second held for five minutes, each one
+ * signature-verified before it is recorded: about what one process can
+ * verify at all, so reaching the cap costs a flooder as much as taking the
+ * process's CPU would. A lower cap would let one client fill the set at a
+ * rate it sends idly — and while it is full every consumer is refused (see
+ * the factory). The memory it bounds is about 200 MB with the UUID `jti`s
+ * clients send, and up to about 700 MB when every `jti` is a 256-character
+ * one outside Latin-1. A longer DPoP window lowers the rate that fills it in
+ * proportion. Set `maxEntries` in a module of your own that builds the set;
+ * past one replica, use the Redis seen-set.
  */
-export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES = 100_000;
+export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES = 1_000_000;
 
 /**
  * How the sweep is paced — `sweepInterval` writing `markSeen` calls, and at
@@ -89,10 +99,12 @@ export class ReplaySeenSetFullError extends Error {
 	}
 }
 
-/** In-process seen-set, with the record count exposed for observability. */
+/** In-process seen-set, with the record count and its cap exposed for observability. */
 export interface MemoryReplaySeenSet extends ReplaySeenSet {
 	/** Records currently resident, expired-but-unswept included. */
 	readonly size: number;
+	/** The most records it holds (`maxEntries`); at it, a new record is refused. */
+	readonly maxEntries: number;
 }
 
 /**
@@ -137,7 +149,10 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  * no room and is still refused (`false`). While it is full every consumer
  * sharing it refuses what it would record — DPoP proofs, `private_key_jwt`
  * assertions, ID-JAGs, WebAuthn challenges — until records expire, which is
- * the fail-closed answer the port asks of a store that cannot write.
+ * the fail-closed answer the port asks of a store that cannot write. The
+ * consumers share one budget: a DPoP flood that fills the set refuses the
+ * others too, which is why the default cap sits where filling it costs as
+ * much as the process's CPU ({@link DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES}).
  *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
@@ -159,10 +174,14 @@ export function createMemoryReplaySeenSet(
 		);
 	}
 	const map = new Map<string, { expiresAtMs: number }>();
-	const schedule = createAmortizedSweep(options, {
-		sweepInterval: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
-		minSweepIntervalMs: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
-	});
+	const schedule = createAmortizedSweep(
+		options,
+		{
+			sweepInterval: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
+			minSweepIntervalMs: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
+		},
+		"createMemoryReplaySeenSet",
+	);
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
@@ -186,6 +205,8 @@ export function createMemoryReplaySeenSet(
 		get size() {
 			return map.size;
 		},
+
+		maxEntries,
 
 		async markSeen(scope, key, expiresAtMs) {
 			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
