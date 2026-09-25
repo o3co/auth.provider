@@ -332,6 +332,37 @@ describe("protectedResourceBindingMw — compound cnf", () => {
 		expect(next).not.toHaveBeenCalled();
 		expect(res.statusCode).toBe(401);
 	});
+
+	it("logs the rejection once, naming what was rejected as `rejection` — not `reason`", async () => {
+		// `reason` on the verdict line beside it is the mechanism's own name
+		// for a refused proof; this line's field says which sender-constraint
+		// rule refused the request, and must not share that name.
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT, "x5t#S256": X5T } });
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		await run(
+			protectedResourceBindingMw({
+				mechanisms: [succeedingMechanism("dpop", { jkt: JKT })],
+				logger: logger as never,
+			}),
+			`DPoP ${token}`,
+		);
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ rejection: "compound_cnf", scheme: "DPoP", site: "protected_resource_binding" },
+				"sender_constraint_rejected",
+			],
+		]);
+	});
 });
 
 describe("protectedResourceBindingMw — a server-side outage", () => {
@@ -459,12 +490,16 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 		);
 		expect(res.statusCode).toBe(401);
 		expect(logger.error).not.toHaveBeenCalled();
-		// Beside it, the sender-constraint refusal's own line
-		// (`sender_constraint_rejected`, reason `proof_invalid`).
+		// Beside it, the sender-constraint refusal's own line, whose field is
+		// `rejection`: `reason` on this line is the mechanism's.
 		const proofLines = logger.warn.mock.calls.filter(
 			([, event]) => event === "protected_resource_binding_proof_invalid",
 		);
 		expect(proofLines).toHaveLength(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ rejection: "proof_invalid", scheme: "Bearer", site: "protected_resource_binding" },
+			"sender_constraint_rejected",
+		);
 		expect(logger.warn).toHaveBeenCalledWith(
 			{
 				mechanism: "mtls",
