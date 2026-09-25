@@ -99,6 +99,18 @@ describe("listen", () => {
 		expect(line.err).not.toBeInstanceOf(Error);
 	});
 
+	it("leaves the bound server one error listener, server_error's: the bind's own is removed", async () => {
+		// The listener that turns a bind failure into a rejection has done its
+		// job once the socket is bound. Left attached, it would take every
+		// later error beside server_error's — a callback already spent.
+		const { logger } = recordingLogger();
+		const server = await listen(express(), 0, logger);
+		opened.push(server);
+
+		expect(server.listenerCount("error")).toBe(1);
+		expect(server.listenerCount("listening")).toBe(0);
+	});
+
 	it("rejects with the server's error for a port already bound, and announces nothing", async () => {
 		const holder = createServer();
 		// Every interface, as `app.listen(port)` binds, so the two collide.
