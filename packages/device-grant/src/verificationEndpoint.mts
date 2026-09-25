@@ -84,24 +84,41 @@
  * `isAuthenticated` is what the browser's cookie session claims; the
  * `UserSession` record its `sid` names is the fact. A logout, a
  * `revokeAllForSubject` or a record deleted out of band ends the record and
- * leaves the cookie as it was — and an approval is the last point anything
- * can ask: the device token it leads to carries no `sid` and no
- * `family_id`, and its `iat` postdates a subject watermark stamped before
- * the approval, so no later revocation reaches it. So every action reads
- * the record first, as `/authorize`, `/oauth/consent` and the session grant
- * read it, with the session grant's rule for what counts: a `sid` the store
- * holds, recording the cookie's own subject. A cookie session with no
- * `sid`, a `sid` the store no longer holds, or one naming another subject
- * is `401 login_required` — the same answer as no session, because the page
- * has the same remedy. The module refuses to boot an enabled grant without a
- * store, so there is no cookie-only mode.
+ * leaves the cookie as it was — and the approval is the one point that can
+ * see it: the device token it leads to carries no `sid` and no `family_id`,
+ * so no logout reaches that token afterwards, and a subject watermark
+ * stamped before the approval is older than the token's `iat`. (A watermark
+ * stamped after the token is minted does reach it, at `verifyJwt`; the
+ * window between the approval and the poll is closed at the poll, by the
+ * grant — see `grant.mts`.) So every action reads the record first, as
+ * `/authorize`, `/oauth/consent` and the session grant read it, with the
+ * session grant's rule for what counts: a `sid` the store holds, recording
+ * the cookie's own subject. A cookie session with no `sid` is `401
+ * login_required` "session identifier (sid) is required" — a login of the
+ * deployment's own that set `isAuthenticated` and `user.id` without the
+ * `sid` and the `UserSession` behind it is told what is missing; a `sid` the
+ * store no longer holds, or one naming another subject (warned once as
+ * `device_verification_session_subject_mismatch`, with the `sid`), is `401
+ * login_required` "the session is no longer active; sign in again". The
+ * module refuses to boot an enabled grant without a store, and this handler
+ * refuses to be built without one, so there is no cookie-only mode.
+ *
+ * With `subjectRevocation` wired, the subject's sessions boundary is read
+ * too, as federation-grants reads it: `revokeAllForSubject` stamps the
+ * boundary before it deletes the sessions, so a cascade that failed for
+ * one — or a session the subject index never learnt of — leaves a record
+ * the boundary has ended. A session that authenticated at or before the
+ * boundary (core's `coveredByRevocationBoundary`, with the one-second
+ * allowance `verifyJwt` gives it) is `401 login_required` too.
  *
  * A store that cannot answer fails closed, as an outage:
  * `503 temporarily_unavailable` ("session store unavailable", the answer
  * `/oauth/consent` gives), logged once at error as
- * `device_verification_session_liveness_unavailable` with the store, the
- * step and core's projection of the error — not `login_required`, which
- * would tell the page the user is signed out when the store said nothing.
+ * `device_verification_session_liveness_unavailable` with the store
+ * (`user_session`, or `revocation_boundary` for the boundary), the step, the
+ * `sid` and core's projection of the error — on core's console logger when
+ * none is wired — not `login_required`, which would tell the page the user
+ * is signed out when the store said nothing.
  *
  * ### `oauth.requireEmailVerified` holds an approval as it holds issuance
  *
@@ -154,11 +171,14 @@ import type {
 	RateLimiter,
 	RateLimitFailMode,
 	RateLimitOutageLogger,
+	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	checkWithFailMode,
 	consoleLogger,
+	coveredByRevocationBoundary,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	emitAuditEvent,
 	isEmailVerified,
 	loggableError,
@@ -255,34 +275,82 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 * whether the gate holds instead of losing it by omission.
 	 */
 	readonly requireEmailVerified: boolean;
+	/**
+	 * Where the subject's sessions boundary is read (see the file header).
+	 * Optional as it is at every surface that reads it: a composition that
+	 * declared subject-level revocation absent has no boundary to honour.
+	 */
+	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
 }
+
+const LIVENESS_UNAVAILABLE = "device_verification_session_liveness_unavailable";
 
 /**
  * Whether the `UserSession` behind the claim is live — see the file header.
- * `"live"` only for a record the store holds under the claim's `sid` that
- * records the claim's subject; `"unavailable"` when the store threw, after
- * the one error line has been written.
+ * `"live"` only for a record the store holds under the claim's `sid`, that
+ * records the claim's subject, and that no sessions boundary covers;
+ * `"unavailable"` when a store threw, after the one error line has been
+ * written.
  */
 const livenessOf = async (
 	claim: SessionClaim,
-	options: Pick<DeviceVerificationHandlerOptions, "userSessionStore" | "logger">,
-): Promise<"live" | "ended" | "unavailable"> => {
-	if (claim.sid === undefined) return "ended";
-	try {
-		const record = await options.userSessionStore.get(claim.sid);
-		return record?.sub === claim.subject ? "live" : "ended";
-	} catch (err) {
-		// The fields `/authorize` and `/oauth/consent` write for the same read.
-		const line = { store: "user_session", step: "get", sid: claim.sid, err: loggableError(err) };
+	options: Pick<
+		DeviceVerificationHandlerOptions,
+		"userSessionStore" | "subjectRevocation" | "logger"
+	>,
+): Promise<"live" | "no_sid" | "ended" | "unavailable"> => {
+	const sid = claim.sid;
+	if (sid === undefined) return "no_sid";
+	// The fields `/authorize` and `/oauth/consent` write for the same read.
+	const outage = (store: "user_session" | "revocation_boundary", step: string, err: unknown) => {
 		const logger = hasErrorChannel(options.logger) ? options.logger : consoleLogger;
-		logger.error(line, "device_verification_session_liveness_unavailable");
-		return "unavailable";
+		logger.error({ store, step, sid, err: loggableError(err) }, LIVENESS_UNAVAILABLE);
+		return "unavailable" as const;
+	};
+	let record: Awaited<ReturnType<UserSessionStore["get"]>>;
+	try {
+		record = await options.userSessionStore.get(sid);
+	} catch (err) {
+		return outage("user_session", "get", err);
+	}
+	if (record === null) return "ended";
+	if (record.sub !== claim.subject) {
+		options.logger?.warn({ sid }, "device_verification_session_subject_mismatch");
+		return "ended";
+	}
+	const revocation = options.subjectRevocation;
+	if (revocation === undefined) return "live";
+	try {
+		const boundary = await revocation.revokedBefore(claim.subject);
+		if (boundary !== null && !(boundary instanceof Date)) {
+			throw new TypeError("the sessions boundary is neither a date nor null");
+		}
+		// Throws for a date that cannot be compared: an outage, answered
+		// neither way (see `coveredByRevocationBoundary`).
+		return coveredByRevocationBoundary(
+			record.authTime,
+			boundary,
+			DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+		)
+			? "ended"
+			: "live";
+	} catch (err) {
+		return outage("revocation_boundary", "read", err);
 	}
 };
 
 export const createDeviceVerificationHandler = (
 	options: DeviceVerificationHandlerOptions,
 ): RequestHandler => {
+	// The type requires it; a caller the type cannot reach is refused here,
+	// where the composition is assembled, rather than answered 503 on every
+	// request as if the store were down.
+	if (typeof options.userSessionStore?.get !== "function") {
+		throw new TypeError(
+			"createDeviceVerificationHandler: userSessionStore is required — every action reads " +
+				"the live UserSession behind the cookie's sid before it is answered",
+		);
+	}
 	const now = options.now ?? Date.now;
 	// The guard's check with its outage policy attached — see the file header.
 	const policy = {
@@ -320,6 +388,13 @@ export const createDeviceVerificationHandler = (
 			respond(res, 503, {
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
+			});
+			return;
+		}
+		if (liveness === "no_sid") {
+			respond(res, 401, {
+				error: "login_required",
+				error_description: "session identifier (sid) is required",
 			});
 			return;
 		}

@@ -62,12 +62,20 @@
  * endpoint approves only from a live `UserSession` — the record behind the
  * cookie's `sid`, not the cookie's `isAuthenticated` — because the device
  * token an approval leads to carries no `sid` and no `family_id`, so no
- * logout or subject revocation reaches it afterwards (see
- * `verificationEndpoint.mts`). Without the store that question cannot be
- * asked, and an endpoint that trusted the cookie instead would look guarded
- * and not be — the limiter's argument again. The slot stays optional in the
- * manifest, as it is on `oauthModule`: a deployment that leaves the grant off
- * needs none, and there is nothing to declare.
+ * logout reaches it afterwards (see `verificationEndpoint.mts`). Without the
+ * store that question cannot be asked, and an endpoint that trusted the
+ * cookie instead would look guarded and not be — the limiter's argument
+ * again. The slot stays optional in the manifest, as it is on `oauthModule`:
+ * a deployment that leaves the grant off needs none, and there is nothing
+ * to declare.
+ *
+ * `subjectRevocation` is read by both halves when it is wired: the
+ * verification endpoint refuses a session its sessions boundary covers, and
+ * the grant refuses an approval made at or before it (the window between an
+ * approval and the poll, which a watermark stamped in between would
+ * otherwise not reach — the token minted at the poll postdates it). Optional
+ * and undeclared here: `oauthModule`, which every enabled grant is composed
+ * with, carries its absence policy.
  *
  * ### The verification endpoint is a CSRF target, and is guarded as one
  *
@@ -261,6 +269,9 @@ const OPTIONAL = [
 	// `UserSession`; required once the grant is enabled
 	// (`requireUserSessionStore`), unused while it is off.
 	"userSessionStore",
+	// The subject's sessions boundary: read by the verification endpoint
+	// (a session it covers) and the grant (an approval it covers).
+	"subjectRevocation",
 ] as const;
 
 /**
@@ -607,8 +618,8 @@ const requireUserSessionStore = (
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
 				"userSessionStore component. POST /oauth/device/verification approves only from " +
 				"the live UserSession behind the cookie's sid: the device token an approval leads " +
-				"to carries no sid and no family_id, so no logout or subject revocation reaches it " +
-				"afterwards, and a cookie that outlived its session would otherwise approve. " +
+				"to carries no sid and no family_id, so no logout reaches it afterwards, and a " +
+				"cookie that outlived its session would otherwise approve. " +
 				"Install memorySessionStoresModule (single replica only) or " +
 				"redisSessionStoresModule, or leave the grant disabled.",
 		);
@@ -824,6 +835,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							// #297, read as `/authorize` reads it: `=== true`, so a
 							// hand-built config that never passed the schema is off.
 							requireEmailVerified: deps.config.oauth?.requireEmailVerified === true,
+							// The sessions boundary, when the composition wires one.
+							...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 							settings: {
 								verificationUri: requireVerificationUri(slice),
 								verificationUriComplete: slice["verification-uri-complete"],

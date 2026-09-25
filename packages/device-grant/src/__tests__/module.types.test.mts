@@ -33,6 +33,7 @@ const OPTIONAL = [
 	"logger",
 	"auditSink",
 	"userSessionStore",
+	"subjectRevocation",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
