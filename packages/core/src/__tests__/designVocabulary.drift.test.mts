@@ -73,8 +73,9 @@ interface VocabularyRow {
 // One row per symbol, so the home has to define each of them: an
 // alternation would pass a home that kept one and lost the others. Two rows
 // still match one concept in two forms, and each pins the form the home must
-// keep: the entropy floor's two spellings (with `homeDefinition`), and the
-// WebAuthn algorithm pin's const or literal (with `homeMatches`).
+// keep: the entropy floor's two spellings and the target-parameter reader's
+// two names (with `homeDefinition`), and the WebAuthn algorithm pin's const or
+// literal (with `homeMatches`).
 const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept: "loopback hostname (#364)",
@@ -197,6 +198,15 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "RFC 8707 resource indicator — the invalid_target check (#173)",
 		home: "packages/core/src/grants/resourceIndicator.mts",
 		definition: /(?:function|const)\s+unrepresentedResources\b/,
+	},
+	{
+		// Either name: the home defines `readTargetParameter`, and a
+		// `normalizeArrayParam` elsewhere is the token-exchange grant's old
+		// reader of `resource` and `audience` restated.
+		concept: "target parameter — reading `resource` or `audience` strictly (RFC 8707, RFC 8693)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition: /(?:function|const)\s+(?:readTargetParameter|normalizeArrayParam)\b/,
+		homeDefinition: /(?:function|const)\s+readTargetParameter\b/,
 	},
 	{
 		// RFC 6749 NQSCHAR, the whole class: a partial one (`\x21\x23-…`, the

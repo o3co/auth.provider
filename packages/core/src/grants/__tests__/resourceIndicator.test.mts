@@ -18,8 +18,23 @@ import { describe, expect, it } from "vitest";
 import {
 	deriveAudienceFromResources,
 	extractResourceParam,
+	readTargetParameter,
 	unrepresentedResources,
 } from "#/grants/resourceIndicator.mjs";
+
+/**
+ * Values a form never produces and a JSON body can: neither a string nor an
+ * array of strings. `readTargetParameter` answers each `null` (malformed), and
+ * `extractResourceParam`, built on it, `null` (none requested).
+ */
+const MALFORMED_TARGETS: ReadonlyArray<readonly [string, unknown]> = [
+	["a nested array", [["https://r1"]]],
+	["a number", 42],
+	["a boolean", false],
+	["an object", { uri: "https://r1" }],
+	["an array holding a number", ["https://r1", 42]],
+	["an array holding null", [null]],
+];
 
 describe("extractResourceParam", () => {
 	it("returns null when resource is absent", () => {
@@ -56,6 +71,15 @@ describe("extractResourceParam", () => {
 	it("returns null when the array contains a non-string element (defensive against mixed-type arrays)", () => {
 		expect(extractResourceParam({ resource: ["https://r1", 42] as unknown })).toBeNull();
 	});
+
+	// Built on `readTargetParameter`: everything that reads as malformed or as
+	// naming nothing there is "none requested" here.
+	it.each([...MALFORMED_TARGETS, ["null", null], ["an empty array", []]] as const)(
+		"returns null for %s, as none requested",
+		(_case, resource) => {
+			expect(extractResourceParam({ resource })).toBeNull();
+		},
+	);
 });
 
 // ---------------------------------------------------------------------------
@@ -131,6 +155,38 @@ describe("extractResourceParam — empty entries in the array shape", () => {
 	it("returns null when every entry is empty", () => {
 		expect(extractResourceParam({ resource: ["", ""] })).toBeNull();
 	});
+});
+
+describe("readTargetParameter", () => {
+	it("reads an absent, null or empty value as naming nothing (RFC 6749 section 3.2)", () => {
+		expect(readTargetParameter(undefined)).toEqual([]);
+		expect(readTargetParameter(null)).toEqual([]);
+		expect(readTargetParameter("")).toEqual([]);
+	});
+
+	it("reads a string as that one value, kept whole", () => {
+		expect(readTargetParameter("https://a,b.example")).toEqual(["https://a,b.example"]);
+	});
+
+	it("keeps a value of spaces: only the empty string names nothing", () => {
+		expect(readTargetParameter(" ")).toEqual([" "]);
+	});
+
+	it("reads an array of strings as its non-empty entries, in order", () => {
+		expect(readTargetParameter(["", "https://r2", "https://r1", ""])).toEqual([
+			"https://r2",
+			"https://r1",
+		]);
+		expect(readTargetParameter(["", ""])).toEqual([]);
+		expect(readTargetParameter([])).toEqual([]);
+	});
+
+	it.each(MALFORMED_TARGETS)(
+		"answers null for %s: malformed, never converted to a string",
+		(_case, value) => {
+			expect(readTargetParameter(value)).toBeNull();
+		},
+	);
 });
 
 describe("deriveAudienceFromResources", () => {
