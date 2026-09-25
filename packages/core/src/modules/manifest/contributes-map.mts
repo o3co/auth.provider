@@ -80,6 +80,11 @@ export type ExchangeTokenValidator = ConcreteExchangeTokenValidator;
  * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
  * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
  * `MfaProvider` interface from `packages/core/src/mfa/types.mts`.
+ *
+ * Unwired. The name is kept, but its contract changes with the
+ * multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3, D7):
+ * `MfaProvider`, which it aliases today, is deprecated. Do not build an
+ * `mfaFactors` contribution on it.
  */
 export type MfaFactor = MfaProvider;
 

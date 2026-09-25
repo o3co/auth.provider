@@ -80,7 +80,7 @@ export function decryptTokenField(envelope: string, key: Buffer, aad?: Aad): str
 	if (ver === undefined || ivB64 === undefined || ctB64 === undefined || tagB64 === undefined) {
 		throw new Error("invalid envelope format");
 	}
-	// The segment is stored text, not ours to quote: see the test.
+	// The segment is stored text, not ours to quote, whoever logs this later.
 	if (ver !== VERSION) throw new Error("unsupported envelope version");
 	const iv = Buffer.from(ivB64, "base64url");
 	const ct = Buffer.from(ctB64, "base64url");

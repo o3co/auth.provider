@@ -670,6 +670,8 @@ export type BootErrorReason =
 	| "route-order-target-missing"
 	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
+	// Deprecated with the unwired MFA surface it guards (MFA ADR D3); see
+	// MfaPartialWiringDetails.
 	| "mfa-partial-wiring"
 	| "federation-stores-incomplete"
 	| "discovery-document-invalid"

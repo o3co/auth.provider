@@ -33,8 +33,8 @@ import {
  * CoreConfigSchema's permissive `z.string().optional()` to a required
  * non-empty string — the built-in self-issued validator compares a
  * token's issuer with it and throws when built without one, so an empty
- * value is refused here, at boot, naming the key (Copilot review on
- * PR #100, Critical).
+ * value is refused here, at boot, as config-validation-failed (Copilot
+ * review on PR #100, Critical).
  *
  * Composed via `composeConfigSchema` at validate-manifests step 13: the
  * intersection with CoreConfigSchema produces `oauth.jwt.issuer:
