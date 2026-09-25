@@ -1030,6 +1030,10 @@ describe("a request value reaches a logger or an audit event only through auditE
 		it.each([
 			["the path, sanitised", `logger.warn({ path: auditErrorText(req.path) }, "rejected");`],
 			[
+				"a list, sanitised",
+				`logger.warn({ scopes: auditErrorList(req.body.scope.split(" ")) }, "rejected");`,
+			],
+			[
 				"a header, sanitised with a fallback",
 				`logger.warn({ site: auditErrorText(req.get("sec-fetch-site") ?? "") }, "rejected");`,
 			],

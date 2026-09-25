@@ -817,7 +817,7 @@ describe("IH-6: /authorize openid scope gate", () => {
 		expect(logger.warn).toHaveBeenCalledWith(
 			{
 				clientId: "client-1",
-				requestedScopes: "profile",
+				requestedScopes: ["profile"],
 				allowedFilteredScopes: ["profile"],
 			},
 			"authorize_rejected_missing_openid_scope",
@@ -868,17 +868,17 @@ describe("IH-6: /authorize openid scope gate", () => {
 		expect(logger.warn).toHaveBeenCalledWith(
 			{
 				clientId: "client-1",
-				requestedScopes: "openid profile",
+				requestedScopes: ["openid", "profile"],
 				allowedFilteredScopes: ["profile"],
 			},
 			"authorize_rejected_missing_openid_scope",
 		);
 	});
 
-	it("logs the requested scopes capped, however many the caller sent", async () => {
+	it("logs the first ten requested scopes, each capped, and how many were sent", async () => {
 		// Every entry is a well-formed scope-token, so nothing refuses the
-		// request before the gate — but the caller chooses how many it sends,
-		// and the line is not to grow with them.
+		// request before the gate — but the caller chooses how many it sends
+		// and how long each is, and the line is not to grow with either.
 		const logger = createMockLogger();
 		const app = await buildAuthorizeApp({
 			sessionFields: { sid: "sid-many-scopes" },
@@ -886,16 +886,22 @@ describe("IH-6: /authorize openid scope gate", () => {
 			logger,
 		});
 
+		// A form POST (OIDC Core §3.1.2.1), because a query this long outgrows
+		// the request line's size limit.
 		const res = await request(app)
-			.get("/oauth/authorize")
-			.query({
+			.post("/oauth/authorize")
+			.type("form")
+			.send({
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
 				code_challenge: AUTHORIZE_S256_CHALLENGE,
 				code_challenge_method: "S256",
 				state: "state-many-scopes",
-				scope: Array.from({ length: 1_000 }, (_, i) => `scope-${i}`).join(" "),
+				scope: [
+					`long-${"s".repeat(10_000)}`,
+					...Array.from({ length: 999 }, (_, i) => `scope-${i}`),
+				].join(" "),
 			});
 
 		expect(res.status).toBe(302);
@@ -904,12 +910,21 @@ describe("IH-6: /authorize openid scope gate", () => {
 			.mocked(logger.warn)
 			.mock.calls.filter(([, event]) => event === "authorize_rejected_missing_openid_scope");
 		expect(calls).toHaveLength(1);
-		const logged = (calls[0]?.[0] as { requestedScopes?: unknown } | undefined)?.requestedScopes;
+		const line = calls[0]?.[0] as { requestedScopes?: unknown; requestedScopeCount?: unknown };
+		const logged = Array.isArray(line.requestedScopes) ? (line.requestedScopes as string[]) : [];
 		expect({
-			string: typeof logged === "string",
-			within200: String(logged).length <= 200,
-			head: String(logged).slice(0, 16),
-		}).toEqual({ string: true, within200: true, head: "scope-0 scope-1 " });
+			array: Array.isArray(line.requestedScopes),
+			entries: logged.length,
+			firstWithin200: (logged[0] ?? "").length <= 200,
+			rest: logged.slice(1),
+			count: line.requestedScopeCount,
+		}).toEqual({
+			array: true,
+			entries: 10,
+			firstWithin200: true,
+			rest: Array.from({ length: 9 }, (_, i) => `scope-${i}`),
+			count: 1_000,
+		});
 	});
 
 	it("refuses a scope carrying a line break before any line is written of it", async () => {

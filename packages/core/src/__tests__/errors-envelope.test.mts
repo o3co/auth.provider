@@ -16,6 +16,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	auditErrorList,
 	auditErrorText,
 	errorEnvelope,
 	isWellFormedErrorCode,
@@ -230,6 +231,40 @@ describe("RFC 6749 error text", () => {
 		it("answers undefined for a non-string", () => {
 			expect(auditErrorText(42)).toBeUndefined();
 		});
+	});
+
+	// A list a client chose — the scopes it asked for, the resources it named
+	// — for a log line or an audit event: still a list, so a query that reads
+	// it as one keeps working, but bounded in what each entry holds and in how
+	// many are kept.
+	describe("auditErrorList", () => {
+		it("keeps a small, well-formed list exactly as it was", () => {
+			expect(auditErrorList(["openid", "profile"])).toEqual(["openid", "profile"]);
+			expect(auditErrorList([])).toEqual([]);
+		});
+
+		it("puts each entry through auditErrorText", () => {
+			expect(auditErrorList(['a"b', `x\r\n${"y".repeat(300)}`])).toEqual([
+				"a?b",
+				`x??${"y".repeat(194)}...`,
+			]);
+		});
+
+		it("keeps the first ten entries", () => {
+			const many = Array.from({ length: 1_000 }, (_, i) => `s${i}`);
+			expect(auditErrorList(many)).toEqual(many.slice(0, 10));
+		});
+
+		it("keeps the first maxItems entries when told how many", () => {
+			expect(auditErrorList(["a", "b", "c"], 2)).toEqual(["a", "b"]);
+		});
+
+		it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+			"refuses maxItems %s with a RangeError",
+			(maxItems) => {
+				expect(() => auditErrorList(["a"], maxItems)).toThrow(RangeError);
+			},
+		);
 	});
 
 	describe("isWellFormedErrorCode", () => {

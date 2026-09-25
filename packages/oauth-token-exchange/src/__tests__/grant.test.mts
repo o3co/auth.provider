@@ -1803,14 +1803,18 @@ describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound f
 
 describe("createTokenExchangeGrant — the resources a refusal logs are the caller's", () => {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
-	const CONTROL = /[\u0000-\u001f\u007f]/;
-	/** What an assertion needs of a logged value: a failure prints this, not the value. */
-	const shapeOf = (value: unknown) => ({
-		string: typeof value === "string",
-		control: CONTROL.test(String(value)),
-		within200: String(value).length <= 200,
-	});
-	const BOUNDED = { string: true, control: false, within200: true };
+	const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+	/** What an assertion needs of a logged list: a failure prints this, not the list. */
+	const shapeOf = (value: unknown) => {
+		const entries = Array.isArray(value) ? (value as unknown[]) : [];
+		return {
+			array: Array.isArray(value),
+			entries: entries.length,
+			strings: entries.every((entry) => typeof entry === "string"),
+			control: entries.some((entry) => CONTROL.test(String(entry))),
+			within200: entries.every((entry) => String(entry).length <= 200),
+		};
+	};
 
 	/** The one warn line, `token_exchange_resource_not_in_audience`, and nothing at another level. */
 	const onlyRefusalLine = (logger: ReturnType<typeof spyLogger>) => {
@@ -1840,11 +1844,20 @@ describe("createTokenExchangeGrant — the resources a refusal logs are the call
 
 		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
 		const line = onlyRefusalLine(logger);
-		expect(shapeOf(line.missingResources)).toEqual(BOUNDED);
-		expect(String(line.missingResources).startsWith("https://x.example??FORGED")).toBe(true);
+		expect(shapeOf(line.missingResources)).toEqual({
+			array: true,
+			entries: 1,
+			strings: true,
+			control: false,
+			within200: true,
+		});
+		expect(
+			String((line.missingResources as string[])[0]).startsWith("https://x.example??FORGED"),
+		).toBe(true);
+		expect(line).not.toHaveProperty("missingResourceCount");
 	});
 
-	it("logs the resources the issued audience left out capped, however many were sent", async () => {
+	it("logs the first ten resources the issued audience left out, and how many there were", async () => {
 		// Each resource is one the client and the subject token both carry, so
 		// the refusal is the later one — but the caller chooses how many it
 		// sends, and the line is not to grow with them.
@@ -1880,10 +1893,11 @@ describe("createTokenExchangeGrant — the resources a refusal logs are the call
 		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
 		const line = onlyRefusalLine(logger);
 		expect(line.audienceForToken).toBe("https://b.example");
-		expect(shapeOf(line.missingResources)).toEqual(BOUNDED);
+		expect(line.missingResources).toEqual(Array.from({ length: 10 }, () => "https://a.example"));
+		expect(line.missingResourceCount).toBe(600);
 	});
 
-	it("still logs an ordinary refusal's resources as the caller sent them", async () => {
+	it("still logs an ordinary refusal's resources exactly as the caller sent them", async () => {
 		const logger = spyLogger();
 		const g = buildGrant({ logger: logger as unknown as Logger });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
@@ -1898,8 +1912,8 @@ describe("createTokenExchangeGrant — the resources a refusal logs are the call
 			}),
 		);
 
-		expect(onlyRefusalLine(logger).missingResources).toBe(
-			"https://api.example.com https://other.example.com",
-		);
+		const line = onlyRefusalLine(logger);
+		expect(line.missingResources).toEqual(["https://api.example.com", "https://other.example.com"]);
+		expect(line).not.toHaveProperty("missingResourceCount");
 	});
 });
