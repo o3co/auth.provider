@@ -158,12 +158,17 @@ export interface DPoPMechanismOptions {
 const DEFAULT_ALG_WHITELIST: readonly string[] = ["ES256", "ES384", "EdDSA", "RS256"];
 
 /**
- * The registered JWS algorithm names (RFC 7518 §3.1, RFC 8037, RFC 8812, and
- * the fully-specified Ed25519 / Ed448): a closed vocabulary, so a refused alg in it can be named on a
- * log line without a client choosing what the line says. Anything else is
- * logged as `unregistered`.
+ * The signature and MAC algorithm names in IANA's "JSON Web Signature and
+ * Encryption Algorithms" registry: a closed vocabulary, so a refused alg in
+ * it can be named on a log line without a client choosing what the line
+ * says. Anything else — a JWE key-management name (`RSA-OAEP`, `dir`)
+ * included — is logged as `unregistered`. Checked against the registry as
+ * last updated 2026-05-22; a name registered later reads `unregistered`
+ * until it is added here, which costs a log line its precision and nothing
+ * else.
  */
 const REGISTERED_JWS_ALGS: ReadonlySet<string> = new Set([
+	// RFC 7518 §3.1
 	"HS256",
 	"HS384",
 	"HS512",
@@ -177,10 +182,18 @@ const REGISTERED_JWS_ALGS: ReadonlySet<string> = new Set([
 	"PS384",
 	"PS512",
 	"none",
+	// RFC 8037 (Deprecated by RFC 9864), RFC 9864, RFC 8812
 	"EdDSA",
 	"Ed25519",
 	"Ed448",
 	"ES256K",
+	// RFC 9964
+	"ML-DSA-44",
+	"ML-DSA-65",
+	"ML-DSA-87",
+	// W3C WebCrypto, registered for use in a JWK and marked Prohibited
+	"RS1",
+	"HS1",
 ]);
 const DEFAULT_IAT_WINDOW_SECONDS = 60;
 const DEFAULT_REPLAY_TTL_SECONDS = 300;
