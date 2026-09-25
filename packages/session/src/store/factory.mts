@@ -47,8 +47,9 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
  * How the Redis store reads and writes a session record: JSON, as
  * connect-redis's default does — except that a record which cannot be read is
  * absent rather than an error. Text that is not JSON, or JSON that is not a
- * session record (an object carrying a `cookie` object, which express-session
- * rebuilds the session's cookie from), would otherwise fail every request
+ * session record (a plain object — not an array — carrying a `cookie` that is
+ * a plain object too, which express-session rebuilds the session's cookie
+ * from), would otherwise fail every request
  * that browser makes until the record expires, answered as a store outage
  * (`../internal/cookieSession.mts`). Read as absent, express-session starts a
  * fresh session for the request. Logged once per read as a warn,
@@ -84,11 +85,11 @@ function readableSessionRecords(logger: Pick<Logger, "warn">): {
 			} catch {
 				record = undefined;
 			}
-			const cookie =
-				record !== null && typeof record === "object"
-					? (record as { cookie?: unknown }).cookie
-					: undefined;
-			if (cookie !== null && typeof cookie === "object") return record as session.SessionData;
+			const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+				value !== null && typeof value === "object" && !Array.isArray(value);
+			if (isPlainObject(record) && isPlainObject(record.cookie)) {
+				return record as unknown as session.SessionData;
+			}
 			logger.warn({ store: "cookie_session" }, "session_cookie_record_unreadable");
 			// connect-redis hands this to express-session as the stored session;
 			// `null` is its "no such session".

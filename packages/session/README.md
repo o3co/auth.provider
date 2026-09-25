@@ -209,8 +209,9 @@ What holds:
   the request's session so express-session does not write to the failing store
   again as the response ends.
 - **A record that cannot be read is absent, not an outage.** A record the Redis
-  store answers with but that is not JSON, or not a session record (an object
-  with a `cookie` object), is read as no session: express-session starts a
+  store answers with but that is not JSON, or not a session record (a plain
+  object, not an array, whose `cookie` is a plain object too), is read as no
+  session: express-session starts a
   fresh one for the request. It is logged once per read as a warn,
   `session_cookie_record_unreadable` (`store: "cookie_session"`), without the
   record's text. The record is not deleted and the browser keeps its cookie —
