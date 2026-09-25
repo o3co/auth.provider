@@ -40,6 +40,7 @@ import { readFileSync } from "node:fs";
 import {
 	createTrustedProxyMatcher,
 	type Logger,
+	lineSafeText,
 	loggableError,
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
@@ -514,7 +515,9 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 					logger?.warn(
 						{
 							step: result.step,
-							detail: result.detail,
+							// Built from the certificate's own text (a subject, a URL
+							// it names): one line and capped.
+							detail: lineSafeText(result.detail),
 							...(result.cause !== undefined ? { err: loggableError(result.cause) } : {}),
 						},
 						"mtls_full_pki_validation_failed",
