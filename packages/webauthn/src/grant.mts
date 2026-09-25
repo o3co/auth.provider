@@ -45,8 +45,9 @@
  *
  * Store outages:
  *   A store that cannot answer at steps 3, 4 or 6, or when the refresh-token
- *   family is registered in step 8, is the server's outage, not a verdict on
- *   the passkey: 503 temporarily_unavailable, logged once at error level as
+ *   family is registered in step 8 (under a reserved `jti` and expiry, before
+ *   either token is signed), is the server's outage, not a verdict on the
+ *   passkey: 503 temporarily_unavailable, logged once at error level as
  *   `webauthn_grant_store_unavailable` with `store` and `step`, and no token.
  *   Nothing is spent before step 4; from there the challenge may be consumed,
  *   so the client's retry of the same assertion is 400 invalid_grant and the
@@ -130,7 +131,6 @@ import {
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
-import { decodeJwtPayload } from "./internal/_jwtPayload.mjs";
 import { storeUnavailableDescription, type WebAuthnStore } from "./internal/storeUnavailable.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
@@ -553,6 +553,35 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// without it survives a revocation that was meant to kill it.
 			const familyId = issueRefreshToken ? randomUUID() : null;
 
+			// #449: the refresh token's identity — its `jti`, and the instant its
+			// lifetime is measured from — is reserved here, and its family
+			// registered under it, before anything is signed, as the refresh grant
+			// commits a rotation before it signs. The expiry registered is exactly
+			// the one signed (`issuedAt + expiresIn`), with no read-back of the
+			// token; and a family store that cannot answer costs no signature, a
+			// billable remote call under a KMS-backed key (#303).
+			//
+			// Fail-closed, mirroring authorization.mts CP-16: a refresh token whose
+			// family was never registered has no replay detection behind it, and
+			// serving it would quietly break the RFC 6819 §5.2.2.3 contract the
+			// family exists to keep. A controlled 503 tells the client to retry;
+			// `invalid_grant` would tell it to throw the passkey session away.
+			const refreshReservation =
+				familyId === null
+					? null
+					: { familyId, jti: randomUUID(), issuedAt: Math.floor(Date.now() / 1000) };
+			if (refreshReservation !== null && deps.refreshTokenFamilyRotation) {
+				try {
+					await deps.refreshTokenFamilyRotation.register(
+						refreshReservation.jti,
+						refreshReservation.familyId,
+						(refreshReservation.issuedAt + refreshTokenExpiresIn) * 1000,
+					);
+				} catch (err) {
+					return storeUnavailable("refresh_token_family", "register", clientId, err);
+				}
+			}
+
 			// Mint client_id + authorizedParty when client authenticated so the AT is
 			// revocable via /oauth/revoke (Wave 1 post-merge security audit H-1: the
 			// revoke endpoint resolves the token's client via `client_id ?? azp ?? aud`
@@ -583,7 +612,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			);
 
 			let refreshToken: Token | undefined;
-			if (client && familyId) {
+			if (client && refreshReservation) {
 				// Sender-binding for the RT is the gate `authorization.mts` and
 				// `refreshToken.mts` already apply, reused verbatim rather than
 				// restated: a mechanism allowlist (only the kinds whose
@@ -606,7 +635,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				refreshToken = await generateToken(
 					// #481 audit: the refresh grant mirrors `amr` from the refresh token
 					// it is handed, so the passkey's `hwk` has to be here too.
-					{ family_id: familyId, amr: ["hwk"] },
+					{ family_id: refreshReservation.familyId, amr: ["hwk"] },
 					{
 						expiresIn: refreshTokenExpiresIn,
 						keyStore,
@@ -616,66 +645,12 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 						authorizedParty: client.clientId,
 						scope: scopeClaim,
 						tokenType: "rt+jwt",
+						// #449: the identity the family was registered under above.
+						jti: refreshReservation.jti,
+						issuedAt: refreshReservation.issuedAt,
 						...(bindRefreshToken && confirmation ? { confirmation } : {}),
 					},
 				);
-
-				if (deps.refreshTokenFamilyRotation) {
-					// Fail-closed, mirroring authorization.mts CP-16: a refresh token
-					// whose family was never registered has no replay detection behind
-					// it, and serving it would quietly break the RFC 6819 §5.2.2.3
-					// contract the family exists to keep. A controlled 503 tells the
-					// client to retry; `invalid_grant` would tell it to throw the
-					// passkey session away.
-					//
-					// EVERY way registration can fail lands here, not just a store
-					// outage. Reading the `jti` / `exp` back off the token we just
-					// minted can fail too — an unparseable token, a decode that
-					// throws, a payload missing either claim (a remote signer is free
-					// to return claims we did not ask for; an unset
-					// `oauth.refreshToken.expiresIn` no longer gets this far) — and
-					// the first shape of this code treated an unreadable payload as
-					// "nothing to register" and served the refresh token anyway. That
-					// is the same live-token-with-no-family outcome as the outage,
-					// reached down a quieter branch, so it gets the same answer. The
-					// log line tells the two apart: the store's outage is
-					// `webauthn_grant_store_unavailable`; a token this server minted
-					// and cannot read back is `webauthn_grant_refresh_token_unregistrable`,
-					// with the `reason`, and points at the keystore rather than at
-					// the family store.
-					const registration = await registerRefreshTokenFamily(
-						deps.refreshTokenFamilyRotation,
-						refreshToken.token,
-						familyId,
-					);
-					if (!registration.ok) {
-						if (registration.reason === "store_unavailable") {
-							return storeUnavailable(
-								"refresh_token_family",
-								"register",
-								clientId,
-								registration.cause,
-							);
-						}
-						logger.error(
-							{
-								clientId: auditErrorText(client.clientId),
-								reason: registration.reason,
-								...(registration.cause === undefined
-									? {}
-									: { err: loggableError(registration.cause) }),
-							},
-							"webauthn_grant_refresh_token_unregistrable",
-						);
-						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: storeUnavailableDescription("refresh_token_family"),
-							},
-						};
-					}
-				}
 			}
 
 			return {
@@ -697,59 +672,6 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 // ---------------------------------------------------------------------------
 // File-private helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Why a refresh token's family was not registered: its payload could not be
- * decoded, carried no usable `jti` or `exp`, or the family store could not
- * answer. `cause` is what was thrown, where something was.
- */
-type FamilyRegistration =
-	| { readonly ok: true }
-	| {
-			readonly ok: false;
-			readonly reason: "undecodable" | "no_jti" | "no_exp" | "store_unavailable";
-			readonly cause?: unknown;
-	  };
-
-/**
- * Opens the refresh-token family for a token this grant just minted.
- *
- * `ok` only when the family is durably registered. Everything else — a payload
- * that cannot be decoded, one carrying no usable `jti` or `exp`, a store that
- * throws — is a refusal with its `reason`, and the caller refuses the whole
- * request. The four are one answer to the client because they have one
- * consequence: without a registration the token has no rotation record, so
- * every replay of it would read as a first use (RFC 6819 §5.2.2.3). They are
- * told apart here only so the log line can say which failed; the fail-closed
- * answer stays in one place at the call site.
- *
- * `exp` is validated as a finite number before the millisecond conversion:
- * `NaN * 1000` is `NaN`, which a store would happily accept as an expiry and
- * then never expire (or expire immediately), which is the failure this guard
- * exists to prevent rather than a variant of it.
- */
-async function registerRefreshTokenFamily(
-	rotation: NonNullable<WebAuthnGrantDeps["refreshTokenFamilyRotation"]>,
-	refreshTokenValue: string,
-	familyId: string,
-): Promise<FamilyRegistration> {
-	let payload: Record<string, unknown>;
-	try {
-		payload = decodeJwtPayload(refreshTokenValue);
-	} catch (decodeFailure) {
-		return { ok: false, reason: "undecodable", cause: decodeFailure };
-	}
-	const jti = payload.jti;
-	const exp = payload.exp;
-	if (typeof jti !== "string" || jti.length === 0) return { ok: false, reason: "no_jti" };
-	if (typeof exp !== "number" || !Number.isFinite(exp)) return { ok: false, reason: "no_exp" };
-	try {
-		await rotation.register(jti, familyId, exp * 1000);
-	} catch (storeFailure) {
-		return { ok: false, reason: "store_unavailable", cause: storeFailure };
-	}
-	return { ok: true };
-}
 
 type AssertionParseOk = {
 	ok: true;
