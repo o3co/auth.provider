@@ -1945,12 +1945,11 @@ describe("full-pki revocation — mode = both (#431)", () => {
 			expect(result.detail).toMatch(/ocsp/i);
 			expect(result.detail).toMatch(/crl/i);
 			// Both sources answered 503: an outage, answered and logged by the
-			// dispatcher. The validator's one line is the OCSP fallback's.
+			// dispatcher. The fallback never answered, so it writes no line of
+			// its own; the validator writes none at all.
 			expect(result.outage).toBe(true);
 		}
-		expect(logger.warn.mock.calls.map(([, event]) => event)).toEqual([
-			"mtls_revocation_ocsp_fallback",
-		]);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("is unavailable only when both are: 'allow' waves through with the unavailable line", async () => {
@@ -1973,6 +1972,9 @@ describe("full-pki revocation — mode = both (#431)", () => {
 			expect.objectContaining({ subject: "CN=client" }),
 			"mtls_revocation_unavailable_allowed",
 		);
+		// One line for the one certificate waved through: the fallback never
+		// answered, so it has no line of its own beside this one.
+		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 
 	it("consults the CRL silently for a certificate that names no responder at all", async () => {

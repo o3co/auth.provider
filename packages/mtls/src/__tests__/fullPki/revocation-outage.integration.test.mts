@@ -51,6 +51,7 @@ import {
 	mintCrl,
 	mintIntermediate,
 	mintLeaf,
+	ocspAia,
 } from "./pkiFactory.mjs";
 
 const FRAMES = expect.stringMatching(/^ {4}at /);
@@ -109,9 +110,10 @@ type LeafCrl = "refused" | "garbage" | "clean" | "revoked";
  * root → intermediate → leaf. The intermediate's CRL (the root's list) is
  * served clean from a live loopback server; the leaf's (the intermediate's
  * list) is `leafCrl`: a refused connection, bytes that are not DER, a clean
- * list, or one naming the leaf.
+ * list, or one naming the leaf. With `leafResponderRefused`, the leaf also
+ * names an OCSP responder nothing listens on — for `revocation.mode = "both"`.
  */
-const pki = async (leafCrl: LeafCrl, leafPointHost = "127.0.0.1") => {
+const pki = async (leafCrl: LeafCrl, leafPointHost = "127.0.0.1", leafResponderRefused = false) => {
 	const root = await mintCa("Root", 1);
 	const lists: Record<string, Uint8Array> = {};
 	const live = await listen((req, res) => {
@@ -136,6 +138,7 @@ const pki = async (leafCrl: LeafCrl, leafPointHost = "127.0.0.1") => {
 			keyUsage(KEY_USAGE.digitalSignature),
 			clientAuthEku(),
 			crlDistributionPoints([leafPoint]),
+			...(leafResponderRefused ? [ocspAia(`${await closedOrigin()}/ocsp`)] : []),
 		],
 	});
 	lists["/root.crl"] = await mintCrl({ issuer: root });
@@ -145,7 +148,12 @@ const pki = async (leafCrl: LeafCrl, leafPointHost = "127.0.0.1") => {
 	return { root, int, leaf, leafPoint };
 };
 
-const mechanism = (root: Minted, onUnavailable: "reject" | "allow", logger: Logger) =>
+const mechanism = (
+	root: Minted,
+	onUnavailable: "reject" | "allow",
+	logger: Logger,
+	mode: "crl" | "both" = "crl",
+) =>
 	createMtlsMechanism({
 		source: "header",
 		certHeaderDialect: "envoy",
@@ -154,7 +162,7 @@ const mechanism = (root: Minted, onUnavailable: "reject" | "allow", logger: Logg
 		trustedCas: [root.pem],
 		fullPki: {
 			revocation: {
-				mode: "crl",
+				mode,
 				"on-unavailable": onUnavailable,
 				"allowed-hosts": ["127.0.0.1"],
 				"fetch-timeout-ms": 2_000,
@@ -169,9 +177,9 @@ const xfcc = (leaf: Minted, int: Minted): string =>
 	`Cert=${encodeURIComponent(leaf.pem)};Chain=${encodeURIComponent(int.pem)}`;
 
 /** `/oauth/token` behind core's token-binding dispatcher, and `/resource` behind the protected-resource one. */
-const appWith = (root: Minted, onUnavailable: "reject" | "allow") => {
+const appWith = (root: Minted, onUnavailable: "reject" | "allow", mode: "crl" | "both" = "crl") => {
 	const { logger, calls } = recordingLogger();
-	const mechanisms = [mechanism(root, onUnavailable, logger)];
+	const mechanisms = [mechanism(root, onUnavailable, logger, mode)];
 	const app = express();
 	app.post(
 		"/oauth/token",
@@ -332,5 +340,70 @@ describe("full-pki, on-unavailable = allow: unchanged", () => {
 		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
 			["warn", "mtls_revocation_unavailable_allowed"],
 		]);
+	});
+});
+
+describe("revocation.mode = both: the OCSP fallback is logged once it has answered, and only then", () => {
+	it("OCSP down, the CRL answers: the certificate is bound, the fallback's one warn and nothing else", async () => {
+		const { root, int, leaf } = await pki("clean", "127.0.0.1", true);
+		const { app, calls } = appWith(root, "reject", "both");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(200);
+		expect(res.body.binding).toMatchObject({ kind: "mtls" });
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["warn", "mtls_revocation_ocsp_fallback"],
+		]);
+		expect(calls[0]?.args[0]).toMatchObject({
+			subject: "CN=client",
+			reason: "fetch_failed",
+			err: expect.objectContaining({ name: "TypeError" }),
+		});
+	});
+
+	it("both down under reject: 503, the dispatcher's one error line, naming both sources and carrying both errors", async () => {
+		const { root, int, leaf } = await pki("refused", "127.0.0.1", true);
+		const { app, calls } = appWith(root, "reject", "both");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["error", "token_binding_unavailable"],
+		]);
+		const line = calls[0]?.args[0] as { err: Record<string, unknown> };
+		expect(line.err).toMatchObject({
+			name: "MtlsRevocationUnavailableError",
+			detail: expect.stringMatching(/ocsp: fetch_failed .*; crl: fetch_failed /),
+			cause: {
+				name: "AggregateError",
+				aggregateErrors: [
+					expect.objectContaining({ name: "TypeError" }),
+					expect.objectContaining({ name: "TypeError" }),
+				],
+			},
+		});
+	});
+
+	it("both down under allow: the certificate is bound, one allowed line naming both sources", async () => {
+		const { root, int, leaf } = await pki("refused", "127.0.0.1", true);
+		const { app, calls } = appWith(root, "allow", "both");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(200);
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["warn", "mtls_revocation_unavailable_allowed"],
+		]);
+		expect(calls[0]?.args[0]).toMatchObject({
+			detail: expect.stringMatching(/ocsp: fetch_failed .*; crl: fetch_failed /),
+		});
 	});
 });
