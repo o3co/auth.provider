@@ -74,11 +74,16 @@ export interface SealBinding {
  * three are ordinary answers a store hands to its caller: an operator who
  * dropped a key can put it back (`key_unavailable`), and a value whose
  * authenticated data no longer matches never opens again (`unreadable`).
+ *
+ * `keyId` is the key the envelope names, which has passed the key id rule:
+ * on `ok` the key that opened the value, so a caller can re-seal a value
+ * opened under a key that is no longer first; on `key_unavailable` the key
+ * to put back.
  */
 export type OpenedSeal =
-	| { readonly state: "ok"; readonly value: string }
+	| { readonly state: "ok"; readonly value: string; readonly keyId: string }
 	| { readonly state: "unreadable" }
-	| { readonly state: "key_unavailable" };
+	| { readonly state: "key_unavailable"; readonly keyId: string };
 
 const PURPOSE_PATTERN = /^[\x21-\x7E]{1,64}$/;
 
@@ -179,13 +184,13 @@ export function openWithKeyRing(
 	const id = keyId.toString("utf8");
 	if (!isSealingKeyId(id)) return { state: "unreadable" };
 	const entry = ring.find((candidate) => candidate.id === id);
-	if (entry === undefined) return { state: "key_unavailable" };
+	if (entry === undefined) return { state: "key_unavailable", keyId: id };
 	try {
 		const decipher = createDecipheriv(ALGO, entry.key, iv, { authTagLength: TAG_LEN });
 		decipher.setAAD(aad(head, keyId, binding.record));
 		decipher.setAuthTag(tag);
 		const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
-		return { state: "ok", value: pt.toString("utf8") };
+		return { state: "ok", value: pt.toString("utf8"), keyId: id };
 	} catch {
 		return { state: "unreadable" };
 	}
