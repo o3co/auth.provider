@@ -357,7 +357,6 @@ export type {
 	GrantFactory,
 	GrantHandler,
 	GrantHandlerResult,
-	GrantModule,
 	GrantResult,
 	GrantSuccess,
 	SessionData,

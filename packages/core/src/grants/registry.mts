@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { GrantDependencies, GrantHandler, GrantModule } from "./types.mjs";
+import type { GrantHandler } from "./types.mjs";
 
 export type GrantRegistryErrorReason = "duplicate" | "unknown" | "frozen";
 
@@ -116,7 +116,7 @@ export class GrantRegistry {
 	/**
 	 * Seal the registry. Idempotent: calling freeze() on an already-frozen
 	 * registry is a no-op. After freeze, register and replace throw with
-	 * reason "frozen"; get continues to work.
+	 * reason "frozen"; get and entries continue to work.
 	 */
 	freeze(): void {
 		this.frozen = true;
@@ -126,84 +126,13 @@ export class GrantRegistry {
 		return this.handlers.get(grantType);
 	}
 
-	addModule(module: GrantModule, deps: GrantDependencies): void {
-		// Apply configSchema defaults when provided.
-		// Pre-fill missing top-level keys with {} so nested defaults are applied in a single parse.
-		const effectiveDeps = module.configSchema
-			? {
-					...deps,
-					config: {
-						...deps.config,
-						oauth: {
-							...deps.config.oauth,
-							grants: {
-								...deps.config.oauth.grants,
-								...(module.configSchema.parse(
-									Object.fromEntries(
-										Object.keys(module.grants).map((name) => [
-											name,
-											(deps.config.oauth.grants as Record<string, unknown>)[name] ?? {},
-										]),
-									),
-								) as Record<string, unknown>),
-							},
-						},
-					},
-				}
-			: deps;
-
-		const isEnabled = (name: string): boolean => {
-			// `oauth.grants` is `z.object({}).passthrough()` — values arrive
-			// unvalidated. `enabled` can be boolean (literal) OR string
-			// (HOCON env substitution). Type as `unknown` so the runtime
-			// reality matches the local cast and the strict opt-in check
-			// below needs no escape-hatch cast.
-			const grantConfig = (
-				effectiveDeps.config.oauth.grants as Record<string, { enabled?: unknown }>
-			)[name];
-			// Strict opt-in: matches the secure-default discipline applied at
-			// `oauthAuthorizationModule` / `oauthSessionModule`. Accepts boolean
-			// `true` and the string `"true"`; everything else (absent /
-			// undefined / boolean `false` / string `"false"` / unrelated
-			// truthy strings) is not-enabled.
-			const enabled = grantConfig?.enabled;
-			return enabled === true || enabled === "true";
-		};
-
-		// Pre-check phase: validate registry is not frozen and no enabled
-		// grant name conflicts with an already-registered handler. Done
-		// BEFORE any factory runs so factory side effects (e.g.
-		// tokenExchangeModule's `validatorRegistry.freeze()`) cannot leak
-		// when a later name in the same module conflicts. Per A6+A7 §2.1
-		// this preserves all-or-nothing semantics for addModule.
-		if (this.frozen) {
-			throw new GrantRegistryError({
-				reason: "frozen",
-				grantType: "<addModule>",
-				registered: [...this.handlers.keys()],
-			});
-		}
-		for (const name of Object.keys(module.grants)) {
-			if (!isEnabled(name)) continue;
-			if (this.handlers.has(name)) {
-				throw new GrantRegistryError({
-					reason: "duplicate",
-					grantType: name,
-					registered: [...this.handlers.keys()],
-				});
-			}
-		}
-
-		// Materialize + register phase: pre-check passed; factories may run.
-		for (const [name, factory] of Object.entries(module.grants)) {
-			if (!isEnabled(name)) continue;
-			this.register(name, factory(effectiveDeps));
-		}
-	}
-
-	cleanup(): void {
-		for (const handler of this.handlers.values()) {
-			handler.cleanup?.();
-		}
+	/**
+	 * Every registered handler, in registration order; a replaced one keeps
+	 * the place of the handler it replaced. Readable before and after
+	 * `freeze()`. Boot's `grants` collector hands this to the
+	 * `grantHandlerResolver` it projects.
+	 */
+	entries(): IterableIterator<readonly [string, GrantHandler]> {
+		return this.handlers.entries();
 	}
 }

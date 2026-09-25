@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { z } from "zod";
 import type { ProviderDeps } from "../modules/manifest/provider.mjs";
 import type { TokenEndpointAuthMethod } from "../repositories/types.mjs";
 import type { SenderConstraint } from "./senderConstraint.mjs";
@@ -190,9 +189,13 @@ export interface GrantHandlerResult {
 	sessionMutation?: SessionMutation;
 }
 
+/**
+ * What `/oauth/token` dispatches a `grant_type` to. It has no teardown hook:
+ * a module that holds a resource on a handler's behalf releases it through
+ * its own `lifecycle[K].cleanup`, which `AppHandle.dispose()` runs.
+ */
 export interface GrantHandler {
 	handle(ctx: GrantContext): Promise<GrantHandlerResult>;
-	cleanup?(): void;
 	/**
 	 * Declares that this grant must never be acquired by omission (#326).
 	 *
@@ -275,12 +278,3 @@ export type GrantDependencies = ProviderDeps<
  * Used by OSS consumers to implement custom grant types.
  */
 export type GrantFactory = (deps: GrantDependencies) => GrantHandler;
-
-/**
- * A module that bundles one or more grant factories together.
- * Used with GrantRegistry.addModule() for plugin-style registration.
- */
-export interface GrantModule {
-	grants: Record<string, GrantFactory>;
-	configSchema?: z.ZodType;
-}

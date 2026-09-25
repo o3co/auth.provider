@@ -14,218 +14,13 @@
  * limitations under the License.
  */
 import { describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import { GrantRegistry, GrantRegistryError } from "#/grants/registry.mjs";
-import type {
-	GrantDependencies,
-	GrantFactory,
-	GrantHandler,
-	GrantModule,
-} from "#/grants/types.mjs";
-import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import type { GrantHandler } from "#/grants/types.mjs";
 
 const makeHandler = (_name: string): GrantHandler => ({
 	handle: vi.fn().mockResolvedValue({
 		result: { status: 200, tokens: {} },
 	}),
-	cleanup: vi.fn(),
-});
-
-const makeFactory = (name: string): GrantFactory => {
-	return (_deps: GrantDependencies) => makeHandler(name);
-};
-
-const makeDeps = (
-	grantOverrides: Record<string, { enabled?: boolean }> = {},
-): GrantDependencies => ({
-	config: {
-		oauth: {
-			jwt: { secret: "test-secret" },
-			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400 },
-			grants: grantOverrides,
-		},
-	} as unknown as GrantDependencies["config"],
-	keyStore: createSymmetricKeyStore("test-secret"),
-});
-
-describe("GrantRegistry.addModule", () => {
-	it("registers enabled grants from a module", () => {
-		const registry = new GrantRegistry();
-		const module: GrantModule = {
-			grants: {
-				session: makeFactory("session"),
-			},
-		};
-		const deps = makeDeps({ session: { enabled: true } });
-
-		registry.addModule(module, deps);
-
-		expect(registry.get("session")).toBeDefined();
-	});
-
-	it("skips grants where config.enabled is false", () => {
-		const registry = new GrantRegistry();
-		const module: GrantModule = {
-			grants: {
-				session: makeFactory("session"),
-			},
-		};
-		const deps = makeDeps({ session: { enabled: false } });
-
-		registry.addModule(module, deps);
-
-		expect(registry.get("session")).toBeUndefined();
-	});
-
-	it("does NOT register grants with no config entry (strict opt-in semantics)", () => {
-		// Aligned with oauthAuthorizationModule / oauthSessionModule: a grant
-		// is registered only when its `enabled` value is explicitly truthy
-		// (boolean `true` or the string `"true"` from HOCON env substitution).
-		// Absent config entries are treated as not-enabled — this prevents
-		// a future composition root that addModule-routes a custom grant
-		// from accidentally enabling it via the omit-means-on legacy default.
-		const registry = new GrantRegistry();
-		const module: GrantModule = {
-			grants: {
-				session: makeFactory("session"),
-			},
-		};
-		const deps = makeDeps({}); // no session entry at all
-
-		registry.addModule(module, deps);
-
-		expect(registry.get("session")).toBeUndefined();
-	});
-
-	it("registers grants when enabled is the string 'true' (HOCON env-substitution outcome)", () => {
-		// `oauth.grants` is a passthrough sub-tree — HOCON env vars resolve
-		// as strings. The opt-in check accepts both boolean `true` and string
-		// `"true"` so the documented `OAUTH_GRANTS_X_ENABLED=true` operator
-		// pattern works through the addModule path as well as the
-		// contributes.grants path.
-		const registry = new GrantRegistry();
-		const module: GrantModule = {
-			grants: {
-				session: makeFactory("session"),
-			},
-		};
-		const deps = makeDeps({
-			session: { enabled: "true" as unknown as boolean },
-		});
-
-		registry.addModule(module, deps);
-
-		expect(registry.get("session")).toBeDefined();
-	});
-
-	it("registers multiple grants from a single module", () => {
-		const registry = new GrantRegistry();
-		const module: GrantModule = {
-			grants: {
-				session: makeFactory("session"),
-				authorization: makeFactory("authorization"),
-				refresh_token: makeFactory("refresh_token"),
-			},
-		};
-		const deps = makeDeps({
-			session: { enabled: true },
-			authorization: { enabled: true },
-			refresh_token: { enabled: true },
-		});
-
-		registry.addModule(module, deps);
-
-		expect(registry.get("session")).toBeDefined();
-		expect(registry.get("authorization")).toBeDefined();
-		expect(registry.get("refresh_token")).toBeDefined();
-	});
-
-	it("applies configSchema defaults when config block is missing", () => {
-		const registry = new GrantRegistry();
-		let receivedDeps: GrantDependencies | undefined;
-		const module: GrantModule = {
-			grants: {
-				custom: (deps) => {
-					receivedDeps = deps;
-					return makeHandler("custom");
-				},
-			},
-			configSchema: z.object({
-				custom: z
-					.object({
-						enabled: z.boolean().default(true),
-						timeout: z.coerce.number().default(500),
-					})
-					.default({ enabled: true, timeout: 500 }),
-			}),
-		};
-		// No "custom" entry in grants config
-		const deps = makeDeps({});
-
-		registry.addModule(module, deps);
-
-		expect(registry.get("custom")).toBeDefined();
-		expect(receivedDeps).toBeDefined();
-		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<
-			string,
-			Record<string, unknown>
-		>;
-		expect(grants.custom.timeout).toBe(500);
-		expect(grants.custom.enabled).toBe(true);
-	});
-
-	it("merges configSchema defaults with existing config values", () => {
-		const registry = new GrantRegistry();
-		let receivedDeps: GrantDependencies | undefined;
-		const module: GrantModule = {
-			grants: {
-				custom: (deps) => {
-					receivedDeps = deps;
-					return makeHandler("custom");
-				},
-			},
-			configSchema: z.object({
-				custom: z
-					.object({
-						enabled: z.boolean().default(true),
-						timeout: z.coerce.number().default(500),
-					})
-					.default({ enabled: true, timeout: 500 }),
-			}),
-		};
-		// Partial config — timeout should get default, enabled is explicit
-		const deps = makeDeps({ custom: { enabled: true } } as Record<string, { enabled?: boolean }>);
-
-		registry.addModule(module, deps);
-
-		expect(receivedDeps).toBeDefined();
-		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<
-			string,
-			Record<string, unknown>
-		>;
-		expect(grants.custom.timeout).toBe(500);
-	});
-
-	it("skips configSchema application when not provided", () => {
-		const registry = new GrantRegistry();
-		let receivedDeps: GrantDependencies | undefined;
-		const module: GrantModule = {
-			grants: {
-				session: (deps) => {
-					receivedDeps = deps;
-					return makeHandler("session");
-				},
-			},
-			// No configSchema
-		};
-		const deps = makeDeps({ session: { enabled: true } });
-
-		registry.addModule(module, deps);
-
-		// deps passed through unmodified
-		expect(receivedDeps).toBe(deps);
-	});
 });
 
 describe("GrantRegistry.register (A6+A7 §2.1: throw on duplicate)", () => {
@@ -356,79 +151,41 @@ describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
 	});
 });
 
-describe("GrantRegistry.addModule no-side-effect-leak (Codex review P1)", () => {
-	it("throws BEFORE running ANY factory when a name conflict exists", () => {
+describe("GrantRegistry.entries (what boot's grants collector lists)", () => {
+	it("lists every registered handler, in registration order", () => {
 		const registry = new GrantRegistry();
-		registry.register("session", makeHandler("existing"));
-
-		const factoryRan: string[] = [];
-		const trackingFactory =
-			(label: string): GrantFactory =>
-			() => {
-				factoryRan.push(label);
-				return makeHandler(label);
-			};
-		const module: GrantModule = {
-			grants: {
-				// "fresh" comes first in iteration order. Pre-check phase
-				// MUST detect the "session" duplicate before fresh's factory
-				// runs.
-				fresh: trackingFactory("fresh"),
-				session: trackingFactory("session"),
-			},
-		};
-		const deps = makeDeps({
-			fresh: { enabled: true },
-			session: { enabled: true },
-		});
-
-		expect(() => registry.addModule(module, deps)).toThrow(GrantRegistryError);
-		// No factory should have run because pre-check caught the duplicate.
-		expect(factoryRan).toEqual([]);
+		const foo = makeHandler("foo");
+		const bar = makeHandler("bar");
+		registry.register("foo", foo);
+		registry.register("bar", bar);
+		expect([...registry.entries()]).toEqual([
+			["foo", foo],
+			["bar", bar],
+		]);
 	});
 
-	it("throws frozen when registry is already sealed (no factory runs)", () => {
+	it("lists a replaced handler in the place of the one it replaced", () => {
 		const registry = new GrantRegistry();
+		const bar = makeHandler("bar");
+		const replacement = makeHandler("replacement");
+		registry.register("foo", makeHandler("foo"));
+		registry.register("bar", bar);
+		registry.replace("foo", replacement);
+		expect([...registry.entries()]).toEqual([
+			["foo", replacement],
+			["bar", bar],
+		]);
+	});
+
+	it("is left as it was by a refused register or replace", () => {
+		const registry = new GrantRegistry();
+		const foo = makeHandler("foo");
+		registry.register("foo", foo);
+		expect(() => registry.register("foo", makeHandler("duplicate"))).toThrow(GrantRegistryError);
+		expect(() => registry.replace("absent", makeHandler("absent"))).toThrow(GrantRegistryError);
 		registry.freeze();
-
-		const factoryRan: string[] = [];
-		const trackingFactory =
-			(label: string): GrantFactory =>
-			() => {
-				factoryRan.push(label);
-				return makeHandler(label);
-			};
-		const module: GrantModule = {
-			grants: {
-				newGrant: trackingFactory("newGrant"),
-			},
-		};
-		const deps = makeDeps({ newGrant: { enabled: true } });
-
-		expect(() => registry.addModule(module, deps)).toThrow(GrantRegistryError);
-		expect(factoryRan).toEqual([]);
-	});
-
-	it("skips disabled grants in the pre-check (no false-positive duplicate)", () => {
-		const registry = new GrantRegistry();
-		registry.register("session", makeHandler("existing"));
-
-		const module: GrantModule = {
-			grants: {
-				// session is in the module but disabled in config —
-				// pre-check must skip it (no duplicate error).
-				session: makeFactory("session"),
-				other: makeFactory("other"),
-			},
-		};
-		const deps = makeDeps({
-			session: { enabled: false },
-			other: { enabled: true },
-		});
-
-		// Should NOT throw because the disabled session entry is skipped.
-		registry.addModule(module, deps);
-		expect(registry.get("other")).toBeDefined();
+		expect(() => registry.register("late", makeHandler("late"))).toThrow(GrantRegistryError);
+		expect([...registry.entries()]).toEqual([["foo", foo]]);
 	});
 });
 

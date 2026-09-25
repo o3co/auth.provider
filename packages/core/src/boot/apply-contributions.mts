@@ -366,10 +366,9 @@ function warnOnTokenBindingSurfaceOverlap(
  *      that are fully populated at request time.
  *   2. Name-keyed pass (in `BootPlan.initOrder`):
  *        - Pre-scan phase: validate no duplicate/missing-target in collector
- *          state BEFORE running any factory for this module. The pre-scan
- *          mirrors `GrantRegistry.addModule` (commit de1ddb92) — prevents
- *          factory side-effect leak when one module's contribution set fails
- *          midway.
+ *          state BEFORE running any factory for this module, so a module
+ *          whose contribution set fails midway leaves no factory side effect
+ *          behind.
  *        - Materialize+register phase: invoke factories, route to
  *          `collector.register` (contributes) or `collector.replace` (overrides).
  *   3. List-shaped pass (in INPUT-ARRAY order):
@@ -429,11 +428,9 @@ export async function applyContributions(
 		);
 
 		// ------------------------------------------------------------------
-		// Pre-scan phase (mirrors GrantRegistry.addModule fix de1ddb92 to
-		// prevent factory side-effect leak).
-		//
-		// Validate ALL collector invariants for this module BEFORE invoking
-		// any factory. If any check fails, no factory for this module runs.
+		// Pre-scan phase: validate ALL collector invariants for this module
+		// BEFORE invoking any factory. If any check fails, no factory for this
+		// module runs, so none leaves a side effect behind.
 		// ------------------------------------------------------------------
 
 		for (const entry of nameKeyedContributes) {

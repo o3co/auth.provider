@@ -173,13 +173,9 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  * collectors on top.
  *
  * Built-in defaults:
- * - grants: `GrantRegistry`-backed `NameKeyedCollector` with shadow Map for
- *   `entries()`. The `GrantRegistry` is the source of truth for `register`
- *   semantics (throw on duplicate) and `freeze`. entries() reads from the
- *   shadow Map.
- *   NOTE: `GrantRegistry` does not currently expose `entries()`. A shadow Map
- *   mirrors every `register`/`replace` call. Future cleanup: upstream
- *   `entries()` to `GrantRegistry` directly (Option B from task spec).
+ * - grants: a `NameKeyedCollector` over one `GrantRegistry`, which holds the
+ *   handlers and answers every call — `register` / `replace` (throwing
+ *   `GrantRegistryError`), `freeze`, `get` and `entries`.
  * - tokenExchangeValidators: Map-backed `NameKeyedCollector`. The
  *   `ExchangeTokenValidatorRegistry` lives in a separate package
  *   (`oauth-token-exchange`) that `core` does not depend on; a plain Map
@@ -219,34 +215,22 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 // ---------------------------------------------------------------------------
 
 /**
- * Build a `NameKeyedCollector` backed by `GrantRegistry` for `register`,
- * `replace`, and `freeze`, with a shadow `Map` providing `entries()`.
- *
- * Option A pattern (per task spec): shadow Map mirrors every `register` /
- * `replace` call. `entries()` reads from the shadow, not the registry, because
- * `GrantRegistry` does not expose `entries()`. A future cleanup may upstream
- * `entries()` to `GrantRegistry` (Option B).
+ * Build the `grants` `NameKeyedCollector` over one `GrantRegistry`. The
+ * registry is the only store: `entries()` — what `grantHandlerResolver`
+ * lists — reads the same map `get` does.
  *
  * @internal
  */
 function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 	const registry = new GrantRegistry();
-	// Shadow Map: mirrors every register/replace for entries() support.
-	const shadow = new Map<string, GrantHandler>();
 
 	return {
 		kind: "name-keyed" as const,
 		register(name: string, value: GrantHandler): void {
-			// Delegate to GrantRegistry for throw-on-duplicate semantics.
 			registry.register(name, value);
-			// Mirror into shadow (only if registry didn't throw).
-			shadow.set(name, value);
 		},
 		replace(name: string, value: GrantHandler): void {
-			// Delegate to GrantRegistry for throw-on-unknown semantics.
 			registry.replace(name, value);
-			// Mirror into shadow.
-			shadow.set(name, value);
 		},
 		freeze(): void {
 			registry.freeze();
@@ -255,7 +239,7 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 			return registry.get(name);
 		},
 		entries(): IterableIterator<readonly [string, GrantHandler]> {
-			return shadow.entries() as IterableIterator<readonly [string, GrantHandler]>;
+			return registry.entries();
 		},
 	};
 }
