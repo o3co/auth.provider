@@ -358,7 +358,7 @@ describe("protectedResourceBindingMw — compound cnf", () => {
 		);
 		expect(logger.warn.mock.calls).toEqual([
 			[
-				{ rejection: "compound_cnf", scheme: "DPoP", site: "protected_resource_binding" },
+				{ rejection: "compound_cnf", scheme: "dpop", site: "protected_resource_binding" },
 				"sender_constraint_rejected",
 			],
 		]);
@@ -497,7 +497,7 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 		);
 		expect(proofLines).toHaveLength(1);
 		expect(logger.warn).toHaveBeenCalledWith(
-			{ rejection: "proof_invalid", scheme: "Bearer", site: "protected_resource_binding" },
+			{ rejection: "proof_invalid", scheme: "bearer", site: "protected_resource_binding" },
 			"sender_constraint_rejected",
 		);
 		expect(logger.warn).toHaveBeenCalledWith(

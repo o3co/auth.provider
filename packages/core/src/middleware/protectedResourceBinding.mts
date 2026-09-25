@@ -117,9 +117,14 @@ export const protectedResourceBindingMw = ({
 			return;
 		}
 
-		const reject = (reason: string, challenge: string, description: string): void => {
+		const reject = (rejection: string, challenge: string, description: string): void => {
+			// `rejection` names the sender-constraint rule that refused the
+			// request (`compound_cnf`, `scheme_mismatch`, `proof_invalid`,
+			// `no_matching_binding`). Not `reason`: the verdict line written
+			// beside a `proof_invalid` uses that for the mechanism's own name for
+			// the refused proof.
 			logger?.warn(
-				{ reason, scheme, site: "protected_resource_binding" },
+				{ rejection, scheme, site: "protected_resource_binding" },
 				"sender_constraint_rejected",
 			);
 			res.setHeader("WWW-Authenticate", `${challenge} error="invalid_token"`);
