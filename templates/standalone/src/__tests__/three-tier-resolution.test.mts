@@ -94,6 +94,18 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(grants(config).authorization_code?.enabled).toBe("false");
 	});
 
+	it("reference.conf default for mfa.mode is 'off', and the template installs no MFA module", () => {
+		// The MFA ADR's D19: off until the release that turns it on. Nothing
+		// here consults it yet; the template composes no MFA module.
+		const config = buildResolvedConfig("development");
+		expect(config.mfa?.mode).toBe("off");
+		expect(
+			buildModules(config)
+				.map((m) => m.name)
+				.filter((name) => /mfa/i.test(name)),
+		).toEqual([]);
+	});
+
 	it("reference.conf default for rateLimit.failMode is 'closed'", () => {
 		const config = buildResolvedConfig("development");
 		expect(config.rateLimit?.failMode).toBe("closed");
