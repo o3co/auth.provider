@@ -775,8 +775,10 @@ export type {
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
 	LinkFederatedIdentityResult,
+	SupportsMfaEnrollmentWitness,
 	UserRepository,
 } from "./repositories/UserRepository.mjs";
+export { supportsMfaEnrollmentWitness } from "./repositories/UserRepository.mjs";
 export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,

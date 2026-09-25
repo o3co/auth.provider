@@ -166,6 +166,40 @@ export interface UserRepository {
 	findSubjectByFederatedIdentity?(
 		identity: FederatedIdentityLookup,
 	): Promise<FederatedIdentityLookupResult>;
+	/**
+	 * Tell the Store whether `subject` has a second factor enrolled — the MFA
+	 * enrollment witness it answers on `authenticate` as `User.mfaEnrolled`
+	 * (the MFA ADR's D12). Optional; detected by
+	 * {@link supportsMfaEnrollmentWitness}.
+	 *
+	 * The provider decides and the Store only persists. It is called with
+	 * `true` after the first counting factor has been written, and with
+	 * `false` after the last one was removed or an operator reset every factor
+	 * — so a crash between the two leaves a factor without a witness, never a
+	 * witness without a factor. A verification whose `User` lacks the witness
+	 * while a counting factor exists marks it again. Idempotent. A backend that
+	 * cannot answer throws.
+	 */
+	markMfaEnrolled?(subject: string, enrolled: boolean): Promise<void>;
+}
+
+/** A `UserRepository` that can write the MFA enrollment witness. */
+export interface SupportsMfaEnrollmentWitness {
+	markMfaEnrolled(subject: string, enrolled: boolean): Promise<void>;
+}
+
+/**
+ * Whether `repository` can write the MFA enrollment witness (the MFA ADR's
+ * D12), detected by method presence like the other optional capabilities. A
+ * repository without it leaves the witness to whatever the Store answers on
+ * `authenticate`, which may be nothing.
+ */
+export function supportsMfaEnrollmentWitness(
+	repository: UserRepository,
+): repository is UserRepository & SupportsMfaEnrollmentWitness {
+	return (
+		typeof (repository as Partial<SupportsMfaEnrollmentWitness>).markMfaEnrolled === "function"
+	);
 }
 
 // ---------------------------------------------------------------------------

@@ -16,15 +16,15 @@ Adapter freedom applies **within** authentication and token issuance. It is not
 a licence to grow the responsibility.
 
 `UserRepository` is the clearest case, and the shape of the rule. It is
-`authenticate` / `authenticateByToken`, plus one optional member,
-`linkFederatedIdentity` (#482). Creating users, changing passwords, flipping
-verification state, linking a device to a user, upgrading an anonymous identity
-to a registered one — all of that belongs to the Store, and for all of it the
-library only ever *reads the result*. The one exception is the link below.
+`authenticate` / `authenticateByToken`, plus optional members for the flows this
+library drives. Creating users, changing passwords, flipping verification
+state, linking a device to a user, upgrading an anonymous identity to a
+registered one — all of that belongs to the Store, and for all of it the library
+only ever *reads the result*. The two exceptions are below.
 
-`linkFederatedIdentity` is the one call through which the library causes a
-write, and it passes the document's own test: the `?link=1` flow is one this
-library drives end to end, so the flow needs the seam. What still holds is the
+`linkFederatedIdentity` (#482) is one of two calls through which the library
+causes a write, and it passes the document's own test: the `?link=1` flow is one
+this library drives end to end, so the flow needs the seam. What still holds is the
 part that matters — the **Store decides**. The library relays the verified
 identity and the session it is bound to, and relays `refused` / `conflict` back
 unchanged; it never merges accounts, never links implicitly, and never links on
@@ -38,6 +38,22 @@ so where the temptation is highest:
 - `user-sessions/revokeAllForSubject.mts` — the Store issues the reset token,
   delivers it, writes the new credential, and *then* calls in to invalidate what
   was already minted.
+
+`markMfaEnrolled` is the other, the MFA enrollment witness (the MFA ADR's
+D12), and it passes the same test from the opposite side. Enrollment, removal
+and the operator reset of a second factor are this library's own flows, end to
+end, so here **the provider decides and the Store only persists**: after the
+first counting factor is written the provider marks the subject enrolled, and
+after the last is removed it clears the mark — in that order, so a crash leaves
+a factor without a witness, never a witness without a factor. The Store answers
+the mark back as `User.mfaEnrolled` on `authenticate`. Why it is a Store write at
+all: the witness has to survive the factor store it vouches for. A factor store
+that loses its records — a Redis restarted without persistence, an eviction, a
+restore from an old backup — would otherwise read as "never enrolled", and every
+affected account would accept a first binding from whoever holds its password.
+A repository without the capability (`supportsMfaEnrollmentWitness`), and a
+Store that answers no field, leave the witness absent; the factor store's
+durability is then the whole defence.
 
 That last one is the pattern for anything that looks like it needs a new slot:
 the library is downstream of the action, never the one taking it. **Message
@@ -144,7 +160,7 @@ a composition root. Listed because a module may `require` them.
 | `subjectRevocation` | `SubjectRevocation` | optional | `core/user-sessions/types.mts` | Per-subject not-before watermark: what a credential change stamps so tokens minted before it stop verifying. Absence must be declared (#406). |
 | `subjectRevocationService` | `SubjectRevocationService` | optional | `core/user-sessions/subjectRevocationService.mts` | Not an adapter seam: the composed operation a Store calls to end everything one subject holds (#593, D13) — the boundary, their sessions, and their federation grants. It is a component rather than the free `revokeAllForSubject` because building it needs every session store plus the cascade, and because the one decision it carries — whether a caller MAY ask for the subject's established grants to be kept — belongs to the operator (`federationGrants.allowKeepOnSubjectRevocation`) and not to the caller. Filled by an explicitly installed module in `@o3co/auth-provider-oauth`, where `cascadeLogout` lives. |
 | `subjectSessionIndex` | `SubjectSessionIndex` | optional | `core/user-sessions/types.mts` | Subject → live sessions, so a credential change can enumerate what to cascade over. Absence must be declared (#406). |
-| `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken`, plus the optional `linkFederatedIdentity` a `?link=1` flow relays to the Store, which decides — see the boundary section. The optional pair `supportsFederatedIdentityLookup` / `findSubjectByFederatedIdentity` is what a federation-grant callback asks (D7 check 5, #611): whether the Store covers a registration with the claims its connection names — asked at boot — and who holds an identity from it, given the registration, the `sub` and those verified claims (Entra's `tid`/`oid` for a directory Store), as `linked` / `unlinked` / `indeterminate`. The bundled `InMemoryUserRepository` covers none. |
+| `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken`, plus the optional `linkFederatedIdentity` a `?link=1` flow relays to the Store, which decides, and the optional `markMfaEnrolled`, the MFA enrollment witness the provider writes and the Store answers back as `User.mfaEnrolled` — see the boundary section. The optional pair `supportsFederatedIdentityLookup` / `findSubjectByFederatedIdentity` is what a federation-grant callback asks (D7 check 5, #611): whether the Store covers a registration with the claims its connection names — asked at boot — and who holds an identity from it, given the registration, the `sub` and those verified claims (Entra's `tid`/`oid` for a directory Store), as `linked` / `unlinked` / `indeterminate`. The bundled `InMemoryUserRepository` covers none. |
 | `userSessionStore` | `UserSessionStore` | optional | `core/user-sessions/types.mts` | The session records themselves, keyed by `sid`. |
 | `webauthnConfig` | `WebAuthnConfig` | optional | `webauthn/config.mts` | Config slice for the WebAuthn module. |
 | `webauthnCredentialStore` | `WebAuthnCredentialStore` | optional | `core/webauthn-credentials/types.mts` | Registered passkeys. |
