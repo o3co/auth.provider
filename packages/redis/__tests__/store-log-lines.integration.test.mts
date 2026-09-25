@@ -71,7 +71,11 @@ const provide = <T,>(
 	module: { provides?: Record<string, unknown> },
 	slot: string,
 	deps: Record<string, unknown>,
-): T => (module.provides?.[slot] as (deps: unknown) => T)(deps);
+): T => {
+	const factory = module.provides?.[slot] as ((deps: unknown) => T) | undefined;
+	if (factory === undefined) throw new Error(`the module provides no ${slot}`);
+	return factory(deps);
+};
 
 describe("redisSessionStoresModule: the stores it builds log on the composition's logger", () => {
 	const sessionDeps = (keyPrefix: string, logger?: Logger) => ({
