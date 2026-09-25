@@ -92,7 +92,7 @@ EXPOSE ${HTTP_PORT}
 # per-service, which keeps the restart-driving signal out of it.
 #
 # Use the shell form so ${HTTP_PORT} expands at probe time. The HOCON
-# config reads `${?HTTP_PORT}` for `http.port`, so app.listen() and the
+# config reads `${?HTTP_PORT}` for `http.port`, so the listener and the
 # probe stay in sync regardless of the operator's port choice.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -q -O /dev/null "http://localhost:${HTTP_PORT}/_healthcheck" || exit 1

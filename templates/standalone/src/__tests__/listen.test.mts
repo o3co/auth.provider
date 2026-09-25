@@ -20,10 +20,12 @@
  *
  * The line used to be a template string, `Server is running on
  * http://localhost:<port>`, which a log pipeline indexes as free text rather
- * than as an event with a port. And Express 5's `app.listen` hands its
- * callback the server's `error` as well as its `listening`, so a callback that
- * ignored its argument announced a server on a port another process held,
- * while Express swallowed the error that should have ended the process.
+ * than as an event with a port. And the standalone called Express 5's
+ * `app.listen`, which hands its callback the server's `error` as well as its
+ * `listening`: a callback that ignored its argument announced a server on a
+ * port another process held, while the error that should have ended the
+ * process was swallowed. `listen` now builds the server and wires its events
+ * itself.
  */
 
 import { createServer, type Server } from "node:http";
@@ -72,10 +74,9 @@ describe("listen", () => {
 	});
 
 	it("logs a server error after the bind — server_error, the projection — rather than swallowing it", async () => {
-		// Express 5 hands its listen callback the server's first `error`; once
-		// the socket is bound, a later one (accept EMFILE) went to that spent
-		// callback and was lost — and the one after it, with no listener left,
-		// threw out of the process.
+		// Once the socket is bound, a later `error` (accept EMFILE) went to
+		// Express 5's spent listen callback and was lost — and the one after
+		// it, with no listener left, threw out of the process.
 		const { logger, calls } = recordingLogger();
 		const server = await listen(express(), 0, logger);
 		opened.push(server);
@@ -108,12 +109,14 @@ describe("listen", () => {
 		opened.push(server);
 
 		expect(server.listenerCount("error")).toBe(1);
-		expect(server.listenerCount("listening")).toBe(0);
+		// And nothing of `listen`'s own left on `listening`: an http.Server
+		// keeps one there itself (its connection tracking).
+		expect(server.listenerCount("listening")).toBe(createServer().listenerCount("listening"));
 	});
 
 	it("rejects with the server's error for a port already bound, and announces nothing", async () => {
 		const holder = createServer();
-		// Every interface, as `app.listen(port)` binds, so the two collide.
+		// Every interface, as `server.listen(port)` binds, so the two collide.
 		await new Promise<void>((resolve) => holder.listen(0, resolve));
 		opened.push(holder);
 		const { port } = holder.address() as AddressInfo;

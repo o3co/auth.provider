@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { Express } from "express";
@@ -28,32 +28,39 @@ import type { Express } from "express";
  * composition root awaits this, so the error ends boot the way any other boot
  * failure does.
  *
- * Express 5's `app.listen` passes the server's `error` to the same callback
- * as its `listening`, and consumes the event. A callback that ignores its
- * argument therefore announces a server on a port another process holds,
- * while the error that should have stopped the process is swallowed — which
- * is what this used to do.
+ * The server is built here (`http.createServer(app)`, as `app.listen` itself
+ * does) and its events are wired here, so none of this rests on how a given
+ * Express version wires them. Until the socket is bound, one `error` listener
+ * turns a bind failure into the rejection. Once it is bound, that listener is
+ * removed and the server gets the one it keeps: a later `error` — an `accept`
+ * that fails with EMFILE — is logged as `server_error` (error, `err`: core's
+ * `loggableError` projection) and the process keeps running, the server
+ * accepting what it can. Without a listener of its own, such an error would be
+ * thrown out of the process.
  *
- * Once the socket is bound, that callback is spent: a later `error` (an
- * `accept` that fails with EMFILE) would go to it and be lost, and the one
- * after would find no listener and be thrown out of the process. So the
- * bound server gets a listener of its own that logs each as `server_error`
- * (error, `err`: core's `loggableError` projection) and leaves the process
- * running — the server keeps accepting what it can.
+ * The standalone used to call `app.listen` with a callback that ignored its
+ * argument: Express 5 hands that callback the bind error too, so it announced
+ * a server on a port another process held and swallowed the error that should
+ * have ended the process.
  */
 export function listen(app: Express, port: number, logger: Logger): Promise<Server> {
+	const server = createServer(app);
 	return new Promise((resolve, reject) => {
-		const server = app.listen(port, (err?: Error) => {
-			if (err !== undefined) {
-				reject(err);
-				return;
-			}
+		const refuse = (err: Error): void => {
+			server.off("listening", bound);
+			reject(err);
+		};
+		const bound = (): void => {
+			server.off("error", refuse);
 			server.on("error", (serverErr: Error) => {
 				logger.error({ err: loggableError(serverErr) }, "server_error");
 			});
 			const address = server.address() as AddressInfo | null;
 			logger.info({ port: address?.port ?? port }, "server_listening");
 			resolve(server);
-		});
+		};
+		server.once("error", refuse);
+		server.once("listening", bound);
+		server.listen(port);
 	});
 }
