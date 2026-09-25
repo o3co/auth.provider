@@ -113,10 +113,10 @@ const aad = (head: Buffer, keyId: Buffer, record: Buffer): Buffer =>
  * is encoded rather than written literally so that the separator cannot
  * appear inside it whatever an operator configures.
  *
- * Throws on a ring that could not seal (empty, or refused by
- * `checkSealingKeyRing`) and a purpose outside {@link SealBinding.purpose}'s
- * rule (`RangeError`): both are faults of the caller or its configuration,
- * never of the value.
+ * Throws a `RangeError` on a ring that could not seal (empty, or refused by
+ * `checkSealingKeyRing`) and on a purpose outside {@link SealBinding.purpose}'s
+ * rule: both are faults of the caller or its configuration, never of the
+ * value.
  *
  * A wrong IV or tag length is not checked on open: `createDecipheriv` and
  * `setAuthTag` refuse both, and a check in front of them could only ever
@@ -130,7 +130,7 @@ export function sealWithKeyRing(
 	checkSealingKeyRing(ring);
 	const head = header(binding.purpose);
 	const sealing = ring[0];
-	if (sealing === undefined) throw new Error("no encryption key to seal with");
+	if (sealing === undefined) throw new RangeError("no encryption key to seal with");
 	const keyId = Buffer.from(sealing.id, "utf8");
 	const iv = randomBytes(IV_LEN);
 	const cipher = createCipheriv(ALGO, sealing.key, iv);
@@ -152,7 +152,7 @@ export function sealWithKeyRing(
  * of a corrupted value would send them looking for a key that would not
  * help. No key is ever tried but the one the envelope names.
  *
- * Throws, as sealing does, on a malformed ring or purpose.
+ * Throws a `RangeError`, as sealing does, on a malformed ring or purpose.
  */
 export function openWithKeyRing(
 	envelope: string,

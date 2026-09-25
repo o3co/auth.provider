@@ -48,21 +48,23 @@ const KEY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 export const isSealingKeyId = (id: string): boolean => KEY_ID_PATTERN.test(id);
 
 /**
- * Refuses a ring no envelope could be sealed or opened under: a key ID
- * outside the rule, a duplicate ID, or key material that is not
- * {@link SEALING_KEY_BYTES} bytes. An empty ring passes; whether one may be
- * empty is the caller's to say (it can open nothing and seal nothing).
+ * Refuses, as a `RangeError`, a ring no envelope could be sealed or opened
+ * under: a key ID outside the rule, a duplicate ID, or key material that is
+ * not {@link SEALING_KEY_BYTES} bytes. A ring is a setting, and one that is
+ * given but unusable is refused rather than worked around. An empty ring
+ * passes; whether one may be empty is the caller's to say (it can open
+ * nothing and seal nothing).
  */
 export function checkSealingKeyRing(ring: SealingKeyRing): void {
 	const seen = new Set<string>();
 	for (const entry of ring) {
 		if (!isSealingKeyId(entry.id)) {
-			throw new Error(`encryption key id must match ${KEY_ID_PATTERN.source}`);
+			throw new RangeError(`encryption key id must match ${KEY_ID_PATTERN.source}`);
 		}
-		if (seen.has(entry.id)) throw new Error("duplicate encryption key id");
+		if (seen.has(entry.id)) throw new RangeError("duplicate encryption key id");
 		seen.add(entry.id);
 		if (entry.key.length !== SEALING_KEY_BYTES) {
-			throw new Error(`encryption key must be ${SEALING_KEY_BYTES} bytes`);
+			throw new RangeError(`encryption key must be ${SEALING_KEY_BYTES} bytes`);
 		}
 	}
 }
