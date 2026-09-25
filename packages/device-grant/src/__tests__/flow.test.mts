@@ -199,6 +199,8 @@ const makeHarness = (
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		accessTokenExpiresIn: 300,
 		now: clock.now,
+		...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
+		...(overrides.logger ? { logger: overrides.logger } : {}),
 	});
 
 	const poll = (
@@ -1380,5 +1382,96 @@ describe("the session check, further", () => {
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(/userSessionStore/);
+	});
+});
+
+describe("a subject revocation between the approval and the poll", () => {
+	// The approval is checked against the session at approval time; a
+	// revocation that lands after it, before the device polls, is older than
+	// the token the poll mints — so `verifyJwt` never refuses that token. The
+	// poll holds the approval's own instant against the boundary instead.
+	const APPROVAL = 1_800_000_000_000; // the harness clock's start, and each fixed session's authTime
+	const FAR = new Date(1_900_000_000_000);
+
+	const approvedDevice = async (harness: ReturnType<typeof makeHarness>) => {
+		const started = await startDevice(harness.app);
+		const approved = await verify(harness.app, {
+			action: "approve",
+			user_code: started.body.user_code,
+		});
+		expect(approved.status).toBe(200);
+		harness.clock.advance(10_000);
+		return started.body.device_code as string;
+	};
+
+	it("refuses the poll when the boundary was stamped at or after the approval", async () => {
+		const subjectRevocation = createInMemorySubjectRevocation();
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("honours an approval given after the boundary", async () => {
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
+	it("refuses an approval that records no instant while a boundary is in force", async () => {
+		// A record written before the store recorded the approval's instant
+		// cannot show it postdates the boundary; the iat-less token's rule.
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const inner = createMemoryDeviceCodeStore();
+		const legacy = {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { ...outcome, authorization: { ...outcome.authorization, approvedAtMs: undefined } }
+					: outcome;
+			},
+		};
+		const harness = makeHarness({ subjectRevocation, store: legacy as never });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("answers a boundary it cannot read at the poll with 503, logged once at error", async () => {
+		const logger = makeLogger();
+		const state = { down: false };
+		const inner = createInMemorySubjectRevocation();
+		const subjectRevocation: SubjectRevocation = {
+			kind: "switchable",
+			revokeBefore: (...args) => inner.revokeBefore(...args),
+			revokedBefore: async (subject) => {
+				if (state.down) throw new Error("redis down");
+				return inner.revokedBefore(subject);
+			},
+		};
+		const harness = makeHarness({ subjectRevocation, logger });
+		const deviceCode = await approvedDevice(harness);
+		state.down = true;
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "the device authorization store is unavailable; retry later",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("device_code_grant_revocation_unavailable");
+		expect(line).toMatchObject({ store: "revocation_boundary", step: "read", clientId: CLIENT_ID });
+		expect(line.err).not.toBeInstanceOf(Error);
 	});
 });

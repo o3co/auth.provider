@@ -1147,6 +1147,43 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 		}
 	});
 
+	it("refuses the device's poll when the subject's sessions were revoked between the approval and the poll", async () => {
+		// The approval was given from a live session. revokeAllForSubject then
+		// lands before the device polls — within the code's lifetime, ten
+		// minutes by default — and the token the poll would mint postdates its
+		// watermark, so nothing downstream would refuse it. A holder of a
+		// stolen live session could approve codes ahead and redeem them after
+		// the victim's credential change.
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, [
+			...modulesFor(config),
+			subjectRevocationServiceModule,
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRevocationModule,
+		]);
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+			const approved = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(approved.status).toBe(200);
+
+			const service = handle.components.subjectRevocationService as SubjectRevocationService;
+			expect((await service.revokeAllForSubject({ subject: "user-1" })).complete).toBe(true);
+
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.status).toBe(400);
+			expect(polled.body.error).toBe("invalid_grant");
+			expect(polled.body.access_token).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("answers a session-store outage with 503 temporarily_unavailable, logged once at error, and decides nothing", async () => {
 		// The store said nothing about whether the user is signed in, so the
 		// answer is the outage, not `login_required` — and not an approval on

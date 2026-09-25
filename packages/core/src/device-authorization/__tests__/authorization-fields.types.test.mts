@@ -61,6 +61,7 @@ describe("DeviceAuthorization — what a store answers with", () => {
 		expectTypeOf<IsRequiredKey<DeviceAuthorization, "requestedScope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<DeviceAuthorization, "subject">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<DeviceAuthorization, "grantedScope">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<DeviceAuthorization, "approvedAtMs">>().toEqualTypeOf<true>();
 	});
 
 	it("still lets a field be absent in value, as undefined", () => {
@@ -68,6 +69,7 @@ describe("DeviceAuthorization — what a store answers with", () => {
 		expectTypeOf<DeviceAuthorization["grantedScope"]>().toEqualTypeOf<
 			readonly string[] | undefined
 		>();
+		expectTypeOf<DeviceAuthorization["approvedAtMs"]>().toEqualTypeOf<number | undefined>();
 	});
 });
 
