@@ -583,6 +583,12 @@ export interface ComposeOptions {
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
 	readonly shippedRefreshTokenFamilyStore?: boolean;
+	/**
+	 * Mount the template's terminal error handler after the composed router,
+	 * as `app.mts` does (the default). `false` mounts the router alone, as a
+	 * composition root that copies nothing of `app.mts` does.
+	 */
+	readonly terminalErrorHandler?: boolean;
 }
 
 /** The module list the template boots for `config`, as `app.mts` builds it. */
@@ -613,8 +619,9 @@ export interface Composition {
 
 /**
  * Boots the composition and mounts it as `app.mts` does: `helmet`, the
- * composed router, and the terminal error handler last, all on one logger
- * that is also the boot's `logger` component.
+ * composed router, and the terminal error handler last (unless
+ * `terminalErrorHandler` is `false`), all on one logger that is also the
+ * boot's `logger` component.
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
 	const base = resolveConfig(options.env ?? SINGLE_ENV, options.referenceConfs);
@@ -638,7 +645,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 		}),
 	);
 	app.use(handle.router);
-	app.use(createTerminalErrorHandler(logger));
+	if (options.terminalErrorHandler !== false) app.use(createTerminalErrorHandler(logger));
 	return { app, handle, config, modules, logger, upstreams: fakes };
 }
 
