@@ -34,13 +34,13 @@
  *
  * `knownDefect` marks a contract the composition breaks today; its comment
  * names the defect. In the monorepo it is `it.fails`: the fix that mends the
- * defect turns the case red, and turns it into a plain `it`.
+ * defect turns the case red, and turns it into a plain `it`. An outage case
+ * pins only the part of the #685 rule that is broken, and asserts the rest
+ * (`describeOutages` in the fixture).
  */
 
 import { readdirSync, readFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
-import type { AppConfig, Module } from "@o3co/auth-provider-core";
+import type { AppConfig } from "@o3co/auth-provider-core";
 import type express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -52,25 +52,39 @@ import {
 	type Composition,
 	codeFrom,
 	compose,
+	contributionNames,
 	cookiesOf,
 	DISCOVERY_PATHS,
+	describeOutages,
 	expectValidMetadata,
 	FEDERATION_LANDING,
+	FORM_TYPE,
 	federatedCallback,
 	ISSUER,
-	type LogLine,
+	inMonorepo,
+	JSON_TYPE,
+	KIB,
+	knownDefect,
 	lodgeGrant,
 	login,
 	M2M,
 	type ModuleOrder,
 	type Outage,
+	type OutageCase,
+	padForm,
+	padJson,
 	REVERSED,
 	redeem,
 	SINGLE_ENV,
+	TEMPLATE_DEPENDENCIES,
 	THIRD,
+	TOO_LARGE,
+	TRANSFERS,
 	WEB,
 	WORKER,
 	webTokens,
+	withLength,
+	withoutTheLine,
 } from "./all-modules-composition.fixture.mjs";
 
 let current: Composition | undefined;
@@ -126,31 +140,9 @@ const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-webauthn": "webauthnModule",
 };
 
-const templateManifest = JSON.parse(
-	readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-) as { dependencies: Record<string, string> };
-
-/**
- * Inside the monorepo the template names its siblings `workspace:*`; a
- * scaffold, and CI's packed-tarball run, name versions or tarballs. Only the
- * monorepo has a workspace for the package list to drift from.
- */
-const inMonorepo =
-	templateManifest.dependencies["@o3co/auth-provider-core"]?.startsWith("workspace:") === true;
-
-/**
- * A contract the composition breaks today. `it.fails` in the monorepo, where
- * the fix lands beside this file and flips it; skipped in a scaffold, which
- * pins released packages and would otherwise turn red on the upgrade that
- * carries the fix.
- */
-const knownDefect = inMonorepo ? it.fails : it.skip;
-
 describe("what the all-modules composition covers", () => {
 	it("names every @o3co/auth-provider-* package the template depends on", () => {
-		const siblings = Object.keys(templateManifest.dependencies)
-			.filter((name) => name.startsWith("@o3co/auth-provider-"))
-			.sort();
+		const siblings = [...TEMPLATE_DEPENDENCIES].sort();
 		expect(siblings).toEqual(Object.keys(TEMPLATE_PACKAGES).sort());
 	});
 
@@ -213,12 +205,6 @@ const ALL_ON_MODULES = [
 ];
 
 const ENABLED_GRANTS = ["authorization_code", "client_credentials", "refresh_token", "session"];
-
-const contributionNames = (module: Module, kind: string): string[] => {
-	const contribution = (module.contributes as Record<string, unknown> | undefined)?.[kind];
-	if (contribution === undefined) return [];
-	return Array.isArray(contribution) ? [module.name] : Object.keys(contribution as object);
-};
 
 describe("every module the template can turn on boots together", () => {
 	it("lists every module, and boots with nothing refused", async () => {
@@ -374,6 +360,14 @@ describe("discovery", () => {
 	});
 
 	it("no consent store: the flag is gone (it could not be completed) and /oauth/consent is not mounted", async () => {
+		// On, the consent route answers for itself: no session, `401 login_required`.
+		const on = await boot();
+		const mounted = await request(on.app).get("/oauth/consent");
+		expect(mounted.status).toBe(401);
+		expect(mounted.body.error).toBe("login_required");
+		await on.handle.dispose();
+		current = undefined;
+
 		const { app } = await boot({ env: { ...SINGLE_ENV, CONSENT_STORE_ADAPTER: "none" } });
 		const doc = (await request(app).get(DISCOVERY_PATHS[0])).body;
 		expectValidMetadata(doc);
@@ -580,13 +574,21 @@ describe("every module's primary route answers in the one app", () => {
 			try {
 				composed = await boot({ config: withoutLanding });
 			} catch (err) {
-				expect(String((err as { cause?: unknown }).cause ?? err)).toMatch(/clientUrl/);
+				// A refusal: a BootError that names the key.
+				const e = err as { name?: string; message?: string; cause?: { message?: string } };
+				expect(e.name).toBe("BootError");
+				expect(`${e.message ?? ""} ${e.cause?.message ?? ""}`).toMatch(/clientUrl/);
 				return;
 			}
+			// Or a completed login: the callback lands the browser somewhere, and
+			// the session it made is one /authorize accepts.
 			const callback = await (
 				await federatedCallback(composed.app, "oidc", composed.upstreams.oidc)
 			)();
-			expect(callback.status).toBeLessThan(500);
+			expect(callback.status).toBe(302);
+			const authorized = await authorize(composed.app, cookiesOf(callback));
+			expect(authorized.status).toBe(302);
+			expect(authorized.headers.location).toMatch(/\?code=/);
 		},
 	);
 
@@ -605,93 +607,6 @@ describe("every module's primary route answers in the one app", () => {
 // Bodies and content types
 // ---------------------------------------------------------------------------
 
-const KIB = 1024;
-
-/**
- * A POST whose body has no `Content-Length` — `Transfer-Encoding: chunked`,
- * one KiB a chunk — so only a parser's own running count can bound it.
- * supertest always sets the length, hence a raw request on a real socket.
- */
-async function postChunked(
-	app: express.Express,
-	path: string,
-	contentType: string,
-	body: string,
-	headers: Record<string, string> = {},
-): Promise<{ status: number; body: Record<string, unknown> }> {
-	const server = http.createServer(app);
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	try {
-		const { port } = server.address() as AddressInfo;
-		return await new Promise((resolve, reject) => {
-			let answered = false;
-			const req = http.request(
-				{
-					host: "127.0.0.1",
-					port,
-					path,
-					method: "POST",
-					// One connection per request, closed after it: nothing keeps the server open.
-					agent: false,
-					headers: { ...headers, "content-type": contentType, "transfer-encoding": "chunked" },
-				},
-				(res) => {
-					answered = true;
-					let text = "";
-					res.setEncoding("utf8");
-					res.on("data", (chunk: string) => {
-						text += chunk;
-					});
-					res.on("end", () => {
-						let parsed: Record<string, unknown> = {};
-						try {
-							parsed = JSON.parse(text) as Record<string, unknown>;
-						} catch {
-							// Not JSON: the status carries the verdict.
-						}
-						resolve({ status: res.statusCode ?? 0, body: parsed });
-					});
-				},
-			);
-			// A server that answers 413 mid-body may close the socket while the
-			// rest is still being written; that is the answer, not a failure.
-			req.on("error", (err) => {
-				if (!answered) reject(err);
-			});
-			for (let at = 0; at < body.length; at += KIB) req.write(body.slice(at, at + KIB));
-			req.end();
-		});
-	} finally {
-		await new Promise<void>((resolve) => server.close(() => resolve()));
-	}
-}
-
-const padJson = (bytes: number): string => JSON.stringify({ pad: "a".repeat(bytes) });
-const padForm = (bytes: number, fields = "grant_type=client_credentials"): string =>
-	`${fields}&pad=${"a".repeat(bytes)}`;
-
-type Send = (
-	app: express.Express,
-	path: string,
-	contentType: string,
-	body: string,
-	headers?: Record<string, string>,
-) => Promise<{ status: number; body: Record<string, unknown> }>;
-
-const withLength: Send = async (app, path, contentType, body, headers = {}) => {
-	const res = await request(app)
-		.post(path)
-		.set(headers)
-		.set("Content-Type", contentType)
-		.send(body);
-	return { status: res.status, body: res.body as Record<string, unknown> };
-};
-
-const TRANSFERS: ReadonlyArray<readonly [string, Send]> = [
-	["with Content-Length", withLength],
-	["chunked", postChunked],
-];
-
 describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 	"bodies and content types, modules %s",
 	(order) => {
@@ -704,19 +619,26 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 			await composed.handle.dispose();
 		});
 
-		it("mounts in a different order from the other case", () => {
+		it("mounts in a different order from the other case, under /oauth and under /session", () => {
 			const ids = composed.handle.routes.map((r) => r.contribution.id);
-			const grants = ids.indexOf("federation-grants");
-			const oauth = ids.indexOf("oauth-endpoints");
-			expect(grants >= 0 && oauth >= 0).toBe(true);
-			expect(grants < oauth).toBe(order === AS_LISTED);
+			for (const [neighbour, own] of [
+				["federation-grants", "oauth-endpoints"],
+				["federation-grants-browser", "session-routes"],
+			] as const) {
+				expect(ids, own).toContain(own);
+				expect(ids, neighbour).toContain(neighbour);
+				expect(ids.indexOf(neighbour) < ids.indexOf(own), `${neighbour} / ${own}`).toBe(
+					order === AS_LISTED,
+				);
+			}
 		});
 
 		it.each(TRANSFERS)(
 			"federation grants keep their 16 KiB bound beneath oauthModule's /oauth, a body sent %s",
 			async (_transfer, send) => {
-				for (const type of ["application/json", "application/x-www-form-urlencoded"]) {
-					const body = type === "application/json" ? padJson(40 * KIB) : padForm(40 * KIB);
+				for (const type of [JSON_TYPE, FORM_TYPE]) {
+					const body =
+						type === JSON_TYPE ? padJson(40 * KIB) : padForm(40 * KIB, "sub=local-subject");
 					const res = await send(composed.app, "/oauth/federation-grants", type, body, {
 						authorization: basic(WORKER),
 					});
@@ -735,7 +657,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 				const res = await send(
 					composed.app,
 					"/session/federation-grants/consent",
-					"application/json",
+					JSON_TYPE,
 					padJson(40 * KIB),
 				);
 				expect(res.status).toBe(413);
@@ -747,31 +669,50 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 			"the token endpoint parses past a neighbour's 16 KiB and stops at its own 100 KiB, a body sent %s",
 			async (_transfer, send) => {
 				const headers = { authorization: basic(M2M) };
-				const form = "application/x-www-form-urlencoded";
-				const within = await send(composed.app, "/oauth/token", form, padForm(50 * KIB), headers);
+				const fields = "grant_type=client_credentials";
+				const within = await send(
+					composed.app,
+					"/oauth/token",
+					FORM_TYPE,
+					padForm(50 * KIB, fields),
+					headers,
+				);
 				// Parsed and handed to the grant, which refuses the missing scope.
 				expect(within.status).toBe(400);
 				expect(within.body.error).toBe("invalid_scope");
-				const over = await send(composed.app, "/oauth/token", form, padForm(150 * KIB), headers);
+				const over = await send(
+					composed.app,
+					"/oauth/token",
+					FORM_TYPE,
+					padForm(150 * KIB, fields),
+					headers,
+				);
 				expect(over.status).toBe(413);
-				expect(over.body).toEqual({
-					error: "invalid_request",
-					error_description: "request body too large",
-				});
+				expect(over.body).toEqual(TOO_LARGE);
 			},
 		);
 
 		it.each(TRANSFERS)(
 			"the login route parses past a neighbour's 16 KiB and stops at its own 100 KiB, a body sent %s",
 			async (_transfer, send) => {
-				const form = "application/x-www-form-urlencoded";
 				const fields = `username=${ALICE.username}&password=x`;
-				const within = await send(composed.app, "/session/login", form, padForm(50 * KIB, fields));
+				const within = await send(
+					composed.app,
+					"/session/login",
+					FORM_TYPE,
+					padForm(50 * KIB, fields),
+				);
 				// Parsed and handed to the route, whose CSRF check refuses it.
 				expect(within.status).toBe(403);
 				expect(within.body.error).toBe("access_denied");
-				const over = await send(composed.app, "/session/login", form, padForm(150 * KIB, fields));
+				const over = await send(
+					composed.app,
+					"/session/login",
+					FORM_TYPE,
+					padForm(150 * KIB, fields),
+				);
 				expect(over.status).toBe(413);
+				expect(over.body).toEqual(TOO_LARGE);
 			},
 		);
 
@@ -784,19 +725,19 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])(
 				status: 415,
 				body: { error: "invalid_request", error_description: "unsupported_content_type" },
 			});
+			expect(await withLength(app, "/oauth/federation-grants", JSON_TYPE, "{nope", grants)).toEqual(
+				{
+					status: 400,
+					body: { error: "invalid_request", error_description: "malformed_body" },
+				},
+			);
 			expect(
-				await withLength(app, "/oauth/federation-grants", "application/json", "{nope", grants),
+				await withLength(app, "/session/federation-grants/consent", JSON_TYPE, "{nope"),
 			).toEqual({
 				status: 400,
 				body: { error: "invalid_request", error_description: "malformed_body" },
 			});
-			expect(
-				await withLength(app, "/session/federation-grants/consent", "application/json", "{nope"),
-			).toEqual({
-				status: 400,
-				body: { error: "invalid_request", error_description: "malformed_body" },
-			});
-			const token = await withLength(app, "/oauth/token", "application/json", "{nope", {
+			const token = await withLength(app, "/oauth/token", JSON_TYPE, "{nope", {
 				authorization: basic(M2M),
 			});
 			expect(token.status).toBe(400);
@@ -836,43 +777,59 @@ describe("a request body the OAuth endpoints do not parse", () => {
 // Outages
 // ---------------------------------------------------------------------------
 
-interface OutageCase {
-	/** The module whose route answers. */
-	readonly module: string;
-	/** The ComponentMap slot whose store goes down. */
-	readonly slot: string;
-	readonly surface: string;
-	/** Drives the route, taking the store down at the step under test. */
-	readonly run: (app: express.Express, outage: Outage, c: Composition) => Promise<request.Response>;
-	readonly answer:
-		| { readonly status: 503; readonly error: string }
-		| { readonly redirect: string; readonly error: "temporarily_unavailable" };
-	/**
-	 * The name of the one line the outage writes (#685). Absent where the
-	 * composition writes no such line today, so that the defect's fix turns
-	 * the case red whatever name it gives the line.
-	 */
-	readonly event?: string;
-	/** Warn lines this route writes whatever the store does — not the outage's. */
-	readonly unrelatedWarns?: readonly string[];
-	/** Set when the composition breaks the contract today: the defect, named. */
-	readonly defect?: string;
-}
-
 const tokenRequest = (app: express.Express, client: { id: string; secret: string }) =>
 	request(app).post("/oauth/token").set("Authorization", basic(client)).type("form");
+
+/** The code exchange, with the store taken down just before the redeem. */
+const codeExchange = async (app: express.Express, outage: Outage) => {
+	const { cookies } = await login(app);
+	const code = codeFrom(await authorize(app, cookies));
+	outage.down = true;
+	return redeem(app, code);
+};
+
+/** The refresh grant, with the store taken down just before the refresh. */
+const refresh = async (app: express.Express, outage: Outage) => {
+	const { refresh_token } = await webTokens(app);
+	outage.down = true;
+	return tokenRequest(app, WEB).send({ grant_type: "refresh_token", refresh_token });
+};
+
+/** A login through the OIDC federation, with the store taken down just before the callback. */
+const oidcCallback = async (app: express.Express, outage: Outage, c: Composition) => {
+	const callback = await federatedCallback(app, "oidc", c.upstreams.oidc);
+	outage.down = true;
+	return callback();
+};
+
+const VERIFIER_WARN =
+	"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the route's error line: two lines for one outage (the runbook's outage table documents both)";
+
+const FEDERATION_GRANTS_WARN =
+	'packages/federation-grants: the outage is answered 503 but logged at warn, as "federation grant operation failed" with a classification and no error projection';
 
 const OUTAGES: readonly OutageCase[] = [
 	{
 		module: "oauth-authorization",
 		slot: "codeRepository",
 		surface: "the code exchange",
-		run: async (app, outage) => {
-			const { cookies } = await login(app);
-			const code = codeFrom(await authorize(app, cookies));
-			outage.down = true;
-			return redeem(app, code);
-		},
+		run: codeExchange,
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "authorization_grant_store_unavailable",
+	},
+	{
+		module: "oauth-authorization",
+		slot: "sessionFamilyIndex",
+		surface: "the code exchange",
+		run: codeExchange,
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "authorization_grant_store_unavailable",
+	},
+	{
+		module: "oauth-authorization",
+		slot: "sessionRPRegistry",
+		surface: "the code exchange",
+		run: codeExchange,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "authorization_grant_store_unavailable",
 	},
@@ -892,14 +849,20 @@ const OUTAGES: readonly OutageCase[] = [
 		module: "oauth-authorization",
 		slot: "refreshTokenFamilyStore",
 		surface: "the refresh grant",
-		run: async (app, outage) => {
-			const { refresh_token } = await webTokens(app);
-			outage.down = true;
-			return tokenRequest(app, WEB).send({ grant_type: "refresh_token", refresh_token });
-		},
+		run: refresh,
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "refresh_token_store_unavailable",
 		unrelatedWarns: ["jwt_verify_aud_skipped"],
+	},
+	{
+		module: "oauth-authorization",
+		slot: "subjectRevocation",
+		surface: "the refresh grant",
+		run: refresh,
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "token_verification_unavailable",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
+		defects: { "no-warn": VERIFIER_WARN },
 	},
 	{
 		module: "oauth",
@@ -932,8 +895,7 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "token_verification_unavailable",
-		defect:
-			"core's verifier (`verifyJwt`, packages/core/src/jwt/verify.mts) also writes its own `jwt_verify_rejected` warn with `reason: \"revocation_unavailable\"` for the outage the route logs at error — two lines for one outage; the operator runbook's outage table documents both",
+		defects: { "no-warn": VERIFIER_WARN },
 	},
 	{
 		module: "oauth",
@@ -963,6 +925,38 @@ const OUTAGES: readonly OutageCase[] = [
 		event: "session_grant_store_unavailable",
 	},
 	{
+		module: "oauth (consent step)",
+		slot: "consentStore",
+		surface: "/oauth/authorize for a client that is not first-party",
+		run: async (app, outage) => {
+			const { cookies } = await login(app);
+			outage.down = true;
+			return authorize(app, cookies, THIRD);
+		},
+		answer: { redirect: THIRD.redirectUri, error: "temporarily_unavailable" },
+		event: "authorize_consent_store_unavailable",
+		defects: {
+			"store-field":
+				"packages/oauth `routes/authorize.mts`: `authorize_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
+		},
+	},
+	{
+		module: "oauth (consent step)",
+		slot: "pendingConsentStore",
+		surface: "/oauth/authorize for a client that is not first-party",
+		run: async (app, outage) => {
+			const { cookies } = await login(app);
+			outage.down = true;
+			return authorize(app, cookies, THIRD);
+		},
+		answer: { redirect: THIRD.redirectUri, error: "temporarily_unavailable" },
+		event: "authorize_pending_consent_store_unavailable",
+		defects: {
+			"store-field":
+				"packages/oauth `routes/authorize.mts`: `authorize_pending_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field",
+		},
+	},
+	{
 		module: "session",
 		slot: "userSessionStore",
 		surface: "/session/login",
@@ -971,21 +965,53 @@ const OUTAGES: readonly OutageCase[] = [
 			return (await login(app)).res;
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defect:
-			"packages/session `Session.mts`: the login route's `userSessionStore.create` failure answers 503 from a bare `catch {}` and logs nothing — a silent 503",
+		defects: withoutTheLine(
+			"packages/session `routes/Session.mts`: the login route's `userSessionStore.create` failure answers 503 from a bare `catch {}` and logs nothing — a silent 503",
+		),
+	},
+	{
+		module: "session",
+		slot: "subjectSessionIndex",
+		surface: "/session/login",
+		run: async (app, outage) => {
+			outage.down = true;
+			return (await login(app)).res;
+		},
+		// Intended (#296): the login is not denied for a best-effort index write,
+		// and the missed write is logged at error because a token minted from
+		// this session keeps introspecting active after a credential change —
+		// the runbook pages on it.
+		answer: { status: 200 },
+		event: "subject_session_index_write_failed",
+		storeFieldNotRequired:
+			"the login succeeds; the line records a missed best-effort write, named by its event, with the subject and the session",
 	},
 	{
 		module: "session",
 		slot: "federationTokenStore",
 		surface: "the OIDC federation callback",
-		run: async (app, outage, c) => {
-			const callback = await federatedCallback(app, "oidc", c.upstreams.oidc);
-			outage.down = true;
-			return callback();
-		},
+		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defect:
-			"packages/session `Federation.mts`: a federation-token-store failure in the callback is not caught; it reaches the terminal handler and is answered `500 server_error`, logged `unhandled_request_error`",
+		defects: {
+			answer:
+				'packages/session `routes/Federation.mts`: a federation-token-store failure at the callback is caught by the post-create catch and answered `500 session_create_failed` "Internal error: session could not be persisted"',
+			"store-field":
+				'packages/session `routes/Federation.mts`: the post-create catch logs "session post-create failed" at error with `provider`, `sid` and `err`, but no `store` / `step` / `site` field',
+		},
+	},
+	{
+		module: "session",
+		slot: "sessionFederationIndex",
+		surface: "the OIDC federation callback",
+		run: oidcCallback,
+		answer: { status: 503, error: "temporarily_unavailable" },
+		defects: {
+			...withoutTheLine(
+				'packages/session `routes/Federation.mts`: a session-federation-index failure at the callback is answered 503 but logged only at warn, as "sessionFederationIndex.addFederation failed"',
+			),
+			"no-warn":
+				'packages/session `routes/Federation.mts`: the outage\'s only line is the warn "sessionFederationIndex.addFederation failed"',
+		},
 	},
 	{
 		module: "core (rate-limit guard)",
@@ -997,22 +1023,12 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "service_unavailable" },
 		event: "rate_limiter_failed_closed",
-		defect:
-			"core's rate-limit guard (`packages/core/src/ratelimit/guard.mts`): `rate_limiter_failed_closed` names the limiter by `tag`, not `store` / `step` / `site`, and carries the limiter's error flattened to a string under `error` (the projection's `detail` or `name`), not the projection under `err`",
-	},
-	{
-		module: "oauth (consent step)",
-		slot: "consentStore",
-		surface: "/oauth/authorize for a client that is not first-party",
-		run: async (app, outage) => {
-			const { cookies } = await login(app);
-			outage.down = true;
-			return authorize(app, cookies, THIRD);
+		defects: {
+			"store-field":
+				"core's rate-limit guard (`packages/core/src/ratelimit/guard.mts`): `rate_limiter_failed_closed` names the limiter by `tag`, not `store` / `step` / `site`",
+			projection:
+				"core's rate-limit guard (`packages/core/src/ratelimit/guard.mts`): the limiter's error is flattened to a string under `error` (the projection's `detail` or `name`), not the projection under `err`",
 		},
-		answer: { redirect: THIRD.redirectUri, error: "temporarily_unavailable" },
-		event: "authorize_consent_store_unavailable",
-		defect:
-			"packages/oauth `routes/authorize.mts`: `authorize_consent_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field naming what failed",
 	},
 	{
 		module: "federation-grants",
@@ -1027,8 +1043,7 @@ const OUTAGES: readonly OutageCase[] = [
 				.send({ sub: ALICE.sub });
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defect:
-			'packages/federation-grants: a grant-store failure is answered 503 but logged at warn, as "federation grant operation failed" with a classification and no error projection',
+		defects: { ...withoutTheLine(FEDERATION_GRANTS_WARN), "no-warn": FEDERATION_GRANTS_WARN },
 	},
 	{
 		module: "federation-grants",
@@ -1039,8 +1054,7 @@ const OUTAGES: readonly OutageCase[] = [
 			return lodgeGrant(app);
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defect:
-			'packages/federation-grants: an intent-store failure is answered 503 but logged at warn, as "federation grant operation failed" with a classification and no error projection',
+		defects: { ...withoutTheLine(FEDERATION_GRANTS_WARN), "no-warn": FEDERATION_GRANTS_WARN },
 	},
 	{
 		module: "jwks",
@@ -1052,72 +1066,15 @@ const OUTAGES: readonly OutageCase[] = [
 		},
 		answer: { status: 503, error: "jwks_unavailable" },
 		event: "jwks_unavailable",
-		defect:
-			"core's JWKS route (`packages/core/src/routes/Jwks.mts`): `jwks_unavailable` carries `algorithm` and `err` but no `store` / `step` / `site` field naming the key store",
+		defects: {
+			"store-field":
+				"core's JWKS route (`packages/core/src/routes/Jwks.mts`): `jwks_unavailable` carries `algorithm` and `err` but no `store` / `step` / `site` field naming the key store",
+		},
 	},
 ];
 
-/** The object argument of a log line, when the line is object-first. */
-const fieldsOf = (line: { args: readonly unknown[] }): Record<string, unknown> =>
-	typeof line.args[0] === "object" && line.args[0] !== null
-		? (line.args[0] as Record<string, unknown>)
-		: {};
-
-describe("a store outage answers 503 and is logged once, at error (#685)", () => {
-	for (const c of OUTAGES) {
-		const title = `${c.module}: ${c.slot} down at ${c.surface}`;
-		// A case with a `defect` fails today; `knownDefect` keeps it visible and
-		// turns red the day the defect is fixed, so the entry is then removed.
-		(c.defect === undefined ? it : knownDefect)(title, async () => {
-			// Everything logged from the moment the store goes down is the outage's.
-			let composition: Composition | undefined;
-			let from = -1;
-			let down = false;
-			const outage: Outage = {
-				get down() {
-					return down;
-				},
-				set down(value: boolean) {
-					if (value && from < 0) from = composition?.logger.lines.length ?? 0;
-					down = value;
-				},
-			};
-			composition = await boot({ outage: { slot: c.slot, outage } });
-			const res = await c.run(composition.app, outage, composition);
-			expect(from, "the case took the store down").toBeGreaterThanOrEqual(0);
-			const lines = composition.logger.lines.slice(from);
-
-			if ("status" in c.answer) {
-				expect(res.status).toBe(c.answer.status);
-				expect(res.body.error).toBe(c.answer.error);
-				expect(res.headers["www-authenticate"]).toBeUndefined();
-			} else {
-				expect(res.status).toBe(302);
-				const location = new URL(res.headers.location as string);
-				expect(`${location.origin}${location.pathname}`).toBe(c.answer.redirect);
-				expect(location.searchParams.get("error")).toBe(c.answer.error);
-			}
-
-			const errors = lines.filter((line) => line.level === "error");
-			expect(
-				errors.map((line) => line.args[1] ?? line.args[0]),
-				"exactly one error line",
-			).toHaveLength(1);
-			const [line] = errors as [LogLine];
-			const fields = fieldsOf(line);
-			expect(typeof line.args[1], "object-first, with an event name").toBe("string");
-			if (c.event !== undefined) expect(line.args[1], "the event name").toBe(c.event);
-			expect(
-				["store", "step", "site"].some((field) => typeof fields[field] === "string"),
-				"a field naming what failed",
-			).toBe(true);
-			expect(fields.err, "the error's projection").toMatchObject({ name: expect.any(String) });
-			expect(fields.err).not.toBeInstanceOf(Error);
-			const warns = lines
-				.filter((l) => l.level === "warn")
-				.map((l) => (typeof l.args[1] === "string" ? l.args[1] : String(l.args[0])))
-				.filter((event) => !(c.unrelatedWarns ?? []).includes(event));
-			expect(warns, "no warn for the outage").toEqual([]);
-		});
-	}
-});
+describeOutages(
+	"a store outage answers 503 and is logged once, at error (#685)",
+	OUTAGES,
+	(outage) => compose({ outage }),
+);

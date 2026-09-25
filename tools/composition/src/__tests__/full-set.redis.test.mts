@@ -212,11 +212,19 @@ describe("two replicas on one Redis database share every flow's state", () => {
 
 	it("keeps the state in Redis: a WebAuthn challenge and a federation grant intent land in the database", async () => {
 		const a = await replica();
-		const before = await inspect.dbsize();
-		expect(
-			(await request(a.app).post("/oauth/webauthn/authentication/options").send({})).status,
-		).toBe(200);
+		// Each write, by the key its store writes under (the Redis package's
+		// default prefixes): a challenge, and an intent.
+		const challenges = () => inspect.keys("chal:*");
+		const intents = () => inspect.keys("fg:{intents}:i:*");
+		const [challengesBefore, intentsBefore] = [await challenges(), await intents()];
+
+		const options = await request(a.app).post("/oauth/webauthn/authentication/options").send({});
+		expect(options.status).toBe(200);
+		const issued = (await challenges()).filter((key) => !challengesBefore.includes(key));
+		expect(issued).toHaveLength(1);
+		expect(issued[0]).toContain(options.body.challenge as string);
+
 		expect((await lodgeGrant(a.app)).status).toBe(201);
-		expect(await inspect.dbsize()).toBeGreaterThan(before);
+		expect((await intents()).filter((key) => !intentsBefore.includes(key))).toHaveLength(1);
 	});
 });

@@ -49,6 +49,9 @@
  */
 
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
@@ -63,16 +66,15 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
-import { readOidcFederationConfigs } from "@o3co/auth-provider-federation-oidc";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import helmet from "helmet";
 import request from "supertest";
-import { expect } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
-import { googleFederationConfigModule } from "#/modules.mjs";
+import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 import { createTerminalErrorHandler } from "#/terminalError.mjs";
 
 export const ISSUER = "https://auth.test";
@@ -314,17 +316,69 @@ export interface Upstreams {
 	readonly google: FakeIdp;
 }
 
-let upstreams: Promise<Upstreams> | undefined;
+let upstreams: Promise<{ fakes: Upstreams; reset: () => void }> | undefined;
 
 /**
- * The two fake upstreams, made once per test file: each signs under an RSA key
- * it generates, and a login's state lives in the authorization it recorded,
- * so boots can share them.
+ * The two fake upstreams, made once per test file — each generates an RSA key,
+ * and a login's state lives in the authorization it recorded, so boots can
+ * share them — and put back as they were made before every boot (`compose`
+ * calls this). A test may set a fake's knobs for its own boot; it may not
+ * rotate a fake's key, which cannot be put back, and the next boot refuses to
+ * run if one did.
  */
-export function sharedUpstreams(): Promise<Upstreams> {
-	upstreams ??= createUpstreams();
-	return upstreams;
+export async function sharedUpstreams(): Promise<Upstreams> {
+	upstreams ??= createUpstreams().then((fakes) => ({
+		fakes,
+		reset: resettable(fakes.oidc, fakes.google),
+	}));
+	const { fakes, reset } = await upstreams;
+	reset();
+	return fakes;
 }
+
+/**
+ * Snapshots each fake's settings — every property that is not a function —
+ * and returns what puts them back: primitives reassigned, objects restored in
+ * place (a fake may hold its own reference to one), recorded requests
+ * cleared. A fake's signing key is checked, not restored: a rotated key is
+ * refused.
+ */
+export function resettable(...fakes: readonly object[]): () => void {
+	const snapshots = fakes.map((fake) => ({
+		fake: fake as Record<string, unknown>,
+		clone: new Map(
+			Object.entries(fake)
+				.filter(([name, value]) => typeof value !== "function" && name !== "requests")
+				.map(([name, value]) => [name, structuredClone(value)]),
+		),
+		kid: currentKidOf(fake),
+	}));
+	return () => {
+		for (const { fake, clone, kid } of snapshots) {
+			if (currentKidOf(fake) !== kid) {
+				throw new Error(
+					"a test rotated a shared fake upstream's key: the fakes are shared by every boot in the file; make a fake of its own instead",
+				);
+			}
+			for (const [name, original] of clone) {
+				const current = fake[name];
+				if (typeof current === "object" && current !== null && !Array.isArray(current)) {
+					for (const key of Object.keys(current)) delete (current as Record<string, unknown>)[key];
+					Object.assign(current, structuredClone(original));
+				} else {
+					fake[name] = structuredClone(original);
+				}
+			}
+			const requests = fake.requests;
+			if (Array.isArray(requests)) requests.splice(0);
+		}
+	};
+}
+
+const currentKidOf = (fake: object): string | undefined => {
+	const currentKid = (fake as { currentKid?: unknown }).currentKid;
+	return typeof currentKid === "function" ? (currentKid as () => string)() : undefined;
+};
 
 async function createUpstreams(): Promise<Upstreams> {
 	return {
@@ -348,17 +402,35 @@ async function createUpstreams(): Promise<Upstreams> {
 }
 
 /**
- * The two federation config slots, read the way the template's bridges read
- * them, with each adapter's `fetch` pointed at its fake upstream. Only for the
- * federations the config enables.
+ * What one of the template's config bridges provides for `config`. Read
+ * through a record, not the typed slot: a program that loads this file without
+ * a federation package's ComponentMap augmentation (`tools/composition` does)
+ * has no key to name.
+ */
+const bridged = <T,>(module: Module, slot: string, config: AppConfig): T => {
+	const provider = (module.provides as Record<string, unknown> | undefined)?.[slot];
+	if (typeof provider !== "function") throw new Error(`${module.name} provides no ${slot}`);
+	return (provider as (deps: { config: AppConfig }) => T)({ config });
+};
+
+/**
+ * The two federation config slots, read by the template's own bridges
+ * (`oidcFederationConfigModule`, `googleFederationConfigModule`), with each
+ * adapter's `fetch` pointed at its fake upstream. Only for the federations the
+ * config enables — which is when `buildModules` lists the bridges.
  */
 async function federationOverrides(
 	config: AppConfig,
 	upstreams: Upstreams,
 ): Promise<Record<string, unknown>> {
 	const overrides: Record<string, unknown> = {};
-	const oidc = readOidcFederationConfigs(config.federations);
-	if (Object.keys(oidc).length > 0) {
+	const modules = buildModules(config).map((m) => m.name);
+	if (modules.includes(oidcFederationConfigModule.name)) {
+		const oidc = bridged<Record<string, object>>(
+			oidcFederationConfigModule,
+			"oidcFederationConfigs",
+			config,
+		);
 		overrides.oidcFederationConfigs = Object.fromEntries(
 			Object.entries(oidc).map(([name, entry]) => [
 				name,
@@ -366,16 +438,11 @@ async function federationOverrides(
 			]),
 		);
 	}
-	const federations = config.federations as Record<string, { enabled?: unknown }> | undefined;
-	if (federations?.google?.enabled === true) {
-		// Read through a record, not the typed slot: a program that loads this
-		// file without the Google package's ComponentMap augmentation
-		// (`tools/composition` does) has no `googleFederationConfig` key to name.
-		const provides = googleFederationConfigModule.provides as Record<string, unknown> | undefined;
-		const bridge = provides?.googleFederationConfig as (deps: {
-			config: AppConfig;
-		}) => Record<string, unknown>;
-		overrides.googleFederationConfig = { ...bridge({ config }), fetch: upstreams.google.fetch };
+	if (modules.includes(googleFederationConfigModule.name)) {
+		overrides.googleFederationConfig = {
+			...bridged<object>(googleFederationConfigModule, "googleFederationConfig", config),
+			fetch: upstreams.google.fetch,
+		};
 	}
 	return overrides;
 }
@@ -704,4 +771,304 @@ export function expectValidMetadata(doc: Record<string, unknown>): void {
 	}
 	expect(doc.response_types_supported).toEqual(["code"]);
 	expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+}
+
+// ---------------------------------------------------------------------------
+// Known defects
+// ---------------------------------------------------------------------------
+
+const templateManifest = JSON.parse(
+	readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as { dependencies: Record<string, string> };
+
+/** The template's `@o3co/auth-provider-*` dependencies, as its `package.json` names them. */
+export const TEMPLATE_DEPENDENCIES: readonly string[] = Object.keys(
+	templateManifest.dependencies,
+).filter((name) => name.startsWith("@o3co/auth-provider-"));
+
+/**
+ * Inside the monorepo the template names its siblings `workspace:*`; a
+ * scaffold, and CI's packed-tarball run, name versions or tarballs.
+ */
+export const inMonorepo =
+	templateManifest.dependencies["@o3co/auth-provider-core"]?.startsWith("workspace:") === true;
+
+/**
+ * A contract the composition breaks today. `it.fails` in the monorepo, where
+ * the fix lands beside this file and flips it; skipped in a scaffold, which
+ * pins released packages and would otherwise turn red on the upgrade that
+ * carries the fix.
+ */
+export const knownDefect = (inMonorepo ? it.fails : it.skip) as unknown as typeof it;
+
+// ---------------------------------------------------------------------------
+// Manifests
+// ---------------------------------------------------------------------------
+
+/** The names a module contributes under `kind`: its own name for a list-shaped kind. */
+export const contributionNames = (module: Module, kind: string): string[] => {
+	const contribution = (module.contributes as Record<string, unknown> | undefined)?.[kind];
+	if (contribution === undefined) return [];
+	return Array.isArray(contribution) ? [module.name] : Object.keys(contribution as object);
+};
+
+// ---------------------------------------------------------------------------
+// Bodies
+// ---------------------------------------------------------------------------
+
+export const KIB = 1024;
+export const JSON_TYPE = "application/json";
+export const FORM_TYPE = "application/x-www-form-urlencoded";
+
+export type Send = (
+	app: express.Express,
+	path: string,
+	contentType: string,
+	body: string,
+	headers?: Record<string, string>,
+) => Promise<{ status: number; body: Record<string, unknown> }>;
+
+/** A POST with its `Content-Length` declared, through supertest. */
+export const withLength: Send = async (app, path, contentType, body, headers = {}) => {
+	const res = await request(app)
+		.post(path)
+		.set(headers)
+		.set("Content-Type", contentType)
+		.send(body);
+	return { status: res.status, body: res.body as Record<string, unknown> };
+};
+
+/**
+ * A POST whose body has no `Content-Length` — `Transfer-Encoding: chunked`,
+ * one KiB a chunk — so only a parser's own running count can bound it.
+ * supertest always sets the length, hence a raw request on a real socket.
+ */
+export const postChunked: Send = async (app, path, contentType, body, headers = {}) => {
+	const server = http.createServer(app);
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const { port } = server.address() as AddressInfo;
+		return await new Promise((resolve, reject) => {
+			let answered = false;
+			const req = http.request(
+				{
+					host: "127.0.0.1",
+					port,
+					path,
+					method: "POST",
+					// One connection per request, closed after it: nothing keeps the server open.
+					agent: false,
+					headers: { ...headers, "content-type": contentType, "transfer-encoding": "chunked" },
+				},
+				(res) => {
+					answered = true;
+					let text = "";
+					res.setEncoding("utf8");
+					res.on("data", (chunk: string) => {
+						text += chunk;
+					});
+					res.on("end", () => {
+						let parsed: Record<string, unknown> = {};
+						try {
+							parsed = JSON.parse(text) as Record<string, unknown>;
+						} catch {
+							// Not JSON: the status carries the verdict.
+						}
+						resolve({ status: res.statusCode ?? 0, body: parsed });
+					});
+				},
+			);
+			// A server that answers 413 mid-body may close the socket while the
+			// rest is still being written; that is the answer, not a failure.
+			req.on("error", (err) => {
+				if (!answered) reject(err);
+			});
+			for (let at = 0; at < body.length; at += KIB) req.write(body.slice(at, at + KIB));
+			req.end();
+		});
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+};
+
+export const TRANSFERS: ReadonlyArray<readonly [string, Send]> = [
+	["with Content-Length", withLength],
+	["chunked", postChunked],
+];
+
+/** A JSON body: `fields`, and `bytes` of padding. */
+export const padJson = (bytes: number, fields: Record<string, unknown> = {}): string =>
+	JSON.stringify({ ...fields, pad: "a".repeat(bytes) });
+
+/** A form body: `fields`, and `bytes` of padding. */
+export const padForm = (bytes: number, fields: string): string =>
+	`${fields}&pad=${"a".repeat(bytes)}`;
+
+/** What a parser's refusal of an oversized body is answered with, by the terminal handler. */
+export const TOO_LARGE = { error: "invalid_request", error_description: "request body too large" };
+
+// ---------------------------------------------------------------------------
+// Outages
+// ---------------------------------------------------------------------------
+
+/**
+ * The parts of the #685 outage rule, each checked on its own so a case pins
+ * only what is broken and asserts the rest:
+ *
+ * - `answer` — the status and error code (a redirect's location and code);
+ * - `one-error-line` — exactly one error-level line, object-first with a name;
+ * - `event-name` — that name (checked only where the case names one);
+ * - `store-field` — a `store`, `step` or `site` field naming what failed;
+ * - `projection` — its `err` is core's `loggableError` projection;
+ * - `no-warn` — no warn line for the outage beside it.
+ */
+export type OutagePredicate =
+	| "answer"
+	| "one-error-line"
+	| "event-name"
+	| "store-field"
+	| "projection"
+	| "no-warn";
+
+export interface OutageCase<C extends Composition = Composition> {
+	/** The module whose route answers. */
+	readonly module: string;
+	/** The ComponentMap slot whose store goes down. */
+	readonly slot: string;
+	readonly surface: string;
+	/** Drives the route, taking the store down at the step under test. */
+	readonly run: (app: express.Express, outage: Outage, c: C) => Promise<request.Response>;
+	readonly answer:
+		| { readonly status: number; readonly error?: string }
+		| { readonly redirect: string; readonly error: string };
+	/** The one line's name; absent where the composition writes no such line today. */
+	readonly event?: string;
+	/** Warn lines this route writes whatever the store does — not the outage's. */
+	readonly unrelatedWarns?: readonly string[];
+	/**
+	 * Why `store-field` does not apply: the line is not an outage's 503, the
+	 * request succeeds. Absent, the predicate is checked.
+	 */
+	readonly storeFieldNotRequired?: string;
+	/** The predicates the composition breaks today, each naming its defect. */
+	readonly defects?: Partial<Record<OutagePredicate, string>>;
+}
+
+/** The same defect text for every predicate that depends on the one missing line. */
+export const withoutTheLine = (
+	defect: string,
+): Pick<Record<OutagePredicate, string>, "one-error-line" | "store-field" | "projection"> => ({
+	"one-error-line": defect,
+	"store-field": `no error line to carry it: ${defect}`,
+	projection: `no error line to carry it: ${defect}`,
+});
+
+/** The object argument of a log line, when the line is object-first. */
+export const fieldsOf = (line: LogLine | undefined): Record<string, unknown> =>
+	typeof line?.args[0] === "object" && line.args[0] !== null
+		? (line.args[0] as Record<string, unknown>)
+		: {};
+
+/**
+ * One `describe` per case: the case's composition is booted and its flow run
+ * once, the store taken down at the step under test, and each predicate is its
+ * own test — a plain `it` where the composition keeps it, `knownDefect` where
+ * it does not.
+ */
+export function describeOutages<C extends Composition>(
+	title: string,
+	cases: readonly OutageCase<C>[],
+	boot: (outage: { readonly slot: string; readonly outage: Outage }) => Promise<C>,
+): void {
+	describe(title, () => {
+		for (const c of cases) {
+			describe(`${c.module}: ${c.slot} down at ${c.surface}`, () => {
+				let res: request.Response;
+				let lines: LogLine[] = [];
+				let tookDown = false;
+
+				beforeAll(async () => {
+					let composition: C | undefined;
+					let from = -1;
+					let down = false;
+					const outage: Outage = {
+						get down() {
+							return down;
+						},
+						set down(value: boolean) {
+							if (value && from < 0) from = composition?.logger.lines.length ?? 0;
+							down = value;
+						},
+					};
+					composition = await boot({ slot: c.slot, outage });
+					try {
+						res = await c.run(composition.app, outage, composition);
+						tookDown = from >= 0;
+						// Everything logged from the moment the store went down is the outage's.
+						lines = composition.logger.lines.slice(Math.max(from, 0));
+					} finally {
+						await composition.handle.dispose();
+					}
+				});
+
+				const errors = () => lines.filter((line) => line.level === "error");
+				const check = (predicate: OutagePredicate, name: string, assertion: () => void) => {
+					const defect = c.defects?.[predicate];
+					(defect === undefined ? it : knownDefect)(name, assertion);
+				};
+
+				// Plain whatever the case pins: a pinned predicate must fail for its
+				// defect, not because the flow never reached the step under test.
+				it("reaches the step under test and takes the store down there", () => {
+					expect(tookDown).toBe(true);
+				});
+				check("answer", "answers as an outage", () => {
+					if ("redirect" in c.answer) {
+						expect(res.status).toBe(302);
+						const location = new URL(res.headers.location as string);
+						expect(`${location.origin}${location.pathname}`).toBe(c.answer.redirect);
+						expect(location.searchParams.get("error")).toBe(c.answer.error);
+					} else {
+						expect(res.status).toBe(c.answer.status);
+						expect(res.body.error).toBe(c.answer.error);
+						expect(res.headers["www-authenticate"]).toBeUndefined();
+					}
+				});
+				check("one-error-line", "logs exactly one error line, object-first with a name", () => {
+					expect(
+						errors().map((line) => line.args[1] ?? line.args[0]),
+						"exactly one error line",
+					).toHaveLength(1);
+					expect(typeof errors()[0]?.args[0]).toBe("object");
+					expect(typeof errors()[0]?.args[1]).toBe("string");
+				});
+				if (c.event !== undefined) {
+					const event = c.event;
+					check("event-name", `names it ${event}`, () => {
+						expect(errors().map((line) => line.args[1])).toEqual([event]);
+					});
+				}
+				if (c.storeFieldNotRequired === undefined) {
+					check("store-field", "names what failed (store, step or site)", () => {
+						const fields = fieldsOf(errors()[0]);
+						expect(
+							["store", "step", "site"].filter((field) => typeof fields[field] === "string"),
+						).not.toEqual([]);
+					});
+				}
+				check("projection", "carries the error's projection", () => {
+					const err = fieldsOf(errors()[0]).err;
+					expect(err).toMatchObject({ name: expect.any(String) });
+					expect(err).not.toBeInstanceOf(Error);
+				});
+				check("no-warn", "writes no warn line for it", () => {
+					const warns = lines
+						.filter((line) => line.level === "warn")
+						.map((line) => (typeof line.args[1] === "string" ? line.args[1] : String(line.args[0])))
+						.filter((event) => !(c.unrelatedWarns ?? []).includes(event));
+					expect(warns).toEqual([]);
+				});
+			});
+		}
+	});
 }

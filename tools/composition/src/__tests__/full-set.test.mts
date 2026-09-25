@@ -31,14 +31,13 @@
  * Redis under `deployment.mode = "multi"`.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
- * defect, and the fix that mends it turns the case red.
+ * defect, and the fix that mends it turns the case red. An outage case pins
+ * only the part of the #685 rule that is broken, and asserts the rest
+ * (`describeOutages`, from the template's fixture).
  */
 
 import { createHash, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
-import type { Module } from "@o3co/auth-provider-core";
 import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
 import {
 	ACCESS_TOKEN_TYPE,
@@ -49,14 +48,23 @@ import {
 	AS_LISTED,
 	authorize,
 	basic,
+	contributionNames,
 	cookiesOf,
 	DISCOVERY_PATHS,
+	describeOutages,
 	expectValidMetadata,
+	FORM_TYPE,
 	ISSUER,
-	type LogLine,
+	JSON_TYPE,
+	KIB,
 	type ModuleOrder,
-	type Outage,
+	type OutageCase,
+	padForm,
+	padJson,
 	REVERSED,
+	TEMPLATE_DEPENDENCIES,
+	TOO_LARGE,
+	TRANSFERS,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
@@ -120,6 +128,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
 	"deployment:webauthn-config",
+	"deployment:webauthn-subject",
 	"deployment:grant-policy",
 	"deployment:apple-federation-config",
 	"deployment:github-federation-config",
@@ -145,8 +154,12 @@ describe("what the full set covers", () => {
 			.filter((name) => name.startsWith("@o3co/auth-provider-"))
 			.filter((name) => name !== "@o3co/auth-provider-standalone")
 			.sort();
-		expect(workspace.length).toBe(15);
+		expect(workspace.length).toBeGreaterThan(0);
 		expect(depended).toEqual(workspace);
+		// What this suite adds is exactly what the template does not compose.
+		expect(Object.keys(ADDED).sort()).toEqual(
+			workspace.filter((name) => !TEMPLATE_DEPENDENCIES.includes(name)),
+		);
 	});
 
 	it("adds every package the template does not compose, and nothing the template already does", async () => {
@@ -163,12 +176,6 @@ describe("what the full set covers", () => {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
-
-const contributionNames = (module: Module, kind: string): string[] => {
-	const contribution = (module.contributes as Record<string, unknown> | undefined)?.[kind];
-	if (contribution === undefined) return [];
-	return Array.isArray(contribution) ? [module.name] : Object.keys(contribution as object);
-};
 
 const ADDED_GRANTS = [DEVICE_CODE_GRANT_TYPE, TOKEN_EXCHANGE_GRANT_TYPE, WEBAUTHN_GRANT_TYPE];
 const ALL_GRANTS = [
@@ -438,6 +445,21 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(res.body).toMatchObject({ rpId: "auth.test", challenge: expect.any(String) });
 	});
 
+	it("WebAuthn: registration options for the signed-in user, through the deployment's subject bridge", async () => {
+		const { app } = await boot();
+		const { agent, header, token } = await signedIn(app);
+		const res = await agent
+			.post("/oauth/webauthn/registration/options")
+			.set(header, token)
+			.send({});
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({
+			rp: { id: "auth.test" },
+			challenge: expect.any(String),
+			excludeCredentials: [],
+		});
+	});
+
 	it("Apple: a form_post login ends in a session /authorize accepts", async () => {
 		const { app, fakes } = await boot();
 		const start = await request(app).get("/session/oauth/federation/apple");
@@ -474,93 +496,6 @@ describe("every added module's primary route answers in the one app", () => {
 // Bodies
 // ---------------------------------------------------------------------------
 
-const KIB = 1024;
-
-/**
- * A POST with `Transfer-Encoding: chunked` and no `Content-Length`, one KiB a
- * chunk, on a real socket (supertest always declares a length).
- */
-async function postChunked(
-	app: Express,
-	path: string,
-	contentType: string,
-	body: string,
-	headers: Record<string, string> = {},
-): Promise<{ status: number; body: Record<string, unknown> }> {
-	const server = http.createServer(app);
-	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	try {
-		const { port } = server.address() as AddressInfo;
-		return await new Promise((resolve, reject) => {
-			let answered = false;
-			const req = http.request(
-				{
-					host: "127.0.0.1",
-					port,
-					path,
-					method: "POST",
-					agent: false,
-					headers: { ...headers, "content-type": contentType, "transfer-encoding": "chunked" },
-				},
-				(res) => {
-					answered = true;
-					let text = "";
-					res.setEncoding("utf8");
-					res.on("data", (chunk: string) => {
-						text += chunk;
-					});
-					res.on("end", () => {
-						let parsed: Record<string, unknown> = {};
-						try {
-							parsed = JSON.parse(text) as Record<string, unknown>;
-						} catch {
-							// Not JSON: the status carries the verdict.
-						}
-						resolve({ status: res.statusCode ?? 0, body: parsed });
-					});
-				},
-			);
-			// A 413 may close the socket mid-body; that is the answer.
-			req.on("error", (err) => {
-				if (!answered) reject(err);
-			});
-			for (let at = 0; at < body.length; at += KIB) req.write(body.slice(at, at + KIB));
-			req.end();
-		});
-	} finally {
-		await new Promise<void>((resolve) => server.close(() => resolve()));
-	}
-}
-
-type Send = (
-	app: Express,
-	path: string,
-	contentType: string,
-	body: string,
-	headers?: Record<string, string>,
-) => Promise<{ status: number; body: Record<string, unknown> }>;
-
-const withLength: Send = async (app, path, contentType, body, headers = {}) => {
-	const res = await request(app)
-		.post(path)
-		.set(headers)
-		.set("Content-Type", contentType)
-		.send(body);
-	return { status: res.status, body: res.body as Record<string, unknown> };
-};
-
-const TRANSFERS: ReadonlyArray<readonly [string, Send]> = [
-	["with Content-Length", withLength],
-	["chunked", postChunked],
-];
-
-const padJson = (bytes: number, fields: Record<string, unknown> = {}): string =>
-	JSON.stringify({ ...fields, pad: "a".repeat(bytes) });
-const padForm = (bytes: number, fields: string): string => `${fields}&pad=${"a".repeat(bytes)}`;
-
-const JSON_TYPE = "application/json";
-const FORM_TYPE = "application/x-www-form-urlencoded";
-
 describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s", (order) => {
 	let composed: FullSet;
 	beforeAll(async () => {
@@ -570,11 +505,17 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 		await composed.handle.dispose();
 	});
 
-	it("puts the added routers on the other side of oauthModule's", () => {
+	it("puts the added routers on the other side of oauthModule's, and swaps the /session pair", () => {
 		const ids = composed.handle.routes.map((r) => r.contribution.id);
-		const oauth = ids.indexOf("oauth-endpoints");
-		for (const id of ["device-authorization", "webauthn-authentication-options"]) {
-			expect(ids.indexOf(id) > oauth, id).toBe(order === AS_LISTED);
+		for (const [own, added] of [
+			["oauth-endpoints", "device-authorization"],
+			["oauth-endpoints", "device-verification"],
+			["oauth-endpoints", "webauthn-authentication-options"],
+			["federation-grants-browser", "session-routes"],
+		] as const) {
+			expect(ids, own).toContain(own);
+			expect(ids, added).toContain(added);
+			expect(ids.indexOf(own) < ids.indexOf(added), `${own} / ${added}`).toBe(order === AS_LISTED);
 		}
 	});
 
@@ -587,7 +528,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 			] as const) {
 				const res = await send(composed.app, "/oauth/device_authorization", type, body);
 				expect(res.status, type).toBe(413);
-				expect(res.body, type).toMatchObject({
+				expect(res.body, type).toEqual({
 					error: "invalid_request",
 					error_description: "body_too_large",
 				});
@@ -605,7 +546,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 				padJson(40 * KIB, { action: "lookup", user_code: "BCDF-GHJK" }),
 			);
 			expect(res.status).toBe(413);
-			expect(res.body).toMatchObject({
+			expect(res.body).toEqual({
 				error: "invalid_request",
 				error_description: "body_too_large",
 			});
@@ -620,6 +561,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 			expect(within.status).toBe(200);
 			const over = await send(composed.app, path, JSON_TYPE, padJson(150 * KIB));
 			expect(over.status).toBe(413);
+			expect(over.body).toEqual(TOO_LARGE);
 		},
 	);
 
@@ -644,18 +586,24 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 				headers,
 			);
 			expect(over.status).toBe(413);
+			expect(over.body).toEqual(TOO_LARGE);
 		},
 	);
 
 	it("the verification route refuses a form with its own 415, beside every other parser", async () => {
-		const res = await withLength(
-			composed.app,
-			"/oauth/device/verification",
-			FORM_TYPE,
-			"action=lookup&user_code=BCDF-GHJK",
-		);
-		// The CSRF guard runs first and refuses a form carrying no token.
-		expect([403, 415]).toContain(res.status);
+		// Signed in, with the CSRF token in its header: past the session and the
+		// CSRF guard, the route's own media-type rule is what answers.
+		const { agent, header, token } = await signedIn(composed.app);
+		const res = await agent
+			.post("/oauth/device/verification")
+			.set(header, token)
+			.type("form")
+			.send("action=lookup&user_code=BCDF-GHJK");
+		expect(res.status).toBe(415);
+		expect(res.body).toEqual({
+			error: "invalid_request",
+			error_description: "the request body must be application/json",
+		});
 	});
 });
 
@@ -663,20 +611,9 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 // Outages
 // ---------------------------------------------------------------------------
 
-interface OutageCase {
-	readonly module: string;
-	readonly slot: string;
-	readonly surface: string;
-	readonly run: (app: Express, outage: Outage, c: FullSet) => Promise<request.Response>;
-	readonly status: 503;
-	readonly error: string;
-	/** The name of the one line the outage writes; absent where there is none today. */
-	readonly event?: string;
-	/** Set when the full set breaks the contract today: the defect, named. */
-	readonly defect?: string;
-}
+const WEBAUTHN_OPTIONS = "/oauth/webauthn/authentication/options";
 
-const OUTAGES: readonly OutageCase[] = [
+const OUTAGES: readonly OutageCase<FullSet>[] = [
 	{
 		module: "device-grant",
 		slot: "deviceCodeStore",
@@ -688,11 +625,12 @@ const OUTAGES: readonly OutageCase[] = [
 				.type("form")
 				.send({ client_id: TV.id });
 		},
-		status: 503,
-		error: "temporarily_unavailable",
+		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "device_authorization_store_unavailable",
-		defect:
-			"packages/device-grant `deviceAuthorizationEndpoint.mts`: `device_authorization_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field naming the device-code store",
+		defects: {
+			"store-field":
+				"packages/device-grant `deviceAuthorizationEndpoint.mts`: `device_authorization_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field naming the device-code store",
+		},
 	},
 	{
 		module: "dpop",
@@ -707,11 +645,12 @@ const OUTAGES: readonly OutageCase[] = [
 				.type("form")
 				.send({ grant_type: "client_credentials" });
 		},
-		status: 503,
-		error: "temporarily_unavailable",
+		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "token_binding_unavailable",
-		defect:
-			'core\'s token-binding dispatcher (`packages/core/src/middleware/tokenBinding.mts`): `token_binding_unavailable` names the mechanism and `reason: "replay_store_unavailable"`, but carries no `store` / `step` / `site` field',
+		defects: {
+			"store-field":
+				'core\'s token-binding dispatcher (`packages/core/src/middleware/tokenBinding.mts`): `token_binding_unavailable` names the mechanism and `reason: "replay_store_unavailable"`, but carries no `store` / `step` / `site` field',
+		},
 	},
 	{
 		module: "oauth-token-exchange",
@@ -730,77 +669,53 @@ const OUTAGES: readonly OutageCase[] = [
 					subject_token_type: ACCESS_TOKEN_TYPE,
 				});
 		},
-		status: 503,
-		error: "temporarily_unavailable",
+		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "token_exchange_validation_unavailable",
-		defect:
-			"two lines and no store field: core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) also writes a `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) for the outage — the defect the template suite pins at introspection — and `token_exchange_validation_unavailable` (`packages/oauth-token-exchange`) names the token's `role` but no `store` / `step` / `site`",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
+		defects: {
+			"store-field":
+				"packages/oauth-token-exchange: `token_exchange_validation_unavailable` names the token's `role` but no `store` / `step` / `site` field",
+			"no-warn":
+				"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the exchange's error line — the defect the template suite pins at introspection",
+		},
 	},
 	{
 		module: "webauthn",
 		slot: "challengeStore",
-		surface: "POST /oauth/webauthn/authentication/options",
+		surface: `POST ${WEBAUTHN_OPTIONS}`,
 		run: async (app, outage) => {
 			outage.down = true;
-			return request(app).post("/oauth/webauthn/authentication/options").send({});
+			return request(app).post(WEBAUTHN_OPTIONS).send({});
 		},
-		status: 503,
-		error: "temporarily_unavailable",
-		defect:
-			"packages/webauthn `routes/authenticationOptions.mts`: a challenge-store failure at `challengeStore.issue` is not caught; it reaches the terminal handler and is answered `500 server_error`, logged `unhandled_request_error` (the runbook documents the same 500 for the ceremony's `contains` / `markSeen`)",
+		answer: { status: 503, error: "temporarily_unavailable" },
+		defects: {
+			answer:
+				"packages/webauthn `routes/authenticationOptions.mts`: a failure at `challengeStore.issue` is not caught; it reaches the terminal handler and is answered `500 server_error` (the runbook documents the same 500 for the ceremony's `contains` / `markSeen`)",
+			"store-field":
+				"packages/webauthn: the outage's one line is the terminal handler's `unhandled_request_error`, which carries `err` and `endpoint` but no `store` / `step` / `site` field",
+		},
+	},
+	{
+		module: "webauthn",
+		slot: "webauthnCredentialStore",
+		surface: "POST /oauth/webauthn/registration/options",
+		run: async (app, outage) => {
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		defects: {
+			answer:
+				"packages/webauthn `routes/registrationOptions.mts`: a failure at `credentialStore.listByUserId` is not caught; it reaches the terminal handler and is answered `500 server_error`",
+			"store-field":
+				"packages/webauthn: the outage's one line is the terminal handler's `unhandled_request_error`, which carries `err` and `endpoint` but no `store` / `step` / `site` field",
+		},
 	},
 ];
 
-const fieldsOf = (line: LogLine): Record<string, unknown> =>
-	typeof line.args[0] === "object" && line.args[0] !== null
-		? (line.args[0] as Record<string, unknown>)
-		: {};
-
-describe("a store outage behind an added module answers 503 and is logged once, at error (#685)", () => {
-	for (const c of OUTAGES) {
-		(c.defect === undefined ? it : it.fails)(
-			`${c.module}: ${c.slot} down at ${c.surface}`,
-			async () => {
-				let composition: FullSet | undefined;
-				let from = -1;
-				let down = false;
-				const outage: Outage = {
-					get down() {
-						return down;
-					},
-					set down(value: boolean) {
-						if (value && from < 0) from = composition?.logger.lines.length ?? 0;
-						down = value;
-					},
-				};
-				composition = await boot({ outage: { slot: c.slot, outage } });
-				const res = await c.run(composition.app, outage, composition);
-				expect(from, "the case took the store down").toBeGreaterThanOrEqual(0);
-				const lines = composition.logger.lines.slice(from);
-
-				expect(res.status).toBe(c.status);
-				expect(res.body.error).toBe(c.error);
-
-				const errors = lines.filter((line) => line.level === "error");
-				expect(
-					errors.map((line) => line.args[1] ?? line.args[0]),
-					"exactly one error line",
-				).toHaveLength(1);
-				const [line] = errors as [LogLine];
-				const fields = fieldsOf(line);
-				expect(typeof line.args[1], "object-first, with an event name").toBe("string");
-				if (c.event !== undefined) expect(line.args[1], "the event name").toBe(c.event);
-				expect(
-					["store", "step", "site"].some((field) => typeof fields[field] === "string"),
-					"a field naming what failed",
-				).toBe(true);
-				expect(fields.err, "the error's projection").toMatchObject({ name: expect.any(String) });
-				expect(fields.err).not.toBeInstanceOf(Error);
-				const warns = lines
-					.filter((l) => l.level === "warn")
-					.map((l) => (typeof l.args[1] === "string" ? l.args[1] : String(l.args[0])));
-				expect(warns, "no warn for the outage").toEqual([]);
-			},
-		);
-	}
-});
+describeOutages(
+	"a store outage behind an added module answers 503 and is logged once, at error (#685)",
+	OUTAGES,
+	(outage) => composeFullSet({ outage }),
+);

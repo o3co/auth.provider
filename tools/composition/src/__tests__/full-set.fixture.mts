@@ -35,6 +35,12 @@
  * - mTLS runs in-process on its `header` source from a loopback peer — the
  *   shape a TLS-terminating proxy in front of the provider gives it — with the
  *   mTLS package's test certificate.
+ * - WebAuthn registration reads `req.webauthnSubject`, which the package leaves
+ *   to middleware the deployment writes; the fixture's sets it from the
+ *   authenticated browser session.
+ *
+ * The fakes are shared by every boot in a file and put back as they were made
+ * before each one (`resettable`, from the template's fixture).
  */
 
 import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
@@ -67,8 +73,10 @@ import {
 	type Composition,
 	compose,
 	ISSUER,
+	resettable,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { webauthnConfigSchema, webauthnModule } from "@o3co/auth-provider-webauthn";
+import type { RequestHandler } from "express";
 import {
 	createFakeGithub,
 	type FakeGithub,
@@ -211,6 +219,35 @@ const grantPolicyModule = defineModule({
 });
 
 /**
+ * The deployment's bridge from its session to `req.webauthnSubject`, which
+ * WebAuthn's registration routes require and no package sets: the signed-in
+ * user's opaque id, for an authenticated session only.
+ */
+const webauthnSubjectModule = defineModule({
+	name: "deployment:webauthn-subject",
+	contributes: {
+		routes: [
+			() => ({
+				id: "deployment-webauthn-subject",
+				mountPath: "/oauth/webauthn/registration",
+				after: ["session-middleware"],
+				before: ["webauthn-registration-options", "webauthn-registration-verify"],
+				handler: ((req, _res, next) => {
+					// express-session's `req.session`, read without its type package.
+					const session = (req as { session?: unknown }).session as
+						| { isAuthenticated?: boolean; user?: { id?: unknown } }
+						| undefined;
+					if (session?.isAuthenticated === true && typeof session.user?.id === "string") {
+						req.webauthnSubject = { userId: session.user.id };
+					}
+					next();
+				}) as RequestHandler,
+			}),
+		],
+	},
+});
+
+/**
  * Stands in for the deployment's own WebAuthn credential store on several
  * replicas: no package ships a shared one, and the README has a production
  * deployment wire its own database. Boot cannot tell it from a database, which
@@ -228,11 +265,24 @@ export interface Fakes {
 	readonly github: FakeGithub;
 }
 
-let fakes: Promise<Fakes> | undefined;
+let fakes: Promise<{ fakes: Fakes; reset: () => void }> | undefined;
 
-/** The Apple and GitHub fakes, made once per test file and shared by every boot. */
-export function sharedFakes(): Promise<Fakes> {
-	fakes ??= (async () => ({
+/**
+ * The Apple and GitHub fakes, made once per test file, shared by every boot,
+ * and put back as they were made before each one.
+ */
+export async function sharedFakes(): Promise<Fakes> {
+	fakes ??= createFakes().then((made) => ({
+		fakes: made,
+		reset: resettable(made.apple, made.github),
+	}));
+	const { fakes: made, reset } = await fakes;
+	reset();
+	return made;
+}
+
+async function createFakes(): Promise<Fakes> {
+	return {
 		// Apple's endpoints are fixed in the adapter, not discovered.
 		apple: await createFakeIdp({
 			issuer: "https://appleid.apple.com",
@@ -243,8 +293,7 @@ export function sharedFakes(): Promise<Fakes> {
 			sub: APPLE_SUB,
 		}),
 		github: createFakeGithub(),
-	}))();
-	return fakes;
+	};
 }
 
 /** The subjects the Apple and GitHub fakes sign in, as the Store has them linked. */
@@ -301,6 +350,7 @@ function addedModules(
 			? [
 					webauthnModule,
 					webauthnConfigModule,
+					webauthnSubjectModule,
 					stores.credential,
 					stores.challenge === "redis" ? redisChallengeStoreModule : memoryChallengeStoreModule,
 					defaultChallengeCeremonyModule,

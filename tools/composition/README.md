@@ -52,14 +52,33 @@ package is added to `packages/` without being added here.
   covers").
 - A contract the full set breaks today is an `it.fails` whose entry names the
   defect; the fix that mends it turns the case red and turns it into a plain
-  `it`.
+  `it`. A store-outage case pins only the part of the #685 rule that is
+  broken and asserts the rest, one test per part (`describeOutages` in the
+  template's fixture).
+- The fakes are shared by every boot in a file and put back as they were made
+  before each one; a test that rotates a fake's key is refused.
+
+## Known gaps
+
+- **No WebAuthn ceremony.** The WebAuthn grant is advertised and its three
+  routes are mounted, but the suite runs only the options routes
+  (authentication, and registration through the deployment's subject bridge).
+  A registration or an authentication needs an authenticator's signed
+  response, and the repository has no software authenticator: the WebAuthn
+  package's own ceremony tests mock the verification. A helper that produces a
+  real `none`-attestation credential and assertion would let one registration
+  and one authentication run through the composed app.
+- **No mTLS outage.** In `self-signed` mode the mechanism reads no store; the
+  `full-pki` revocation outage needs a CRL distribution point or an OCSP
+  responder, which the mTLS package tests against its own fakes.
 
 ## Running it
 
 ```sh
 pnpm install
 pnpm run build            # the packages resolve through their dist/
-pnpm --filter @o3co/auth-provider-composition run test -- --maxWorkers=2
+pnpm --filter @o3co/auth-provider-composition run test                          # tsc, then vitest
+pnpm --filter @o3co/auth-provider-composition exec vitest run --maxWorkers=2    # vitest alone
 ```
 
 The Redis-backed file uses the Redis package's shared test container
