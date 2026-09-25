@@ -62,7 +62,7 @@ export const isSealingKeyId = (id: unknown): id is string =>
  * seal nothing).
  *
  * `setting` names the ring in the refusal, as its reader knows it: the
- * configuration key it was read from (`mfa.encryptionKeys`), or the option
+ * configuration key it was read from (`federationGrants.encryptionKeys`), or the option
  * it was passed as. Every refusal names the entry by its index and none
  * quotes an ID: an operator who swapped an ID and its key would otherwise
  * see the key in a boot error, and passing the ID rule does not make an ID

@@ -932,6 +932,8 @@ function checkGrantPolicyIssuerInvariant(
  * undefined`.
  *
  * Per issue #101, A2-β amendment 2026-05.
+ *
+ * @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG.
  */
 export function checkMfaPartialWiring(plannedKeys: ReadonlySet<string>): void {
 	if (!plannedKeys.has("mfaCoordinator")) return;

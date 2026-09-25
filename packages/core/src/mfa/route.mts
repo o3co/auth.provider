@@ -18,6 +18,7 @@ import type { Request, Response, Router } from "express";
 import { sanitizeErrorText } from "../errors/envelope.mjs";
 import type { MfaProviderFactory, MfaResumeState, MfaTransactionStore } from "./types.mjs";
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface MfaRouteDeps {
 	providerFactory: MfaProviderFactory;
 	transactionStore: MfaTransactionStore;
@@ -38,6 +39,7 @@ export interface MfaRouteDeps {
 	): Promise<void>;
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export function createMfaRouter(express: { Router: () => Router }, deps: MfaRouteDeps): Router {
 	const router = express.Router();
 

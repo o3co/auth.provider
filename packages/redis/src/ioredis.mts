@@ -1342,8 +1342,8 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
  * importing the main entry (`@o3co/auth-provider-redis`) do NOT pull
  * `ioredis` types into their TypeScript dependency closure. The main entry
  * stays vendor-agnostic; only callers of `makeIoredisClients` need ioredis
- * installed. Future per-vendor wrappers (e.g. node-redis) will follow the
- * same `@o3co/auth-provider-redis/<vendor>` subpath convention.
+ * installed. A wrapper for another client library would take the same
+ * `@o3co/auth-provider-redis/<vendor>` subpath convention.
  *
  * Per Copilot review on PR #102.
  *
