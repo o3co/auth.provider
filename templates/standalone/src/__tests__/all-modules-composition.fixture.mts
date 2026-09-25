@@ -40,6 +40,12 @@
  * - Configuration with no environment form (a map of grant connections, a key
  *   ring, a landing URL): laid over the resolved config, as an operator would
  *   write it in `application.conf`.
+ *
+ * `tools/composition` in the monorepo imports this file and boots the same
+ * composition with the workspace's other modules added (`ComposeOptions`'s
+ * `referenceConfs`, `extraModules`, `extraOverrides`, `extraClients` and
+ * `extraUsers`), so the two suites share one fixture rather than two copies
+ * that drift.
  */
 
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -63,6 +69,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import helmet from "helmet";
 import request from "supertest";
+import { expect } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
 import { googleFederationConfigModule } from "#/modules.mjs";
@@ -157,16 +164,21 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /**
  * The shipped HOCON under `env`, with what has no environment form laid over
  * it: the federations' landing page, the grant key ring and one grant
- * connection.
+ * connection. `referenceConfs` — other packages' `reference.conf` files — are
+ * layered between `application.conf` and core's, as a deployment layers them.
  */
-export function resolveConfig(env: Readonly<Record<string, string>>): AppConfig {
+export function resolveConfig(
+	env: Readonly<Record<string, string>>,
+	referenceConfs: readonly string[] = [],
+): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const resolved = validate(
-		parseFile(envConfPath, { env: { ...env } })
-			.withFallback(parseFile(applicationConfPath, { env: { ...env } }))
-			.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env: { ...env } })),
-		AppConfigSchema,
-	);
+	const read = (path: string) => parseFile(path, { env: { ...env } });
+	const layered = [
+		applicationConfPath,
+		...referenceConfs,
+		resolveLibraryReferenceConfPath(),
+	].reduce((config, path) => config.withFallback(read(path)), read(envConfPath));
+	const resolved = validate(layered, AppConfigSchema);
 	const federations = resolved.federations as Record<string, Record<string, unknown>>;
 	return {
 		...resolved,
@@ -214,8 +226,15 @@ export const ALICE = { username: "alice", password: "correct-horse-battery", sub
 const OIDC_SUB = "idp-sub";
 const GOOGLE_SUB = "google-sub";
 
-const clientEntries = (): Map<string, ReturnType<typeof ClientEntrySchema.parse>> =>
-	new Map([
+type ClientEntry = ReturnType<typeof ClientEntrySchema.parse>;
+
+const clientEntries = (
+	extra: Readonly<Record<string, Record<string, unknown>>> = {},
+): Map<string, ClientEntry> =>
+	new Map<string, ClientEntry>([
+		...Object.entries(extra).map(
+			([id, entry]) => [id, ClientEntrySchema.parse(entry)] as [string, ClientEntry],
+		),
 		[
 			WEB.id,
 			ClientEntrySchema.parse({
@@ -259,27 +278,32 @@ const clientEntries = (): Map<string, ReturnType<typeof ClientEntrySchema.parse>
 		],
 	]);
 
-const testRepositoriesModule = defineModule({
-	name: "test:repositories",
-	provides: {
-		clientRepository: () => new InMemoryClientRepository(clientEntries()),
-		userRepository: () =>
-			new InMemoryUserRepository(
-				new Map([
-					[
-						ALICE.username,
-						{
-							id: ALICE.sub,
-							password: ALICE.password,
-							email: "alice@example.com",
-							token: `oidc:${OIDC_SUB}`,
-						},
-					],
-					["bob", { id: "u-bob", password: "bob-password-long", token: `google:${GOOGLE_SUB}` }],
-				]),
-			),
-	},
-});
+const testRepositoriesModule = (
+	extraClients: Readonly<Record<string, Record<string, unknown>>> = {},
+	extraUsers: Readonly<Record<string, Record<string, unknown>>> = {},
+): Module =>
+	defineModule({
+		name: "test:repositories",
+		provides: {
+			clientRepository: () => new InMemoryClientRepository(clientEntries(extraClients)),
+			userRepository: () =>
+				new InMemoryUserRepository(
+					new Map([
+						[
+							ALICE.username,
+							{
+								id: ALICE.sub,
+								password: ALICE.password,
+								email: "alice@example.com",
+								token: `oidc:${OIDC_SUB}`,
+							},
+						],
+						["bob", { id: "u-bob", password: "bob-password-long", token: `google:${GOOGLE_SUB}` }],
+						...Object.entries(extraUsers),
+					]) as ConstructorParameters<typeof InMemoryUserRepository>[0],
+				),
+		},
+	});
 
 // ---------------------------------------------------------------------------
 // Upstream identity providers
@@ -344,8 +368,11 @@ async function federationOverrides(
 	}
 	const federations = config.federations as Record<string, { enabled?: unknown }> | undefined;
 	if (federations?.google?.enabled === true) {
-		const bridge = googleFederationConfigModule.provides
-			?.googleFederationConfig as unknown as (deps: {
+		// Read through a record, not the typed slot: a program that loads this
+		// file without the Google package's ComponentMap augmentation
+		// (`tools/composition` does) has no `googleFederationConfig` key to name.
+		const provides = googleFederationConfigModule.provides as Record<string, unknown> | undefined;
+		const bridge = provides?.googleFederationConfig as (deps: {
 			config: AppConfig;
 		}) => Record<string, unknown>;
 		overrides.googleFederationConfig = { ...bridge({ config }), fetch: upstreams.google.fetch };
@@ -459,6 +486,16 @@ export type ModuleOrder = typeof AS_LISTED | typeof REVERSED;
 
 export interface ComposeOptions {
 	readonly env?: Readonly<Record<string, string>>;
+	/** Other packages' `reference.conf` files, layered above core's (see `resolveConfig`). */
+	readonly referenceConfs?: readonly string[];
+	/** Modules added after the template's own, before the order and the outage apply. */
+	readonly extraModules?: (config: AppConfig) => readonly Module[];
+	/** Components laid over the boot's, beside the federation config slots. */
+	readonly extraOverrides?: (config: AppConfig) => Record<string, unknown>;
+	/** Client registrations beside the fixture's own, as `ClientEntrySchema` input. */
+	readonly extraClients?: Readonly<Record<string, Record<string, unknown>>>;
+	/** Users beside the fixture's own, keyed by username. */
+	readonly extraUsers?: Readonly<Record<string, Record<string, unknown>>>;
 	/** Adjust the resolved config before anything reads it. */
 	readonly config?: (config: AppConfig) => AppConfig;
 	readonly order?: ModuleOrder;
@@ -469,13 +506,16 @@ export interface ComposeOptions {
 
 /** The module list the template boots for `config`, as `app.mts` builds it. */
 export function composedModules(config: AppConfig, options: ComposeOptions = {}): Module[] {
-	let modules = buildModules(config, {
-		environment: "production",
-		repositoriesModule: testRepositoriesModule,
-		...(options.shippedRefreshTokenFamilyStore
-			? {}
-			: { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
-	});
+	let modules = [
+		...buildModules(config, {
+			environment: "production",
+			repositoriesModule: testRepositoriesModule(options.extraClients, options.extraUsers),
+			...(options.shippedRefreshTokenFamilyStore
+				? {}
+				: { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] }),
+		}),
+		...(options.extraModules?.(config) ?? []),
+	];
 	if (options.outage) modules = withOutage(modules, options.outage.slot, options.outage.outage);
 	if (options.order === REVERSED) modules = [modules[0], ...modules.slice(1).reverse()];
 	return modules;
@@ -496,7 +536,7 @@ export interface Composition {
  * that is also the boot's `logger` component.
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
-	const base = resolveConfig(options.env ?? SINGLE_ENV);
+	const base = resolveConfig(options.env ?? SINGLE_ENV, options.referenceConfs);
 	const config = options.config ? options.config(base) : base;
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
@@ -504,7 +544,10 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: { config, pathResolver: (s) => s, logger },
-		overrideComponents: (await federationOverrides(config, fakes)) as never,
+		overrideComponents: {
+			...(await federationOverrides(config, fakes)),
+			...options.extraOverrides?.(config),
+		} as never,
 	});
 	const app = express();
 	app.set("trust proxy", config.http.trustProxy);
@@ -620,3 +663,45 @@ export function lodgeGrant(app: express.Express): request.Test {
 }
 
 export { cookiesOf };
+
+// ---------------------------------------------------------------------------
+// Discovery
+// ---------------------------------------------------------------------------
+
+export const DISCOVERY_PATHS = [
+	"/.well-known/openid-configuration",
+	"/.well-known/oauth-authorization-server",
+] as const;
+
+/**
+ * What RFC 8414 §2 and OpenID Connect Discovery §3 require of the document
+ * this composition serves, and what each advertised URL must be: https, on
+ * the issuer's origin.
+ */
+export function expectValidMetadata(doc: Record<string, unknown>): void {
+	expect(doc.issuer).toBe(ISSUER);
+	for (const field of [
+		"authorization_endpoint",
+		"token_endpoint",
+		"jwks_uri",
+		"response_types_supported",
+		"subject_types_supported",
+		"id_token_signing_alg_values_supported",
+	]) {
+		expect(doc[field], field).toBeDefined();
+	}
+	for (const [field, value] of Object.entries(doc)) {
+		if (field.endsWith("_endpoint") || field === "jwks_uri") {
+			const url = new URL(value as string);
+			expect(url.origin, field).toBe(ISSUER);
+			expect(url.search + url.hash, field).toBe("");
+		}
+		if (field.endsWith("_supported") && Array.isArray(value)) {
+			expect(value.length, field).toBeGreaterThan(0);
+			for (const entry of value) expect(typeof entry, field).toBe("string");
+			expect(new Set(value).size, `${field} repeats a value`).toBe(value.length);
+		}
+	}
+	expect(doc.response_types_supported).toEqual(["code"]);
+	expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
+}

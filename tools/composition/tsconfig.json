@@ -1,0 +1,13 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"declaration": false,
+		"declarationMap": false,
+		// The suite imports the standalone template's composition fixture, the
+		// fake GitHub and the shared Redis helpers as TypeScript source.
+		"allowImportingTsExtensions": true,
+		"types": ["node"]
+	},
+	"include": ["src/**/*"]
+}

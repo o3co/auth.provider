@@ -32,9 +32,11 @@
  * one.
  */
 
-import { replicaUnsafeReason } from "@o3co/auth-provider-core";
+import { type Module, replicaUnsafeReason } from "@o3co/auth-provider-core";
+import * as redisPackage from "@o3co/auth-provider-redis";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { standaloneRedisClientsModule } from "#/modules.mjs";
 import {
 	type Composition,
 	compose,
@@ -200,5 +202,40 @@ describe('every module on, every shared store on Redis, deployment.mode = "multi
 				modules: expect.arrayContaining(MEMORY_SWITCHES.map(([, module]) => module)),
 			},
 		});
+	});
+});
+
+describe("the shared Redis socket can back every store the Redis package ships", () => {
+	/**
+	 * Every store module `@o3co/auth-provider-redis` exports, the two built per
+	 * composition root included. This template composes some; a deployment adds
+	 * the others to the manifest with the modules that read them (the device
+	 * grant's code store, WebAuthn's challenge store), and each requires its
+	 * client from this module. One it does not provide is a boot refused with
+	 * `missing-required-component` — the #439 shape, which `modules.mts`
+	 * guards against for the device-code store by name.
+	 */
+	const storeModules: Module[] = Object.entries(redisPackage).flatMap(([name, value]) => {
+		if (name.endsWith("ModuleFor") && typeof value === "function") {
+			return [(value as (options: object) => Module)({})];
+		}
+		if (name.endsWith("Module") && typeof value === "object" && value !== null) {
+			return [value as Module];
+		}
+		return [];
+	});
+
+	it.each(storeModules.map((m) => [m.name, m] as const))(
+		"%s: its client slot is provided by standalone:redis-clients",
+		(_name, module) => {
+			const provided = Object.keys(standaloneRedisClientsModule.provides ?? {});
+			const clients = (module.requires ?? []).filter((slot) => String(slot).endsWith("Client"));
+			expect(clients.length).toBeGreaterThan(0);
+			for (const slot of clients) expect(provided, slot).toContain(slot);
+		},
+	);
+
+	it("finds the store modules to check", () => {
+		expect(storeModules.length).toBeGreaterThanOrEqual(12);
 	});
 });

@@ -1,0 +1,39 @@
+{
+	"name": "@o3co/auth-provider-composition",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Every workspace package booted together through core's createApp \u2014 the contracts that exist only when all of them are composed",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"scripts": {
+		"test": "tsc --noEmit && vitest run"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-device-grant": "workspace:*",
+		"@o3co/auth-provider-dpop": "workspace:*",
+		"@o3co/auth-provider-federation-apple": "workspace:*",
+		"@o3co/auth-provider-federation-github": "workspace:*",
+		"@o3co/auth-provider-federation-google": "workspace:*",
+		"@o3co/auth-provider-federation-grants": "workspace:*",
+		"@o3co/auth-provider-federation-oidc": "workspace:*",
+		"@o3co/auth-provider-foundation": "workspace:*",
+		"@o3co/auth-provider-mtls": "workspace:*",
+		"@o3co/auth-provider-oauth": "workspace:*",
+		"@o3co/auth-provider-oauth-token-exchange": "workspace:*",
+		"@o3co/auth-provider-redis": "workspace:*",
+		"@o3co/auth-provider-session": "workspace:*",
+		"@o3co/auth-provider-standalone": "workspace:*",
+		"@o3co/auth-provider-webauthn": "workspace:*",
+		"@types/express": "^5.0.6",
+		"@types/node": "^26.5.1",
+		"@types/supertest": "^7.2.1",
+		"ioredis": "^6.0.0",
+		"supertest": "^7.1.0",
+		"typescript": "^6.0.3",
+		"vitest": "^5.0.0"
+	}
+}

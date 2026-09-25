@@ -53,6 +53,8 @@ import {
 	codeFrom,
 	compose,
 	cookiesOf,
+	DISCOVERY_PATHS,
+	expectValidMetadata,
 	FEDERATION_LANDING,
 	federatedCallback,
 	ISSUER,
@@ -110,9 +112,9 @@ const TEMPLATE_PACKAGES: Readonly<Record<string, string>> = {
 /**
  * Workspace packages the template does not depend on, so nothing here can
  * boot them. Each is a module a deployment adds to this manifest by hand —
- * `modules.mts` already provides the device-code store's Redis client for
- * that reason — and each is a `todo` below until a composition that depends
- * on it boots it beside the rest.
+ * `modules.mts` provides the Redis clients their stores need for that reason
+ * — and `tools/composition` in the monorepo boots each beside every module
+ * here, through this file's fixture.
  */
 const NOT_IN_TEMPLATE: Readonly<Record<string, string>> = {
 	"@o3co/auth-provider-device-grant": "deviceGrantModule",
@@ -171,14 +173,6 @@ describe("what the all-modules composition covers", () => {
 				[...Object.keys(TEMPLATE_PACKAGES), ...Object.keys(NOT_IN_TEMPLATE)].sort(),
 			);
 		});
-
-		// Listed only here: `runIf` skips a block's cases but still reports its
-		// todos, and a scaffold has none of these packages to boot.
-		for (const [name, module] of inMonorepo ? Object.entries(NOT_IN_TEMPLATE) : []) {
-			it.todo(
-				`boots ${module} (${name}) beside every other module — needs a composition that depends on ${name}`,
-			);
-		}
 	});
 });
 
@@ -297,44 +291,6 @@ describe("every module the template can turn on boots together", () => {
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
-
-const DISCOVERY_PATHS = [
-	"/.well-known/openid-configuration",
-	"/.well-known/oauth-authorization-server",
-];
-
-/**
- * What RFC 8414 §2 and OpenID Connect Discovery §3 require of the document
- * this composition serves, and what each advertised URL must be: https, on
- * the issuer's origin.
- */
-function expectValidMetadata(doc: Record<string, unknown>): void {
-	expect(doc.issuer).toBe(ISSUER);
-	for (const field of [
-		"authorization_endpoint",
-		"token_endpoint",
-		"jwks_uri",
-		"response_types_supported",
-		"subject_types_supported",
-		"id_token_signing_alg_values_supported",
-	]) {
-		expect(doc[field], field).toBeDefined();
-	}
-	for (const [field, value] of Object.entries(doc)) {
-		if (field.endsWith("_endpoint") || field === "jwks_uri") {
-			const url = new URL(value as string);
-			expect(url.origin, field).toBe(ISSUER);
-			expect(url.search + url.hash, field).toBe("");
-		}
-		if (field.endsWith("_supported") && Array.isArray(value)) {
-			expect(value.length, field).toBeGreaterThan(0);
-			for (const entry of value) expect(typeof entry, field).toBe("string");
-			expect(new Set(value).size, `${field} repeats a value`).toBe(value.length);
-		}
-	}
-	expect(doc.response_types_supported).toEqual(["code"]);
-	expect(doc.code_challenge_methods_supported).toEqual(["S256"]);
-}
 
 describe("discovery", () => {
 	it.each(DISCOVERY_PATHS)("%s is valid and advertises every enabled grant", async (path) => {

@@ -640,6 +640,78 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
 
+  tools/composition:
+    devDependencies:
+      '@o3co/auth-provider-core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@o3co/auth-provider-device-grant':
+        specifier: workspace:*
+        version: link:../../packages/device-grant
+      '@o3co/auth-provider-dpop':
+        specifier: workspace:*
+        version: link:../../packages/dpop
+      '@o3co/auth-provider-federation-apple':
+        specifier: workspace:*
+        version: link:../../packages/federation-apple
+      '@o3co/auth-provider-federation-github':
+        specifier: workspace:*
+        version: link:../../packages/federation-github
+      '@o3co/auth-provider-federation-google':
+        specifier: workspace:*
+        version: link:../../packages/federation-google
+      '@o3co/auth-provider-federation-grants':
+        specifier: workspace:*
+        version: link:../../packages/federation-grants
+      '@o3co/auth-provider-federation-oidc':
+        specifier: workspace:*
+        version: link:../../packages/federation-oidc
+      '@o3co/auth-provider-foundation':
+        specifier: workspace:*
+        version: link:../../packages/foundation
+      '@o3co/auth-provider-mtls':
+        specifier: workspace:*
+        version: link:../../packages/mtls
+      '@o3co/auth-provider-oauth':
+        specifier: workspace:*
+        version: link:../../packages/oauth
+      '@o3co/auth-provider-oauth-token-exchange':
+        specifier: workspace:*
+        version: link:../../packages/oauth-token-exchange
+      '@o3co/auth-provider-redis':
+        specifier: workspace:*
+        version: link:../../packages/redis
+      '@o3co/auth-provider-session':
+        specifier: workspace:*
+        version: link:../../packages/session
+      '@o3co/auth-provider-standalone':
+        specifier: workspace:*
+        version: link:../../templates/standalone
+      '@o3co/auth-provider-webauthn':
+        specifier: workspace:*
+        version: link:../../packages/webauthn
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      '@types/supertest':
+        specifier: ^7.2.1
+        version: 7.2.1
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
+      supertest:
+        specifier: ^7.1.0
+        version: 7.2.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
+
   tools/live-check:
     devDependencies:
       '@types/node':
