@@ -1214,7 +1214,13 @@ before you flip — and a relying party holding the secret can also mint.
    `redisFederationTokenStore.scanFallback` ([§5](#operational-notes)),
    `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and
    `oauth.refreshToken.unknownFamilyPolicy = "accept"`
-   (`packages/core/config/reference.conf`).
+   (`packages/core/config/reference.conf`). That last one does not close by
+   waiting: under `"accept"` a refresh token with no family record is
+   redeemed with a new one of the full `oauth.refreshToken.expiresIn`, in the
+   same family and still with no record, so a client that keeps refreshing
+   holds a chain that never expires and is never replay-checked. Setting
+   `"reject"` ends it, and signs out every holder of such a chain at that
+   moment — plan it as a forced re-login.
 
 ### Rolling out
 
