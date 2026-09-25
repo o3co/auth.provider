@@ -500,10 +500,32 @@ export type {
 // MFA (the MFA ADR): the stores, their memory adapters, factories and modules
 export {
 	createMfaFactorStoreFactory,
+	createMfaTransactionStoreFactory,
 	registerBuiltinMfaFactorStores,
+	registerBuiltinMfaTransactionStores,
 } from "./mfa/factory.mjs";
 export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
-export { memoryMfaFactorStoreModule } from "./mfa/module.mjs";
+export {
+	createMemoryMfaTransactionStore,
+	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
+	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
+	type MemoryMfaTransactionStore,
+	type MemoryMfaTransactionStoreOptions,
+} from "./mfa/memoryTransactionStore.mjs";
+export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
+export {
+	checkMfaLockoutPolicy,
+	MFA_TRANSACTION_PATCH_KEYS,
+	MFA_WEEKLY_WINDOW_MS,
+	type MfaLockoutPolicy,
+	type MfaSubjectAttemptOutcome,
+	type MfaSubjectAttemptReservation,
+	type MfaSubjectHold,
+	type MfaTransaction,
+	type MfaTransactionPatch,
+	type MfaTransactionStore,
+	type MfaTransactionStoreFactory,
+} from "./mfa/transactionStore.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {
 	browserFacingCorsRoutes,

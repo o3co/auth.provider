@@ -24,6 +24,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import { defineModule } from "../modules/manifest/index.mjs";
 import { warnMfaFactorStoreInMemory } from "./factory.mjs";
 import { createMemoryMfaFactorStore } from "./memoryFactorStore.mjs";
+import { createMemoryMfaTransactionStore } from "./memoryTransactionStore.mjs";
 
 /**
  * Provides the in-process {@link MfaFactorStore}. Every enrollment is lost at
@@ -46,5 +47,23 @@ export const memoryMfaFactorStoreModule = defineModule({
 			warnMfaFactorStoreInMemory(deps.logger ?? consoleLogger);
 			return createMemoryMfaFactorStore();
 		},
+	},
+});
+
+/**
+ * Provides the in-process {@link MfaTransactionStore}. A restart loses the
+ * ceremonies in flight — each user starts again from the password — and the
+ * subject lock state, which a restart therefore lifts.
+ */
+export const memoryMfaTransactionStoreModule = defineModule({
+	name: "core-mfa-transaction-store-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica",
+	},
+	provides: {
+		mfaTransactionStore: () => createMemoryMfaTransactionStore(),
 	},
 });

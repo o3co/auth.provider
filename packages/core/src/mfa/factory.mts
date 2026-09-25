@@ -24,6 +24,8 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { MfaFactorStore, MfaFactorStoreFactory } from "./factorStore.mjs";
 import { createMemoryMfaFactorStore } from "./memoryFactorStore.mjs";
+import { createMemoryMfaTransactionStore } from "./memoryTransactionStore.mjs";
+import type { MfaTransactionStore, MfaTransactionStoreFactory } from "./transactionStore.mjs";
 
 /**
  * Says, once per store built, that an in-process factor store forgets every
@@ -55,4 +57,17 @@ export function registerBuiltinMfaFactorStores(
 		warnMfaFactorStoreInMemory(logger);
 		return createMemoryMfaFactorStore();
 	});
+}
+
+/** An empty {@link MfaTransactionStoreFactory}; register builders, or call {@link registerBuiltinMfaTransactionStores}. */
+export function createMfaTransactionStoreFactory(): MfaTransactionStoreFactory {
+	return createAdapterFactory<MfaTransactionStore>("MfaTransactionStore");
+}
+
+/**
+ * Registers the in-tree builders: `memory`. Throws `AdapterFactoryError`
+ * (`duplicate`) when one is already registered.
+ */
+export function registerBuiltinMfaTransactionStores(factory: MfaTransactionStoreFactory): void {
+	factory.register("memory", () => createMemoryMfaTransactionStore());
 }
