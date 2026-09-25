@@ -51,12 +51,14 @@ import {
 	AS_LISTED,
 	authorize,
 	basic,
+	codeFrom,
 	contributionNames,
 	cookiesOf,
 	DISCOVERY_PATHS,
 	describeOutages,
 	expectValidMetadata,
 	FORM_TYPE,
+	federatedCallback,
 	ISSUER,
 	JSON_TYPE,
 	KIB,
@@ -65,6 +67,7 @@ import {
 	padForm,
 	padJson,
 	REVERSED,
+	redeem,
 	TEMPLATE_DEPENDENCIES,
 	TOO_LARGE,
 	TRANSFERS,
@@ -704,6 +707,19 @@ describe("token exchange: a token exchanged from a session-bound token ends with
 		expect(tokenPayload(exchanged).sid).toBe(tokenPayload(original).sid);
 	});
 
+	it("after /session/logout, /userinfo refuses the exchanged token as it refuses the original", async () => {
+		const { app } = await boot();
+		const { agent, header, token, original, exchanged } = await sessionAndExchange(app);
+		expect((await agent.post("/session/logout").set(header, token)).status).toBe(200);
+		for (const accessToken of [original, exchanged]) {
+			const res = await request(app)
+				.get("/oauth/userinfo")
+				.set("Authorization", `Bearer ${accessToken}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error_description).toBe("session_invalid");
+		}
+	});
+
 	it("refuses to exchange a session-bound token after its session logged out", async () => {
 		const { app } = await boot();
 		const { agent, header, token, original } = await sessionAndExchange(app);
@@ -715,6 +731,100 @@ describe("token exchange: a token exchanged from a session-bound token ends with
 			error: "invalid_request",
 			error_description: "session_invalid",
 		});
+	});
+});
+
+describe("token exchange: an exchanged token reaches none of the capabilities its session's own tokens have", () => {
+	// The session link an exchanged token carries is for liveness — it goes
+	// inactive when the session ends — and for nothing else. A `sid` claim is
+	// also what /userinfo releases the session's claims on, what
+	// `POST /oauth/federation/:name/logout` deletes the upstream tokens on, and
+	// (with `family_id` and an allowlisted `azp`) what the federation token
+	// route hands the upstream access token out on. A downstream holder of an
+	// exchanged token must reach none of them. The gateway is registered for
+	// `email` and allowlisted for federation tokens, so nothing but the
+	// missing session capability stands in the way.
+
+	const exchangeAsGateway = (app: Express, subjectToken: string, scope?: string) =>
+		request(app)
+			.post("/oauth/token")
+			.set("Authorization", basic(GATEWAY))
+			.type("form")
+			.send({
+				grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				...(scope === undefined ? {} : { scope }),
+			});
+
+	/** A Google login, and the web client's authorization-code tokens from that session. */
+	const federatedTokens = async (app: Express, upstreams: FullSet["upstreams"]) => {
+		const callback = await (await federatedCallback(app, "google", upstreams.google))();
+		expect(callback.status).toBe(302);
+		const redeemed = await redeem(app, codeFrom(await authorize(app, cookiesOf(callback))));
+		expect(redeemed.status).toBe(200);
+		const original = redeemed.body.access_token as string;
+		const sid = tokenPayload(original).sid as string;
+		expect(typeof sid).toBe("string");
+		const exchanged = await exchangeAsGateway(app, original, "openid");
+		expect(exchanged.status).toBe(200);
+		return { original, sid, exchanged: exchanged.body.access_token as string };
+	};
+
+	it("/userinfo answers the exchanged token with its subject alone, not the session's claims", async () => {
+		const { app } = await boot();
+		const { agent } = await signedIn(app);
+		const minted = await agent
+			.post("/oauth/token")
+			.set("Authorization", basic(WEB))
+			.type("form")
+			.send({ grant_type: "session", scope: "openid email" });
+		expect(minted.status).toBe(200);
+		const original = minted.body.access_token as string;
+		// The session's own token, for contrast: its scope releases the email.
+		const own = await request(app)
+			.get("/oauth/userinfo")
+			.set("Authorization", `Bearer ${original}`);
+		expect(own.status).toBe(200);
+		expect(own.body).toMatchObject({ sub: ALICE.sub, email: "alice@example.com" });
+
+		const exchanged = await exchangeAsGateway(app, original);
+		expect(exchanged.status).toBe(200);
+		expect(exchanged.body.scope).toContain("email");
+		const res = await request(app)
+			.get("/oauth/userinfo")
+			.set("Authorization", `Bearer ${exchanged.body.access_token as string}`);
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sub: ALICE.sub });
+	});
+
+	it("the federation token route does not hand the upstream token to the exchanged token", async () => {
+		const { app, upstreams } = await boot();
+		const { exchanged } = await federatedTokens(app, upstreams);
+		const res = await request(app)
+			.post("/oauth/federation/google/token")
+			.set("Authorization", `Bearer ${exchanged}`);
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "missing sid claim" });
+		expect(res.body.access_token).toBeUndefined();
+	});
+
+	it("the federation logout route does not let the exchanged token delete the upstream tokens", async () => {
+		const { app, upstreams, handle } = await boot();
+		const { exchanged, sid } = await federatedTokens(app, upstreams);
+		const store = handle.components.federationTokenStore;
+		expect(await store?.get(sid, "google")).not.toBeNull();
+
+		const res = await request(app)
+			.post("/oauth/federation/google/logout")
+			.set("Authorization", `Bearer ${exchanged}`)
+			// A body, as a client sends one: the route reads its optional
+			// parameters from it.
+			.type("form")
+			.send({ state: "s" });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "missing sid claim" });
+		expect(await store?.get(sid, "google")).not.toBeNull();
 	});
 });
 

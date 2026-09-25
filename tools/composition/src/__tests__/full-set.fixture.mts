@@ -383,12 +383,17 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 		allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
 	},
 	// A confidential client exchanging the web client's tokens for its own.
+	// `email` and the federation-token allowlist are there so what an
+	// exchanged token must NOT reach — the session's claims at /userinfo, the
+	// upstream token — is within the client's registration: only the missing
+	// session capability stands in the way.
 	[GATEWAY.id]: {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: GATEWAY.secret,
-		allowedScopes: ["openid", "profile"],
+		allowedScopes: ["openid", "profile", "email"],
 		allowedAudiences: [ISSUER],
 		allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
+		allowedAzpForFederationToken: true,
 	},
 	// A machine client whose tokens are sender-constrained by DPoP or mTLS.
 	[BINDER.id]: {
