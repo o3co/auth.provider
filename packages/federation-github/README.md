@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-github
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 GitHub federation provider for `auth.provider`: sign-in with a GitHub account
 through a GitHub OAuth App, with upstream logout and claim mapping.
@@ -175,6 +175,11 @@ record is silent.
   `endSessionEndpoint` configured, that URL with `id_token_hint`,
   `post_logout_redirect_uri` and `state`; otherwise `postLogoutRedirectUri`, and without one
   `https://github.com/logout`, with `state`. An unparsable URL throws.
+  Redirecting straight to `postLogoutRedirectUri` is safe because the caller
+  hands only a URI it has matched against the client's registered
+  `postLogoutRedirectUris`, or none — core's `EndSessionRequest` states the
+  rule, and `oauth`'s logout routes keep it. A composition that calls
+  `endSession()` itself must do the same.
 
 ## Public API
 

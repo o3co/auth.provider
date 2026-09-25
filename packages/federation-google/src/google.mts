@@ -292,6 +292,12 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			// Google does not publish an OIDC end_session_endpoint in its discovery document.
 			// Operators MUST pass endSessionEndpoint explicitly for upstream logout.
 			// Absent that, redirect directly to postLogoutRedirectUri (or accounts.google.com/Logout).
+			// That redirect is safe only because of the caller's side of the
+			// contract (core's `EndSessionRequest`): the URI handed here is one
+			// already matched against the client's registered
+			// postLogoutRedirectUris, or none — `oauth`'s logout routes check it
+			// first. Handed a request's value unchecked, this would answer with
+			// wherever the request asked to go.
 			if (config.endSessionEndpoint) {
 				let url: URL;
 				try {

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -504,6 +504,8 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと**バイト単位で完全一致**しなければならない。逆ドメインのカスタムスキームは正当なエントリーだが、それだからといって緩和はされない。
 - `state`（任意） — `post_logout_redirect_uri` へのリダイレクト時にそのまま返す
 
+`post_logout_redirect_uri` は、ヒントを検証した直後に 1 回だけ、ヒントの発行先クライアント（その `aud`）のリストと照合し、以後は照合の結果だけを使う — 確認ページも、上流の end-session 呼び出しも、このエンドポイント自身のリダイレクトも。一致しないもの、あるいはこのデプロイメントが知らないクライアントのものは、送られなかったものとして扱う。特に、**フェデレーションの end-session 呼び出しには決して渡さない**。Google、GitHub、Apple は end-session エンドポイントを公開しておらず、設定されていなければそのアダプターは渡された URI へそのままリダイレクトするからである。`post_logout_redirect_uri` を指定しないリクエストはクライアントリポジトリに一切問い合わせない。答えられないクライアントリポジトリは、何もログアウトする前に `503 temporarily_unavailable`（"client repository unavailable"）となり、`site: "logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。
+
 `id_token_hint` の発行から 24 時間を超えた `GET` には、ログアウトする代わりに確認ページを返す。そのフォームはヒントと `state` をこのエンドポイントへ POST で送り返し、`post_logout_redirect_uri` はクライアントのアローリストにある場合だけ送り返す。
 
 検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。
@@ -511,7 +513,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 フロー: `id_token_hint` を検証 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
 - `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）
-- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添える。フェデレーショントークンのレコードが読めなければ添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
+- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
@@ -530,7 +532,9 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 プロバイダー単位のフェデレーション切断。Authorization に `typ: at+jwt` の `Bearer <access_token>`。ボディ（任意）: `post_logout_redirect_uri`、`state`。
 
-フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+
+`post_logout_redirect_uri` を IdP の end-session 呼び出しに渡すのは、アクセストークンの発行先クライアント（その `azp`）の `postLogoutRedirectUris` のいずれかと完全一致したときだけである — このルートも呼び出し側が選んだ先へのリダイレクトで終わるので、`/oauth/logout` と同じ規則を適用する。一致しなければ捨て、アダプターは指定が無いときと同じように答える: Google と GitHub はブラウザーを自身のログアウトページへ送り、end-session エンドポイントが設定されていない Apple は拒否する。このルートはそれを失敗した end-session 呼び出しと同じく `200 {"disconnected": true}` で答える。`azp` の無いトークンには照合するリストが無い。答えられないクライアントリポジトリは、何も削除する前に `503 temporarily_unavailable`（"client repository unavailable"）となり、`site: "federation_logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。
 
 IdP の end-session 呼び出しが例外を投げた場合、ローカルの状態は既にクリア済みなので、応答は `200 {"disconnected": true}` で、オペレーター向けに監査イベント `federation.logout.idp_unreachable` を出す。
 

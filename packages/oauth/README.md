@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
 
@@ -510,12 +510,14 @@ OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Parameters (`application/x-
 - `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` **exactly**, byte for byte. A reverse-domain custom scheme is a legal entry, and gets no relaxation for being one.
 - `state` (optional) — round-tripped when redirecting to `post_logout_redirect_uri`
 
+`post_logout_redirect_uri` is held to the list of the client the hint was issued to (its `aud`) once, right after the hint is verified, and only the result is used from then on — by the confirmation page, the upstream end-session call and this endpoint's own redirect. One that does not match, or one for a client this deployment does not know, is treated as if none was sent: in particular, **the federation's end-session call is never handed it**. That matters because Google, GitHub and Apple publish no end-session endpoint, and without one configured their adapters redirect straight to the URI they are handed. A request that names no `post_logout_redirect_uri` does not consult the client repository at all. A client repository that cannot answer is `503 temporarily_unavailable` ("client repository unavailable"), before anything is logged out, logged once at error level as `client_repository_unavailable` with `site: "logout"`.
+
 An `id_token_hint` that cannot be verified is `400 invalid_token`; one that cannot be verified because the keystore did not answer is `503 temporarily_unavailable`, on `GET` as on `POST`. A `GET` whose `id_token_hint` was issued more than 24 hours ago is answered with a confirmation page instead of logging out; its form posts the hint and `state` back to this endpoint, and `post_logout_redirect_uri` only when it is on the client's allowlist.
 
 Flow: verifies `id_token_hint` → loads the session → broadcasts an OIDC Back-Channel Logout 1.0 `logout_token` to every RP with a `backchannelLogoutUri` (best-effort; a failed POST does not stop the logout) → runs the store cascade → answers with one of:
 
 - `text/html` page with an `<iframe>` per RP with a `frontchannelLogoutUri` (when `Accept: text/html` wins q-weighted negotiation)
-- `303` to the first federation's IdP end-session URL (when that federation's provider implements `SupportsLogout`). The stored federation id_token goes with it as `id_token_hint`; when the federation token record cannot be read, the redirect goes without it, logged once as `logout_federation_token_read_failed` (warn)
+- `303` to the first federation's IdP end-session URL (when that federation's provider implements `SupportsLogout`). The stored federation id_token goes with it as `id_token_hint`, and `post_logout_redirect_uri` only when it matched the client's list; when the federation token record cannot be read, the redirect goes without the hint, logged once as `logout_federation_token_read_failed` (warn)
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
 
@@ -534,7 +536,9 @@ On every success shape — and on the no-op answer for a session that is already
 
 Provider-scoped federation disconnect. Authorization: `Bearer <access_token>` with `typ: at+jwt`. Optional body: `post_logout_redirect_uri`, `state`.
 
-Flow: verifies the access token → checks its family is not revoked → loads the session → verifies the federation is linked → deletes the federation token → removes the federation from the session → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
+Flow: verifies the access token → checks its family is not revoked → loads the session → verifies the federation is linked → holds `post_logout_redirect_uri` to the client's list → deletes the federation token → removes the federation from the session → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
+
+`post_logout_redirect_uri` is handed to the IdP end-session call only when it matches, exactly, one of the `postLogoutRedirectUris` of the client the access token was issued to (its `azp`) — the rule `/oauth/logout` applies, since this route too ends in a redirect the caller chose. Otherwise it is dropped, and the adapter answers as it does with none: Google and GitHub send the browser to their own logout pages, and Apple with no end-session endpoint configured refuses, which this route answers as any end-session call that fails — `200 {"disconnected": true}`. A token with no `azp` has no list to match. A client repository that cannot answer is `503 temporarily_unavailable` ("client repository unavailable") before anything is deleted, logged once at error level as `client_repository_unavailable` with `site: "federation_logout"`.
 
 If the IdP end-session call throws, local state is already cleared; the response is `200 {"disconnected": true}` and an audit event `federation.logout.idp_unreachable` is emitted for operator visibility.
 
