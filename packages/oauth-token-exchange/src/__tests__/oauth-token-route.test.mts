@@ -18,8 +18,11 @@
  * authentication, dispatch through the resolver and the explicit grant
  * allowlist the handler declares, and the response the route writes from the
  * handler's result (status, body, `Cache-Control`, the RFC 6749 §5.2 character
- * set of `error_description`). Nothing is stubbed but what a deployment
- * supplies itself: the client and code repositories and the key store.
+ * set of `error_description`), and how `resource` and `audience` arrive from
+ * the body parsers the route mounts — a JSON value that is not a string or an
+ * array of strings, a repeated or empty form parameter. Nothing is stubbed but
+ * what a deployment supplies itself: the client and code repositories and the
+ * key store.
  */
 
 import {
@@ -230,5 +233,161 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
+	});
+
+	// The target parameters, RFC 8707 `resource` and RFC 8693 `audience`. The
+	// route parses JSON as well as a form, and only a JSON body can carry a
+	// value that is neither a string nor an array of strings. Such a value is
+	// one the server "fails to parse", which RFC 8707 §2 answers
+	// `invalid_target`; it is never converted to a string, because
+	// `String([["billing"]])` is `"billing"` — a target the client never sent.
+	describe("target parameters", () => {
+		const exchangeJson = (app: express.Express, body: Record<string, unknown>) =>
+			request(app)
+				.post("/oauth/token")
+				.auth(gateway.clientId, SECRET)
+				.type("json")
+				.send({ grant_type: TOKEN_EXCHANGE_GRANT_TYPE, ...body });
+
+		const malformed: ReadonlyArray<readonly [string, unknown]> = [
+			["a nested array", [["billing"]]],
+			["a number", 42],
+			["a boolean", true],
+			["an object", { uri: "billing" }],
+			["an array holding a number", ["billing", 42]],
+			["an array holding null", [null]],
+		];
+
+		it.each(malformed)("refuses %s as resource with invalid_target", async (_case, resource) => {
+			const app = await boot();
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+
+			const res = await exchangeJson(app, {
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource,
+			});
+
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_target",
+				error_description: "resource must be a string or an array of strings",
+			});
+		});
+
+		it.each(malformed)("refuses %s as audience with invalid_target", async (_case, audience) => {
+			const app = await boot();
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+
+			const res = await exchangeJson(app, {
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience,
+			});
+
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_target",
+				error_description: "audience must be a string or an array of strings",
+			});
+		});
+
+		// RFC 6749 §3.2: a parameter sent without a value is omitted, and the
+		// empty entry of a repeated one names nothing — as core reads `resource`
+		// for every grant. Either way the issued audience is the one the
+		// subject token names, as with the parameter left out.
+		const targets = ["resource", "audience"] as const;
+		const emptyForms = (name: string): ReadonlyArray<readonly [string, string]> => [
+			["sent without a value", `${name}=`],
+			["repeated with one empty entry", `${name}=&${name}=billing`],
+			["repeated with empty entries only", `${name}=&${name}=`],
+		];
+		const exchangeForm = (app: express.Express, subjectToken: string, target: string) =>
+			request(app)
+				.post("/oauth/token")
+				.auth(gateway.clientId, SECRET)
+				.type("form")
+				.send(
+					`${new URLSearchParams({
+						grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+						subject_token: subjectToken,
+						subject_token_type: ACCESS_TOKEN_TYPE,
+					}).toString()}&${target}`,
+				);
+
+		it.each(
+			targets.flatMap((name) =>
+				emptyForms(name).map(([shape, target]) => [name, shape, target] as const),
+			),
+		)("reads a form %s %s by its non-empty values", async (_name, _shape, target) => {
+			const app = await boot();
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+
+			const res = await exchangeForm(app, subjectToken, target);
+
+			expect(res.status).toBe(200);
+			expect(decodeJwt(res.body.access_token as string).aud).toBe("billing");
+		});
+
+		it.each(
+			targets.flatMap((name) =>
+				(
+					[
+						["null", null],
+						["an empty array", []],
+						["an array of empty strings", ["", ""]],
+					] as const
+				).map(([shape, value]) => [name, shape, value] as const),
+			),
+		)("reads a JSON %s of %s as none requested", async (name, _shape, value) => {
+			const app = await boot();
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+
+			const res = await exchangeJson(app, {
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				[name]: value,
+			});
+
+			expect(res.status).toBe(200);
+			expect(decodeJwt(res.body.access_token as string).aud).toBe("billing");
+		});
+
+		// The value beside an empty entry is kept, and read: a repeated form
+		// `resource` whose one value the issued audience does not equal is
+		// refused naming that value, and nothing for the empty entry.
+		it("keeps the value beside an empty form entry, and refuses it when the audience does not equal it", async () => {
+			const app = await boot();
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+
+			const res = await exchangeForm(
+				app,
+				subjectToken,
+				"resource=&resource=https%3A%2F%2Felsewhere.example",
+			);
+
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_target",
+				error_description: "requested_resources_not_in_audience: https://elsewhere.example",
+			});
+		});
+
+		it("still refuses a well-formed resource the issued audience does not equal", async () => {
+			const app = await boot();
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+
+			const res = await exchangeJson(app, {
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: ["billing", "https://elsewhere.example"],
+			});
+
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_target",
+				error_description: "requested_resources_not_in_audience: https://elsewhere.example",
+			});
+		});
 	});
 });

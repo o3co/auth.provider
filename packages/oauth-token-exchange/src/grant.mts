@@ -43,6 +43,7 @@ import {
 	policyOutOfBounds,
 	readIssuedScope,
 	readSpaceDelimitedParameter,
+	readTargetParameter,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
@@ -629,8 +630,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 			// Normalize empty to null — `scope=""` and `scope=" "` behave the same
-			// as scope omitted (inherit subject scope), per the same rationale that
-			// drives normalizeArrayParam for audience/resource.
+			// as scope omitted (inherit subject scope), as a target parameter
+			// that names nothing does below (RFC 6749 §3.2).
 			const requestedScope = requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
 			if (requestedScope) {
 				for (const s of requestedScope) {
@@ -671,8 +672,41 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const subjectAudienceSet = new Set(
 				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
 			);
-			const requestedAudience = normalizeArrayParam(body.audience);
-			const requestedResource = normalizeArrayParam(body.resource);
+			// The target parameters, read by core's `readTargetParameter`, which
+			// the other grants' reading of `resource` is built on. One that is
+			// neither a string nor an array of strings is refused, never
+			// converted: a converted value could name a target the client never
+			// sent (`String([["billing"]])` is `"billing"`). For `resource` the
+			// code is RFC 8707 §2's: a value the server "fails to parse" is
+			// `invalid_target`. RFC 8693 §2.2.2 has no such sentence for
+			// `audience` — it gives `invalid_target` for a target the server is
+			// unwilling or unable to issue for, and `invalid_request` for a
+			// request that is not valid — so `audience` is answered
+			// `invalid_target` by symmetry: one reader, one answer. One that names
+			// nothing — absent, `null`, `""`, or empty entries only — is omitted
+			// (RFC 6749 §3.2).
+			const audienceValues = readTargetParameter(body.audience);
+			if (audienceValues === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: "audience must be a string or an array of strings",
+					},
+				};
+			}
+			const resourceValues = readTargetParameter(body.resource);
+			if (resourceValues === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: "resource must be a string or an array of strings",
+					},
+				};
+			}
+			const requestedAudience = audienceValues.length > 0 ? audienceValues : null;
+			const requestedResource = resourceValues.length > 0 ? resourceValues : null;
 			if (requestedAudience) {
 				for (const aud of requestedAudience) {
 					if (!clientAudienceSet.has(aud)) {
@@ -1087,6 +1121,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
  * `invalid_client`, `unauthorized_client` — a policy decision past a ceiling
  * is core's `policyOutOfBounds`, and a store that cannot answer is
  * `503 temporarily_unavailable`, never a verdict on the request.
+ *
+ * A value of the wrong type is `invalid_request` for a parameter sent once
+ * (`scope`, `client_id`, `expires_in`: an array is a repeated parameter, RFC
+ * 6749 §3.2), but `invalid_target` for `resource` and `audience`, which may be
+ * repeated, so a value that is neither a string nor strings is a target that
+ * cannot be read (RFC 8707 §2; `audience` by symmetry).
  */
 function invalidRequest(errorDescription: string): GrantHandlerResult {
 	return { result: { status: 400, error: "invalid_request", errorDescription } };
@@ -1265,15 +1305,6 @@ function subjectAudienceBoundary(
 		return values.length > 0 ? values : [clientId];
 	}
 	return [clientId];
-}
-
-function normalizeArrayParam(value: unknown): string[] | null {
-	if (value === undefined || value === null || value === "") return null;
-	if (Array.isArray(value)) {
-		const filtered = value.map(String).filter((s) => s.length > 0);
-		return filtered.length === 0 ? null : filtered;
-	}
-	return [String(value)];
 }
 
 export { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";

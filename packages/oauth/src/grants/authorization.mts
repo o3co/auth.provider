@@ -38,7 +38,6 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
-import { decodeJwtPayload } from "./_jwtPayload.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
 /**
@@ -625,6 +624,14 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					...(confirmation ? { confirmation } : {}),
 				},
 			);
+			// #449: the refresh token's identity — its `jti`, and the instant its
+			// lifetime is measured from — is reserved here, so the family below is
+			// registered under exactly the `jti` and `exp` the token carries, as
+			// the refresh grant registers a rotation. It is never read back from
+			// the signer's output, which a `KeyStore` may return in a form this
+			// grant cannot decode.
+			const refreshTokenIssuedAt = Math.floor(Date.now() / 1000);
+			const refreshTokenJti = crypto.randomUUID();
 			const refreshToken = await generateToken(
 				{
 					family_id: familyId,
@@ -645,6 +652,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
+					jti: refreshTokenJti,
+					issuedAt: refreshTokenIssuedAt,
 					...(bindRefreshToken ? { confirmation } : {}),
 				},
 			);
@@ -653,29 +662,30 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// active from the first use. Per A3 §5.2: use the dedicated
 			// RefreshTokenFamilyRotation.register(newJti, familyId, expiresAtMs) rather
 			// than the v0.4.x rotate(null, ...) trick — expiresAtMs is epoch-ms.
+			// Every refresh token served with a rotation wired has its family
+			// registered; there is no branch that serves one without.
 			if (deps.refreshTokenFamilyRotation) {
-				const payload = decodeJwtPayload(refreshToken.token);
-				const jti = payload.jti as string | undefined;
-				const exp = payload.exp as number | undefined;
-				if (typeof jti === "string" && typeof exp === "number") {
-					// CP-16: fail-closed when the store is unavailable. If we cannot
-					// register the initial rt, we cannot guarantee replay detection
-					// for the family — serving a token whose replay-detection is
-					// blind would undermine the RFC 6819 §5.2.2.3 contract. Return
-					// a controlled 503 JSON so clients see a retryable error instead
-					// of an unhandled HTML 500 from express.
-					try {
-						await deps.refreshTokenFamilyRotation.register(jti, familyId, exp * 1000);
-					} catch (err) {
-						storeUnavailable("refresh_token_family", "register", authenticatedClientId, err);
-						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: "refresh token store unavailable",
-							},
-						};
-					}
+				// CP-16: fail-closed when the store is unavailable. If we cannot
+				// register the initial rt, we cannot guarantee replay detection
+				// for the family — serving a token whose replay-detection is
+				// blind would undermine the RFC 6819 §5.2.2.3 contract. Return
+				// a controlled 503 JSON so clients see a retryable error instead
+				// of an unhandled HTML 500 from express.
+				try {
+					await deps.refreshTokenFamilyRotation.register(
+						refreshTokenJti,
+						familyId,
+						(refreshTokenIssuedAt + refreshTokenExpiresIn) * 1000,
+					);
+				} catch (err) {
+					storeUnavailable("refresh_token_family", "register", authenticatedClientId, err);
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "refresh token store unavailable",
+						},
+					};
 				}
 			}
 
