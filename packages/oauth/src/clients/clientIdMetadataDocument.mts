@@ -76,6 +76,7 @@
 import { promises as dns } from "node:dns";
 import { isIP } from "node:net";
 import {
+	auditErrorText,
 	type ClientRepository,
 	checkRedirectUri,
 	isLoopbackHostname,
@@ -516,7 +517,11 @@ export function createClientIdMetadataDocumentResolver(
 		const contentType = res.headers.get("content-type") ?? "";
 		if (!/json/i.test(contentType)) {
 			await res.body?.cancel().catch(() => undefined);
-			throw new DocumentRejected(`document is not JSON (Content-Type: ${contentType || "absent"})`);
+			// The client's server wrote the header: quoted sanitised and capped,
+			// since the message is what the log keeps as `reason`.
+			throw new DocumentRejected(
+				`document is not JSON (Content-Type: ${contentType === "" ? "absent" : auditErrorText(contentType)})`,
+			);
 		}
 		const text = await readCapped(res, maxBytes);
 		let parsed: unknown;
@@ -558,7 +563,11 @@ export function createClientIdMetadataDocumentResolver(
 			// what `reason` cannot — a fetch failure's cause code.
 			const projected = loggableError(err);
 			logger?.warn(
-				{ clientId, reason: projected.detail ?? projected.name, err: projected },
+				{
+					clientId: auditErrorText(clientId),
+					reason: projected.detail ?? projected.name,
+					err: projected,
+				},
 				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
 			);
 			if (rejected) {
@@ -590,7 +599,7 @@ export function createClientIdMetadataDocumentResolver(
 		async resolve(clientId) {
 			if (!isClientIdMetadataDocumentUrl(clientId)) return null;
 			if (!hostAllowed(new URL(clientId).hostname)) {
-				logger?.warn({ clientId }, "cimd_host_not_allowed");
+				logger?.warn({ clientId: auditErrorText(clientId) }, "cimd_host_not_allowed");
 				return null;
 			}
 			const cached = cache.get(clientId);

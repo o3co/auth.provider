@@ -1101,10 +1101,13 @@ const resolveScopes = (
 		//       even though the server is configured oidc-required.
 		(!requestedScopes.includes("openid") || !allowedFilteredScopes.includes("openid"))
 	) {
+		// The requested scopes are the caller's: every one a scope-token (the
+		// grammar check above), but as many as it sent. They go on the line as
+		// the `scope` parameter spells them, sanitised and capped.
 		ctx.opts.logger.warn(
 			{
 				clientId: ctx.clientId,
-				requestedScopes,
+				requestedScopes: auditErrorText(requestedScopes.join(" ")),
 				allowedFilteredScopes,
 			},
 			"authorize_rejected_missing_openid_scope",

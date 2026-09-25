@@ -689,7 +689,7 @@ clients:
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき
 - `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
 - `federation.token.reauthentication_required` — IdP の構造化された `invalid_grant` または `invalid_token` を受け取ったとき（上の 410）
-- `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま — トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
+- `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま、ただし上流や呼び出し元が書いた監査フィールドすべてと同じくサニタイズし 200 文字で切り詰める（core の `auditErrorText`）— トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
 
 ## jwt-bearer: 信頼する発行者 (#525)
 
