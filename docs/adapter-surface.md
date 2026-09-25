@@ -122,6 +122,7 @@ a composition root. Listed because a module may `require` them.
 | `googleFederationConfig` | `GoogleProviderConfig` | optional | `federation-google/google.mts` | Config slice for the bundled Google federation module. |
 | `grantPolicy` | `GrantPolicyHook` | optional | `core/policy/types.mts` | Deployment-supplied hook consulted at grant dispatch, for policy this library does not model. |
 | `keyStore` | `KeyStore` | required | `core/keys/KeyStore.mts` | Signing and verification keys. `sign()` is the seam a KMS/HSM implements without surrendering the private key (#303). |
+| `mfaFactorStore` | `MfaFactorStore` | optional | `core/mfa/factorStore.mts` | Enrolled second factors (the MFA ADR's D7): one record per factor, keyed by subject and id, whose `data` the coordinator seals before it arrives and every store keeps byte for byte without reading. `update` is a compare-and-set on the record's `version`; a store that cannot answer throws, because an outage read as "no factors" would open a first binding. Bundled adapter: memory (`memoryMfaFactorStoreModule`, single replica; a restart empties it, which it warns about). |
 | `oidcFederationConfigs` | `Readonly<Record<string, OidcProviderConfig>>` | optional | `federation-oidc/module.mts` | Config of every generic OpenID Connect federation instance, keyed by federation name; each `oidcFederationModule(<name>)` reads its own entry. `readOidcFederationConfigs` builds it from `config.federations` (#524). |
 | `rateLimiter` | `RateLimiter` | optional | `core/ratelimit/types.mts` | Shared counters for the OAuth endpoints and the login brute-force guard. |
 | `refreshTokenFamilyRevocation` | `RefreshTokenFamilyRevocation` | optional | `core/refresh-token-family/types.mts` | Family-wide revoke, used on replay detection and on the credential-change cascade. |
@@ -219,6 +220,7 @@ out-of-tree adapter can import and run:
 | `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
 | `FederationGrantStore` | `packages/core/src/federation-grants/__tests__/store.contract.mts` |
 | `FederationGrantIntentStore` | `packages/core/src/federation-grants/__tests__/intentStore.contract.mts` |
+| `MfaFactorStore` | `packages/core/src/mfa/__tests__/factorStore.contract.mts` |
 | `PendingConsentStore` | `packages/core/src/consents/__tests__/pending.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |

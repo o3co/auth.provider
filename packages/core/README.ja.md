@@ -408,6 +408,7 @@ const userRepo = new InMemoryUserRepository(users);
 多要素認証のポート。設計は [MFA の ADR](docs/adr/2026-09-25-multi-factor-authentication.md) にある。このリポジトリでそれを参照するものはまだない: `POST /session/login`、`/authorize`、フェデレーションのコールバックは第二要素を求めない。
 
 - `MfaFactor` — 第二要素が実装する契約と、それが受け取るもの — [`src/mfa/factor.mts`](src/mfa/factor.mts)。要素は鍵、ストア、トランザクションのどれにも触れない: 受け取るのは開封済みのレコードのデータと、1 つのセレモニーの 2 つのリクエストの間に保持する状態である。パッケージは要素を種別をキーに `contributes.mfaFactors` として提供する（`MfaFactorFactory`）。設定で要素が無効なら、ファクトリーは `null` を返す。boot は contribution を synthetic key `mfaFactorResolver` として射影し、`null` を返した種別はそこに現れない。その種別は占有されたままなので、同じ種別の 2 つ目の contribution は重複になる。boot が synthetic key を組み立てるのは `provides` ファクトリーの実行後なので、モジュールは resolver を contribution ファクトリーから読む。
+- `MfaFactorStore` — 対象ユーザーの登録済み要素を保持する場所 — と `MfaFactorRecord` — [`src/mfa/factorStore.mts`](src/mfa/factorStore.mts)。レコードの `data` はストアに届く前に封印され、ストアはそれを 1 バイトも変えずに保持する。`update` は `version` に対する compare-and-set。応答できないストアは「要素なし」と答えず例外を投げる。インプロセスのアダプター `createMemoryMfaFactorStore()` とそのモジュール `memoryMfaFactorStoreModule` は開発用と単一レプリカ用: 再起動で空になり、モジュールはそのことを一度だけ警告し（`mfa_factor_store_in_memory`）、`deployment.mode = "multi"` はこのモジュールを拒否する。`createMfaFactorStoreFactory()` / `registerBuiltinMfaFactorStores()` で名前から組み立てられる。すべてのアダプターは [`src/mfa/__tests__/factorStore.contract.mts`](src/mfa/__tests__/factorStore.contract.mts) を実行する。
 - factor は同梱しない。`@o3co/auth-provider-webauthn` はパスキーを `mfaFactors` contribution ではなくグラント（`contributes.grants`）として提供する。
 
 #### 監査（Audit）

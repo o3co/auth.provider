@@ -491,6 +491,19 @@ export type {
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";
+export type {
+	MfaFactorRecord,
+	MfaFactorRecordUpdate,
+	MfaFactorStore,
+	MfaFactorStoreFactory,
+} from "./mfa/factorStore.mjs";
+// MFA (the MFA ADR): the stores, their memory adapters, factories and modules
+export {
+	createMfaFactorStoreFactory,
+	registerBuiltinMfaFactorStores,
+} from "./mfa/factory.mjs";
+export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export { memoryMfaFactorStoreModule } from "./mfa/module.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {
 	browserFacingCorsRoutes,
