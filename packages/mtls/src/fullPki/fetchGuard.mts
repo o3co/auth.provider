@@ -363,6 +363,9 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 				};
 			}
 			if (!response.ok) {
+				// Refused before the body is read: release it, or the connection
+				// stays held until the peer gives up.
+				await response.body?.cancel().catch(() => undefined);
 				return { ok: false, reason: "http_error", detail: `HTTP ${response.status}` };
 			}
 			if (request.expectContentType !== undefined) {
@@ -372,6 +375,7 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 				// surfacing later as a parse failure.
 				const declared = mediaTypeOf(response.headers.get("content-type"));
 				if (declared !== request.expectContentType.toLowerCase()) {
+					await response.body?.cancel().catch(() => undefined);
 					return {
 						ok: false,
 						reason: "unexpected_content_type",
