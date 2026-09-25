@@ -25,6 +25,7 @@
  * type, the OAuth error and its description — must.
  */
 
+import { generateKeyPairSync } from "node:crypto";
 import { loggableError } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { createOidcProvider } from "#/oidc.mjs";
@@ -121,5 +122,113 @@ describe("loggableError on the errors openid-client throws for a token answer", 
 			error: "invalid_grant",
 			error_description: "Token has been expired or revoked.",
 		});
+	});
+});
+
+/**
+ * A provider that cannot be built says what failed in its own fixed words and
+ * keeps the library's error as `cause`: a library's message is the library's
+ * reading of its input (openid-client's of the discovery answer, OpenSSL's
+ * and jose's of the key), and it goes wherever the construction error goes —
+ * a boot log, a crash report. The operator still reads it: Node prints the
+ * cause chain of an error that ends the process, and `loggableError`
+ * projects it.
+ */
+describe("a construction failure names what failed in fixed text, the library's error kept as its cause", () => {
+	/** What `createOidcProvider` rejects with. */
+	const constructionFailure = async (
+		build: () => Promise<unknown>,
+	): Promise<Error & { cause: Error }> => {
+		try {
+			await build();
+		} catch (err) {
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).cause).toBeInstanceOf(Error);
+			return err as Error & { cause: Error };
+		}
+		throw new Error("the construction was expected to fail");
+	};
+
+	const discoveryFailed =
+		`OIDC federation "idp": discovery of ${ISSUER} failed and the provider cannot start ` +
+		"without the issuer's metadata (set discovery = false and the endpoints to run from " +
+		"hand-typed values)";
+
+	it("discovery: an issuer that answers 503", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		idp.discoveryStatus = 503;
+		const err = await constructionFailure(() =>
+			createOidcProvider("idp", {
+				issuer: ISSUER,
+				clientId: idp.clientId,
+				clientSecret: "client-secret",
+				callbackURL: "https://auth.test/session/oauth/federation/idp/callback",
+				fetch: idp.fetch,
+			}),
+		);
+		expect(err.message).toBe(discoveryFailed);
+		expect(err.message).not.toContain(err.cause.message);
+		expect(loggableError(err)).toMatchObject({
+			detail: discoveryFailed,
+			cause: { code: "OAUTH_RESPONSE_IS_NOT_CONFORM", response: { status: 503 } },
+		});
+	});
+
+	it("discovery: a document that is not JSON, which the parser quotes", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		const err = await constructionFailure(() =>
+			createOidcProvider("idp", {
+				issuer: ISSUER,
+				clientId: idp.clientId,
+				clientSecret: "client-secret",
+				callbackURL: "https://auth.test/session/oauth/federation/idp/callback",
+				fetch: async (input, init) => {
+					const url = String(input instanceof Request ? input.url : input);
+					return url.endsWith("/.well-known/openid-configuration")
+						? new Response('{"issuer":gho_DISCOVERYSECRET}', {
+								status: 200,
+								headers: { "content-type": "application/json" },
+							})
+						: idp.fetch(input, init);
+				},
+			}),
+		);
+		expect(err.message).toBe(discoveryFailed);
+		expect(err.message).not.toContain(err.cause.message);
+		expect(JSON.stringify(loggableError(err))).not.toContain("DISCOVERYSECRET");
+		expect(loggableError(err)).toMatchObject({ cause: { code: "OAUTH_PARSE_ERROR" } });
+	});
+
+	it("privateKey: a PEM block that holds no key OpenSSL can read", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		const err = await constructionFailure(() =>
+			createOidcProvider("idp", {
+				issuer: ISSUER,
+				clientId: idp.clientId,
+				privateKey: "-----BEGIN PRIVATE KEY-----\nAAAAAAAA\n-----END PRIVATE KEY-----\n",
+				callbackURL: "https://auth.test/session/oauth/federation/idp/callback",
+				fetch: idp.fetch,
+			}),
+		);
+		expect(err.message).toBe('OIDC federation "idp": privateKey could not be parsed');
+		expect(err.message).not.toContain(err.cause.message);
+		expect(loggableError(err)).toMatchObject({ cause: { code: expect.any(String) } });
+	});
+
+	it("privateKey: a key that cannot sign the algorithm configured", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+		const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+		const err = await constructionFailure(() =>
+			createOidcProvider("idp", {
+				issuer: ISSUER,
+				clientId: idp.clientId,
+				privateKey: { pem, alg: "ES256" },
+				callbackURL: "https://auth.test/session/oauth/federation/idp/callback",
+				fetch: idp.fetch,
+			}),
+		);
+		expect(err.message).toBe('OIDC federation "idp": privateKey cannot sign ES256');
+		expect(err.message).not.toContain(err.cause.message);
 	});
 });
