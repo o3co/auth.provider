@@ -300,21 +300,23 @@ export const createRouter = (
 	 * the cookie. This inverts `cascadeLogout`'s §6.2 order (fanout first,
 	 * `delete` last) on purpose: §6.2 defers the delete so a FAILED cascade
 	 * stays retryable through the sid it did not erase, and this endpoint
-	 * offers no retry — it never reports failure to the caller, and the caller
-	 * loses the cookie naming the sid either way. With retry off the table the
+	 * offers no retry of these steps — it never reports their failure to the
+	 * caller, and once the cookie is destroyed the caller has lost the sid. With retry off the table the
 	 * remaining criterion is which failure hurts most, and that is the one
 	 * that leaves a token still honoured. So the delete runs first and is not
 	 * conditional on the hygiene that follows.
 	 *
-	 * FAILURE — every step is best-effort and logged, never propagated. A
-	 * store outage must not turn a logout into a 5xx that leaves the user
-	 * holding a live cookie: the cookie is the half this endpoint can always
-	 * deliver, and a 5xx would invite a retry of work that partly succeeded.
-	 * The residue of a failed delete is covered from the other side —
-	 * `/authorize` refuses a session whose `sid` does not resolve, and a store
-	 * that cannot answer `delete` will not answer `get` either, which the
-	 * introspection and userinfo liveness checks both fail closed on. Only the
-	 * cookie's own destroy failing is answered as an outage — see the route.
+	 * FAILURE — every step here is best-effort and logged, never propagated:
+	 * an outage of these stores must not turn a logout into a 5xx that leaves
+	 * the user holding a live cookie — the cookie is the half this endpoint can
+	 * always deliver, and a 5xx would invite a retry of work that partly
+	 * succeeded. The residue of a failed delete is covered from the other side
+	 * — `/authorize` refuses a session whose `sid` does not resolve, and a
+	 * store that cannot answer `delete` will not answer `get` either, which the
+	 * introspection and userinfo liveness checks both fail closed on. The one
+	 * exception is the cookie's own destroy, in the route: when the cookie
+	 * store cannot destroy the browser session the user is not logged out, so
+	 * that answers `503` and the client retries.
 	 */
 	const invalidateSessionRecords = async (sid: string, sub: string | undefined): Promise<void> => {
 		if (userSessionStore) {

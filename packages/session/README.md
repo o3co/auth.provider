@@ -195,9 +195,8 @@ What holds:
 - **Federation transactions share the store**, under the `fedtx:` key prefix —
   see [the transaction cookie](#the-transaction-cookie).
 - **A store that cannot answer is an outage, not a `500`.** When the store
-  cannot load a request's session (it is unreachable, or holds a record it
-  cannot read) the request is answered `503 temporarily_unavailable` before any
-  route runs; when it cannot save a session, or refresh its expiry, after the
+  cannot load a request's session (it is unreachable, or times out) the
+  request is answered `503 temporarily_unavailable` before any route runs; when it cannot save a session, or refresh its expiry, after the
   route answered, that answer stands. Either way it is logged once at error
   level as `session_middleware_store_unavailable` (`store: "cookie_session"`,
   `step`: `load` or `save`, the error's projection) and goes no further —
@@ -209,6 +208,13 @@ What holds:
   there is their own `503`, and a route that answers a cookie-store outage drops
   the request's session so express-session does not write to the failing store
   again as the response ends.
+- **A record that cannot be read is absent, not an outage.** A record the Redis
+  store answers with but that is not JSON, or not a session record (an object
+  with a `cookie` object), is read as no session: express-session starts a
+  fresh one and the user signs in again. It is logged once per read as a warn,
+  `session_cookie_record_unreadable` (`store: "cookie_session"`), without the
+  record's text. Answered as an outage it would fail every request from that
+  browser until the record expired ([`src/store/factory.mts`](src/store/factory.mts)).
 
 **Not `@o3co/auth-provider-redis`.** That package's `UserSessionStore` holds the
 `UserSession` record behind a `sid` — what introspection, `/userinfo` and
@@ -321,16 +327,17 @@ The `session` grant issues no refresh token, so a deployment whose tokens all
 come from that grant has no family to revoke and `/session/logout` is
 sufficient on its own.
 
-**Failure modes.** Every store step is best-effort and logged, never
-propagated: a store outage must not turn a logout into a `5xx` that leaves the
-user holding a live cookie. The `UserSession` delete runs **first**, before the
+**Failure modes.** Every records step in the table above is best-effort and
+logged, never propagated: an outage of those stores must not turn a logout
+into a `5xx` that leaves the user holding a live cookie. The `UserSession` delete runs **first**, before the
 express session is destroyed and before the best-effort hygiene, so a
 federation-store outage cannot prevent the invalidation that matters. Failures
 are logged as `logout_user_session_delete_failed`,
 `logout_subject_session_index_remove_failed`,
 `logout_federation_token_remove_failed` and
-`logout_session_federation_index_remove_failed` — alert on the first. If
-destroying the express session fails — its store's outage — the response is
+`logout_session_federation_index_remove_failed` — alert on the first. The one
+exception is the express session itself: if destroying it fails — the cookie
+store's outage — the user is not logged out, so the response is
 `503 temporarily_unavailable`, logged once at error level as
 `session_logout_store_unavailable` (`store: "cookie_session"`, `step:
 "destroy"`, the `sid`), and the client retries; by then the records are

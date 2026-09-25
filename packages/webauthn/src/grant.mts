@@ -559,7 +559,11 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// commits a rotation before it signs. The expiry registered is exactly
 			// the one signed (`issuedAt + expiresIn`), with no read-back of the
 			// token; and a family store that cannot answer costs no signature, a
-			// billable remote call under a KMS-backed key (#303).
+			// billable remote call under a KMS-backed key (#303). The other order's
+			// cost is an orphan: if signing fails after the registration (a KMS
+			// outage), the family is left with no token — none carrying its
+			// `family_id` was served, so it is harmless, and it expires at the
+			// expiry registered for it.
 			//
 			// Fail-closed, mirroring authorization.mts CP-16: a refresh token whose
 			// family was never registered has no replay detection behind it, and
