@@ -158,7 +158,7 @@ export type FederationGrantLodgingRefusal =
 	| "intent_limit"
 	| "storage";
 
-export interface FederationGrantLodged {
+export interface FederationGrantLodged extends FederationGrantLodgingAbsorbedCarrier {
 	readonly ok: true;
 	readonly grantId: string;
 	/** What `connect_uri` carries. Single-use, 256 bits. */
@@ -171,8 +171,6 @@ export interface FederationGrantLodged {
 	readonly connection: string;
 	readonly scopes: readonly string[];
 	readonly resource?: string;
-	/** Store errors this answer let through regardless — see `FederationGrantLodgingAbsorbedCarrier`. */
-	readonly absorbed?: readonly FederationGrantLodgingStepFailure[];
 }
 
 /**

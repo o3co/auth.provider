@@ -412,7 +412,9 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				"temporarily_unavailable",
 			],
 			["a connection that timed out", { code: "ETIMEDOUT" }, "temporarily_unavailable"],
-			["a connection that was reset", { code: "ECONNRESET" }, "upstream_rejected"],
+			// An outage, read by isFederationUpstreamOutage beside the refresh
+			// classifier's four codes: it was `upstream_rejected` / `unknown`.
+			["a connection that was reset", { code: "ECONNRESET" }, "temporarily_unavailable"],
 			[
 				"an answer that could not be parsed",
 				{ name: "OperationProcessingError" },

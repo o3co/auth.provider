@@ -17,18 +17,24 @@
 /**
  * Whether a failed call to an upstream IdP is an OUTAGE — not reached, not
  * answered in time, or answered with a 5xx — rather than the upstream's
- * verdict. The connect callback's code exchange answers the first
- * `temporarily_unavailable` and logs it as an outage, and the second
- * `upstream_error` (#593, D7). A 5xx is an outage here as it is on the
- * refresh path, where core's `classifyFederationRefreshError` reads a 5xx
- * `status` as `network`.
+ * verdict. Both federation-grant paths that call the upstream decide on it:
+ * the connect callback's code exchange answers an outage
+ * `temporarily_unavailable` and anything else `upstream_error` (#593, D7);
+ * the retrieval's refresh answers an outage `503 upstream` — reading it this
+ * way beside the refresh-error classifier's `network`, which knows fewer
+ * shapes — and a refusal `upstream_rejected`.
  *
- * Read off what an error IS — its `name`, its `code`, a numeric `status`, on
- * the error or on any of its first causes — and never off what its text
- * says: a message is whatever the library or the upstream wrote, and matching
- * it reads an upstream's description as this provider's outage. The shapes it
- * knows are what openid-client / oauth4webapi and undici throw, held to the
- * real libraries by federation-oidc's `delegated-outage.test.mts`:
+ * Read off what the library raised — the `name`, the `code` and a numeric
+ * `status` of the error and of its first causes that are themselves Errors,
+ * and the `status` of a `Response` it was raised over — and never off what a
+ * text says or what a peer wrote: a message is whatever the library or the
+ * upstream wrote, and openid-client puts the IdP's parsed error body on a
+ * `ResponseBodyError` as its `cause`, where a `status`, a `code` or a `name`
+ * would be the IdP's to choose. So the walk follows a cause only into an
+ * Error, and reads a status only on an Error or a `Response`; a thrown value
+ * that is not an Error is no outage. The shapes it knows are what
+ * openid-client / oauth4webapi and undici throw, held to the real libraries
+ * by federation-oidc's `delegated-outage.test.mts`:
  *
  * - `AbortError` / `TimeoutError`, bare or as the cause of openid-client's
  *   `ClientError` `OAUTH_TIMEOUT` — a request given up on;
@@ -78,18 +84,51 @@ const field = (value: unknown, key: string): unknown => {
 const serverError = (status: unknown): boolean =>
 	typeof status === "number" && Number.isInteger(status) && status >= 500 && status <= 599;
 
+/**
+ * An Error — this realm's or another's (`Error.isError` where the runtime has
+ * it) — and not a plain object shaped like one: what a library raised, never
+ * what a peer's parsed body says. Asking never throws.
+ */
+const isError = (value: unknown): boolean => {
+	try {
+		const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
+		if (typeof brand === "function") return brand(value);
+		return (
+			value instanceof Error ||
+			(typeof value === "object" &&
+				value !== null &&
+				Object.prototype.toString.call(value) === "[object Error]")
+		);
+	} catch {
+		return false;
+	}
+};
+
+/** A fetch `Response` — what oauth4webapi raises a status it would not read over. */
+const isResponse = (value: unknown): boolean => {
+	try {
+		return typeof Response === "function" && value instanceof Response;
+	} catch {
+		return false;
+	}
+};
+
 /** Whether `error`, a failed upstream call, is the upstream's outage rather than its answer. */
 export function isFederationUpstreamOutage(error: unknown): boolean {
 	let current = error;
 	for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
-		if (current === null || current === undefined) return false;
+		// The Response an error was raised over says what the upstream answered.
+		if (isResponse(current)) return serverError(field(current, "status"));
+		if (!isError(current)) return false;
 		const name = field(current, "name");
 		const code = field(current, "code");
 		if (typeof name === "string" && ABANDONED.has(name)) return true;
 		if (typeof code === "string" && UNREACHABLE.has(code)) return true;
 		if (serverError(field(current, "status"))) return true;
 		const cause = field(current, "cause");
-		if (name === "TypeError" && typeof field(cause, "code") === "string") return true;
+		if (name === "TypeError" && isError(cause) && typeof field(cause, "code") === "string") {
+			return true;
+		}
 		current = cause;
 	}
 	return false;

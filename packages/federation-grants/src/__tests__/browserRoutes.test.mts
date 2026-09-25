@@ -2755,7 +2755,7 @@ describe("the callback — what an outage logs", () => {
 		}
 	});
 
-	it("logs an upstream answering 5xx as the outage — as openid-client raises it — like the refresh path does", async () => {
+	it("logs an upstream answering 5xx as the outage — as openid-client raises it — the reading the token route's refresh makes too", async () => {
 		// The shapes the real library throws (federation-oidc's
 		// delegated-outage.test.mts): a 503 or 502 that oauth4webapi will not
 		// read is a ClientError over the Response; an OAuth error body under a

@@ -368,6 +368,13 @@ again, `429` slow down, `502` the upstream, `503` come back. `Retry-After` is
 present whenever the answer knew when — including on `502` and `503`, not only
 on `429`.
 
+A refresh against an upstream that could not be reached, did not answer in
+time, or answered with a 5xx is `503 temporarily_unavailable/upstream` — core's
+`isFederationUpstreamOutage` (the callback's own test, below) beside the
+refresh-error classifier's `network` — and one the upstream answered with a
+refusal is `502 upstream_rejected`, with its code when this provider knows it
+and `unknown` otherwise.
+
 An unknown grant id, a grant belonging to another client and one belonging to
 another subject all answer the same `404` body, byte for byte.
 
@@ -601,8 +608,10 @@ It checks, in this order:
    `ECONNRESET`, `ENOTFOUND`, `ETIMEDOUT`, `UND_ERR_SOCKET`, …) on the error
    or its causes, `fetch`'s `TypeError` over a coded socket or TLS error, or a
    5xx `status` on the error or on the `Response` it was raised over (an IdP
-   answering 503 — the refresh path reads a 5xx as an outage too). One the
-   upstream answered with a refusal is `upstream_error`.
+   answering 503) — each read only on what the library raised, never on the
+   IdP's parsed body. The token route's refresh reads the same shapes as an
+   outage (`503 upstream`). One the upstream answered with a refusal is
+   `upstream_error`.
 5. **The upstream account**: the connection's issuer; for a renewal, the
    account already on the grant; the client's `upstream_sub` if it sent one;
    and — unless `identityLookup = "unsupported"` — the Store's answer to who

@@ -47,6 +47,7 @@ import {
 	type FederationGrantUnavailableReason,
 	hasFederationGrantAuthorization,
 } from "./types.mjs";
+import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 export type { FederationGrantRetrievalFailure } from "./types.mjs";
 
@@ -1232,8 +1233,15 @@ async function refreshUnderLock(
 				kind: "rate_limited",
 				...(advice !== undefined ? { retryAfterSeconds: advice } : {}),
 			};
-		} else if (classified.reason === "network") {
-			// The upstream could not be reached: the outage this answer is.
+		} else if (classified.reason === "network" || isFederationUpstreamOutage(settled.error)) {
+			// The upstream could not be reached, did not answer in time, or said
+			// it is down: the outage this answer is. The refresh-error classifier
+			// alone knows a status only on the error itself and four connection
+			// codes; what the libraries raise for the rest — openid-client's
+			// ClientError over a 5xx Response, OAUTH_TIMEOUT, undici's TypeError
+			// over ECONNRESET or UND_ERR_SOCKET — is read by
+			// `isFederationUpstreamOutage`, the connect callback's own test.
+			// Stamped `unavailable` either way, so the backoff is unchanged.
 			denial = unavailable("upstream", upstreamFailure);
 			failure = { at, kind: "unavailable" };
 		} else if (
