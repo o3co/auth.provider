@@ -333,6 +333,15 @@ describe("createMemoryChallengeStore — a cap on the challenges it holds", () =
 		expect(store.size).toBe(1);
 	});
 
+	it("refuses a cap above what a Map can hold, 2^24 entries", () => {
+		expect(createMemoryChallengeStore({ maxEntries: 2 ** 24 }).maxEntries).toBe(16_777_216);
+		expect(() => createMemoryChallengeStore({ maxEntries: 2 ** 24 + 1 })).toThrow(
+			new RangeError(
+				"createMemoryChallengeStore: maxEntries must be at most 16777216, the most entries a Map holds (got 16777217)",
+			),
+		);
+	});
+
 	it("refuses a cap that is not a positive whole number, rather than holding no cap", () => {
 		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
 			expect(() => createMemoryChallengeStore({ maxEntries: bad }), String(bad)).toThrow(

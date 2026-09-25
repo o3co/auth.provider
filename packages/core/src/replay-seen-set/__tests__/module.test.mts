@@ -99,6 +99,20 @@ describe("memoryReplaySeenSetModule", () => {
 			).toBe(7000);
 		});
 
+		it("refuses a value above what a Map can hold at boot, naming the key", async () => {
+			for (const tooMany of [2 ** 24 + 1, "16777217"]) {
+				const err = await refusalOf(
+					bootWith(memoryReplaySeenSetModule, {
+						replaySeenSet: { memory: { maxEntries: tooMany } },
+					}),
+				);
+				expect(err.cause).toBeInstanceOf(RangeError);
+				expect((err.cause as Error).message).toBe(
+					`replaySeenSet.memory.maxEntries must be at most 16777216, the most entries a Map holds (got ${JSON.stringify(tooMany)})`,
+				);
+			}
+		});
+
 		it("refuses a value it cannot use at boot, naming the key", async () => {
 			for (const bad of [0, -1, 1.5, "lots", "", true]) {
 				const err = await refusalOf(

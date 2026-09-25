@@ -330,10 +330,35 @@ describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 		expect(set.size).toBe(10);
 	});
 
-	it("rounds DPoP's share up, so a set of any size takes a proof", async () => {
+	it("lets a cap of one hold a proof: a set that small has no reserve", async () => {
 		const set = createMemoryReplaySeenSet({ maxEntries: 1 });
 		expect(await set.markSeen("dpop-proof:k", "jti-1", later())).toBe(true);
 	});
+
+	it.each([
+		[2, 1],
+		[5, 4],
+		[9, 8],
+		[10, 9],
+		[20, 18],
+	])(
+		"keeps at least one record for the other consumers at a cap of %i: DPoP fills %i",
+		async (cap, share) => {
+			// 90% rounded up would give DPoP the whole of any cap below ten.
+			const set = createMemoryReplaySeenSet({ maxEntries: cap });
+			let proofs = 0;
+			for (;;) {
+				try {
+					await set.markSeen("dpop-proof:flood-key", `jti-${proofs}`, later());
+					proofs += 1;
+				} catch {
+					break;
+				}
+			}
+			expect(proofs).toBe(share);
+			expect(await set.markSeen("client-assertion:rp", "jti-a", later())).toBe(true);
+		},
+	);
 
 	it("still refuses a replay at its cap: a replay writes nothing", async () => {
 		const set = createMemoryReplaySeenSet({ maxEntries: 1 });
@@ -381,5 +406,16 @@ describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 				),
 			);
 		}
+	});
+
+	it("refuses a cap above what a Map can hold, 2^24 entries", () => {
+		// V8's Map refuses an entry past 2^24: a larger cap is one the set could
+		// never reach, and `Map.set` would throw at the Map's limit instead.
+		expect(createMemoryReplaySeenSet({ maxEntries: 2 ** 24 }).maxEntries).toBe(16_777_216);
+		expect(() => createMemoryReplaySeenSet({ maxEntries: 2 ** 24 + 1 })).toThrow(
+			new RangeError(
+				"createMemoryReplaySeenSet: maxEntries must be at most 16777216, the most entries a Map holds (got 16777217)",
+			),
+		);
 	});
 });
