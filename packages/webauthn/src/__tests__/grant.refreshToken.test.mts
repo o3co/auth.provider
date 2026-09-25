@@ -222,6 +222,21 @@ async function issue(
 	return result.tokens;
 }
 
+/** A logger whose every level is a spy; `child` answers the same logger. */
+function spyLogger() {
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
+	return logger;
+}
+
 function dpopBinding(jkt: string): TokenBinding {
 	return { kind: "dpop", confirmation: { jkt } };
 }
@@ -501,17 +516,44 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 	// gets the same fail-closed answer.
 	// -------------------------------------------------------------------------
 
-	it("answers 503 and serves nothing when the minted token cannot be decoded", async () => {
+	// Answered as the outage above is, and logged once at error level as
+	// `webauthn_grant_refresh_token_unregistrable` with the `reason` — not as a
+	// store outage: the store was never asked. The token was minted by this
+	// server's own keystore, so an operator seeing this line has a signer that
+	// returned something other than what it was handed.
+	it.each<[string, () => void, Record<string, unknown>]>([
+		[
+			"cannot be decoded",
+			() =>
+				mockDecodeJwtPayload.mockImplementationOnce(() => {
+					throw new Error("decode blew up");
+				}),
+			{
+				reason: "undecodable",
+				err: expect.objectContaining({ name: "Error", message: "decode blew up" }),
+			},
+		],
+		[
+			"carries no jti",
+			() => mockDecodeJwtPayload.mockReturnValueOnce({ exp: Math.floor(Date.now() / 1000) + 60 }),
+			{ reason: "no_jti" },
+		],
+		[
+			"carries no exp",
+			() => mockDecodeJwtPayload.mockReturnValueOnce({ jti: "a-jti-with-no-exp" }),
+			{ reason: "no_exp" },
+		],
+	])("answers 503, serves nothing and logs it once when the minted token %s", async (_case, arrange, fields) => {
 		const register = vi.fn(async () => {});
+		const logger = spyLogger();
 		const deps = await makeDeps({
 			refreshTokenFamilyRotation: {
 				register,
 				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			},
+			logger,
 		});
-		mockDecodeJwtPayload.mockImplementationOnce(() => {
-			throw new Error("decode blew up");
-		});
+		arrange();
 
 		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
 
@@ -519,42 +561,14 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		expect("error" in result && result.error).toBe("temporarily_unavailable");
 		expect("tokens" in result).toBe(false);
 		expect(register).not.toHaveBeenCalled();
-	});
-
-	it("answers 503 and serves nothing when the minted token carries no jti", async () => {
-		const register = vi.fn(async () => {});
-		const deps = await makeDeps({
-			refreshTokenFamilyRotation: {
-				register,
-				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-			},
-		});
-		mockDecodeJwtPayload.mockReturnValueOnce({ exp: Math.floor(Date.now() / 1000) + 60 });
-
-		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("error" in result && result.error).toBe("temporarily_unavailable");
-		expect("tokens" in result).toBe(false);
-		expect(register).not.toHaveBeenCalled();
-	});
-
-	it("answers 503 and serves nothing when the minted token carries no exp", async () => {
-		const register = vi.fn(async () => {});
-		const deps = await makeDeps({
-			refreshTokenFamilyRotation: {
-				register,
-				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-			},
-		});
-		mockDecodeJwtPayload.mockReturnValueOnce({ jti: "a-jti-with-no-exp" });
-
-		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("error" in result && result.error).toBe("temporarily_unavailable");
-		expect("tokens" in result).toBe(false);
-		expect(register).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ clientId: CLIENT_ID, ...fields },
+			"webauthn_grant_refresh_token_unregistrable",
+		);
+		const [context] = logger.error.mock.calls[0] as [Record<string, unknown>];
+		expect(context.err).not.toBeInstanceOf(Error);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
