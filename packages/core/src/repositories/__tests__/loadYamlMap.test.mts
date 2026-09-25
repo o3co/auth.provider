@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { inspect } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { loadYamlMap } from "#/repositories/loadYamlMap.mjs";
@@ -77,5 +78,63 @@ foo:
   name: 123
 `);
 		expect(() => loadYamlMap(fp, TestSchema)).toThrow("foo");
+	});
+
+	describe("a file that is not YAML", () => {
+		// js-yaml's exception quotes the lines around the error in its message
+		// and holds the whole file in `mark.buffer`; a clients or users file
+		// holds secrets. What is thrown names the file, the line and column
+		// and the parser's reason, and carries nothing of the file.
+		const thrownBy = (content: string): Error => {
+			const fp = writeYaml(content);
+			try {
+				loadYamlMap(fp, TestSchema);
+			} catch (err) {
+				return err as Error;
+			}
+			throw new Error("loadYamlMap did not throw");
+		};
+		const carriesNothingOf = (err: Error, ...markers: readonly string[]): void => {
+			const printed = inspect(err, { depth: Number.POSITIVE_INFINITY, showHidden: true });
+			for (const marker of markers) {
+				expect(err.message).not.toContain(marker);
+				expect(printed).not.toContain(marker);
+			}
+			expect(err.cause).toBeUndefined();
+			expect(Object.hasOwn(err, "mark")).toBe(false);
+		};
+
+		it("names the file, the line and column and the reason, and quotes none of the file", () => {
+			const err = thrownBy(
+				[
+					"web:",
+					"  name: before-secret-marker",
+					"  redirectUris:",
+					"   - https://rp.test/cb",
+					"  bad",
+					"other:",
+					"  name: after-secret-marker",
+					"",
+				].join("\n"),
+			);
+			expect(err.message).toBe(
+				`Invalid YAML in ${path.join(tmpDir, "test.yaml")} at 5:6: expected ':' after a mapping key`,
+			);
+			carriesNothingOf(err, "before-secret-marker", "after-secret-marker", "rp.test");
+		});
+
+		it("leaves out what the parser quotes of the file into its reason", () => {
+			// An unquoted value that starts with `*` or `!` is read as an alias or
+			// a tag, and the parser names it in the reason itself.
+			for (const [content, marker, reason] of [
+				["web:\n  name: *alias-secret-marker\n", "alias-secret-marker", "unidentified alias"],
+				["web:\n  name: !tag-secret-marker x\n", "tag-secret-marker", "unknown scalar tag"],
+				["web:\n  name: !h!handle-secret-marker x\n", "h!", "undeclared tag handle"],
+			] as const) {
+				const err = thrownBy(content);
+				expect(err.message).toMatch(new RegExp(`at 2:\\d+: ${reason}$`));
+				carriesNothingOf(err, marker);
+			}
+		});
 	});
 });
