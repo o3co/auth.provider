@@ -15,7 +15,7 @@
  */
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { Logger } from "@o3co/auth-provider-core";
+import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { Express } from "express";
 
 /**
@@ -33,6 +33,13 @@ import type { Express } from "express";
  * argument therefore announces a server on a port another process holds,
  * while the error that should have stopped the process is swallowed — which
  * is what this used to do.
+ *
+ * Once the socket is bound, that callback is spent: a later `error` (an
+ * `accept` that fails with EMFILE) would go to it and be lost, and the one
+ * after would find no listener and be thrown out of the process. So the
+ * bound server gets a listener of its own that logs each as `server_error`
+ * (error, `err`: core's `loggableError` projection) and leaves the process
+ * running — the server keeps accepting what it can.
  */
 export function listen(app: Express, port: number, logger: Logger): Promise<Server> {
 	return new Promise((resolve, reject) => {
@@ -41,6 +48,9 @@ export function listen(app: Express, port: number, logger: Logger): Promise<Serv
 				reject(err);
 				return;
 			}
+			server.on("error", (serverErr: Error) => {
+				logger.error({ err: loggableError(serverErr) }, "server_error");
+			});
 			const address = server.address() as AddressInfo | null;
 			logger.info({ port: address?.port ?? port }, "server_listening");
 			resolve(server);

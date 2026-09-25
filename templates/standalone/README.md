@@ -30,8 +30,9 @@ the Google and generic OpenID Connect federation adapters, `-federation-grants`,
 - the host process: the Express app, its security headers, the health,
   readiness and metrics routes, startup and the terminal error handler —
   [`src/app.mts`](src/app.mts); the listener, which logs `server_listening`
-  (info, `port`) once its socket is bound and fails boot with the bind error
-  when it cannot be — [`src/listen.mts`](src/listen.mts). Every error this code logs — an unhandled
+  (info, `port`) once its socket is bound, fails boot with the bind error
+  when it cannot be, and logs any later server error as `server_error`
+  (error) — [`src/listen.mts`](src/listen.mts). Every error this code logs — an unhandled
   request error, the shared Redis connection's `error` event, a failed
   shutdown — is logged as core's
   [`loggableError`](../../packages/core/README.md#logger) projection, never the
