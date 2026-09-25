@@ -41,7 +41,13 @@
  */
 
 export type { ClientCertificate } from "./certificate.mjs";
-export { MtlsError, type MtlsErrorCode, type MtlsReasonCode } from "./errors.mjs";
+export {
+	MtlsError,
+	type MtlsErrorCode,
+	type MtlsReasonCode,
+	MtlsRevocationSourceError,
+	MtlsRevocationUnavailableError,
+} from "./errors.mjs";
 export { createMtlsMechanism, type MtlsMechanismOptions } from "./extractor.mjs";
 export {
 	DEFAULT_SIGNATURE_ALGORITHMS,

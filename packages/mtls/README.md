@@ -351,7 +351,7 @@ The exports are listed in [`src/index.mts`](src/index.mts), whose header also sa
 - the module and its config schema (`mtlsModule`, `mtlsConfigSchema`) — the normal way in;
 - the mechanism factory (`createMtlsMechanism`) for a composition that builds its mechanisms by hand;
 - `computeCertThumbprint`, the RFC 8705 §3.1 `x5t#S256` value of a DER-encoded certificate;
-- the error type and its codes (`MtlsError`, `MtlsErrorCode` — `invalid_certificate`, or `temporarily_unavailable` for `revocation_unavailable`), and the diagnostic `ClientCertificate` / `CertHeaderDialect` types;
+- the error type and its codes (`MtlsError`, `MtlsErrorCode` — `invalid_certificate`, or `temporarily_unavailable` for `revocation_unavailable`), the outage refusal's cause (`MtlsRevocationUnavailableError`) and its members (`MtlsRevocationSourceError`), and the diagnostic `ClientCertificate` / `CertHeaderDialect` types;
 - the signature-algorithm vocabulary (`SIGNATURE_ALGORITHM_NAMES`, `DEFAULT_SIGNATURE_ALGORITHMS`, `SignatureAlgorithmName`) — the legal values of `full-pki.signature-algorithms`, exported so that an operator's list can be checked against the one the schema enforces.
 
 The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`cert-header-dialect`, `mode`, `full-pki.revocation`), not by import. The package's config defaults ship as HOCON in [`src/reference.conf`](src/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`.
