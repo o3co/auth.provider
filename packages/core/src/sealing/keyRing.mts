@@ -63,9 +63,10 @@ export const isSealingKeyId = (id: unknown): id is string =>
  *
  * `setting` names the ring in the refusal, as its reader knows it: the
  * configuration key it was read from (`mfa.encryptionKeys`), or the option
- * it was passed as. An ID outside the rule is named by its index and never
- * quoted, since an operator who swapped an ID and its key would otherwise
- * see the key in a boot error; an ID that passed the rule is quoted.
+ * it was passed as. Every refusal names the entry by its index and none
+ * quotes an ID: an operator who swapped an ID and its key would otherwise
+ * see the key in a boot error, and passing the ID rule does not make an ID
+ * safe to quote (a 32-byte key in hex, or in unpadded base64url, passes).
  */
 export function checkSealingKeyRing(ring: SealingKeyRing, setting: string): void {
 	const seen = new Set<string>();
@@ -76,12 +77,12 @@ export function checkSealingKeyRing(ring: SealingKeyRing, setting: string): void
 			);
 		}
 		if (seen.has(entry.id)) {
-			throw new RangeError(`${setting} has a duplicate encryption key id "${entry.id}"`);
+			throw new RangeError(`${setting} has a duplicate encryption key id at index ${index}`);
 		}
 		seen.add(entry.id);
 		if (!Buffer.isBuffer(entry.key) || entry.key.length !== SEALING_KEY_BYTES) {
 			throw new RangeError(
-				`${setting} has an encryption key "${entry.id}" that is not a Buffer of ${SEALING_KEY_BYTES} bytes`,
+				`${setting} has an encryption key at index ${index} that is not a Buffer of ${SEALING_KEY_BYTES} bytes`,
 			);
 		}
 	});

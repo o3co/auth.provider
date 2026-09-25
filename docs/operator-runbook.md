@@ -235,8 +235,9 @@ Module-level messages that arrive wrapped in a factory failure:
   `federation grant store: federationGrants.encryptionKeys[<i>].key must be
   canonical base64 of 32 bytes`, and, from core's ring rule,
   `federation grant store: federationGrants.encryptionKeys has a duplicate
-  encryption key id "<id>"` and `… has an encryption key id at index <i> that
-  does not match ^[A-Za-z0-9_-]{1,64}$`
+  encryption key id at index <i>` and `… has an encryption key id at index <i>
+  that does not match ^[A-Za-z0-9_-]{1,64}$` — an entry is named by its
+  index, never by its id, which could be a key written in the wrong place
   (`packages/redis/src/federation-grant-store.mts`,
   `packages/core/src/sealing/keyRing.mts`); so does
   `federation grant store: keyPrefix may not contain "{" or "}"`. A value the
