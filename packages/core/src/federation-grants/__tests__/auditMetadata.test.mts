@@ -55,4 +55,29 @@ describe("federationGrantAuditMetadata (#593, D18)", () => {
 		});
 		expect(JSON.stringify(metadata)).not.toContain("sentinel");
 	});
+
+	it("carries the upstream subject sanitised and capped: the IdP wrote it", () => {
+		// The ID token's `sub`, stored as the IdP sent it; every emitter —
+		// core's retrieval and revocation, whose `audit` seam a composer may
+		// fill with its own function, and the routes' bridges — takes it from
+		// here.
+		const metadata = federationGrantAuditMetadata({
+			...grant,
+			upstream: {
+				issuer: grant.upstream.issuer,
+				subject: `sub\r\nFORGED\u0085\u2028\u202e${"s".repeat(10_000)}`,
+			},
+		});
+		const subject = metadata.upstream?.subject ?? "";
+		expect({
+			head: subject.slice(0, 11),
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+			unsafe: /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(subject),
+			within200: subject.length <= 200,
+		}).toEqual({ head: "sub??FORGED", unsafe: false, within200: true });
+	});
+
+	it("carries an ordinary upstream subject exactly", () => {
+		expect(federationGrantAuditMetadata(grant).upstream?.subject).toBe("grant-A");
+	});
 });

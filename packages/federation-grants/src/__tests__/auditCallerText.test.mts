@@ -172,6 +172,23 @@ describe("the audit trail — a caller's grant id and subject, sanitised and cap
 		});
 	});
 
+	it("audits the upstream account's subject bounded: the IdP wrote it", async () => {
+		const h = harness();
+		await h.seed({ upstreamSubject: HOSTILE });
+
+		const response = await request(h.app)
+			.post(`/oauth/federation-grants/${GRANT_ID}/token`)
+			.set("Authorization", basic())
+			.send({ sub: "local-subject" });
+
+		expect(response.status).toBe(200);
+		await h.background.drain();
+		const event = onlyEvent(h.events, "federation.grant.token.success");
+		expect(
+			shapeOf((event.details as { upstream?: { subject?: unknown } }).upstream?.subject),
+		).toEqual(BOUNDED);
+	});
+
 	it("still audits an ordinary grant id and subject exactly", async () => {
 		const h = harness();
 
