@@ -247,7 +247,15 @@ The manifest ([`src/module.mts`](src/module.mts)):
 
 - `400 invalid_request` when either is missing; `401 invalid_credentials` when
   `UserRepository.authenticate` answers `null`; `503 temporarily_unavailable`
-  when it or the `UserSession` write throws.
+  when a store the login needs cannot answer — the `UserRepository` throws,
+  the `UserSession` write throws, or the express session cannot be
+  regenerated (its store failed to destroy the old record). Each is logged
+  once at error level as `login_store_unavailable`, with `store`
+  (`user_repository`, `user_session`, `cookie_session`), `step`
+  (`authenticate`, `create`, `regenerate`) and the error's projection, never
+  the username. After a failed regeneration the `UserSession` and its
+  subject-index entry are rolled back best-effort; a rollback step that fails
+  is one `login_cleanup_failed` warn.
 - On success it creates a `UserSession` (`amr: ["pwd"]`, lifetime
   `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
   regenerates the express session, and answers `200` with a fresh CSRF cookie.
@@ -305,9 +313,11 @@ are logged as `logout_user_session_delete_failed`,
 `logout_subject_session_index_remove_failed`,
 `logout_federation_token_remove_failed` and
 `logout_session_federation_index_remove_failed` — alert on the first. If
-destroying the express session fails the response is `500 server_error`, and by
-then the records are already gone, so `/authorize` refuses the surviving cookie
-on its own account. A session carrying no `sid` has no records to invalidate
+destroying the express session fails — its store's outage — the response is
+`503 temporarily_unavailable`, logged once at error level as
+`session_logout_store_unavailable` (`store: "cookie_session"`, `step:
+"destroy"`, the `sid`), and the client retries; by then the records are
+already gone, so `/authorize` refuses the surviving cookie on its own account. A session carrying no `sid` has no records to invalidate
 and only the express session is destroyed.
 
 ### CSRF on the state-changing routes
@@ -374,7 +384,7 @@ An account gains a second identity through an explicit, authenticated action:
    - **this account** → nothing to link; the callback proceeds.
 4. The federation is attached to the **live** session — `sessionFederationIndex` and `federationTokenStore` under the current `sid` — and the browser is redirected as after a login. No new `UserSession` is minted and the express session is not regenerated: a link is not a login, and the session's claims envelope is unchanged (the next login through the new provider builds one the usual way).
 
-The transaction records the session that asked (`link: { sid }`), and the callback links to *that* session's account. A `form_post` federation's callback is a cross-site POST the application session cookie (`SameSite=Lax`) does not accompany, so the record is what binds it — Sign in with Apple links exactly as a `query` federation does — and a browser that presents a different authenticated session at the callback is refused `401 login_required`: the identity is never linked to whichever session the browser holds now. If attaching to the live session fails after the Store has linked, the half-attached federation is removed from the session best-effort (one the session already carried is left as it was) and the callback answers `503`; the Store's link stands, and the next login through that federation lands on the account.
+The transaction records the session that asked (`link: { sid }`), and the callback links to *that* session's account. A `form_post` federation's callback is a cross-site POST the application session cookie (`SameSite=Lax`) does not accompany, so the record is what binds it — Sign in with Apple links exactly as a `query` federation does — and a browser that presents a different authenticated session at the callback is refused `401 login_required`: the identity is never linked to whichever session the browser holds now. If attaching to the live session fails after the Store has linked, the half-attached federation is removed from the session best-effort (one the session already carried is left as it was, and nothing is removed when the session's federation list could not be read at all) and the callback answers `503`; the Store's link stands, and the next login through that federation lands on the account. Every store the link needs that cannot answer — the session read, the Store's `linkFederatedIdentity`, the index read or write, the token attach — is `503 temporarily_unavailable`, logged once at error level as `federation_link_store_unavailable` with `store`, `step`, the linking `sid` and the error's projection; a rollback step that fails is one `federation_cleanup_failed` warn.
 
 Without `link=1`, an authenticated session that completes a federation whose identity the Store does not know is `401 unknown_user`. **There is no implicit linking** — a session cookie plus a stray identity is the login-CSRF shape, and `link=1` on an authenticated session is what makes the action the user's.
 
@@ -412,7 +422,12 @@ elsewhere: `SupportsLogout` by `oauth`'s `/oauth/logout` and
 IdP uses a nonce, and persists them — with `redirect_to` and the link intent —
 **before** redirecting: in the express session for a `query` federation, in a
 [federation transaction](#the-transaction-cookie) for a `form_post` one. A store
-that cannot persist them answers `500 server_error` and redirects nobody. The
+that cannot persist them is `503 temporarily_unavailable` and redirects nobody,
+logged once at error level as `federation_start_store_unavailable` (`store`:
+`cookie_session` or `federation_transaction`). A `form_post` federation with no
+express-session store on the request, or whose callback URL has no path, is the
+composition's fault: `500 misconfiguration`, logged as
+`federation_form_post_start_misconfigured`. The
 `redirect_uri` handed to `buildAuthorizationUrl` is the federation's
 `callbackURL` from config. For a `form_post` federation the router appends
 `response_mode=form_post` to the URL the adapter returned; for a `query` one the
@@ -443,12 +458,17 @@ URL is exactly what the adapter returned.
    is `profile.amr` plus `fed`.
 5. **The session** is a new `UserSession` (lifetime `session.maxAge`), a
    `subjectSessionIndex` entry when that is wired, a `sessionFederationIndex`
-   entry, and a regenerated express session. A `UserSession` or
-   `sessionFederationIndex` write that fails is `503 temporarily_unavailable`; a
-   failure regenerating or saving the session, or attaching the tokens below, is
-   `500 session_create_failed`. Either way what was written is rolled back
-   best-effort, in reverse order. A `subjectSessionIndex` write that fails is
-   logged and the login proceeds.
+   entry, and a regenerated express session. Any store the callback cannot do
+   without that fails — the Store's lookup, the `UserSession` or
+   `sessionFederationIndex` write, regenerating or saving the express session,
+   attaching the tokens below, and before all of them retiring the ephemeral
+   state (see [When a transaction is spent](#when-a-transaction-is-spent)) — is
+   `503 temporarily_unavailable`, logged once at error level as
+   `federation_callback_store_unavailable` with `store`, `step` and the error's
+   projection. What was written is rolled back best-effort, in reverse order;
+   a rollback step that fails is one `federation_cleanup_failed` warn. A
+   `subjectSessionIndex` write that fails is logged
+   (`subject_session_index_write_failed`) and the login proceeds.
 6. **Tokens** are attached to `federationTokenStore` under the new `sid` only
    when the profile carries an `accessToken`:
    - `accessToken`, `refreshToken`, `idToken` and `expiresAt` as the adapter
@@ -585,7 +605,8 @@ that claim. A callback carrying no `state` — checked once the record has resol
 the cookie is read. A *wrong* `state` is an attempt on this transaction, and it
 still spends it, so a guess gets no second try; so does a transaction id that
 resolves to no record or to another provider's (`400 invalid_session`), and a
-store read that fails spends it best-effort (`500`). The distinction matters because
+store read that fails spends it best-effort (`503`; a spend that fails there, or
+on a refusal, is one `federation_cleanup_failed` warn). The distinction matters because
 the cookie is `SameSite=None` by necessity and accompanies any cross-site
 request to the callback path: if every refusal consumed the record, a third
 party could destroy a victim's in-flight login with one `<img>` tag.
@@ -611,8 +632,8 @@ the three.
 | **Not guaranteed** | Callbacks that *overlap*. Two that both read the record before either deletes it both pass the `state` comparison and both reach `exchangeCode`. `MemoryStore` answers synchronously and happens to serialise them; a store with network latency does not. |
 | **What bounds the overlap** | The IdP. An authorization code is single-use at the IdP, racing callbacks necessarily carry the same one, and at most one exchange succeeds however many get that far — the rest get `502 exchange_failed`. PKCE binds that exchange to the verifier held in the record. |
 
-If the record cannot be deleted at all, the callback stops with `500` rather
-than exchanging the code. This is weaker than `DeviceCodeStore`, which *is* an
+If the record cannot be deleted at all, the callback stops with `503
+temporarily_unavailable` rather than exchanging the code. This is weaker than `DeviceCodeStore`, which *is* an
 atomic read-and-consume: that store owns its adapter and can push the consume
 into one Redis round trip, while a federation transaction shares the session
 store rather than adding a component slot every deployment would have to
@@ -891,8 +912,8 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie name, the `__Host-` rule, and the replica-safety declaration and refusal |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
-| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, and the login rate-limit guard |
-| [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, `amr` |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
+| [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts; the request helpers are pinned in core ([`core/src/federations/__tests__/`](../core/src/federations/__tests__/)) |
 

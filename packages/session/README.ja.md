@@ -112,7 +112,7 @@ const handle = await createApp({
 
 `POST /session/login` は `username` と `password` を受け取る（JSON またはフォーム）。
 
-- どちらかが欠けていれば `400 invalid_request`。`UserRepository.authenticate` が `null` を返せば `401 invalid_credentials`。それ、または `UserSession` の書き込みが例外を投げれば `503 temporarily_unavailable`。
+- どちらかが欠けていれば `400 invalid_request`。`UserRepository.authenticate` が `null` を返せば `401 invalid_credentials`。ログインに必要なストアが答えられなければ `503 temporarily_unavailable` — `UserRepository` が例外を投げた、`UserSession` の書き込みが例外を投げた、または express session を再生成できなかった（そのストアが古いレコードを破棄できなかった）場合。いずれも error レベルで 1 行、`login_store_unavailable` として `store`（`user_repository`、`user_session`、`cookie_session`）、`step`（`authenticate`、`create`、`regenerate`）、エラーの射影とともにログに出る。ユーザー名は出さない。再生成に失敗したときは `UserSession` とその subject index のエントリーをベストエフォートでロールバックし、失敗したロールバックの各ステップは `login_cleanup_failed` の warn 1 行になる。
 - 成功すると `UserSession`（`amr: ["pwd"]`、寿命 `session.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
 - `redirect_to` を送るなら `session.redirectAllowlist` に載っていなければならず（[リダイレクト許可リスト](#リダイレクト許可リスト) を参照）、`req.session.redirectTo` に保存される。このパッケージの中にそこへリダイレクトするものは無い。
 - ブルートフォース対策のガードは共有の `rateLimiter`（接頭辞 `login`、クライアント IP ごと）の上で `rateLimit.login` の窓と上限で動き、拒否すれば `429`、リミッター自体が失敗すれば `rateLimit.failMode` に従う。`rateLimiter` が配線されていなければルートはプロセス内のリミッターにフォールバックする: `deployment.mode = "multi"` では起動が拒否され、未設定なら `login_rate_limiter_not_shared` の警告がログに出て、`"single"` では何も言わない。
@@ -137,7 +137,7 @@ const handle = await createApp({
 
 `session` グラントはリフレッシュトークンを発行しないので、トークンがすべてそのグラント由来のデプロイには失効させるファミリーが無く、`/session/logout` だけで足りる。
 
-**失敗時の振る舞い。** ストアの各ステップはベストエフォートでログに出し、呼び出し側には伝えない: ストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。express session の破棄が失敗すると応答は `500 server_error` だが、その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
+**失敗時の振る舞い。** ストアの各ステップはベストエフォートでログに出し、呼び出し側には伝えない: ストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。express session の破棄が失敗する — そのストアの障害 — と応答は `503 temporarily_unavailable` で、error レベルで 1 行、`session_logout_store_unavailable`（`store: "cookie_session"`、`step: "destroy"`、`sid`）としてログに出て、クライアントは再試行する。その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
 
 ### 状態変更ルートの CSRF 対策
 
@@ -179,7 +179,7 @@ const handle = await createApp({
    - **このアカウント** → リンクするものは無く、コールバックはそのまま進む。
 4. フェデレーションは **生きている** セッション — 現在の `sid` の下の `sessionFederationIndex` と `federationTokenStore` — に紐づけられ、ブラウザはログイン後と同じようにリダイレクトされる。新しい `UserSession` は作られず、express session も再生成されない: リンクはログインではなく、セッションのクレームエンベロープは変わらない（新しいプロバイダー経由の次のログインが通常どおりに作る）。
 
-トランザクションは要求したセッション（`link: { sid }`）を記録し、コールバックは *その* セッションのアカウントにリンクする。`form_post` フェデレーションのコールバックはアプリケーションのセッション cookie（`SameSite=Lax`）が付かないクロスサイト POST なので、それを束縛するのはこの記録である — Sign in with Apple も `query` フェデレーションとまったく同じようにリンクする — そして、コールバックで別の認証済みセッションを提示したブラウザは `401 login_required` で拒否される: ID がブラウザが今持っているセッションにリンクされることはない。Store がリンクしたあとで生きたセッションへの紐づけに失敗した場合、途中まで紐づいたフェデレーションはベストエフォートでセッションから外され（セッションが元から持っていたものはそのまま）、コールバックは `503` を返す。Store のリンクは残り、そのフェデレーション経由の次のログインはそのアカウントに着地する。
+トランザクションは要求したセッション（`link: { sid }`）を記録し、コールバックは *その* セッションのアカウントにリンクする。`form_post` フェデレーションのコールバックはアプリケーションのセッション cookie（`SameSite=Lax`）が付かないクロスサイト POST なので、それを束縛するのはこの記録である — Sign in with Apple も `query` フェデレーションとまったく同じようにリンクする — そして、コールバックで別の認証済みセッションを提示したブラウザは `401 login_required` で拒否される: ID がブラウザが今持っているセッションにリンクされることはない。Store がリンクしたあとで生きたセッションへの紐づけに失敗した場合、途中まで紐づいたフェデレーションはベストエフォートでセッションから外され（セッションが元から持っていたものはそのまま。セッションのフェデレーション一覧をそもそも読めなかったときは何も外さない）、コールバックは `503` を返す。Store のリンクは残り、そのフェデレーション経由の次のログインはそのアカウントに着地する。リンクに必要なストアが答えられない場合 — セッションの読み出し、Store の `linkFederatedIdentity`、インデックスの読み書き、トークンの紐づけ — はいずれも `503 temporarily_unavailable` で、error レベルで 1 行、`federation_link_store_unavailable` として `store`、`step`、リンク中の `sid`、エラーの射影とともにログに出る。失敗したロールバックの各ステップは `federation_cleanup_failed` の warn 1 行になる。
 
 `link=1` が無い場合、Store が知らない ID のフェデレーションを完了した認証済みセッションは `401 unknown_user`。**暗黙のリンクは無い** — セッション cookie とはぐれた ID の組み合わせはログイン CSRF の形であり、認証済みセッションでの `link=1` がそれをユーザーの操作にする。
 
@@ -201,7 +201,7 @@ const handle = await createApp({
 
 ### 開始レグ
 
-`GET /session/oauth/federation/:name` は、IdP が nonce を使うかどうかにかかわらずすべてのフェデレーションについて、`state`（128 ビット）、PKCE の `codeVerifier`、`nonce`（128 ビット）を生成し、`redirect_to` とリンクの意図と一緒に、リダイレクト **の前に** 保存する: `query` フェデレーションなら express session に、`form_post` フェデレーションなら [フェデレーショントランザクション](#トランザクション-cookie) に。保存できないストアは `500 server_error` を返し、誰もリダイレクトしない。`buildAuthorizationUrl` に渡す `redirect_uri` は設定上のそのフェデレーションの `callbackURL`。`form_post` フェデレーションではアダプターが返した URL にルーターが `response_mode=form_post` を付け足し、`query` フェデレーションではアダプターが返した URL そのままになる。
+`GET /session/oauth/federation/:name` は、IdP が nonce を使うかどうかにかかわらずすべてのフェデレーションについて、`state`（128 ビット）、PKCE の `codeVerifier`、`nonce`（128 ビット）を生成し、`redirect_to` とリンクの意図と一緒に、リダイレクト **の前に** 保存する: `query` フェデレーションなら express session に、`form_post` フェデレーションなら [フェデレーショントランザクション](#トランザクション-cookie) に。保存できないストアは `503 temporarily_unavailable` を返して誰もリダイレクトせず、error レベルで 1 行、`federation_start_store_unavailable`（`store`: `cookie_session` または `federation_transaction`）としてログに出る。リクエスト上に express-session のストアが無い、またはコールバック URL にパスが無い `form_post` フェデレーションは組み立ての誤りであり、`500 misconfiguration` で `federation_form_post_start_misconfigured` としてログに出る。`buildAuthorizationUrl` に渡す `redirect_uri` は設定上のそのフェデレーションの `callbackURL`。`form_post` フェデレーションではアダプターが返した URL にルーターが `response_mode=form_post` を付け足し、`query` フェデレーションではアダプターが返した URL そのままになる。
 
 ### コールバックがプロファイルで行うこと
 
@@ -209,7 +209,7 @@ const handle = await createApp({
 2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation token exchange failed` が運ぶのは core の `loggableError(err)` であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。これらのルートがログに書く他の失敗 — ストア、リポジトリ、express-session のもの — も同じように射影する（Redis ストアのエラーは拒否されたコマンドの引数を運ぶ。`allow-plaintext` ならトークンレコードである）。
 3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
 4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `profile.amr` に `fed` を加えたもの。
-5. **セッション** は新しい `UserSession`（寿命 `session.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session。`UserSession` か `sessionFederationIndex` の書き込みが失敗すれば `503 temporarily_unavailable`、セッションの再生成・保存、または下のトークンの紐づけが失敗すれば `500 session_create_failed`。どちらの場合も書き込んだものはベストエフォートで逆順にロールバックされる。`subjectSessionIndex` の書き込みが失敗してもログに出るだけでログインは進む。
+5. **セッション** は新しい `UserSession`（寿命 `session.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session。コールバックに欠かせないストアが失敗した場合 — Store の照会、`UserSession` か `sessionFederationIndex` の書き込み、express session の再生成・保存、下のトークンの紐づけ、そしてそれらすべてに先立つ一時状態の破棄（[トランザクションが消費されるとき](#トランザクションが消費されるとき) を参照） — はいずれも `503 temporarily_unavailable` で、error レベルで 1 行、`federation_callback_store_unavailable` として `store`、`step`、エラーの射影とともにログに出る。書き込んだものはベストエフォートで逆順にロールバックされ、失敗したロールバックの各ステップは `federation_cleanup_failed` の warn 1 行になる。`subjectSessionIndex` の書き込みが失敗してもログに出る（`subject_session_index_write_failed`）だけでログインは進む。
 6. **トークン** は、プロファイルが `accessToken` を持つときにだけ、新しい `sid` の下で `federationTokenStore` に紐づけられる:
    - `accessToken`、`refreshToken`、`idToken`、`expiresAt` はアダプターが返したまま — `expiresAt: null` は `null`（「リフレッシュしない」）として保存され、ルーターが有効期限をでっち上げることはない。
    - `scope` と `grantedScope`: アダプターが `profile.scope` を返していればそれ（空や使えない文字列は何も表さない）、返していなければプロバイダーが要求した `scope` — RFC 6749 §3.3 は応答の欠落を「要求どおり」と読む（[`src/federations/consented-scope.mts`](src/federations/consented-scope.mts)）。
@@ -260,7 +260,7 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 
 #### トランザクションが消費されるとき
 
-レコードと cookie は、トランザクションを **判定した** コールバックの出口すべて — 成功、`invalid_state`、`exchange_failed`、`unknown_user` いずれも — で破棄され、何も判定しなかった拒否では意図的に破棄 *されない*。規則: **拒否がトランザクションを消費するのは、リクエストがそれについて主張をしたときであり、何も主張しなかったときは手を付けない。** `state` がその主張である。`state` を持たないコールバック（レコードがこのプロバイダーのものに解決した後で確認する）は何も主張せず何も失わない（`400 invalid_request`、レコードはそのまま）。GET は cookie を読む前に `405` で拒否される。*誤った* `state` はこのトランザクションへの試行であり、やはり消費されるので、推測に二度目は無い。レコードに解決しない、または別のプロバイダーのものに解決するトランザクション ID（`400 invalid_session`）も同様に消費し、ストアの読み出しが失敗した場合はベストエフォートで消費する（`500`）。この区別が重要なのは、cookie がやむを得ず `SameSite=None` で、コールバックのパスへのあらゆるクロスサイトリクエストに付くからである: どの拒否でもレコードが消費されるなら、第三者は `<img>` タグ一つで被害者の進行中のログインを壊せてしまう。
+レコードと cookie は、トランザクションを **判定した** コールバックの出口すべて — 成功、`invalid_state`、`exchange_failed`、`unknown_user` いずれも — で破棄され、何も判定しなかった拒否では意図的に破棄 *されない*。規則: **拒否がトランザクションを消費するのは、リクエストがそれについて主張をしたときであり、何も主張しなかったときは手を付けない。** `state` がその主張である。`state` を持たないコールバック（レコードがこのプロバイダーのものに解決した後で確認する）は何も主張せず何も失わない（`400 invalid_request`、レコードはそのまま）。GET は cookie を読む前に `405` で拒否される。*誤った* `state` はこのトランザクションへの試行であり、やはり消費されるので、推測に二度目は無い。レコードに解決しない、または別のプロバイダーのものに解決するトランザクション ID（`400 invalid_session`）も同様に消費し、ストアの読み出しが失敗した場合はベストエフォートで消費する（`503`。そこや拒否での消費が失敗すれば `federation_cleanup_failed` の warn 1 行）。この区別が重要なのは、cookie がやむを得ず `SameSite=None` で、コールバックのパスへのあらゆるクロスサイトリクエストに付くからである: どの拒否でもレコードが消費されるなら、第三者は `<img>` タグ一つで被害者の進行中のログインを壊せてしまう。
 
 この規則は `form_post` だけのもの。`query` フェデレーションはエンベロープをセッションに置き、`state` が *一致した* 経路でだけ破棄するので、誤った `state` ではエンベロープが残る — セッション cookie は `SameSite=Lax` でトップレベルのクロスサイト GET には **付く** ため、不一致でエンベロープを消費すれば第三者に同じ可用性攻撃を与えてしまうからである。それで防げるはずの推測は現実的なものではない: `state` は CSPRNG からの 128 ビットである。両モードに共通なのは「`state` が無い」場合の規則だけ。
 
@@ -274,7 +274,7 @@ cookie を厳密に一つのホストに固定するのは `__Host-` であり�
 | **保証しない** | *重なった* コールバック。どちらかが削除する前に両方がレコードを読めば、両方が `state` の比較を通り、両方が `exchangeCode` に達する。`MemoryStore` は同期的に応答するので結果的に直列化されるが、ネットワーク遅延のあるストアではそうならない。 |
 | **重なりを抑えるもの** | IdP。認可コードは IdP 側で一度きりで、競合するコールバックは必ず同じコードを持つので、何本がそこまで進んでも交換に成功するのは高々一つ — 残りは `502 exchange_failed`。PKCE がその交換をレコード内の verifier に束縛する。 |
 
-レコードがまったく削除できないなら、コールバックはコードを交換せずに `500` で止まる。これは `DeviceCodeStore` より弱い。あちらはアトミックな読み出しと消費である: あのストアは自前のアダプターを持ち、消費を Redis の一往復に押し込めるが、フェデレーショントランザクションはすべてのデプロイが設定しなければならないコンポーネントスロットを追加する代わりにセッションストアを共有している — IdP が既に提供している性質のために。[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) が表の両半分を固定している。
+レコードがまったく削除できないなら、コールバックはコードを交換せずに `503 temporarily_unavailable` で止まる。これは `DeviceCodeStore` より弱い。あちらはアトミックな読み出しと消費である: あのストアは自前のアダプターを持ち、消費を Redis の一往復に押し込めるが、フェデレーショントランザクションはすべてのデプロイが設定しなければならないコンポーネントスロットを追加する代わりにセッションストアを共有している — IdP が既に提供している性質のために。[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) が表の両半分を固定している。
 
 `query` フェデレーションはこれらのどれにも影響されない: コールバックは同一サイトのトップレベル GET で、エンベロープは `req.session.federation` に残り、認可 URL はアダプターが作ったものそのままである。
 
@@ -431,8 +431,8 @@ export const exampleFederationModule = defineModule({
 | [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | `/` のミドルウェアルート、cookie 名、`__Host-` の規則、replica-safety の宣言と拒否 |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | 二つの組み込みストア、`session-store` の readiness probe、Redis クライアントのエラーリスナー |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | 署名付きトークン、オリジン検査、ガードの受理規則 |
-| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、ログインのレート制限ガード |
-| [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | 開始とコールバックのレグ、アカウントリンク、ストアへの書き込みとそのロールバック、`amr` |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、障害時の応答とそのログ 1 行、ログインのレート制限ガード |
+| [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | 開始とコールバックのレグ、アカウントリンク、ストアへの書き込みとそのロールバック、障害時の応答とそのログ、`amr` |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts)、[`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts)、[`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts)、[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response mode、トランザクション cookie、手を付けられないセッション cookie、トランザクションの失敗経路、「一度きり」が保証すること |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | ツールキットとルーターのフェデレーション部品。要求を組み立てるヘルパーは core で固定される（[`core/src/federations/__tests__/`](../core/src/federations/__tests__/)） |
 

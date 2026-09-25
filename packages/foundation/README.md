@@ -303,8 +303,8 @@ deployment that then has a connection under `"required"` is refused at boot.
 
 | Caller | Answers | Logs |
 | --- | --- | --- |
-| Password login, `POST /session/login` ([`@o3co/auth-provider-session`](../session/README.md)) | `503 temporarily_unavailable` | `local login authenticate failed` (warn), with `err` |
-| Federation login and `?link=1` callbacks (session) | `503 temporarily_unavailable` | `user repository lookup failed` or `federation link: user repository failed` (warn), with `err` |
+| Password login, `POST /session/login` ([`@o3co/auth-provider-session`](../session/README.md)) | `503 temporarily_unavailable` | `login_store_unavailable` (error, `store: "user_repository"`), with `err` |
+| Federation login and `?link=1` callbacks (session) | `503 temporarily_unavailable` | `federation_callback_store_unavailable` or `federation_link_store_unavailable` (error, `store: "user_repository"`), with `err` |
 | The jwt-bearer grant ([`@o3co/auth-provider-oauth`](../oauth/README.md)) | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable` (error), with `err` |
 | The federation-grants connect callback — the identity lookup ([`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)) | redirect with `error=temporarily_unavailable` | `federation_grant.failure` (warn) with `during: "callback_identity_lookup"` and `classification: "store_credential_refused"` (`store_transport_failed` for a `StoreTransportError`, `timeout` for a `TimeoutError`) — that reporter logs a classification, never an error's message |
 
