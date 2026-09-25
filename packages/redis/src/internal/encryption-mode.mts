@@ -56,7 +56,8 @@ export interface EncryptionGuardContext {
 /**
  * OR-12 / #473 — refuse to construct a federation-token store with
  * `mode = "allow-plaintext"` where plaintext is not acceptable, unless the
- * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Logs
+ * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. The refusal
+ * is a `RangeError`, as every setting a store is given and cannot use is. Logs
  * `federation_store_plaintext_override` at error when the escape hatch is
  * active, naming what would have refused it. Everywhere else it logs
  * `federation_store_plaintext` at warn but does not throw.
@@ -108,7 +109,7 @@ export function validateEncryptionMode(
 			);
 			return;
 		}
-		throw new Error(
+		throw new RangeError(
 			`[${label}] mode "${mode}" is refused because ${because}. ` +
 				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
 				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).",

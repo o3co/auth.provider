@@ -273,7 +273,13 @@ Each adapter ships in up to two forms:
   `federation_store_plaintext` (warn, `store`, `mode`) where it is allowed,
   `federation_store_plaintext_override` (error, with the `environment` or
   `deploymentMode` that would have refused it and `override`) where only
-  `FEDERATION_TOKENS_ALLOW_INSECURE=1` let it through.
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1` let it through. Every setting either
+  store is given and cannot use is refused at construction as a `RangeError`
+  — plaintext where the guard refuses it, a key or key ring it cannot read,
+  the grant store's key prefix with a brace — which boot carries as the
+  `cause` of a `provides-factory-failed` BootError naming the module. A
+  builder called without a `client` is a composition fault, and throws an
+  `Error`, as every builder here does.
 - An **`AdapterBuilder`** (`redisChallengeStoreBuilder`,
   `redisCodeRepositoryBuilder`, …) for a composition root that selects a
   backend at runtime through core's `AdapterFactory`:

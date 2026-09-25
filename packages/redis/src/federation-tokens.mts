@@ -260,8 +260,10 @@ export function createRedisFederationTokenStore(
 		deploymentMode: opts.deploymentMode,
 		...(opts.logger !== undefined ? { logger: opts.logger } : {}),
 	});
+	// Every setting this store is given and cannot use is refused as a
+	// RangeError: the key here, the TTL below, and the plaintext guard above.
 	if (opts.encryption.mode === "required" && opts.encryption.key.length !== 32) {
-		throw new Error("FederationTokenStore redis: encryption key must be 32 bytes");
+		throw new RangeError("FederationTokenStore redis: encryption key must be 32 bytes");
 	}
 	const prefix = opts.keyPrefix ?? "ft:";
 	const ttlSeconds = opts.ttl ?? DEFAULT_TTL_SECONDS;
@@ -576,7 +578,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 					? rawKey
 					: Buffer.alloc(0);
 		if (keyBuf.length !== 32) {
-			throw new Error(
+			throw new RangeError(
 				"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
 			);
 		}
