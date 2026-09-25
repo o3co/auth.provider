@@ -53,11 +53,13 @@
 
 import {
 	type AdapterBuilder,
+	decodeSealingKey,
 	defineModule,
 	type FederationTokenStore,
 	type FederationTokens,
 	isStorableLifetime,
 	type Logger,
+	SEALING_KEY_BYTES,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -512,8 +514,10 @@ export function createRedisFederationTokenStore(
  *     environment?: string,
  *     deploymentMode?: string }
  *
- * Encryption defaults: mode = "required", key MUST be 32-byte (raw Buffer or
- * base64 string). `mode = "allow-plaintext"` emits a startup warning and is
+ * Encryption defaults: mode = "required", key MUST be 32 bytes: a Buffer, or
+ * canonical base64 (core's `decodeSealingKey`: no whitespace, the standard
+ * alphabet, its padding). Any other mode than the two is refused by the
+ * store's guard. `mode = "allow-plaintext"` emits a startup warning and is
  * intended for dev/test only (per spec §5); `environment` and `deploymentMode`
  * are what the guard on it reads (#473, {@link EncryptionGuardContext}).
  */
@@ -570,21 +574,26 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	};
 	let encryption: EncryptionConfig;
 	if (mode === "required") {
+		// Core's rule for a configured key: a value an operator would have to
+		// tidy up to read (a trailing newline, the URL alphabet, no padding) is
+		// not the value they checked.
 		const rawKey = cfg.encryption?.key;
 		const keyBuf =
 			typeof rawKey === "string"
-				? Buffer.from(rawKey, "base64")
-				: rawKey instanceof Buffer
+				? decodeSealingKey(rawKey)
+				: Buffer.isBuffer(rawKey) && rawKey.length === SEALING_KEY_BYTES
 					? rawKey
-					: Buffer.alloc(0);
-		if (keyBuf.length !== 32) {
+					: undefined;
+		if (keyBuf === undefined) {
 			throw new RangeError(
-				"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
+				`federationTokenStore.redis: encryption.key must be canonical base64 of ${SEALING_KEY_BYTES} bytes (AES-256), or a Buffer of ${SEALING_KEY_BYTES} bytes, when encryption.mode is 'required' (the default)`,
 			);
 		}
 		encryption = { mode: "required", key: keyBuf };
 	} else {
-		encryption = { mode: "allow-plaintext" };
+		// Passed on as given: the store's guard refuses a mode it does not
+		// know, where reading it here as plaintext would downgrade silently.
+		encryption = { mode };
 	}
 	return createRedisFederationTokenStore({
 		client: cfg.client as FederationTokenStoreClient,
@@ -639,7 +648,7 @@ export interface RedisFederationTokenStoreModuleOptions {
  * `requires`: needs `federationTokenStoreClient` (per-purpose slot declared
  * in `@o3co/auth-provider-core`'s `federation-tokens/types.mts`) and
  * `config`. Encryption key is read from
- * `redisFederationTokenStore.encryptionKey` (base64 string) — operators set
+ * `redisFederationTokenStore.encryptionKey` (canonical base64) — operators set
  * it via env var `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
  *
  * The `allow-plaintext` guard (#473) reads `deployment.mode` off the config

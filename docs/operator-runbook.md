@@ -117,9 +117,10 @@ store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 `OAUTH_CODE_ADAPTER=redis`, `RATE_LIMITER_ADAPTER=redis`,
 `ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORAGE_TYPE=redis`, and
 `FEDERATION_TOKEN_STORE_TYPE=redis` together with
-`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (a base64 string that decodes to
-exactly 32 bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder
-refuses any other length; `templates/standalone/src/buildModules.mts`,
+`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (canonical base64 of exactly 32
+bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder refuses
+any other length, and a value with whitespace, the URL alphabet or missing
+padding; `templates/standalone/src/buildModules.mts`,
 `packages/core/config/reference.conf`). The consent step for clients that are
 not first-party is off by default (`CONSENT_STORE_ADAPTER=none`); to serve such
 clients under `multi`, set `CONSENT_STORE_ADAPTER=redis` — `memory` is refused
