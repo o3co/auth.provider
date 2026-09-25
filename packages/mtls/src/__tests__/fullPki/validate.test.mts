@@ -713,7 +713,7 @@ describe("full-pki revocation", () => {
 	});
 
 	it("under 'reject', a verdict elsewhere on the path wins over an outage: a revoked intermediate is refused as revoked", async () => {
-		// The leaf's list is down (an outage, a retry may clear it), but the
+		// The leaf's list is down (an outage, the source's), but the
 		// intermediate is on its issuer's list: no retry changes that, so the
 		// answer is the verdict, not a 503.
 		const { root, int, leaf } = await buildChain();

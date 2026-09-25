@@ -150,13 +150,16 @@
  * last failure's.
  *
  * An unavailability is marked `outage`, as in `crl.mts`, when the responder
- * did not answer usefully: it could not be fetched for a reason of its own
- * (`isSourceFailure`), it answered with bytes that are not a response or a
- * status (`unparseable`), it said it could not answer (`responder_error`:
- * `tryLater`, `internalError`, …), or its answer is out of date (`stale`) — or
- * a delegated responder's own status could not be read for such a reason
- * (`responder_status_unavailable`). A lookup over several responders is an
- * outage only when every one of them was.
+ * did not deliver a usable answer: it could not be fetched for a reason of
+ * its own (`isSourceFailure`), it answered with bytes that are not a response
+ * or a status (`unparseable`), it refused to answer (`responder_error`), or
+ * its answer is out of date (`stale`) — or a delegated responder's own status
+ * could not be read for such a reason (`responder_status_unavailable`). Each
+ * is a fault of the responder or of this server's configuration, never a
+ * verdict on the certificate. `tryLater` and `internalError` clear on retry;
+ * `malformedRequest`, `sigRequired` and `unauthorized` need an operator — the
+ * responder refuses what this server sends. A lookup over several responders
+ * is an outage only when every one of them was.
  */
 
 import { createHash, randomBytes, X509Certificate } from "node:crypto";

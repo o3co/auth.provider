@@ -137,12 +137,18 @@
  *
  * ### An outage, or the certificate's shape
  *
- * An unavailability is marked `outage` when the source did not answer
- * usefully: it could not be fetched for a reason of its own (`isSourceFailure`
- * in `fetchGuard.mts`: unreachable, timed out, an HTTP error, a redirect, an
- * answer too large or of the wrong type), it answered with bytes that are not
- * a CRL (`unparseable`), or its list is out of date (`stale`). A retry may
- * clear each, and a client cannot cause any. Everything else — no or an
+ * An unavailability is marked `outage` when the source did not deliver a
+ * usable answer: it could not be fetched for a reason of its own
+ * (`isSourceFailure` in `fetchGuard.mts`: unreachable, timed out, an HTTP
+ * error, a redirect, an answer too large or of the wrong type), it answered
+ * with bytes that are not a CRL (`unparseable`), or its list is out of date
+ * (`stale`). Each is a fault of the source or of this server's configuration,
+ * never a verdict on the certificate, and a client cannot cause any. Some
+ * clear on retry — a refused connection, a timeout, a 5xx, a truncated
+ * answer, a list the CA has not yet republished; some need an operator — a
+ * 404 or 410 (the CA moved or dropped its list), an answer larger than
+ * `max-response-bytes`, a redirect (never followed), an answer of the wrong
+ * media type (a proxy or portal in the way). Everything else — no or an
  * unsupported distribution point, a URL the guard will not fetch, a CRL of a
  * shape or algorithm this resolver does not accept, a signature that does not
  * verify — is not. A lookup that sums several points up is an outage only

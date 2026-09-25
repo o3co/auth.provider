@@ -95,14 +95,17 @@ export type FetchRejection =
 	| "network_error";
 
 /**
- * The refusals that say the source did not answer usefully — it could not be
- * reached in time, answered with an HTTP error or a redirect, or answered
- * with something too large or of the wrong type — as against the ones about
- * the URL a certificate names (a scheme, host, credentials or URL this guard
- * will not fetch). The first kind is an outage of the source, which a retry
- * may clear and a client cannot cause; the second is the certificate's own
- * shape. `crl.mts` and `ocsp.mts` read this to say which an unavailable
- * status is.
+ * The refusals that say the source did not deliver a usable answer — it
+ * could not be reached in time, answered with an HTTP error or a redirect, or
+ * answered with something too large or of the wrong type — as against the
+ * ones about the URL a certificate names (a scheme, host, credentials or URL
+ * this guard will not fetch). The first kind is a fault of the source or of
+ * this server's configuration, never a verdict on the certificate, and a
+ * client cannot cause it: some clear on retry (`timeout`, `network_error`, a
+ * 5xx `http_error`), some need an operator (a 404 or 410 `http_error`,
+ * `response_too_large`, `redirect_refused`, `unexpected_content_type`). The
+ * second is the certificate's own shape. `crl.mts` and `ocsp.mts` read this
+ * to say which an unavailable status is.
  */
 const SOURCE_FAILURES: ReadonlySet<FetchRejection> = new Set<FetchRejection>([
 	"timeout",
