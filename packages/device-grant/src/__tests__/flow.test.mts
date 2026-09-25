@@ -1257,6 +1257,20 @@ describe("the session check, further", () => {
 		});
 	});
 
+	it("reads a store that answers undefined for a missing session as an ended one, not a failure", async () => {
+		// The port says `null`; a store of the deployment's own may answer
+		// `undefined`, and that is still no session.
+		const store = liveSessionStore();
+		store.get = async () => undefined as never;
+		const { app } = makeHarness({ userSessionStore: store });
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "the session is no longer active; sign in again",
+		});
+	});
+
 	it("warns once, naming the sid, when the session behind the cookie records another subject", async () => {
 		const logger = makeLogger();
 		const { app } = makeHarness({
@@ -1447,6 +1461,26 @@ describe("a subject revocation between the approval and the poll", () => {
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 
+	it("honours an approval that records no instant while no boundary is in force — the upgrade path", async () => {
+		// A record approved before the store recorded the instant (or on a
+		// replica not yet upgraded) is refused only when a boundary exists to
+		// hold it against.
+		const subjectRevocation = createInMemorySubjectRevocation();
+		const inner = createMemoryDeviceCodeStore();
+		const legacy = {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { ...outcome, authorization: { ...outcome.authorization, approvedAtMs: undefined } }
+					: outcome;
+			},
+		};
+		const harness = makeHarness({ subjectRevocation, store: legacy as never });
+		const deviceCode = await approvedDevice(harness);
+		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
 	it("answers a boundary it cannot read at the poll with 503, logged once at error", async () => {
 		const logger = makeLogger();
 		const state = { down: false };
@@ -1463,10 +1497,13 @@ describe("a subject revocation between the approval and the poll", () => {
 		const deviceCode = await approvedDevice(harness);
 		state.down = true;
 		const { result } = await harness.poll(deviceCode);
+		// Not the device-code store's words: that store answered, and a retry
+		// finds the approval already consumed — the device starts again.
 		expect(result).toEqual({
 			status: 503,
 			error: "temporarily_unavailable",
-			errorDescription: "the device authorization store is unavailable; retry later",
+			errorDescription:
+				"the revocation boundary is unavailable; start a new device authorization request",
 		});
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
