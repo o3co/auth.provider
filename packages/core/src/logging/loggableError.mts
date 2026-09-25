@@ -39,8 +39,11 @@
  *   body-parser quote the input); only ` at position N` survives, as
  *   `position`, N at most ten digits and none from a longer number. Redis's
  *   `, with args beginning with: …` is cut from any message. Other text a
- *   peer wrote into a message is kept: the projection cannot tell it from
- *   this process's own.
+ *   peer wrote into a message is kept — the projection cannot tell it from
+ *   this process's own — but on one line: every character that breaks a
+ *   line or reorders it on screen ({@link lineSafeText}: C0, DEL, C1,
+ *   U+2028/U+2029, the bidi embedding, override and isolate controls) is
+ *   replaced by `?`. `"`, `\` and any other character stay.
  * - `error_description`: the one peer-written string kept on purpose — an
  *   operator needs "Token has been expired or revoked." — and only its first
  *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
@@ -115,9 +118,10 @@ export interface LoggableError {
 	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */
 	readonly name: string;
 	/**
-	 * The error's message. Absent for a SyntaxError, which quotes its input; a
-	 * Redis reply's echoed arguments are cut. Not `message`, which would make
-	 * a serializer take the projection for an Error.
+	 * The error's message, on one line (see {@link lineSafeText}). Absent for a
+	 * SyntaxError, which quotes its input; a Redis reply's echoed arguments are
+	 * cut. Not `message`, which would make a serializer take the projection
+	 * for an Error.
 	 */
 	readonly detail?: string;
 	/** A SyntaxError's `position N`, read out of its message. */
@@ -250,6 +254,40 @@ const MAX_STATUS_FIELDS = 4;
  * could be an argument.
  */
 const COMMAND_NAME = /^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})?$/i;
+
+/**
+ * Every character that breaks a line or reorders it on screen: C0 (the line
+ * breaks, tab, ESC), DEL, C1 (NEL, CSI), the Unicode line and paragraph
+ * separators, and the bidi embedding, override (U+202A–U+202E) and isolate
+ * (U+2066–U+2069) controls.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the control characters are what is matched, to be replaced.
+const LINE_UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
+
+/** `text` with every {@link LINE_UNSAFE} character replaced by `?`, one per code unit. */
+const oneLine = (text: string): string => text.replace(LINE_UNSAFE, "?");
+
+/**
+ * Text a peer wrote, as a log line carries it: on one line — every character
+ * that breaks a line or reorders it on screen (C0, DEL, C1, U+2028/U+2029,
+ * the bidi embedding, override and isolate controls) replaced by `?` — and
+ * cut at `maxLength` characters (256 by default), the cut marked with `...`.
+ * The filter `loggableError` applies to a message, for a package that logs
+ * peer text that is not an error's: a certificate's subject, a URL a
+ * certificate names, a responder's Content-Type. Not RFC 6749's set
+ * (`auditErrorText`): a non-ASCII name, `"` and `\` stay legible. A value
+ * that is not a string answers `undefined`.
+ */
+export function lineSafeText(text: string, maxLength?: number): string;
+export function lineSafeText(text: unknown, maxLength?: number): string | undefined;
+export function lineSafeText(
+	text: unknown,
+	maxLength: number = LOGGED_STRING_MAX_LENGTH,
+): string | undefined {
+	if (typeof text !== "string") return undefined;
+	const safe = oneLine(text);
+	return safe.length <= maxLength ? safe : `${safe.slice(0, Math.max(0, maxLength - 3))}...`;
+}
 
 /** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
@@ -611,7 +649,7 @@ function ownFieldsOf(err: unknown): Draft {
 			const at = SYNTAX_POSITION.exec(rawMessage);
 			position = at ? Number(at[1]) : undefined;
 		} else {
-			detail = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
+			detail = capped(oneLine(rawMessage.replace(REDIS_ECHOED_ARGS, "")));
 		}
 	}
 

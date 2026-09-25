@@ -341,8 +341,7 @@ export const createCsrfGuard = ({
 		if (originVerdict === "foreign") {
 			const rawOrigin = req.headers?.origin;
 			const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
-			// Both are the caller's: sanitised and capped, as every caller-written
-			// value on a line is (`auditErrorText`).
+			// Both are the caller's: sanitised and capped (`auditErrorText`).
 			logger.warn(
 				{ origin: auditErrorText(origin ?? ""), path: auditErrorText(req.path) },
 				"csrf_origin_rejected",

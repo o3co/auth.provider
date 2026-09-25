@@ -481,6 +481,7 @@ export {
 	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,
 	type LoggableError,
+	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";

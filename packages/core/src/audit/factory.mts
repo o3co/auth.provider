@@ -33,9 +33,9 @@ export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
 
 /**
  * `event` as a sink is handed it: `ip` and `userAgent`, the two fields a
- * route copies from the request, sanitised and capped as every caller-written
- * string on a log line or an audit event is ({@link auditErrorText}: RFC 6749
- * NQSCHAR, `?` for anything else, at most 200 characters). Behind `trust
+ * route copies from the request, sanitised and capped with
+ * {@link auditErrorText} (RFC 6749 NQSCHAR, `?` for anything else, at most
+ * 200 characters). Behind `trust
  * proxy`, `req.ip` is what the caller wrote in `X-Forwarded-For`, and a user
  * agent is the caller's own header; over HTTP either can carry a tab, the C1
  * controls and up to the header-size limit, and a composition can hand in
