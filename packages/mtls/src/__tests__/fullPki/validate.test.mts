@@ -26,6 +26,7 @@
 
 import type * as pkijs from "pkijs";
 import { describe, expect, it, vi } from "vitest";
+import { MtlsRevocationUnavailableError } from "#/errors.mjs";
 import {
 	checkAlgorithmPolicy,
 	DEFAULT_SIGNATURE_ALGORITHMS,
@@ -2315,23 +2316,73 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 			headers: { "content-type": "application/ocsp-response" },
 		});
 
-	const judge = (
+	/** The validator's result for the path, and every line it wrote. */
+	interface Judged {
+		readonly result: Awaited<ReturnType<ReturnType<typeof createFullPkiValidator>["validate"]>>;
+		readonly warn: ReturnType<typeof vi.fn>;
+	}
+
+	const judge = async (
 		root: Minted,
 		int: Minted,
 		leaf: Minted,
 		mode: "crl" | "ocsp" | "both",
 		impl: typeof globalThis.fetch,
-	) =>
-		validator([root], { revocation: fetchingPolicy(mode, "reject"), fetchImpl: impl }).validate(
-			leaf.x509,
-			[int.x509],
-			NOW,
+	): Promise<Judged> => {
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+		const result = await validator([root], {
+			revocation: fetchingPolicy(mode, "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+		return { result, warn: logger.warn };
+	};
+
+	/**
+	 * An outage: the validator writes nothing (the dispatcher's 503 line is the
+	 * one account), and the cause's first member is the source expected, for
+	 * the reason expected — not merely some outage.
+	 */
+	const expectOutage = (
+		{ result, warn }: Judged,
+		source: "crl" | "ocsp",
+		url: string,
+		reason: string,
+	): void => {
+		expect(result).toMatchObject({
+			ok: false,
+			step: "revocation status unavailable",
+			outage: true,
+		});
+		expect(warn).not.toHaveBeenCalled();
+		const cause = (result as { cause?: unknown }).cause;
+		expect(cause).toBeInstanceOf(MtlsRevocationUnavailableError);
+		expect((cause as AggregateError).errors[0]).toMatchObject({
+			reason,
+			message: expect.stringContaining(`${source} ${url}: ${reason} — `),
+		});
+	};
+
+	/**
+	 * A verdict: exactly one line, mtls_revocation_unavailable_rejected, and it
+	 * names the reason that decided it — not merely some verdict.
+	 */
+	const expectVerdict = ({ result, warn }: Judged, reason: string): void => {
+		expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
+		expect(result).not.toHaveProperty("outage");
+		expect(warn).toHaveBeenCalledTimes(1);
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ detail: expect.stringContaining(reason) }),
+			"mtls_revocation_unavailable_rejected",
 		);
+	};
 
 	it.each([
 		[
 			"CRL: a list past its nextUpdate (stale)",
 			"crl" as const,
+			INT_CRL_URL,
+			"stale",
 			async (root: Minted, int: Minted) => ({
 				[INT_CRL_URL]: await mintCrl({
 					issuer: int,
@@ -2344,6 +2395,8 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 		[
 			"OCSP: an answer past its nextUpdate (stale)",
 			"ocsp" as const,
+			INT_OCSP_URL,
+			"stale",
 			async (root: Minted, int: Minted, leaf: Minted) => ({
 				[INT_OCSP_URL]: ocspAnswer({
 					issuer: int,
@@ -2357,6 +2410,8 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 		[
 			"OCSP: a responder saying tryLater (responder_error)",
 			"ocsp" as const,
+			INT_OCSP_URL,
+			"responder_error",
 			async (root: Minted, int: Minted, leaf: Minted) => ({
 				[INT_OCSP_URL]: ocspAnswer({
 					issuer: int,
@@ -2369,6 +2424,8 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 		[
 			"OCSP: a responder saying unauthorized (responder_error) — an operator's to fix, still not the certificate's",
 			"ocsp" as const,
+			INT_OCSP_URL,
+			"responder_error",
 			async (root: Minted, int: Minted, leaf: Minted) => ({
 				[INT_OCSP_URL]: ocspAnswer({
 					issuer: int,
@@ -2381,19 +2438,17 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 		[
 			"OCSP: an answer that is not DER (unparseable)",
 			"ocsp" as const,
+			INT_OCSP_URL,
+			"unparseable",
 			async (root: Minted, int: Minted) => ({
 				[INT_OCSP_URL]: ocspBytes(GARBAGE),
 				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
 			}),
 		],
-	])("%s: an outage", async (_label, mode, table) => {
+	])("%s: an outage", async (_label, mode, url, reason, table) => {
 		const { root, int, leaf } = mode === "crl" ? await buildCrlChain() : await ocspChain();
 		const { impl } = stubFetch(await table(root, int, leaf));
-		expect(await judge(root, int, leaf, mode, impl)).toMatchObject({
-			ok: false,
-			step: "revocation status unavailable",
-			outage: true,
-		});
+		expectOutage(await judge(root, int, leaf, mode, impl), mode, url, reason);
 	});
 
 	it("a point remembered as down keeps its outage when it is not retried yet", async () => {
@@ -2402,19 +2457,18 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 			[INT_CRL_URL]: 503,
 			[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
 		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
 		const v = validator([root], {
 			revocation: fetchingPolicy("crl", "reject"),
 			fetchImpl: impl,
+			logger,
 		});
 
 		const first = await v.validate(leaf.x509, [int.x509], NOW);
+		expectOutage({ result: first, warn: logger.warn }, "crl", INT_CRL_URL, "fetch_failed");
 		const second = await v.validate(leaf.x509, [int.x509], NOW);
-
-		expect(first).toMatchObject({ outage: true });
-		expect(second).toMatchObject({
-			outage: true,
-			detail: expect.stringContaining("not retried yet"),
-		});
+		expectOutage({ result: second, warn: logger.warn }, "crl", INT_CRL_URL, "fetch_failed");
+		expect(second).toMatchObject({ detail: expect.stringContaining("not retried yet") });
 		expect(calls.filter((url) => url === INT_CRL_URL)).toHaveLength(1);
 	});
 
@@ -2439,10 +2493,10 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 			[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
 		});
 
-		const result = await judge(root, int, leaf, "both", impl);
+		const judged = await judge(root, int, leaf, "both", impl);
 
-		expect(result).toMatchObject({ ok: false, outage: true });
-		if (!result.ok) expect(result.detail).toContain("responder_status_unavailable");
+		expectOutage(judged, "ocsp", INT_OCSP_URL, "responder_status_unavailable");
+		if (!judged.result.ok) expect(judged.result.detail).toContain("responder_status_unavailable");
 	});
 
 	it("one point down and one outside the allowlist: a verdict — not every failure is an outage", async () => {
@@ -2467,10 +2521,7 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 			[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
 		});
 
-		const result = await judge(root, int, leaf, "crl", impl);
-
-		expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
-		expect(result).not.toHaveProperty("outage");
+		expectVerdict(await judge(root, int, leaf, "crl", impl), "host_not_allowed");
 	});
 
 	it("two responders, one down and one outside the allowlist: a verdict", async () => {
@@ -2483,10 +2534,7 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
 		});
 
-		const result = await judge(root, int, leaf, "ocsp", impl);
-
-		expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
-		expect(result).not.toHaveProperty("outage");
+		expectVerdict(await judge(root, int, leaf, "ocsp", impl), "host_not_allowed");
 	});
 
 	describe("under revocation.mode = both", () => {
@@ -2499,10 +2547,7 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 				[INT_CRL_URL]: await mintCrl({ issuer: int, signingKeys: impostor.keys }),
 			});
 
-			const result = await judge(root, int, leaf, "both", impl);
-
-			expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
-			expect(result).not.toHaveProperty("outage");
+			expectVerdict(await judge(root, int, leaf, "both", impl), "bad_signature");
 		});
 
 		it("no responder named and the CRL down: an outage (503) — the source never asked says nothing", async () => {
@@ -2515,12 +2560,12 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 				[INT_CRL_URL]: 503,
 			});
 
-			const result = await judge(root, int, leaf, "both", impl);
+			const judged = await judge(root, int, leaf, "both", impl);
 
-			expect(result).toMatchObject({ ok: false, outage: true });
+			expectOutage(judged, "crl", INT_CRL_URL, "fetch_failed");
 			// Nor is it a member of the outage: the one member is the CRL point
 			// that was asked, not a slot spent on "no_responder".
-			const cause = (result as { cause?: unknown }).cause as AggregateError;
+			const cause = (judged.result as { cause?: unknown }).cause as AggregateError;
 			expect(cause.errors.map((member: Error) => member.message)).toEqual([
 				expect.stringContaining(`crl ${INT_CRL_URL}: fetch_failed — `),
 			]);
@@ -2535,10 +2580,7 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 				[INT_CRL_URL]: 503,
 			});
 
-			const result = await judge(root, int, leaf, "both", impl);
-
-			expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
-			expect(result).not.toHaveProperty("outage");
+			expectVerdict(await judge(root, int, leaf, "both", impl), "bad_signature");
 		});
 	});
 });
