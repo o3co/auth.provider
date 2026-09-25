@@ -139,3 +139,34 @@ describe("core barrel — the federation adapter toolkit", () => {
 		expect(typeof core.resolveClientSecret).toBe("function");
 	});
 });
+
+describe("core barrel — the sealing leaf", () => {
+	it("re-exports what a store needs to seal a value at rest under a key ring, and to read the ring's keys", () => {
+		// The federation grant store in `@o3co/auth-provider-redis` seals with
+		// these, and a second store must not grow its own envelope.
+		for (const name of [
+			"sealWithKeyRing",
+			"openWithKeyRing",
+			"decodeSealingKey",
+			"checkSealingKeyRing",
+			"isSealingKeyId",
+		] as const) {
+			expect(typeof (core as Record<string, unknown>)[name], name).toBe("function");
+		}
+		expect(core.SEALING_KEY_BYTES).toBe(32);
+		const ring: core.SealingKeyRing = [{ id: "k", key: Buffer.alloc(32, 1) }];
+		const binding: core.SealBinding = { purpose: "o3co:test:barrel", record: Buffer.alloc(0) };
+		const opened: core.OpenedSeal = core.openWithKeyRing(
+			core.sealWithKeyRing("value", ring, binding),
+			ring,
+			binding,
+		);
+		expect(opened).toStrictEqual({ state: "ok", value: "value", keyId: "k" });
+	});
+
+	it("names them for what they do, not for the store they came from", () => {
+		for (const name of ["sealCredential", "openSealedCredential", "encryptTokenField"]) {
+			expect((core as Record<string, unknown>)[name], name).toBeUndefined();
+		}
+	});
+});

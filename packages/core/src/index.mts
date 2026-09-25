@@ -1152,6 +1152,25 @@ export {
 } from "./user-sessions/types.mjs";
 
 // ===========================================================================
+// Sealing — the key-ring envelope a store seals a value in at rest
+// ===========================================================================
+
+export {
+	type OpenedSeal,
+	openWithKeyRing,
+	type SealBinding,
+	sealWithKeyRing,
+} from "./sealing/envelope.mjs";
+export {
+	checkSealingKeyRing,
+	decodeSealingKey,
+	isSealingKeyId,
+	SEALING_KEY_BYTES,
+	type SealingKey,
+	type SealingKeyRing,
+} from "./sealing/keyRing.mjs";
+
+// ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628, #298)
 // ===========================================================================
 

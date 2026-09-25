@@ -273,7 +273,23 @@ Each adapter ships in up to two forms:
   `federation_store_plaintext` (warn, `store`, `mode`) where it is allowed,
   `federation_store_plaintext_override` (error, with the `environment` or
   `deploymentMode` that would have refused it and `override`) where only
-  `FEDERATION_TOKENS_ALLOW_INSECURE=1` let it through.
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1` let it through. The two stores' own
+  refusals of a setting they are given and cannot use are `RangeError`s,
+  which boot carries as the `cause` of a `provides-factory-failed` BootError
+  naming the module: the guard's (`[<store>] mode "allow-plaintext" is
+  refused because …`, and `[<store>] mode must be "required" or
+  "allow-plaintext"` for a store built directly); the grant store's
+  (`federation grant store: mode "required" needs at least one encryption
+  key`, `federation grant store: federationGrants.encryptionKeys[<i>].key
+  must be canonical base64 of 32 bytes`, core's ring rule under
+  `federation grant store: federationGrants.encryptionKeys`, and
+  `federation grant store: keyPrefix may not contain "{" or "}"`); and the
+  token store's (`federationTokenStore.redis: encryption.key must be
+  canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when
+  encryption.mode is 'required' (the default)`, and its `ttl`). A value a
+  module's configuration schema refuses first is `config-validation-failed`
+  instead. A builder called without a `client` is a composition fault and
+  throws an `Error`, as every builder here does.
 - An **`AdapterBuilder`** (`redisChallengeStoreBuilder`,
   `redisCodeRepositoryBuilder`, …) for a composition root that selects a
   backend at runtime through core's `AdapterFactory`:
@@ -442,16 +458,17 @@ re-reads. Nothing deletes a record because of the time its caller passed —
 what a caller is told is judged on the time it passes, and what Redis reclaims
 is judged by Redis.
 
-The credential is sealed under a key **ring**: the first key seals, every
-configured key opens, and the envelope names the one that sealed it, so a key
-can be introduced without re-sealing grants that are paused. A key that is not
-in the ring reads as `key_unavailable` — a configuration problem an operator
-undoes by putting it back — and is told apart from a credential that will
-never open again. Nothing is ever deleted on a read. Rotate by adding the new
-key last, then moving it first, and keep the old one listed for 365 days after
-the last replica that sealed with it stopped — the procedure, and why it is
-the ceiling and not `maxExpiresIn`, is in the
-[operator runbook](../../docs/operator-runbook.md).
+The credential is sealed under a key **ring**, in core's `v2` key-ring
+envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
+first key seals, every configured key opens, and the envelope names the one
+that sealed it, so a key can be introduced without re-sealing grants that are
+paused. A key that is not in the ring reads as `key_unavailable` — a
+configuration problem an operator undoes by putting it back — and is told
+apart from a credential that will never open again. Nothing is ever deleted
+on a read. Rotate by adding the new key last, then moving it first, and keep
+the old one listed for 365 days after the last replica that sealed with it
+stopped — the procedure, and why it is the ceiling and not `maxExpiresIn`, is
+in the [operator runbook](../../docs/operator-runbook.md).
 
 **Acquisition's records share the prefix.** The intent store keeps the intent
 a backend lodged, the consent challenge and the connect transaction under
@@ -574,8 +591,11 @@ its port. Two directories hold what several of them share:
 - **`src/internal/`** — helpers no consumer imports, and which the package's
   exports do not reach: the advisory lock (its options carry the federation
   token's `{ sid, federationName }`, so it is not a general-purpose lock), the
-  AES-256-GCM sealing, the plaintext guard both sealing stores share (one
-  escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for both), the
-  federation-grant codecs and lock, and the three sid-keyed structures (HASH,
-  ZSET, SET) the session and federation adapters are built from — same
-  `${keyPrefix}${sid}` layout and TTL contract, different Redis type.
+  AES-256-GCM sealing (the federation-token store's `v1` envelope, and the
+  federation grant store's purpose label over core's `v2` key-ring envelope,
+  which lives in core's `sealing/` leaf), the plaintext guard both sealing
+  stores share (one escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for
+  both), the federation-grant codecs and lock, and the three sid-keyed
+  structures (HASH, ZSET, SET) the session and federation adapters are built
+  from — same `${keyPrefix}${sid}` layout and TTL contract, different Redis
+  type.

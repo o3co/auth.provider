@@ -117,9 +117,10 @@ store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 `OAUTH_CODE_ADAPTER=redis`, `RATE_LIMITER_ADAPTER=redis`,
 `ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORAGE_TYPE=redis`, and
 `FEDERATION_TOKEN_STORE_TYPE=redis` together with
-`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (a base64 string that decodes to
-exactly 32 bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder
-refuses any other length; `templates/standalone/src/buildModules.mts`,
+`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (canonical base64 of exactly 32
+bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder refuses
+any other length, and a value with whitespace, the URL alphabet or missing
+padding; `templates/standalone/src/buildModules.mts`,
 `packages/core/config/reference.conf`). The consent step for clients that are
 not first-party is off by default (`CONSENT_STORE_ADAPTER=none`); to serve such
 clients under `multi`, set `CONSENT_STORE_ADAPTER=redis` — `memory` is refused
@@ -228,10 +229,24 @@ Module-level messages that arrive wrapped in a factory failure:
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
   own: `mode "required" needs at least one encryption key`, at construction
   rather than at the first write — a ring that cannot seal would otherwise be
-  discovered after a user had already consented. A read never re-seals, so
+  discovered after a user had already consented. The store's own refusals of
+  `federationGrants.encryptionKeys` arrive as a `RangeError` `cause`:
+  `federation grant store: mode "required" needs at least one encryption key`,
+  `federation grant store: federationGrants.encryptionKeys[<i>].key must be
+  canonical base64 of 32 bytes`, and, from core's ring rule,
+  `federation grant store: federationGrants.encryptionKeys has a duplicate
+  encryption key id at index <i>` and `… has an encryption key id at index <i>
+  that does not match ^[A-Za-z0-9_-]{1,64}$` — an entry is named by its
+  index, never by its id, which could be a key written in the wrong place
+  (`packages/redis/src/federation-grant-store.mts`,
+  `packages/core/src/sealing/keyRing.mts`); so does
+  `federation grant store: keyPrefix may not contain "{" or "}"`. A value the
+  configuration schema refuses first — an empty `id` or `key`, a mode that is
+  neither `required` nor `allow-plaintext` — is `config-validation-failed`
+  instead. A read never re-seals, so
   dropping the key that sealed a grant makes it read `key_unavailable` until
   it is put back; the rotation procedure below says when a key may leave.
-- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`).
+- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`). That refusal, and `federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)` for a `redisFederationTokenStore.encryptionKey` that is missing, the wrong length or not canonical base64, are the store's own and arrive as a `RangeError` `cause`, as does the same guard's refusal for federation grants; a mode outside the schema's two is `config-validation-failed`.
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
 - DPoP with no seen-set: `dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component`, in every `deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
 - Device grant: the six refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, a usable `oauth.deviceAuthorization.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `oauth.deviceAuthorization.store = "unsupported"` does not stand in for (#626); and a seventh, `built from a config with the grant on, but the config createApp validated has oauth.deviceAuthorization.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the same config as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint.

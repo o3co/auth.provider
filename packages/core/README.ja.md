@@ -186,6 +186,12 @@ floor が置かれているのは **builder と schema**（= config 境界）で
 
 JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるときだけ NumericDate（RFC 7519 §2）です。`isNumericDate` と `malformedNumericDateClaim`（[`src/jwt/numericDate.mts`](src/jwt/numericDate.mts)）がその規則を述べ、jwt-bearer のレジストリ検証器、`private_key_jwt`、DPoP はこれを破るアサーションや proof を、そこから期限を計算する前に拒否します。jose はこうしたクレームが数値であることしか確かめず、JSON の `1e400` は Infinity にパースされます。小数は許されます。単一使用のために `jti` を記録するアサーション — `private_key_jwt` のクライアントアサーション、ID-JAG — は、さらに現在から `MAX_ASSERTION_LIFETIME_SECONDS`（1 時間）先までしか有効でなく、発行もそれ以内でなければなりません（[`src/assertions/lifetime.mts`](src/assertions/lifetime.mts)）。リプレイの記録は `exp` まで残るので、上限の無い `exp` は上限の無い記録になるからです。どちらの検証器も、ほかのすべての時刻チェックと同じく時計の許容幅をその上に認め、`exp` を同じ `assertionLifetime` で比べます。時計が少し進んでいるクライアントや IdP が、一方の経路では拒否され他方では受け入れられる、ということは起きません。
 
+### 保存時の封印（sealing）
+
+秘密を保存するストアは、それを `v2` のキーリング封筒に封印します（[`src/sealing/envelope.mts`](src/sealing/envelope.mts)）。`sealWithKeyRing(plaintext, ring, { purpose, record })` は、リングの先頭の鍵による AES-256-GCM で `v2.<key id>.<iv>.<ciphertext>.<tag>` を返します。`openWithKeyRing(envelope, ring, { purpose, record })` は `OpenedSeal` で答えます。値と、それを開いた鍵の `keyId` とともに `ok`（先頭でなくなった鍵で開いた値を、呼び出し元が封印し直せます）、封筒が名指す鍵をリングがもう持っていないときの、その `keyId` とともに `key_unavailable`（運用者がその鍵を戻せば元に戻ります）、それ以外すべての `unreadable`（別の目的や別のレコードに結び付いた値や、16 バイト以外のタグ、12 バイト以外の IV を含みます）のいずれかです。封筒を理由に throw することはありません。目的ラベル（1〜64 文字の印字可能な ASCII、空白なし）とレコードのバイト列は認証され、保存はされません。そのため、別のレコードへコピーされた値や、同じリングで封印する別の呼び出し元が読もうとした値は開きません。
+
+リング（`SealingKeyRing`: `{ id, key }` の `SealingKey` の並び、[`src/sealing/keyRing.mts`](src/sealing/keyRing.mts)）は先頭の鍵で封印し、どの鍵でも開けます。ID は `A-Za-z0-9_-` の 1〜64 文字（`isSealingKeyId`）、鍵は `SEALING_KEY_BYTES`（32）バイトの Buffer です。`checkSealingKeyRing(ring, setting)` は規則を破るリングを、`setting` で始まるメッセージの `RangeError` で拒否します。ストアは構築時に、リングを読んだ設定キーやオプションの名前（`mfa.encryptionKeys`）でこれを呼ぶので、不正なリングは起動時に、書かれた場所を名指して拒否されます。どの拒否もエントリをインデックスで名指し、ID を引用しません。32 バイトの鍵を hex やパディングなしの base64url で書いたものは ID の規則を通るので、ID と鍵を取り違えた運用者には、引用すれば鍵が見えてしまうからです。封印と開封はリングを「sealing key ring」として改めて確かめ、規則外の目的ラベルに対して、封印は空のリングに対しても、`RangeError` を throw します。`decodeSealingKey` は設定された鍵を読みます。空白を含まない、ちょうど 32 バイトの正準な base64 なら鍵の値を、そうでなければ `undefined` を返し、呼び出し元が自分の設定キーを名指して拒否します。`@o3co/auth-provider-redis` のフェデレーショングラントストアは、この方法でクレデンシャルを封印しています。
+
 ### リポジトリ
 
 リポジトリインターフェースはデータアクセスのコントラクトを定義します。開発・テスト向けのインメモリ実装が標準で提供されています。

@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import { createCipheriv } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { decryptTokenField, encryptTokenField } from "../../src/internal/crypto.mjs";
 
@@ -78,5 +79,44 @@ describe("encryptTokenField / decryptTokenField with additional authenticated da
 	it("fails authentication when an AAD is presented for a ciphertext sealed without one", () => {
 		const ct = encryptTokenField(plaintext, key);
 		expect(() => decryptTokenField(ct, key, aad)).toThrow();
+	});
+});
+
+// Node before 26 accepts a GCM tag of 4 to 16 bytes on decrypt unless told
+// the length, so a v1 envelope whose tag was cut short decrypted. Every v1
+// envelope ever written has a 12-byte IV and a 16-byte tag.
+describe("decryptTokenField reads only a 16-byte tag and a 12-byte IV", () => {
+	const aad = "ft:sid-1:google";
+
+	it("refuses a tag cut to 4, 8 or 12 bytes as a malformed envelope", () => {
+		const [ver, iv, ct, tag] = encryptTokenField(plaintext, key, aad).split(".") as [
+			string,
+			string,
+			string,
+			string,
+		];
+		for (const length of [4, 8, 12]) {
+			const truncated = Buffer.from(tag, "base64url").subarray(0, length).toString("base64url");
+			expect(
+				() => decryptTokenField([ver, iv, ct, truncated].join("."), key, aad),
+				`a ${length}-byte tag`,
+			).toThrow(new Error("invalid envelope format"));
+		}
+	});
+
+	it("refuses a 16-byte IV, even one sealed under the right key and AAD", () => {
+		const iv = Buffer.alloc(16, 9);
+		const cipher = createCipheriv("aes-256-gcm", key, iv);
+		cipher.setAAD(Buffer.from(aad, "utf8"));
+		const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+		const envelope = [
+			"v1",
+			iv.toString("base64url"),
+			ct.toString("base64url"),
+			cipher.getAuthTag().toString("base64url"),
+		].join(".");
+		expect(() => decryptTokenField(envelope, key, aad)).toThrow(
+			new Error("invalid envelope format"),
+		);
 	});
 });

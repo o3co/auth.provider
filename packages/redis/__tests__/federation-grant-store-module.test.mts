@@ -22,10 +22,14 @@
 // a configuration that cannot seal is refused at boot rather than at the first
 // grant — which would mean refusing after a user had already consented.
 
+import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationGrantStoreClient } from "../src/clients.mjs";
 import {
+	createRedisFederationGrantStore,
 	DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS,
+	redisFederationGrantStoreModule,
 	redisFederationGrantStoreModuleFor,
 	resolveRedisFederationGrantStoreOptions,
 } from "../src/federation-grant-store.mjs";
@@ -54,6 +58,46 @@ const build = (
 		federationGrantStoreClient: client,
 		config: config(federationGrants, deployment),
 	});
+};
+
+/**
+ * Stands in for the routes that read the store, so that the store is in the
+ * closure boot builds.
+ */
+const grantsReader = defineModule({
+	name: "test:federation-grant-store-reader",
+	optional: ["federationGrantStore"] as const,
+	contributes: {
+		routes: [
+			{
+				mountPath: "/__test_noop__",
+				id: "test-noop",
+				handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+			},
+		],
+	},
+});
+
+/**
+ * Boots the module through `createApp` with `extra` over a valid core
+ * configuration, requires the boot to fail on the store's provider, naming the
+ * module, and answers the BootError's cause.
+ */
+const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => {
+	const boot = createApp({
+		modules: [redisFederationGrantStoreModule, grantsReader],
+		bootstrapComponents: {
+			config: { ...makeValidCoreConfig(), ...extra },
+			pathResolver: (p: string) => p,
+			federationGrantStoreClient: client,
+		} as never,
+	});
+	await expect(boot).rejects.toMatchObject({
+		name: "BootError",
+		reason: "provides-factory-failed",
+		details: { module: "redis-federation-grant-store", componentKey: "federationGrantStore" },
+	});
+	return ((await boot.catch((err: unknown) => err)) as Error).cause;
 };
 
 describe("the Redis federation grant store module (#593, D16)", () => {
@@ -142,6 +186,184 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		}
 	});
 
+	it("refuses a ring whose key ids break the rule as a RangeError naming the configuration key", () => {
+		// The resolver checks the ring it read with core's rule, under the key an
+		// operator wrote it at; its refusals are RangeErrors, as every refused
+		// setting is.
+		const ringOf = (ids: readonly string[]) => ({
+			encryptionMode: "required",
+			encryptionKeys: ids.map((id) => ({ id, key: KEY })),
+		});
+		expect(() => build(ringOf(["k-1", "k-1"]))).toThrow(
+			new RangeError(
+				"federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id at index 1",
+			),
+		);
+		expect(() => build(ringOf(["k-1", "k.2"]))).toThrow(
+			new RangeError(
+				"federation grant store: federationGrants.encryptionKeys has an encryption key id at index 1 that does not match ^[A-Za-z0-9_-]{1,64}$",
+			),
+		);
+	});
+
+	it("refuses the same ring as a RangeError when the store factory is called directly", () => {
+		// A composition root that builds the store itself, without the module,
+		// meets the ring rule unwrapped.
+		const direct = (keys: readonly { id: string; key: Buffer }[]) => () =>
+			createRedisFederationGrantStore({ client, encryption: { mode: "required", keys } });
+		const material = Buffer.alloc(32, 7);
+		expect(
+			direct([
+				{ id: "k-1", key: material },
+				{ id: "k-1", key: material },
+			]),
+		).toThrow(
+			new RangeError(
+				"federation grant store: encryption.keys has a duplicate encryption key id at index 1",
+			),
+		);
+		expect(direct([{ id: "k 1", key: material }])).toThrow(
+			new RangeError(
+				"federation grant store: encryption.keys has an encryption key id at index 0 that does not match ^[A-Za-z0-9_-]{1,64}$",
+			),
+		);
+		expect(direct([{ id: "k-1", key: Buffer.alloc(16, 7) }])).toThrow(
+			new RangeError(
+				"federation grant store: encryption.keys has an encryption key at index 0 that is not a Buffer of 32 bytes",
+			),
+		);
+		// An id that passes the rule can itself be key material: a 32-byte key
+		// in hex, or in unpadded base64url. Swapped with its key, it must not
+		// reach the refusal.
+		for (const swapped of [material.toString("hex"), material.toString("base64url")]) {
+			let thrown: unknown;
+			try {
+				direct([{ id: swapped, key: "k-1" as unknown as Buffer }])();
+			} catch (err) {
+				thrown = err;
+			}
+			expect(thrown, swapped).toStrictEqual(
+				new RangeError(
+					"federation grant store: encryption.keys has an encryption key at index 0 that is not a Buffer of 32 bytes",
+				),
+			);
+			expect((thrown as Error).message, swapped).not.toContain(swapped);
+		}
+		// The store's own refusal of a ring with nothing to seal with, before the
+		// leaf is asked: the same setting, so the same class.
+		expect(direct([])).toThrow(
+			new RangeError('federation grant store: mode "required" needs at least one encryption key'),
+		);
+	});
+
+	it("refuses a configured key it cannot read as a RangeError naming the entry, before any store is built", () => {
+		// The key reader runs in the exported resolver, which a composition root
+		// that builds the store itself calls too; the factory takes key material.
+		const refusal = new RangeError(
+			"federation grant store: federationGrants.encryptionKeys[1].key must be canonical base64 of 32 bytes",
+		);
+		for (const key of [`${KEY}\n`, Buffer.alloc(16, 7).toString("base64"), "not base64!!"]) {
+			expect(
+				() =>
+					resolveRedisFederationGrantStoreOptions(
+						config({
+							encryptionMode: "required",
+							encryptionKeys: [
+								{ id: "k-0", key: KEY },
+								{ id: "k-1", key },
+							],
+						}) as never,
+						{},
+					),
+				JSON.stringify(key),
+			).toThrow(refusal);
+		}
+	});
+
+	it("never puts key material in a refusal: an operator who swapped id and key sees neither", () => {
+		// The id is read before the key is known to be one, so a refusal that
+		// quoted it would put the base64 key into the BootError and the log.
+		let thrown: unknown;
+		try {
+			resolveRedisFederationGrantStoreOptions(
+				config({ encryptionMode: "required", encryptionKeys: [{ id: KEY, key: "k-1" }] }) as never,
+				{},
+			);
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toStrictEqual(
+			new RangeError(
+				"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+			),
+		);
+		expect((thrown as Error).message).not.toContain(KEY);
+	});
+
+	it.each([
+		[
+			"a duplicate key id",
+			[
+				{ id: "k-1", key: KEY },
+				{ id: "k-1", key: KEY },
+			],
+			"federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id at index 1",
+		],
+		[
+			"a key id outside the rule",
+			[{ id: "k.1", key: KEY }],
+			"federation grant store: federationGrants.encryptionKeys has an encryption key id at index 0 that does not match ^[A-Za-z0-9_-]{1,64}$",
+		],
+		[
+			"no key at all",
+			[],
+			'federation grant store: mode "required" needs at least one encryption key',
+		],
+		[
+			"a key that is not canonical base64",
+			[{ id: "k-1", key: `${KEY}\n` }],
+			"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+		],
+		[
+			"a key that is not 32 bytes",
+			[{ id: "k-1", key: Buffer.alloc(16, 7).toString("base64") }],
+			"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+		],
+	])(
+		"fails boot on %s with a RangeError as the BootError's cause, naming the module",
+		async (_what, encryptionKeys, message) => {
+			const cause = await bootRefusal({
+				federationGrants: { encryptionMode: "required", encryptionKeys },
+			});
+			expect(cause).toStrictEqual(new RangeError(message));
+			expect(cause).toBeInstanceOf(RangeError);
+		},
+	);
+
+	it("refuses a key prefix that would break the hash tag as a RangeError, through the factory and at boot", async () => {
+		// `{` or `}` in the prefix would move the hash tag a grant's three keys
+		// share, and scatter them across a Cluster's slots. A setting that is
+		// given but unusable, like the ring.
+		const message = 'federation grant store: keyPrefix may not contain "{" or "}"';
+		for (const keyPrefix of ["fg{", "}fg:", "a{b}:"]) {
+			expect(
+				() =>
+					createRedisFederationGrantStore({
+						client,
+						keyPrefix,
+						encryption: { mode: "required", keys: [{ id: "k-1", key: Buffer.alloc(32, 7) }] },
+					}),
+				keyPrefix,
+			).toThrow(new RangeError(message));
+		}
+		const cause = await bootRefusal({
+			federationGrants: { encryptionMode: "required", encryptionKeys: [{ id: "k-1", key: KEY }] },
+			redisFederationGrantStore: { keyPrefix: "fg:{tenant}:" },
+		});
+		expect(cause).toStrictEqual(new RangeError(message));
+		expect(cause).toBeInstanceOf(RangeError);
+	});
+
 	it("refuses a retention that is not a duration, rather than reading it as none", () => {
 		// Copilot's finding, and the one where the two readings look the same
 		// from outside: `null` coerced to `0` is "keep no tombstones", which is
@@ -183,6 +405,54 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 			);
 			// And in development it warns rather than refusing.
 			expect(() => build({ encryptionMode: "allow-plaintext" })).not.toThrow();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it("refuses plaintext where it is refused as a RangeError, through the factory and at boot", async () => {
+		// `allow-plaintext` is a setting, and where the plaintext guard refuses it
+		// it is one the store is given and cannot use. The guard is shared with
+		// the federation-token store, which refuses it the same way.
+		const insecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		try {
+			const message =
+				'[federation-grants] mode "allow-plaintext" is refused because deployment.mode is "multi" ' +
+				"(a multi-replica deployment is never a development box). " +
+				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
+				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
+			expect(() =>
+				createRedisFederationGrantStore({
+					client,
+					encryption: { mode: "allow-plaintext" },
+					guard: { deploymentMode: "multi" },
+				}),
+			).toThrow(new RangeError(message));
+			const cause = await bootRefusal({
+				federationGrants: { encryptionMode: "allow-plaintext" },
+				deployment: { mode: "multi" },
+			});
+			expect(cause).toStrictEqual(new RangeError(message));
+			expect(cause).toBeInstanceOf(RangeError);
+		} finally {
+			if (insecure !== undefined) process.env.FEDERATION_TOKENS_ALLOW_INSECURE = insecure;
+		}
+	});
+
+	it("refuses an encryption mode it does not know, rather than reading it as plaintext", () => {
+		// The shared plaintext guard took anything but "required" for
+		// `allow-plaintext`. The module's schema refuses such a value first; a
+		// store built directly met the guard alone.
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(() =>
+				createRedisFederationGrantStore({
+					client,
+					encryption: { mode: "requried" } as never,
+				}),
+			).toThrow(new RangeError('[federation-grants] mode must be "required" or "allow-plaintext"'));
+			expect(warn).not.toHaveBeenCalled();
 		} finally {
 			warn.mockRestore();
 		}

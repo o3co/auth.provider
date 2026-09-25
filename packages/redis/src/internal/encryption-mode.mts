@@ -56,7 +56,9 @@ export interface EncryptionGuardContext {
 /**
  * OR-12 / #473 — refuse to construct a federation-token store with
  * `mode = "allow-plaintext"` where plaintext is not acceptable, unless the
- * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Logs
+ * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`, and any mode
+ * but `required` and `allow-plaintext` everywhere. The refusals are
+ * `RangeError`s, as every setting a store is given and cannot use is. Logs
  * `federation_store_plaintext_override` at error when the escape hatch is
  * active, naming what would have refused it. Everywhere else it logs
  * `federation_store_plaintext` at warn but does not throw.
@@ -69,10 +71,16 @@ export interface EncryptionGuardContext {
  */
 export function validateEncryptionMode(
 	label: string,
-	mode: "required" | "allow-plaintext",
+	mode: unknown,
 	{ environment, deploymentMode, logger = consoleLogger }: EncryptionGuardContext,
 ): void {
 	if (mode === "required") return;
+	// Anything else that is not `allow-plaintext` is a mode nobody wrote on
+	// purpose: a typo read as plaintext would store refresh tokens in the
+	// clear outside production, and be refused in production as plaintext.
+	if (mode !== "allow-plaintext") {
+		throw new RangeError(`[${label}] mode must be "required" or "allow-plaintext"`);
+	}
 	const allowInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE === "1";
 
 	// Both names are checked, and the one that matched is the one reported:
@@ -108,7 +116,7 @@ export function validateEncryptionMode(
 			);
 			return;
 		}
-		throw new Error(
+		throw new RangeError(
 			`[${label}] mode "${mode}" is refused because ${because}. ` +
 				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
 				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).",
