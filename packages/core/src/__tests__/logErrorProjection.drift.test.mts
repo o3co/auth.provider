@@ -840,3 +840,97 @@ describe("a logger call opens with an object, not a string (string-first rule)",
 		}
 	});
 });
+
+describe("a caught error is not flattened into the message of an error built from it", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}: every such site is one this file lists, with its reason`, () => {
+		const unexpected: string[] = [];
+		for (const [file, lines] of thrownMessageSites()) {
+			const allowed = THROWN_FLATTENING_ALLOWED.find((entry) => entry.file === file)?.sites ?? 0;
+			if (lines.length > allowed) unexpected.push(`${file}:${lines.join(",")}`);
+		}
+		expect(unexpected).toEqual([]);
+	});
+
+	it("has no stale entry in THROWN_FLATTENING_ALLOWED", () => {
+		const sites = thrownMessageSites();
+		for (const { file, sites: allowed, why } of THROWN_FLATTENING_ALLOWED) {
+			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(allowed);
+		}
+	});
+
+	describe("the guard sees the shapes it exists for, and no others", () => {
+		const flags = (source: string): boolean => thrownMessageSitesIn(source).length > 0;
+
+		it.each([
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+			["the error in a template", "try { x() } catch (err) { throw new Error(`failed: ${err}`); }"],
+			[
+				"its message in a template",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`failed: ${err.message}`); }",
+			],
+			[
+				"its message, optionally chained",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`failed: ${err?.message}`); }",
+			],
+			["String(err)", `try { x() } catch (err) { throw new Error("failed: " + String(err)); }`],
+			["concatenation", `try { x() } catch (err) { throw new Error("failed: " + err); }`],
+			[
+				"its message as the argument",
+				`try { x() } catch (err) { throw new TypeError(err.message); }`,
+			],
+			["its stack", `try { x() } catch (err) { throw new Error(err.stack); }`],
+			["its toString()", `try { x() } catch (err) { throw new Error(err.toString()); }`],
+			["JSON.stringify of it", `try { x() } catch (err) { throw new Error(JSON.stringify(err)); }`],
+			[
+				"a BootError's message",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (thrownValue) { throw new BootError({ message: `factory failed: ${String(thrownValue)}`, reason, stage, details, cause: thrownValue }); }",
+			],
+			[
+				"an error handed to a promise, not thrown",
+				`p.catch((err) => reject(new RangeError(err.message)));`,
+			],
+			[
+				"an error an Express error handler passes on",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"app.use((failure, req, res, next) => { next(new Error(`wrapped: ${failure}`)); });",
+			],
+		])("flags %s", (_label, source) => {
+			expect(flags(source)).toBe(true);
+		});
+
+		it.each([
+			[
+				"the error as `cause`",
+				`try { x() } catch (err) { throw new Error("failed", { cause: err }); }`,
+			],
+			[
+				"a BootError carrying it, its message by the projection's rules",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (thrownValue) { throw new BootError({ message: `factory failed: ${failureSummary(thrownValue)}`, details: { originalError: thrownValue }, cause: thrownValue }); }",
+			],
+			[
+				"a field of it that is not its text",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`${err.issues.length} issue(s)`, { cause: err }); }",
+			],
+			[
+				"a refusal with fixed text and the error as cause",
+				`try { x() } catch (err) { throw new DPoPError("replay_store_fault", "the store broke its contract", undefined, undefined, { cause: err }); }`,
+			],
+			[
+				"a name that is not a caught error",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"const error = describe(code); throw new Error(`refused: ${error}`);",
+			],
+			[
+				"its message in a call that builds no error",
+				`try { x() } catch (err) { return { ok: false, text: String(err) }; }`,
+			],
+		])("does not flag %s", (_label, source) => {
+			expect(flags(source)).toBe(false);
+		});
+	});
+});
