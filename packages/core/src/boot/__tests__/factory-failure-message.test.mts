@@ -34,6 +34,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { inspect } from "node:util";
+import * as yaml from "js-yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { BootError, type BootstrapMap } from "#/boot/types.mjs";
@@ -162,6 +163,22 @@ describe("a factory's error, in the boot failure's message", () => {
 			// `console.error`) shows the cause's projection, not the cause.
 			expect(printed(err)).not.toContain("json-secret-marker");
 		}
+	});
+
+	it("names a YAML parser's error by its name alone, when a host's own module parses a file", async () => {
+		const thrown = (() => {
+			try {
+				yaml.load("web:\n  clientSecret: host-yaml-secret-marker\n  bad\nnext: 1\n");
+			} catch (err) {
+				return err;
+			}
+			throw new Error("yaml.load did not throw");
+		})();
+		const err = await bootFailure([providing(thrown)]);
+		expect(err.message).toBe(
+			'Module "test:failing-provider" provider factory for "clientRepository" failed: YAMLException',
+		);
+		expect(printed(err)).not.toContain("host-yaml-secret-marker");
 	});
 
 	it("names only the kind of a thrown value that is not an Error", async () => {
