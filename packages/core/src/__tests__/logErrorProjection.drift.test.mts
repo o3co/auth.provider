@@ -1015,6 +1015,19 @@ describe("a caught error is not flattened into the message of an error built fro
 			],
 			["inspect of it", `try { x() } catch (err) { throw new Error(inspect(err)); }`],
 			[
+				"its message through a union cast",
+				`try { x() } catch (err) { throw new Error("failed: " + (err as Error | undefined)?.message); }`,
+			],
+			[
+				"its message through an object-type cast",
+				`try { x() } catch (err) { throw new Error((err as { message: string }).message); }`,
+			],
+			[
+				"its stack through a union cast in a template",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`failed: ${(err as Error | null)?.stack}`); }",
+			],
+			[
 				"util.inspect of it, with options",
 				`try { x() } catch (err) { throw new Error(util.inspect(err, { depth: 5 })); }`,
 			],
