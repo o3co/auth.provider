@@ -186,6 +186,12 @@ floor が置かれているのは **builder と schema**（= config 境界）で
 
 JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるときだけ NumericDate（RFC 7519 §2）です。`isNumericDate` と `malformedNumericDateClaim`（[`src/jwt/numericDate.mts`](src/jwt/numericDate.mts)）がその規則を述べ、jwt-bearer のレジストリ検証器、`private_key_jwt`、DPoP はこれを破るアサーションや proof を、そこから期限を計算する前に拒否します。jose はこうしたクレームが数値であることしか確かめず、JSON の `1e400` は Infinity にパースされます。小数は許されます。単一使用のために `jti` を記録するアサーション — `private_key_jwt` のクライアントアサーション、ID-JAG — は、さらに現在から `MAX_ASSERTION_LIFETIME_SECONDS`（1 時間）先までしか有効でなく、発行もそれ以内でなければなりません（[`src/assertions/lifetime.mts`](src/assertions/lifetime.mts)）。リプレイの記録は `exp` まで残るので、上限の無い `exp` は上限の無い記録になるからです。どちらの検証器も、ほかのすべての時刻チェックと同じく時計の許容幅をその上に認め、`exp` を同じ `assertionLifetime` で比べます。時計が少し進んでいるクライアントや IdP が、一方の経路では拒否され他方では受け入れられる、ということは起きません。
 
+### 保存時の封印（sealing）
+
+秘密を保存するストアは、それを `v2` のキーリング封筒に封印します（[`src/sealing/envelope.mts`](src/sealing/envelope.mts)）。`sealWithKeyRing(plaintext, ring, { purpose, record })` は、リングの先頭の鍵による AES-256-GCM で `v2.<key id>.<iv>.<ciphertext>.<tag>` を返します。`openWithKeyRing(envelope, ring, { purpose, record })` は `OpenedSeal` で答えます。値とともに `ok`、封筒が名指す鍵をリングがもう持っていないときの `key_unavailable`（運用者が鍵を戻せば元に戻ります）、それ以外すべての `unreadable`（別の目的や別のレコードに結び付いた値を含みます）のいずれかです。封筒を理由に throw することはありません。目的ラベル（1〜64 文字の印字可能な ASCII、空白なし）とレコードのバイト列は認証され、保存はされません。そのため、別のレコードへコピーされた値や、同じリングで封印する別の呼び出し元が読もうとした値は開きません。
+
+リング（`SealingKeyRing`: `{ id, key }` の `SealingKey` の並び、[`src/sealing/keyRing.mts`](src/sealing/keyRing.mts)）は先頭の鍵で封印し、どの鍵でも開けます。ID は `A-Za-z0-9_-` の 1〜64 文字、鍵は `SEALING_KEY_BYTES`（32）バイトです。どちらの関数も規則を破るリングで throw し、封印は空のリングでも throw します。そのためストアは、空の値を一度封印することで、構築時に不正なリングを拒否できます。`decodeSealingKey` は設定された鍵を読みます。空白を含まない、ちょうど 32 バイトの正準な base64 なら鍵の値を、そうでなければ `undefined` を返し、呼び出し元が自分の設定キーを名指して拒否します。`@o3co/auth-provider-redis` のフェデレーショングラントストアは、この方法でクレデンシャルを封印しています。
+
 ### リポジトリ
 
 リポジトリインターフェースはデータアクセスのコントラクトを定義します。開発・テスト向けのインメモリ実装が標準で提供されています。

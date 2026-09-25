@@ -442,9 +442,11 @@ re-reads. Nothing deletes a record because of the time its caller passed —
 what a caller is told is judged on the time it passes, and what Redis reclaims
 is judged by Redis.
 
-The credential is sealed under a key **ring**: the first key seals, every
-configured key opens, and the envelope names the one that sealed it, so a key
-can be introduced without re-sealing grants that are paused. A key that is not
+The credential is sealed under a key **ring**, in core's `v2` key-ring
+envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
+first key seals, every configured key opens, and the envelope names the one
+that sealed it, so a key can be introduced without re-sealing grants that are
+paused. A key that is not
 in the ring reads as `key_unavailable` — a configuration problem an operator
 undoes by putting it back — and is told apart from a credential that will
 never open again. Nothing is ever deleted on a read. Rotate by adding the new
@@ -574,8 +576,11 @@ its port. Two directories hold what several of them share:
 - **`src/internal/`** — helpers no consumer imports, and which the package's
   exports do not reach: the advisory lock (its options carry the federation
   token's `{ sid, federationName }`, so it is not a general-purpose lock), the
-  AES-256-GCM sealing, the plaintext guard both sealing stores share (one
-  escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for both), the
+  AES-256-GCM sealing (the federation-token store's `v1` envelope, and the
+  federation grant store's purpose label over core's `v2` key-ring envelope,
+  which lives in core's `sealing/` leaf), the plaintext guard both sealing
+  stores share (one escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for
+  both), the
   federation-grant codecs and lock, and the three sid-keyed structures (HASH,
   ZSET, SET) the session and federation adapters are built from — same
   `${keyPrefix}${sid}` layout and TTL contract, different Redis type.
