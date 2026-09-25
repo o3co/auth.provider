@@ -30,6 +30,7 @@ import { codeChallenge } from "@o3co/auth-provider-core";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createFederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
 // ---------------------------------------------------------------------------
@@ -3261,5 +3262,191 @@ describe("a federation route's composition fault is a 500, logged once at error"
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("internal_error");
 		expectMisconfigurationLogged(logger, { reason: "no_redirect_policy" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A redirect policy's own 5xx: a server-side answer nobody reported. The
+// policy's 4xx is a verdict on the client's `redirect_to` and stays unlogged.
+// ---------------------------------------------------------------------------
+
+describe("a redirect policy that answers a 5xx is logged once at error; its 4xx is not", () => {
+	/**
+	 * Exactly one error line, `redirect_policy_server_fault`, carrying `fields`
+	 * and no error (nothing threw), and nothing at any other level.
+	 */
+	const expectPolicyFaultLogged = (logger: SpyLogger, fields: Record<string, unknown>): void => {
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe("redirect_policy_server_fault");
+		expect(context).toMatchObject(fields);
+		expect(context).not.toHaveProperty("err");
+		for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
+	};
+	/** The default policy, with neither `authCallbackUrl` nor `clientUrl` configured. */
+	const unconfiguredPolicy = () =>
+		new Map([["test", createFederationRedirectPolicy({})]]) as unknown as ReadonlyMap<
+			string,
+			ReturnType<typeof makePermissivePolicy>
+		>;
+
+	it("the login callback, when the default policy has no clientUrl", async () => {
+		const logger = spyLogger();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			federationRedirectPolicyResolver: unconfiguredPolicy(),
+			logger: logger as unknown as Logger,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({
+			error: "misconfiguration",
+			error_description: "client URL not configured",
+		});
+		expectPolicyFaultLogged(logger, {
+			status: 500,
+			error: "misconfiguration",
+			errorDescription: "client URL not configured",
+		});
+	});
+
+	it("the link callback, when a redirect_to was asked for and the default policy has no authCallbackUrl", async () => {
+		const logger = spyLogger();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation: {
+				name: "test",
+				state: "s1",
+				codeVerifier: "v1",
+				redirectTo: "https://app.example.com/account",
+				link: { sid: "s-1" },
+			},
+			sessionSeed: { sid: "s-1", isAuthenticated: true },
+			userRepository: {
+				authenticate: vi.fn(async () => null),
+				authenticateByToken: vi.fn(async () => ({ id: "user-1", username: "alice" })),
+			},
+			userSessionStore: {
+				...makeUserSessionStore(),
+				get: vi.fn(async () => ({
+					sid: "s-1",
+					sub: "user-1",
+					authTime: new Date(),
+					createdAt: new Date(),
+					expiresAt: new Date(Date.now() + 3_600_000),
+					claims: {},
+				})),
+			},
+			federationRedirectPolicyResolver: unconfiguredPolicy(),
+			logger: logger as unknown as Logger,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("misconfiguration");
+		expectPolicyFaultLogged(logger, {
+			status: 500,
+			error: "misconfiguration",
+			errorDescription: "authCallback URL not configured but redirect_to was requested",
+		});
+	});
+
+	const startWith = (validateRedirect: () => unknown) => {
+		const logger = spyLogger();
+		const store: SessionStore = new Map();
+		const app = makeSessionApp(store);
+		app.use(
+			createRouter(express, {
+				config: {} as never,
+				federationProviders: new Map([["test", makeFakeProvider()]]),
+				federationRedirectPolicyResolver: new Map([
+					["test", { ...makePermissivePolicy(), validateRedirect }],
+				]) as never,
+				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
+				userRepository: makeUserRepository(),
+				userSessionStore: makeUserSessionStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: makeFederationTokenStore(),
+				logger: logger as unknown as Logger,
+			}),
+		);
+		return { app, logger };
+	};
+
+	it("the start, when a contributed policy answers a 5xx, sanitising its text", async () => {
+		const { app, logger } = startWith(() => ({
+			ok: false,
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "allowlist service down\u0000",
+		}));
+		const res = await request(app).get("/oauth/federation/test?redirect_to=%2Fdashboard");
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expectPolicyFaultLogged(logger, {
+			provider: "test",
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "allowlist service down?",
+		});
+	});
+
+	it("the start, when the policy refuses the redirect_to with a 4xx: nothing is logged", async () => {
+		const { app, logger } = startWith(() => ({
+			ok: false,
+			status: 400,
+			error: "invalid_redirect",
+			errorDescription: "redirect target not allowed",
+		}));
+		const res = await request(app).get("/oauth/federation/test?redirect_to=%2Fdashboard");
+		expect(res.status).toBe(400);
+		for (const level of ["trace", "debug", "info", "warn", "error", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The code exchange the upstream IdP refused or could not answer: 502, and one
+// structured warn — not a sentence.
+// ---------------------------------------------------------------------------
+
+describe("a failed code exchange is one object-first warn", () => {
+	it("502, one federation_callback_exchange_failed line with the error's projection, on the provider's child logger", async () => {
+		const logger = spyLogger();
+		const provider = makeFakeProvider({
+			exchangeCode: vi.fn(async () => {
+				throw Object.assign(new Error("upstream refused the code"), { code: "OAUTH_RESPONSE" });
+			}),
+		});
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			logger: logger as unknown as Logger,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(502);
+		expect(res.body.error).toBe("exchange_failed");
+		expect(logger.child).toHaveBeenCalledWith({ provider: "test" });
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		const [context, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe("federation_callback_exchange_failed");
+		expect(context.err).not.toBeInstanceOf(Error);
+		expect(context.err).toMatchObject({
+			name: "Error",
+			detail: "upstream refused the code",
+			code: "OAUTH_RESPONSE",
+		});
+		for (const level of ["trace", "debug", "info", "error", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
 	});
 });

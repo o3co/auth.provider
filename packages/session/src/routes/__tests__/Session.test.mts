@@ -155,6 +155,7 @@ function buildApp(
 		sessionTtlMs?: number;
 		regenerateError?: Error;
 		destroyError?: Error;
+		saveError?: Error;
 		config?: AppConfig;
 	} = {},
 ) {
@@ -176,6 +177,7 @@ function buildApp(
 		sessionTtlMs,
 		regenerateError,
 		destroyError,
+		saveError,
 		config = stubConfig,
 	} = opts;
 
@@ -202,8 +204,8 @@ function buildApp(
 				Object.assign(req as unknown as { session: Record<string, unknown> }, { session: fresh });
 				cb(null);
 			},
-			save(cb: (err: null) => void) {
-				cb(null);
+			save(cb: (err: Error | null) => void) {
+				cb(saveError ?? null);
 			},
 			destroy(cb: (err: Error | null) => void) {
 				if (destroyError) {
@@ -1397,6 +1399,37 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 				{ store: "subject_session_index", step: "remove_sid", sub: "u-1" },
 			],
 		);
+	});
+
+	it("the regenerated session's save: 503, one error line, and the record rolled back", async () => {
+		const logger = spyLogger();
+		const store = makeLiveUserSessionStore();
+		const created: string[] = [];
+		store.create = async (input) => {
+			created.push(input.sid);
+			store.live.set(input.sid, input);
+		};
+		const { app } = buildApp({
+			userSessionStore: store,
+			saveError: new Error("cookie store down"),
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "Session store temporarily unavailable",
+		});
+		expectOutageLogged(
+			logger,
+			"login_store_unavailable",
+			{ store: "cookie_session", step: "save", sid: created[0] },
+			"cookie store down",
+		);
+		expect(store.live.size).toBe(0);
 	});
 
 	it("the cookie session's destroy at logout: 503 and one error line", async () => {
