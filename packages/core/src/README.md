@@ -91,7 +91,7 @@ The `Authorization`-header parser that `protectedResourceBindingMw` and `package
 
 ## Where a boundary is a judgement call
 
-None of these is enforced; each is recorded so a change can see it.
+Except where a bullet names its test, none of these is enforced; each is recorded so a change can see it.
 
 - `user-sessions/` and `federation-grants/` depend on each other at run time: subject-wide revocation ends grants through `federation-grants/`, and the grants' wiring rule reads a capability guard from `user-sessions/`. Their value imports are the one directory-level cycle `importBoundaries.drift.test.mts` lets stand; no cycle of value imports between their files does, which the same test holds. The refresher and audit-event contract types sit in `federation-grants/retrieve.mts` rather than `federation-grants/types.mts`.
 - `repositories/` imports `federation-grants/` for one reserved-parameter check, which loads the lodging module with it.
