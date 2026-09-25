@@ -575,6 +575,24 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				});
 			});
 
+			it("still the user when the IdP's parsed body names a connection code: that is the IdP's text, not an outage", async () => {
+				// openid-client's ResponseBodyError carries the IdP's JSON body as its
+				// cause; a `code` written there says nothing about the transport.
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockRejectedValue(
+					asksFor("login_required", {
+						status: 400,
+						cause: { error: "login_required", code: "ECONNREFUSED" },
+					}),
+				);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "reauthorization_required",
+					reason: "upstream_login_required",
+				});
+			});
+
 			it("does not establish it from a message alone: a proxy's page that says consent_required is a refusal nobody can read", async () => {
 				await h.seed();
 				setNow(GONE);

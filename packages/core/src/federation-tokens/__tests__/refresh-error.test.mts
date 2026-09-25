@@ -156,6 +156,40 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 				});
 			});
 
+			it("reads no outage off the IdP's parsed error body, which is openid-client's cause", () => {
+				// ResponseBodyError carries the IdP's JSON body as its `cause`: a plain
+				// object whose every field the IdP chose. A connection code or a 5xx
+				// status written there is not this server's transport failing.
+				const answered = (body: Record<string, unknown>) =>
+					Object.assign(
+						new Error("server responded with an error in the response body", { cause: body }),
+						{ name: "ResponseBodyError", error: body.error, status: 400 },
+					);
+				expect(
+					classifyFederationRefreshError(
+						answered({ error: "login_required", code: "ECONNREFUSED", status: 503 }),
+					),
+				).toEqual({ reason: "unknown", structured: false, upstreamCode: "login_required" });
+				expect(
+					classifyFederationRefreshError(answered({ error: "invalid_grant", code: "ETIMEDOUT" })),
+				).toMatchObject({ reason: "invalid_grant", structured: true });
+			});
+
+			it("still reads a network code on the thrown value itself, and on causes that are Errors", () => {
+				// What a hand-written adapter may throw, and what fetch raises.
+				expect(classifyFederationRefreshError({ code: "ETIMEDOUT" })).toMatchObject({
+					reason: "network",
+					structured: true,
+				});
+				expect(
+					classifyFederationRefreshError(
+						new TypeError("fetch failed", {
+							cause: Object.assign(new Error("getaddrinfo ENOTFOUND"), { code: "ENOTFOUND" }),
+						}),
+					),
+				).toMatchObject({ reason: "network", structured: true });
+			});
+
 			it("still reads a rejected token off a structured code under a 4xx", () => {
 				for (const status of [400, 401, 429]) {
 					expect(

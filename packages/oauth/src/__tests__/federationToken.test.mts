@@ -3000,8 +3000,12 @@ describe("POST /oauth/federation/:name/token", () => {
 		// the helper would classify these as `unknown` → 500, defeating SF-13's intent that
 		// network failures return 503.
 		it("returns 503 when provider throws TypeError with cause.code = 'ENOTFOUND'", async () => {
-			const providerError = Object.assign(new TypeError("fetch failed"), {
-				cause: { code: "ENOTFOUND" },
+			// undici's cause is an Error; a plain object there is read as nothing,
+			// since openid-client puts the IdP's parsed body in the same place.
+			const providerError = new TypeError("fetch failed", {
+				cause: Object.assign(new Error("getaddrinfo ENOTFOUND idp.example"), {
+					code: "ENOTFOUND",
+				}),
 			});
 			const app = buildRefreshFailure(providerError);
 			const token = await mintAccessToken();
@@ -3153,6 +3157,25 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(503);
 			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
 			expectNoRefreshFailedAudit(auditSink);
+		});
+
+		it("answers no outage for a 4xx whose parsed body names a connection code", async () => {
+			// openid-client's ResponseBodyError carries the IdP's JSON body as its
+			// cause: a `code` there is the IdP's text, not this server's transport.
+			const { app, fedTokenStore, sessionFederationIndex, auditSink } = refreshRejectingWith(
+				Object.assign(
+					new Error("server responded with an error in the response body", {
+						cause: { error: "login_required", code: "ECONNREFUSED" },
+					}),
+					{ name: "ResponseBodyError", error: "login_required", status: 400 },
+				),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
 		});
 
 		it("keeps them when only the message says invalid_grant", async () => {
