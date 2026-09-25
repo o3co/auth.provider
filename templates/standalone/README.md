@@ -43,7 +43,11 @@ the Google and generic OpenID Connect federation adapters, `-federation-grants`,
   [`src/shutdown.mts`](src/shutdown.mts);
 - packaging: the `Dockerfile`, the compose files, the `Makefile`;
 - its tests: `src/__tests__/`, which `pnpm run test` and `make test` run against
-  this composition, and `tests/`, a separate black-box API suite with its own
+  this composition — `all-modules-composition.test.mts` and its `.multi`
+  sibling boot every module the template can turn on together and hold the
+  contracts that exist only when they meet (one discovery document, each
+  module's body rules in either mount order, a store outage answered 503 and
+  logged once) — and `tests/`, a separate black-box API suite with its own
   `package.json`, run against a server that is already up (`API_BASE_URL`).
 
 **Does not own** the HTTP API, the grants, the token format, how each store

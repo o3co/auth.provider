@@ -17,7 +17,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
 - プロセスのライフサイクル: drain の deadline 付きのシグナル処理 — [`src/shutdown.mts`](src/shutdown.mts)
 - パッケージング: `Dockerfile`、compose ファイル群、`Makefile`
-- 自身のテスト: `pnpm run test` と `make test` がこの合成に対して実行する `src/__tests__/` と、独自の `package.json` を持つ別個のブラックボックス API スイートで、既に起動しているサーバー（`API_BASE_URL`）に対して実行する `tests/`。
+- 自身のテスト: `pnpm run test` と `make test` がこの合成に対して実行する `src/__tests__/`（そのうち `all-modules-composition.test.mts` と `.multi` 版は、このテンプレートが有効にできるすべてのモジュールを一緒に起動し、モジュールが出会って初めて成り立つ契約 — 1 つのディスカバリー文書、どちらのマウント順でも保たれる各モジュールのボディ規則、503 で答えて 1 行だけログに出るストア障害 — を検証する）と、独自の `package.json` を持つ別個のブラックボックス API スイートで、既に起動しているサーバー（`API_BASE_URL`）に対して実行する `tests/`。
 
 **所有しない**のは HTTP API、グラント、トークン形式、各ストアの振る舞い、config スキーマで、これらはパッケージ側が所有する。変更は上流で行い、ここでは行わない。
 
