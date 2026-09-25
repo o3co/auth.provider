@@ -1026,6 +1026,17 @@ describe("a request value reaches a logger or an audit event only through auditE
 				"a header other than user-agent as the audit's ip",
 				`emitAuditEvent(sink, { type: "x", ip: req.get("x-forwarded-for") });`,
 			],
+			["the path, optionally chained", `logger.warn({ path: req?.path }, "x");`],
+			["the path, by bracket", `logger.warn({ path: req["path"] }, "x");`],
+			["a header, optionally chained", `logger.warn({ origin: req?.get("origin") }, "x");`],
+			["the hostname", `logger.warn({ host: req.hostname }, "x");`],
+			["the raw headers", `logger.warn({ headers: req.rawHeaders }, "x");`],
+			["the signed cookies", `logger.warn({ cookies: req.signedCookies }, "x");`],
+			["a logger chain broken across lines", `logger\n\t.warn({ path: req.path }, "x");`],
+			[
+				"a logger chain broken after the dot",
+				`ctx.opts.logger?.\n\twarn({ path: req.path }, "x");`,
+			],
 		])("flags %s", (_label, source) => {
 			expect(flags(source)).toBe(true);
 		});
@@ -1051,13 +1062,15 @@ describe("a request value reaches a logger or an audit event only through auditE
 			["a string naming the path", `logger.warn({ note: "req.path" }, "rejected");`],
 			["a call that is not a logger's", `res.status(400).json({ path: req.path });`],
 			["a name that merely ends in req", `logger.warn({ path: myreq.path }, "rejected");`],
-			[
-				"a request value read into a name first (a known gap)",
-				`const p = req.path; logger.warn({ p }, "x");`,
-			],
 		])("does not flag %s", (_label, source) => {
 			expect(flags(source)).toBe(false);
 		});
+
+		// A known gap, not a rule: improving the guard to follow a value into a
+		// name must not fail this file.
+		it.todo(
+			"flags a request value read into a name first: `const p = req.path; logger.warn({ p })`",
+		);
 	});
 });
 
@@ -1103,6 +1116,11 @@ describe("a built-in audit event reaches its sink only through core's recordAudi
 		["an audit sink", "auditSink.record(event).catch(() => undefined);"],
 		["a sink behind optional chaining", "options.sink?.record(event);"],
 		["inside a callback", "void Promise.resolve().then(() => sink.record(mapped));"],
+		["a sink behind a non-null assertion", "sink!.record(event);"],
+		["a sink behind a cast", "(sink as AuditSink).record(event);"],
+		["an optional call", "sink?.record?.(event);"],
+		["one of several sinks", "sinks[i].record(event);"],
+		["a chain broken across lines", "sink\n\t.record(event);"],
 	])("flags %s written directly", (_label, source) => {
 		expect(sinkWritesIn(source)).toEqual([1]);
 	});
