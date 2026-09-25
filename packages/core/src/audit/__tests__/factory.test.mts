@@ -35,6 +35,29 @@ describe("createAuditSinkFactory", () => {
 });
 
 describe("emitAuditEvent", () => {
+	it("resolves, and throws nothing into the route, when a sink throws synchronously", async () => {
+		const sink = {
+			kind: "sync-throw",
+			record: () => {
+				throw new Error("sink down");
+			},
+		} as unknown as AuditSink;
+		let answered: Promise<void> | undefined;
+		expect(() => {
+			answered = emitAuditEvent(sink, { timestamp: new Date(), type: "test" });
+		}).not.toThrow();
+		await expect(answered).resolves.toBeUndefined();
+	});
+
+	it("resolves, and throws nothing into the route, when a sink returns undefined", async () => {
+		const sink = { kind: "sync", record: () => undefined } as unknown as AuditSink;
+		let answered: Promise<void> | undefined;
+		expect(() => {
+			answered = emitAuditEvent(sink, { timestamp: new Date(), type: "test" });
+		}).not.toThrow();
+		await expect(answered).resolves.toBeUndefined();
+	});
+
 	it("swallows thrown errors from sink.record", async () => {
 		const throwingSink: AuditSink = {
 			kind: "boom",
@@ -149,17 +172,61 @@ describe("emitAuditEvent — the request's own fields", () => {
 		return (record.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
 	};
 
-	it("hands the sink an ip and a userAgent sanitised and capped", async () => {
+	it("hands the sink a userAgent sanitised and capped, and no ip that is not an address", async () => {
 		const event = await recorded({
 			timestamp: new Date(),
 			type: "test",
 			ip: HOSTILE,
 			userAgent: HOSTILE,
 		});
-		expect({ ip: shapeOf(event.ip), userAgent: shapeOf(event.userAgent) }).toEqual({
-			ip: BOUNDED,
+		expect({ ip: event.ip, hasIp: "ip" in event, userAgent: shapeOf(event.userAgent) }).toEqual({
+			ip: undefined,
+			hasIp: false,
 			userAgent: BOUNDED,
 		});
+	});
+
+	// An `ip` is an address or nothing: an SIEM that maps the field as an IP
+	// type rejects the whole event over a value that is not one, and a spoofed
+	// `X-Forwarded-For: x` would otherwise make it.
+	it.each([
+		["an IPv4 address", "203.0.113.7", "203.0.113.7"],
+		["an IPv6 address", "2001:db8::1", "2001:db8::1"],
+		["an IPv4-mapped IPv6 address", "::ffff:127.0.0.1", "::ffff:127.0.0.1"],
+		["a link-local address, its zone stripped", "fe80::1%eth0", "fe80::1"],
+		["a zone that is anything, stripped", "fe80::1%<script>", "fe80::1"],
+		["a name", "x", undefined],
+		["an IPv4 address with a zone", "203.0.113.7%eth0", undefined],
+		["an address in brackets", "[::1]", undefined],
+		["an address with a port", "203.0.113.7:8080", undefined],
+		["an empty string", "", undefined],
+	])("hands the sink %s, %j, as %j", async (_label, ip, expected) => {
+		const event = await recorded({ timestamp: new Date(), type: "test", ip });
+		expect({ ip: event.ip, hasIp: "ip" in event }).toEqual({
+			ip: expected,
+			hasIp: expected !== undefined,
+		});
+	});
+
+	it("keeps the event's own key order", async () => {
+		const event = await recorded({
+			timestamp: new Date(),
+			type: "test",
+			subject: "u1",
+			ip: "203.0.113.7",
+			userAgent: "ua/1",
+			clientId: "c1",
+			details: { reason: "x" },
+		});
+		expect(Object.keys(event)).toEqual([
+			"timestamp",
+			"type",
+			"subject",
+			"ip",
+			"userAgent",
+			"clientId",
+			"details",
+		]);
 	});
 
 	it("hands the sink an ordinary ip and userAgent unchanged, and everything else as it was", async () => {

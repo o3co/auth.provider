@@ -153,10 +153,16 @@ describe("the audit trail — a caller's grant id and subject, sanitised and cap
 			return onlyEvent(h.events, "federation.grant.token.denied");
 		};
 
-		it("audits an X-Forwarded-For ip sanitised and capped", async () => {
-			expect(
-				requestShapeOf((await deniedEvent({ "X-Forwarded-For": REQUEST_HOSTILE })).ip),
-			).toEqual(REQUEST_BOUNDED);
+		it.each([
+			["a hostile value: no ip", REQUEST_HOSTILE, undefined],
+			["x: no ip", "x", undefined],
+			["a link-local address with a zone: the address alone", "fe80::1%eth0", "fe80::1"],
+		])("audits an X-Forwarded-For of %s", async (_label, forwarded, expected) => {
+			const event = await deniedEvent({ "X-Forwarded-For": forwarded });
+			expect({ ip: event.ip, hasIp: "ip" in event }).toEqual({
+				ip: expected,
+				hasIp: expected !== undefined,
+			});
 		});
 
 		it("audits a user agent sanitised and capped", async () => {

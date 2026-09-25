@@ -522,11 +522,23 @@ describe("createRateLimitGuard — an outage's report of the caller's ip and use
 		return { line, event: audited[0] as AuditEvent };
 	};
 
-	it("logs and audits an X-Forwarded-For ip sanitised and capped", async () => {
+	it("logs an X-Forwarded-For ip sanitised and capped, and audits none that is not an address", async () => {
 		const { line, event } = await outage({ "X-Forwarded-For": HOSTILE });
-		expect({ logged: shapeOf(line.ip), audited: shapeOf(event.ip) }).toEqual({
+		expect({ logged: shapeOf(line.ip), audited: "ip" in event }).toEqual({
 			logged: BOUNDED,
-			audited: BOUNDED,
+			audited: false,
+		});
+	});
+
+	it.each([
+		["x", undefined],
+		["fe80::1%eth0", "fe80::1"],
+		["2001:db8::7", "2001:db8::7"],
+	])("audits X-Forwarded-For %s as the ip %s", async (forwarded, expected) => {
+		const { event } = await outage({ "X-Forwarded-For": forwarded });
+		expect({ ip: event.ip, hasIp: "ip" in event }).toEqual({
+			ip: expected,
+			hasIp: expected !== undefined,
 		});
 	});
 

@@ -51,7 +51,7 @@ describe("recordAuditEvent", () => {
 		).rejects.toThrow("sink down");
 	});
 
-	it("hands the sink the event with its ip and userAgent sanitised and capped", async () => {
+	it("hands the sink the event with its userAgent sanitised and capped, and an ip only if it is an address", async () => {
 		const record = vi.fn(async () => undefined);
 		await recordAuditEvent({ kind: "spy", record } as AuditSink, {
 			timestamp: new Date(),
@@ -59,10 +59,24 @@ describe("recordAuditEvent", () => {
 			ip: `x\r\n${"i".repeat(10_000)}`,
 			userAgent: `x\u0085${"u".repeat(10_000)}`,
 		});
-		const event = (record.mock.calls[0] as unknown[])[0] as { ip: string; userAgent: string };
+		const event = (record.mock.calls[0] as unknown[])[0] as { ip?: string; userAgent: string };
 		expect({
-			ip: [event.ip.slice(0, 4), event.ip.length <= 200],
+			hasIp: "ip" in event,
 			userAgent: [event.userAgent.slice(0, 3), event.userAgent.length <= 200],
-		}).toEqual({ ip: ["x??i", true], userAgent: ["x?u", true] });
+		}).toEqual({ hasIp: false, userAgent: ["x?u", true] });
+	});
+
+	it("turns a sink's synchronous throw into a rejection", async () => {
+		const sink = {
+			kind: "sync-throw",
+			record: () => {
+				throw new Error("sink down");
+			},
+		} as unknown as AuditSink;
+		let answered: Promise<void> | undefined;
+		expect(() => {
+			answered = recordAuditEvent(sink, { timestamp: new Date(), type: "test" });
+		}).not.toThrow();
+		await expect(answered).rejects.toThrow("sink down");
 	});
 });

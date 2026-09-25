@@ -1064,8 +1064,18 @@ describe("oauth routes — the audit event's ip and user agent are the caller's"
 		return audited[0] as AuditEvent;
 	};
 
-	it("audits an X-Forwarded-For ip sanitised and capped", async () => {
-		expect(shapeOf((await refusedGrantEvent({ "X-Forwarded-For": HOSTILE })).ip)).toEqual(BOUNDED);
+	// `ip` is an address or nothing: an SIEM that maps it as an IP type
+	// rejects the whole event over a value that is not one.
+	it.each([
+		["a hostile value: no ip", HOSTILE, undefined],
+		["x: no ip", "x", undefined],
+		["a link-local address with a zone: the address alone", "fe80::1%eth0", "fe80::1"],
+	])("audits an X-Forwarded-For of %s", async (_label, forwarded, expected) => {
+		const event = await refusedGrantEvent({ "X-Forwarded-For": forwarded });
+		expect({ ip: event.ip, hasIp: "ip" in event }).toEqual({
+			ip: expected,
+			hasIp: expected !== undefined,
+		});
 	});
 
 	it("audits a user agent sanitised and capped", async () => {
