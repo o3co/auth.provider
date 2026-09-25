@@ -1028,3 +1028,60 @@ describe("oauth routes — /oauth/revoke is rate limited too (#529 audit)", () =
 		expect(checked).toEqual([]);
 	});
 });
+
+describe("oauth routes — the audit event's ip and user agent are the caller's", () => {
+	// The app trusts one proxy hop, as a deployment behind a load balancer
+	// does, so `req.ip` is what the caller put in X-Forwarded-For. Over real
+	// HTTP that and the user agent can carry a tab, the C1 controls (U+0085
+	// NEL, U+009B CSI) and ten thousand characters; Node refuses CR/LF and the
+	// C0 escapes, not these.
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+	const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+	const shapeOf = (value: unknown) => ({
+		string: typeof value === "string",
+		control: CONTROL.test(String(value)),
+		within200: String(value).length <= 200,
+		kept: /^x\?+FORGED /.test(String(value)),
+	});
+	const BOUNDED = { string: true, control: false, within200: true, kept: true };
+	const HOSTILE = `x\t\u0085\u009bFORGED token.issued ${"h".repeat(10_000)}`;
+
+	/** The one `token.issued.failure` a refused grant type audits. */
+	const refusedGrantEvent = async (headers: Record<string, string>): Promise<AuditEvent> => {
+		const { sink, events } = createSpyAuditSink();
+		const app = await buildApp({ auditSink: sink });
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.set(headers)
+			.send({ grant_type: "unsupported_type_xyz" });
+
+		expect(res.status).toBe(400);
+		await new Promise((r) => setImmediate(r));
+		const audited = events.filter((e) => e.type === "token.issued.failure");
+		expect(audited).toHaveLength(1);
+		return audited[0] as AuditEvent;
+	};
+
+	it("audits an X-Forwarded-For ip sanitised and capped", async () => {
+		expect(shapeOf((await refusedGrantEvent({ "X-Forwarded-For": HOSTILE })).ip)).toEqual(BOUNDED);
+	});
+
+	it("audits a user agent sanitised and capped", async () => {
+		expect(shapeOf((await refusedGrantEvent({ "User-Agent": HOSTILE })).userAgent)).toEqual(
+			BOUNDED,
+		);
+	});
+
+	it("still audits an ordinary ip and user agent exactly", async () => {
+		const event = await refusedGrantEvent({
+			"X-Forwarded-For": "203.0.113.7",
+			"User-Agent": "rp-client/2.1",
+		});
+		expect({ ip: event.ip, userAgent: event.userAgent }).toEqual({
+			ip: "203.0.113.7",
+			userAgent: "rp-client/2.1",
+		});
+	});
+});

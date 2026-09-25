@@ -94,22 +94,36 @@
  *
  * A fourth rule reads the same logger calls, and every `emitAuditEvent(...)`,
  * for the request itself: `req.body`, `req.query`, `req.params`, `req.path`,
- * `req.originalUrl`, `req.url`, `req.headers`, `req.cookies`, `req.get(…)` or
- * `req.header(…)` (on `req` or a member path ending in it, `ctx.req`) —
- * inside a template literal's `${…}` too — anywhere but inside the
- * parentheses of `auditErrorText(...)`. What a caller sent is put on a line
- * sanitised and capped: a log line and an audit event are read by systems
- * that split on a line break, and neither may be made unbounded by a caller.
- * The one exception is an audit event's own `userAgent` field written as
- * `userAgent: req.get("user-agent")` inside `emitAuditEvent(...)` — the
- * header `AuditEvent.userAgent` exists to carry, which Node's HTTP parser
- * already bounds (no line break, the header-size limit). What it does not
+ * `req.originalUrl`, `req.url`, `req.headers`, `req.cookies`, `req.ip`,
+ * `req.ips`, `req.get(…)` or `req.header(…)` (on `req` or a member path
+ * ending in it, `ctx.req`) — inside a template literal's `${…}` too —
+ * anywhere but inside the parentheses of `auditErrorText(...)`. What a
+ * caller sent is put on a line sanitised and capped: a log line and an audit
+ * event are read by systems that split on a line break, and neither may be
+ * made unbounded by a caller. `req.ip` is the caller's too: behind `trust
+ * proxy` it is what the caller wrote in `X-Forwarded-For`. The two
+ * exceptions are an audit event's own `ip` and `userAgent`, written as
+ * `ip: req.ip` and `userAgent: req.get("user-agent")` directly in the event
+ * `emitAuditEvent(...)` is handed (not nested in `details`): core's
+ * `recordAuditEvent`, which `emitAuditEvent` and every other built-in
+ * emitter hand their events to, sanitises and caps those two fields itself,
+ * and the fifth rule pins that nothing else writes a sink. What it does not
  * see, and each site's own tests pin instead: a request value read into a
- * name first (`const name = req.params.name`), a receiver not named `req`,
- * a value derived from one (a list of the caller's resources, a parsed
- * body's field), and an audit event built anywhere but `emitAuditEvent`
- * (federation-grants' bridge takes its events from core and from its
- * routes, and sanitises what it forwards itself).
+ * name first (`const name = req.params.name`, the rate-limit guard's `ip`),
+ * a receiver not named `req`, a value derived from one (a list of the
+ * caller's resources, a parsed body's field), and an audit event built
+ * anywhere but `emitAuditEvent` (federation-grants' bridge takes its events
+ * from core and from its routes, sanitises what it forwards itself, and
+ * hands them to `recordAuditEvent`).
+ *
+ * A fifth rule reads every source for a sink written directly —
+ * `sink.record(…)`, `auditSink.record(…)`, `options.sink?.record(…)` — and
+ * allows it only in core's `audit/factory.mts`, where `recordAuditEvent`
+ * bounds an event's `ip` and `userAgent` before the sink is handed it. Every
+ * built-in event reaches its sink through it: `emitAuditEvent` detached, or
+ * `recordAuditEvent` itself where the emitter waits on the sink. It sees a
+ * receiver named `sink` or `…Sink`; a sink held under another name is left
+ * to review.
  *
  * Where it looks is `SOURCE_ROOTS` below: every workspace package's `src`
  * and the standalone template's, tests (`__tests__`) left out. A package
@@ -867,10 +881,34 @@ const AUDIT_CALL = /\bemitAuditEvent\(/g;
  * (`ctx.req`): what the caller sent, or a header it chose.
  */
 const REQUEST_READ =
-	/(?<![\w$])req\s*\.\s*(?:(?:body|query|params|path|originalUrl|url|headers|cookies)(?![\w$])|(?:get|header)\s*\()/;
+	/(?<![\w$])req\s*\.\s*(?:(?:body|query|params|path|originalUrl|url|headers|cookies|ip|ips)(?![\w$])|(?:get|header)\s*\()/;
 
-/** The audit event's own `userAgent` field, written as the header it exists to carry. */
-const USER_AGENT_FIELD = /\buserAgent\s*:\s*(?:[\w$]+\.)*req\.get\(\s*(["'`])user-agent\1\s*\)/g;
+/**
+ * An audit event's own `ip` or `userAgent`, written as the request field it
+ * exists to carry: `ip: req.ip`, `userAgent: req.get("user-agent")`. Exempt
+ * only at the event's top level — `recordAuditEvent` bounds those two fields,
+ * not a `details` entry that happens to share a name.
+ */
+const EVENT_REQUEST_FIELD =
+	/\b(?:ip\s*:\s*(?:[\w$]+\.)*req\.ip(?![\w$])|userAgent\s*:\s*(?:[\w$]+\.)*req\.get\(\s*(["'`])user-agent\1\s*\))/g;
+
+/** How many braces are open at the end of `code` (literals blanked first). */
+const braceDepth = (code: string): number => {
+	let depth = 0;
+	for (const c of literalsBlanked(code)) {
+		if (c === "{") depth++;
+		else if (c === "}") depth--;
+	}
+	return depth;
+};
+
+/** `args` of an `emitAuditEvent(...)` with the event's own request fields blanked. */
+const withEventRequestFieldsExempt = (args: string): string =>
+	args.replace(EVENT_REQUEST_FIELD, (field: string, _quote: string, offset: number) =>
+		braceDepth(args.slice(0, offset)) === 1
+			? `${field.startsWith("ip") ? "ip" : "userAgent"}: ""`
+			: field,
+	);
 
 /** `text` with every `name(...)` call replaced by `""`, parentheses balanced. */
 function withoutCallsOf(text: string, name: string): string {
@@ -898,7 +936,7 @@ function withoutCallsOf(text: string, name: string): string {
 
 /** Whether `args` reads the request anywhere but inside `auditErrorText(...)`. */
 function readsRequestRaw(args: string, { audit }: { readonly audit: boolean }): boolean {
-	const exempted = audit ? args.replace(USER_AGENT_FIELD, 'userAgent: ""') : args;
+	const exempted = audit ? withEventRequestFieldsExempt(args) : args;
 	return [literalsBlanked(exempted), ...templateExpressions(exempted)].some((code) =>
 		REQUEST_READ.test(withoutCallsOf(literalsBlanked(code), "auditErrorText")),
 	);
@@ -968,6 +1006,23 @@ describe("a request value reaches a logger or an audit event only through auditE
 				"a request read beside a sanitised one",
 				`logger.warn({ a: auditErrorText(req.path), b: req.path }, "refused");`,
 			],
+			[
+				"the ip, which is X-Forwarded-For's behind trust proxy",
+				`logger.warn({ ip: req.ip }, "x");`,
+			],
+			["the forwarded hops", `logger.warn({ hops: req.ips }, "x");`],
+			[
+				"an ip nested in an audit's details",
+				`emitAuditEvent(sink, { type: "x", details: { ip: req.ip } });`,
+			],
+			[
+				"a userAgent nested in an audit's details",
+				`emitAuditEvent(sink, { type: "x", details: { userAgent: req.get("user-agent") } });`,
+			],
+			[
+				"a header other than user-agent as the audit's ip",
+				`emitAuditEvent(sink, { type: "x", ip: req.get("x-forwarded-for") });`,
+			],
 		])("flags %s", (_label, source) => {
 			expect(flags(source)).toBe(true);
 		});
@@ -979,14 +1034,13 @@ describe("a request value reaches a logger or an audit event only through auditE
 				`logger.warn({ site: auditErrorText(req.get("sec-fetch-site") ?? "") }, "rejected");`,
 			],
 			[
-				"the audit event's own userAgent field",
+				"the audit event's own ip and userAgent fields",
 				`emitAuditEvent(sink, { type: "x", ip: req.ip, userAgent: req.get("user-agent") });`,
 			],
 			[
-				"the audit event's own userAgent field, on ctx.req",
-				`emitAuditEvent(sink, { type: "x", userAgent: ctx.req.get("user-agent") });`,
+				"the audit event's own ip and userAgent fields, on ctx.req",
+				`emitAuditEvent(sink, { type: "x", ip: ctx.req.ip, userAgent: ctx.req.get("user-agent") });`,
 			],
-			["the peer address", `logger.warn({ ip: req.ip }, "rejected");`],
 			["a string naming the path", `logger.warn({ note: "req.path" }, "rejected");`],
 			["a call that is not a logger's", `res.status(400).json({ path: req.path });`],
 			["a name that merely ends in req", `logger.warn({ path: myreq.path }, "rejected");`],
@@ -997,5 +1051,64 @@ describe("a request value reaches a logger or an audit event only through auditE
 		])("does not flag %s", (_label, source) => {
 			expect(flags(source)).toBe(false);
 		});
+	});
+});
+
+/** A sink written directly: `sink.record(`, `auditSink.record(`, `options.sink?.record(`. */
+const SINK_WRITE = /\b\w*[sS]ink\??\.record\(/g;
+
+/** The one source that writes a sink, and how many times: core's `recordAuditEvent`. */
+const SINK_WRITERS: ReadonlyMap<string, number> = new Map([
+	["packages/core/src/audit/factory.mts", 1],
+]);
+
+const sinkWritesIn = (original: string): number[] => {
+	const source = withoutComments(original);
+	return [...source.matchAll(SINK_WRITE)].map(
+		(write) => source.slice(0, write.index).split("\n").length,
+	);
+};
+
+function sinkWrites(): Map<string, number[]> {
+	const sites = new Map<string, number[]>();
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			const lines = sinkWritesIn(readFileSync(file, "utf8"));
+			if (lines.length > 0) sites.set(relative(repoRoot, file), lines);
+		}
+	}
+	return sites;
+}
+
+describe("a built-in audit event reaches its sink only through core's recordAuditEvent", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}: only core's audit factory writes a sink`, () => {
+		const sites = sinkWrites();
+		const unexpected = [...sites]
+			.filter(([file, lines]) => lines.length !== SINK_WRITERS.get(file))
+			.map(([file, lines]) => `${file}:${lines.join(",")}`);
+		expect(unexpected).toEqual([]);
+		for (const [file, count] of SINK_WRITERS)
+			expect(sites.get(file)?.length ?? 0, file).toBe(count);
+	});
+
+	it.each([
+		["a sink", "await sink.record(mapped);"],
+		["an audit sink", "auditSink.record(event).catch(() => undefined);"],
+		["a sink behind optional chaining", "options.sink?.record(event);"],
+		["inside a callback", "void Promise.resolve().then(() => sink.record(mapped));"],
+	])("flags %s written directly", (_label, source) => {
+		expect(sinkWritesIn(source)).toEqual([1]);
+	});
+
+	it.each([
+		["recordAuditEvent", "await recordAuditEvent(sink, mapped);"],
+		["emitAuditEvent", "emitAuditEvent(auditSink, event);"],
+		["a schema's record", "const map = z.record(z.string(), z.unknown());"],
+		[
+			"a sink's own method",
+			'const sink = { kind: "x", async record(event) { lines.push(event); } };',
+		],
+	])("does not flag %s", (_label, source) => {
+		expect(sinkWritesIn(source)).toEqual([]);
 	});
 });

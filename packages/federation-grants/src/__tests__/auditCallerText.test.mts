@@ -122,6 +122,50 @@ describe("the audit trail — a caller's grant id and subject, sanitised and cap
 		expect(shapeOf(onlyEvent(h.events, "federation.grant.requested").subject)).toEqual(BOUNDED);
 	});
 
+	describe("the event's ip and user agent", () => {
+		// Behind `trust proxy`, `req.ip` is what the caller wrote in
+		// X-Forwarded-For. Over real HTTP it and the user agent can carry a tab,
+		// the C1 controls (U+0085 NEL, U+009B CSI) and ten thousand characters.
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+		const REQUEST_CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+		const requestShapeOf = (value: unknown) => ({
+			string: typeof value === "string",
+			control: REQUEST_CONTROL.test(String(value)),
+			within200: String(value).length <= 200,
+			kept: /^x\?+FORGED /.test(String(value)),
+		});
+		const REQUEST_BOUNDED = { string: true, control: false, within200: true, kept: true };
+		const REQUEST_HOSTILE = `x\t\u0085\u009bFORGED federation.grant ${"h".repeat(10_000)}`;
+
+		/** The denial a refused credential audits, through the route's own bridge. */
+		const deniedEvent = async (headers: Record<string, string>): Promise<AuditEvent> => {
+			const h = harness();
+			h.app.set("trust proxy", true);
+
+			const response = await request(h.app)
+				.post(`/oauth/federation-grants/${GRANT_ID}/token`)
+				.set("Authorization", basic(CLIENT_ID, "wrong"))
+				.set(headers)
+				.send({ sub: "local-subject" });
+
+			expect(response.status).toBe(401);
+			await h.background.drain();
+			return onlyEvent(h.events, "federation.grant.token.denied");
+		};
+
+		it("audits an X-Forwarded-For ip sanitised and capped", async () => {
+			expect(
+				requestShapeOf((await deniedEvent({ "X-Forwarded-For": REQUEST_HOSTILE })).ip),
+			).toEqual(REQUEST_BOUNDED);
+		});
+
+		it("audits a user agent sanitised and capped", async () => {
+			expect(
+				requestShapeOf((await deniedEvent({ "User-Agent": REQUEST_HOSTILE })).userAgent),
+			).toEqual(REQUEST_BOUNDED);
+		});
+	});
+
 	it("still audits an ordinary grant id and subject exactly", async () => {
 		const h = harness();
 
