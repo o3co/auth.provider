@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { isIP } from "node:net";
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { auditErrorText } from "../errors/envelope.mjs";
 import type { AuditEvent, AuditSink, AuditSinkFactory } from "./types.mjs";
@@ -32,46 +33,71 @@ export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
 }
 
 /**
- * `event` as a sink is handed it: `ip` and `userAgent`, the two fields a
- * route copies from the request, sanitised and capped with
- * {@link auditErrorText} (RFC 6749 NQSCHAR, `?` for anything else, at most
- * 200 characters). Behind `trust
- * proxy`, `req.ip` is what the caller wrote in `X-Forwarded-For`, and a user
- * agent is the caller's own header; over HTTP either can carry a tab, the C1
- * controls and up to the header-size limit, and a composition can hand in
- * anything. A value that is not a string is dropped, never coerced. Every
- * other field is the event's as it was, and an event with neither field gains
- * neither.
- *
- * The one cap for both: an address never approaches it, and a user agent's
- * product tokens — what a dashboard groups on — come first; the longest
- * common ones (an in-app browser's, 210–270 characters) lose only trailing
- * device detail past 200.
+ * An event's `ip` as a sink is handed it: an IPv4 or IPv6 address
+ * (`net.isIP`), an IPv6 `%zone` stripped, or nothing. Behind `trust proxy`,
+ * `req.ip` is what the caller wrote in `X-Forwarded-For`, and an SIEM that
+ * maps the field as an IP type rejects the whole event over a value that is
+ * not one — so `X-Forwarded-For: x` must not reach it. The zone goes because
+ * it is the caller's text too (`fe80::1%<anything>`) and names an interface
+ * on some other host. A value that is not an address is left out rather than
+ * kept elsewhere: the event keeps its documented shape, and the proxy that
+ * set the header is the one place its raw value can be trusted and is
+ * logged.
+ */
+const auditedIp = (value: unknown): string | undefined => {
+	if (typeof value !== "string") return undefined;
+	const zone = value.indexOf("%");
+	if (zone === -1) return isIP(value) === 0 ? undefined : value;
+	const address = value.slice(0, zone);
+	return isIP(address) === 6 ? address : undefined;
+};
+
+/**
+ * `event` as a sink is handed it, its two request fields bounded: `ip` an
+ * address or nothing ({@link auditedIp}); `userAgent`, the caller's own
+ * header, sanitised and capped with {@link auditErrorText} (RFC 6749 NQSCHAR,
+ * `?` for anything else, at most 200 characters) — over HTTP it can carry a
+ * tab, the C1 controls and up to the header-size limit, and a composition can
+ * hand in anything. A user agent's product tokens, what a dashboard groups
+ * on, come first; the longest common ones (an in-app browser's, 210–270
+ * characters) lose only trailing device detail past 200. A value that is not
+ * a string is dropped, never coerced. The event is copied and the two fields
+ * overwritten in place, so its key order is its own; every other field is as
+ * it was, and an event with neither field gains neither.
  */
 function withBoundedRequestFields(event: AuditEvent): AuditEvent {
 	if (event.ip === undefined && event.userAgent === undefined) return event;
-	const { ip, userAgent, ...rest } = event;
-	const boundedIp = auditErrorText(ip);
-	const boundedUserAgent = auditErrorText(userAgent);
-	return {
-		...rest,
-		...(boundedIp === undefined ? {} : { ip: boundedIp }),
-		...(boundedUserAgent === undefined ? {} : { userAgent: boundedUserAgent }),
-	};
+	const bounded: { -readonly [K in keyof AuditEvent]: AuditEvent[K] } = { ...event };
+	if (event.ip !== undefined) {
+		const ip = auditedIp(event.ip);
+		if (ip === undefined) delete bounded.ip;
+		else bounded.ip = ip;
+	}
+	if (event.userAgent !== undefined) {
+		const userAgent = auditErrorText(event.userAgent);
+		if (userAgent === undefined) delete bounded.userAgent;
+		else bounded.userAgent = userAgent;
+	}
+	return bounded;
 }
 
 /**
  * Hands `event` to `sink` with its request fields bounded (see
- * {@link withBoundedRequestFields}), and answers the sink's own promise.
+ * {@link withBoundedRequestFields}), and answers the sink's own promise. A
+ * sink that throws synchronously, or answers something that is not a
+ * promise, answers a rejection or a resolution like any other: it never
+ * throws into the caller.
  *
- * The one way a built-in event reaches a sink: {@link emitAuditEvent} calls
- * it and detaches, and an emitter that waits on the sink — federation grants,
- * whose core bounds its audit waits and hands them to a registry a shutdown
- * drains — calls it directly. The log-projection drift guard pins that no
- * other source writes a sink.
+ * The one way a built-in event reaches a sink. {@link emitAuditEvent} calls it
+ * and detaches. Two emitters call it directly: the federation-grants routes'
+ * bridge, which returns the sink's promise because core bounds its audit
+ * waits and hands them to a registry a shutdown drains; and oauth's
+ * subject-revocation auditor, which neither waits nor lets the promise go
+ * unobserved — it logs a rejection (`federation_grant_audit_failed`). The
+ * log-projection drift guard pins that no other source writes a sink.
  */
-export function recordAuditEvent(sink: AuditSink, event: AuditEvent): Promise<void> {
-	return sink.record(withBoundedRequestFields(event));
+export async function recordAuditEvent(sink: AuditSink, event: AuditEvent): Promise<void> {
+	await sink.record(withBoundedRequestFields(event));
 }
 
 /**
@@ -88,7 +114,7 @@ export function emitAuditEvent(sink: AuditSink | undefined, event: AuditEvent): 
 	if (!sink) return Promise.resolve();
 	// Detach from the caller's promise chain; errors are intentionally
 	// swallowed per spec §2.2.
-	recordAuditEvent(sink, event).catch(() => {
+	void recordAuditEvent(sink, event).catch(() => {
 		// intentionally swallowed
 	});
 	return Promise.resolve();

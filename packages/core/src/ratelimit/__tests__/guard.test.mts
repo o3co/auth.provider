@@ -444,7 +444,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 		},
 	);
 
-	it("normalises a missing ip to 'unknown' in the outage report, as the guard does", async () => {
+	it("normalises a missing ip to 'unknown' on the outage line, and audits no ip", async () => {
 		const logger = makeLogger();
 		const { sink, events } = spyAuditSink();
 		const limiter = scriptedLimiter(() => new Error("redis down"));
@@ -458,7 +458,9 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 			expect.objectContaining({ ip: "unknown" }),
 			"rate_limiter_failed_open",
 		);
-		expect(events[0]?.ip).toBe("unknown");
+		// "unknown" is no address: the audit event leaves `ip` out rather than
+		// put it in a field an SIEM maps as an IP type.
+		expect(events[0] !== undefined && "ip" in events[0]).toBe(false);
 	});
 
 	it("rateLimiterUnavailableEnvelope() is the body the guard answers under failMode='closed'", async () => {

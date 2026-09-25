@@ -18,8 +18,10 @@
  * Core's audit events carried to the deployment's sink (#593, D18).
  *
  * **The sink's promise is returned, not detached.** `emitAuditEvent` — which
- * every other module-side emission goes through — hands the event to core's
- * `recordAuditEvent` and swallows the promise. That is right where the emitter is answering a
+ * most module-side emissions go through — hands the event to core's
+ * `recordAuditEvent` and swallows the promise; oauth's subject-revocation
+ * auditor calls `recordAuditEvent` itself and logs a rejection rather than
+ * waiting. That is right where the emitter is answering a
  * request and will be gone before the sink settles; it is wrong here, because
  * core bounds its own audit waits and hands them to the background registry,
  * and a promise nobody holds is one a shutdown cannot drain. The event most
@@ -45,8 +47,9 @@
  * string on this package's log lines already is: a sink is read by systems
  * that split on a line break, and the standalone writes every event into its
  * log. A well-formed id or subject is carried unchanged. The request's `ip`
- * and `userAgent` are bounded by `recordAuditEvent` itself, which is how this
- * hands every event to the sink and still returns its promise.
+ * (an address, or left out) and `userAgent` are bounded by
+ * `recordAuditEvent` itself, which is how this hands every event to the sink
+ * and still returns its promise.
  */
 
 import {

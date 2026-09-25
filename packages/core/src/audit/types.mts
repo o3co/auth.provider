@@ -99,8 +99,8 @@ export interface AuditEvent {
 	readonly clientId?: string;
 	/**
 	 * The request's address — behind `trust proxy`, what the caller wrote in
-	 * `X-Forwarded-For`. A sink is handed it sanitised and capped
-	 * (`recordAuditEvent`).
+	 * `X-Forwarded-For`. A sink is handed an IPv4 or IPv6 address, an IPv6
+	 * zone stripped, or no `ip` at all (`recordAuditEvent`).
 	 */
 	readonly ip?: string;
 	/** The request's `User-Agent`, the caller's own; a sink is handed it sanitised and capped. */
