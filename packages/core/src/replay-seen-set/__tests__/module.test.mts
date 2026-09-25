@@ -114,7 +114,7 @@ describe("memoryReplaySeenSetModule", () => {
 		});
 
 		it("refuses a value it cannot use at boot, naming the key", async () => {
-			for (const bad of [0, -1, 1.5, "lots", "", true]) {
+			for (const bad of [0, -1, 1.5, "lots", "", true, null]) {
 				const err = await refusalOf(
 					bootWith(memoryReplaySeenSetModule, { replaySeenSet: { memory: { maxEntries: bad } } }),
 				);

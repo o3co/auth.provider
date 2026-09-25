@@ -150,6 +150,21 @@ describe("createMemoryChallengeStore — bounded growth", () => {
 		expect(store.size).toBe(0);
 	});
 
+	it("refuses an explicit null for each setting: only a setting left out takes the default", () => {
+		for (const [option, message] of [
+			["maxEntries", "maxEntries must be a positive whole number (got null)"],
+			["sweepInterval", "sweepInterval must be a positive whole number (got null)"],
+			[
+				"minSweepIntervalMs",
+				"minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got null)",
+			],
+		] as const) {
+			expect(() => createMemoryChallengeStore({ [option]: null } as never), option).toThrow(
+				new RangeError(`createMemoryChallengeStore: ${message}`),
+			);
+		}
+	});
+
 	it("refuses a sweep interval that is not a positive whole number, rather than using another", () => {
 		// It used to fall back to the default: a setting given and unusable was
 		// quietly replaced, which is what a boot refusal exists to prevent.

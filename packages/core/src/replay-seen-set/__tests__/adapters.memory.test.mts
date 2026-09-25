@@ -141,6 +141,21 @@ describe("createMemoryReplaySeenSet — bounded growth", () => {
 		expect(set.size).toBe(1);
 	});
 
+	it("refuses an explicit null for each setting: only a setting left out takes the default", () => {
+		for (const [option, message] of [
+			["maxEntries", "maxEntries must be a positive whole number (got null)"],
+			["sweepInterval", "sweepInterval must be a positive whole number (got null)"],
+			[
+				"minSweepIntervalMs",
+				"minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got null)",
+			],
+		] as const) {
+			expect(() => createMemoryReplaySeenSet({ [option]: null } as never), option).toThrow(
+				new RangeError(`createMemoryReplaySeenSet: ${message}`),
+			);
+		}
+	});
+
 	it("refuses a sweep interval that is not a positive whole number, rather than using another", () => {
 		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
 			expect(() => createMemoryReplaySeenSet({ sweepInterval: bad }), String(bad)).toThrow(

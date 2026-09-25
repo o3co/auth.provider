@@ -33,6 +33,16 @@ describe("ChallengeStoreFactory", () => {
 		expect(plain.maxEntries).toBe(1_000_000);
 	});
 
+	it("refuses a 'memory' adapter config whose cap is an explicit null", async () => {
+		const factory = createChallengeStoreFactory();
+		registerBuiltinChallengeStores(factory);
+		await expect(factory.create({ type: "memory", maxEntries: null })).rejects.toThrow(
+			new RangeError(
+				"ChallengeStore memory adapter maxEntries must be a positive whole number (got null)",
+			),
+		);
+	});
+
 	it("refuses a 'memory' adapter config whose cap it cannot use, naming the key", async () => {
 		const factory = createChallengeStoreFactory();
 		registerBuiltinChallengeStores(factory);

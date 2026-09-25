@@ -145,6 +145,18 @@ const routesModule = defineModule({
 				router.get("/deep/*rest", () => {
 					throw new Error("failed somewhere deep");
 				});
+				router.get("/hostile", () => {
+					// A thrown value whose prototype cannot even be asked for: a
+					// Proxy whose trap throws. The handler must not throw with it.
+					throw new Proxy(
+						{},
+						{
+							getPrototypeOf() {
+								throw new Error("trap");
+							},
+						},
+					);
+				});
 				router.get("/boom", () => {
 					throw Object.assign(new Error("store said: secret-in-message-marker"), {
 						command: { name: "set", args: ["secret-in-args-marker"] },
@@ -382,6 +394,22 @@ describe("createApp's router answers an error that escaped a route", () => {
 		expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("secret-in-args-marker");
 		expect(otherLevels(logger)).toEqual([]);
+		await handle.dispose();
+	});
+
+	it("answers a thrown value it cannot inspect as 500 server_error, and logs it once", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		const res = await request(app).get("/t/hostile");
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ endpoint: "/t/hostile", err: expect.objectContaining({ name: expect.any(String) }) },
+			"unhandled_request_error",
+		);
 		await handle.dispose();
 	});
 

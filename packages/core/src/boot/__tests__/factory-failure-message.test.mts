@@ -124,6 +124,24 @@ describe("a clients file with a YAML error, booted through createApp", () => {
 });
 
 describe("a BootError, printed", () => {
+	it("prints one whose stack is not a string by its name and message alone", () => {
+		const err = new BootError({
+			message: "a refusal with no stack",
+			reason: "provides-factory-failed",
+			stage: "materializeComponents",
+			details: {
+				reason: "provides-factory-failed",
+				module: "m",
+				componentKey: "clientRepository",
+				originalError: undefined,
+			},
+		});
+		Object.defineProperty(err, "stack", { value: undefined });
+		const out = printed(err);
+		expect(out.startsWith("BootError: a refusal with no stack {")).toBe(true);
+		expect(out).not.toMatch(/ {4}at /);
+	});
+
 	it("prints one built without details, rather than failing to print", () => {
 		const err = new BootError({
 			message: "a refusal with no details",
