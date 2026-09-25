@@ -426,8 +426,11 @@ that cannot persist them is `503 temporarily_unavailable` and redirects nobody,
 logged once at error level as `federation_start_store_unavailable` (`store`:
 `cookie_session` or `federation_transaction`). A `form_post` federation with no
 express-session store on the request, or whose callback URL has no path, is the
-composition's fault: `500 misconfiguration`, logged as
-`federation_form_post_start_misconfigured`. The
+composition's fault: `500 misconfiguration`. Every composition fault these
+routes meet — that one, a provider with no callback URL, one with no redirect
+policy — is logged once at error level as `federation_misconfigured` with the
+`reason` (`no_session_store`, `no_callback_path`, `no_callback_url`,
+`no_redirect_policy`). The
 `redirect_uri` handed to `buildAuthorizationUrl` is the federation's
 `callbackURL` from config. For a `form_post` federation the router appends
 `response_mode=form_post` to the URL the adapter returned; for a `query` one the

@@ -243,7 +243,7 @@ await store.registerCredential({ userId: opaqueUserId, /* ... */ });
 
 The middleware that sets `req.webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
 
-The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error. `authentication/options` enforces the same bound on the `userId` a *caller* may supply, but as `400 invalid_request`: there the value is untrusted request data, not your configuration.
+The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error — logged once at error level as `webauthn_subject_user_handle_invalid` with the route's `site` and the handle's `byteLength`, never the handle itself. `authentication/options` enforces the same bound on the `userId` a *caller* may supply, but as `400 invalid_request`: there the value is untrusted request data, not your configuration.
 
 ## SECURITY — scope authorization
 

@@ -263,6 +263,28 @@ const logStoreUnavailable = (
 	log.error({ ...context, store, step, err: loggableError(cause) }, event);
 };
 
+/** A composition fault a federation route can meet, as its log line names it. */
+type FederationMisconfiguration =
+	| "no_callback_url"
+	| "no_redirect_policy"
+	| "no_session_store"
+	| "no_callback_path";
+
+/**
+ * A federation route met a composition fault — a provider with no callback URL
+ * or no redirect policy, a `form_post` federation with no express-session
+ * store on its requests or a callback URL with no path to scope its cookie
+ * to. No client causes it and no retry fixes it: one line at error level,
+ * `federation_misconfigured`, with the `reason`; the caller answers `500`.
+ */
+const logMisconfigured = (
+	log: Logger,
+	reason: FederationMisconfiguration,
+	context: Readonly<Record<string, unknown>> = {},
+): void => {
+	log.error({ ...context, reason }, "federation_misconfigured");
+};
+
 /**
  * Run one best-effort cleanup step — a rollback after a failed login or link,
  * the discard of a refused transaction. A step that fails is one warn line,
@@ -653,6 +675,7 @@ export const createRouter = (
 		}
 		const policy = federationRedirectPolicyResolver.get(provider.name);
 		if (!policy) {
+			logMisconfigured(log, "no_redirect_policy");
 			return res.status(500).json({
 				error: "internal_error",
 				error_description: "redirect policy not registered for provider",
@@ -920,6 +943,7 @@ export const createRouter = (
 		// providerCallbackUrls is the authoritative map; same entry verified above in the start handler.
 		const callbackUrl = providerCallbackUrls.get(provider.name);
 		if (!callbackUrl) {
+			logMisconfigured(log, "no_callback_url");
 			return res.status(500).json({
 				error: "misconfiguration",
 				error_description: sanitizeErrorText(
@@ -1222,6 +1246,7 @@ export const createRouter = (
 		// Resolve redirect URL via policy (Theme B: redirect concerns separated from IdP protocol)
 		const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
 		if (!callbackPolicy) {
+			logMisconfigured(log, "no_redirect_policy");
 			return res.status(500).json({
 				error: "internal_error",
 				error_description: "redirect policy not registered for provider",
@@ -1342,6 +1367,7 @@ export const createRouter = (
 				if (!policy) {
 					// Pairing invariant fires at boot; this branch is defence-in-depth
 					// against a hypothetical bug bypassing the invariant at runtime.
+					logMisconfigured(logger, "no_redirect_policy", { provider: provider.name });
 					return res.status(500).json({
 						error: "internal_error",
 						error_description: "redirect policy not registered for provider",
@@ -1424,6 +1450,7 @@ export const createRouter = (
 			// callback URL is missing.
 			const callbackUrl = providerCallbackUrls.get(provider.name);
 			if (!callbackUrl) {
+				logMisconfigured(logger, "no_callback_url", { provider: provider.name });
 				return res.status(500).json({
 					error: "misconfiguration",
 					error_description: sanitizeErrorText(
@@ -1462,14 +1489,10 @@ export const createRouter = (
 					// whose request carries no express-session store, or whose
 					// callback URL has no path to scope the cookie to, cannot check
 					// state on the cross-site callback it would be sent.
-					logger.error(
-						{
-							provider: provider.name,
-							callbackUrl,
-							reason: transactions ? "no_callback_path" : "no_session_store",
-						},
-						"federation_form_post_start_misconfigured",
-					);
+					logMisconfigured(logger, transactions ? "no_callback_path" : "no_session_store", {
+						provider: provider.name,
+						callbackUrl,
+					});
 					return res.status(500).json({
 						error: "misconfiguration",
 						error_description: sanitizeErrorText(

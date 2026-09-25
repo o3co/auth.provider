@@ -141,6 +141,13 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		// req.webauthnSubject invariant under normal middleware composition.
 		const userIdByteLength = new TextEncoder().encode(userId).length;
 		if (userIdByteLength < 1 || userIdByteLength > 64) {
+			// The composition's fault, logged once: the length, never the value —
+			// the misconfiguration this catches is a middleware handing over an
+			// e-mail or a username.
+			deps.logger.error(
+				{ site: "registration_verify", byteLength: userIdByteLength },
+				"webauthn_subject_user_handle_invalid",
+			);
 			res.status(500).json({
 				error: "server_error",
 				error_description:

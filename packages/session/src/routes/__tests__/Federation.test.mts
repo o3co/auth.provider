@@ -1130,10 +1130,7 @@ describe("account linking across federations (#482)", () => {
 			const none = await callback(await plantAndGetAgent(unregistered.app));
 			expect(none.status).toBe(500);
 			expect(none.body.error).toBe("internal_error");
-			expectMisconfigurationLogged(unregisteredLogger, {
-				provider: "test",
-				reason: "no_redirect_policy",
-			});
+			expectMisconfigurationLogged(unregisteredLogger, { reason: "no_redirect_policy" });
 
 			const refusing = {
 				...makePermissivePolicy(),
@@ -1819,7 +1816,7 @@ describe("Federation routes", () => {
 				error: "misconfiguration",
 				error_description: "No callback URL registered for provider 'test'",
 			});
-			expectMisconfigurationLogged(logger, { provider: "test", reason: "no_callback_url" });
+			expectMisconfigurationLogged(logger, { reason: "no_callback_url" });
 		});
 
 		it("happy path: creates UserSession, addFederation, attaches token, sets req.session.sid, redirects to redirectTo", async () => {
