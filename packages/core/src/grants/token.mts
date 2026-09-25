@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
 import type { Confirmation } from "./confirmation.mjs";
+import { BINDING_PROFILES, CONFIRMATION_MEMBERS } from "./confirmationMatch.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
 	return Object.fromEntries(
@@ -32,10 +33,11 @@ export interface Token {
 	audience?: string;
 	issuer?: string;
 	/**
-	 * Echo of `GenerateTokenOptions.confirmation` when set. Read-only
-	 * informational field for callers (e.g. audit log); does NOT drive
-	 * claim emission — that is `GenerateTokenOptions.confirmation`'s job.
-	 * See RFC 7800 §3 for the `cnf` claim structure and Wave 2
+	 * Echo of `GenerateTokenOptions.confirmation` when set. It does NOT drive
+	 * claim emission — that is `GenerateTokenOptions.confirmation`'s job — but
+	 * on an access token it is what `generateTokenResponse` reads the
+	 * response's `token_type` from, so the envelope describes the `cnf` the
+	 * token carries. See RFC 7800 §3 for the `cnf` claim structure and Wave 2
 	 * Token-binding Cluster spec §4.4 for the field's role here.
 	 */
 	readonly confirmation?: Confirmation;
@@ -56,22 +58,37 @@ export interface TokenResponse {
 	id_token?: string;
 }
 
-export interface GenerateTokenResponseOptions {
-	/**
-	 * Wire-level token_type for the response envelope. Defaults to "Bearer".
-	 * Set to "DPoP" when the issued access token has a DPoP confirmation
-	 * (RFC 9449 §5). mTLS-bound tokens keep "Bearer" per RFC 8705 §3.
-	 */
-	readonly tokenType?: "Bearer" | "DPoP";
-}
+/**
+ * The wire-level `token_type` for an access token bound by `confirmation`:
+ * the scheme core's binding profile names for the member it carries —
+ * `DPoP` for `cnf.jkt` (RFC 9449 §5), `Bearer` for `cnf["x5t#S256"]`, which
+ * RFC 8705 §3 leaves on the bearer scheme — and `Bearer` for an unbound one.
+ */
+const tokenTypeFor = (confirmation: Confirmation | undefined): "Bearer" | "DPoP" => {
+	const member = CONFIRMATION_MEMBERS.find(
+		(candidate) => confirmation !== undefined && candidate in confirmation,
+	);
+	return member === undefined ? "Bearer" : BINDING_PROFILES[member].challenge;
+};
 
-export const generateTokenResponse = (
-	{ accessToken, refreshToken = undefined, idToken = undefined }: IntermediateToken,
-	options?: GenerateTokenResponseOptions,
-): TokenResponse => {
+/**
+ * The RFC 6749 §5.1 token response for the tokens a grant minted.
+ *
+ * `token_type` is read off the access token's own confirmation (the echo
+ * `generateToken` puts on the `Token`), not handed in: a grant that forgot to
+ * say `DPoP` advertised a `cnf.jkt` token as Bearer, and a DPoP-aware client
+ * believed the envelope and presented it as one — which RFC 9449 §7.1 has a
+ * resource server refuse. Read off the token, the envelope cannot disagree
+ * with the claim.
+ */
+export const generateTokenResponse = ({
+	accessToken,
+	refreshToken = undefined,
+	idToken = undefined,
+}: IntermediateToken): TokenResponse => {
 	return {
 		access_token: accessToken.token,
-		token_type: options?.tokenType ?? "Bearer",
+		token_type: tokenTypeFor(accessToken.confirmation),
 		...formatObject({
 			scope: accessToken.scope,
 			refresh_token: refreshToken ? refreshToken.token : null,

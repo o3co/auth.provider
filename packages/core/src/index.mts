@@ -360,7 +360,6 @@ export type { SenderConstraint } from "./grants/senderConstraint.mjs";
 export {
 	formatObject,
 	type GenerateTokenOptions,
-	type GenerateTokenResponseOptions,
 	generateToken,
 	generateTokenResponse,
 	type Token,

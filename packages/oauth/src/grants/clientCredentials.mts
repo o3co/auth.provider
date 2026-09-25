@@ -26,6 +26,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	ownedConfirmation,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
@@ -191,14 +192,16 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
 			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation
-			// (RFC 7800 `cnf`) into the issued AT. Mechanism-agnostic copy —
-			// DPoP supplies `{ jkt }`, mTLS supplies `{ "x5t#S256" }`. The
-			// wire-level `token_type` is "DPoP" only for the DPoP kind
-			// (RFC 9449 §5); mTLS keeps "Bearer" per RFC 8705 §3. RFC 6749
+			// (RFC 7800 `cnf`) into the issued AT — the member the binding's
+			// mechanism kind owns (core's `ownedConfirmation`): DPoP's
+			// `{ jkt }`, mTLS's `{ "x5t#S256" }`, and nothing for a kind that
+			// owns neither, so a contributed mechanism cannot have a binding
+			// minted that no owning mechanism validated. The wire-level
+			// `token_type` is read off it by `generateTokenResponse` ("DPoP"
+			// per RFC 9449 §5; mTLS keeps "Bearer" per RFC 8705 §3). RFC 6749
 			// §4.4.3 says client_credentials does not issue a refresh token,
 			// so no RT-binding branch is needed here.
-			const confirmation = ctx.tokenBinding?.confirmation;
-			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
+			const confirmation = ownedConfirmation(ctx.tokenBinding);
 
 			const accessToken = await generateToken(
 				{
@@ -220,7 +223,7 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken }, { tokenType }),
+					tokens: generateTokenResponse({ accessToken }),
 				},
 			};
 		},

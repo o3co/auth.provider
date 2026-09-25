@@ -28,6 +28,7 @@ import {
 	generateTokenResponse,
 	logClientRepositoryUnavailable,
 	loggableError,
+	ownedConfirmation,
 	type ProviderDeps,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
@@ -529,10 +530,15 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// propagate the token-binding confirmation (RFC 7800 `cnf`) into
 			// the issued tokens.
 			//
-			// **AT cnf** is mechanism-agnostic: any binding's confirmation
-			// (DPoP `{jkt}`, mTLS `{x5t#S256}`, future mechanisms) flows
-			// through unchanged because RFC 7800 cnf claim shape is
-			// mechanism-neutral.
+			// **AT cnf** is the member the binding's mechanism kind owns —
+			// core's `ownedConfirmation`, the boundary `matchConfirmation`
+			// enforces on the way back in. `ctx.tokenBinding` carries what a
+			// mechanism returned, and `Confirmation` is extensible by
+			// mechanism, so a contributed kind presenting `{jkt}` or
+			// `{x5t#S256}`, a DPoP binding presenting an mTLS member, or a
+			// compound confirmation would otherwise be minted as a binding no
+			// mechanism that owns it validated. Such a request is issued
+			// unbound; a compound one keeps the owning member alone.
 			//
 			// **RT cnf** is gated on `(bindingIsDpop || bindingIsMtls) &&
 			// isPublicClient`:
@@ -554,12 +560,12 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			//      stopped Phase 2 from silently emitting unenforceable
 			//      mTLS-bound RTs.
 			//
-			// The wire-level `token_type` is "DPoP" only for the DPoP kind
-			// (mTLS keeps "Bearer" per RFC 8705 §3).
-			const confirmation = ctx.tokenBinding?.confirmation;
+			// The wire-level `token_type` is read off the access token's
+			// confirmation by `generateTokenResponse`: "DPoP" for `cnf.jkt`,
+			// "Bearer" otherwise (mTLS keeps it per RFC 8705 §3).
+			const confirmation = ownedConfirmation(ctx.tokenBinding);
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
 			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
-			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
 			// #275: `bindConfidentialClientRefreshTokens` opts a deployment out of
 			// the `isPublicClient` restriction.
@@ -654,7 +660,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					tokenType: "rt+jwt",
 					jti: refreshTokenJti,
 					issuedAt: refreshTokenIssuedAt,
-					...(bindRefreshToken ? { confirmation } : {}),
+					...(bindRefreshToken && confirmation ? { confirmation } : {}),
 				},
 			);
 
@@ -881,7 +887,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }, { tokenType }),
+					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
 				},
 				sessionMutation: {
 					// D-1: /authorize no longer writes session.code* in v0.5.1.

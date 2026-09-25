@@ -146,8 +146,10 @@ export const matchConfirmation = (
  * third-party mechanism) or the confirmation lacks that member.
  *
  * This is the value a grant may stamp onto a token it issues for the
- * request: material the owning mechanism actually validated. The kind
- * gating is the same boundary {@link matchConfirmation} enforces.
+ * request: material the owning mechanism actually validated. Every grant
+ * that issues tokens stamps this and never `binding.confirmation` itself,
+ * which carries whatever a mechanism returned. The kind gating is the same
+ * boundary {@link matchConfirmation} enforces.
  */
 export const ownedConfirmation = (
 	binding: TokenBinding | null | undefined,

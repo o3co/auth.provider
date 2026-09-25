@@ -264,8 +264,8 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			// rides RFC 8705 §4 ("the authorization server SHOULD bind the
 			// refresh token to the certificate the client used"). mTLS still
 			// keeps wire-level token_type "Bearer" per RFC 8705 §3 — only
-			// DPoP signals "DPoP" in the response wrapper. AT cnf propagation
-			// remains mechanism-agnostic (RFC 7800).
+			// DPoP signals "DPoP" in the response wrapper. The AT carries the
+			// member the mTLS mechanism owns (core's `ownedConfirmation`).
 			//
 			// The previous "RT stays plain" assertion was pinned at PR #185
 			// because there was no refresh-time mTLS enforcement matrix in
@@ -291,7 +291,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			// mTLS keeps wire-level "Bearer" per RFC 8705 §3.
 			expect(result.tokens.token_type).toBe("Bearer");
 
-			// AT gets the mTLS cnf shape (mechanism-agnostic propagation)
+			// AT gets the member the mTLS mechanism owns
 			const atPayload = decodePayload(result.tokens.access_token as string);
 			const atCnf = atPayload.cnf as Record<string, string> | undefined;
 			expect(atCnf?.["x5t#S256"]).toBe("MTLS-THUMBPRINT-AC");
@@ -328,7 +328,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			if (!("tokens" in result)) expect.fail("Expected tokens in result");
 			expect(result.tokens.token_type).toBe("Bearer");
 
-			// AT cnf still propagates (mechanism-agnostic).
+			// AT cnf still propagates (the member the mTLS mechanism owns).
 			const atPayload = decodePayload(result.tokens.access_token as string);
 			expect((atPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
 				"MTLS-THUMBPRINT-CONF",

@@ -409,33 +409,19 @@ describe("generateTokenResponse token_type follows the access token's confirmati
 	});
 });
 
-describe("generateTokenResponse tokenType option", () => {
-	it("returns Bearer by default", async () => {
+describe("generateTokenResponse token_type beside the other tokens", () => {
+	it("returns Bearer for an unbound access token", async () => {
 		const keyStore = createSymmetricKeyStore("x".repeat(32));
 		const accessToken = await generateToken({}, { keyStore });
 		const response = generateTokenResponse({ accessToken });
 		expect(response.token_type).toBe("Bearer");
 	});
 
-	it("returns DPoP when tokenType option is DPoP", async () => {
-		const keyStore = createSymmetricKeyStore("x".repeat(32));
-		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
-		const response = generateTokenResponse({ accessToken }, { tokenType: "DPoP" });
-		expect(response.token_type).toBe("DPoP");
-	});
-
-	it("returns Bearer when tokenType option is explicitly Bearer", async () => {
-		const keyStore = createSymmetricKeyStore("x".repeat(32));
-		const accessToken = await generateToken({}, { keyStore });
-		const response = generateTokenResponse({ accessToken }, { tokenType: "Bearer" });
-		expect(response.token_type).toBe("Bearer");
-	});
-
-	it("DPoP tokenType coexists with refreshToken in response", async () => {
+	it("DPoP coexists with a refresh token in the response", async () => {
 		const keyStore = createSymmetricKeyStore("x".repeat(32));
 		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
 		const refreshToken = await generateToken({}, { keyStore });
-		const response = generateTokenResponse({ accessToken, refreshToken }, { tokenType: "DPoP" });
+		const response = generateTokenResponse({ accessToken, refreshToken });
 		expect(response.token_type).toBe("DPoP");
 		expect(response.refresh_token).toBe(refreshToken.token);
 	});

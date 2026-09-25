@@ -49,6 +49,17 @@
  * body — the body is attacker-controlled, and reading it here would be the
  * same defect the session grant fixed in #295.
  *
+ * ### A sender-constrained poll
+ *
+ * A poll that presented a DPoP proof or a client certificate gets an access
+ * token bound to it: the member the binding's mechanism kind owns (core's
+ * `ownedConfirmation`), and nothing for a contributed kind that owns neither.
+ * The response's `token_type` is read off that confirmation by
+ * `generateTokenResponse` — `DPoP` for `cnf.jkt` (RFC 9449 §5), `Bearer` for
+ * an mTLS-bound token (RFC 8705 §3). It used to be `Bearer` for both, and a
+ * DPoP-aware device presented its DPoP-bound token as a bearer token, which a
+ * resource server enforcing the binding refuses (§7.1).
+ *
  * ### A store outage is 503, not a verdict
  *
  * A `poll` that throws is the device-code store failing, which the handler
@@ -69,7 +80,12 @@ import type {
 	GrantHandlerResult,
 	KeyStore,
 } from "@o3co/auth-provider-core";
-import { generateToken, generateTokenResponse, isLifetimeSeconds } from "@o3co/auth-provider-core";
+import {
+	generateToken,
+	generateTokenResponse,
+	isLifetimeSeconds,
+	ownedConfirmation,
+} from "@o3co/auth-provider-core";
 import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
 
 export interface DeviceCodeGrantOptions {
@@ -193,6 +209,9 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			// client id. Never null — an audience-less token is accepted by
 			// anything that checks `aud` loosely.
 			const audience = client.allowedAudiences?.[0] ?? client.clientId;
+			// See the file header: the owned member only, and the envelope's
+			// `token_type` follows it.
+			const confirmation = ownedConfirmation(ctx.tokenBinding);
 
 			return {
 				result: {
@@ -209,9 +228,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 								authorizedParty: client.clientId,
 								scope: scope.length > 0 ? scope.join(" ") : null,
 								tokenType: "at+jwt",
-								...(ctx.tokenBinding?.confirmation
-									? { confirmation: ctx.tokenBinding.confirmation }
-									: {}),
+								...(confirmation ? { confirmation } : {}),
 							},
 						),
 					}),

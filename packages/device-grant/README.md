@@ -253,6 +253,8 @@ Collapsing any pair into `invalid_grant` turns a client that would have shown "y
 
 A store that cannot be read is none of the four: the poll answers `503 temporarily_unavailable`, as every grant at `/oauth/token` answers a store outage, and logs `device_code_grant_store_unavailable` at error (see [Storage](#storage)).
 
+**A sender-constrained poll.** With `@o3co/auth-provider-dpop` or `@o3co/auth-provider-mtls` installed, a poll that presents a DPoP proof or a client certificate gets an access token bound to it — the member the binding's mechanism owns (core's `ownedConfirmation`), as every grant stamps it — and the response's `token_type` is read off that `cnf`: `DPoP` for `cnf.jkt` (RFC 9449 §5), `Bearer` for an mTLS-bound or unbound token. The grant mints no refresh token, so there is no refresh-token binding to decide.
+
 ## Single use, and bound to one client
 
 `DeviceCodeStore.poll` reads the status **and consumes an approved authorization in the same operation**. A `find`-then-`delete` implementation passes a naive unit test and issues two access tokens from one human approval under concurrency; the shared conformance suite in core has a test that races two polls for exactly this reason.

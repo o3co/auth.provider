@@ -57,11 +57,14 @@
  *   A DPoP- or mTLS-bound request carries its RFC 7800 confirmation into BOTH
  *   tokens, on the two different gates the other grants apply (#489).
  *
- *   The access token binds whenever the request carried a confirmation, with no
- *   further condition — the same mechanism-agnostic copy `authorization.mts` and
- *   `clientCredentials.mts` perform. A resource server checks an access token's
- *   `cnf` against the proof on every call, so a token minted from a proven key
- *   and handed back unbound is a token that replays from anywhere.
+ *   The access token binds whenever the request carried a confirmation its
+ *   mechanism owns, with no further condition — the rule every grant applies
+ *   (core's `ownedConfirmation`: DPoP's `jkt`, mTLS's `x5t#S256`, and nothing
+ *   for a contributed kind that owns neither). A resource server checks an
+ *   access token's `cnf` against the proof on every call, so a token minted
+ *   from a proven key and handed back unbound is a token that replays from
+ *   anywhere; one minted with a binding no owning mechanism validated is one
+ *   no resource server can honour.
  *
  *   The refresh token binds on the narrower gate `authorization.mts` and
  *   `refreshToken.mts` apply: public clients always, confidential clients only
@@ -124,6 +127,7 @@ import {
 	generateTokenResponse,
 	isGrantTypeAllowed,
 	loggableError,
+	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
@@ -496,30 +500,22 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
 			// #489: the confirmation the request already carries belongs on the
-			// access token too. Mechanism-agnostic — DPoP supplies `{ jkt }`, mTLS
-			// supplies `{ "x5t#S256" }`, and RFC 7800's claim shape is neutral
-			// between them — and ungated, exactly as `authorization.mts` and
-			// `clientCredentials.mts` apply it. Until this landed, a client
-			// registered `senderConstrained: "dpop"` had its proof verified at the
-			// token endpoint and was then handed a bearer access token; the proof
-			// bought it nothing, and a captured token replayed.
+			// access token too — the member the binding's mechanism kind owns
+			// (core's `ownedConfirmation`: DPoP's `{ jkt }`, mTLS's
+			// `{ "x5t#S256" }`, nothing for a kind that owns neither), and
+			// ungated, exactly as every other grant applies it. Until #489, a
+			// client registered `senderConstrained: "dpop"` had its proof
+			// verified at the token endpoint and was then handed a bearer access
+			// token; the proof bought it nothing, and a captured token replayed.
 			//
 			// The refresh token keeps its own, narrower gate below. #480 wired only
-			// that one, which is what made the asymmetry visible.
-			const confirmation = ctx.tokenBinding?.confirmation;
+			// that one, which is what made the asymmetry visible. The response's
+			// `token_type` is read off the access token's confirmation by
+			// `generateTokenResponse`: "DPoP" for `cnf.jkt` (RFC 9449 §5), "Bearer"
+			// for an mTLS-bound token (RFC 8705 §3).
+			const confirmation = ownedConfirmation(ctx.tokenBinding);
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
 			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
-			// The wire-level answer describes what was actually minted: "DPoP" only
-			// for the DPoP kind (RFC 9449 §5). An mTLS-bound token keeps "Bearer"
-			// per RFC 8705 §3 — it travels as a bearer token and is checked against
-			// the TLS client certificate.
-			//
-			// Named for the envelope it fills, not `tokenType` as in the sibling
-			// grants: this handler mints two tokens and passes `tokenType` twice
-			// more below as the JWT header `typ` ("at+jwt" / "rt+jwt"), which is a
-			// different value in a different registry from the response's
-			// `token_type`.
-			const responseTokenType = bindingIsDpop ? "DPoP" : "Bearer";
 
 			// #480: a passkey is the primary login on a native app, and the access
 			// token is short-lived — without a refresh token the user is sent back
@@ -660,13 +656,10 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse(
-						{
-							accessToken,
-							...(refreshToken ? { refreshToken } : {}),
-						},
-						{ tokenType: responseTokenType },
-					),
+					tokens: generateTokenResponse({
+						accessToken,
+						...(refreshToken ? { refreshToken } : {}),
+					}),
 				},
 			};
 		},

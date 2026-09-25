@@ -382,7 +382,7 @@ describe("DPoP refresh-token mechanism boundary", () => {
 		if (!("tokens" in result)) expect.fail("Expected tokens in result");
 		// mTLS keeps Bearer per RFC 8705 §3.
 		expect(result.tokens.token_type).toBe("Bearer");
-		// AT gets mTLS cnf (mechanism-agnostic propagation per RFC 7800).
+		// AT gets the member the mTLS mechanism owns (core's `ownedConfirmation`).
 		const atPayload = decodeJwt(result.tokens.access_token);
 		expect((atPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
 			"MTLS-RT-THUMB",

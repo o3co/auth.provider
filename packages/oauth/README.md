@@ -466,9 +466,9 @@ When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `
 
 ### Issuance
 
-- **Access-token `cnf` is mechanism-agnostic.** Any binding's `confirmation` flows through unchanged — DPoP `{ jkt }`, mTLS `{ "x5t#S256" }`.
+- **Access-token `cnf` is the member the binding's mechanism owns.** Every grant stamps core's `ownedConfirmation` of the request's binding — DPoP's `{ jkt }`, mTLS's `{ "x5t#S256" }` — never the binding's `confirmation` as a mechanism returned it. A contributed mechanism whose kind owns neither member, or a binding carrying a member its kind does not own, gets an unbound token; a compound confirmation keeps the owned member alone. The same rule holds in the WebAuthn grant, the device grant and token exchange.
 - **Refresh-token `cnf` is bound for public clients, and for confidential clients only on request.** A public client with a bound access token gets a bound refresh token, so the next refresh enforces continuity. A confidential client gets a plain refresh token — its client authentication is the refresh-time authenticator (RFC 9449 §5, RFC 8705 §7.1) — unless `oauth.tokenBinding.bindConfidentialClientRefreshTokens = true` (`OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`), which binds it too. That costs key rotation: a bound refresh token pins the client to one key or certificate for its whole lifetime.
-- **Wire-level `token_type`:** `"DPoP"` only for a DPoP binding (RFC 9449 §5). mTLS keeps `"Bearer"` (RFC 8705 §3) — the certificate is the binding evidence, not the wire token type.
+- **Wire-level `token_type`** is read off the access token's `cnf` by core's `generateTokenResponse`: `"DPoP"` for `cnf.jkt` (RFC 9449 §5), `"Bearer"` for mTLS (RFC 8705 §3 — the certificate is the binding evidence, not the wire token type) and for an unbound token. The envelope cannot disagree with the claim.
 
 ### Refresh-time matrix
 

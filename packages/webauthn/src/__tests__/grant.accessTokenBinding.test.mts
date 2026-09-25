@@ -26,8 +26,9 @@
  *
  * What is asserted here:
  *   - the confirmation the request already carries reaches the access token,
- *     for both binding kinds, exactly as `authorization.mts` and
- *     `clientCredentials.mts` apply it — mechanism-agnostic, ungated;
+ *     for both binding kinds, exactly as every other grant applies it — the
+ *     member the binding's mechanism owns (core's `ownedConfirmation`),
+ *     ungated, and nothing for a binding whose kind owns no member it carries;
  *   - the wire-level `token_type` describes what was minted: "DPoP" for a
  *     DPoP-bound token (RFC 9449 §5), "Bearer" for an mTLS-bound one
  *     (RFC 8705 §3, where the binding travels on the TLS layer);

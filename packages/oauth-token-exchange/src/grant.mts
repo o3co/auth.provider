@@ -1063,16 +1063,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			);
 
 			// RFC 9449 §5: a DPoP-bound access token is advertised as
-			// `token_type: "DPoP"`. The envelope defaulted to Bearer while the
-			// token itself carried `cnf.jkt`, so a DPoP-aware client believed
-			// the response and presented the token as a Bearer token — which
-			// this provider's own protected-resource middleware refuses (RFC
-			// 9449 §7.1). mTLS keeps "Bearer": RFC 8705 §3 does not redefine
-			// the wire-level type. Read off the confirmation actually stamped
-			// into the token, so the envelope cannot disagree with the claim.
-			const responseTokenType =
-				issuedConfirmation && "jkt" in issuedConfirmation ? "DPoP" : "Bearer";
-			const tokens = generateTokenResponse({ accessToken }, { tokenType: responseTokenType });
+			// `token_type: "DPoP"`; mTLS keeps "Bearer" (RFC 8705 §3).
+			// `generateTokenResponse` reads it off the confirmation actually
+			// stamped into the token, so the envelope cannot disagree with the
+			// claim.
+			const tokens = generateTokenResponse({ accessToken });
 			const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
 				...tokens,
 				issued_token_type: ACCESS_TOKEN_TYPE,
