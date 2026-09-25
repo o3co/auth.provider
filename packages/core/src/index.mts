@@ -71,6 +71,17 @@ export {
 	ID_JAG_TYP,
 	type RegistryAssertionVerifierOptions,
 } from "./assertions/registryAssertionVerifier.mjs";
+// A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
+export {
+	createRemoteKeySetCache,
+	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
+	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
+	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
+	type RemoteKeySet,
+	type RemoteKeySetCache,
+	type RemoteKeySetCacheOptions,
+	type RemoteKeySetTuning,
+} from "./assertions/remoteKeySet.mjs";
 // #301: possession proof for the RFC 7523 jwt-bearer grant. The port is here;
 // the JWT implementation is the vendor-neutral one, and a platform attestation
 // (DeviceCheck, Play Integrity) is the operator's own.
@@ -360,7 +371,6 @@ export type {
 	GrantFactory,
 	GrantHandler,
 	GrantHandlerResult,
-	GrantModule,
 	GrantResult,
 	GrantSuccess,
 	SessionData,
@@ -380,17 +390,7 @@ export {
 export { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "./jwks/cache.mjs";
 export { jwksModule } from "./jwks/module.mjs";
 export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
-// A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
-export {
-	createRemoteKeySetCache,
-	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
-	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
-	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
-	type RemoteKeySet,
-	type RemoteKeySetCache,
-	type RemoteKeySetCacheOptions,
-	type RemoteKeySetTuning,
-} from "./jwks/remoteKeySet.mjs";
+export { createRouter as createJwksRouter, type JwksRouterOptions } from "./jwks/router.mjs";
 // A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
 export type { NumericDateClaim } from "./jwt/numericDate.mjs";
 export {
@@ -743,7 +743,6 @@ export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,
 } from "./routes/Healthcheck.mjs";
-export { createRouter as createJwksRouter, type JwksRouterOptions } from "./routes/Jwks.mjs";
 export {
 	createRouter as createReadinessRouter,
 	type ReadinessRouterOptions,
@@ -824,17 +823,11 @@ export {
 	type MemoryChallengeStore,
 	type MemoryChallengeStoreOptions,
 } from "./challenges/adapters/memory.mjs";
-// Canonical key helper (exported for integrators writing their own adapters
-// to preserve cross-adapter parity per A1 §7.3)
-export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
 // Default composition
 export {
 	type ChallengeCeremonyDeps,
 	createChallengeCeremony,
 } from "./challenges/ceremony.mjs";
-export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
-// Errors
-export { ChallengeStorageError } from "./challenges/errors.mjs";
 // Adapter factories
 export {
 	type ChallengeStoreFactory,
@@ -868,6 +861,12 @@ export {
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
+// Canonical key helper (exported for integrators writing their own adapters
+// to preserve cross-adapter parity per A1 §7.3)
+export { canonicalKey as canonicalChallengeKey } from "./single-use/canonical-key.mjs";
+export type { ChallengeStorageErrorReason } from "./single-use/errors.mjs";
+// Errors
+export { ChallengeStorageError } from "./single-use/errors.mjs";
 
 // ===========================================================================
 // A3 — RefreshTokenFamilyStore + RefreshTokenFamilyRotation + RefreshTokenFamilyRevocation

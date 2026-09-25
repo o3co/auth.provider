@@ -19,17 +19,21 @@ describe("memoryReplaySeenSetModule", () => {
 
 	it("names what actually forks when it refuses a multi-replica boot", () => {
 		// The reason is quoted verbatim into the refused boot message, so it is
-		// what an operator reads. The consumers are the WebAuthn challenge
-		// ceremony, the jwt-bearer registry verifier, `private_key_jwt` client
-		// assertions and DPoP, which records every proof it accepts here. DPoP
-		// is named as conditional on being enabled: an operator with no DPoP
-		// module must not read DPoP as why their boot failed.
+		// what an operator reads, and it names exactly what records here:
+		// `private_key_jwt` client assertions, the WebAuthn challenge ceremony
+		// (a consumed challenge is marked seen), DPoP, which records every proof
+		// it accepts, and the jwt-bearer registry verifier for an ID-JAG only —
+		// a plain RFC 7523 assertion's `jti` is never recorded, so "a jwt-bearer
+		// assertion" would name something that does not fork. DPoP is named as
+		// conditional on being enabled: an operator with no DPoP module must
+		// not read DPoP as why their boot failed.
 		const reason = memoryReplaySeenSetModule.replicaSafety?.unsafe
 			? memoryReplaySeenSetModule.replicaSafety.reason
 			: "";
-		expect(reason).toMatch(/private_key_jwt/);
-		expect(reason).toMatch(/jwt-bearer/);
-		expect(reason).toMatch(/WebAuthn/);
+		expect(reason).toMatch(/a private_key_jwt client assertion/);
+		expect(reason).toMatch(/the jti of an ID-JAG \(jwt-bearer\) assertion/);
+		expect(reason).not.toMatch(/, a jwt-bearer assertion/);
+		expect(reason).toMatch(/a consumed WebAuthn challenge/);
 		expect(reason).toMatch(/with DPoP enabled, a DPoP proof/);
 	});
 });

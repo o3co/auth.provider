@@ -530,11 +530,6 @@ const STRING_FIRST_ALLOWED: ReadonlyArray<{
 	readonly why: string;
 }> = [
 	{
-		file: "packages/core/src/boot/create-app.mts",
-		sites: 1,
-		why: "the boot-failure drain's `console.error`: no logger exists yet, and console prints every argument",
-	},
-	{
 		file: "packages/core/src/middleware/cors.mts",
 		sites: 1,
 		why: "a boot-time notice about a configured origin, with no error; the message is written whole",

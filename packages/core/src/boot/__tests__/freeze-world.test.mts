@@ -168,8 +168,7 @@ describe("freezeWorld — 1. Object.freeze on component map", () => {
 describe("freezeWorld — 2. GrantRegistry.freeze() invoked via name-keyed collector", () => {
 	it("after freezeWorld, calling register on GrantRegistry throws reason=frozen", () => {
 		const grantRegistry = new GrantRegistry();
-		// Wrap it so it satisfies NameKeyedCollector<GrantHandler> interface.
-		// GrantRegistry already exposes register/replace/freeze/get/entries.
+		// Handed over as it is: freezeWorld reads nothing but `freeze()`.
 		const registries: Map<ContributionKind, unknown> = new Map([["grants", grantRegistry]]);
 
 		const world = makeMinimalRegistryWorld(registries);
@@ -195,13 +194,13 @@ describe("freezeWorld — 2. GrantRegistry.freeze() invoked via name-keyed colle
 });
 
 // ---------------------------------------------------------------------------
-// 3. ExchangeTokenValidatorRegistry stub — freeze() invoked
+// 3. A Map-backed name-keyed collector (tokenExchangeValidators) — freeze() invoked
 // ---------------------------------------------------------------------------
 
-describe("freezeWorld — 3. ExchangeTokenValidatorRegistry-like stub freeze() invoked", () => {
-	it("stub registry with freeze() has freeze() called; post-freeze register throws", () => {
-		// Use a stub that mimics ExchangeTokenValidatorRegistry behaviour
-		// (same contract: register/replace/freeze, throws reason="frozen" post-freeze).
+describe("freezeWorld — 3. the tokenExchangeValidators name-keyed collector has freeze() invoked", () => {
+	it("stub collector with freeze() has freeze() called; post-freeze register throws", () => {
+		// A stub with the contract of the Map-backed collector boot seeds for
+		// this kind: register/replace/freeze, and register throws once frozen.
 		const stubRegistry = makeStubNameKeyedCollector<unknown>({ withFreeze: true });
 
 		const registries: Map<ContributionKind, unknown> = new Map([

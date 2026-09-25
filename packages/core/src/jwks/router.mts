@@ -16,11 +16,11 @@
 import { createHash } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
-import { DEFAULT_JWKS_CACHE_MAX_AGE } from "../jwks/cache.mjs";
-import { DEFAULT_JWKS_PATH, isValidJwksPath } from "../jwks/path.mjs";
 import type { KeyStore, ManagedKey } from "../keys/KeyStore.mjs";
 import type { EventLogger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
+import { DEFAULT_JWKS_CACHE_MAX_AGE } from "./cache.mjs";
+import { DEFAULT_JWKS_PATH, isValidJwksPath } from "./path.mjs";
 
 /**
  * JWK members that carry PRIVATE or SYMMETRIC key material and must never

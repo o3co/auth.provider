@@ -15,9 +15,9 @@
  */
 
 import { isStorableExpiry } from "../../adapters/expiry.mjs";
-import { canonicalKey } from "../../challenges/canonical-key.mjs";
-import { ChallengeStorageError } from "../../challenges/errors.mjs";
-import { type AmortizedSweepOptions, createAmortizedSweep } from "../../challenges/sweep.mjs";
+import { canonicalKey } from "../../single-use/canonical-key.mjs";
+import { ChallengeStorageError } from "../../single-use/errors.mjs";
+import { type AmortizedSweepOptions, createAmortizedSweep } from "../../single-use/sweep.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
 
 /**
@@ -76,7 +76,7 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  *
  * Amortized on the writing `markSeen` rather than on a timer, as the
  * access-token denylist's is, and paced by the schedule the memory
- * ChallengeStore shares (`challenges/sweep.mts`): once `sweepInterval`
+ * ChallengeStore shares (`single-use/sweep.mts`): once `sweepInterval`
  * writes have accumulated and at least `minSweepIntervalMs` has passed on the
  * monotonic clock since the last sweep. A replay is refused without writing
  * and pays nothing. The guarantee is bounded growth, not zero-lag

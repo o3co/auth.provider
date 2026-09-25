@@ -15,9 +15,9 @@
  */
 
 import { isStorableExpiry } from "../../adapters/expiry.mjs";
-import { canonicalKey } from "../canonical-key.mjs";
-import { ChallengeStorageError } from "../errors.mjs";
-import { type AmortizedSweepOptions, createAmortizedSweep } from "../sweep.mjs";
+import { canonicalKey } from "../../single-use/canonical-key.mjs";
+import { ChallengeStorageError } from "../../single-use/errors.mjs";
+import { type AmortizedSweepOptions, createAmortizedSweep } from "../../single-use/sweep.mjs";
 import type { Challenge, ChallengeStore } from "../types.mjs";
 
 /**
@@ -73,7 +73,7 @@ export interface MemoryChallengeStore extends ChallengeStore {
  * credential, so anyone could grow the map.
  *
  * The sweep is the replay seen-set's, paced by the same schedule
- * (`challenges/sweep.mts`): amortized on the writing `issue`, once
+ * (`single-use/sweep.mts`): amortized on the writing `issue`, once
  * `sweepInterval` writes have accumulated and at least `minSweepIntervalMs`
  * has passed on the monotonic clock since the last one. A refused `issue` — a
  * duplicate, an expiry already past or not a number — writes nothing and pays

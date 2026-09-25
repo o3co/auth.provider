@@ -22,7 +22,7 @@
  * `createApp` function. The orchestrator owns no per-call state: it receives
  * inputs, calls each stage function in order, and forwards the output.
  *
- * Built-in defaults for the seven contribution kinds are seeded by
+ * Built-in defaults for the eleven built-in contribution kinds are seeded by
  * `mergeWithBuiltins`; consumer-supplied kinds (via `contributionKinds`)
  * overlay on top.
  *
@@ -33,6 +33,7 @@ import type { RequestHandler, Router } from "express";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type {
 	AuditHook,
@@ -78,8 +79,10 @@ import { validateManifests } from "./validate-manifests.mjs";
  *   6. assembleApp — mount routes, build AppHandle.
  *
  * Built-in contribution kinds (grants, tokenExchangeValidators, federations,
- * mfaFactors, auditHooks, routes, grantPolicyHooks, grantMiddleware) are
- * seeded by `mergeWithBuiltins`; consumer-supplied kinds overlay on top.
+ * federationRedirectPolicies, mfaFactors, auditHooks, routes,
+ * grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
+ * discoveryMetadata) are seeded by `mergeWithBuiltins`; consumer-supplied
+ * kinds overlay on top.
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
@@ -154,12 +157,15 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	} catch (err) {
 		// D-5 partial-boot failure: any builder may have already registered a
 		// cleanup callback before a later stage threw. Best-effort drain so
-		// adapter sub-resources do not leak when boot fails.
-		await lifecycleReg._drain({
-			// Boot-failure path: no AppHandle exists yet, so no Logger slot to
-			// resolve. console.error is the only available emission channel.
-			error: (obj) => console.error("[boot-failure lifecycle drain]", obj),
-		});
+		// adapter sub-resources do not leak when boot fails. No AppHandle
+		// exists, but a composition root that has a logger handed it in, as a
+		// bootstrap component or an override (never both: stage 1 refuses the
+		// pair) — `dispose()` logs through either — so a failed cleanup is
+		// logged there, and through `consoleLogger` only when there is none.
+		await lifecycleReg._drain(
+			overrideComponents?.logger ?? validatedBootstrap.logger ?? consoleLogger,
+			"boot_failure",
+		);
 		throw err;
 	}
 }
@@ -169,25 +175,20 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the seven built-in contribution kinds and overlay any consumer-supplied
+ * Seed the eleven built-in contribution kinds and overlay any consumer-supplied
  * collectors on top.
  *
  * Built-in defaults:
- * - grants: `GrantRegistry`-backed `NameKeyedCollector` with shadow Map for
- *   `entries()`. The `GrantRegistry` is the source of truth for `register`
- *   semantics (throw on duplicate) and `freeze`. entries() reads from the
- *   shadow Map.
- *   NOTE: `GrantRegistry` does not currently expose `entries()`. A shadow Map
- *   mirrors every `register`/`replace` call. Future cleanup: upstream
- *   `entries()` to `GrantRegistry` directly (Option B from task spec).
- * - tokenExchangeValidators: Map-backed `NameKeyedCollector`. The
- *   `ExchangeTokenValidatorRegistry` lives in a separate package
- *   (`oauth-token-exchange`) that `core` does not depend on; a plain Map
- *   implementation satisfies the `NameKeyedCollector` contract without a
- *   cross-package import. Same cleanup opportunity: if the registry is moved
- *   into core, switch to registry-backed form.
- * - federations, mfaFactors: Map-backed `NameKeyedCollector`.
- * - auditHooks, grantPolicyHooks, grantMiddleware: identity-dedup `ListCollector`.
+ * - grants: a `NameKeyedCollector` over one `GrantRegistry`, which holds the
+ *   handlers and answers every call — `register` / `replace` (throwing
+ *   `GrantRegistryError`), `freeze`, `get` and `entries`.
+ * - tokenExchangeValidators, federations, federationRedirectPolicies,
+ *   mfaFactors: a Map-backed `NameKeyedCollector`, which is the only registry
+ *   of its kind. Token-exchange validators are contributed by modules
+ *   (`oauth-token-exchange` contributes the self-issued access-token one) and
+ *   read back through the `tokenExchangeValidatorResolver` synthetic key.
+ * - auditHooks, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
+ *   discoveryMetadata: identity-dedup `ListCollector`.
  * - routes: declaration-indexed `RouteCollector`.
  *
  * @internal
@@ -219,34 +220,22 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 // ---------------------------------------------------------------------------
 
 /**
- * Build a `NameKeyedCollector` backed by `GrantRegistry` for `register`,
- * `replace`, and `freeze`, with a shadow `Map` providing `entries()`.
- *
- * Option A pattern (per task spec): shadow Map mirrors every `register` /
- * `replace` call. `entries()` reads from the shadow, not the registry, because
- * `GrantRegistry` does not expose `entries()`. A future cleanup may upstream
- * `entries()` to `GrantRegistry` (Option B).
+ * Build the `grants` `NameKeyedCollector` over one `GrantRegistry`. The
+ * registry is the only store: `entries()` — what `grantHandlerResolver`
+ * lists — reads the same map `get` does.
  *
  * @internal
  */
 function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 	const registry = new GrantRegistry();
-	// Shadow Map: mirrors every register/replace for entries() support.
-	const shadow = new Map<string, GrantHandler>();
 
 	return {
 		kind: "name-keyed" as const,
 		register(name: string, value: GrantHandler): void {
-			// Delegate to GrantRegistry for throw-on-duplicate semantics.
 			registry.register(name, value);
-			// Mirror into shadow (only if registry didn't throw).
-			shadow.set(name, value);
 		},
 		replace(name: string, value: GrantHandler): void {
-			// Delegate to GrantRegistry for throw-on-unknown semantics.
 			registry.replace(name, value);
-			// Mirror into shadow.
-			shadow.set(name, value);
 		},
 		freeze(): void {
 			registry.freeze();
@@ -255,7 +244,7 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 			return registry.get(name);
 		},
 		entries(): IterableIterator<readonly [string, GrantHandler]> {
-			return shadow.entries() as IterableIterator<readonly [string, GrantHandler]>;
+			return registry.entries();
 		},
 	};
 }
@@ -266,11 +255,11 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
  * (e.g. `<MfaFactor>`, `<FederationProvider>`) so the produced collector
  * matches the narrowed `ContributionCollectorMap` slot.
  *
- * Used for `tokenExchangeValidators`, `federations`, and `mfaFactors`.
- * `tokenExchangeValidators` uses this form because `ExchangeTokenValidatorRegistry`
- * lives in a separate package that `core` does not depend on. The Map
- * implementation satisfies the full `NameKeyedCollector` contract including
- * `entries()` without a cross-package import.
+ * Used for `tokenExchangeValidators`, `federations`,
+ * `federationRedirectPolicies` and `mfaFactors`. The Map is the only registry
+ * of each of those kinds, and keeps the whole `NameKeyedCollector` contract:
+ * `register` throws on a duplicate and `replace` on an unknown name, both
+ * throw after `freeze()`, and `entries()` lists in registration order.
  *
  * @internal
  */
@@ -321,7 +310,8 @@ function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
  * so the produced collector matches the narrowed `ContributionCollectorMap`
  * slot.
  *
- * Used for `auditHooks` and `grantPolicyHooks`. The `Set`-based identity
+ * Used for `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
+ * `tokenBindingMechanisms` and `discoveryMetadata`. The `Set`-based identity
  * check silently skips re-registration of the same reference per A2-α §4.5.
  *
  * @internal

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
-import { ChallengeStorageError } from "./errors.mjs";
+import { ChallengeStorageError } from "../single-use/errors.mjs";
 import type { ChallengeCeremony, ChallengeCeremonyOutcome, ChallengeStore } from "./types.mjs";
 
 /**

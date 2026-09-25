@@ -615,7 +615,7 @@ stream — its level is fixed at `info`.
 | `logout_store_unavailable` (error) by `store`; `logout_cascade_operation_failed`, `logout_cascade_cleanup_failed` (warn) | `oauth/src/routes/logout.mts`, `oauth/src/logout/cascadeLogout.mts` | RP-initiated logout is answering `503` because a session store could not be read or the cascade stopped (`store: "logout_cascade"`, `cascadeStep`); the warn lines name each operation that failed |
 | `authorization_grant_store_unavailable`, `session_grant_store_unavailable` (error) by `store` and `step` | `oauth/src/grants/authorization.mts`, `grants/session.mts` | code exchanges or session-grant token requests are answering `503` because a session store or the family store cannot answer |
 | `grant_policy_unavailable` (error) | `core/src/grants/grantPolicy.mts` (every grant through `evaluateGrantPolicy`, webauthn's included), `oauth-token-exchange/src/grant.mts`, `oauth/src/routes/authorize.mts` | the `grantPolicy` hook threw: every grant it gates is answering `503`, and `/authorize` redirects `temporarily_unavailable` |
-| `jwks_unavailable` (error) | `core/src/routes/Jwks.mts` | the JWKS endpoint is answering `503`: the keystore returned no publishable key (`keys: 0`), or could not answer at all (the error's projection) — relying parties cannot fetch a key to verify with |
+| `jwks_unavailable` (error) | `core/src/jwks/router.mts` | the JWKS endpoint is answering `503`: the keystore returned no publishable key (`keys: 0`), or could not answer at all (the error's projection) — relying parties cannot fetch a key to verify with |
 | `userinfo_store_unavailable`, `introspect_store_unavailable` (error) | `oauth/src/routes/userinfo.mts`, `oauth/src/routes.mts` | userinfo or introspection is answering `503` because the refresh-token family store (`store: "refresh_token_family"`) or the session store (`store: "user_session"`) is unreachable |
 | `token_exchange_family_store_unavailable` (error) | `oauth-token-exchange/src/grant.mts` | token exchanges are answering `503` because the refresh-token family store is unreachable; `role` says whether the `subject_token`'s or the `actor_token`'s family could not be read |
 | `revoke_all_for_subject_incomplete`, `revoke_all_watermark_failed`, `revoke_all_list_sids_failed`, `revoke_all_cascade_failed`, `revoke_all_remove_sid_failed` (error) | `core/src/user-sessions/revokeAllForSubject.mts` | a credential change did **not** fully invalidate what was issued. `incomplete` means a store was not wired (composition gap); the others mean a wired store threw (outage — retry) |
@@ -637,6 +637,7 @@ stream — its level is fixed at `info`.
 | `revoke_store_unavailable` (error) | `oauth/src/routes/revoke.mts` | `/oauth/revoke` is answering `503`: a client's revocation was not recorded, so the token it asked to end is still valid until it expires. `store` says whether the access-token denylist or the refresh-token family store failed, and `clientId` whose revocation was lost. A client that ignores the `503` keeps a live token it believes revoked — retries succeed once the store is back |
 | `token_binding_unavailable`, `protected_resource_binding_unavailable` (error) by `mechanism` and `reason` | `core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts` | a token-binding mechanism could not reach a verdict, and requests at `/oauth/token` (`token_binding_unavailable`) or at protected resources (`protected_resource_binding_unavailable`) are answering `503 temporarily_unavailable`. The dispatcher that answers owns the one line, with the mechanism's `reason` and its `cause`'s projection when it gives them. For DPoP: `reason: "replay_store_unavailable"` = the seen-set is unreachable; `reason: "replay_store_fault"` = it answered with its own contract error (a `RangeError` or `expired-at-issue`) — a broken or hand-built seen-set, whose fix is in the composition, not in Redis. These replace DPoP's own `dpop_replay_store_unavailable` / `dpop_replay_store_fault` lines and the dispatchers' former warn lines |
 | `graceful shutdown: drain deadline exceeded, closing remaining connections`, `graceful shutdown: cleanup failed`, `graceful shutdown: cleanup timed out`, `graceful shutdown: server close failed` (error) + non-zero exit | `templates/standalone/src/shutdown.mts` | a replica did not drain within `drainTimeoutMs` (default 10 s), its cleanup did not finish within the allowance (45 s or more with federation grants on — a rotated upstream credential may be unwritten), or it could not release its connections |
+| `adapter_lifecycle_cleanup_failed` (error) with `phase`, `cleanupIndex` and `err` | `core/src/adapters/AdapterFactory.mts` | an adapter's own cleanup — typically the close of a connection its builder opened — threw while `handle.dispose()` drained them (`phase: "dispose"`) or while a failed boot did (`phase: "boot_failure"`). One line per failed cleanup, through the deployment's logger — the `logger` component at dispose, the logger the composition root handed in (bootstrap or override) when boot failed; the standalone passes one — and to stderr only when there is none; the drain goes on to the rest, even when the logger itself throws. A dispose then rejects, which the standalone reports as `graceful shutdown: cleanup failed`; a failed boot rethrows the error that failed it (a `BootError` for every refusal) |
 
 ### Investigate — security signals worth a dashboard and a threshold
 
@@ -829,7 +830,7 @@ bytes each" (`packages/core/src/device-authorization/memory.mts`).
 Core's in-process challenge store and replay seen-set, on a single replica,
 hold their live entries plus at most those that expired since the last sweep:
 each sweeps on its writes, at most once per 1000 writes and once per ten
-seconds (`packages/core/src/challenges/sweep.mts`), so a WebAuthn ceremony
+seconds (`packages/core/src/single-use/sweep.mts`), so a WebAuthn ceremony
 the user abandons, or an options request repeated in a loop, costs an entry
 for its lifetime and not until the process restarts.
 
@@ -917,7 +918,7 @@ is deliberately not offered there.
 `GET /.well-known/jwks.json` (`oauth.jwt.jwksPath` to move it) publishes the
 current key plus every `previousKeys` entry whose `expiresAt` has not passed
 (`getVerificationKeys`, `packages/core/src/keys/KeyStore.mts`). The route
-(`packages/core/src/routes/Jwks.mts`):
+(`packages/core/src/jwks/router.mts`):
 
 - serialises the set **once per key set** and answers with a strong `ETag`
   (SHA-256 of the body); a poller sending `If-None-Match` gets `304` until the

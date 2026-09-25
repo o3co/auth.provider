@@ -325,7 +325,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 		reg.register(makeCleanup(1));
 		reg.register(makeCleanup(2));
 		reg.register(makeCleanup(3));
-		const errors = await reg._drain({ error: () => {} });
+		const errors = await reg._drain({ error: () => {} }, "dispose");
 		expect(order).toEqual([3, 2, 1]);
 		expect(maxConcurrent).toBe(1);
 		expect(errors).toEqual([]);
@@ -333,7 +333,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 
 	it("continues drain on individual cleanup error and aggregates errors", async () => {
 		const ran: string[] = [];
-		const logged: unknown[] = [];
+		const error = vi.fn();
 		const reg = createLifecycleRegistrar();
 		reg.register(async () => {
 			ran.push("first-registered");
@@ -344,17 +344,84 @@ describe("createLifecycleRegistrar (D-5)", () => {
 		reg.register(async () => {
 			ran.push("third-registered");
 		});
-		const errors = await reg._drain({ error: (obj) => logged.push(obj) });
+		const errors = await reg._drain({ error }, "dispose");
 		// LIFO: third runs, then boom (caught), then first.
 		expect(ran).toEqual(["third-registered", "first-registered"]);
 		expect(errors).toHaveLength(1);
 		expect((errors[0] as Error).message).toBe("boom");
-		expect(logged).toHaveLength(1);
+		expect(error).toHaveBeenCalledTimes(1);
+	});
+
+	it("logs a cleanup a real factory's builder registered, when it throws, once at error, object-first with its event name", async () => {
+		// The path every adapter that opens a connection takes: the builder
+		// registers the connection's close on the registrar the factory was
+		// built with, and the drain runs it at dispose.
+		const reg = createLifecycleRegistrar();
+		const factory = createAdapterFactory<MockAdapter>("Mock", { lifecycle: reg });
+		factory.register("closing", (_config, ctx) => {
+			ctx.lifecycle?.register(async () => {
+				throw new Error("close failed", { cause: new Error("socket gone") });
+			});
+			return { name: "closing" };
+		});
+		await factory.create({ type: "closing" });
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+		};
+
+		const errors = await reg._drain(logger, "boot_failure");
+
+		expect(errors).toHaveLength(1);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [fields, event, ...rest] = logger.error.mock.calls[0] as unknown[];
+		expect(event).toBe("adapter_lifecycle_cleanup_failed");
+		expect(rest).toEqual([]);
+		expect(fields).toEqual({
+			phase: "boot_failure",
+			cleanupIndex: 0,
+			err: expect.objectContaining({
+				name: "Error",
+				detail: "close failed",
+				cause: expect.objectContaining({ name: "Error", detail: "socket gone" }),
+			}),
+		});
+		expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
+		for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
+	});
+
+	it("never throws when the logger throws: every remaining cleanup still runs, every error is returned", async () => {
+		const ran: string[] = [];
+		const reg = createLifecycleRegistrar();
+		reg.register(async () => {
+			ran.push("first-registered");
+		});
+		reg.register(async () => {
+			throw new Error("second fails");
+		});
+		reg.register(async () => {
+			throw new Error("third fails");
+		});
+		const error = vi.fn(() => {
+			throw new Error("log sink down");
+		});
+
+		const errors = await reg._drain({ error }, "dispose");
+
+		expect(ran).toEqual(["first-registered"]);
+		expect((errors as Error[]).map((err) => err.message)).toEqual(["third fails", "second fails"]);
+		expect(error).toHaveBeenCalledTimes(2);
 	});
 
 	it("empty registrar drain returns empty error array (no-op)", async () => {
 		const reg = createLifecycleRegistrar();
-		const errors = await reg._drain({ error: () => {} });
+		const errors = await reg._drain({ error: () => {} }, "dispose");
 		expect(errors).toEqual([]);
 	});
 });

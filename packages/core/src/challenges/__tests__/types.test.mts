@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, expectTypeOf, it } from "vitest";
-import type { ChallengeStorageErrorReason } from "../errors.mjs";
+import type { ChallengeStorageErrorReason } from "#/single-use/errors.mjs";
 import type { Challenge, ChallengeStore } from "../types.mjs";
 
 describe("ChallengeStore type contract", () => {

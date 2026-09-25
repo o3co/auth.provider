@@ -34,7 +34,7 @@
  * asks for no more than a negligible chance of collision. 256 leaves room for
  * a prefixed identifier, a hex SHA-512 (128) or a signed nonce, and still
  * caps every record's key. Counted in code units because that is the unit
- * the seen-set's canonical key is measured in (`challenges/canonical-key.mts`),
+ * the seen-set's canonical key is measured in (`single-use/canonical-key.mts`),
  * so the bound is the same number an adapter stores; in UTF-8 it is at most
  * 768 bytes.
  */

@@ -18,11 +18,12 @@
  * boot/__tests__/integration.test.mts — End-to-end integration tests for
  * the A2-β boot planner pipeline (createApp).
  *
- * Covers three end-to-end scenarios per spec §12 + §8.1:
+ * Covers four end-to-end scenarios, the first three per spec §12 + §8.1:
  *   1. Happy boot — multi-module manifest with grants + routes contributions.
  *   2. Spec §12 worked-example failure diagnostic — oauthAuthorizationModule
  *      missing intMissingSlot (test-only slot); BootError shape matches §12 exactly.
  *   3. Reverse-topological cleanup order on dispose (§8.1).
+ *   4. `grantHandlerResolver` lists what the grants registry holds.
  *
  * Per A2-β §12 + §8.1 / Phase 4 Task 10.
  */
@@ -39,7 +40,7 @@ import { BootError } from "../types.mjs";
 // AS-M1 (Phase F F9 PR6): typed GrantHandler stub for the grants
 // contributions. Pre-AS-M1 the inline literal `{ grantType: ... }` worked
 // because the contributes-map placeholder was `unknown`; post-narrow it
-// must satisfy `GrantHandler` (handle / cleanup interface). The result
+// must satisfy `GrantHandler` (the `handle` interface). The result
 // shape mirrors `GrantSuccess` — `status: 200` + a minimal `TokenResponse`
 // with `tag` in `access_token` so pipeline assertions can distinguish
 // stubs. The handler is never invoked; the rest of `TokenResponse` is
@@ -466,5 +467,50 @@ describe("integration — Scenario 3: cleanup runs in reverse-topological order 
 
 		// After dispose: reverse-topological order — C first, then B, then A.
 		expect(order).toEqual(["C", "B", "A"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Scenario 4: the grants collector lists what the registry holds
+// ---------------------------------------------------------------------------
+
+describe("integration — Scenario 4: grantHandlerResolver lists the registered grants", () => {
+	it("in contribution order, an overridden grant in its place, after the registry is frozen", async () => {
+		// `/oauth/token` dispatches through `get`, and `oauth` derives
+		// `grant_types_supported` from `entries()`: the two must read one
+		// registry, whatever a module overrides.
+		const first = fakeGrantHandler("first");
+		const second = fakeGrantHandler("second");
+		const replacement = fakeGrantHandler("replacement");
+		const grantsModule = defineModule({
+			name: "grants",
+			contributes: {
+				grants: {
+					"urn:test:first": () => first,
+					"urn:test:second": () => second,
+				},
+			},
+		});
+		const overridingModule = defineModule({
+			name: "overriding",
+			overrides: {
+				grants: { "urn:test:first": () => replacement },
+			},
+		});
+
+		const handle = await createApp({
+			modules: [grantsModule, overridingModule],
+			bootstrapComponents: minBoot,
+		});
+
+		const resolver = handle.components.grantHandlerResolver;
+		expect(resolver).toBeDefined();
+		expect([...(resolver?.entries() ?? [])]).toEqual([
+			["urn:test:first", replacement],
+			["urn:test:second", second],
+		]);
+		expect(resolver?.get("urn:test:first")).toBe(replacement);
+
+		await handle.dispose();
 	});
 });

@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import { ChallengeStorageError } from "../errors.mjs";
+import { ChallengeStorageError } from "#/single-use/errors.mjs";
 
 describe("ChallengeStorageError", () => {
 	it("carries reason 'duplicate' with default message and no cause own-property", () => {
