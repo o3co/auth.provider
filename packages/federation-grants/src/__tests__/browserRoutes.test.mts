@@ -43,7 +43,7 @@ import {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createFederationGrantBackground } from "#/background.mjs";
+import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
@@ -118,12 +118,14 @@ interface WorldOptions {
 	readonly identityLookup?: FederationGrantBrowserRouterOptions["identityLookup"];
 	/** Replaces the repository whose lookup records into `state.lookups`. */
 	readonly userRepository?: FederationGrantBrowserRouterOptions["userRepository"];
+	/** Replaces the drain registry: a composition's own, which may fail. */
+	readonly background?: FederationGrantBackground;
 }
 
 function world(options: WorldOptions = {}) {
 	const grants = createMemoryFederationGrantStore();
 	const intents = createMemoryFederationGrantIntentStore();
-	const background = createFederationGrantBackground();
+	const background = options.background ?? createFederationGrantBackground();
 	const events: AuditEvent[] = [];
 	const browsers = new Map<string, Browser>();
 	const durable = new Map<string, UserSession>();
@@ -2838,6 +2840,30 @@ describe("the callback — what an outage logs", () => {
 		expect(payloadOf(w.lines, "federation_grants_unexpected_error")).toMatchObject({
 			site: "callback",
 			err: { name: "Error", detail: "injected: configuration unreadable" },
+		});
+	});
+});
+
+describe("the callback, when the composition fails where nothing expected it", () => {
+	it("answers a registry that throws on the unknown-transaction exit a plain 500, logged as unexpected", async () => {
+		// The drain registry is the composition's component: one that throws
+		// when the refusal's audit is handed to it escapes the check-1 exits.
+		const real = createFederationGrantBackground();
+		const w = world({
+			background: {
+				...real,
+				register: () => {
+					throw new Error("registry closed");
+				},
+			},
+		});
+		const response = await callback(w, { state: "never-issued", code: "c" }, "b-1");
+		expect(response.status).toBe(500);
+		isPlain(response);
+		expect(written(await settledLines(w))).toEqual(["error federation_grants_unexpected_error"]);
+		expect(payloadOf(w.lines, "federation_grants_unexpected_error")).toMatchObject({
+			site: "callback",
+			err: { name: "Error", detail: "registry closed" },
 		});
 	});
 });

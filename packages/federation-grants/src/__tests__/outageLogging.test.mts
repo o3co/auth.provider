@@ -595,6 +595,34 @@ describe("the token route — an upstream that is down", () => {
 	});
 });
 
+describe("the token route — a 5xx is never a verdict on the credential", () => {
+	it("answers a 503 whose body says invalid_grant 503 upstream, logged once, and leaves the grant as it was", async () => {
+		const h = harness();
+		await seedExpired(h);
+		h.refresh.mockRejectedValue(
+			Object.assign(new Error("server error"), {
+				name: "ResponseBodyError",
+				status: 503,
+				error: "invalid_grant",
+			}),
+		);
+		const response = await call(h, "token");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "upstream",
+		});
+		expect(written(await settled(h))).toEqual(["error federation_grant_token_unavailable"]);
+		expect(payloadOf(h.lines, "federation_grant_token_unavailable")).toMatchObject({
+			reason: "upstream",
+			step: "upstream",
+			err: { name: "ResponseBodyError", status: 503, error: "invalid_grant" },
+		});
+		// The IdP had an outage; the user is not sent to connect again.
+		expect((await h.store.find(GRANT_ID, h.world.now))?.status).toBe("active");
+	});
+});
+
 describe("the token route — what a refresh that runs out of time logs", () => {
 	it("logs a credential write that hangs as the outage, not answered", async () => {
 		const h = harness({ limits: SHORT });

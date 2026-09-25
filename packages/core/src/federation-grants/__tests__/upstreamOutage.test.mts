@@ -76,6 +76,20 @@ describe("isFederationUpstreamOutage", () => {
 			"a 503 from a deployment's own fetch (npm undici's Response), as openid-client raises it",
 			clientError("OAUTH_RESPONSE_IS_NOT_CONFORM", new ForeignResponse(503)),
 		],
+		...(
+			[
+				"CERT_HAS_EXPIRED",
+				"ERR_TLS_CERT_ALTNAME_INVALID",
+				"ERR_SSL_WRONG_VERSION_NUMBER",
+				"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+				"DEPTH_ZERO_SELF_SIGNED_CERT",
+				"ERR_INVALID_URL",
+				"UND_ERR_CONNECT_TIMEOUT",
+			] as const
+		).map((code) => [
+			`undici's fetch failure over a ${code} cause — the TLS layer, the URL or the socket`,
+			new TypeError("fetch failed", { cause: coded(code) }),
+		]),
 		[
 			"undici's fetch failure over a coded socket error, raised in another realm",
 			runInNewContext(
@@ -134,11 +148,90 @@ describe("isFederationUpstreamOutage", () => {
 		["a thrown plain object that looks like a timeout", { name: "TimeoutError" }],
 		["a thrown plain object that carries a 5xx status", { status: 503 }],
 		[
+			"a TypeError over a cause whose code is no transport's — an adapter's validation error",
+			new TypeError("invalid response", {
+				cause: Object.assign(new Error("the answer is not one"), {
+					code: "OAUTH_INVALID_RESPONSE",
+				}),
+			}),
+		],
+		[
+			"a connection code five causes down, past where the walk looks",
+			new Error("1", {
+				cause: new Error("2", {
+					cause: new Error("3", { cause: new Error("4", { cause: coded("ECONNRESET") }) }),
+				}),
+			}),
+		],
+		[
+			"an Error whose every field throws when read",
+			Object.defineProperties(new Error("hostile"), {
+				name: {
+					get: () => {
+						throw new Error("trap");
+					},
+				},
+				code: {
+					get: () => {
+						throw new Error("trap");
+					},
+				},
+				status: {
+					get: () => {
+						throw new Error("trap");
+					},
+				},
+				cause: {
+					get: () => {
+						throw new Error("trap");
+					},
+				},
+			}),
+		],
+		[
 			"a 404 from a deployment's own fetch",
 			clientError("OAUTH_RESPONSE_IS_NOT_CONFORM", new ForeignResponse(404)),
 		],
 	])("reads %s as no outage", (_label, error) => {
 		expect(isFederationUpstreamOutage(error)).toBe(false);
+	});
+
+	it("follows a connection code four causes down, where the walk still looks", () => {
+		expect(
+			isFederationUpstreamOutage(
+				new Error("1", {
+					cause: new Error("2", { cause: new Error("3", { cause: coded("ECONNRESET") }) }),
+				}),
+			),
+		).toBe(true);
+	});
+
+	it("reads an Error by its tag, and no plain object, where the runtime has no Error.isError (Node 22)", () => {
+		// The engines floor is Node 22, which has no Error.isError: the fallback
+		// is what runs there, and a value whose prototype cannot be read must
+		// not make it throw.
+		const brand = Object.getOwnPropertyDescriptor(Error, "isError");
+		delete (Error as { isError?: unknown }).isError;
+		try {
+			expect(
+				isFederationUpstreamOutage(
+					runInNewContext('Object.assign(new Error("x"), { code: "ECONNRESET" })'),
+				),
+			).toBe(true);
+			expect(isFederationUpstreamOutage(coded("ECONNREFUSED"))).toBe(true);
+			expect(isFederationUpstreamOutage({ code: "ECONNREFUSED" })).toBe(false);
+			const unreadable = new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("trap");
+					},
+				},
+			);
+			expect(isFederationUpstreamOutage(unreadable)).toBe(false);
+		} finally {
+			if (brand) Object.defineProperty(Error, "isError", brand);
+		}
 	});
 
 	it("never throws on what it is asked about", () => {

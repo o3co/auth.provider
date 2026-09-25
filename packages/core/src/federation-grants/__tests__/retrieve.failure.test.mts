@@ -314,6 +314,51 @@ describe("retrieveFederationGrantToken — the cause a 503 was turned from", () 
 		},
 	);
 
+	it.each([
+		["invalid_grant", "would have marked the grant for the user to connect again"],
+		["consent_required", "would have stamped the user's absence"],
+	])("answers a 5xx whose body says %s as the outage it is — it %s", async (code) => {
+		await h.seed();
+		setNow(at(HOUR));
+		const down = Object.assign(new Error("server error"), {
+			name: "ResponseBodyError",
+			status: 503,
+			error: code,
+		});
+		h.refresh.mockRejectedValue(down);
+		const result = await settled();
+		expect(result).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+		expect(failureOf(result)).toMatchObject({ during: "upstream", error: down });
+		const grant = await h.store.find("g-1", at(HOUR));
+		// Not a verdict on the credential: nothing asks for the user.
+		expect(grant?.status).toBe("active");
+		expect(grant?.refreshFailure).toMatchObject({ kind: "unavailable" });
+	});
+
+	it("tells a write that threw something that is not an error, or an error that cannot be read, as a kind of its own", async () => {
+		await h.seed();
+		setNow(at(HOUR));
+		h.refresh.mockResolvedValue(refreshed("1", at(HOUR)));
+		const unreadable = Object.defineProperty(new Error("hostile"), "code", {
+			get() {
+				throw new Error("trap");
+			},
+		});
+		let attempt = 0;
+		vi.spyOn(h.store, "replaceCredentials").mockImplementation(async () => {
+			attempt += 1;
+			throw attempt === 1 ? "a string" : unreadable;
+		});
+		const result = await settled();
+		expect(attempt).toBeGreaterThan(2);
+		const writes = reported.filter((failure) => failure.during === "write");
+		expect(writes.map((failure) => [failure.error, failure.attempts])).toEqual([
+			["a string", undefined],
+			[unreadable, attempt - 1],
+		]);
+		expect(failureOf(result)).toBe(writes[1]);
+	});
+
 	it("carries nothing when the upstream did not answer before the caller stopped waiting", async () => {
 		await h.seed();
 		setNow(at(HOUR));

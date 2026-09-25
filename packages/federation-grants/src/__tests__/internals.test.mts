@@ -287,6 +287,10 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 		});
 
 	it.each([
+		// Not an Error at all: what a middleware passing `next("…")`, or a
+		// handler throwing a value, would hand the last handlers.
+		["a thrown string", () => "something failed"],
+		["a thrown null", () => null],
 		["a `name` getter that throws", () => throwingOn(new Error("m"), "name")],
 		["a `status` getter that throws", () => throwingOn(new Error("m"), "status")],
 		["a URIError whose `status` getter throws", () => throwingOn(new URIError("m"), "status")],
