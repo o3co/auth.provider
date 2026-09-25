@@ -130,8 +130,9 @@ export interface DPoPMechanismOptions {
 	 * second — a real, if narrow, replay window.
 	 *
 	 * The defaults (60 / 300) satisfy this with margin. A mechanism
-	 * constructed below the requirement logs a warning
-	 * (`reason: "replay_ttl_below_iat_window"`, carrying `requiredTtlSeconds`).
+	 * constructed below the requirement logs `dpop_replay_ttl_below_window`
+	 * (warn, carrying `iatWindowSeconds`, `replayTtlSeconds` and
+	 * `requiredTtlSeconds`).
 	 */
 	readonly replayTtlSeconds?: number;
 	readonly logger?: Logger;
@@ -275,14 +276,11 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 	// would break deployments that are running today.
 	const requiredTtlSeconds = iatWindowSeconds * 2 + 1;
 	if (replayTtlSeconds < requiredTtlSeconds) {
+		// A proof can outlive its replay entry and be replayed while still
+		// inside its acceptance window: `requiredTtlSeconds` is 2W + 1.
 		logger?.warn(
-			{
-				reason: "replay_ttl_below_iat_window",
-				iatWindowSeconds,
-				replayTtlSeconds,
-				requiredTtlSeconds,
-			},
-			"replayTtlSeconds is below 2 × iatWindowSeconds + 1 (requiredTtlSeconds); a proof can outlive its replay entry and be replayed while still inside its acceptance window",
+			{ iatWindowSeconds, replayTtlSeconds, requiredTtlSeconds },
+			"dpop_replay_ttl_below_window",
 		);
 	}
 

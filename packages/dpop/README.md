@@ -183,7 +183,8 @@ So of two requests carrying one proof, exactly one is accepted.
 - **How long.** `replay-store-ttl-seconds` from the moment the proof is first
   accepted, which must be at least `2 × iat-window-seconds + 1` to outlive the
   proof's acceptance window; below that the mechanism logs
-  `replay_ttl_below_iat_window` (derivation: `replayTtlSeconds` in
+  `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`,
+  `replayTtlSeconds`, `requiredTtlSeconds`; derivation: `replayTtlSeconds` in
   [`src/verifier.mts`](src/verifier.mts)). A value that is not a positive
   finite number is refused when the mechanism is built.
 - **When the store fails.** A seen-set that cannot be reached refuses the
