@@ -730,6 +730,131 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
+	// The upstream end-session call is handed the caller's
+	// post_logout_redirect_uri only once it matched the client's registered
+	// list: an adapter for an IdP that publishes no end-session endpoint
+	// (Google, GitHub, Apple) redirects straight to what it is handed.
+	describe("the post_logout_redirect_uri the upstream end-session call is handed", () => {
+		const REGISTERED = "https://rp.example/logged-out";
+
+		function buildWithUpstream(opts: BuildAppOpts = {}) {
+			const endSession = vi.fn().mockResolvedValue({
+				url: new URL("https://accounts.google.com/Logout"),
+				method: "GET",
+			});
+			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
+			const app = buildApp({
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn(async () => ["google"]),
+				}),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [REGISTERED],
+					}),
+				}),
+				...opts,
+			});
+			return { app, endSession };
+		}
+
+		it("is none when the client has not registered it", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			const res = await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: "https://evil.example/landing",
+				state: "s-1",
+			});
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledOnce();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is none when the client is not known", async () => {
+			const { app, endSession } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById: vi.fn().mockResolvedValue(null) }),
+			});
+
+			await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is the registered one when it matches exactly", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: REGISTERED,
+				state: "s-1",
+			});
+
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: REGISTERED, state: "s-1" }),
+			);
+		});
+
+		it("asks the client repository nothing when the request names no post_logout_redirect_uri", async () => {
+			const findById = vi.fn().mockRejectedValue(storeReplyError());
+			const { app, endSession } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById }),
+			});
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(303);
+			expect(findById).not.toHaveBeenCalled();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("answers 503 before anything is logged out when the client repository cannot answer", async () => {
+			const logger = createMockLogger();
+			const sessionStore = makeSessionStore();
+			const refreshFamilyRevocation = makeFamilyRevocation();
+			const { app, endSession } = buildWithUpstream({
+				sessionStore,
+				refreshFamilyRevocation,
+				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
+				logger,
+			});
+
+			const res = await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "client repository unavailable",
+			});
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "logout",
+				step: "find",
+				clientId: "client-1",
+			});
+			// Nothing ran, so a retry is the same request.
+			expect(endSession).not.toHaveBeenCalled();
+			expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
+			expect(sessionStore.delete).not.toHaveBeenCalled();
+		});
+	});
+
 	describe("id_token_hint missing entirely", () => {
 		it("returns 400 invalid_request", async () => {
 			const app = buildApp();
@@ -1200,6 +1325,29 @@ describe("GET /oauth/logout", () => {
 		expect(res.text).toContain('name="state"');
 	});
 
+	it("answers 503 for a stale-iat confirm page when the client repository cannot answer", async () => {
+		// The page may carry the URI only once it is known to be registered;
+		// an outage is not a verdict that it is not.
+		const logger = createMockLogger();
+		const sessionStore = makeSessionStore();
+		const clientRepo = makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) });
+		const app = buildApp({ sessionStore, clientRepo, logger });
+
+		const res = await getLogout(app, {
+			id_token_hint: await mintOldIdToken(),
+			post_logout_redirect_uri: "https://rp.example/logged-out",
+		});
+
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expectOutageLine(logger, "client_repository_unavailable", {
+			site: "logout",
+			step: "find",
+			clientId: "client-1",
+		});
+		expect(sessionStore.delete).not.toHaveBeenCalled();
+	});
+
 	it("HTML-escapes hidden input values to prevent attribute injection", async () => {
 		// state may carry attacker-influenced characters in the worst case;
 		// the GET-confirm path echoes it into an HTML attribute so it must
@@ -1395,6 +1543,108 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(res.headers.location).toContain("accounts.google.com");
 			expect(mockProvider.endSession).toHaveBeenCalledOnce();
 			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+	});
+
+	// The same rule as RP-initiated logout, for the client the access token
+	// was issued to (`azp`): the upstream is handed the caller's
+	// post_logout_redirect_uri only once that client has registered it.
+	describe("the post_logout_redirect_uri the upstream end-session call is handed", () => {
+		const REGISTERED = "https://rp.example/logged-out";
+
+		function buildWithUpstream(opts: BuildAppOpts = {}) {
+			const endSession = vi.fn().mockResolvedValue({
+				url: new URL("https://accounts.google.com/Logout"),
+				method: "GET",
+			});
+			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn(async () => googleFederations),
+			});
+			const app = buildFedLogoutApp({
+				fedTokenStore,
+				sessionFederationIndex,
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [REGISTERED],
+					}),
+				}),
+				...opts,
+			});
+			return { app, endSession, fedTokenStore, sessionFederationIndex };
+		}
+
+		it("is none when the token's client has not registered it", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: "https://evil.example/landing",
+				state: "s-1",
+			});
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledOnce();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is none when the token names no client", async () => {
+			const findById = vi.fn();
+			const { app, endSession } = buildWithUpstream({ clientRepo: makeClientRepo({ findById }) });
+
+			await postFedLogout(app, "google", await mintAccessToken(), {
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(findById).not.toHaveBeenCalled();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is the registered one when it matches exactly", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: REGISTERED,
+				state: "s-1",
+			});
+
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: REGISTERED, state: "s-1" }),
+			);
+		});
+
+		it("answers 503 before the federation is disconnected when the client repository cannot answer", async () => {
+			const logger = createMockLogger();
+			const { app, endSession, fedTokenStore, sessionFederationIndex } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
+				logger,
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "client repository unavailable",
+			});
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "federation_logout",
+				step: "find",
+				clientId: "client-1",
+			});
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
+			expect(endSession).not.toHaveBeenCalled();
 		});
 	});
 
