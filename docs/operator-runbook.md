@@ -789,6 +789,13 @@ BigQuery schema, a Datadog facet) never drops an event for disagreeing:
 `AuditEventDetails` (`packages/core/src/audit/types.mts`) types both keys, and
 the inventory's drift test reads every emission for them.
 
+An event's `ip` is always an IPv4 or IPv6 address (an IPv6 zone stripped), or
+absent. An event with no `ip` means the request's address was not an address:
+behind `trust proxy`, `req.ip` came from an `X-Forwarded-For` that held
+something else — check that `HTTP_TRUST_PROXY` trusts only the hop that sets
+the header. Its `userAgent` is the header sanitised and capped at 200
+characters.
+
 ---
 
 ## 5. Redis

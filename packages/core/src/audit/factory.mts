@@ -37,12 +37,16 @@ export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
  * (`net.isIP`), an IPv6 `%zone` stripped, or nothing. Behind `trust proxy`,
  * `req.ip` is what the caller wrote in `X-Forwarded-For`, and an SIEM that
  * maps the field as an IP type rejects the whole event over a value that is
- * not one — so `X-Forwarded-For: x` must not reach it. The zone goes because
- * it is the caller's text too (`fe80::1%<anything>`) and names an interface
- * on some other host. A value that is not an address is left out rather than
- * kept elsewhere: the event keeps its documented shape, and the proxy that
- * set the header is the one place its raw value can be trusted and is
- * logged.
+ * not one — so `X-Forwarded-For: x` must not reach it. The zone goes too,
+ * whichever way it arrived. Read from `X-Forwarded-For` it is the caller's
+ * text (`fe80::1%<anything>`). Read from the socket, with no proxy trusted,
+ * it names one of this host's own interfaces (`fe80::1%eth0`): true, but it
+ * identifies nothing about the client to a system that is not this host,
+ * and an IP-typed field refuses it. A value that is not an address is left
+ * out rather than kept elsewhere: the event keeps its documented shape, and
+ * the proxy that set the header is the one place its raw value can be
+ * trusted and is logged. An event with no `ip` therefore says the request's
+ * address was not an address — check `trust proxy`.
  */
 const auditedIp = (value: unknown): string | undefined => {
 	if (typeof value !== "string") return undefined;
