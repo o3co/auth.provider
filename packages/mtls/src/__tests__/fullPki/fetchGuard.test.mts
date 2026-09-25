@@ -250,6 +250,39 @@ describe("guarded fetch — response limits", () => {
 		});
 	});
 
+	it.each([
+		["an HTTP error", { status: 503 }, {}, "http_error"],
+		[
+			"an unexpected Content-Type",
+			{ status: 200, headers: { "content-type": "text/html" } },
+			{ expectContentType: "application/ocsp-response" },
+			"unexpected_content_type",
+		],
+	] as const)("releases the body it will not read: %s", async (_label, init, request, reason) => {
+		// A refusal made before the body is read must cancel it, or the
+		// connection stays held until the peer gives up.
+		let cancelled = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				controller.enqueue(new Uint8Array(16));
+			},
+			cancel() {
+				cancelled = true;
+			},
+		});
+		const fetchImpl = vi.fn(async () => new Response(body, init));
+		const get = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect(await get("http://crl.example.test/a.crl", request)).toMatchObject({
+			ok: false,
+			reason,
+		});
+		expect(cancelled).toBe(true);
+	});
+
 	it("times out a responder that never answers", async () => {
 		const fetchImpl = vi.fn(
 			(_url: unknown, init: RequestInit) =>
