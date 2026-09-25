@@ -148,8 +148,9 @@ export const checkWithFailMode = async (
 		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
 		// Behind `trust proxy`, `ip` is what the caller wrote in
-		// X-Forwarded-For: on the line sanitised and capped. The audit event is
-		// handed it raw — `emitAuditEvent` bounds it the same way.
+		// X-Forwarded-For: on the line, sanitised and capped, as claimed. The
+		// audit event is handed it raw — `emitAuditEvent` keeps it only if it
+		// is an address, so a sink never gets `"unknown"` or a spoofed name.
 		logger.error(
 			{ error: reported, mode: failMode, tag, ip: auditErrorText(ip) },
 			failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",

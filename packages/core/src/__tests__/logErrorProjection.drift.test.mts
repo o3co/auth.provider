@@ -110,7 +110,8 @@
  * `ip: req.ip` and `userAgent: req.get("user-agent")` directly in the event
  * `emitAuditEvent(...)` is handed (not nested in `details`): core's
  * `recordAuditEvent`, which `emitAuditEvent` and every other built-in
- * emitter hand their events to, sanitises and caps those two fields itself,
+ * emitter hand their events to, bounds those two fields itself (`ip` an
+ * address or nothing, `userAgent` sanitised and capped),
  * and the fifth rule pins that nothing else writes a sink. What it does not
  * see, and each site's own tests pin instead: a request value read into a
  * name first (`const name = req.params.name`, the rate-limit guard's `ip`),
