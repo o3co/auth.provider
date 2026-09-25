@@ -81,7 +81,10 @@
  * `unavailable`, which core's dispatcher answers 503 and logs once. Anything
  * else is the certificate's own shape, a verdict, refused and logged here as
  * before. A verdict anywhere on the path wins over an outage: the outage is
- * held until every certificate has been judged.
+ * held until every certificate has been judged, and then it is the whole
+ * path's — one refusal whose cause names every source that could not be
+ * used, for every certificate on the path, so an operator sees the next
+ * source down before fixing the first.
  *
  * The ordering — validate, then fetch — is a security property, not an
  * optimisation. A distribution point is a URL inside a certificate, and
@@ -114,10 +117,15 @@
  * has said nothing, and the `unknown` stands. A *revoked* from either source
  * wins; a certificate is unavailable when both sources are, or when the
  * responder said `unknown` and the CRL did not list it. The fallback is logged
- * when a responder was actually asked and failed and the CRL then answered,
- * so an OCSP outage is visible even while the CRL keeps revocation checking
- * alive. When the CRL does not answer either, the one line is the
- * unavailability's — the dispatcher's outage line under `"reject"`, the
+ * when a responder was actually asked and failed, the CRL then answered, and
+ * the request was served on that answer, so an OCSP outage is visible even
+ * while the CRL keeps revocation checking alive. `decide` hands the notice
+ * back rather than writing it, because whether the request is served is the
+ * whole path's to say: it is written once every certificate has passed. A
+ * path refused for another certificate's outage names the failed responder
+ * among the outage's members instead, and a path refused as a verdict has
+ * that verdict's lines. When the CRL does not answer either, the one line is
+ * the unavailability's — the dispatcher's outage line under `"reject"`, the
  * allowed line under `"allow"` — naming both sources and carrying both
  * errors (an AggregateError, OCSP's first).
  */
@@ -214,7 +222,8 @@ export type FullPkiResult =
 			 * shape"). The mechanism refuses it `unavailable` — `503` from the
 			 * dispatcher, which writes its one line — and this validator writes
 			 * none. `cause` is then an `MtlsRevocationUnavailableError`, one
-			 * member per source that could not be used.
+			 * member per source that could not be used, for every certificate on
+			 * the path.
 			 */
 			readonly outage?: true;
 	  };
@@ -245,6 +254,13 @@ type RevocationOutcome =
 			readonly kind: "determined";
 			/** CRL distribution points that could not be used, for the per-point strictness (#446). */
 			readonly unavailable: readonly CrlPointUnavailable[];
+			/**
+			 * Under `"both"`, the responder that was asked and failed before the
+			 * CRL's answer was served. Written as `mtls_revocation_ocsp_fallback`
+			 * only once the whole path has passed; folded into an outage's
+			 * members when another certificate's status could not be determined.
+			 */
+			readonly fallback?: FallbackNotice;
 	  }
 	| {
 			readonly kind: "unavailable";
@@ -267,6 +283,14 @@ interface SourceFailure {
 	readonly cause?: unknown;
 }
 
+/** The OCSP failure a certificate's CRL answer was served over, under `"both"`. */
+interface FallbackNotice {
+	readonly reason: string;
+	readonly detail: string;
+	readonly cause?: unknown;
+	readonly failures: readonly SourceFailure[];
+}
+
 /** A CRL distribution point that could not be used, as a {@link SourceFailure}. */
 const pointFailure = (point: CrlPointUnavailable): SourceFailure => ({
 	source: "crl",
@@ -276,21 +300,28 @@ const pointFailure = (point: CrlPointUnavailable): SourceFailure => ({
 	...withCause(point.cause),
 });
 
+/** A source that could not be used, and the certificate it was asked about. */
+interface OutageMember {
+	readonly subject: string;
+	readonly failure: SourceFailure;
+}
+
 /**
  * The cause of an outage refusal: one short error per source that could not
- * be used, the certificate named last — so a log line's cap on a projected
- * message cuts no source's account.
+ * be used, each naming its certificate last — so a log line's cap on a
+ * projected message cuts no source's account — in path order, leaf first.
+ * `subjects` are the certificates whose status could not be determined.
  */
 const revocationUnavailable = (
-	subject: string,
-	failures: readonly SourceFailure[],
+	subjects: readonly string[],
+	members: readonly OutageMember[],
 ): MtlsRevocationUnavailableError =>
 	new MtlsRevocationUnavailableError(
-		subject,
-		failures.map(
-			(failure) =>
+		subjects,
+		members.map(
+			({ subject, failure }) =>
 				new MtlsRevocationSourceError(
-					failure,
+					{ ...failure, subject },
 					failure.cause !== undefined ? { cause: failure.cause } : undefined,
 				),
 		),
@@ -619,21 +650,24 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				(crl.unavailable.length === 0 ||
 					("onUnavailable" in revocation && revocation.onUnavailable === "allow")));
 		if (served) {
-			// A degraded request, served. The responder that was asked and did
-			// not answer is reported here, so an OCSP outage stays visible while
-			// the CRL carries on. A certificate that names no responder is a
+			// A degraded answer. The responder that was asked and did not answer
+			// is handed back as a notice, so an OCSP outage stays visible while
+			// the CRL carries on — written by `validate` once the whole path has
+			// passed, since a request refused for another certificate was not
+			// served on this fallback. A revoked certificate is a verdict and has
+			// the verdict's lines. A certificate that names no responder is a
 			// normal shape under "both" — a CA that publishes only CRLs for some
-			// of its certificates — not an outage, and has no line.
-			if (ocsp.reason !== "no_responder") {
-				options.logger?.warn(
-					{
-						subject: toNode(certificate).subject,
+			// of its certificates — not an outage, and has no notice.
+			if (crl.kind === "determined" && ocsp.reason !== "no_responder") {
+				return {
+					...crl,
+					fallback: {
 						reason: ocsp.reason,
 						detail: ocsp.detail,
-						...errOf(ocsp.cause),
+						...withCause(ocsp.cause),
+						failures: ocsp.failures,
 					},
-					"mtls_revocation_ocsp_fallback",
-				);
+				};
 			}
 			return crl;
 		}
@@ -835,9 +869,17 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// is the server's, answered 503, and it is held until every
 			// certificate has been judged: a certificate on the path that is
 			// revoked, or whose status cannot be determined for a reason of its
-			// own, is a verdict a retry would not change, and it wins. The first
-			// outage is returned only when nothing else refused.
-			let outage: FullPkiResult | undefined;
+			// own, is a verdict a retry would not change, and it wins. When
+			// nothing else refused, the outage is returned for the whole path:
+			// every certificate whose status could not be determined, and every
+			// source that could not be used — a responder the CRL was served over
+			// included — in path order.
+			const outages: { readonly subject: string; readonly account: string }[] = [];
+			const members: OutageMember[] = [];
+			const memberOf =
+				(subject: string) =>
+				(failure: SourceFailure): OutageMember => ({ subject, failure });
+			const notices: { readonly subject: string; readonly notice: FallbackNotice }[] = [];
 			for (const [index, certificate] of subjects.entries()) {
 				const outcome = outcomes[index] as RevocationOutcome;
 
@@ -857,14 +899,9 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					const subject = toNode(certificate).subject;
 					if (revocation.onUnavailable === "reject" && outcome.outage) {
 						// Not logged here: the dispatcher that answers the 503 writes the
-						// outage's one line, with this detail and cause.
-						outage ??= {
-							ok: false,
-							step: "revocation status unavailable",
-							detail: `${subject}: ${outcome.reason} — ${outcome.detail}`,
-							cause: revocationUnavailable(subject, outcome.failures),
-							outage: true,
-						};
+						// outage's one line, with the cause built below.
+						outages.push({ subject, account: `${outcome.reason} — ${outcome.detail}` });
+						members.push(...outcome.failures.map(memberOf(subject)));
 						continue;
 					}
 					if (revocation.onUnavailable === "reject") {
@@ -890,6 +927,16 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					continue;
 				}
 
+				// Served on the CRL over a responder that failed: the notice waits
+				// for the path's result — written if the path passes, a member of
+				// the outage if another certificate's status could not be
+				// determined, nothing beside a verdict's own lines.
+				if (outcome.fallback !== undefined) {
+					const subject = toNode(certificate).subject;
+					notices.push({ subject, notice: outcome.fallback });
+					members.push(...outcome.fallback.failures.map(memberOf(subject)));
+				}
+
 				// Only a certificate absent from every CRL that was obtained is
 				// subject to the gap. A certificate may name several distribution
 				// points, and the resolver reports the ones it could not use —
@@ -913,13 +960,8 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 						revocation.onUnavailable === "reject" &&
 						outcome.unavailable.every((point) => point.outage)
 					) {
-						outage ??= {
-							ok: false,
-							step: "revocation status unavailable",
-							detail: `${subject}: ${last.reason} — ${detail}`,
-							cause: revocationUnavailable(subject, outcome.unavailable.map(pointFailure)),
-							outage: true,
-						};
+						outages.push({ subject, account: `${last.reason} — ${detail}` });
+						members.push(...outcome.unavailable.map(pointFailure).map(memberOf(subject)));
 						continue;
 					}
 					if (revocation.onUnavailable === "reject") {
@@ -941,7 +983,27 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				}
 			}
 
-			return outage ?? { ok: true };
+			if (outages.length > 0) {
+				return {
+					ok: false,
+					step: "revocation status unavailable",
+					detail: outages.map(({ subject, account }) => `${subject}: ${account}`).join("; "),
+					cause: revocationUnavailable(
+						outages.map(({ subject }) => subject),
+						members,
+					),
+					outage: true,
+				};
+			}
+			// The path passed: each certificate whose CRL was served over a
+			// failed responder is a request served on the fallback.
+			for (const { subject, notice } of notices) {
+				options.logger?.warn(
+					{ subject, reason: notice.reason, detail: notice.detail, ...errOf(notice.cause) },
+					"mtls_revocation_ocsp_fallback",
+				);
+			}
+			return { ok: true };
 		},
 	};
 };

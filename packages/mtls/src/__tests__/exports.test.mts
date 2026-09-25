@@ -33,7 +33,10 @@ describe("@o3co/auth-provider-mtls exports", () => {
 			detail: "network_error (ECONNREFUSED)",
 			subject: "CN=client",
 		});
-		const cause = new mtls.MtlsRevocationUnavailableError(["CN=client", "CN=Intermediate"], [member]);
+		const cause = new mtls.MtlsRevocationUnavailableError(
+			["CN=client", "CN=Intermediate"],
+			[member],
+		);
 
 		expect(cause).toBeInstanceOf(AggregateError);
 		expect(cause.errors).toEqual([member]);

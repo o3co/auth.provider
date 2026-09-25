@@ -103,16 +103,20 @@ export class MtlsError extends Error {
 /**
  * One revocation source — a CRL distribution point or an OCSP responder — that
  * could not be used, as a member of an {@link MtlsRevocationUnavailableError}:
- * `<source> <url>: <reason> — <detail>`, all this package's own words, with the
- * library's error, when one threw, as its `cause`. One error per source, so a
- * log line's cap on a projected message (core's `loggableError`, 256
- * characters) cuts no other source's account.
+ * `<source> <url>: <reason> — <detail>; for <subject>`, all this package's own
+ * words, with the library's error, when one threw, as its `cause`. One error
+ * per source, so a log line's cap on a projected message (core's
+ * `loggableError`, 256 characters) cuts no other source's account; the
+ * certificate it was asked about comes last, so a long subject is what the
+ * cap cuts, never the URL or the reason.
  */
 export class MtlsRevocationSourceError extends Error {
 	readonly source: "crl" | "ocsp";
 	readonly url?: string;
 	/** The source's reason code (`fetch_failed`, `unparseable`, `stale`, …), which a projection keeps. */
 	readonly reason: string;
+	/** The subject of the certificate this source was asked about. */
+	readonly subject: string;
 
 	constructor(
 		failure: {
@@ -120,31 +124,42 @@ export class MtlsRevocationSourceError extends Error {
 			readonly url?: string;
 			readonly reason: string;
 			readonly detail: string;
+			readonly subject: string;
 		},
 		options?: ErrorOptions,
 	) {
 		super(
-			`${failure.source}${failure.url !== undefined ? ` ${failure.url}` : ""}: ${failure.reason} — ${failure.detail}`,
+			`${failure.source}${failure.url !== undefined ? ` ${failure.url}` : ""}: ${failure.reason} — ${failure.detail}; for ${failure.subject}`,
 			options,
 		);
 		this.name = "MtlsRevocationSourceError";
 		this.source = failure.source;
 		if (failure.url !== undefined) this.url = failure.url;
 		this.reason = failure.reason;
+		this.subject = failure.subject;
 	}
 }
 
 /**
  * The cause of a `revocation_unavailable` refusal: an AggregateError whose
  * members are the {@link MtlsRevocationSourceError}s — one per source that
- * could not be used — and whose own message is short, naming the certificate
- * last. The dispatcher's outage line carries its projection: the message,
- * and each member (the first five) with its library error.
+ * could not be used, for every certificate on the path, leaf first and each
+ * certificate's OCSP responders before its CRL distribution points — and
+ * whose own message is short, naming each certificate whose status could not
+ * be determined. A certificate the CRL decided under `revocation.mode =
+ * "both"` after its responder failed has its responder among the members
+ * too: that failure is part of the same outage. The dispatcher's outage line
+ * carries its projection: the message, and the first five members with their
+ * library errors, the rest counted in `aggregateErrorsOmitted`.
  */
 export class MtlsRevocationUnavailableError extends AggregateError {
-	constructor(subject: string, sources: readonly MtlsRevocationSourceError[]) {
-		super(sources, `revocation status could not be determined for ${subject}`);
+	/** The subjects of the certificates whose status could not be determined, leaf first. */
+	readonly subjects: readonly string[];
+
+	constructor(subjects: readonly string[], sources: readonly MtlsRevocationSourceError[]) {
+		super(sources, `revocation status could not be determined for ${subjects.join("; ")}`);
 		this.name = "MtlsRevocationUnavailableError";
+		this.subjects = subjects;
 	}
 }
 
