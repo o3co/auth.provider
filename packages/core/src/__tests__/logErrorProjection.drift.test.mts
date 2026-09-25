@@ -489,9 +489,10 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
  * quoted input, a Redis reply's arguments and a thrown string there.
  *
  * Flagged, for a name the file binds as a caught error: `String(x)`,
- * `JSON.stringify(x)`, `x.message`, `x.stack` and `x.toString()` (optionally
- * chained), `"…" + x` and `x + "…"`, and — inside a template's `${…}` — the
- * error itself. Not flagged: `x` as a value elsewhere (`{ cause: x }`,
+ * `JSON.stringify(x)`, `inspect(x)` / `util.inspect(x, …)`, `x.message`,
+ * `x.stack` and `x.toString()` (optionally chained, and through a chain of
+ * casts: `(x as Error).message`), `"…" + x` and `x + "…"`, and — inside a
+ * template's `${…}` — the error itself. Not flagged: `x` as a value elsewhere (`{ cause: x }`,
  * `originalError: x`), a field of it that is not its text
  * (`x.issues.length`, `x.code`), `x` handed to the rules that name an error
  * without its text (`failureSummary`, `failureDetail`, `uncappedDetail`,
@@ -512,7 +513,17 @@ const TEXTLESS_NAMINGS = ["failureSummary", "failureDetail", "uncappedDetail", "
 function flattenedInto(code: string, templates: readonly string[], name: string): boolean {
 	const n = name.replace(/\$/g, "\\$");
 	const text = new RegExp(
-		String.raw`\bString\(\s*${n}\s*\)|\bJSON\.stringify\(\s*${n}\s*[,)]|(?<![\w$.])${n}\s*(?:\?\.|\.)\s*(?:message|stack|toString)\b|""\s*\+\s*${n}(?![\w$])|(?<![\w$.])${n}\s*\+\s*""`,
+		[
+			String.raw`\bString\(\s*${n}\s*\)`,
+			String.raw`\bJSON\.stringify\(\s*${n}\s*[,)]`,
+			// `inspect(x)`, `util.inspect(x, …)`: the whole error, printed.
+			String.raw`\binspect\(\s*${n}\s*[,)]`,
+			// `x.message`, and the same read through a chain of casts:
+			// `(x as Error).message`, `(x as unknown as Error).stack`.
+			String.raw`(?:(?<![\w$.])${n}|\(\s*${n}(?:\s+as\s+[\w$.<>[\]]+)+\s*\))\s*(?:\?\.|\.)\s*(?:message|stack|toString)\b`,
+			String.raw`""\s*\+\s*${n}(?![\w$])`,
+			String.raw`(?<![\w$.])${n}\s*\+\s*""`,
+		].join("|"),
 	);
 	if (text.test(code)) return true;
 	// The error itself — not a field read off it — in a template's `${…}`.
