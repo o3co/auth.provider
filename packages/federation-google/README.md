@@ -234,7 +234,8 @@ a query-parameter allowlist, or a front end that relays only `code` and
   Google publishes no `end_session_endpoint`. With `endSessionEndpoint`
   configured, that URL with `id_token_hint`, `post_logout_redirect_uri` and
   `state`; otherwise `postLogoutRedirectUri`, and without one
-  `https://accounts.google.com/Logout`, with `state`. An unparsable URL throws.
+  `https://accounts.google.com/Logout`, with `state`. An unparsable URL throws;
+  the message names the field and quotes no value it was handed.
   Redirecting straight to `postLogoutRedirectUri` is safe because the caller
   hands only a URI it has matched against the client's registered
   `postLogoutRedirectUris`, or none — core's `EndSessionRequest` states the
@@ -257,7 +258,8 @@ Defined in [`src/google.mts`](src/google.mts), exported from
 
 | Test file | Pins |
 | --- | --- |
-| [`google.test.mts`](src/__tests__/google.test.mts) | the authorization request, the nonce requirement, the UserInfo `sub` binding, the profile, refresh and `mapClaims` (`endSession` has no test here) |
+| [`google.test.mts`](src/__tests__/google.test.mts) | the authorization request, the nonce requirement, the UserInfo `sub` binding, the profile, refresh and `mapClaims` |
+| [`google.end-session.test.mts`](src/__tests__/google.end-session.test.mts) | `endSession`: a configured endpoint, the handed `postLogoutRedirectUri`, Google's logout page, and a refusal that quotes nothing it was handed |
 | [`google.consent.test.mts`](src/__tests__/google.consent.test.mts) | that a returning user's sign-in yields a refresh token, `prompt=consent` beside `access_type=offline`, and `accessType` |
 | [`google.signature.test.mts`](src/__tests__/google.signature.test.mts) | that the id_token's signature is verified against the JWKS |
 | [`google.token-snapshot.test.mts`](src/__tests__/google.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |

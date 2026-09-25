@@ -318,8 +318,11 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			try {
 				url = new URL(base);
 			} catch {
+				// Named, not quoted: the message reaches a log line as the error's
+				// `detail`, and the value is not this adapter's text. (The fallback
+				// above is always a URL, so only a handed value lands here.)
 				throw new Error(
-					`Google federation "google" received an invalid postLogoutRedirectUri: ${base}`,
+					'Google federation "google" received an invalid postLogoutRedirectUri: not a URL',
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);

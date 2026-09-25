@@ -500,8 +500,10 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			try {
 				url = new URL(req.postLogoutRedirectUri);
 			} catch {
+				// Named, not quoted: the message reaches a log line as the error's
+				// `detail`, and the value is not this adapter's text.
 				throw new Error(
-					`Apple federation "apple" received an invalid postLogoutRedirectUri: ${req.postLogoutRedirectUri}`,
+					'Apple federation "apple" received an invalid postLogoutRedirectUri: not a URL',
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);
