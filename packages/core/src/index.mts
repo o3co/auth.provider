@@ -224,6 +224,9 @@ export type {
 	SupportsLock,
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
+// Whether a failed upstream call is an outage: the classifier reads it before
+// any code an answer names, and the federation-grant connect callback on its own.
+export { isFederationUpstreamOutage } from "./federation-tokens/upstreamOutage.mjs";
 // The federation adapter toolkit: the pure helpers every adapter builds its
 // requests with — the PKCE S256 challenge, the URL its library exchanges the
 // code at (RFC 9207 `iss` and nothing else from the callback), a
@@ -1129,7 +1132,6 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
-export { isFederationUpstreamOutage } from "./federation-grants/upstreamOutage.mjs";
 // #593, D13: the two boundaries of a subject revocation, and how long each has
 // to be kept. The skew leaves `jwt/verify.mts` because the grants comparison
 // has to use the same allowance the watermark comparison already does.

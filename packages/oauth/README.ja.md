@@ -653,13 +653,13 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 403 | `forbidden` | クライアントが `allowedAzpForFederationToken` でオプトインしていない |
 | 404 | `federation_not_linked` | 指定のフェデレーションがこのセッションに紐付いていない |
 | 410 | `refresh_token_absent` | 保存済みトークンにリフレッシュトークンが無い（ログイン時に上流が返さなかった、またはロック後の再読み込みでそれの無いレコードが見つかった） |
-| 410 | `re_authentication_required` | IdP が `invalid_grant` / `invalid_token` を返した — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要 |
+| 410 | `re_authentication_required` | IdP がリフレッシュトークンを拒否した: ライブラリが投げたものの `error` が `invalid_grant` / `invalid_token` で、ステータスが 5xx でない — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要。5xx は本文が何を名乗ってもこれにならず、メッセージにコードを含むだけのエラーもならない。それらは保存済みトークンを残す（下の `503` と `500`） |
 | 429 | `rate_limited` | 上流 IdP のレート制限超過（`status: 429` または `error: "too_many_requests"`）。後で再試行する |
-| 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` フィールドでグループ化すること |
+| 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー（`error` にコードが無く、メッセージが `invalid_grant` を名乗るだけのものを含む）、またはこのルートが読めない応答。保存済みトークンは残す。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった。続く競合が見えるよう、`federation`、`clientId`、`sid` 付きの `federation_token_lock_timeout` として warn でログに出す |
-| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む）。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
+| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、または上流の障害: 5xx を返した IdP（本文がどの OAuth コードを名乗っていても、ライブラリが本文を読んだか `Response` の上で投げたかにかかわらず）、時間内に答えなかった IdP、到達できなかった IdP（エラーやその cause に包まれた接続・トランスポートのコード）。判定は core の `isFederationUpstreamOutage` で、応答が名乗るどのコードよりも先に行う。保存済みトークンは再試行のために残す。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
@@ -688,7 +688,7 @@ clients:
 - `federation.token.forbidden` — 403 のとき（クライアントがオプトインしていない）
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき
 - `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
-- `federation.token.reauthentication_required` — IdP から `invalid_grant` または `invalid_token` を受け取ったとき
+- `federation.token.reauthentication_required` — IdP の構造化された `invalid_grant` または `invalid_token` を受け取ったとき（上の 410）
 - `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま — トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
 
 ## jwt-bearer: 信頼する発行者 (#525)

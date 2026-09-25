@@ -17,12 +17,20 @@
 /**
  * Whether a failed call to an upstream IdP is an OUTAGE — not reached, not
  * answered in time, or answered with a 5xx — rather than the upstream's
- * verdict. Both federation-grant paths that call the upstream decide on it:
- * the connect callback's code exchange answers an outage
- * `temporarily_unavailable` and anything else `upstream_error` (#593, D7);
- * the retrieval's refresh answers an outage `503 upstream` — reading it this
- * way beside the refresh-error classifier's `network`, which knows fewer
- * shapes — and a refusal `upstream_rejected`.
+ * verdict. Every path that calls an upstream decides on it:
+ *
+ * - the refresh-error classifier (`classifyFederationRefreshError` in
+ *   `refresh-error.mts`, beside it) reads it first, before any OAuth code the
+ *   answer names, so an outage is `network` and never a rejected refresh
+ *   token — for the session-bound token route and a federation grant's
+ *   retrieval alike;
+ * - the federation-grant connect callback's code exchange answers an outage
+ *   `temporarily_unavailable` and anything else `upstream_error` (#593, D7);
+ * - the federation-grant retrieval's refresh answers an outage `503 upstream`
+ *   and a refusal `upstream_rejected`.
+ *
+ * It sits with the classifier, not with the grants, because the classifier
+ * reads it and the grants read the classifier.
  *
  * Read off what the library raised — the `name`, the `code` and a numeric
  * `status` of the error and of its first causes that are themselves Errors

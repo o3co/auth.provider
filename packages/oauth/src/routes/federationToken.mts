@@ -803,13 +803,13 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// empty string under any branch.
 				refreshed = await provider.refreshToken(currentTokens.refreshToken);
 			} catch (error) {
-				// SF-13: classify via structured properties first (openid-client v6 surfaces
-				// `.error`, `.status`, `.code`), with message-string fallback for legacy /
-				// non-openid-client errors. The fragile `msg.includes(...)` / `/5\d\d/.test(msg)`
-				// path is now confined to the helper as last-resort.
-				// SF-13's classifier lives in core now, shared with the federation grant
-				// retrieval (#593). This route acts on the reason alone, the message
-				// fallback included, exactly as before.
+				// SF-13: core's classifier, shared with the federation grant retrieval
+				// (#593). Its reason is safe to act on alone: an outage — the upstream
+				// not reached, not in time, or answering 5xx, whatever its body says —
+				// is `network`, read before any code the answer names, and
+				// `invalid_grant` is only ever the upstream's structured verdict, never
+				// a message's text. So the stored tokens below are ended on that
+				// verdict and on nothing else, and an outage keeps them for the retry.
 				const { reason } = classifyFederationRefreshError(error);
 				// The projection, never the error: the adapter's library puts the
 				// refresh answer it refused on the error's cause chain, and that

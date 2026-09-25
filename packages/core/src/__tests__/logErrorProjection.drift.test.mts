@@ -454,7 +454,7 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 	{
 		file: "packages/core/src/federation-tokens/refresh-error.mts",
 		sites: 1,
-		why: "a legacy classifier reads the text for `invalid_grant` / `5xx`; it is never logged",
+		why: "a legacy classifier reads the text for an outage (`temporarily_unavailable` / `5xx`), never for a verdict; it is never logged",
 	},
 	{
 		file: "packages/core/src/jwt/verify.mts",
