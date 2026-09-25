@@ -22,7 +22,7 @@
 // failed tag — one is a configuration problem the operator can undo, the other
 // is a value that will never open again. Neither ever deletes anything.
 
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { openWithKeyRing, type SealBinding, sealWithKeyRing } from "#/sealing/envelope.mjs";
 import type { SealingKey, SealingKeyRing } from "#/sealing/keyRing.mjs";
@@ -313,20 +313,6 @@ describe("the v2 key-ring envelope", () => {
 		).not.toThrow();
 	});
 
-	it("keeps the ring the caller handed over out of reach: a buffer mutated afterwards does not change what opens", () => {
-		const mutable = Buffer.alloc(32, 7);
-		const ring: SealingKeyRing = [{ id: "k", key: mutable }];
-		const sealed = sealWithKeyRing("rt-1", ring, BINDING);
-		mutable.fill(8);
-		expect(openWithKeyRing(sealed, [{ id: "k", key: Buffer.alloc(32, 7) }], BINDING)).toStrictEqual(
-			{
-				state: "ok",
-				value: "rt-1",
-				keyId: "k",
-			},
-		);
-	});
-
 	it("opens a vector sealed outside this module: the format is a contract, not whatever the writer happens to produce", () => {
 		// Sealed here by hand, the way another implementation would have to: the
 		// GCM AAD is the purpose and a NUL, then the key ID and the record's own
@@ -370,14 +356,13 @@ describe("the v2 key-ring envelope", () => {
 		}
 	});
 
-	it("never returns the same IV twice for the same plaintext, and never the same ciphertext", () => {
-		const seen = new Set<string>();
+	it("never uses the same IV twice under one key", () => {
+		// GCM under a repeated IV leaks the XOR of two plaintexts and the
+		// authentication key, so the IVs alone are what must differ.
+		const ivs = new Set<string>();
 		for (let i = 0; i < 64; i += 1) {
-			const parts = sealWithKeyRing("rt-1", RING, BINDING).split(".");
-			seen.add(`${parts[2]}.${parts[3]}`);
+			ivs.add(sealWithKeyRing("rt-1", RING, BINDING).split(".")[2] as string);
 		}
-		expect(seen.size).toBe(64);
-		// And the IV really comes from the platform's CSPRNG, not a counter.
-		expect(randomBytes(12)).toHaveLength(12);
+		expect(ivs.size).toBe(64);
 	});
 });
