@@ -20,6 +20,7 @@ import {
 	checkSecureEndpoint,
 	describeEndpointRejection,
 	type EndpointRejection,
+	endpointForMessage,
 	isLoopbackHostname,
 } from "#/endpointUrl.mjs";
 
@@ -196,5 +197,26 @@ describe("assertSecureEndpoint", () => {
 		} catch (err) {
 			expect((err as Error).message).not.toContain("hunter2");
 		}
+	});
+});
+
+describe("endpointForMessage", () => {
+	it("names an endpoint by its origin and path, without its query or fragment", () => {
+		expect(
+			endpointForMessage("https://users.example.com/authenticate?api_key=SECRET&tenant=acme#frag"),
+		).toBe("https://users.example.com/authenticate");
+		expect(endpointForMessage("http://127.0.0.1:8080/lookup?x=1")).toBe(
+			"http://127.0.0.1:8080/lookup",
+		);
+	});
+
+	it("names an endpoint without a query exactly as configured", () => {
+		expect(endpointForMessage("https://users.example.com/authenticate")).toBe(
+			"https://users.example.com/authenticate",
+		);
+	});
+
+	it("never throws, and never quotes what does not parse", () => {
+		expect(endpointForMessage("not a url?api_key=SECRET")).toBe("(an endpoint that is not a URL)");
 	});
 });
