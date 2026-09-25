@@ -22,9 +22,10 @@
  * are kept by this suite because each was an entanglement that was taken
  * apart, and putting it back is one import away and looks harmless in a
  * diff: two directories importing each other's values (`jwks/` and `routes/`
- * did, through the JWKS router), and `replay-seen-set/` reaching into
+ * did, through the JWKS router), `replay-seen-set/` reaching into
  * `challenges/` for the pieces the two share, instead of both taking them
- * from the `single-use/` leaf.
+ * from the `single-use/` leaf, and a leaf taking on a dependency — which
+ * makes everything that imports the leaf depend on it too.
  *
  * Read with TypeScript's parser rather than a pattern, because the rules turn
  * on whether an import is type-only: `import type` / `export type`, a clause
@@ -231,9 +232,9 @@ describe("challenges/ and replay-seen-set/ share their pieces through single-use
 		expect(edgesBetween("challenges/", "replay-seen-set/", "value")).toEqual([]);
 	});
 
-	it("single-use/ holds the shared pieces and imports nothing else in core", () => {
-		// A leaf: were it to import either store, each would reach the other
-		// through it.
+	it("single-use/ holds the shared pieces", () => {
+		// It imports nothing outside itself: see the leaves below. Were it to
+		// import either store, each would reach the other through it.
 		expect(productFiles(join(srcDir, "single-use")).map(fromSrc)).toEqual(
 			expect.arrayContaining([
 				"single-use/canonical-key.mts",
@@ -241,10 +242,55 @@ describe("challenges/ and replay-seen-set/ share their pieces through single-use
 				"single-use/sweep.mts",
 			]),
 		);
+	});
+});
+
+/**
+ * The leaves `src/README.md` names, and the edges out of them that stand,
+ * each with why. A leaf is imported from everywhere, so what it imports
+ * everything imports. Each edge is a file-to-file import with its kind: a new
+ * edge, a type-only edge that became a value import, a second file taking the
+ * same import, or an edge that is gone all fail, so the list says what holds
+ * now.
+ */
+const LEAVES: Readonly<
+	Record<string, ReadonlyArray<{ readonly edge: string; readonly why: string }>>
+> = {
+	"adapters/": [
+		{
+			edge: "adapters/AdapterFactory.mts -> logging/Logger.mts (type)",
+			why: "`BuilderContext.logger`: the logger a builder reports its connection's errors through",
+		},
+		{
+			edge: "adapters/AdapterFactory.mts -> logging/loggableError.mts",
+			why: "the lifecycle drain logs a failed cleanup's error through the one projection a log line may carry",
+		},
+		{
+			edge: "adapters/AdapterFactory.mts -> readiness/types.mts (type)",
+			why: "`BuilderContext.readiness` is the registrar a builder that opens a connection registers its probe into",
+		},
+	],
+	"errors/": [
+		{
+			edge: "errors/envelope.mts -> logging/consoleLogger.mts",
+			why: "`errorEnvelope` warns when it is handed a malformed error code or `error_uri`; it takes no logger, so it writes to `consoleLogger`",
+		},
+	],
+	"logging/": [],
+	"net/": [],
+	"security/": [],
+	"single-use/": [],
+};
+
+describe("core's leaves import nothing else in core but the edges listed", () => {
+	it.each(Object.keys(LEAVES))("%s", (leaf) => {
+		expect(productFiles(join(srcDir, leaf)).length, `${leaf} holds product code`).toBeGreaterThan(
+			0,
+		);
 		const outward = EDGES.filter(
-			(edge) => edge.from.startsWith("single-use/") && !edge.to.startsWith("single-use/"),
-		).map((edge) => `${edge.from} -> ${edge.to}`);
-		expect(outward).toEqual([]);
+			(edge) => edge.from.startsWith(leaf) && !edge.to.startsWith(leaf),
+		).map((edge) => `${edge.from} -> ${edge.to}${edge.typeOnly ? " (type)" : ""}`);
+		expect(outward.sort()).toEqual((LEAVES[leaf] ?? []).map((allowed) => allowed.edge).sort());
 	});
 });
 
