@@ -145,7 +145,7 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 		expect(rp?.backchannelLogoutUri).toBeUndefined();
 	});
 
-	it("emits structured corrupt-envelope warns with sid + reason + cause (no raw JSON)", async () => {
+	it("emits structured corrupt-envelope warns with sid + reason + err (no raw JSON)", async () => {
 		// Mirror the userSessionStore corrupt-envelope warn shape so operators
 		// see consistent fields across sibling adapters and the raw JSON
 		// payload — which may contain attacker-controlled or sensitive data
@@ -163,13 +163,13 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 			{
 				sid: "sid-corrupt",
 				reason: "json_parse",
-				cause: { name: "SyntaxError", position: 1, stack: expect.stringMatching(/^ {4}at /) },
+				err: { name: "SyntaxError", position: 1, stack: expect.stringMatching(/^ {4}at /) },
 			},
-			expect.stringContaining("JSON.parse failed"),
+			"session_rp_registry_corrupt_envelope",
 		);
 		expect(logger.warn).toHaveBeenCalledWith(
 			{ sid: "sid-corrupt", reason: "shape_invalid" },
-			expect.stringContaining("shape invalid"),
+			"session_rp_registry_corrupt_envelope",
 		);
 		// The raw payload snippet must NOT appear in any warn invocation —
 		// previously the implementation logged `{ json: json.slice(0, 100) }`
@@ -196,9 +196,9 @@ describe("redisSessionRPRegistryBuilder", () => {
 			{
 				sid: "sid-builder",
 				reason: "json_parse",
-				cause: { name: "SyntaxError", position: 1, stack: expect.stringMatching(/^ {4}at /) },
+				err: { name: "SyntaxError", position: 1, stack: expect.stringMatching(/^ {4}at /) },
 			},
-			expect.stringContaining("session_rp_registry_corrupt_envelope"),
+			"session_rp_registry_corrupt_envelope",
 		);
 	});
 
