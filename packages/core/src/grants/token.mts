@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
 import type { Confirmation } from "./confirmation.mjs";
-import { BINDING_PROFILES, CONFIRMATION_MEMBERS } from "./confirmationMatch.mjs";
+import { tokenTypeForConfirmation } from "./confirmationMatch.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
 	return Object.fromEntries(
@@ -59,19 +59,6 @@ export interface TokenResponse {
 }
 
 /**
- * The wire-level `token_type` for an access token bound by `confirmation`:
- * the scheme core's binding profile names for the member it carries —
- * `DPoP` for `cnf.jkt` (RFC 9449 §5), `Bearer` for `cnf["x5t#S256"]`, which
- * RFC 8705 §3 leaves on the bearer scheme — and `Bearer` for an unbound one.
- */
-const tokenTypeFor = (confirmation: Confirmation | undefined): "Bearer" | "DPoP" => {
-	const member = CONFIRMATION_MEMBERS.find(
-		(candidate) => confirmation !== undefined && candidate in confirmation,
-	);
-	return member === undefined ? "Bearer" : BINDING_PROFILES[member].challenge;
-};
-
-/**
  * The RFC 6749 §5.1 token response for the tokens a grant minted.
  *
  * `token_type` is read off the access token's own confirmation (the echo
@@ -88,7 +75,8 @@ export const generateTokenResponse = ({
 }: IntermediateToken): TokenResponse => {
 	return {
 		access_token: accessToken.token,
-		token_type: tokenTypeFor(accessToken.confirmation),
+		// `DPoP` for `cnf.jkt`, `Bearer` otherwise — core's one reading of it.
+		token_type: tokenTypeForConfirmation(accessToken.confirmation),
 		...formatObject({
 			scope: accessToken.scope,
 			refresh_token: refreshToken ? refreshToken.token : null,

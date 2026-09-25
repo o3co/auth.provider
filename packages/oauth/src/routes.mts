@@ -55,6 +55,7 @@ import {
 	type SessionRPRegistry,
 	type SubjectRevocation,
 	sanitizeErrorText,
+	tokenTypeForConfirmation,
 	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -1056,7 +1057,8 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 					const cnf = extractConfirmation(claims.cnf);
-					const tokenType: "Bearer" | "DPoP" = cnf && "jkt" in cnf ? "DPoP" : "Bearer";
+					// Core's one reading, which the token response uses too.
+					const tokenType = tokenTypeForConfirmation(claims.cnf);
 					const response: IntrospectResponse = {
 						active: true,
 						exp,

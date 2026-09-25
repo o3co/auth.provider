@@ -311,6 +311,7 @@ export {
 	isCompoundConfirmation,
 	matchConfirmation,
 	ownedConfirmation,
+	tokenTypeForConfirmation,
 } from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // Grant-policy evaluation and its bounds (#520): the one answer every minting

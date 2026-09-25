@@ -197,6 +197,27 @@ export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
 };
 
 /**
+ * The wire-level `token_type` for an access token whose `cnf` is `cnf` (the
+ * raw claim, or the `Confirmation` a grant stamped): the scheme core's
+ * binding profile names for the member it carries — `DPoP` for `jkt`
+ * (RFC 9449 §5), `Bearer` for `x5t#S256` (RFC 8705 §3) — and `Bearer` for no
+ * binding. Read through {@link extractConfirmation}, so a member counts only
+ * as a non-empty string, as it does at every surface that reads a `cnf`. A
+ * compound `cnf` narrows as `extractConfirmation` narrows it; a surface that
+ * vouches for a token screens it out first ({@link isCompoundConfirmation}).
+ *
+ * One reading for the token response (`generateTokenResponse`) and for
+ * introspection, so the envelope and the introspection answer cannot
+ * disagree about the same token.
+ */
+export const tokenTypeForConfirmation = (cnf: unknown): "Bearer" | "DPoP" => {
+	const confirmation = extractConfirmation(cnf);
+	if (confirmation === undefined) return "Bearer";
+	const member = CONFIRMATION_MEMBERS.find((candidate) => candidate in confirmation);
+	return member === undefined ? "Bearer" : BINDING_PROFILES[member].challenge;
+};
+
+/**
  * Whether a raw `cnf` claim value carries BOTH a well-formed `jkt` and a
  * well-formed `x5t#S256` — an ambiguous compound binding.
  *
