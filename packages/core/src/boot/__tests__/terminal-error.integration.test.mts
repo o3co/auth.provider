@@ -74,6 +74,50 @@ const routesModule = defineModule({
 				router.get("/item/:id", (req, res) => {
 					res.status(200).json({ id: req.params.id });
 				});
+				router.all(
+					"/signed",
+					express.json({
+						verify: () => {
+							throw new Error("the body's signature does not verify");
+						},
+					}),
+				);
+				router.post("/signed", (_req, res) => {
+					res.status(204).end();
+				});
+				router.get("/refused-400", () => {
+					// An `http-errors` 400 that is not a body parser's.
+					throw Object.assign(new Error("no such tenant"), {
+						status: 400,
+						statusCode: 400,
+						expose: true,
+					});
+				});
+				router.get("/method", () => {
+					throw Object.assign(new Error("method not allowed"), {
+						status: 405,
+						expose: true,
+						headers: { Allow: "GET, HEAD" },
+					});
+				});
+				router.get("/login-needed", () => {
+					throw Object.assign(new Error("login needed"), {
+						status: 401,
+						expose: true,
+						headers: { "WWW-Authenticate": 'Basic realm="api"', "X-Other": "dropped" },
+					});
+				});
+				router.get("/bad-header", () => {
+					throw Object.assign(new Error("login needed"), {
+						status: 401,
+						expose: true,
+						headers: { "WWW-Authenticate": "Basic\r\nSet-Cookie: injected=1" },
+					});
+				});
+				router.get("/after-end", (_req, res) => {
+					res.status(200).json({ answered: true });
+					throw new Error("failed after the answer was sent");
+				});
 				router.get("/gone", () => {
 					// An `http-errors` refusal that is not a body's: `expose`, 404.
 					throw Object.assign(new Error("no such record: record-id-marker"), {
@@ -168,6 +212,7 @@ describe("createApp's router answers a body parser's refusal itself", () => {
 			expect(res.status).toBe(status);
 			expect(res.headers["content-type"]).toMatch(/^application\/json/);
 			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
 			expect(res.body).toEqual({ error: "invalid_request", error_description: description });
 			expect(res.text).not.toContain("body-secret-marker");
 			expect(res.text).not.toMatch(/ at /);
@@ -189,6 +234,64 @@ describe("createApp's router answers a body parser's refusal itself", () => {
 		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_path" });
 		expect(logger.error).not.toHaveBeenCalled();
 		expect(otherLevels(logger)).toEqual([]);
+		await handle.dispose();
+	});
+
+	it("answers a compressed body that does not decompress as malformed_body", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+		const res = await request(app)
+			.post("/t/echo")
+			.set("Content-Type", "application/json")
+			.set("Content-Encoding", "gzip")
+			.send("this is not gzip at all");
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_body" });
+		expect(logger.error).not.toHaveBeenCalled();
+		await handle.dispose();
+	});
+
+	it("reads a body parser's refusal by its own type: a body that fails the parser's verify is malformed_body", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+		const res = await request(app).post("/t/signed").send({ any: "body" });
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_body" });
+		expect(logger.error).not.toHaveBeenCalled();
+		await handle.dispose();
+	});
+
+	it("answers an exposed 400 that is not a body parser's as request_refused, not as a malformed body", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+		const res = await request(app).get("/t/refused-400");
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "request_refused" });
+		expect(res.text).not.toContain("no such tenant");
+		expect(logger.error).not.toHaveBeenCalled();
+		await handle.dispose();
+	});
+
+	it("keeps the header a 405 or a 401 owes its client: Allow, WWW-Authenticate — and no other", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		const method = await request(app).get("/t/method");
+		expect(method.status).toBe(405);
+		expect(method.headers.allow).toBe("GET, HEAD");
+
+		const login = await request(app).get("/t/login-needed");
+		expect(login.status).toBe(401);
+		expect(login.headers["www-authenticate"]).toBe('Basic realm="api"');
+		expect(login.headers["x-other"]).toBeUndefined();
+		expect(login.body).toEqual({ error: "invalid_request", error_description: "request_refused" });
+
+		// A value that is not a header's is dropped, not written.
+		const bad = await request(app).get("/t/bad-header");
+		expect(bad.status).toBe(401);
+		expect(bad.headers["www-authenticate"]).toBeUndefined();
+		expect(bad.headers["set-cookie"]).toBeUndefined();
+		expect(logger.error).not.toHaveBeenCalled();
 		await handle.dispose();
 	});
 
@@ -227,6 +330,7 @@ describe("createApp's router answers an error that escaped a route", () => {
 		expect(res.status).toBe(500);
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
 		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.headers.pragma).toBe("no-cache");
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(res.text).not.toContain("marker");
 		expect(logger.error).toHaveBeenCalledTimes(1);
@@ -278,6 +382,28 @@ describe("createApp's router answers an error that escaped a route", () => {
 		expect(fields.endpoint).toHaveLength(200);
 		expect(fields.endpoint.startsWith("/t/deep/segment/")).toBe(true);
 		expect(fields.endpoint.endsWith("...")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("leaves a finished response's connection alone, and logs the error once", async () => {
+		// The answer is whole: closing the socket now could cut it off before it
+		// is flushed.
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		const res = await request(app).get("/t/after-end");
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ answered: true });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				endpoint: "/t/after-end",
+				headersSent: true,
+				err: expect.objectContaining({ detail: "failed after the answer was sent" }),
+			},
+			"unhandled_request_error",
+		);
 		await handle.dispose();
 	});
 

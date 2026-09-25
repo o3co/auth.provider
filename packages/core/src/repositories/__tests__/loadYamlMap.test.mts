@@ -130,9 +130,29 @@ foo:
 				["web:\n  name: *alias-secret-marker\n", "alias-secret-marker", "unidentified alias"],
 				["web:\n  name: !tag-secret-marker x\n", "tag-secret-marker", "unknown scalar tag"],
 				["web:\n  name: !h!handle-secret-marker x\n", "h!", "undeclared tag handle"],
+				[
+					"web:\n  name: !seq-secret-marker\n    - a\n",
+					"seq-secret-marker",
+					"unknown sequence tag",
+				],
+				[
+					"web:\n  name: !map-secret-marker\n    a: b\n",
+					"map-secret-marker",
+					"unknown mapping tag",
+				],
+				[
+					"web:\n  name: !<tag{chars-secret-marker}> x\n",
+					"chars-secret-marker",
+					"tag name cannot contain such characters",
+				],
+				[
+					"%TAG !suffixsecret! tag:a:\n%TAG !suffixsecret! tag:b:\n---\nweb: 1\n",
+					"suffixsecret",
+					"there is a previously declared suffix for",
+				],
 			] as const) {
 				const err = thrownBy(content);
-				expect(err.message).toMatch(new RegExp(`at 2:\\d+: ${reason}$`));
+				expect(err.message).toMatch(new RegExp(`at \\d+:\\d+: ${reason}$`));
 				carriesNothingOf(err, marker);
 			}
 		});

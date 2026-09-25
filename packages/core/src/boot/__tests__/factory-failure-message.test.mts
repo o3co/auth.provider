@@ -123,6 +123,18 @@ describe("a clients file with a YAML error, booted through createApp", () => {
 	});
 });
 
+describe("a BootError, printed", () => {
+	it("prints one built without details, rather than failing to print", () => {
+		const err = new BootError({
+			message: "a refusal with no details",
+			reason: "provides-factory-failed",
+			stage: "materializeComponents",
+			details: undefined as never,
+		});
+		expect(printed(err)).toContain("a refusal with no details");
+	});
+});
+
 describe("a factory's error, in the boot failure's message", () => {
 	const providing = (thrown: unknown): Module =>
 		defineModule({
