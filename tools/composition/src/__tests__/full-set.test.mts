@@ -89,6 +89,7 @@ import {
 	type FullSetOptions,
 	GATEWAY,
 	GITHUB_LANDING,
+	REQUIRED_BINDER,
 	TV,
 } from "./full-set.fixture.mts";
 
@@ -457,6 +458,55 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(res.status).toBe(200);
 		expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
 		expect(res.body.token_type).toBe("DPoP");
+	});
+
+	describe("a client that requires a sender constraint, with the real mechanisms", () => {
+		// The dispatch gate refuses a binding whose confirmation its mechanism
+		// does not own. The real DPoP and mTLS mechanisms always hand over the
+		// member they own, so neither is ever refused by it — pinned here, so
+		// the gate cannot come to refuse what it exists to admit.
+		it("DPoP: admitted, and the token is bound to the proof's key", async () => {
+			const { app } = await boot();
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(REQUIRED_BINDER))
+				.set("DPoP", dpopProof("POST", `${ISSUER}/oauth/token`))
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+			expect(res.status).toBe(200);
+			expect(res.body.token_type).toBe("DPoP");
+			expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
+		});
+
+		it("mTLS: admitted, and the token is bound to the certificate", async () => {
+			const { app } = await boot();
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(REQUIRED_BINDER))
+				.set("x-forwarded-client-cert", encodeURIComponent(CLIENT_CERTIFICATE))
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+			expect(res.status).toBe(200);
+			expect(res.body.token_type).toBe("Bearer");
+			const thumbprint = createHash("sha256")
+				.update(new X509Certificate(CLIENT_CERTIFICATE).raw)
+				.digest("base64url");
+			expect(tokenPayload(res.body.access_token as string).cnf).toEqual({
+				"x5t#S256": thumbprint,
+			});
+		});
+
+		it("no binding at all: refused before any token is minted", async () => {
+			const { app } = await boot();
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(REQUIRED_BINDER))
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.access_token).toBeUndefined();
+		});
 	});
 
 	it("mTLS: a client_credentials token bound to the forwarded certificate", async () => {

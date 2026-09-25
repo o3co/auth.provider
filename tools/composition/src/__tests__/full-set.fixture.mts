@@ -373,6 +373,8 @@ function addedModules(
 export const TV = { id: "tv" } as const;
 export const GATEWAY = { id: "gateway", secret: "gateway-secret" } as const;
 export const BINDER = { id: "binder", secret: "binder-secret" } as const;
+/** BINDER's twin that requires a sender constraint — every token it gets is bound. */
+export const REQUIRED_BINDER = { id: "required-binder", secret: "required-binder-secret" } as const;
 
 const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 	// A public device client.
@@ -402,6 +404,16 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 		allowedScopes: ["api.read"],
 		defaultScopes: ["api.read"],
 		allowedGrantTypes: ["client_credentials"],
+	},
+	// The same, registered to require a binding by either mechanism: the
+	// dispatch gate must let each real mechanism's binding through.
+	[REQUIRED_BINDER.id]: {
+		tokenEndpointAuthMethod: "client_secret_basic",
+		clientSecret: REQUIRED_BINDER.secret,
+		allowedScopes: ["api.read"],
+		defaultScopes: ["api.read"],
+		allowedGrantTypes: ["client_credentials"],
+		senderConstrained: { required: true, methods: ["dpop", "mtls"] },
 	},
 };
 
