@@ -1,0 +1,261 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// The `v2` key-ring envelope a value is sealed in at rest.
+//
+// Two things make it a format of its own rather than a key and a cipher: it
+// names the key that sealed it, so that a ring can be rotated without
+// re-sealing every value at rest, and an unknown key ID is told apart from a
+// failed tag — one is a configuration problem the operator can undo, the other
+// is a value that will never open again. Neither ever deletes anything.
+
+import { createCipheriv, randomBytes } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { openWithKeyRing, type SealBinding, sealWithKeyRing } from "#/sealing/envelope.mjs";
+import type { SealingKey, SealingKeyRing } from "#/sealing/keyRing.mjs";
+
+const key = (byte: number): Buffer => Buffer.alloc(32, byte);
+const RING: SealingKeyRing = [
+	{ id: "k-2026-09", key: key(2) },
+	{ id: "k-2026-03", key: key(1) },
+];
+const BINDING: SealBinding = {
+	purpose: "o3co:test:value",
+	record: Buffer.from("the record this value belongs to", "utf8"),
+};
+
+const u32 = (value: number): Buffer => {
+	const out = Buffer.alloc(4);
+	out.writeUInt32BE(value);
+	return out;
+};
+
+describe("the v2 key-ring envelope", () => {
+	it("is five dot-separated segments naming the key that sealed it: the first in the ring", () => {
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		const parts = sealed.split(".");
+		expect(parts).toHaveLength(5);
+		expect(parts[0]).toBe("v2");
+		expect(Buffer.from(parts[1] as string, "base64url").toString("utf8")).toBe("k-2026-09");
+		// 12-byte IV, 16-byte tag: AES-256-GCM.
+		expect(Buffer.from(parts[2] as string, "base64url")).toHaveLength(12);
+		expect(Buffer.from(parts[4] as string, "base64url")).toHaveLength(16);
+	});
+
+	it("opens under the key that sealed it, and under an older key still in the ring", () => {
+		const fresh = sealWithKeyRing("rt-fresh", RING, BINDING);
+		const old = sealWithKeyRing("rt-old", [RING[1] as SealingKey], BINDING);
+		expect(openWithKeyRing(fresh, RING, BINDING)).toStrictEqual({ state: "ok", value: "rt-fresh" });
+		expect(openWithKeyRing(old, RING, BINDING)).toStrictEqual({ state: "ok", value: "rt-old" });
+	});
+
+	it("tells an unknown key ID from a failed tag: one is undone by putting the key back, the other never opens", () => {
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		// The operator dropped the key that sealed it from the ring.
+		expect(openWithKeyRing(sealed, [RING[1] as SealingKey], BINDING)).toStrictEqual({
+			state: "key_unavailable",
+		});
+		// The key ID is known, the material behind it is not the one that sealed.
+		const wrong: SealingKeyRing = [{ id: "k-2026-09", key: key(9) }];
+		expect(openWithKeyRing(sealed, wrong, BINDING)).toStrictEqual({ state: "unreadable" });
+		// And the ring it was sealed under still opens it: nothing was consumed.
+		expect(openWithKeyRing(sealed, RING, BINDING)).toStrictEqual({ state: "ok", value: "rt-1" });
+	});
+
+	it("authenticates the record it was sealed for: another record's data does not open it", () => {
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		expect(
+			openWithKeyRing(sealed, RING, { ...BINDING, record: Buffer.from("another record", "utf8") }),
+		).toStrictEqual({ state: "unreadable" });
+	});
+
+	it("authenticates the purpose it was sealed for: the same record under another purpose does not open it", () => {
+		// Two callers sealing under one ring cannot read each other's values,
+		// even where the record bytes they bind happen to coincide.
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		expect(openWithKeyRing(sealed, RING, { ...BINDING, purpose: "o3co:test:other" })).toStrictEqual(
+			{ state: "unreadable" },
+		);
+	});
+
+	it("authenticates the key ID in its own envelope: renaming it to another key of the same material fails", () => {
+		// Two IDs, one key. Without the ID inside the authenticated data, an
+		// envelope could be re-labelled to whichever ID an attacker wanted the
+		// value to name — the plaintext would still come out.
+		const ring: SealingKeyRing = [
+			{ id: "a", key: key(3) },
+			{ id: "b", key: key(3) },
+		];
+		const sealed = sealWithKeyRing("rt-1", ring, BINDING);
+		const relabelled = ["v2", Buffer.from("b", "utf8").toString("base64url")]
+			.concat(sealed.split(".").slice(2))
+			.join(".");
+		expect(openWithKeyRing(relabelled, ring, BINDING)).toStrictEqual({ state: "unreadable" });
+	});
+
+	it("reads nothing but its own shape: a wrong version, a segment that is not canonical base64url, a truncated one", () => {
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		const parts = sealed.split(".");
+		const cases: Record<string, string> = {
+			"a v1 envelope's shape": ["v1", parts[2], parts[3], parts[4]].join("."),
+			"a v3 envelope": sealed.replace(/^v2\./, "v3."),
+			"four segments": parts.slice(0, 4).join("."),
+			"six segments": `${sealed}.x`,
+			// `Buffer.from` drops what it cannot decode rather than refusing, so a
+			// segment that is not canonical base64url would otherwise be accepted
+			// and read as some shorter value.
+			"a non-canonical IV": [parts[0], parts[1], `${parts[2]}=`, parts[3], parts[4]].join("."),
+			// Standard base64, not base64url: twelve 0xff bytes spell "/" sixteen
+			// times there and "_" sixteen times here. Permissive decoding would
+			// take it and read the same IV.
+			"an IV spelled in standard base64": [
+				parts[0],
+				parts[1],
+				Buffer.alloc(12, 0xff).toString("base64"),
+				parts[3],
+				parts[4],
+			].join("."),
+			// A key ID no ring may hold is not a key the operator could put back.
+			"a key ID outside the rule": [
+				parts[0],
+				Buffer.from("k.2", "utf8").toString("base64url"),
+				parts[2],
+				parts[3],
+				parts[4],
+			].join("."),
+			"an empty envelope": "",
+			"the version alone": "v2",
+		};
+		for (const [name, envelope] of Object.entries(cases)) {
+			expect(openWithKeyRing(envelope, RING, BINDING), name).toStrictEqual({
+				state: "unreadable",
+			});
+		}
+	});
+
+	it("refuses a ring it cannot seal with: no keys, a key that is not 32 bytes, a duplicate or unusable ID", () => {
+		expect(() => sealWithKeyRing("rt-1", [], BINDING)).toThrow(/key/);
+		expect(() => sealWithKeyRing("rt-1", [{ id: "k", key: Buffer.alloc(16, 1) }], BINDING)).toThrow(
+			/32 bytes/,
+		);
+		const duplicate: SealingKeyRing = [
+			{ id: "k", key: key(1) },
+			{ id: "k", key: key(2) },
+		];
+		expect(() => sealWithKeyRing("rt-1", duplicate, BINDING)).toThrow(/id/);
+		for (const id of ["", "k.2", "k 2", "k\n", "x".repeat(65)]) {
+			expect(
+				() => sealWithKeyRing("rt-1", [{ id, key: key(1) }], BINDING),
+				JSON.stringify(id),
+			).toThrow(/id/);
+		}
+	});
+
+	it("refuses to open with a ring that could not have sealed: a malformed ring is a configuration fault, not an unreadable value", () => {
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		expect(() =>
+			openWithKeyRing(sealed, [...RING, { id: "k-2026-09", key: key(7) }], BINDING),
+		).toThrow(/id/);
+		expect(() => openWithKeyRing(sealed, [{ id: "k", key: Buffer.alloc(31, 1) }], BINDING)).toThrow(
+			/32 bytes/,
+		);
+	});
+
+	it("refuses a purpose that is not 1 to 64 printable ASCII characters, on both sides", () => {
+		// The purpose is written into the authenticated data followed by a NUL,
+		// so no purpose may hold one: "a" and "a\0…" would otherwise be two
+		// purposes whose headers one key ID could make identical.
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		for (const purpose of ["", "with space", "nul\0inside", "café", "x".repeat(65), "tab\t"]) {
+			const binding = { ...BINDING, purpose };
+			expect(() => sealWithKeyRing("rt-1", RING, binding), JSON.stringify(purpose)).toThrow(
+				RangeError,
+			);
+			expect(() => openWithKeyRing(sealed, RING, binding), JSON.stringify(purpose)).toThrow(
+				RangeError,
+			);
+		}
+		expect(() =>
+			sealWithKeyRing("rt-1", RING, { ...BINDING, purpose: "x".repeat(64) }),
+		).not.toThrow();
+	});
+
+	it("keeps the ring the caller handed over out of reach: a buffer mutated afterwards does not change what opens", () => {
+		const mutable = Buffer.alloc(32, 7);
+		const ring: SealingKeyRing = [{ id: "k", key: mutable }];
+		const sealed = sealWithKeyRing("rt-1", ring, BINDING);
+		mutable.fill(8);
+		expect(openWithKeyRing(sealed, [{ id: "k", key: Buffer.alloc(32, 7) }], BINDING)).toStrictEqual(
+			{
+				state: "ok",
+				value: "rt-1",
+			},
+		);
+	});
+
+	it("opens a vector sealed outside this module: the format is a contract, not whatever the writer happens to produce", () => {
+		// Sealed here by hand, the way another implementation would have to: the
+		// GCM AAD is the purpose and a NUL, then the key ID and the record's own
+		// bytes, each after a 32-bit big-endian length.
+		const material = key(4);
+		const iv = Buffer.alloc(12, 5);
+		const kid = Buffer.from("k-hand", "utf8");
+		const aad = Buffer.concat([
+			Buffer.from("o3co:test:value\0", "ascii"),
+			u32(kid.length),
+			kid,
+			u32(BINDING.record.length),
+			BINDING.record,
+		]);
+		const cipher = createCipheriv("aes-256-gcm", material, iv);
+		cipher.setAAD(aad);
+		const ct = Buffer.concat([cipher.update("rt-by-hand", "utf8"), cipher.final()]);
+		const envelope = [
+			"v2",
+			kid.toString("base64url"),
+			iv.toString("base64url"),
+			ct.toString("base64url"),
+			cipher.getAuthTag().toString("base64url"),
+		].join(".");
+		expect(openWithKeyRing(envelope, [{ id: "k-hand", key: material }], BINDING)).toStrictEqual({
+			state: "ok",
+			value: "rt-by-hand",
+		});
+	});
+
+	it("round-trips the empty value, multi-byte UTF-8 and binary record bytes", () => {
+		for (const [plaintext, record] of [
+			["", Buffer.alloc(0)],
+			["トークン \u{1F511} ü", Buffer.from([0, 1, 2, 0xfe, 0xff, 0])],
+		] as const) {
+			const binding = { ...BINDING, record };
+			expect(
+				openWithKeyRing(sealWithKeyRing(plaintext, RING, binding), RING, binding),
+			).toStrictEqual({ state: "ok", value: plaintext });
+		}
+	});
+
+	it("never returns the same IV twice for the same plaintext, and never the same ciphertext", () => {
+		const seen = new Set<string>();
+		for (let i = 0; i < 64; i += 1) {
+			const parts = sealWithKeyRing("rt-1", RING, BINDING).split(".");
+			seen.add(`${parts[2]}.${parts[3]}`);
+		}
+		expect(seen.size).toBe(64);
+		// And the IV really comes from the platform's CSPRNG, not a counter.
+		expect(randomBytes(12)).toHaveLength(12);
+	});
+});

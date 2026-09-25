@@ -501,6 +501,7 @@ const LEAVES: Readonly<
 	],
 	"logging/": [],
 	"net/": [],
+	"sealing/": [],
 	"security/": [],
 	"single-use/": [],
 };
