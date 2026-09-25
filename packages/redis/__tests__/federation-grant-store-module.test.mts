@@ -179,50 +179,99 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		expect(direct([{ id: "k-1", key: Buffer.alloc(16, 7) }])).toThrow(
 			new RangeError("encryption key must be 32 bytes"),
 		);
+		// The store's own refusal of a ring with nothing to seal with, before the
+		// leaf is asked: the same setting, so the same class.
+		expect(direct([])).toThrow(
+			new RangeError('federation grant store: mode "required" needs at least one encryption key'),
+		);
 	});
 
-	it("fails boot on such a ring with the RangeError as the BootError's cause, naming the module", async () => {
-		// Stands in for the routes that read the store, so that the store is in
-		// the closure boot builds.
-		const grantsReader = defineModule({
-			name: "test:federation-grant-store-reader",
-			optional: ["federationGrantStore"] as const,
-			contributes: {
-				routes: [
-					{
-						mountPath: "/__test_noop__",
-						id: "test-noop",
-						handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
-					},
-				],
-			},
-		});
-		const boot = createApp({
-			modules: [redisFederationGrantStoreModule, grantsReader],
-			bootstrapComponents: {
-				config: {
-					...makeValidCoreConfig(),
-					federationGrants: {
-						encryptionMode: "required",
-						encryptionKeys: [
-							{ id: "k-1", key: KEY },
-							{ id: "k-1", key: KEY },
-						],
-					},
-				},
-				pathResolver: (p: string) => p,
-				federationGrantStoreClient: client,
-			} as never,
-		});
-		await expect(boot).rejects.toMatchObject({
-			name: "BootError",
-			reason: "provides-factory-failed",
-			details: { module: "redis-federation-grant-store", componentKey: "federationGrantStore" },
-		});
-		const refused = await boot.catch((err: unknown) => err);
-		expect((refused as Error).cause).toStrictEqual(new RangeError("duplicate encryption key id"));
-		expect((refused as Error).cause).toBeInstanceOf(RangeError);
+	it("refuses a configured key it cannot read as a RangeError naming the key, before any store is built", () => {
+		// The key reader runs in the exported resolver, which a composition root
+		// that builds the store itself calls too; the factory takes key material.
+		const refusal = new RangeError(
+			'federation grant store: encryption key "k-1" must be canonical base64 of 32 bytes',
+		);
+		for (const key of [`${KEY}\n`, Buffer.alloc(16, 7).toString("base64"), "not base64!!"]) {
+			expect(
+				() =>
+					resolveRedisFederationGrantStoreOptions(
+						config({ encryptionMode: "required", encryptionKeys: [{ id: "k-1", key }] }) as never,
+						{},
+					),
+				JSON.stringify(key),
+			).toThrow(refusal);
+		}
 	});
+
+	it.each([
+		[
+			"a duplicate key id",
+			[
+				{ id: "k-1", key: KEY },
+				{ id: "k-1", key: KEY },
+			],
+			"duplicate encryption key id",
+		],
+		[
+			"a key id outside the rule",
+			[{ id: "k.1", key: KEY }],
+			"encryption key id must match ^[A-Za-z0-9_-]{1,64}$",
+		],
+		[
+			"no key at all",
+			[],
+			'federation grant store: mode "required" needs at least one encryption key',
+		],
+		[
+			"a key that is not canonical base64",
+			[{ id: "k-1", key: `${KEY}\n` }],
+			'federation grant store: encryption key "k-1" must be canonical base64 of 32 bytes',
+		],
+		[
+			"a key that is not 32 bytes",
+			[{ id: "k-1", key: Buffer.alloc(16, 7).toString("base64") }],
+			'federation grant store: encryption key "k-1" must be canonical base64 of 32 bytes',
+		],
+	])(
+		"fails boot on %s with a RangeError as the BootError's cause, naming the module",
+		async (_what, encryptionKeys, message) => {
+			// Stands in for the routes that read the store, so that the store is in
+			// the closure boot builds.
+			const grantsReader = defineModule({
+				name: "test:federation-grant-store-reader",
+				optional: ["federationGrantStore"] as const,
+				contributes: {
+					routes: [
+						{
+							mountPath: "/__test_noop__",
+							id: "test-noop",
+							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+						},
+					],
+				},
+			});
+			const boot = createApp({
+				modules: [redisFederationGrantStoreModule, grantsReader],
+				bootstrapComponents: {
+					config: {
+						...makeValidCoreConfig(),
+						federationGrants: { encryptionMode: "required", encryptionKeys },
+					},
+					pathResolver: (p: string) => p,
+					federationGrantStoreClient: client,
+				} as never,
+			});
+			await expect(boot).rejects.toMatchObject({
+				name: "BootError",
+				reason: "provides-factory-failed",
+				details: { module: "redis-federation-grant-store", componentKey: "federationGrantStore" },
+			});
+			const refused = await boot.catch((err: unknown) => err);
+			expect((refused as Error).cause).toStrictEqual(new RangeError(message));
+			expect((refused as Error).cause).toBeInstanceOf(RangeError);
+		},
+	);
 
 	it("refuses a retention that is not a duration, rather than reading it as none", () => {
 		// Copilot's finding, and the one where the two readings look the same
