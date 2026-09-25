@@ -17,6 +17,7 @@
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import type { MfaProvider, MfaProviderFactory } from "./types.mjs";
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export function createMfaProviderFactory(): MfaProviderFactory {
 	return createAdapterFactory<MfaProvider>("MfaProvider");
 }

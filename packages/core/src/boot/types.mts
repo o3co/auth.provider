@@ -975,7 +975,11 @@ export interface GrantPolicyWithoutIssuerDetails {
 	readonly providedBy: string;
 }
 
-/** Per A2-β §6.1 amendment 2026-05 (issue #101). */
+/**
+ * Per A2-β §6.1 amendment 2026-05 (issue #101).
+ *
+ * @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG.
+ */
 export interface MfaPartialWiringDetails {
 	readonly reason: "mfa-partial-wiring";
 	readonly missing: readonly ("mfaProviderFactory" | "mfaTransactionStore")[];

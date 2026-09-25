@@ -16,6 +16,7 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface MfaChallenge {
 	readonly id: string;
 	readonly kind: string;
@@ -27,12 +28,15 @@ export interface MfaChallenge {
 	readonly metadata?: Record<string, unknown>;
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface MfaIssueContext {
 	readonly request: { ip?: string; userAgent?: string };
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export type MfaVerifyFailureReason = "invalid" | "expired" | "locked" | "unknown";
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface MfaVerifyResult {
 	readonly success: boolean;
 	readonly failureReason?: MfaVerifyFailureReason;
@@ -40,6 +44,8 @@ export interface MfaVerifyResult {
 
 /**
  * Adapter primitive for MFA challenge providers.
+ *
+ * @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG.
  */
 export interface MfaProvider {
 	readonly kind: string;
@@ -47,20 +53,24 @@ export interface MfaProvider {
 	verify(challengeId: string, proof: unknown): Promise<MfaVerifyResult>;
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface EnrollResult {
 	readonly success: boolean;
 	readonly enrollmentId?: string;
 	readonly metadata?: Record<string, unknown>;
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface SupportsEnrollment {
 	enroll(userId: string, request: unknown): Promise<EnrollResult>;
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface SupportsRevocation {
 	revoke(userId: string): Promise<void>;
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export function supportsEnrollment(
 	p: MfaProvider | undefined | null,
 ): p is MfaProvider & SupportsEnrollment {
@@ -68,6 +78,7 @@ export function supportsEnrollment(
 	return typeof (p as { enroll?: unknown }).enroll === "function";
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export function supportsRevocation(
 	p: MfaProvider | undefined | null,
 ): p is MfaProvider & SupportsRevocation {
@@ -75,8 +86,10 @@ export function supportsRevocation(
 	return typeof (p as { revoke?: unknown }).revoke === "function";
 }
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export type MfaProviderFactory = AdapterFactory<MfaProvider>;
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export type MfaResumeState =
 	| {
 			readonly flow: "authorize";
@@ -98,6 +111,7 @@ export type MfaResumeState =
 			readonly redirectTo?: string;
 	  };
 
+/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
 export interface MfaPendingTransaction {
 	readonly transactionId: string;
 	readonly flow: "authorize" | "federation" | "login";
@@ -112,6 +126,9 @@ export interface MfaPendingTransaction {
 	readonly resumeState: MfaResumeState;
 }
 
+/**
+ * Unwired. The name is kept, but its operations change with the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3, D8): `set` / `get` / `delete` lets two verifications in flight both pass `get`.
+ */
 export interface MfaTransactionStore {
 	/**
 	 * Persist a pending MFA transaction.
@@ -134,6 +151,9 @@ export interface MfaTransactionStore {
 	delete(transactionId: string): Promise<void>;
 }
 
+/**
+ * Unwired. The name is kept, but its shape changes with the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3, D8).
+ */
 export interface MfaCoordinator {
 	listEnrolled(userId: string): Promise<readonly MfaProvider[]>;
 }
