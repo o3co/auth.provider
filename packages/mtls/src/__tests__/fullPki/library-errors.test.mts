@@ -243,7 +243,7 @@ describe("a CRL pkijs cannot use", () => {
 				errors: [
 					expect.objectContaining({
 						name: "MtlsRevocationSourceError",
-						message: `crl ${INT_CRL_URL}: unparseable — not a DER CRL`,
+						message: `crl ${INT_CRL_URL}: unparseable — not a DER CRL; for CN=client`,
 						cause: expect.objectContaining({ name: "AsnError" }),
 					}),
 				],

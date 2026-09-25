@@ -121,7 +121,8 @@ type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
  * names an OCSP responder nothing listens on — for `revocation.mode = "both"`.
  * `extra.leafCn` names the leaf; `extra.morePoints` adds distribution points
  * after the first — one the live server answers 404 (`missing`) or one on a
- * port nothing listens on (`refused`).
+ * port nothing listens on (`refused`). `extra.intSourcesRefused` points the
+ * intermediate's own CRL and OCSP responder at ports nothing listens on.
  */
 const pki = async (
 	leafCrl: LeafCrl,
@@ -130,6 +131,7 @@ const pki = async (
 	extra: {
 		readonly leafCn?: string;
 		readonly morePoints?: readonly ("missing" | "refused")[];
+		readonly intSourcesRefused?: boolean;
 	} = {},
 ) => {
 	const root = await mintCa("Root", 1);
@@ -139,11 +141,16 @@ const pki = async (
 		res.writeHead(body === undefined ? 404 : 200, { "content-type": "application/pkix-crl" });
 		res.end(body === undefined ? undefined : Buffer.from(body));
 	});
+	const intPoint = extra.intSourcesRefused
+		? `${await closedOrigin()}/root.crl`
+		: `${live}/root.crl`;
+	const intResponder = extra.intSourcesRefused ? `${await closedOrigin()}/ocsp` : undefined;
 	const int = await mintIntermediate("Intermediate", 2, root, {
 		extensions: [
 			basicConstraints(true),
 			keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
-			crlDistributionPoints([`${live}/root.crl`]),
+			crlDistributionPoints([intPoint]),
+			...(intResponder !== undefined ? [ocspAia(intResponder)] : []),
 		],
 	});
 	const leafPoint =
@@ -176,7 +183,7 @@ const pki = async (
 	if (leafCrl === "garbage") lists["/int.crl"] = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
 	if (leafCrl === "clean") lists["/int.crl"] = await mintCrl({ issuer: int });
 	if (leafCrl === "revoked") lists["/int.crl"] = await mintCrl({ issuer: int, revoked: [leaf] });
-	return { root, int, leaf, leafPoint, morePoints, leafResponder };
+	return { root, int, leaf, leafPoint, morePoints, leafResponder, intPoint, intResponder };
 };
 
 const mechanism = (
@@ -231,13 +238,28 @@ const appWith = (
 	return { app, calls };
 };
 
+const escaped = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
  * One source that could not be used, as the outage line projects it: an
- * error of its own, so the cap on a projected message cuts no other source.
+ * error of its own, so the cap on a projected message cuts no other source,
+ * naming the certificate it was asked about last — `null` for a subject long
+ * enough that the cap cuts it.
  */
-const sourceMember = (source: "crl" | "ocsp", url: string, reason: string, cause?: unknown) => ({
+const sourceMember = (
+	source: "crl" | "ocsp",
+	url: string,
+	reason: string,
+	cause?: unknown,
+	subject: string | null = "CN=client",
+) => ({
 	name: "MtlsRevocationSourceError",
-	detail: expect.stringContaining(`${source} ${url}: ${reason} — `),
+	detail:
+		subject === null
+			? expect.stringContaining(`${source} ${url}: ${reason} — `)
+			: expect.stringMatching(
+					new RegExp(`^${escaped(`${source} ${url}: ${reason} — `)}.+; for ${escaped(subject)}$`),
+				),
 	reason,
 	stack: FRAMES,
 	...(cause === undefined ? {} : { cause }),
@@ -525,11 +547,98 @@ describe("the outage line's account survives a long subject", () => {
 		};
 		expect(calls).toHaveLength(1);
 		expect(line.err.aggregateErrors).toEqual([
-			sourceMember("crl", leafPoint, "fetch_failed", REFUSED),
-			sourceMember("crl", morePoints[0] as string, "fetch_failed", REFUSED),
+			sourceMember("crl", leafPoint, "fetch_failed", REFUSED, null),
+			sourceMember("crl", morePoints[0] as string, "fetch_failed", REFUSED, null),
 		]);
 		expect(
 			line.err.detail.startsWith("revocation status could not be determined for CN=client-x"),
 		).toBe(true);
+	});
+});
+
+describe("one outage line for the whole path", () => {
+	it("the leaf served on the CRL and the intermediate down under both: 503, the one error line, naming the leaf's responder too", async () => {
+		// A shared OCSP outage with the root's CRL down: the leaf's CRL answers,
+		// the intermediate's does not. The request is refused, so no line may
+		// say it was served on the fallback — and the responder the leaf could
+		// not reach is part of the outage the one line accounts for.
+		const { root, int, leaf, leafResponder, intPoint, intResponder } = await pki(
+			"clean",
+			"127.0.0.1",
+			true,
+			{ intSourcesRefused: true },
+		);
+		const { app, calls } = appWith(root, "reject", "both");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: outageLine(
+					"token_binding_unavailable",
+					[
+						sourceMember("ocsp", leafResponder as string, "fetch_failed", REFUSED),
+						sourceMember(
+							"ocsp",
+							intResponder as string,
+							"fetch_failed",
+							REFUSED,
+							"CN=Intermediate",
+						),
+						sourceMember("crl", intPoint, "fetch_failed", REFUSED, "CN=Intermediate"),
+					],
+					"CN=Intermediate",
+				),
+			},
+		]);
+	});
+
+	it("the leaf and the intermediate both down: one line with every certificate's sources, each naming its certificate", async () => {
+		// An operator who fixes the first source must not find the next one
+		// only after the first is back.
+		const { root, int, leaf, leafPoint, intPoint } = await pki("refused", "127.0.0.1", false, {
+			intSourcesRefused: true,
+		});
+		const { app, calls } = appWith(root, "reject");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: outageLine(
+					"token_binding_unavailable",
+					[
+						sourceMember("crl", leafPoint, "fetch_failed", REFUSED),
+						sourceMember("crl", intPoint, "fetch_failed", REFUSED, "CN=Intermediate"),
+					],
+					"CN=client; CN=Intermediate",
+				),
+			},
+		]);
+	});
+
+	it("the leaf's OCSP down and its CRL listing it: 400, the verdict's lines, no fallback line", async () => {
+		// The fallback line marks a request served on the CRL. This one was
+		// refused, and the verdict's own lines are its account.
+		const { root, int, leaf } = await pki("revoked", "127.0.0.1", true);
+		const { app, calls } = appWith(root, "reject", "both");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(400);
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["warn", "mtls_full_pki_validation_failed"],
+			["warn", "token_binding_proof_invalid"],
+		]);
 	});
 });

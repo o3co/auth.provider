@@ -31,14 +31,20 @@ describe("@o3co/auth-provider-mtls exports", () => {
 			url: "http://crl.test/int.crl",
 			reason: "fetch_failed",
 			detail: "network_error (ECONNREFUSED)",
+			subject: "CN=client",
 		});
-		const cause = new mtls.MtlsRevocationUnavailableError("CN=client", [member]);
+		const cause = new mtls.MtlsRevocationUnavailableError(["CN=client", "CN=Intermediate"], [member]);
 
 		expect(cause).toBeInstanceOf(AggregateError);
 		expect(cause.errors).toEqual([member]);
+		// The certificate last, so a cap on the message cuts it before the source.
 		expect(member.message).toBe(
-			"crl http://crl.test/int.crl: fetch_failed — network_error (ECONNREFUSED)",
+			"crl http://crl.test/int.crl: fetch_failed — network_error (ECONNREFUSED); for CN=client",
 		);
-		expect(cause.message).toBe("revocation status could not be determined for CN=client");
+		expect(member.subject).toBe("CN=client");
+		expect(cause.message).toBe(
+			"revocation status could not be determined for CN=client; CN=Intermediate",
+		);
+		expect(cause.subjects).toEqual(["CN=client", "CN=Intermediate"]);
 	});
 });
