@@ -1033,9 +1033,10 @@ describe("OCSP resolver — through the guarded fetch", () => {
 
 	it("refuses a redirect", async () => {
 		const { int, leaf } = await chain();
-		const fetchImpl = vi.fn(async () => {
-			throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
-		});
+		const fetchImpl = vi.fn(
+			async () =>
+				new Response(null, { status: 302, headers: { location: "http://elsewhere.test/" } }),
+		);
 		const result = await resolver(guarded(fetchImpl)).resolve(leaf.cert, int.cert, NOW);
 		expect(result).toMatchObject({ ok: false, reason: "fetch_failed" });
 		if (!result.ok) expect(result.detail).toContain("redirect_refused");

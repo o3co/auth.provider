@@ -126,30 +126,35 @@ describe("guarded fetch — destination", () => {
 	});
 
 	it("does not follow redirects", async () => {
-		// A redirect names a second destination the allowlist never saw. Passing
-		// `redirect: "error"` is what makes an allowlisted host unable to act as
-		// an open proxy to everything it can reach.
+		// A redirect names a second destination the allowlist never saw. Asking
+		// for `redirect: "manual"` and refusing the 3xx it hands back is what
+		// makes an allowlisted host unable to act as an open proxy to
+		// everything it can reach — and names the refusal by its status.
 		const fetchImpl = vi.fn(async (_url: unknown, init: RequestInit) => {
-			expect(init.redirect).toBe("error");
-			throw new TypeError("unexpected redirect");
+			expect(init.redirect).toBe("manual");
+			return new Response(null, {
+				status: 307,
+				headers: { location: "http://169.254.169.254/latest/meta-data/" },
+			});
 		});
 		const get = createGuardedFetch({
 			...options,
 			fetchImpl: fetchImpl as unknown as typeof fetch,
 		});
 
-		expect(await get("http://crl.example.test/a.crl")).toMatchObject({
+		expect(await get("http://crl.example.test/a.crl")).toEqual({
 			ok: false,
 			reason: "redirect_refused",
+			detail: "HTTP 307",
 		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
 	});
 
-	it("names a refused redirect when the platform fetch wraps the reason in `cause`", async () => {
-		// undici — Node's fetch — surfaces `redirect: "error"` as
-		// TypeError("fetch failed") with the actual reason on `cause`. Matching
-		// only the top-level message read every refused redirect as a generic
-		// network error in production logs, which is the one limit the audit
-		// trail most needs to name.
+	it("reads no error's text: a fetch error that mentions a redirect is a network error", async () => {
+		// undici used to be asked for `redirect: "error"`, which it reports as
+		// TypeError("fetch failed") with "unexpected redirect" on the cause and
+		// no code — so the text was all there was to classify by. A redirect is
+		// now a status; an error's message is the library's, and is never read.
 		const fetchImpl = vi.fn(async () => {
 			throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
 		});
@@ -160,7 +165,9 @@ describe("guarded fetch — destination", () => {
 
 		expect(await get("http://crl.example.test/a.crl")).toMatchObject({
 			ok: false,
-			reason: "redirect_refused",
+			reason: "network_error",
+			detail: "fetch failed",
+			err: { name: "TypeError", cause: { name: "Error" } },
 		});
 	});
 
@@ -291,7 +298,7 @@ describe("guarded fetch — POST, for OCSP (#431)", () => {
 		const fetchImpl = vi.fn(async (_url: unknown, init: RequestInit) => {
 			expect(init.method).toBe("POST");
 			expect(init.body).toBe(body);
-			expect(init.redirect).toBe("error");
+			expect(init.redirect).toBe("manual");
 			expect(init.credentials).toBe("omit");
 			const headers = init.headers as Record<string, string>;
 			expect(headers["content-type"]).toBe("application/ocsp-request");
