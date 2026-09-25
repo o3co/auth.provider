@@ -18,9 +18,11 @@
  * The failures `HttpUserRepository` throws about the exchange with the Store
  * rather than about a user: the Store refusing this deployment's credential,
  * and a transport that failed. Each is built from an allowlist — the
- * endpoint, a status, a transport code — and never from what the Store or the
- * transport said, which may quote the request.
+ * endpoint (origin and path), a status, a transport code — and never from
+ * what the Store or the transport said, which may quote the request.
  */
+
+import { endpointForMessage } from "../endpointUrl.mjs";
 
 /**
  * The Store refused the credential this deployment presented: a `401` or a
@@ -32,7 +34,8 @@
  * `name` is part of the contract. A caller that does not depend on this
  * package recognises the refusal by it — an operator reading the
  * federation-grants callback's `federation_grant_callback_unavailable` line
- * finds it as the projected error's `name`. The message names the endpoint,
+ * finds it as the projected error's `name`. The message names the endpoint —
+ * its origin and path, never a query or fragment, however it is handed one —
  * the status and the option to check; never the token, and nothing the Store
  * wrote.
  *
@@ -47,7 +50,7 @@ export class StoreCredentialRefusedError extends Error {
 
 	constructor(url: string, status: 401 | 403) {
 		super(
-			`HttpUserRepository: the Store at ${url} refused this deployment's credential ` +
+			`HttpUserRepository: the Store at ${endpointForMessage(url)} refused this deployment's credential ` +
 				`(HTTP ${status} with a Bearer challenge) — bearerToken (CLIENT_USER_BEARER_TOKEN) is ` +
 				"not a token the Store accepts",
 		);

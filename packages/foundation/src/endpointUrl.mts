@@ -43,6 +43,15 @@
  * runs on, though, is shared vocabulary: `isLoopbackHostname` comes from
  * `@o3co/auth-provider-core` (`net/loopback`, #364), the same definition the
  * session redirect policy consumes, so the carve-outs cannot drift apart.
+ *
+ * ## What a message names of an endpoint
+ *
+ * Every failure the repository throws names the endpoint it was talking to,
+ * and every caller logs what it throws. A message names the endpoint by its
+ * origin and path alone ({@link endpointForMessage}): a query string is
+ * accepted in a Store URL, and a deployment may carry a credential there
+ * (`?api_key=…`) despite the README's advice, so the query never reaches a
+ * message — nor does a fragment, which no request sends anyway.
  */
 
 import { isLoopbackHostname } from "@o3co/auth-provider-core";
@@ -147,4 +156,19 @@ export function assertSecureEndpoint(value: unknown, field: string): string {
 		);
 	}
 	return value as string;
+}
+
+/**
+ * `url` as a message names it: its origin and path — `https://store.example
+ * /authenticate` — and never its query or fragment, which may carry a
+ * credential. A value that does not parse (never a configured endpoint, which
+ * the constructor has already checked) is named by what it is not.
+ */
+export function endpointForMessage(url: string): string {
+	try {
+		const { origin, pathname } = new URL(url);
+		return `${origin}${pathname}`;
+	} catch {
+		return "(an endpoint that is not a URL)";
+	}
 }
