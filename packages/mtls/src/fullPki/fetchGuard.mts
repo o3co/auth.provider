@@ -270,7 +270,12 @@ const readCapped = async (
 	maxBytes: number,
 ): Promise<{ ok: true; bytes: Uint8Array } | { ok: false }> => {
 	const declared = response.headers.get("content-length");
-	if (declared !== null && Number(declared) > maxBytes) return { ok: false };
+	if (declared !== null && Number(declared) > maxBytes) {
+		// Refused before a reader is taken: release the body, or the
+		// connection stays held until the peer gives up.
+		await response.body?.cancel().catch(() => undefined);
+		return { ok: false };
+	}
 	const body = response.body;
 	if (body === null) return { ok: true, bytes: new Uint8Array(0) };
 
