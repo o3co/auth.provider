@@ -58,6 +58,7 @@ import {
 	mustStaple,
 	nameConstraints,
 	nonceOf,
+	OCSP_RESPONSE_STATUS,
 	ocspAia,
 	ocspSigningEku,
 	reasonPartitionedCrlDistributionPoint,
@@ -1645,7 +1646,8 @@ describe("full-pki revocation — mode = ocsp (#431)", () => {
 			fetchImpl: down().impl,
 		}).validate(leaf.x509, [int.x509], NOW);
 		expect(rejected.ok).toBe(false);
-		if (!rejected.ok) expect(rejected.step).toBe("revocation status unavailable");
+		// A responder answering 503 is the source's outage, not a verdict.
+		expect(rejected).toMatchObject({ step: "revocation status unavailable", outage: true });
 
 		const logger = { warn: vi.fn(), debug: vi.fn() };
 		const allowed = await validator([root], {
@@ -2295,3 +2297,250 @@ describe("full-pki revocation — a responder checked against a partial CRL (#55
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Which unavailability is an outage (503) and which a verdict (400)
+// ---------------------------------------------------------------------------
+
+describe("full-pki revocation — an outage or the certificate's shape, under 'reject'", () => {
+	/** Bytes no parser takes for a response. */
+	const GARBAGE = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+	const OUTSIDE_ALLOWLIST_CRL = "http://elsewhere.test/int.crl";
+	const OUTSIDE_ALLOWLIST_OCSP = "http://elsewhere.test/ocsp";
+
+	/** An OCSP answer with the right media type and the bytes given. */
+	const ocspBytes = (bytes: Uint8Array) => async (): Promise<Response> =>
+		new Response(bytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "application/ocsp-response" },
+		});
+
+	const judge = (
+		root: Minted,
+		int: Minted,
+		leaf: Minted,
+		mode: "crl" | "ocsp" | "both",
+		impl: typeof globalThis.fetch,
+	) =>
+		validator([root], { revocation: fetchingPolicy(mode, "reject"), fetchImpl: impl }).validate(
+			leaf.x509,
+			[int.x509],
+			NOW,
+		);
+
+	it.each([
+		[
+			"CRL: a list past its nextUpdate (stale)",
+			"crl" as const,
+			async (root: Minted, int: Minted) => ({
+				[INT_CRL_URL]: await mintCrl({
+					issuer: int,
+					thisUpdate: new Date("2026-05-01T00:00:00Z"),
+					nextUpdate: new Date("2026-06-01T00:00:00Z"),
+				}),
+				[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
+			}),
+		],
+		[
+			"OCSP: an answer past its nextUpdate (stale)",
+			"ocsp" as const,
+			async (root: Minted, int: Minted, leaf: Minted) => ({
+				[INT_OCSP_URL]: ocspAnswer({
+					issuer: int,
+					subject: leaf,
+					thisUpdate: new Date("2026-05-01T00:00:00Z"),
+					nextUpdate: new Date("2026-05-02T00:00:00Z"),
+				}),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			}),
+		],
+		[
+			"OCSP: a responder saying tryLater (responder_error)",
+			"ocsp" as const,
+			async (root: Minted, int: Minted, leaf: Minted) => ({
+				[INT_OCSP_URL]: ocspAnswer({
+					issuer: int,
+					subject: leaf,
+					responseStatus: OCSP_RESPONSE_STATUS.tryLater,
+				}),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			}),
+		],
+		[
+			"OCSP: a responder saying unauthorized (responder_error) — an operator's to fix, still not the certificate's",
+			"ocsp" as const,
+			async (root: Minted, int: Minted, leaf: Minted) => ({
+				[INT_OCSP_URL]: ocspAnswer({
+					issuer: int,
+					subject: leaf,
+					responseStatus: OCSP_RESPONSE_STATUS.unauthorized,
+				}),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			}),
+		],
+		[
+			"OCSP: an answer that is not DER (unparseable)",
+			"ocsp" as const,
+			async (root: Minted, int: Minted) => ({
+				[INT_OCSP_URL]: ocspBytes(GARBAGE),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			}),
+		],
+	])("%s: an outage", async (_label, mode, table) => {
+		const { root, int, leaf } = mode === "crl" ? await buildCrlChain() : await ocspChain();
+		const { impl } = stubFetch(await table(root, int, leaf));
+		expect(await judge(root, int, leaf, mode, impl)).toMatchObject({
+			ok: false,
+			step: "revocation status unavailable",
+			outage: true,
+		});
+	});
+
+	it("a point remembered as down keeps its outage when it is not retried yet", async () => {
+		const { root, int, leaf } = await buildCrlChain();
+		const { impl, calls } = stubFetch({
+			[INT_CRL_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
+		});
+		const v = validator([root], {
+			revocation: fetchingPolicy("crl", "reject"),
+			fetchImpl: impl,
+		});
+
+		const first = await v.validate(leaf.x509, [int.x509], NOW);
+		const second = await v.validate(leaf.x509, [int.x509], NOW);
+
+		expect(first).toMatchObject({ outage: true });
+		expect(second).toMatchObject({
+			outage: true,
+			detail: expect.stringContaining("not retried yet"),
+		});
+		expect(calls.filter((url) => url === INT_CRL_URL)).toHaveLength(1);
+	});
+
+	it("a delegated responder whose own CRL is down carries the outage through responder_status_unavailable", async () => {
+		// Under "both": the responder's own status comes from INT_CRL_URL, which
+		// is down — an outage — and so is the leaf's CRL at the same URL. The
+		// whole is an outage only if responder_status_unavailable kept the
+		// outage it was built from.
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				ocspSigningEku(),
+				crlDistributionPoints([INT_CRL_URL]),
+			],
+		});
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
+		});
+
+		const result = await judge(root, int, leaf, "both", impl);
+
+		expect(result).toMatchObject({ ok: false, outage: true });
+		if (!result.ok) expect(result.detail).toContain("responder_status_unavailable");
+	});
+
+	it("one point down and one outside the allowlist: a verdict — not every failure is an outage", async () => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				crlDistributionPoints([ROOT_CRL_URL]),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints([INT_CRL_URL, OUTSIDE_ALLOWLIST_CRL]),
+			],
+		});
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root }),
+		});
+
+		const result = await judge(root, int, leaf, "crl", impl);
+
+		expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
+		expect(result).not.toHaveProperty("outage");
+	});
+
+	it("two responders, one down and one outside the allowlist: a verdict", async () => {
+		const { root, int, leaf } = await chainPointing({
+			leaf: [ocspAia([INT_OCSP_URL, OUTSIDE_ALLOWLIST_OCSP])],
+			int: [ocspAia(ROOT_OCSP_URL)],
+		});
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: 503,
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+
+		const result = await judge(root, int, leaf, "ocsp", impl);
+
+		expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
+		expect(result).not.toHaveProperty("outage");
+	});
+
+	describe("under revocation.mode = both", () => {
+		it("OCSP down and a CRL whose signature does not verify: a verdict (400)", async () => {
+			const { root, int, leaf } = await ocspAndCrlChain();
+			const impostor = await mintCa("Impostor", 900);
+			const { impl } = stubFetch({
+				[INT_OCSP_URL]: 503,
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+				[INT_CRL_URL]: await mintCrl({ issuer: int, signingKeys: impostor.keys }),
+			});
+
+			const result = await judge(root, int, leaf, "both", impl);
+
+			expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
+			expect(result).not.toHaveProperty("outage");
+		});
+
+		it("no responder named and the CRL down: an outage (503) — the source never asked says nothing", async () => {
+			const { root, int, leaf } = await chainPointing({
+				leaf: [crlDistributionPoints([INT_CRL_URL])],
+				int: [ocspAia(ROOT_OCSP_URL)],
+			});
+			const { impl } = stubFetch({
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+				[INT_CRL_URL]: 503,
+			});
+
+			expect(await judge(root, int, leaf, "both", impl)).toMatchObject({
+				ok: false,
+				outage: true,
+			});
+		});
+
+		it("an OCSP answer whose signature does not verify and the CRL down: a verdict (400)", async () => {
+			const { root, int, leaf } = await ocspAndCrlChain();
+			const impostor = await mintCa("Impostor", 900);
+			const { impl } = stubFetch({
+				[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signingKeys: impostor.keys }),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+				[INT_CRL_URL]: 503,
+			});
+
+			const result = await judge(root, int, leaf, "both", impl);
+
+			expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
+			expect(result).not.toHaveProperty("outage");
+		});
+	});
+});
+
+/** root → intermediate → leaf, each non-anchor naming its issuer's CRL point. */
+const buildCrlChain = () =>
+	chainPointing({
+		leaf: [crlDistributionPoints([INT_CRL_URL])],
+		int: [crlDistributionPoints([ROOT_CRL_URL])],
+	});

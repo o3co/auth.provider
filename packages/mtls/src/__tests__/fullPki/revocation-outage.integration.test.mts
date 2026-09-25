@@ -82,9 +82,14 @@ const servers: Server[] = [];
 
 afterEach(async () => {
 	await Promise.all(
-		servers
-			.splice(0)
-			.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+		servers.splice(0).map(
+			(server) =>
+				new Promise<void>((resolve) => {
+					// A server that never answers still holds its sockets open.
+					server.closeAllConnections();
+					server.close(() => resolve());
+				}),
+		),
 	);
 });
 
@@ -106,7 +111,7 @@ const closedOrigin = async (): Promise<string> => {
 	return `http://127.0.0.1:${port}`;
 };
 
-type LeafCrl = "refused" | "garbage" | "clean" | "revoked";
+type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
 
 /**
  * root → intermediate → leaf. The intermediate's CRL (the root's list) is
@@ -144,7 +149,10 @@ const pki = async (
 	const leafPoint =
 		leafCrl === "refused"
 			? `${await closedOrigin()}/int.crl`
-			: `${live.replace("127.0.0.1", leafPointHost)}/int.crl`;
+			: leafCrl === "hanging"
+				? // Accepts the connection and never answers.
+					`${await listen(() => {})}/int.crl`
+				: `${live.replace("127.0.0.1", leafPointHost)}/int.crl`;
 	const morePoints: string[] = [];
 	for (const [index, kind] of (extra.morePoints ?? []).entries()) {
 		morePoints.push(
@@ -176,6 +184,7 @@ const mechanism = (
 	onUnavailable: "reject" | "allow",
 	logger: Logger,
 	mode: "crl" | "both" = "crl",
+	fetchTimeoutMs = 2_000,
 ) =>
 	createMtlsMechanism({
 		source: "header",
@@ -188,7 +197,7 @@ const mechanism = (
 				mode,
 				"on-unavailable": onUnavailable,
 				"allowed-hosts": ["127.0.0.1"],
-				"fetch-timeout-ms": 2_000,
+				"fetch-timeout-ms": fetchTimeoutMs,
 				"cache-ttl-seconds": 60,
 				"max-response-bytes": 65_536,
 			},
@@ -200,9 +209,14 @@ const xfcc = (leaf: Minted, int: Minted): string =>
 	`Cert=${encodeURIComponent(leaf.pem)};Chain=${encodeURIComponent(int.pem)}`;
 
 /** `/oauth/token` behind core's token-binding dispatcher, and `/resource` behind the protected-resource one. */
-const appWith = (root: Minted, onUnavailable: "reject" | "allow", mode: "crl" | "both" = "crl") => {
+const appWith = (
+	root: Minted,
+	onUnavailable: "reject" | "allow",
+	mode: "crl" | "both" = "crl",
+	fetchTimeoutMs = 2_000,
+) => {
 	const { logger, calls } = recordingLogger();
-	const mechanisms = [mechanism(root, onUnavailable, logger, mode)];
+	const mechanisms = [mechanism(root, onUnavailable, logger, mode, fetchTimeoutMs)];
 	const app = express();
 	app.post(
 		"/oauth/token",
@@ -274,6 +288,27 @@ describe("full-pki, on-unavailable = reject: a revocation source that cannot ans
 		]);
 		const line = calls[0]?.args[0] as { err: { aggregateErrors: Array<{ detail: string }> } };
 		expect(line.err.aggregateErrors[0]?.detail).toContain("network_error (ECONNREFUSED)");
+	});
+
+	it("a point that accepts the connection and never answers: timed out, the same 503", async () => {
+		const { root, int, leaf, leafPoint } = await pki("hanging");
+		const { app, calls } = appWith(root, "reject", "crl", 300);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: outageLine("token_binding_unavailable", [
+					sourceMember("crl", leafPoint, "fetch_failed"),
+				]),
+			},
+		]);
+		const line = calls[0]?.args[0] as { err: { aggregateErrors: Array<{ detail: string }> } };
+		expect(line.err.aggregateErrors[0]?.detail).toContain("timeout (300ms)");
 	});
 
 	it("an answer that is not DER: the same, pkijs's error inside", async () => {
