@@ -413,7 +413,7 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 ### Revoked families and ended sessions
 
 - **Refresh-token family.** A token carrying `family_id` is checked with `refreshTokenFamilyRevocation.isFamilyRevoked` when that slot is wired: a revoked family answers `active: false` and emits `introspect.family_revoked`; a store that cannot answer is `503 temporarily_unavailable` ("refresh token store unavailable"), audited as `introspect.store_unavailable` and logged as `introspect_store_unavailable` — an outage, for the reason above. A token without `family_id` is verified by signature and the revocation stores alone. A revoked family is remembered until the last access token it could have minted stops being accepted, so the answer does not revert once the family's own refresh tokens expire (core's `refresh-token-family/retention.mts`).
-- **Session liveness.** A token carrying a `sid` claim is checked against the `UserSessionStore` — the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`; a store outage is `503 temporarily_unavailable` ("session store unavailable"), audited and logged as the family store's is. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
+- **Session liveness.** A token carrying a `sid` claim — or a `liveness_sid`, the liveness-only link a token-exchange result carries to its subject token's session (core's `grants/sessionClaims.mts`) — is checked against the `UserSessionStore`, the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`; a store outage is `503 temporarily_unavailable` ("session store unavailable"), audited and logged as the family store's is. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
 
 These bind only callers that ask: a resource server validating the JWT offline, by signature and `exp`, sees no revocation and accepts the token until it expires.
 
@@ -446,7 +446,8 @@ OIDC Core §5.3, on `GET` and `POST`. Returns scope-filtered claims sourced from
 | Session not found | `401 invalid_token` |
 | The keystore, the jti denylist or the subject watermark cannot answer | `503 temporarily_unavailable` ("verification key unavailable" / "revocation store unavailable"), no challenge; logged as `token_verification_unavailable` |
 | The refresh-token family store or the session store cannot answer | `503 temporarily_unavailable` ("refresh token store unavailable" / "session store unavailable"), no challenge; logged as `userinfo_store_unavailable` |
-| No `userSessionStore` wired or no `sid` claim | `200 { sub }` (sub only, no durable claims) |
+| No `userSessionStore` wired, or neither a `sid` nor a `liveness_sid` claim | `200 { sub }` (sub only, no durable claims) |
+| A `liveness_sid` and no `sid` (a token-exchange result), session active | `200 { sub }` — the session is checked and none of it is released: the holder of an exchanged token is not the session's client, whatever its scope says |
 | Session active | `200 { sub, ...scope-filtered claims }` |
 
 All responses set `Cache-Control: no-store` and `Pragma: no-cache` (RFC 6750 §5.3). An outage is refused — no claims are served — but not as `invalid_token`, which RFC 6750 §3.1 defines as a statement about the token ("expired, revoked, malformed, or invalid") and which sends the client to replace it.

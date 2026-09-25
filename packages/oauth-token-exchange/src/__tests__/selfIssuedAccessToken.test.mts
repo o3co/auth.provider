@@ -124,6 +124,12 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(result?.sid).toBe("sid-1");
 	});
 
+	it("projects an exchanged token's liveness_sid as its sid, so a re-exchange stays tied to the session", async () => {
+		const token = await signSelfIssuedAccessToken({ liveness_sid: "sid-1" });
+		const result = await validator().validate(token, { role: "subject" });
+		expect(result?.sid).toBe("sid-1");
+	});
+
 	it("leaves sid absent for a token without one, or with an empty one", async () => {
 		for (const claims of [{}, { sid: "" }, { sid: 42 }]) {
 			const result = await validator().validate(await signSelfIssuedAccessToken(claims), {

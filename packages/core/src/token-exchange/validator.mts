@@ -91,10 +91,13 @@ export interface ExchangeTokenValidator {
  *     inherited. Leave it unset for foreign tokens, whose families this
  *     provider's store does not hold; an empty string counts as unset.
  *   - `sid`: the `UserSession` the token was issued under, for a token this
- *     provider minted from a browser session. The grant handler checks that
- *     the session is still live against this provider's user-session store
- *     (when one is wired) and copies it into the issued token, so a logout
- *     that ends the subject token's session ends the exchanged token too.
+ *     provider minted from a browser session — its `sid`, or the
+ *     `liveness_sid` of a token that was itself exchanged (`livenessSidOf`).
+ *     The grant handler checks that the session is still live against this
+ *     provider's user-session store (when one is wired) and carries it into
+ *     the issued token as `liveness_sid` — a liveness link, never a `sid`
+ *     (`grants/sessionClaims.mts`) — so a logout that ends the subject
+ *     token's session ends the exchanged token too.
  *     A `sid` left only in `claims` is neither checked nor inherited. Leave
  *     it unset for foreign tokens: another issuer's `sid` names no session
  *     this provider's store holds. An empty string counts as unset.

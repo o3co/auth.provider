@@ -41,6 +41,7 @@ import {
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
+	livenessSidOf,
 	loggableError,
 	type PendingConsentStore,
 	type RateLimiter,
@@ -962,8 +963,12 @@ export const createOAuthRouter = async (
 					//
 					// Fail-closed on a store throw, for the reason the family
 					// check states: 503, the outage it is, never `active: false`.
-					const rawSid = (payload as Record<string, unknown>).sid;
-					const sid = typeof rawSid === "string" && rawSid.length > 0 ? rawSid : null;
+					//
+					// The session is the token's own `sid` or, for a token-exchange
+					// result, its `liveness_sid` (core's `livenessSidOf`): a derived
+					// token ends with the session it came from, as its subject token
+					// does.
+					const sid = livenessSidOf(payload as Record<string, unknown>);
 					if (sid !== null && userSessionStore) {
 						let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
 						try {

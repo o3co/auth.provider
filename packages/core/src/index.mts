@@ -349,6 +349,9 @@ export {
 	unrepresentedResources,
 } from "./grants/resourceIndicator.mjs";
 export type { SenderConstraint } from "./grants/senderConstraint.mjs";
+// The two ways an access token names its session: `sid` (liveness and the
+// session's capabilities) and `liveness_sid` (a derived token's liveness link).
+export { LIVENESS_SID_CLAIM, livenessSidOf } from "./grants/sessionClaims.mjs";
 // Grant types and interfaces.
 //
 // `GrantRegistry` and `GrantRegistryError` (deprecated public re-exports

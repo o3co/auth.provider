@@ -703,8 +703,10 @@ describe("token exchange: a token exchanged from a session-bound token ends with
 
 		expect(await active(app, original, WEB)).toBe(false);
 		expect(await active(app, exchanged, GATEWAY)).toBe(false);
-		// Because the exchanged token names the same browser session.
-		expect(tokenPayload(exchanged).sid).toBe(tokenPayload(original).sid);
+		// Because the exchanged token names the same browser session — as a
+		// liveness link, never as the `sid` its capabilities are authorised on.
+		expect(tokenPayload(exchanged).liveness_sid).toBe(tokenPayload(original).sid);
+		expect(tokenPayload(exchanged)).not.toHaveProperty("sid");
 	});
 
 	it("after /session/logout, /userinfo refuses the exchanged token as it refuses the original", async () => {

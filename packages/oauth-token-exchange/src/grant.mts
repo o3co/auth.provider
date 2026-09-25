@@ -36,6 +36,7 @@ import {
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
+	LIVENESS_SID_CLAIM,
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
@@ -1059,11 +1060,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const accessToken = await generateToken(
 				formatObject({
 					family_id: reportedFamily(subjectValidated),
-					// The subject's session, so that the logout which ends the
-					// subject token ends this one at every surface that reads
-					// `sid` (`sessionRefusal`). The actor's is not carried: the
-					// issued token speaks for the subject.
-					sid: subjectValidated.sid ? subjectValidated.sid : undefined,
+					// The subject's session, as a liveness link only (core's
+					// `grants/sessionClaims.mts`): the logout that ends the subject
+					// token ends this one at introspection and userinfo, and no
+					// capability a `sid` authorises — the session's claims, its
+					// upstream tokens — is reachable with it. The actor's session
+					// is not carried: the issued token speaks for the subject.
+					[LIVENESS_SID_CLAIM]: subjectValidated.sid ? subjectValidated.sid : undefined,
 					act,
 				}),
 				{
@@ -1294,8 +1297,9 @@ async function familyRefusal(
  *   role and core's `loggableError` projection — an outage is never reported
  *   as an ended session, nor waved through as a live one.
  *
- * The issued token carries the subject's `sid` (see the issuance above), so
- * the same logout reaches it too.
+ * The issued token carries the subject's session as `liveness_sid` (see the
+ * issuance above), so the same logout reaches it too — and nothing a `sid`
+ * authorises does.
  */
 async function sessionRefusal(
 	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,

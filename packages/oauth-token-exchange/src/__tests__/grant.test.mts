@@ -1846,24 +1846,46 @@ describe("createTokenExchangeGrant — the session behind a sid-carrying token",
 		return decodeJwt(result.tokens.access_token);
 	};
 
-	it("carries the subject token's sid onto the issued token", async () => {
+	it("carries the subject token's session onto the issued token as liveness_sid, never as sid", async () => {
+		// `sid` is what the session's capabilities are authorised on — its
+		// claims at /userinfo, its upstream tokens — and a downstream holder of
+		// an exchanged token is not the session's client. `liveness_sid` is
+		// read by the liveness checks alone.
 		const g = buildGrant({ userSessionStore: await liveSessions() });
 		const { result } = await exchange(g, {
 			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
 		});
 		expect(result.status).toBe(200);
-		expect(issued(result).sid).toBe("sid-live");
+		expect(issued(result).liveness_sid).toBe("sid-live");
+		expect(issued(result)).not.toHaveProperty("sid");
 	});
 
-	it("carries the sid without a store to check it against, as introspection reads it then", async () => {
-		// With no UserSession store wired nothing anywhere judges a `sid`, and
-		// the one the exchange would drop is the one a later wiring reads.
+	it("carries a re-exchanged token's liveness_sid on, so a chain stays tied to the session", async () => {
+		const store = await liveSessions();
+		const g = buildGrant({ userSessionStore: store });
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ liveness_sid: "sid-live" }),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result).liveness_sid).toBe("sid-live");
+		expect(issued(result)).not.toHaveProperty("sid");
+
+		await store.delete("sid-live");
+		const again = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ liveness_sid: "sid-live" }),
+		});
+		expect(again.result).toMatchObject({ status: 400, errorDescription: "session_invalid" });
+	});
+
+	it("carries the session without a store to check it against, as introspection reads it then", async () => {
+		// With no UserSession store wired nothing anywhere judges it, and the
+		// link the exchange would drop is the one a later wiring reads.
 		const g = buildGrant();
 		const { result } = await exchange(g, {
 			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
 		});
 		expect(result.status).toBe(200);
-		expect(issued(result).sid).toBe("sid-live");
+		expect(issued(result).liveness_sid).toBe("sid-live");
 	});
 
 	it("stamps no sid for a subject token without one, and reads no session", async () => {
@@ -1874,6 +1896,7 @@ describe("createTokenExchangeGrant — the session behind a sid-carrying token",
 		});
 		expect(result.status).toBe(200);
 		expect(issued(result)).not.toHaveProperty("sid");
+		expect(issued(result)).not.toHaveProperty("liveness_sid");
 		expect(get).not.toHaveBeenCalled();
 	});
 

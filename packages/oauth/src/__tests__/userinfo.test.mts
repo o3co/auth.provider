@@ -289,6 +289,49 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.headers["www-authenticate"]).toBeUndefined();
 	});
 
+	describe("a token whose session link is liveness-only (liveness_sid, a token-exchange result)", () => {
+		// The session is checked — the logout that ends it ends the token — and
+		// none of it is released: an exchanged token's holder is not the
+		// session's client, whatever its scope says.
+		const storeAnswering = (get: UserSessionStore["get"]) => ({
+			kind: "memory",
+			get: vi.fn(get),
+			create: vi.fn(),
+			delete: vi.fn(),
+		});
+
+		it("answers {sub} alone for a live session, even with a scope that would release claims", async () => {
+			const store = storeAnswering(async () => baseSession);
+			const res = await callUserinfo({
+				token: await mintAT({ liveness_sid: "sid-1", scope: "openid email profile" }),
+				userSessionStore: store,
+			});
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ sub: "u-1" });
+			expect(store.get).toHaveBeenCalledWith("sid-1");
+		});
+
+		it("answers 401 session_invalid once the session is gone", async () => {
+			const res = await callUserinfo({
+				token: await mintAT({ liveness_sid: "sid-dead" }),
+				userSessionStore: storeAnswering(async () => null),
+			});
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual({ error: "invalid_token", error_description: "session_invalid" });
+		});
+
+		it("answers 503 when the session store cannot say", async () => {
+			const res = await callUserinfo({
+				token: await mintAT({ liveness_sid: "sid-1" }),
+				userSessionStore: storeAnswering(async () => {
+					throw new Error("redis unavailable");
+				}),
+			});
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+	});
+
 	it("rejects refresh_token (typ: rt+jwt) presented as Bearer (security)", async () => {
 		// Refresh tokens are signed by the same KeyStore and carry sub/sid/scope
 		// claims, so without a typ check they would also pass signature verification.
