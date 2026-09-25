@@ -34,7 +34,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
-import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	expectBestEffortWarn,
 	expectOutageLine,
@@ -991,6 +991,117 @@ describe("POST /oauth/logout", () => {
 			expect(res.body).toEqual({ logged_out: true });
 		});
 
+		// A custom ClientRepository bypasses ClientEntrySchema, so an entry
+		// `checkRedirectUri` would refuse at boot can reach this route: one the
+		// URL parser cannot read, or one in an executable scheme. Matching it
+		// exactly does not make it a place to send a browser — `new URL()` on
+		// the first ended a finished logout in a 500, and the second reached
+		// `window.location.href` on the front-channel page, which is script on
+		// this origin. Either is dropped with one warn, and the logout
+		// completes as if no URI had been sent.
+		describe("a registered entry this server would not redirect to", () => {
+			const UNPARSABLE = "::not a url";
+			const EXECUTABLE = "javascript:alert(document.domain)";
+			const cases = [
+				["one the URL parser cannot read", UNPARSABLE, "unparsable"],
+				["one in an executable scheme", EXECUTABLE, "executable-scheme"],
+			] as const;
+
+			const registering = (entry: string) =>
+				makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [entry],
+					}),
+				});
+
+			const expectRefusedOnce = (logger: MockLogger, reason: string) => {
+				expectBestEffortWarn(
+					logger,
+					"logout_registered_redirect_uri_refused",
+					{ site: "logout", clientId: "client-1", reason },
+					null,
+				);
+				expect(logger.error).not.toHaveBeenCalled();
+			};
+
+			it.each(cases)("is not the redirect (7c): %s", async (_label, entry, reason) => {
+				const logger = createMockLogger();
+				const sessionStore = makeSessionStore();
+				const app = buildApp({ sessionStore, clientRepo: registering(entry), logger });
+
+				const res = await postLogout(app, {
+					id_token_hint: await mintIdToken(),
+					post_logout_redirect_uri: entry,
+					state: "s-1",
+				});
+
+				expect(res.status).toBe(200);
+				expect(res.body).toEqual({ logged_out: true });
+				expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+				expectRefusedOnce(logger, reason);
+			});
+
+			it.each(cases)(
+				"is not handed to the upstream end-session call (7b): %s",
+				async (_label, entry, reason) => {
+					const logger = createMockLogger();
+					const { app, endSession } = buildWithUpstream({
+						clientRepo: registering(entry),
+						logger,
+					});
+
+					const res = await postLogout(app, {
+						id_token_hint: await mintIdToken(),
+						post_logout_redirect_uri: entry,
+					});
+
+					expect(res.status).toBe(303);
+					expect(res.headers.location).toBe("https://accounts.google.com/Logout");
+					expect(endSession).toHaveBeenCalledWith(
+						expect.objectContaining({ postLogoutRedirectUri: undefined }),
+					);
+					expectRefusedOnce(logger, reason);
+				},
+			);
+
+			it.each(cases)(
+				"is not where the front-channel page sends the browser (7a): %s",
+				async (_label, entry, reason) => {
+					const logger = createMockLogger();
+					const sessionRPRegistry = makeSessionRPRegistry({
+						listRPs: vi.fn(async () => [
+							{
+								clientId: "client-1",
+								frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+								registeredAt: new Date(),
+								backchannelLogoutUri: undefined,
+								backchannelLogoutSessionRequired: undefined,
+								frontchannelLogoutSessionRequired: undefined,
+							},
+						]),
+					});
+					const app = buildApp({ sessionRPRegistry, clientRepo: registering(entry), logger });
+
+					const res = await postLogout(
+						app,
+						{ id_token_hint: await mintIdToken(), post_logout_redirect_uri: entry },
+						{ Accept: "text/html" },
+					);
+
+					expect(res.status).toBe(200);
+					expect(res.headers["content-type"]).toMatch(/text\/html/);
+					expect(res.text).toContain("<iframe");
+					expect(res.text).not.toContain("<script>");
+					expect(res.text).not.toContain("javascript:");
+					expect(res.text).not.toContain("not a url");
+					expectRefusedOnce(logger, reason);
+				},
+			);
+		});
+
 		describe("which client's list the URI is held to", () => {
 			/** Only `client-1` is registered, with the one URI. */
 			const onlyClient1 = () =>
@@ -1900,6 +2011,47 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
 			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
 		});
+
+		// The same gap on this route: an entry a custom ClientRepository holds
+		// that `checkRedirectUri` would refuse is not handed to the adapter.
+		it.each([
+			["one the URL parser cannot read", "::not a url", "unparsable"],
+			["one in an executable scheme", "javascript:alert(document.domain)", "executable-scheme"],
+		] as const)(
+			"is none for a registered entry this server would not redirect to: %s",
+			async (_label, entry, reason) => {
+				const logger = createMockLogger();
+				const { app, endSession, fedTokenStore } = buildWithUpstream({
+					clientRepo: makeClientRepo({
+						findById: vi.fn().mockResolvedValue({
+							clientId: "client-1",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							postLogoutRedirectUris: [entry],
+						}),
+					}),
+					logger,
+				});
+
+				const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+					post_logout_redirect_uri: entry,
+				});
+
+				expect(res.status).toBe(303);
+				expect(res.headers.location).toBe("https://accounts.google.com/Logout");
+				expect(endSession).toHaveBeenCalledWith(
+					expect.objectContaining({ postLogoutRedirectUri: undefined }),
+				);
+				expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
+				expectBestEffortWarn(
+					logger,
+					"logout_registered_redirect_uri_refused",
+					{ site: "federation_logout", clientId: "client-1", reason },
+					null,
+				);
+				expect(logger.error).not.toHaveBeenCalled();
+			},
+		);
 	});
 
 	describe("a POST that carries no body", () => {
