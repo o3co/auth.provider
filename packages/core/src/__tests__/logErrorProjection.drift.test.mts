@@ -97,7 +97,8 @@
  * `req.originalUrl`, `req.url`, `req.headers`, `req.cookies`, `req.ip`,
  * `req.ips`, `req.get(…)` or `req.header(…)` (on `req` or a member path
  * ending in it, `ctx.req`) — inside a template literal's `${…}` too —
- * anywhere but inside the parentheses of `auditErrorText(...)`. What a
+ * anywhere but inside the parentheses of `auditErrorText(...)` or
+ * `auditErrorList(...)`. What a
  * caller sent is put on a line sanitised and capped: a log line and an audit
  * event are read by systems that split on a line break, and neither may be
  * made unbounded by a caller. `req.ip` is the caller's too: behind `trust
@@ -934,11 +935,13 @@ function withoutCallsOf(text: string, name: string): string {
 	return out + text.slice(from);
 }
 
-/** Whether `args` reads the request anywhere but inside `auditErrorText(...)`. */
+/** Whether `args` reads the request anywhere but inside `auditErrorText(...)` or `auditErrorList(...)`. */
 function readsRequestRaw(args: string, { audit }: { readonly audit: boolean }): boolean {
 	const exempted = audit ? withEventRequestFieldsExempt(args) : args;
 	return [literalsBlanked(exempted), ...templateExpressions(exempted)].some((code) =>
-		REQUEST_READ.test(withoutCallsOf(literalsBlanked(code), "auditErrorText")),
+		REQUEST_READ.test(
+			withoutCallsOf(withoutCallsOf(literalsBlanked(code), "auditErrorText"), "auditErrorList"),
+		),
 	);
 }
 

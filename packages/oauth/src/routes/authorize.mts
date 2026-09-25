@@ -16,6 +16,7 @@
 
 import {
 	type AuditSink,
+	auditErrorList,
 	auditErrorText,
 	boundPolicyAudience,
 	buildCanonicalRequestUrl,
@@ -1102,12 +1103,17 @@ const resolveScopes = (
 		(!requestedScopes.includes("openid") || !allowedFilteredScopes.includes("openid"))
 	) {
 		// The requested scopes are the caller's: every one a scope-token (the
-		// grammar check above), but as many as it sent. They go on the line as
-		// the `scope` parameter spells them, sanitised and capped.
+		// grammar check above), but as long and as many as it sent. The line
+		// keeps the first ten, each capped, and how many there were when it
+		// had to cut.
+		const loggedScopes = auditErrorList(requestedScopes);
 		ctx.opts.logger.warn(
 			{
 				clientId: ctx.clientId,
-				requestedScopes: auditErrorText(requestedScopes.join(" ")),
+				requestedScopes: loggedScopes,
+				...(loggedScopes.length < requestedScopes.length
+					? { requestedScopeCount: requestedScopes.length }
+					: {}),
 				allowedFilteredScopes,
 			},
 			"authorize_rejected_missing_openid_scope",

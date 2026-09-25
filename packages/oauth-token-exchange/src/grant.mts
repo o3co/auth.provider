@@ -28,6 +28,7 @@ import type {
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
+	auditErrorList,
 	auditErrorText,
 	formatObject,
 	generateToken,
@@ -780,7 +781,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
 							audienceForToken: requestAudience,
-							missingResources: loggedResources(missingResources),
+							...loggedResources(missingResources),
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -970,7 +971,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
 							audienceForToken,
-							missingResources: loggedResources(missingResources),
+							...loggedResources(missingResources),
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -1259,16 +1260,23 @@ async function familyRefusal(
 }
 
 /**
- * The requested resources a refusal names, as its log line carries them: one
- * string, space-delimited as the refusal's `error_description` spells them,
- * sanitised and capped (core's `auditErrorText`). They are the caller's own
- * `resource` values — before the policy runs, anything it wrote; after it,
- * values the client and the subject token both carry, but as many as it
- * chose to send — so neither what they hold nor how many there are may
- * reach the line unbounded.
+ * The requested resources a refusal names, as its log line carries them:
+ * `missingResources`, the first ten through core's `auditErrorList` (each
+ * sanitised and capped at 200 characters), and `missingResourceCount` when
+ * that had to cut. They are the caller's own `resource` values — before the
+ * policy runs, anything it wrote; after it, values the client and the subject
+ * token both carry, but as many as it chose to send — so neither what they
+ * hold nor how many there are may reach the line unbounded. A small,
+ * well-formed list reads as it always did.
  */
-const loggedResources = (resources: readonly string[]): string =>
-	auditErrorText(resources.join(" "));
+const loggedResources = (
+	resources: readonly string[],
+): { readonly missingResources: string[]; readonly missingResourceCount?: number } => {
+	const missingResources = auditErrorList(resources);
+	return missingResources.length < resources.length
+		? { missingResources, missingResourceCount: resources.length }
+		: { missingResources };
+};
 
 /**
  * The single audience an exchanged token is minted for (spec §8.1 rule 2):
