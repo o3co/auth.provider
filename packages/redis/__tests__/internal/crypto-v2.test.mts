@@ -57,8 +57,13 @@ describe("the v2 federation grant credential envelope (#593, D16)", () => {
 		expect(openSealedCredential(fresh, RING, AAD)).toStrictEqual({
 			state: "ok",
 			value: "rt-fresh",
+			keyId: "k-2026-09",
 		});
-		expect(openSealedCredential(old, RING, AAD)).toStrictEqual({ state: "ok", value: "rt-old" });
+		expect(openSealedCredential(old, RING, AAD)).toStrictEqual({
+			state: "ok",
+			value: "rt-old",
+			keyId: "k-2026-03",
+		});
 	});
 
 	it("tells an unknown key ID from a failed tag: one is undone by putting the key back, the other never opens", () => {
@@ -66,12 +71,17 @@ describe("the v2 federation grant credential envelope (#593, D16)", () => {
 		// The operator dropped the key that sealed it from the ring.
 		expect(openSealedCredential(sealed, [RING[1] as FederationGrantKey], AAD)).toStrictEqual({
 			state: "key_unavailable",
+			keyId: "k-2026-09",
 		});
 		// The key ID is known, the material behind it is not the one that sealed.
 		const wrong: readonly FederationGrantKey[] = [{ id: "k-2026-09", key: key(9) }];
 		expect(openSealedCredential(sealed, wrong, AAD)).toStrictEqual({ state: "unreadable" });
 		// And the ring it was sealed under still opens it: nothing was consumed.
-		expect(openSealedCredential(sealed, RING, AAD)).toStrictEqual({ state: "ok", value: "rt-1" });
+		expect(openSealedCredential(sealed, RING, AAD)).toStrictEqual({
+			state: "ok",
+			value: "rt-1",
+			keyId: "k-2026-09",
+		});
 	});
 
 	it("authenticates the record it was sealed for: another record's data does not open it", () => {
@@ -167,7 +177,7 @@ describe("the v2 federation grant credential envelope (#593, D16)", () => {
 		mutable.fill(8);
 		expect(
 			openSealedCredential(sealed, [{ id: "k", key: Buffer.alloc(32, 7) }], AAD),
-		).toStrictEqual({ state: "ok", value: "rt-1" });
+		).toStrictEqual({ state: "ok", value: "rt-1", keyId: "k" });
 	});
 
 	it("opens a vector sealed outside this module: the format is a contract, not whatever the writer happens to produce", () => {
@@ -205,6 +215,7 @@ describe("the v2 federation grant credential envelope (#593, D16)", () => {
 		expect(openSealedCredential(envelope, [{ id: "k-hand", key: material }], AAD)).toStrictEqual({
 			state: "ok",
 			value: "rt-by-hand",
+			keyId: "k-hand",
 		});
 	});
 

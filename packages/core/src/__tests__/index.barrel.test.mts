@@ -155,7 +155,7 @@ describe("core barrel — the sealing leaf", () => {
 			ring,
 			binding,
 		);
-		expect(opened).toStrictEqual({ state: "ok", value: "value" });
+		expect(opened).toStrictEqual({ state: "ok", value: "value", keyId: "k" });
 	});
 
 	it("names them for what they do, not for the store they came from", () => {

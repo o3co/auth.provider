@@ -125,6 +125,7 @@ describe("v2 envelopes sealed before the envelope moved to core", () => {
 			expect(openSealedCredential(entry.envelope, RING, recordOf(entry))).toStrictEqual({
 				state: "ok",
 				value: entry.plaintext,
+				keyId: entry.sealedWith,
 			});
 		},
 	);
@@ -155,6 +156,7 @@ describe("v2 envelopes sealed before the envelope moved to core", () => {
 		const withoutItsKey = RING.filter((candidate) => candidate.id !== entry.sealedWith);
 		expect(openSealedCredential(entry.envelope, withoutItsKey, recordOf(entry))).toStrictEqual({
 			state: "key_unavailable",
+			keyId: entry.sealedWith,
 		});
 		expect(
 			openSealedCredential(entry.envelope, RING, Buffer.from("another record", "utf8")),

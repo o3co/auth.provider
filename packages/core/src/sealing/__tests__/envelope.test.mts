@@ -65,24 +65,40 @@ describe("the v2 key-ring envelope", () => {
 		expect(Buffer.from(parts[4] as string, "base64url")).toHaveLength(16);
 	});
 
-	it("opens under the key that sealed it, and under an older key still in the ring", () => {
+	it("opens under the key that sealed it, and under an older key still in the ring, and says which", () => {
+		// Which key opened a value is what a caller re-seals by: a value opened
+		// under a key that is no longer first was sealed with a retired one.
 		const fresh = sealWithKeyRing("rt-fresh", RING, BINDING);
 		const old = sealWithKeyRing("rt-old", [RING[1] as SealingKey], BINDING);
-		expect(openWithKeyRing(fresh, RING, BINDING)).toStrictEqual({ state: "ok", value: "rt-fresh" });
-		expect(openWithKeyRing(old, RING, BINDING)).toStrictEqual({ state: "ok", value: "rt-old" });
+		expect(openWithKeyRing(fresh, RING, BINDING)).toStrictEqual({
+			state: "ok",
+			value: "rt-fresh",
+			keyId: "k-2026-09",
+		});
+		expect(openWithKeyRing(old, RING, BINDING)).toStrictEqual({
+			state: "ok",
+			value: "rt-old",
+			keyId: "k-2026-03",
+		});
 	});
 
 	it("tells an unknown key ID from a failed tag: one is undone by putting the key back, the other never opens", () => {
 		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
-		// The operator dropped the key that sealed it from the ring.
+		// The operator dropped the key that sealed it from the ring; the answer
+		// names the key to put back.
 		expect(openWithKeyRing(sealed, [RING[1] as SealingKey], BINDING)).toStrictEqual({
 			state: "key_unavailable",
+			keyId: "k-2026-09",
 		});
 		// The key ID is known, the material behind it is not the one that sealed.
 		const wrong: SealingKeyRing = [{ id: "k-2026-09", key: key(9) }];
 		expect(openWithKeyRing(sealed, wrong, BINDING)).toStrictEqual({ state: "unreadable" });
 		// And the ring it was sealed under still opens it: nothing was consumed.
-		expect(openWithKeyRing(sealed, RING, BINDING)).toStrictEqual({ state: "ok", value: "rt-1" });
+		expect(openWithKeyRing(sealed, RING, BINDING)).toStrictEqual({
+			state: "ok",
+			value: "rt-1",
+			keyId: "k-2026-09",
+		});
 	});
 
 	it("authenticates the record it was sealed for: another record's data does not open it", () => {
@@ -272,6 +288,7 @@ describe("the v2 key-ring envelope", () => {
 			{
 				state: "ok",
 				value: "rt-1",
+				keyId: "k",
 			},
 		);
 	});
@@ -303,6 +320,7 @@ describe("the v2 key-ring envelope", () => {
 		expect(openWithKeyRing(envelope, [{ id: "k-hand", key: material }], BINDING)).toStrictEqual({
 			state: "ok",
 			value: "rt-by-hand",
+			keyId: "k-hand",
 		});
 	});
 
@@ -314,7 +332,7 @@ describe("the v2 key-ring envelope", () => {
 			const binding = { ...BINDING, record };
 			expect(
 				openWithKeyRing(sealWithKeyRing(plaintext, RING, binding), RING, binding),
-			).toStrictEqual({ state: "ok", value: plaintext });
+			).toStrictEqual({ state: "ok", value: plaintext, keyId: "k-2026-09" });
 		}
 	});
 
