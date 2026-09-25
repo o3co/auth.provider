@@ -561,6 +561,20 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				});
 			});
 
+			it("nor beside a 5xx on a thrown value that is not an Error: the classifier's outage is the retrieval's too", async () => {
+				// A hand-written adapter may throw a plain object. The refresh-error
+				// classifier reads its 5xx status as an outage; the interaction code
+				// beside it is no more the user's absence than under an Error.
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockRejectedValue({ error: "login_required", status: 503 });
+				expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-0" });
+				expect(await h.store.find("g-1", DUE)).toMatchObject({
+					status: "active",
+					refreshFailure: { kind: "unavailable" },
+				});
+			});
+
 			it("does not establish it from a message alone: a proxy's page that says consent_required is a refusal nobody can read", async () => {
 				await h.seed();
 				setNow(GONE);

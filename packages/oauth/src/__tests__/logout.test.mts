@@ -456,6 +456,43 @@ describe("POST /oauth/logout", () => {
 			expect(res.body.error).toBe("invalid_request");
 			expect(res.body.error_description).toMatch(/sid/);
 		});
+
+		// A hint that names no session can log nothing out, on GET or POST, and
+		// that is known before anything else is asked: neither the client
+		// repository (for post_logout_redirect_uri) nor, on a stale GET, the
+		// confirmation page — whose "Sign out" would only post the same hint
+		// back to this 400.
+		const hintWithoutSid = (iat?: number) => {
+			const jwt = new SignJWT({ sub: "u-1", aud: "client-1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
+				.setIssuer("https://auth.example.com")
+				.setExpirationTime("1h");
+			return (iat === undefined ? jwt.setIssuedAt() : jwt.setIssuedAt(iat)).sign(secretKey);
+		};
+
+		it("answers 400 without asking the client repository for post_logout_redirect_uri", async () => {
+			const findById = vi.fn().mockRejectedValue(storeReplyError());
+			const app = buildApp({ clientRepo: makeClientRepo({ findById }) });
+
+			const res = await postLogout(app, {
+				id_token_hint: await hintWithoutSid(),
+				post_logout_redirect_uri: "https://rp.example/logged-out",
+			});
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_request");
+			expect(findById).not.toHaveBeenCalled();
+		});
+
+		it("answers a stale GET 400, not with a confirmation page that can only fail", async () => {
+			const app = buildApp();
+			const stale = Math.floor((Date.now() - 25 * 60 * 60 * 1000) / 1000);
+
+			const res = await getLogout(app, { id_token_hint: await hintWithoutSid(stale) });
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_request");
+		});
 	});
 
 	describe("cascadeLogout returns failed (step 1: revokeFamily throws)", () => {
