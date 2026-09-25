@@ -530,7 +530,7 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 				}),
 			{
 				reason: "undecodable",
-				err: expect.objectContaining({ name: "Error", message: "decode blew up" }),
+				err: expect.objectContaining({ name: "Error", detail: "decode blew up" }),
 			},
 		],
 		[
@@ -543,33 +543,36 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 			() => mockDecodeJwtPayload.mockReturnValueOnce({ jti: "a-jti-with-no-exp" }),
 			{ reason: "no_exp" },
 		],
-	])("answers 503, serves nothing and logs it once when the minted token %s", async (_case, arrange, fields) => {
-		const register = vi.fn(async () => {});
-		const logger = spyLogger();
-		const deps = await makeDeps({
-			refreshTokenFamilyRotation: {
-				register,
-				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-			},
-			logger,
-		});
-		arrange();
+	])(
+		"answers 503, serves nothing and logs it once when the minted token %s",
+		async (_case, arrange, fields) => {
+			const register = vi.fn(async () => {});
+			const logger = spyLogger();
+			const deps = await makeDeps({
+				refreshTokenFamilyRotation: {
+					register,
+					rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+				},
+				logger,
+			});
+			arrange();
 
-		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
+			const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
 
-		expect(result.status).toBe(503);
-		expect("error" in result && result.error).toBe("temporarily_unavailable");
-		expect("tokens" in result).toBe(false);
-		expect(register).not.toHaveBeenCalled();
-		expect(logger.error).toHaveBeenCalledTimes(1);
-		expect(logger.error).toHaveBeenCalledWith(
-			{ clientId: CLIENT_ID, ...fields },
-			"webauthn_grant_refresh_token_unregistrable",
-		);
-		const [context] = logger.error.mock.calls[0] as [Record<string, unknown>];
-		expect(context.err).not.toBeInstanceOf(Error);
-		expect(logger.warn).not.toHaveBeenCalled();
-	});
+			expect(result.status).toBe(503);
+			expect("error" in result && result.error).toBe("temporarily_unavailable");
+			expect("tokens" in result).toBe(false);
+			expect(register).not.toHaveBeenCalled();
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ clientId: CLIENT_ID, ...fields },
+				"webauthn_grant_refresh_token_unregistrable",
+			);
+			const [context] = logger.error.mock.calls[0] as [Record<string, unknown>];
+			expect(context.err).not.toBeInstanceOf(Error);
+			expect(logger.warn).not.toHaveBeenCalled();
+		},
+	);
 
 	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
 		// This used to reach the guard above at request time: no configured TTL

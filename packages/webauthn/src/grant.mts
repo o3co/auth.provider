@@ -27,6 +27,14 @@
  *   5. Verify assertion via verifyWebAuthnAssertion. ok=false → 400 invalid_grant.
  *   6. Atomic CAS sign-count update via credentialStore.updateSignCount.
  *      Returns false → 400 invalid_grant (concurrent race / clone attack).
+ *
+ *   A store that cannot answer at steps 3, 4 or 6, or when the refresh-token
+ *   family is registered, is the server's outage, not a verdict on the passkey:
+ *   503 temporarily_unavailable, logged once at error level as
+ *   `webauthn_grant_store_unavailable` with `store` and `step`, and no token.
+ *   Nothing is spent before step 4; from there the challenge is consumed, so
+ *   the client's retry of the same assertion is 400 invalid_grant and the user
+ *   runs the ceremony again.
  *   7. Optional grantPolicy gate — rt-style: called unconditionally when deps.grantPolicy
  *      is wired (Codex Round 3 P1). The resourceIndicator flag gates ONLY whether
  *      body.resource is forwarded in the request payload (Stage 1 plumbing contract).
@@ -101,7 +109,9 @@
 import { randomUUID } from "node:crypto";
 
 import {
+	auditErrorText,
 	boundPolicyAudience,
+	consoleLogger,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	type GrantContext,
@@ -111,6 +121,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	loggableError,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
@@ -119,6 +130,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { decodeJwtPayload } from "./internal/_jwtPayload.mjs";
+import { storeUnavailableDescription, type WebAuthnStore } from "./internal/storeUnavailable.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
 // ---------------------------------------------------------------------------
@@ -204,6 +216,42 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	// missing refresh lifetime signed a refresh token with no `exp`.
 	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
+	// One logger for every line this grant writes. The module hands over the
+	// deployment's; a handler built without one still reports its outages.
+	const logger = deps.logger ?? consoleLogger;
+
+	/**
+	 * A store this grant needs could not answer: the server's outage, never a
+	 * verdict on the passkey. One line at error level —
+	 * `webauthn_grant_store_unavailable`, `store` naming which and `step` the
+	 * operation, the client when one authenticated, and the error's projection
+	 * (a store's error can carry what it was sent) — and `503
+	 * temporarily_unavailable`, so the client retries rather than discards
+	 * anything.
+	 */
+	const storeUnavailable = (
+		store: Exclude<WebAuthnStore, "challenge">,
+		step: "find" | "consume" | "update_sign_count" | "register",
+		clientId: string | undefined,
+		err: unknown,
+	): GrantHandlerResult => {
+		logger.error(
+			{
+				store,
+				step,
+				...(clientId === undefined ? {} : { clientId: auditErrorText(clientId) }),
+				err: loggableError(err),
+			},
+			"webauthn_grant_store_unavailable",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: storeUnavailableDescription(store),
+			},
+		};
+	};
 
 	return {
 		// allowedGrantTypes strictness for authenticated clients — mirroring
@@ -236,11 +284,20 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				};
 			}
 			const { assertion, challengeValue } = parseResult;
+			const clientId = ctx.authenticatedClient?.clientId;
 
 			// ------------------------------------------------------------------
 			// Step 2: Look up credential
+			//
+			// Nothing is spent yet: after an outage here the same assertion can
+			// be presented again, within the challenge's lifetime.
 			// ------------------------------------------------------------------
-			const credential = await deps.webauthnCredentialStore.findByCredentialId(assertion.id);
+			let credential: Awaited<ReturnType<typeof deps.webauthnCredentialStore.findByCredentialId>>;
+			try {
+				credential = await deps.webauthnCredentialStore.findByCredentialId(assertion.id);
+			} catch (err) {
+				return storeUnavailable("webauthn_credential", "find", clientId, err);
+			}
 			if (!credential) {
 				return {
 					result: {
@@ -253,11 +310,21 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 
 			// ------------------------------------------------------------------
 			// Step 3: Consume challenge (replay protection)
+			//
+			// An outage here may land after the atomic delete (the replay
+			// seen-set is written afterwards), so the challenge can already be
+			// spent: the retry of this assertion is then `invalid_grant`, and the
+			// user starts the ceremony again.
 			// ------------------------------------------------------------------
-			const ceremonyOutcome = await deps.challengeCeremony.consume(
-				"webauthn:authentication",
-				challengeValue,
-			);
+			let ceremonyOutcome: Awaited<ReturnType<typeof deps.challengeCeremony.consume>>;
+			try {
+				ceremonyOutcome = await deps.challengeCeremony.consume(
+					"webauthn:authentication",
+					challengeValue,
+				);
+			} catch (err) {
+				return storeUnavailable("challenge_ceremony", "consume", clientId, err);
+			}
 			if (ceremonyOutcome.outcome !== "consumed") {
 				return {
 					result: {
@@ -299,12 +366,21 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 
 			// ------------------------------------------------------------------
 			// Step 5: Atomic CAS sign-count update
+			//
+			// The challenge is spent by now, and a store that lost its reply may
+			// have written the new count. Either way no token is issued; the next
+			// ceremony's assertion carries a higher count than any written here.
 			// ------------------------------------------------------------------
-			const casOk = await deps.webauthnCredentialStore.updateSignCount(assertion.id, {
-				expectedCurrentSignCount: credential.signCount,
-				newSignCount: verificationResult.newSignCount,
-				lastUsedAt: new Date(),
-			});
+			let casOk: boolean;
+			try {
+				casOk = await deps.webauthnCredentialStore.updateSignCount(assertion.id, {
+					expectedCurrentSignCount: credential.signCount,
+					newSignCount: verificationResult.newSignCount,
+					lastUsedAt: new Date(),
+				});
+			} catch (err) {
+				return storeUnavailable("webauthn_credential", "update_sign_count", clientId, err);
+			}
 			if (!casOk) {
 				return {
 					result: {
@@ -377,7 +453,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
 					effectiveScopes,
-					{ logger: deps.logger },
+					{ logger },
 				);
 				if (!policy.ok) return { result: policy.result };
 				// CP-18 / CP-15: the scope came back re-validated against the
@@ -560,18 +636,41 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					// the first shape of this code treated an unreadable payload as
 					// "nothing to register" and served the refresh token anyway. That
 					// is the same live-token-with-no-family outcome as the outage,
-					// reached down a quieter branch, so it gets the same answer.
-					const registered = await registerRefreshTokenFamily(
+					// reached down a quieter branch, so it gets the same answer. The
+					// log line tells the two apart: the store's outage is
+					// `webauthn_grant_store_unavailable`; a token this server minted
+					// and cannot read back is `webauthn_grant_refresh_token_unregistrable`,
+					// with the `reason`, and points at the keystore rather than at
+					// the family store.
+					const registration = await registerRefreshTokenFamily(
 						deps.refreshTokenFamilyRotation,
 						refreshToken.token,
 						familyId,
 					);
-					if (!registered) {
+					if (!registration.ok) {
+						if (registration.reason === "store_unavailable") {
+							return storeUnavailable(
+								"refresh_token_family",
+								"register",
+								clientId,
+								registration.cause,
+							);
+						}
+						logger.error(
+							{
+								clientId: auditErrorText(client.clientId),
+								reason: registration.reason,
+								...(registration.cause === undefined
+									? {}
+									: { err: loggableError(registration.cause) }),
+							},
+							"webauthn_grant_refresh_token_unregistrable",
+						);
 						return {
 							result: {
 								status: 503,
 								error: "temporarily_unavailable",
-								errorDescription: "refresh token store unavailable",
+								errorDescription: storeUnavailableDescription("refresh_token_family"),
 							},
 						};
 					}
@@ -599,16 +698,29 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 // ---------------------------------------------------------------------------
 
 /**
+ * Why a refresh token's family was not registered: its payload could not be
+ * decoded, carried no usable `jti` or `exp`, or the family store could not
+ * answer. `cause` is what was thrown, where something was.
+ */
+type FamilyRegistration =
+	| { readonly ok: true }
+	| {
+			readonly ok: false;
+			readonly reason: "undecodable" | "no_jti" | "no_exp" | "store_unavailable";
+			readonly cause?: unknown;
+	  };
+
+/**
  * Opens the refresh-token family for a token this grant just minted.
  *
- * Returns `true` only when the family is durably registered. Everything else —
- * a payload that cannot be decoded, one carrying no usable `jti` or `exp`, a
- * store that throws — returns `false`, and the caller refuses the whole
- * request. The three are one event to the caller because they have one
+ * `ok` only when the family is durably registered. Everything else — a payload
+ * that cannot be decoded, one carrying no usable `jti` or `exp`, a store that
+ * throws — is a refusal with its `reason`, and the caller refuses the whole
+ * request. The four are one answer to the client because they have one
  * consequence: without a registration the token has no rotation record, so
- * every replay of it would read as a first use (RFC 6819 §5.2.2.3). A boolean
- * rather than a thrown error keeps that single fail-closed answer in one place
- * at the call site.
+ * every replay of it would read as a first use (RFC 6819 §5.2.2.3). They are
+ * told apart here only so the log line can say which failed; the fail-closed
+ * answer stays in one place at the call site.
  *
  * `exp` is validated as a finite number before the millisecond conversion:
  * `NaN * 1000` is `NaN`, which a store would happily accept as an expiry and
@@ -619,18 +731,23 @@ async function registerRefreshTokenFamily(
 	rotation: NonNullable<WebAuthnGrantDeps["refreshTokenFamilyRotation"]>,
 	refreshTokenValue: string,
 	familyId: string,
-): Promise<boolean> {
+): Promise<FamilyRegistration> {
+	let payload: Record<string, unknown>;
 	try {
-		const payload = decodeJwtPayload(refreshTokenValue);
-		const jti = payload.jti;
-		const exp = payload.exp;
-		if (typeof jti !== "string" || jti.length === 0) return false;
-		if (typeof exp !== "number" || !Number.isFinite(exp)) return false;
-		await rotation.register(jti, familyId, exp * 1000);
-		return true;
-	} catch {
-		return false;
+		payload = decodeJwtPayload(refreshTokenValue);
+	} catch (decodeFailure) {
+		return { ok: false, reason: "undecodable", cause: decodeFailure };
 	}
+	const jti = payload.jti;
+	const exp = payload.exp;
+	if (typeof jti !== "string" || jti.length === 0) return { ok: false, reason: "no_jti" };
+	if (typeof exp !== "number" || !Number.isFinite(exp)) return { ok: false, reason: "no_exp" };
+	try {
+		await rotation.register(jti, familyId, exp * 1000);
+	} catch (storeFailure) {
+		return { ok: false, reason: "store_unavailable", cause: storeFailure };
+	}
+	return { ok: true };
 }
 
 type AssertionParseOk = {

@@ -103,7 +103,7 @@ function expectOneOutageLine(
 	expect(name).toBe(event);
 	expect(context).toMatchObject(fields);
 	expect(context.err).not.toBeInstanceOf(Error);
-	expect(context.err).toMatchObject({ name: "Error", message });
+	expect(context.err).toMatchObject({ name: "Error", detail: message });
 	for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
 		expect(logger[level]).not.toHaveBeenCalled();
 	}

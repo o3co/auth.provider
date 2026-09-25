@@ -26,6 +26,10 @@
  *   - `routes[1]` — POST /oauth/webauthn/registration/verify (T28).
  *   - `routes[2]` — POST /oauth/webauthn/authentication/options (T29).
  *
+ * `logger` (optional, `consoleLogger` when unwired) is where the grant and
+ * the three routes report a store that cannot answer — each answered `503
+ * temporarily_unavailable` — and where the rate-limit guard reports its own.
+ *
  * DI requires (all consumed transitively by the grant or routes):
  *   - `webauthnConfig`         — consumer-supplied via a bootstrap module's
  *                                 `provides` slot. Schema exported from this
@@ -132,7 +136,8 @@ export const webauthnModule = defineModule<
 		// #281 — `rate_limit.unavailable` during a limiter outage. No events when
 		// absent, matching how oauth and session treat the slot.
 		"auditSink",
-		// #281 — operator-visible outage channel + the fallback-limiter warning.
+		// #281 — operator-visible outage channel + the fallback-limiter warning;
+		// also where the grant and the routes log a store that cannot answer.
 		"logger",
 		// #480 — the refresh-token family the grant opens when the client is
 		// allowed `refresh_token`. A3 §5.2, the same component the
@@ -200,6 +205,7 @@ export const webauthnModule = defineModule<
 						config: deps.webauthnConfig,
 						challengeStore: deps.challengeStore,
 						credentialStore: deps.webauthnCredentialStore,
+						logger: deps.logger ?? consoleLogger,
 					}),
 				);
 				return {
@@ -219,6 +225,7 @@ export const webauthnModule = defineModule<
 						config: deps.webauthnConfig,
 						challengeCeremony: deps.challengeCeremony,
 						credentialStore: deps.webauthnCredentialStore,
+						logger: deps.logger ?? consoleLogger,
 					}),
 				);
 				return {
@@ -341,6 +348,7 @@ export const webauthnModule = defineModule<
 						config: deps.webauthnConfig,
 						challengeStore: deps.challengeStore,
 						credentialStore: deps.webauthnCredentialStore,
+						logger,
 					}),
 				);
 				return {

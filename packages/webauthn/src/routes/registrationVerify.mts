@@ -34,6 +34,13 @@
  *     empty string is rejected. Limit: 64 chars (chosen to match common display-name
  *     field constraints; large enough for emoji and Unicode labels).
  *   - Multi-origin support: config.origin[] is passed to verifyWebAuthnAttestation (S7).
+ *   - A store that cannot answer — the ceremony's consume or the credential
+ *     insert — is 503 temporarily_unavailable, logged once at error level as
+ *     `webauthn_ceremony_store_unavailable` (`../internal/storeUnavailable.mts`).
+ *     Either may land after the challenge was consumed, and an insert whose
+ *     reply was lost may have stored the credential: the client's retry of the
+ *     same response is then 400 challenge_invalid, and a new ceremony's
+ *     `excludeCredentials` names the stored credential.
  *
  * NOT barrel-exported from the package index — internal to the webauthn module
  * until Task 31 wires the router.
@@ -43,12 +50,14 @@
 
 import {
 	type ChallengeCeremony,
+	type Logger,
 	WebAuthnCredentialStorageError,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
+import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs";
 import { verifyWebAuthnAttestation } from "../internal/verification.mjs";
 
 // ---------------------------------------------------------------------------
@@ -98,6 +107,8 @@ export interface RegistrationVerifyDeps {
 	readonly config: WebAuthnConfig;
 	readonly challengeCeremony: ChallengeCeremony;
 	readonly credentialStore: WebAuthnCredentialStore;
+	/** Where a store outage is logged. */
+	readonly logger: Pick<Logger, "error">;
 	// session/bearer auth resolved upstream — endpoint trusts req.webauthnSubject
 }
 
@@ -108,7 +119,7 @@ export interface RegistrationVerifyDeps {
 /**
  * Creates an Express RequestHandler for POST /oauth/webauthn/registration/verify.
  *
- * @param deps - Injected dependencies (config, challengeCeremony, credentialStore).
+ * @param deps - Injected dependencies (config, challengeCeremony, credentialStore, logger).
  * @returns RequestHandler suitable for mounting on an Express router.
  */
 export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): RequestHandler {
@@ -202,7 +213,18 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		}
 
 		const ceremonyScope = `webauthn:registration:${userId}`;
-		const outcome = await deps.challengeCeremony.consume(ceremonyScope, challengeValue);
+		let outcome: Awaited<ReturnType<typeof deps.challengeCeremony.consume>>;
+		try {
+			outcome = await deps.challengeCeremony.consume(ceremonyScope, challengeValue);
+		} catch (err) {
+			refuseCeremonyStoreUnavailable(
+				res,
+				deps.logger,
+				{ site: "registration_verify", store: "challenge_ceremony", step: "consume" },
+				err,
+			);
+			return;
+		}
 
 		if (outcome.outcome !== "consumed") {
 			// "unknown" = challenge never issued / already GC'd; "replayed" = replay attack.
@@ -243,9 +265,10 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		//
 		// Same-user re-roll requires explicit deletion of the prior credential first
 		// (no silent re-upsert). Returns 400 (not 409) per OAuth-style endpoint
-		// convention — validation errors use 400 in this codebase. Any non-duplicate
-		// adapter error (e.g. transient Redis ECONNRESET) is rethrown to Express 5's
-		// default async error handler → 500, never silently swallowed.
+		// convention — validation errors use 400 in this codebase. Any other
+		// adapter error (e.g. transient Redis ECONNRESET) is the store's outage:
+		// 503, logged once — never swallowed into a 200, and never a 500 the
+		// terminal handler reports as unexpected.
 		const { material } = verification;
 		try {
 			await deps.credentialStore.registerCredential({
@@ -266,7 +289,13 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 				});
 				return;
 			}
-			throw err;
+			refuseCeremonyStoreUnavailable(
+				res,
+				deps.logger,
+				{ site: "registration_verify", store: "webauthn_credential", step: "register" },
+				err,
+			);
+			return;
 		}
 
 		res.status(200).json({

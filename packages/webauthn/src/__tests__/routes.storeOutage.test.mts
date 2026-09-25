@@ -194,7 +194,7 @@ function expectOneOutageLine(
 	expect(name).toBe("webauthn_ceremony_store_unavailable");
 	expect(context).toMatchObject(fields);
 	expect(context.err).not.toBeInstanceOf(Error);
-	expect(context.err).toMatchObject({ name: "Error", message });
+	expect(context.err).toMatchObject({ name: "Error", detail: message });
 	for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
 		expect(logger[level]).not.toHaveBeenCalled();
 	}
@@ -256,7 +256,10 @@ describe("POST /oauth/webauthn/registration/verify", () => {
 		await stores.challengeStore.issue(REGISTRATION_SCOPE, "reg-challenge", Date.now() + 60_000);
 		const logger = spyLogger();
 		const app = await boot(
-			{ ...stores, replaySeenSet: { ...stores.replaySeenSet, markSeen: down("the replay seen-set") } },
+			{
+				...stores,
+				replaySeenSet: { ...stores.replaySeenSet, markSeen: down("the replay seen-set") },
+			},
 			logger,
 		);
 
