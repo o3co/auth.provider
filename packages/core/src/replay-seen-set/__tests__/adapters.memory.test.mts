@@ -5,9 +5,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createMemoryReplaySeenSet,
+	DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
-} from "../adapters/memory.mjs";
+	ReplaySeenSetFullError,
+} from "#/replay-seen-set/adapters/memory.mjs";
+import { ChallengeStorageError } from "#/single-use/errors.mjs";
 import { runReplaySeenSetContract } from "./adapters.contract.mjs";
 
 runReplaySeenSetContract("memory", {
@@ -250,6 +253,98 @@ describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => 
 			await fill(set, 2, 600_000, "b");
 			// The default ten-second floor applied: the expired two remain.
 			expect(set.size).toBe(4);
+		}
+	});
+});
+
+/*
+ * Nothing bounded the set but time. DPoP records a proof before the token
+ * endpoint's rate limit runs and before a protected resource has verified
+ * the access token, so anyone can have it write one 300-second record per
+ * request: the set grew with the request rate, until the process ran out of
+ * memory. A cap on the records it holds bounds it; at the cap it refuses a
+ * new record as a store fault — the set cannot record it, so the value is
+ * not accepted — the way a Redis seen-set refuses a write at `maxmemory`
+ * under `noeviction`. It never evicts a live record, which would let the
+ * value it held be replayed.
+ */
+describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
+	const later = (): number => Date.now() + 600_000;
+
+	it("holds at most 100 000 records by default", () => {
+		expect(DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES).toBe(100_000);
+	});
+
+	it("refuses a new record at its cap as a store fault, recording nothing and evicting nothing", async () => {
+		const set = createMemoryReplaySeenSet({ maxEntries: 2 });
+		expect(await set.markSeen("dpop-proof:k1", "jti-1", later())).toBe(true);
+		expect(await set.markSeen("client-assertion:c1", "jti-2", later())).toBe(true);
+
+		const refusal = await set.markSeen("dpop-proof:k1", "jti-3", later()).then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+		expect(refusal).toBeInstanceOf(ReplaySeenSetFullError);
+		// Not the port's contract errors, which a consumer reads as its own
+		// fault (`expired-at-issue`, a RangeError): a store that cannot record.
+		expect(refusal).not.toBeInstanceOf(ChallengeStorageError);
+		expect(refusal).not.toBeInstanceOf(RangeError);
+		expect(refusal).toMatchObject({ name: "ReplaySeenSetFullError", reason: "full" });
+		expect((refusal as Error).message).toBe(
+			"memory ReplaySeenSet is at its cap of 2 live records; refusing a new one rather than evicting one",
+		);
+
+		expect(set.size).toBe(2);
+		expect(await set.contains("dpop-proof:k1", "jti-3")).toBe(false);
+		expect(await set.contains("dpop-proof:k1", "jti-1")).toBe(true);
+		expect(await set.contains("client-assertion:c1", "jti-2")).toBe(true);
+	});
+
+	it("still refuses a replay at its cap: a replay writes nothing", async () => {
+		const set = createMemoryReplaySeenSet({ maxEntries: 1 });
+		expect(await set.markSeen("scope-A", "jti-1", later())).toBe(true);
+		expect(await set.markSeen("scope-A", "jti-1", later())).toBe(false);
+	});
+
+	it("reclaims expired records before it refuses", async () => {
+		vi.useFakeTimers();
+		const set = createMemoryReplaySeenSet({ maxEntries: 2, minSweepIntervalMs: 0 });
+		expect(await set.markSeen("scope-A", "short", Date.now() + 1_000)).toBe(true);
+		expect(await set.markSeen("scope-A", "long", later())).toBe(true);
+		vi.advanceTimersByTime(2_000);
+		expect(await set.markSeen("scope-A", "next", later())).toBe(true);
+		expect(set.size).toBe(2);
+		expect(await set.contains("scope-A", "long")).toBe(true);
+	});
+
+	it("scans for expired records at its cap no more often than its sweep floor", async () => {
+		// Under a flood the set sits at its cap, and a scan per refused write
+		// would make every request O(size).
+		vi.useFakeTimers();
+		const set = createMemoryReplaySeenSet({ maxEntries: 2, minSweepIntervalMs: 1_000 });
+		await set.markSeen("scope-A", "a", Date.now() + 10);
+		await set.markSeen("scope-A", "b", Date.now() + 10);
+		// At the cap, nothing expired yet: this write's scan finds nothing.
+		await expect(set.markSeen("scope-A", "c", later())).rejects.toBeInstanceOf(
+			ReplaySeenSetFullError,
+		);
+		vi.advanceTimersByTime(20);
+		// Both records have expired, but the floor has not passed: no scan.
+		await expect(set.markSeen("scope-A", "d", later())).rejects.toBeInstanceOf(
+			ReplaySeenSetFullError,
+		);
+		vi.advanceTimersByTime(1_000);
+		expect(await set.markSeen("scope-A", "e", later())).toBe(true);
+		expect(set.size).toBe(1);
+	});
+
+	it("refuses a cap that is not a positive whole number, rather than holding no cap", () => {
+		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => createMemoryReplaySeenSet({ maxEntries: bad }), String(bad)).toThrow(
+				new RangeError(
+					`createMemoryReplaySeenSet: maxEntries must be a positive whole number (got ${String(bad)})`,
+				),
+			);
 		}
 	});
 });

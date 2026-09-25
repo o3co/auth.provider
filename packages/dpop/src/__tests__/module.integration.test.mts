@@ -958,6 +958,50 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		await handle.dispose();
 	});
 
+	it("answers 503 at the token endpoint when the memory seen-set is at its cap, and still refuses a replay", async () => {
+		// The token endpoint records a proof before its rate limit runs, so
+		// anyone can make the set write one record per request. At its cap the
+		// memory set refuses a new record as a store fault: the proof is refused
+		// unrecorded, as the server's outage — never accepted unrecorded, and
+		// never answered as an invalid proof.
+		const { logger, lines } = serialiseEverythingLogger();
+		const seenSet = createMemoryReplaySeenSet({ maxEntries: 1 });
+		const { handle, app } = await bootReplica({ mode: "single", seenSet, logger });
+
+		const first = await mintProof();
+		expect((await request(app).post("/oauth/token").set("DPoP", first.proof).send({})).status).toBe(
+			200,
+		);
+		const { proof } = await mintProof();
+		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				mechanism: "dpop",
+				code: "temporarily_unavailable",
+				reason: "replay_store_unavailable",
+				err: {
+					name: "ReplaySeenSetFullError",
+					detail:
+						"memory ReplaySeenSet is at its cap of 1 live records; refusing a new one rather than evicting one",
+					reason: "full",
+					stack: FRAMES,
+				},
+			},
+			"token_binding_unavailable",
+		);
+		expect(seenSet.size).toBe(1);
+		// A replay needs no write, so the full set still refuses it.
+		const replay = await request(app).post("/oauth/token").set("DPoP", first.proof).send({});
+		expect(replay.status).toBe(400);
+		expect(replay.body).toMatchObject({ error: "invalid_dpop_proof" });
+		for (const line of lines) expect(line).not.toContain("dpop-proof:");
+
+		await handle.dispose();
+	});
+
 	it("logs a proof the signature step refuses as the error's projection, never the claims jose puts on it", async () => {
 		// jose verifies the signature, then the registered claims: a proof
 		// whose `exp` has passed is refused with a JWTExpired that carries
