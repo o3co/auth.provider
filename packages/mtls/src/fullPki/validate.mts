@@ -114,8 +114,12 @@
  * has said nothing, and the `unknown` stands. A *revoked* from either source
  * wins; a certificate is unavailable when both sources are, or when the
  * responder said `unknown` and the CRL did not list it. The fallback is logged
- * when a responder was actually asked and failed, so an OCSP outage is
- * visible even while the CRL keeps revocation checking alive.
+ * when a responder was actually asked and failed and the CRL then answered,
+ * so an OCSP outage is visible even while the CRL keeps revocation checking
+ * alive. When the CRL does not answer either, the one line is the
+ * unavailability's — the dispatcher's outage line under `"reject"`, the
+ * allowed line under `"allow"` — naming both sources and carrying both
+ * errors (an AggregateError, OCSP's first).
  */
 
 import { X509Certificate } from "node:crypto";
@@ -532,36 +536,51 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			if (listed.kind === "revoked") return listed;
 			return ocsp;
 		}
-		// A certificate that names no responder is a normal shape under
-		// "both" — a CA that publishes only CRLs for some of its
-		// certificates — not an outage. A responder that was asked and did
-		// not answer is, and stays visible even while the CRL carries on.
-		if (ocsp.reason !== "no_responder") {
-			options.logger?.warn(
-				{
-					subject: toNode(certificate).subject,
-					reason: ocsp.reason,
-					detail: ocsp.detail,
-					...errOf(ocsp.cause),
-				},
-				"mtls_revocation_ocsp_fallback",
-			);
-		}
 		const crl = await byCrl(certificate, issuer, now);
-		if (crl.kind !== "unavailable") return crl;
+		if (crl.kind !== "unavailable") {
+			// The fallback answered: a degraded request, served. The responder
+			// that was asked and did not answer is reported here, so an OCSP
+			// outage stays visible while the CRL carries on. A certificate that
+			// names no responder is a normal shape under "both" — a CA that
+			// publishes only CRLs for some of its certificates — not an outage,
+			// and has no line.
+			if (ocsp.reason !== "no_responder") {
+				options.logger?.warn(
+					{
+						subject: toNode(certificate).subject,
+						reason: ocsp.reason,
+						detail: ocsp.detail,
+						...errOf(ocsp.cause),
+					},
+					"mtls_revocation_ocsp_fallback",
+				);
+			}
+			return crl;
+		}
+		// Neither source answered. No fallback line: the unavailability below
+		// is the one account of it — the dispatcher's outage line, or this
+		// validator's rejected or allowed line — and it names both sources.
+		//
 		// An outage when every source the certificate names failed as one; a
 		// source it names none of (no responder, no distribution point) was
 		// never asked, and says nothing either way.
 		const asked = [ocsp, crl].filter(
 			(source) => source.reason !== "no_responder" && source.reason !== "no_distribution_point",
 		);
-		// `cause` goes with `reason`, and both are the CRL's: the OCSP failure's
-		// projection was on the fallback line above.
+		// `reason` is the CRL's, the last source asked. The errors are both
+		// sources', OCSP's first: an AggregateError of the two when both
+		// threw — its members are what a log line projects — else the one
+		// that did.
+		const causes = [ocsp.cause, crl.cause].filter((cause) => cause !== undefined);
+		const cause =
+			causes.length > 1
+				? new AggregateError(causes, "neither revocation source answered: OCSP, then the CRL")
+				: causes[0];
 		return {
 			kind: "unavailable",
 			reason: crl.reason,
 			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crl.reason} (${crl.detail})`,
-			...withCause(crl.cause),
+			...withCause(cause),
 			...(asked.length > 0 && asked.every((source) => source.outage) ? { outage: true } : {}),
 		};
 	};
