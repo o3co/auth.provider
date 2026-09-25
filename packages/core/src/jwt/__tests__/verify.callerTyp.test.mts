@@ -141,3 +141,36 @@ describe("verifyJwt — a typ header the caller wrote", () => {
 		);
 	});
 });
+
+describe("verifyJwt — a crit header the caller wrote", () => {
+	// jose refuses an unrecognised `crit` entry before the signature, quoting
+	// the name the caller wrote: `Extension Header Parameter "<name>" is not
+	// recognized`. The verdict's message is documented as fit for a log line,
+	// so it carries jose's text on one line and capped — its quotes kept.
+	it("builds the verdict's message from jose's text on one line and capped", async () => {
+		const keyStore = createSymmetricKeyStore(SECRET, "v0");
+		const name = `x\r\nFORGED\u0085\u2028\u202e${"n".repeat(10_000)}`;
+		const jwt = await new SignJWT({ sub: "user-1" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt", crit: [name], [name]: 1 })
+			.setIssuer(ISSUER)
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(createSecretKey(Buffer.from(SECRET)), { crit: { [name]: true } });
+
+		const err = await verifyJwt(jwt, keyStore, options).catch((e: unknown) => e);
+
+		expect(err).toBeInstanceOf(JwtVerificationError);
+		const message = (err as Error).message;
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+		const unsafe = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+		expect({
+			unsafe: unsafe.test(message),
+			within200: message.length <= 200,
+			head: message.slice(0, 38),
+		}).toEqual({
+			unsafe: false,
+			within200: true,
+			head: 'Extension Header Parameter "x??FORGED?',
+		});
+	});
+});
