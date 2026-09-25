@@ -552,6 +552,9 @@ describe("a cookie-session record the store holds but cannot read", () => {
 		["text that is not JSON", '{"cookie": {"originalMaxAge": 36'],
 		["JSON that is not a session record", "42"],
 		["a record with no cookie", '{"value":"written"}'],
+		["a record whose cookie is an array", '{"cookie":[],"value":"written"}'],
+		["a record whose cookie is null", '{"cookie":null,"value":"written"}'],
+		["a record that is an array", '[{"cookie":{"originalMaxAge":3600000},"value":"written"}]'],
 	])(
 		"%s is read as absent: a fresh session, and one warn without the record",
 		async (_label, corrupt) => {
