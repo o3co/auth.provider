@@ -62,6 +62,12 @@ import { type Logger, loggableError } from "@o3co/auth-provider-core";
  *    reports through its callback, and treating that as success would tell an
  *    orchestrator the listener came down when it did not.
  *
+ * Every stage is one object-first line under a snake_case event name:
+ * `shutdown_draining` (info, `drainTimeoutMs`), `shutdown_drain_deadline_exceeded`
+ * (error), `shutdown_server_close_failed` (error, `err`), `shutdown_cleanup_timed_out`
+ * (error, `cleanupTimeoutMs`), `shutdown_cleanup_failed` (error, `err`) and
+ * `shutdown_complete` (info, `reason`, `drain`, `exitCode`).
+ *
  * Size `drainTimeoutMs` plus `cleanupTimeoutMs` **below** the orchestrator's
  * own kill grace period (Kubernetes `terminationGracePeriodSeconds` is 30s by
  * default, compose `stop_grace_period` 10s; with federation grants on the sum
@@ -227,7 +233,7 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		let outcome = reason;
 		try {
 			if ((await runCleanup()) === CLEANUP_TIMED_OUT) {
-				logger.error({ cleanupTimeoutMs }, "graceful shutdown: cleanup timed out");
+				logger.error({ cleanupTimeoutMs }, "shutdown_cleanup_timed_out");
 				exitCode = 1;
 				outcome = "cleanup-timeout";
 			}
@@ -238,11 +244,11 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 			// pipeline drops. The projection, not the error: `dispose()`
 			// rejects with every cleanup's own error on `errors`, a store's
 			// write — and what it wrote — among them.
-			logger.error({ err: loggableError(err) }, "graceful shutdown: cleanup failed");
+			logger.error({ err: loggableError(err) }, "shutdown_cleanup_failed");
 			exitCode = 1;
 			outcome = "cleanup-failed";
 		}
-		logger.info({ reason: outcome, drain: reason, exitCode }, "graceful shutdown: complete");
+		logger.info({ reason: outcome, drain: reason, exitCode }, "shutdown_complete");
 		exit(exitCode);
 	};
 
@@ -250,13 +256,10 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		if (shuttingDown) return;
 		shuttingDown = true;
 		for (const signal of SIGNALS) offSignal(signal, handler);
-		logger.info({ drainTimeoutMs }, "graceful shutdown: draining");
+		logger.info({ drainTimeoutMs }, "shutdown_draining");
 
 		const deadline = setTimeout(() => {
-			logger.error(
-				{ drainTimeoutMs },
-				"graceful shutdown: drain deadline exceeded, closing remaining connections",
-			);
+			logger.error({ drainTimeoutMs }, "shutdown_drain_deadline_exceeded");
 			server.closeAllConnections();
 			void finish(1, "drain-timeout");
 		}, drainTimeoutMs);
@@ -272,7 +275,7 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 				// here. Reporting "drained" and exiting 0 on it would tell an
 				// orchestrator the shutdown went cleanly when the listener did
 				// not actually come down.
-				logger.error({ err: loggableError(err) }, "graceful shutdown: server close failed");
+				logger.error({ err: loggableError(err) }, "shutdown_server_close_failed");
 				void finish(1, "close-failed");
 				return;
 			}
