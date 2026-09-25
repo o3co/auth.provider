@@ -82,6 +82,16 @@ const routesModule = defineModule({
 						expose: true,
 					});
 				});
+				router.get("/store-refused", () => {
+					// A store's refusal carrying the HTTP status it got, not marked
+					// as the client's: this server's fault.
+					throw Object.assign(new Error("the Store refused this deployment's token"), {
+						status: 401,
+					});
+				});
+				router.get("/deep/*rest", () => {
+					throw new Error("failed somewhere deep");
+				});
 				router.get("/boom", () => {
 					throw Object.assign(new Error("store said: secret-in-message-marker"), {
 						command: { name: "set", args: ["secret-in-args-marker"] },
@@ -235,6 +245,39 @@ describe("createApp's router answers an error that escaped a route", () => {
 		expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("secret-in-args-marker");
 		expect(otherLevels(logger)).toEqual([]);
+		await handle.dispose();
+	});
+
+	it("takes a 4xx status the error did not mark as the client's for the server's: 500, logged", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		const res = await request(app).get("/t/store-refused");
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				endpoint: "/t/store-refused",
+				err: expect.objectContaining({ name: "Error", status: 401 }),
+			},
+			"unhandled_request_error",
+		);
+		await handle.dispose();
+	});
+
+	it("logs the path as an audit field: capped, whatever length the caller sent", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		await request(app).get(`/t/deep/${"segment/".repeat(60)}end`);
+
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [fields] = logger.error.mock.calls[0] as [{ endpoint: string }];
+		expect(fields.endpoint).toHaveLength(200);
+		expect(fields.endpoint.startsWith("/t/deep/segment/")).toBe(true);
+		expect(fields.endpoint.endsWith("...")).toBe(true);
 		await handle.dispose();
 	});
 
