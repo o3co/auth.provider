@@ -371,7 +371,11 @@ export const storesModule: Module = defineModule({
  * Redis-backed adapters (refresh-token-family + 4 user-session stores +
  * subject-level revocation index + watermark + rate limiter + code
  * repository + access-token denylist + replay seen-set + federation token
- * store + device-code store + the consent stores).
+ * store + device-code store + WebAuthn challenge store + the consent stores),
+ * and the two federation-grant stores' clients from their own factories.
+ * Every store module `@o3co/auth-provider-redis` ships finds its client
+ * slot here, including the ones this template does not select — pinned by
+ * `all-modules-composition.multi.test.mts`.
  *
  * Per F4 PR1 (D-2 v2) + Wave 5d unification: the previous design opened a
  * separate ioredis socket per Redis-backed module (3+ sockets per replica).
@@ -532,6 +536,15 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		deviceCodeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.deviceCodeStoreClient;
+		},
+		// The WebAuthn challenge store's client, off the same shared socket, for
+		// the reason the device-code slot above is here: this template does not
+		// mount WebAuthn, and a deployment that adds `webauthnModule` with
+		// `redisChallengeStoreModule` would otherwise be refused at boot for a
+		// `challengeStoreClient` nothing provided.
+		challengeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.challengeStoreClient;
 		},
 		// #561: the consent stores' clients, off the same shared socket.
 		// `redisConsentStoreModule` requires both — it provides the consent
