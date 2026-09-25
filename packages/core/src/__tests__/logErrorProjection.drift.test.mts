@@ -503,11 +503,6 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		sites: 2,
 		why: "the message of an error it throws, the queued command's error kept as `cause`; and a NOSCRIPT classifier that reads the text and never logs it (outside this change; for review)",
 	},
-	{
-		file: "packages/session/src/store/redisStoreLibraries.mts",
-		sites: 1,
-		why: "a 60-character one-line brief of each member of a composite error, sized for loggableError (outside this change; for review)",
-	},
 ];
 
 /**
@@ -520,6 +515,7 @@ const STRING_FIRST_EVERYWHERE: readonly string[] = [
 	"packages/dpop/src",
 	"packages/oauth/src",
 	"packages/oauth-token-exchange/src",
+	"packages/session/src",
 	"packages/webauthn/src",
 ];
 
