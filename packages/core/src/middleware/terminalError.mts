@@ -36,15 +36,16 @@
  *   sent `400 malformed_body` — by body-parser's own `type`
  *   (`entity.parse.failed`, `entity.verify.failed`, `request.aborted`,
  *   `request.size.invalid`, `querystring.parse.rangeError`) or, for a body
- *   that does not decompress, zlib's `code`. A path parameter Express could
+ *   that does not decompress, the decoder's `code` (zlib's `Z_…` for gzip
+ *   and deflate, Node's `ERR__ERROR_FORMAT_…` for brotli). A path parameter Express could
  *   not decode is `400 malformed_path`. Only `expose`, `status`, `type` and
  *   `code` are read, never the message, which quotes the body. Any other
  *   `expose`d 4xx — a 400 included — is an `http-errors` refusal that says
  *   it is the client's (a 404, a 401): it keeps its status, answered
  *   `invalid_request` / `request_refused`, logged nowhere, with the one
  *   header its status owes the client when the refusal carries it (a 401's
- *   `WWW-Authenticate`, a 405's `Allow`; a value no header can hold is
- *   dropped).
+ *   `WWW-Authenticate`, a 405's `Allow`, up to 1 KiB; a longer value, or one
+ *   no header can hold, is dropped).
  * - Anything else is `500 server_error` (`unexpected_error`), logged once at
  *   error as `unhandled_request_error` with `endpoint` (the path, through
  *   `auditErrorText`) and the error's `loggableError` projection — never the
@@ -87,14 +88,25 @@ const MALFORMED_BODY_TYPES: ReadonlySet<unknown> = new Set([
 	"querystring.parse.rangeError",
 ]);
 
-/** zlib's codes, which body-parser passes on untyped for a body that does not decompress. */
-const ZLIB_CODE = /^Z_[A-Z_]+$/;
+/**
+ * The decoders' codes for a body that does not decompress, which body-parser
+ * passes on untyped: zlib's (`Z_DATA_ERROR`, `Z_BUF_ERROR`) for gzip and
+ * deflate, and Node's brotli decoder's format errors
+ * (`ERR__ERROR_FORMAT_PADDING_1`, …).
+ */
+const UNDECOMPRESSIBLE_CODE = /^(?:Z_[A-Z_]+|ERR__ERROR_FORMAT_[A-Z0-9_]+)$/;
 
 /** The header a refusal's status owes its client: a 401's challenge, a 405's methods. */
 const OWED_HEADER: Readonly<Record<number, string>> = { 401: "WWW-Authenticate", 405: "Allow" };
 
-/** A header value that can be written as it is: printable ASCII and tab, no line break. */
+/**
+ * A header value that can be written as it is: printable ASCII and tab, no
+ * line break, and at most {@link HEADER_VALUE_MAX_LENGTH} characters.
+ */
 const HEADER_VALUE = /^[\t\x20-\x7e]+$/;
+
+/** The longest `WWW-Authenticate` / `Allow` value passed on; a longer one is dropped. */
+const HEADER_VALUE_MAX_LENGTH = 1024;
 
 /**
  * The header `status` owes its client, read from the refusal's `http-errors`
@@ -109,7 +121,11 @@ const owedHeader = (
 	if (name === undefined) return undefined;
 	const headers = field(error, "headers");
 	const value = field(headers, name) ?? field(headers, name.toLowerCase());
-	return typeof value === "string" && HEADER_VALUE.test(value) ? { name, value } : undefined;
+	return typeof value === "string" &&
+		value.length <= HEADER_VALUE_MAX_LENGTH &&
+		HEADER_VALUE.test(value)
+		? { name, value }
+		: undefined;
 };
 
 /** `error[key]`, or `undefined` when it is not an object or the read throws. */
@@ -143,7 +159,7 @@ const callerMistakeOf = (error: unknown): CallerMistake | null => {
 	const code = field(error, "code");
 	if (
 		MALFORMED_BODY_TYPES.has(type) ||
-		(type === undefined && typeof code === "string" && ZLIB_CODE.test(code))
+		(type === undefined && typeof code === "string" && UNDECOMPRESSIBLE_CODE.test(code))
 	) {
 		return { status: 400, description: "malformed_body" };
 	}
