@@ -97,6 +97,7 @@ interface Entry {
 	status: "pending" | "approved" | "denied";
 	subject: string | undefined;
 	grantedScope: readonly string[] | undefined;
+	approvedAtMs: number | undefined;
 	lastPolledAtMs?: number;
 }
 
@@ -109,6 +110,7 @@ const toAuthorization = (entry: Entry): DeviceAuthorization => ({
 	status: entry.status,
 	subject: entry.subject,
 	grantedScope: entry.grantedScope,
+	approvedAtMs: entry.approvedAtMs,
 });
 
 /**
@@ -275,6 +277,7 @@ export const createMemoryDeviceCodeStore = (
 				status: "pending",
 				subject: undefined,
 				grantedScope: undefined,
+				approvedAtMs: undefined,
 			};
 			byDeviceCode.set(entry.deviceCode, entry);
 			byUserCode.set(entry.userCode, entry);
@@ -296,6 +299,7 @@ export const createMemoryDeviceCodeStore = (
 			}
 			entry.status = "approved";
 			entry.subject = input.subject;
+			entry.approvedAtMs = input.nowMs;
 			// Omitted means "grant what was asked for". When supplied it is
 			// intersected rather than trusted: a caller may narrow what the
 			// user approved, never widen it past the allowlist the device

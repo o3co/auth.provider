@@ -41,7 +41,9 @@ import {
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
+	livenessSidOf,
 	loggableError,
+	ownedConfirmation,
 	type PendingConsentStore,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
@@ -53,6 +55,7 @@ import {
 	type SessionRPRegistry,
 	type SubjectRevocation,
 	sanitizeErrorText,
+	tokenTypeForConfirmation,
 	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -669,6 +672,37 @@ export const createOAuthRouter = async (
 								),
 							);
 					}
+					// The kind is allowed, but the binding must also carry a member
+					// that kind owns: every grant stamps `ownedConfirmation` and
+					// nothing else, so a binding with none — a DPoP binding
+					// presenting an mTLS thumbprint, a contributed kind core has no
+					// confirmation for — would be minted an unbound Bearer token,
+					// and the required constraint downgraded without a word. A client
+					// that does not require a constraint gets that unbound token,
+					// advertised as Bearer; this one is refused.
+					if (ownedConfirmation(ctx.tokenBinding) === undefined) {
+						await emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "token.issued.failure",
+							clientId: req.oauthClient?.clientId,
+							ip: req.ip,
+							userAgent: req.get("user-agent"),
+							details: {
+								reason: "sender_constraint_unowned_confirmation",
+								grant_type,
+								presented_kind: ctx.tokenBinding.kind,
+								required_methods: sc.methods,
+							},
+						});
+						return res
+							.status(400)
+							.json(
+								errorEnvelope(
+									"invalid_request",
+									"sender-constrained binding carries no confirmation its mechanism owns",
+								),
+							);
+					}
 				}
 				// #326: deny-by-absence for handlers that declare
 				// `requiresExplicitGrantAllowlist`. The base check above admits an
@@ -962,8 +996,12 @@ export const createOAuthRouter = async (
 					//
 					// Fail-closed on a store throw, for the reason the family
 					// check states: 503, the outage it is, never `active: false`.
-					const rawSid = (payload as Record<string, unknown>).sid;
-					const sid = typeof rawSid === "string" && rawSid.length > 0 ? rawSid : null;
+					//
+					// The session is the token's own `sid` or, for a token-exchange
+					// result, its `liveness_sid` (core's `livenessSidOf`): a derived
+					// token ends with the session it came from, as its subject token
+					// does.
+					const sid = livenessSidOf(payload as Record<string, unknown>);
 					if (sid !== null && userSessionStore) {
 						let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
 						try {
@@ -1019,7 +1057,8 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 					const cnf = extractConfirmation(claims.cnf);
-					const tokenType: "Bearer" | "DPoP" = cnf && "jkt" in cnf ? "DPoP" : "Bearer";
+					// Core's one reading, which the token response uses too.
+					const tokenType = tokenTypeForConfirmation(claims.cnf);
 					const response: IntrospectResponse = {
 						active: true,
 						exp,

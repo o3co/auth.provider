@@ -383,33 +383,52 @@ describe("generateToken cnf claim emission", () => {
 	});
 });
 
-describe("generateTokenResponse tokenType option", () => {
-	it("returns Bearer by default", async () => {
+describe("generateTokenResponse token_type follows the access token's confirmation", () => {
+	// RFC 9449 §5: a DPoP-bound access token is `token_type: "DPoP"`. The
+	// envelope used to be whatever the grant passed, and a grant that passed
+	// nothing (the device grant) advertised a `cnf.jkt` token as Bearer — which
+	// a DPoP-aware client then presents as one, and a resource server refuses
+	// (§7.1). Read off the confirmation the token carries, the envelope cannot
+	// disagree with the claim.
+	const keyStore = createSymmetricKeyStore("x".repeat(32));
+
+	it("answers DPoP for an access token bound by cnf.jkt, without being told", async () => {
+		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
+		expect(generateTokenResponse({ accessToken }).token_type).toBe("DPoP");
+	});
+
+	it("keeps Bearer for an mTLS-bound access token (RFC 8705 §3)", async () => {
+		const accessToken = await generateToken({}, { keyStore, confirmation: { "x5t#S256": "def" } });
+		expect(generateTokenResponse({ accessToken }).token_type).toBe("Bearer");
+	});
+
+	it("reads the confirmation as every cnf reader does: an empty member names no binding", () => {
+		// `extractConfirmation`'s rule (a non-empty string member), which the
+		// introspection handler applies too — never the key's mere presence.
+		const accessToken = { token: "t", confirmation: { jkt: "" } as unknown as Confirmation };
+		expect(generateTokenResponse({ accessToken }).token_type).toBe("Bearer");
+	});
+
+	it("answers for the access token, not the refresh token beside it", async () => {
+		const accessToken = await generateToken({}, { keyStore });
+		const refreshToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
+		expect(generateTokenResponse({ accessToken, refreshToken }).token_type).toBe("Bearer");
+	});
+});
+
+describe("generateTokenResponse token_type beside the other tokens", () => {
+	it("returns Bearer for an unbound access token", async () => {
 		const keyStore = createSymmetricKeyStore("x".repeat(32));
 		const accessToken = await generateToken({}, { keyStore });
 		const response = generateTokenResponse({ accessToken });
 		expect(response.token_type).toBe("Bearer");
 	});
 
-	it("returns DPoP when tokenType option is DPoP", async () => {
-		const keyStore = createSymmetricKeyStore("x".repeat(32));
-		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
-		const response = generateTokenResponse({ accessToken }, { tokenType: "DPoP" });
-		expect(response.token_type).toBe("DPoP");
-	});
-
-	it("returns Bearer when tokenType option is explicitly Bearer", async () => {
-		const keyStore = createSymmetricKeyStore("x".repeat(32));
-		const accessToken = await generateToken({}, { keyStore });
-		const response = generateTokenResponse({ accessToken }, { tokenType: "Bearer" });
-		expect(response.token_type).toBe("Bearer");
-	});
-
-	it("DPoP tokenType coexists with refreshToken in response", async () => {
+	it("DPoP coexists with a refresh token in the response", async () => {
 		const keyStore = createSymmetricKeyStore("x".repeat(32));
 		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
 		const refreshToken = await generateToken({}, { keyStore });
-		const response = generateTokenResponse({ accessToken, refreshToken }, { tokenType: "DPoP" });
+		const response = generateTokenResponse({ accessToken, refreshToken });
 		expect(response.token_type).toBe("DPoP");
 		expect(response.refresh_token).toBe(refreshToken.token);
 	});

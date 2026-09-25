@@ -14,6 +14,7 @@ import {
 	isCompoundConfirmation,
 	matchConfirmation,
 	ownedConfirmation,
+	tokenTypeForConfirmation,
 } from "#/grants/confirmationMatch.mjs";
 import type { TokenBinding } from "#/grants/tokenBinding.mjs";
 
@@ -159,6 +160,21 @@ describe("matchConfirmation — compound cnf", () => {
 			member: "x5t#S256",
 			expected: "def",
 		});
+	});
+});
+
+describe("tokenTypeForConfirmation", () => {
+	it("answers DPoP for a jkt, Bearer for an x5t#S256 and for no binding", () => {
+		expect(tokenTypeForConfirmation({ jkt: "abc" })).toBe("DPoP");
+		expect(tokenTypeForConfirmation({ "x5t#S256": "def" })).toBe("Bearer");
+		expect(tokenTypeForConfirmation(undefined)).toBe("Bearer");
+	});
+
+	it("counts a member only as a non-empty string, as extractConfirmation does", () => {
+		expect(tokenTypeForConfirmation({ jkt: "" })).toBe("Bearer");
+		expect(tokenTypeForConfirmation({ jkt: 7 })).toBe("Bearer");
+		expect(tokenTypeForConfirmation(["jkt"])).toBe("Bearer");
+		expect(tokenTypeForConfirmation({ jkt: "", "x5t#S256": "def" })).toBe("Bearer");
 	});
 });
 

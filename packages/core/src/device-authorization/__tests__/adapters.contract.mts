@@ -189,6 +189,7 @@ export const runDeviceCodeStoreContract = (
 					status: "pending",
 					subject: undefined,
 					grantedScope: undefined,
+					approvedAtMs: undefined,
 				};
 				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toStrictEqual(pending);
 
@@ -197,6 +198,7 @@ export const runDeviceCodeStoreContract = (
 					status: "approved",
 					subject: "user-1",
 					grantedScope: ["profile"],
+					approvedAtMs: NOW,
 				};
 				expect(
 					await store.approve({
@@ -228,6 +230,7 @@ export const runDeviceCodeStoreContract = (
 					status: "pending",
 					subject: undefined,
 					grantedScope: undefined,
+					approvedAtMs: undefined,
 				};
 				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toStrictEqual(pending);
 				expect(await store.deny(seed.userCode, NOW)).toStrictEqual({
@@ -253,6 +256,7 @@ export const runDeviceCodeStoreContract = (
 					status: "approved",
 					subject: "user-1",
 					grantedScope: [],
+					approvedAtMs: NOW,
 				};
 				expect(
 					await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW }),
@@ -261,6 +265,24 @@ export const runDeviceCodeStoreContract = (
 					status: "approved",
 					authorization: approved,
 				});
+			});
+		});
+
+		it("records when the approval was given — the instant the approve call was handed — and hands it to the poll", async () => {
+			// What a poll needs to hold an approval against a subject revocation
+			// stamped between the approval and the poll: the token minted at the
+			// poll postdates it, so only the approval's own instant can.
+			await withStore(async (store) => {
+				await store.create(seed);
+				const approvedAt = NOW + 1_234;
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: approvedAt,
+				});
+				expect(decided.status === "ok" && decided.authorization.approvedAtMs).toBe(approvedAt);
+				const polled = await store.poll(seed.deviceCode, NOW + 10 * 1000);
+				expect(polled.status === "approved" && polled.authorization.approvedAtMs).toBe(approvedAt);
 			});
 		});
 

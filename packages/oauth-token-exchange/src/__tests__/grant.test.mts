@@ -17,6 +17,9 @@
 import {
 	type AppConfig,
 	type ClientRepository,
+	consoleLogger,
+	createInMemoryUserSessionStore,
+	type ExchangeTokenValidator,
 	type GrantContext,
 	type GrantPolicyContext,
 	type GrantPolicyHook,
@@ -24,6 +27,7 @@ import {
 	type Logger,
 	MAX_CLIENT_ID_LENGTH,
 	type PublicClient,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
@@ -71,6 +75,7 @@ function buildGrant(
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHook;
 		logger?: Logger;
+		userSessionStore?: UserSessionStore;
 	} = {},
 ) {
 	// null = explicitly absent; undefined = use default
@@ -91,6 +96,7 @@ function buildGrant(
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
+		...(overrides.userSessionStore ? { userSessionStore: overrides.userSessionStore } : {}),
 	});
 }
 
@@ -1945,5 +1951,334 @@ describe("createTokenExchangeGrant — the resources a refusal logs are the call
 		const line = onlyRefusalLine(logger);
 		expect(line.missingResources).toEqual(["https://api.example.com", "https://other.example.com"]);
 		expect(line).not.toHaveProperty("missingResourceCount");
+	});
+});
+
+describe("createTokenExchangeGrant — the session behind a sid-carrying token", () => {
+	// A token minted from a browser session carries its `sid`, and a logout
+	// ends it: introspection, `/userinfo` and the refresh grant all read the
+	// UserSession it names. The exchange dropped the `sid`, so the token it
+	// issued stayed active after the logout that ended its subject token —
+	// and it accepted a subject token whose session was already gone.
+
+	/** A store holding `user-1`'s live session under `sid-live`, and `svc-a`'s under `sid-actor`. */
+	const liveSessions = async (): Promise<UserSessionStore> => {
+		const store = createInMemoryUserSessionStore();
+		for (const [sid, sub] of [
+			["sid-live", "user-1"],
+			["sid-actor", "svc-a"],
+		] as const) {
+			await store.create({
+				sid,
+				sub,
+				authTime: new Date(),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["pwd"],
+			});
+		}
+		return store;
+	};
+
+	const exchange = (g: ReturnType<typeof buildGrant>, body: Record<string, unknown>) =>
+		g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				...body,
+			}),
+		);
+
+	const issued = (result: Awaited<ReturnType<typeof exchange>>["result"]) => {
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		return decodeJwt(result.tokens.access_token);
+	};
+
+	it("carries the subject token's session onto the issued token as liveness_sid, never as sid", async () => {
+		// `sid` is what the session's capabilities are authorised on — its
+		// claims at /userinfo, its upstream tokens — and a downstream holder of
+		// an exchanged token is not the session's client. `liveness_sid` is
+		// read by the liveness checks alone.
+		const g = buildGrant({ userSessionStore: await liveSessions() });
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result).liveness_sid).toBe("sid-live");
+		expect(issued(result)).not.toHaveProperty("sid");
+	});
+
+	it("carries a re-exchanged token's liveness_sid on, so a chain stays tied to the session", async () => {
+		const store = await liveSessions();
+		const g = buildGrant({ userSessionStore: store });
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ liveness_sid: "sid-live" }),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result).liveness_sid).toBe("sid-live");
+		expect(issued(result)).not.toHaveProperty("sid");
+
+		await store.delete("sid-live");
+		const again = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ liveness_sid: "sid-live" }),
+		});
+		expect(again.result).toMatchObject({ status: 400, errorDescription: "session_invalid" });
+	});
+
+	it("carries the session without a store to check it against, as introspection reads it then", async () => {
+		// With no UserSession store wired nothing anywhere judges it, and the
+		// link the exchange would drop is the one a later wiring reads.
+		const g = buildGrant();
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result).liveness_sid).toBe("sid-live");
+	});
+
+	it("stamps no sid for a subject token without one, and reads no session", async () => {
+		const store = await liveSessions();
+		const get = vi.spyOn(store, "get");
+		const { result } = await exchange(buildGrant({ userSessionStore: store }), {
+			subject_token: await signSelfIssuedAccessToken({}),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result)).not.toHaveProperty("sid");
+		expect(issued(result)).not.toHaveProperty("liveness_sid");
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("refuses a subject token whose session has ended, with invalid_request session_invalid", async () => {
+		// RFC 8693 §2.2.2: a subject_token unacceptable for any reason is
+		// `invalid_request`. The refresh grant's words for the same finding.
+		const store = await liveSessions();
+		const g = buildGrant({ userSessionStore: store });
+		const subject = await signSelfIssuedAccessToken({ sid: "sid-live" });
+		await store.delete("sid-live");
+		const { result } = await exchange(g, { subject_token: subject });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "session_invalid",
+		});
+	});
+
+	it("refuses an actor_token whose session has ended, naming the actor", async () => {
+		const store = await liveSessions();
+		const g = buildGrant({ userSessionStore: store });
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a", sid: "sid-actor" });
+		await store.delete("sid-actor");
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({
+				sid: "sid-live",
+				may_act: [{ sub: "svc-a", iss: ISSUER }],
+			}),
+			actor_token: actor,
+			actor_token_type: ACCESS_TOKEN_TYPE,
+		});
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "actor_token session_invalid",
+		});
+	});
+
+	it("answers a session store that cannot be read with 503, logged once at error, and issues nothing", async () => {
+		const store = await liveSessions();
+		vi.spyOn(store, "get").mockRejectedValue(storeReplyError());
+		const logger = spyLogger();
+		const { result } = await exchange(buildGrant({ userSessionStore: store, logger }), {
+			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+		});
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session store unavailable",
+		});
+		expectOutageLine(logger, "token_exchange_session_store_unavailable", {
+			store: "user_session",
+			step: "get",
+			role: "subject",
+			err: expect.objectContaining({ name: "ReplyError" }),
+		});
+	});
+});
+
+describe("createTokenExchangeGrant — the session rule, the actor, and what the rule reads", () => {
+	const liveSessions = async (): Promise<UserSessionStore> => {
+		const store = createInMemoryUserSessionStore();
+		for (const [sid, sub] of [
+			["sid-live", "user-1"],
+			["sid-actor", "svc-a"],
+		] as const) {
+			await store.create({
+				sid,
+				sub,
+				authTime: new Date(),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["pwd"],
+			});
+		}
+		return store;
+	};
+
+	const exchange = (g: ReturnType<typeof buildGrant>, body: Record<string, unknown>) =>
+		g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				...body,
+			}),
+		);
+
+	const delegation = async (actorClaims: Record<string, unknown> = {}) => ({
+		subject_token: await signSelfIssuedAccessToken({
+			sid: "sid-live",
+			may_act: [{ sub: "svc-a", iss: ISSUER }],
+		}),
+		actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", ...actorClaims }),
+		actor_token_type: ACCESS_TOKEN_TYPE,
+	});
+
+	it("refuses a subject token whose session records another subject", async () => {
+		// The session grant's rule: the record behind the `sid` must be this
+		// token's subject's. A token naming another subject's session is not
+		// tied to it, and its liveness says nothing about this subject.
+		const { result } = await exchange(buildGrant({ userSessionStore: await liveSessions() }), {
+			subject_token: await signSelfIssuedAccessToken({ sub: "user-2", sid: "sid-live" }),
+		});
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "session_invalid",
+		});
+	});
+
+	it("answers an actor session the store cannot read with the actor's own description", async () => {
+		// The family rule prefixes the actor's answers; the session rule does too.
+		const store = await liveSessions();
+		const real = store.get.bind(store);
+		vi.spyOn(store, "get").mockImplementation(async (sid) => {
+			if (sid === "sid-actor") throw storeReplyError();
+			return real(sid);
+		});
+		const logger = spyLogger();
+		const { result } = await exchange(
+			buildGrant({ userSessionStore: store, logger }),
+			await delegation({ sid: "sid-actor" }),
+		);
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "actor_token session store unavailable",
+		});
+		expectOutageLine(logger, "token_exchange_session_store_unavailable", {
+			store: "user_session",
+			step: "get",
+			role: "actor",
+		});
+	});
+
+	it("carries the subject's session and not the actor's", async () => {
+		const { result } = await exchange(
+			buildGrant({ userSessionStore: await liveSessions() }),
+			await delegation({ sid: "sid-actor" }),
+		);
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		const issued = decodeJwt(result.tokens.access_token);
+		expect(issued.liveness_sid).toBe("sid-live");
+		expect(issued).not.toHaveProperty("sid");
+		expect(JSON.stringify(issued)).not.toContain("sid-actor");
+	});
+
+	it("neither checks nor carries a session a validator leaves in claims alone", async () => {
+		// `ValidatedToken.sid` is the contract; a foreign token's `sid` claim
+		// names no session this provider's store holds.
+		const store = await liveSessions();
+		const get = vi.spyOn(store, "get");
+		const foreign: ExchangeTokenValidator = {
+			validate: async () => ({ sub: "user-1", scope: "read", claims: { sid: "sid-foreign" } }),
+		};
+		const g = createTokenExchangeGrant({
+			config: mockConfig,
+			keyStore,
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+			tokenExchangeValidatorResolver: new Map([[ACCESS_TOKEN_TYPE, foreign]]),
+			clientRepository: mockClientRepository(),
+			userSessionStore: store,
+		});
+		const { result } = await exchange(g, { subject_token: "opaque-foreign-token" });
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		const issued = decodeJwt(result.tokens.access_token);
+		expect(issued).not.toHaveProperty("sid");
+		expect(issued).not.toHaveProperty("liveness_sid");
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	describe("an outage line is never silent for want of a logger", () => {
+		// The grant's logger is an optional slot. Without one, an outage that
+		// answers 503 is written to core's console logger, as the session
+		// rule's line already is — never dropped.
+		const consoleError = () => vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+
+		it("the family store's", async () => {
+			const spy = consoleError();
+			try {
+				const g = buildGrant({
+					refreshTokenFamilyRevocation: makeFamilyRevocation({
+						isFamilyRevoked: async () => {
+							throw storeReplyError();
+						},
+					}),
+				});
+				const { result } = await exchange(g, {
+					subject_token: await signSelfIssuedAccessToken({ family_id: "fam-1" }),
+				});
+				expect(result.status).toBe(503);
+				const lines = spy.mock.calls.filter(
+					(call) => call[1] === "token_exchange_family_store_unavailable",
+				);
+				expect(lines).toHaveLength(1);
+				expect(lines[0]?.[0]).toMatchObject({
+					store: "refresh_token_family",
+					role: "subject",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				});
+			} finally {
+				spy.mockRestore();
+			}
+		});
+
+		it.each(["subject", "actor"] as const)("the %s validator's", async (role) => {
+			const spy = consoleError();
+			try {
+				const real = createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER });
+				const failing: ExchangeTokenValidator = {
+					validate: async (token, context) => {
+						if (context.role === role) throw storeReplyError();
+						return real.validate(token, context);
+					},
+				};
+				const g = createTokenExchangeGrant({
+					config: mockConfig,
+					keyStore,
+					refreshTokenFamilyRevocation: makeFamilyRevocation(),
+					tokenExchangeValidatorResolver: new Map([[ACCESS_TOKEN_TYPE, failing]]),
+					clientRepository: mockClientRepository(),
+				});
+				const { result } = await exchange(g, await delegation());
+				expect(result.status).toBe(503);
+				const lines = spy.mock.calls.filter(
+					(call) => call[1] === "token_exchange_validation_unavailable",
+				);
+				expect(lines).toHaveLength(1);
+				expect(lines[0]?.[0]).toMatchObject({ role });
+			} finally {
+				spy.mockRestore();
+			}
+		});
 	});
 });

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -485,7 +485,7 @@ as two keys:
 
 | Key | Type | Holds |
 | --- | --- | --- |
-| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject |
+| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject, and the approval's instant (`approvedAtMs`, written by the approving script in the same `HSET`; a record approved before it was written reads it as absent) |
 | `${keyPrefix}{devauth}:user:${user_code}` | string | the `device_code` it belongs to |
 
 `keyPrefix` is `redisDeviceCodeStore.keyPrefix` (default `devauth:`); the

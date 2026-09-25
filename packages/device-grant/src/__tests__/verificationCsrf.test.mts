@@ -45,6 +45,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
+import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
 const USER_CODE = "BCDFGHJK";
@@ -100,6 +101,7 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 		},
 		clientRepository,
 		deviceCodeStore: store,
+		userSessionStore: liveSessionStore(),
 		rateLimiter: createMemoryRateLimiter({
 			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
 			defaultLimit: { limit: 60, windowSeconds: 60 },
@@ -123,10 +125,7 @@ const mountVerification = (deps: { readonly config: unknown }) => {
 	const route = verificationRouteFor(deps)(deps);
 	const app = express();
 	app.use((req, _res, next) => {
-		(req as unknown as { session: unknown }).session = {
-			isAuthenticated: true,
-			user: { id: "user-1" },
-		};
+		(req as unknown as { session: unknown }).session = liveCookieSession();
 		next();
 	});
 	app.use(route.mountPath, route.handler);

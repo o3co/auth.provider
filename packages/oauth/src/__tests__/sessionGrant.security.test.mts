@@ -19,6 +19,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 const SID = "browser-session";
 const SUB = "user-1";
@@ -58,6 +63,8 @@ async function buildApp(
 	binding?: TokenBinding,
 	sid: string | undefined = SID,
 	browserUser: { id?: unknown } = { id: SUB },
+	/** Register the client `senderConstrained` for the binding's kind (the default). */
+	constrained = true,
 ) {
 	const client = {
 		clientId: "app",
@@ -65,7 +72,9 @@ async function buildApp(
 		allowedRedirectUris: [],
 		allowedScopes: ["read"],
 		allowedGrantTypes: ["session"],
-		...(binding ? { senderConstrained: { required: true, methods: [binding.kind] } } : {}),
+		...(binding && constrained
+			? { senderConstrained: { required: true, methods: [binding.kind] } }
+			: {}),
 	};
 	const clientRepository: ClientRepository = {
 		findById: async (id) => (id === "app" ? client : null),
@@ -237,4 +246,42 @@ describe("session grant authentication and token binding", () => {
 			expect(result.body.token_type).toBe(binding.kind === "dpop" ? "DPoP" : "Bearer");
 		},
 	);
+});
+
+describe("session grant stamps only the confirmation the binding's mechanism owns", () => {
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access token, advertised as Bearer, for %s — to a client with no required constraint",
+		async (_label, binding) => {
+			const result = await mint(
+				await buildApp(await liveStore(), binding, SID, { id: SUB }, false),
+			);
+			expect(result.status).toBe(200);
+			expect(decodeJwt(result.body.access_token).cnf).toBeUndefined();
+			expect(result.body.token_type).toBe("Bearer");
+		},
+	);
+
+	it.each(UNOWNED_BINDINGS)(
+		"refuses %s at dispatch for a client that requires its kind, rather than downgrading it",
+		async (_label, binding) => {
+			const result = await mint(await buildApp(await liveStore(), binding));
+			expect(result.status).toBe(400);
+			expect(result.body.error).toBe("invalid_request");
+			expect(result.body.access_token).toBeUndefined();
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const result = await mint(await buildApp(await liveStore(), COMPOUND_DPOP_BINDING));
+		expect(result.status).toBe(200);
+		expect(decodeJwt(result.body.access_token).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(result.body.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const result = await mint(await buildApp(await liveStore(), COMPOUND_MTLS_BINDING));
+		expect(result.status).toBe(200);
+		expect(decodeJwt(result.body.access_token).cnf).toEqual({ "x5t#S256": "OWNED-X5T" });
+		expect(result.body.token_type).toBe("Bearer");
+	});
 });

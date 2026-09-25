@@ -51,12 +51,14 @@ import {
 	AS_LISTED,
 	authorize,
 	basic,
+	codeFrom,
 	contributionNames,
 	cookiesOf,
 	DISCOVERY_PATHS,
 	describeOutages,
 	expectValidMetadata,
 	FORM_TYPE,
+	federatedCallback,
 	ISSUER,
 	JSON_TYPE,
 	KIB,
@@ -65,9 +67,11 @@ import {
 	padForm,
 	padJson,
 	REVERSED,
+	redeem,
 	TEMPLATE_DEPENDENCIES,
 	TOO_LARGE,
 	TRANSFERS,
+	WEB,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
@@ -85,6 +89,7 @@ import {
 	type FullSetOptions,
 	GATEWAY,
 	GITHUB_LANDING,
+	REQUIRED_BINDER,
 	TV,
 } from "./full-set.fixture.mts";
 
@@ -424,6 +429,86 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
 	});
 
+	it("DPoP: the device's poll with a proof gets a token bound to its key, advertised as DPoP (RFC 9449 §5)", async () => {
+		// The real DPoP mechanism beside the device grant. The grant stamped the
+		// proof's `cnf.jkt` and the envelope said Bearer, so a DPoP-aware device
+		// presented the token as a bearer token, which a resource server that
+		// enforces the binding refuses (§7.1).
+		const { app } = await boot();
+		const started = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({ client_id: TV.id });
+		const { agent, header, token } = await signedIn(app);
+		const approved = await agent
+			.post("/oauth/device/verification")
+			.set(header, token)
+			.send({ action: "approve", user_code: started.body.user_code });
+		expect(approved.status).toBe(200);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", dpopProof("POST", `${ISSUER}/oauth/token`))
+			.type("form")
+			.send({
+				grant_type: DEVICE_CODE_GRANT_TYPE,
+				client_id: TV.id,
+				device_code: started.body.device_code,
+			});
+		expect(res.status).toBe(200);
+		expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
+		expect(res.body.token_type).toBe("DPoP");
+	});
+
+	describe("a client that requires a sender constraint, with the real mechanisms", () => {
+		// The dispatch gate refuses a binding whose confirmation its mechanism
+		// does not own. The real DPoP and mTLS mechanisms always hand over the
+		// member they own, so neither is ever refused by it — pinned here, so
+		// the gate cannot come to refuse what it exists to admit.
+		it("DPoP: admitted, and the token is bound to the proof's key", async () => {
+			const { app } = await boot();
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(REQUIRED_BINDER))
+				.set("DPoP", dpopProof("POST", `${ISSUER}/oauth/token`))
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+			expect(res.status).toBe(200);
+			expect(res.body.token_type).toBe("DPoP");
+			expect(tokenPayload(res.body.access_token as string).cnf).toEqual({ jkt: DPOP_JKT });
+		});
+
+		it("mTLS: admitted, and the token is bound to the certificate", async () => {
+			const { app } = await boot();
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(REQUIRED_BINDER))
+				.set("x-forwarded-client-cert", encodeURIComponent(CLIENT_CERTIFICATE))
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+			expect(res.status).toBe(200);
+			expect(res.body.token_type).toBe("Bearer");
+			const thumbprint = createHash("sha256")
+				.update(new X509Certificate(CLIENT_CERTIFICATE).raw)
+				.digest("base64url");
+			expect(tokenPayload(res.body.access_token as string).cnf).toEqual({
+				"x5t#S256": thumbprint,
+			});
+		});
+
+		it("no binding at all: refused before any token is minted", async () => {
+			const { app } = await boot();
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(REQUIRED_BINDER))
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.access_token).toBeUndefined();
+		});
+	});
+
 	it("mTLS: a client_credentials token bound to the forwarded certificate", async () => {
 		const { app } = await boot();
 		const res = await request(app)
@@ -611,6 +696,191 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 });
 
 // ---------------------------------------------------------------------------
+// Token exchange and the session behind the subject token
+// ---------------------------------------------------------------------------
+
+describe("token exchange: a token exchanged from a session-bound token ends with the session", () => {
+	// The session grant's token carries the browser session's `sid` and no
+	// family, so a logout reaches it only through the UserSession record that
+	// introspection reads. The exchange dropped the `sid`: the token it issued
+	// from that one stayed active after the logout, for the rest of its life.
+
+	/** Signed in, a session-grant token for the web client, and the gateway's exchange of it. */
+	const sessionAndExchange = async (app: Express) => {
+		const signed = await signedIn(app);
+		const minted = await signed.agent
+			.post("/oauth/token")
+			.set("Authorization", basic(WEB))
+			.type("form")
+			.send({ grant_type: "session", scope: "openid profile" });
+		expect(minted.status).toBe(200);
+		const original = minted.body.access_token as string;
+		const exchanged = await exchangeAsGateway(app, original);
+		expect(exchanged.status).toBe(200);
+		return { ...signed, original, exchanged: exchanged.body.access_token as string };
+	};
+
+	const exchangeAsGateway = (app: Express, subjectToken: string) =>
+		request(app).post("/oauth/token").set("Authorization", basic(GATEWAY)).type("form").send({
+			grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+			subject_token: subjectToken,
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+
+	/** Introspected by the client its audience names. */
+	const active = async (
+		app: Express,
+		token: string,
+		client: { id: string; secret: string },
+	): Promise<unknown> => {
+		const res = await request(app)
+			.post("/oauth/introspect")
+			.set("Authorization", basic(client))
+			.type("form")
+			.send({ token });
+		expect(res.status).toBe(200);
+		return res.body.active;
+	};
+
+	it("after /session/logout, the session-grant token and the token exchanged from it both introspect inactive", async () => {
+		const { app } = await boot();
+		const { agent, header, token, original, exchanged } = await sessionAndExchange(app);
+		expect(await active(app, original, WEB)).toBe(true);
+		expect(await active(app, exchanged, GATEWAY)).toBe(true);
+
+		const logout = await agent.post("/session/logout").set(header, token);
+		expect(logout.status).toBe(200);
+
+		expect(await active(app, original, WEB)).toBe(false);
+		expect(await active(app, exchanged, GATEWAY)).toBe(false);
+		// Because the exchanged token names the same browser session — as a
+		// liveness link, never as the `sid` its capabilities are authorised on.
+		expect(tokenPayload(exchanged).liveness_sid).toBe(tokenPayload(original).sid);
+		expect(tokenPayload(exchanged)).not.toHaveProperty("sid");
+	});
+
+	it("after /session/logout, /userinfo refuses the exchanged token as it refuses the original", async () => {
+		const { app } = await boot();
+		const { agent, header, token, original, exchanged } = await sessionAndExchange(app);
+		expect((await agent.post("/session/logout").set(header, token)).status).toBe(200);
+		for (const accessToken of [original, exchanged]) {
+			const res = await request(app)
+				.get("/oauth/userinfo")
+				.set("Authorization", `Bearer ${accessToken}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error_description).toBe("session_invalid");
+		}
+	});
+
+	it("refuses to exchange a session-bound token after its session logged out", async () => {
+		const { app } = await boot();
+		const { agent, header, token, original } = await sessionAndExchange(app);
+		expect((await agent.post("/session/logout").set(header, token)).status).toBe(200);
+
+		const again = await exchangeAsGateway(app, original);
+		expect(again.status).toBe(400);
+		expect(again.body).toEqual({
+			error: "invalid_request",
+			error_description: "session_invalid",
+		});
+	});
+});
+
+describe("token exchange: an exchanged token reaches none of the capabilities its session's own tokens have", () => {
+	// The session link an exchanged token carries is for liveness — it goes
+	// inactive when the session ends — and for nothing else. A `sid` claim is
+	// also what /userinfo releases the session's claims on, what
+	// `POST /oauth/federation/:name/logout` deletes the upstream tokens on, and
+	// (with `family_id` and an allowlisted `azp`) what the federation token
+	// route hands the upstream access token out on. A downstream holder of an
+	// exchanged token must reach none of them. The gateway is registered for
+	// `email` and allowlisted for federation tokens, so nothing but the
+	// missing session capability stands in the way.
+
+	const exchangeAsGateway = (app: Express, subjectToken: string, scope?: string) =>
+		request(app)
+			.post("/oauth/token")
+			.set("Authorization", basic(GATEWAY))
+			.type("form")
+			.send({
+				grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				...(scope === undefined ? {} : { scope }),
+			});
+
+	/** A Google login, and the web client's authorization-code tokens from that session. */
+	const federatedTokens = async (app: Express, upstreams: FullSet["upstreams"]) => {
+		const callback = await (await federatedCallback(app, "google", upstreams.google))();
+		expect(callback.status).toBe(302);
+		const redeemed = await redeem(app, codeFrom(await authorize(app, cookiesOf(callback))));
+		expect(redeemed.status).toBe(200);
+		const original = redeemed.body.access_token as string;
+		const sid = tokenPayload(original).sid as string;
+		expect(typeof sid).toBe("string");
+		const exchanged = await exchangeAsGateway(app, original, "openid");
+		expect(exchanged.status).toBe(200);
+		return { original, sid, exchanged: exchanged.body.access_token as string };
+	};
+
+	it("/userinfo answers the exchanged token with its subject alone, not the session's claims", async () => {
+		const { app } = await boot();
+		const { agent } = await signedIn(app);
+		const minted = await agent
+			.post("/oauth/token")
+			.set("Authorization", basic(WEB))
+			.type("form")
+			.send({ grant_type: "session", scope: "openid email" });
+		expect(minted.status).toBe(200);
+		const original = minted.body.access_token as string;
+		// The session's own token, for contrast: its scope releases the email.
+		const own = await request(app)
+			.get("/oauth/userinfo")
+			.set("Authorization", `Bearer ${original}`);
+		expect(own.status).toBe(200);
+		expect(own.body).toMatchObject({ sub: ALICE.sub, email: "alice@example.com" });
+
+		const exchanged = await exchangeAsGateway(app, original);
+		expect(exchanged.status).toBe(200);
+		expect(exchanged.body.scope).toContain("email");
+		const res = await request(app)
+			.get("/oauth/userinfo")
+			.set("Authorization", `Bearer ${exchanged.body.access_token as string}`);
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sub: ALICE.sub });
+	});
+
+	it("the federation token route does not hand the upstream token to the exchanged token", async () => {
+		const { app, upstreams } = await boot();
+		const { exchanged } = await federatedTokens(app, upstreams);
+		const res = await request(app)
+			.post("/oauth/federation/google/token")
+			.set("Authorization", `Bearer ${exchanged}`);
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "missing sid claim" });
+		expect(res.body.access_token).toBeUndefined();
+	});
+
+	it("the federation logout route does not let the exchanged token delete the upstream tokens", async () => {
+		const { app, upstreams, handle } = await boot();
+		const { exchanged, sid } = await federatedTokens(app, upstreams);
+		const store = handle.components.federationTokenStore;
+		expect(await store?.get(sid, "google")).not.toBeNull();
+
+		const res = await request(app)
+			.post("/oauth/federation/google/logout")
+			.set("Authorization", `Bearer ${exchanged}`)
+			// A body, as a client sends one: the route reads its optional
+			// parameters from it.
+			.type("form")
+			.send({ state: "s" });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "invalid_token", error_description: "missing sid claim" });
+		expect(await store?.get(sid, "google")).not.toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Outages
 // ---------------------------------------------------------------------------
 
@@ -634,6 +904,26 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 			"store-field":
 				"packages/device-grant `deviceAuthorizationEndpoint.mts`: `device_authorization_store_unavailable` carries `clientId` and `err` but no `store` / `step` / `site` field naming the device-code store",
 		},
+	},
+	{
+		module: "device-grant",
+		slot: "userSessionStore",
+		surface: "POST /oauth/device/verification",
+		run: async (app, outage) => {
+			const started = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: TV.id });
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			// The approval reads the live UserSession behind the cookie first.
+			return agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: started.body.user_code });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "device_verification_session_liveness_unavailable",
 	},
 	{
 		module: "dpop",
@@ -681,6 +971,75 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 			"no-warn":
 				"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the exchange's error line — the defect the template suite pins at introspection",
 		},
+	},
+	{
+		module: "device-grant",
+		slot: "subjectRevocation",
+		surface: "POST /oauth/device/verification (the sessions boundary)",
+		run: async (app, outage) => {
+			const started = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: TV.id });
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: started.body.user_code });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "device_verification_session_liveness_unavailable",
+	},
+	{
+		module: "device-grant",
+		slot: "subjectRevocation",
+		surface: "the device's poll at /oauth/token (the sessions boundary)",
+		run: async (app, outage) => {
+			const started = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: TV.id });
+			const { agent, header, token } = await signedIn(app);
+			await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: started.body.user_code });
+			outage.down = true;
+			return request(app).post("/oauth/token").type("form").send({
+				grant_type: DEVICE_CODE_GRANT_TYPE,
+				client_id: TV.id,
+				device_code: started.body.device_code,
+			});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "device_code_grant_revocation_unavailable",
+	},
+	{
+		module: "oauth-token-exchange",
+		slot: "userSessionStore",
+		surface: "the subject_token's session check",
+		run: async (app, outage) => {
+			const { agent } = await signedIn(app);
+			const minted = await agent
+				.post("/oauth/token")
+				.set("Authorization", basic(WEB))
+				.type("form")
+				.send({ grant_type: "session", scope: "openid profile" });
+			outage.down = true;
+			return request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(GATEWAY))
+				.type("form")
+				.send({
+					grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+					subject_token: minted.body.access_token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "token_exchange_session_store_unavailable",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
 	},
 	{
 		module: "webauthn",

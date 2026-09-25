@@ -1457,7 +1457,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				errorDescription: "refresh token store unavailable",
 			});
 			expect(logger.error).toHaveBeenCalledWith(
-				{ err: projectedStoreError, role: "subject" },
+				{ store: "refresh_token_family", err: projectedStoreError, role: "subject" },
 				"token_exchange_family_store_unavailable",
 			);
 			for (const line of lines) expect(line).not.toContain("fam-subject");
@@ -1481,7 +1481,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				errorDescription: "actor_token refresh token store unavailable",
 			});
 			expect(logger.error).toHaveBeenCalledWith(
-				{ err: projectedStoreError, role: "actor" },
+				{ store: "refresh_token_family", err: projectedStoreError, role: "actor" },
 				"token_exchange_family_store_unavailable",
 			);
 			for (const line of lines) expect(line).not.toContain("fam-actor");

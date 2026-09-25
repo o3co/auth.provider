@@ -373,6 +373,8 @@ function addedModules(
 export const TV = { id: "tv" } as const;
 export const GATEWAY = { id: "gateway", secret: "gateway-secret" } as const;
 export const BINDER = { id: "binder", secret: "binder-secret" } as const;
+/** BINDER's twin that requires a sender constraint — every token it gets is bound. */
+export const REQUIRED_BINDER = { id: "required-binder", secret: "required-binder-secret" } as const;
 
 const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 	// A public device client.
@@ -383,12 +385,17 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 		allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
 	},
 	// A confidential client exchanging the web client's tokens for its own.
+	// `email` and the federation-token allowlist are there so what an
+	// exchanged token must NOT reach — the session's claims at /userinfo, the
+	// upstream token — is within the client's registration: only the missing
+	// session capability stands in the way.
 	[GATEWAY.id]: {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: GATEWAY.secret,
-		allowedScopes: ["openid", "profile"],
+		allowedScopes: ["openid", "profile", "email"],
 		allowedAudiences: [ISSUER],
 		allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
+		allowedAzpForFederationToken: true,
 	},
 	// A machine client whose tokens are sender-constrained by DPoP or mTLS.
 	[BINDER.id]: {
@@ -397,6 +404,16 @@ const EXTRA_CLIENTS: Readonly<Record<string, Record<string, unknown>>> = {
 		allowedScopes: ["api.read"],
 		defaultScopes: ["api.read"],
 		allowedGrantTypes: ["client_credentials"],
+	},
+	// The same, registered to require a binding by either mechanism: the
+	// dispatch gate must let each real mechanism's binding through.
+	[REQUIRED_BINDER.id]: {
+		tokenEndpointAuthMethod: "client_secret_basic",
+		clientSecret: REQUIRED_BINDER.secret,
+		allowedScopes: ["api.read"],
+		defaultScopes: ["api.read"],
+		allowedGrantTypes: ["client_credentials"],
+		senderConstrained: { required: true, methods: ["dpop", "mtls"] },
 	},
 };
 

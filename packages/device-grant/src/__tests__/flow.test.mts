@@ -31,8 +31,13 @@ import type {
 	GrantContext,
 	RateLimiter,
 	RateLimitFailMode,
+	SubjectRevocation,
+	TokenBinding,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	consoleLogger,
+	createInMemorySubjectRevocation,
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
@@ -47,6 +52,7 @@ import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
+import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
 const ISSUER = "https://as.example.test";
@@ -134,6 +140,9 @@ const makeHarness = (
 		auditSink?: AuditSink;
 		logger?: ReturnType<typeof makeLogger>;
 		store?: ReturnType<typeof createMemoryDeviceCodeStore>;
+		userSessionStore?: UserSessionStore;
+		requireEmailVerified?: boolean;
+		subjectRevocation?: SubjectRevocation;
 	} = {},
 ) => {
 	const clock = makeClock();
@@ -146,7 +155,8 @@ const makeHarness = (
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		});
 
-	const session = overrides.session ?? { isAuthenticated: true, user: { id: "user-1" } };
+	const session = overrides.session ?? liveCookieSession();
+	const userSessionStore = overrides.userSessionStore ?? liveSessionStore();
 
 	const app = express();
 	app.use(express.json());
@@ -175,6 +185,9 @@ const makeHarness = (
 			settings: resolved,
 			rateLimiter,
 			failMode: overrides.failMode ?? "closed",
+			userSessionStore,
+			requireEmailVerified: overrides.requireEmailVerified ?? false,
+			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 			now: clock.now,
 			...(overrides.auditSink ? { auditSink: overrides.auditSink } : {}),
 			...(overrides.logger ? { logger: overrides.logger } : {}),
@@ -186,15 +199,22 @@ const makeHarness = (
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		accessTokenExpiresIn: 300,
 		now: clock.now,
+		...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
+		...(overrides.logger ? { logger: overrides.logger } : {}),
 	});
 
-	const poll = (deviceCode: string, authenticated: AuthenticatedClient | null = client) =>
+	const poll = (
+		deviceCode: string,
+		authenticated: AuthenticatedClient | null = client,
+		tokenBinding?: TokenBinding,
+	) =>
 		grant.handle({
 			body: { device_code: deviceCode },
 			session: {},
 			metadata: {},
 			issuer: ISSUER,
 			authenticatedClient: authenticated,
+			...(tokenBinding === undefined ? {} : { tokenBinding }),
 		} as unknown as GrantContext);
 
 	return { app, store, clock, grant, poll, rateLimiter };
@@ -436,6 +456,70 @@ describe("verification endpoint", () => {
 		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("login_required");
+	});
+
+	it.each([
+		["records no sid", { isAuthenticated: true, user: { id: "user-1" } }],
+		[
+			"names a sid the store does not hold",
+			{ isAuthenticated: true, user: { id: "user-1" }, sid: "sid-gone" },
+		],
+		[
+			"names another subject's session",
+			{ isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
+		],
+	])(
+		"answers login_required, deciding nothing, for a cookie session that %s",
+		async (_label, session) => {
+			// The session grant's rule: with a store wired, the cookie's claim
+			// stands only on a live record of the same subject. A session with
+			// no `sid` is one no logout can reach, and a record of another
+			// subject is not this cookie's; neither is an end user to approve as.
+			const { app, poll } = makeHarness({ session });
+			const started = await startDevice(app);
+			const userCode = started.body.user_code as string;
+			for (const action of ["lookup", "approve", "deny"]) {
+				const res = await verify(app, { action, user_code: userCode });
+				expect(res.status, action).toBe(401);
+				expect(res.body.error, action).toBe("login_required");
+			}
+			const result = await poll(started.body.device_code as string);
+			expect(result.result).toMatchObject({ status: 400, error: "authorization_pending" });
+		},
+	);
+
+	it("refuses an approval from an unverified email under requireEmailVerified, and nothing else", async () => {
+		// #297's gate is on issuance: `approve` is what a token is issued from.
+		// A lookup shows the user what is being asked, and a denial issues
+		// nothing, so both still go through.
+		const { app, poll } = makeHarness({ requireEmailVerified: true });
+		const started = await startDevice(app);
+		const userCode = started.body.user_code as string;
+
+		const refused = await verify(app, { action: "approve", user_code: userCode });
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual({
+			error: "access_denied",
+			error_description: "email address is not verified",
+		});
+		expect((await verify(app, { action: "lookup", user_code: userCode })).status).toBe(200);
+		const pending = await poll(started.body.device_code as string);
+		expect(pending.result).toMatchObject({ status: 400, error: "authorization_pending" });
+		expect((await verify(app, { action: "deny", user_code: userCode })).status).toBe(200);
+	});
+
+	it("does not spend the subject's budget on an approval the email gate refuses", async () => {
+		// Refused before the code is read: no oracle, and no attempt counted.
+		const rateLimiter = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const { app } = makeHarness({ requireEmailVerified: true, rateLimiter });
+		for (let i = 0; i < 3; i++) {
+			const res = await verify(app, { action: "approve", user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(403);
+		}
+		expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
 	});
 
 	it("answers a malformed code exactly as it answers an unknown one", async () => {
@@ -1071,5 +1155,396 @@ describe("store capacity (#445)", () => {
 			status: 400,
 			error: "authorization_pending",
 		});
+	});
+});
+
+describe("a sender-constrained poll", () => {
+	/** A started, approved device; the poll after the interval. */
+	const approvedPoll = async (tokenBinding: TokenBinding) => {
+		const { app, poll, clock } = makeHarness();
+		const started = await startDevice(app);
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+		clock.advance(10_000);
+		const { result } = await poll(started.body.device_code as string, client, tokenBinding);
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		const [, payloadB64] = result.tokens.access_token.split(".");
+		return {
+			tokens: result.tokens,
+			payload: JSON.parse(Buffer.from(payloadB64 as string, "base64url").toString()) as Record<
+				string,
+				unknown
+			>,
+		};
+	};
+
+	it("advertises a DPoP-bound access token as DPoP (RFC 9449 §5)", async () => {
+		// The token carried `cnf.jkt` and the envelope said Bearer, so a
+		// DPoP-aware device presented it as a bearer token — which a resource
+		// server enforcing the binding refuses (§7.1).
+		const { tokens, payload } = await approvedPoll({
+			kind: "dpop",
+			confirmation: { jkt: "DEVICE-JKT" },
+		});
+		expect(payload.cnf).toEqual({ jkt: "DEVICE-JKT" });
+		expect(tokens.token_type).toBe("DPoP");
+	});
+
+	it("keeps an mTLS-bound access token Bearer (RFC 8705 §3)", async () => {
+		const { tokens, payload } = await approvedPoll({
+			kind: "mtls",
+			confirmation: { "x5t#S256": "DEVICE-X5T" },
+		});
+		expect(payload.cnf).toEqual({ "x5t#S256": "DEVICE-X5T" });
+		expect(tokens.token_type).toBe("Bearer");
+	});
+
+	// Core's `ownedConfirmation`: only the member the binding's mechanism owns
+	// is stamped, since `ctx.tokenBinding` carries whatever a mechanism returned.
+	it.each([
+		["a contributed kind presenting cnf.jkt", { kind: "acme", confirmation: { jkt: "ACME-JKT" } }],
+		[
+			"a contributed kind presenting cnf.x5t#S256",
+			{ kind: "acme", confirmation: { "x5t#S256": "ACME-X5T" } },
+		],
+		[
+			"a DPoP binding presenting cnf.x5t#S256",
+			{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
+		],
+		["an mTLS binding presenting cnf.jkt", { kind: "mtls", confirmation: { jkt: "CROSSED-JKT" } }],
+	] as const)(
+		"mints an unbound access token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const { tokens, payload } = await approvedPoll(tokenBinding as TokenBinding);
+			expect(payload.cnf).toBeUndefined();
+			expect(tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const { tokens, payload } = await approvedPoll({
+			kind: "dpop",
+			confirmation: { jkt: "DEVICE-JKT", "x5t#S256": "STOWAWAY-X5T" },
+		} as unknown as TokenBinding);
+		expect(payload.cnf).toEqual({ jkt: "DEVICE-JKT" });
+		expect(tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const { tokens, payload } = await approvedPoll({
+			kind: "mtls",
+			confirmation: { jkt: "STOWAWAY-JKT", "x5t#S256": "DEVICE-X5T" },
+		} as unknown as TokenBinding);
+		expect(payload.cnf).toEqual({ "x5t#S256": "DEVICE-X5T" });
+		expect(tokens.token_type).toBe("Bearer");
+	});
+});
+
+describe("the session check, further", () => {
+	/** The authTime of every fixed session (`liveSessions.mts`). */
+	const AUTH_TIME = new Date(1_800_000_000_000);
+	const FAR = new Date(1_900_000_000_000);
+
+	it("says a cookie session with no sid needs one, distinctly from an ended session", async () => {
+		// A deployment's own login that sets `isAuthenticated` and `user.id`
+		// but no `sid` would otherwise see every action answered as a session
+		// that ended — the session grant's words for the same finding.
+		const { app } = makeHarness({ session: { isAuthenticated: true, user: { id: "user-1" } } });
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "session identifier (sid) is required",
+		});
+	});
+
+	it("reads a store that answers undefined for a missing session as an ended one, not a failure", async () => {
+		// The port says `null`; a store of the deployment's own may answer
+		// `undefined`, and that is still no session.
+		const store = liveSessionStore();
+		store.get = async () => undefined as never;
+		const { app } = makeHarness({ userSessionStore: store });
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "the session is no longer active; sign in again",
+		});
+	});
+
+	it("warns once, naming the sid, when the session behind the cookie records another subject", async () => {
+		const logger = makeLogger();
+		const { app } = makeHarness({
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
+			logger,
+		});
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(401);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ sid: "sid-2" },
+			"device_verification_session_subject_mismatch",
+		);
+		expect(logger.error).not.toHaveBeenCalled();
+	});
+
+	it("refuses a session that authenticated at or before the subject's sessions boundary", async () => {
+		// `revokeAllForSubject` stamps the boundary first and deletes the
+		// sessions after it; a cascade that failed, or a session the subject
+		// index never learnt of, leaves the record while the boundary is in
+		// force. federation-grants refuses that session the same way.
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", AUTH_TIME, FAR);
+		const { app, poll } = makeHarness({ subjectRevocation });
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		const pending = await poll(started.body.device_code as string);
+		expect(pending.result).toMatchObject({ status: 400, error: "authorization_pending" });
+	});
+
+	it("approves from a session that authenticated after the boundary", async () => {
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", new Date(AUTH_TIME.getTime() - 60_000), FAR);
+		const { app } = makeHarness({ subjectRevocation });
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(200);
+	});
+
+	it("answers a boundary it cannot read with 503, logged once at error", async () => {
+		const logger = makeLogger();
+		const subjectRevocation: SubjectRevocation = {
+			kind: "broken",
+			revokeBefore: async () => {},
+			revokedBefore: async () => {
+				throw new Error("redis down");
+			},
+		};
+		const { app } = makeHarness({ subjectRevocation, logger });
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("device_verification_session_liveness_unavailable");
+		expect(line).toMatchObject({ store: "revocation_boundary", step: "read" });
+		expect(line.err).not.toBeInstanceOf(Error);
+	});
+
+	it("spends none of the subject's budget on a session that has ended", async () => {
+		const rateLimiter = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const dead = makeHarness({
+			rateLimiter,
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-gone" },
+		});
+		for (let i = 0; i < 3; i++) {
+			expect((await verify(dead.app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(
+				401,
+			);
+		}
+		const live = makeHarness({ rateLimiter });
+		expect((await verify(live.app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
+	});
+
+	it.each(["lookup", "approve", "deny"] as const)(
+		"answers a session-store outage on %s with 503, before the code is read",
+		async (action) => {
+			const store = liveSessionStore();
+			store.get = async () => {
+				throw new Error("redis down");
+			};
+			const { app } = makeHarness({ userSessionStore: store, logger: makeLogger() });
+			const res = await verify(app, { action, user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		},
+	);
+
+	it("writes the outage line to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			const store = liveSessionStore();
+			store.get = async () => {
+				throw new Error("redis down");
+			};
+			const { app } = makeHarness({ userSessionStore: store });
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(503);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1]).toBe("device_verification_session_liveness_unavailable");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("writes the subject-mismatch warning to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
+		try {
+			const { app } = makeHarness({
+				session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
+			});
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(401);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy).toHaveBeenCalledWith(
+				{ sid: "sid-2" },
+				"device_verification_session_subject_mismatch",
+			);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("writes the rate-limited warning to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
+		try {
+			const rateLimiter = createMemoryRateLimiter({
+				limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+			});
+			const { app } = makeHarness({ rateLimiter });
+			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(429);
+			expect(spy).toHaveBeenCalledWith(
+				expect.objectContaining({ subject: "user-1", action: "lookup", remaining: 0 }),
+				"device_verification_rate_limited",
+			);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("refuses to build a handler with no userSessionStore — a hand-mounted handler would answer every request 503", () => {
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				rateLimiter: createMemoryRateLimiter({
+					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				}),
+				failMode: "closed",
+				requireEmailVerified: false,
+			} as never),
+		).toThrow(/userSessionStore/);
+	});
+});
+
+describe("a subject revocation between the approval and the poll", () => {
+	// The approval is checked against the session at approval time; a
+	// revocation that lands after it, before the device polls, is older than
+	// the token the poll mints — so `verifyJwt` never refuses that token. The
+	// poll holds the approval's own instant against the boundary instead.
+	const APPROVAL = 1_800_000_000_000; // the harness clock's start, and each fixed session's authTime
+	const FAR = new Date(1_900_000_000_000);
+
+	const approvedDevice = async (harness: ReturnType<typeof makeHarness>) => {
+		const started = await startDevice(harness.app);
+		const approved = await verify(harness.app, {
+			action: "approve",
+			user_code: started.body.user_code,
+		});
+		expect(approved.status).toBe(200);
+		harness.clock.advance(10_000);
+		return started.body.device_code as string;
+	};
+
+	it("refuses the poll when the boundary was stamped at or after the approval", async () => {
+		const subjectRevocation = createInMemorySubjectRevocation();
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL + 5_000), FAR);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+		});
+	});
+
+	it("honours an approval given after the boundary", async () => {
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const harness = makeHarness({ subjectRevocation });
+		const deviceCode = await approvedDevice(harness);
+		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
+	it("refuses an approval that records no instant while a boundary is in force", async () => {
+		// A record written before the store recorded the approval's instant
+		// cannot show it postdates the boundary; the iat-less token's rule.
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", new Date(APPROVAL - 60_000), FAR);
+		const inner = createMemoryDeviceCodeStore();
+		const legacy = {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { ...outcome, authorization: { ...outcome.authorization, approvedAtMs: undefined } }
+					: outcome;
+			},
+		};
+		const harness = makeHarness({ subjectRevocation, store: legacy as never });
+		const deviceCode = await approvedDevice(harness);
+		const { result } = await harness.poll(deviceCode);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("honours an approval that records no instant while no boundary is in force — the upgrade path", async () => {
+		// A record approved before the store recorded the instant (or on a
+		// replica not yet upgraded) is refused only when a boundary exists to
+		// hold it against.
+		const subjectRevocation = createInMemorySubjectRevocation();
+		const inner = createMemoryDeviceCodeStore();
+		const legacy = {
+			...inner,
+			poll: async (code: string, nowMs: number) => {
+				const outcome = await inner.poll(code, nowMs);
+				return outcome.status === "approved"
+					? { ...outcome, authorization: { ...outcome.authorization, approvedAtMs: undefined } }
+					: outcome;
+			},
+		};
+		const harness = makeHarness({ subjectRevocation, store: legacy as never });
+		const deviceCode = await approvedDevice(harness);
+		expect((await harness.poll(deviceCode)).result.status).toBe(200);
+	});
+
+	it("answers a boundary it cannot read at the poll with 503, logged once at error", async () => {
+		const logger = makeLogger();
+		const state = { down: false };
+		const inner = createInMemorySubjectRevocation();
+		const subjectRevocation: SubjectRevocation = {
+			kind: "switchable",
+			revokeBefore: (...args) => inner.revokeBefore(...args),
+			revokedBefore: async (subject) => {
+				if (state.down) throw new Error("redis down");
+				return inner.revokedBefore(subject);
+			},
+		};
+		const harness = makeHarness({ subjectRevocation, logger });
+		const deviceCode = await approvedDevice(harness);
+		state.down = true;
+		const { result } = await harness.poll(deviceCode);
+		// Not the device-code store's words: that store answered, and a retry
+		// finds the approval already consumed — the device starts again.
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription:
+				"the revocation boundary is unavailable; start a new device authorization request",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("device_code_grant_revocation_unavailable");
+		expect(line).toMatchObject({ store: "revocation_boundary", step: "read", clientId: CLIENT_ID });
+		expect(line.err).not.toBeInstanceOf(Error);
 	});
 });
