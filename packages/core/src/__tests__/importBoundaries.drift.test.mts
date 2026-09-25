@@ -37,8 +37,8 @@
  * What the scan cannot turn into an edge it reports, and "sees every import
  * in core's product code" fails on it: core imported by its own package name,
  * an `import()` or `require()` of a computed specifier, a `require()` of a
- * core file, and an `import … = require(…)`. What it does not see at all: a
- * require function bound under another name than `require`.
+ * core file — through `require` or any name bound to `createRequire(…)` —
+ * and an `import … = require(…)`.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -120,6 +120,23 @@ function scanSource(from: string, text: string): Scan {
 		const to = coreFile(specifier);
 		if (to !== undefined) edges.push({ from, to, typeOnly });
 	};
+	// `require`, and every name bound to `createRequire(…)` — collected
+	// first, so a use before its binding in source order is seen too.
+	const requireNames = new Set(["require"]);
+	const bindings = (node: ts.Node): void => {
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer !== undefined &&
+			ts.isCallExpression(node.initializer) &&
+			ts.isIdentifier(node.initializer.expression) &&
+			node.initializer.expression.text === "createRequire"
+		) {
+			requireNames.add(node.name.text);
+		}
+		ts.forEachChild(node, bindings);
+	};
+	bindings(source);
 	const visit = (node: ts.Node): void => {
 		if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
 			const clause = node.importClause;
@@ -162,7 +179,7 @@ function scanSource(from: string, text: string): Scan {
 		} else if (
 			ts.isCallExpression(node) &&
 			ts.isIdentifier(node.expression) &&
-			node.expression.text === "require"
+			requireNames.has(node.expression.text)
 		) {
 			// `createRequire` is how core loads `express`, an optional peer. A
 			// package is not an edge; a core file loaded this way would be one
@@ -304,6 +321,25 @@ describe("the import scan", () => {
 			"adapters/example.mts:4: a require() of core's own ./sibling.mjs",
 			"adapters/example.mts:5: a require() of a computed specifier",
 			"adapters/example.mts:6: an import-equals require of ./legacy",
+		]);
+	});
+
+	it("reads a require function bound to createRequire(…) under another name as require", () => {
+		// `boot/assemble-app.mts` binds `const req = createRequire(import.meta.url)`.
+		const { edges, holes } = scanSource(
+			"boot/example.mts",
+			[
+				'import { createRequire } from "node:module";',
+				"const req = createRequire(import.meta.url);",
+				'const express = req("express");',
+				'const sibling = req("./sibling.mjs");',
+				"const computed = req(specifier);",
+			].join("\n"),
+		);
+		expect(edges).toEqual([]);
+		expect(holes).toEqual([
+			"boot/example.mts:4: a require() of core's own ./sibling.mjs",
+			"boot/example.mts:5: a require() of a computed specifier",
 		]);
 	});
 
