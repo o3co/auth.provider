@@ -675,7 +675,7 @@ stream — its level is fixed at `info`.
 | `jwt_bearer_issuer_audience_mismatch` (warn) | `oauth/src/grants/jwtBearer.mts` | the presenting client's `allowedAudiences` and the assertion issuer's `allowedAudiences` (its trust-registry entry) admit no audience in common, so no token could name one both stand behind. Devices get `invalid_grant`; compare the two registrations (#525) |
 | `cimd_document_rejected`, `cimd_document_fetch_failed`, `cimd_host_not_allowed` (warn) | `oauth/src/clients/clientIdMetadataDocument.mts` | a Client ID Metadata Document client (#529) was refused: the reason names what failed (a redirect, a byte cap, a special-use address, a document that does not match its URL). The client sees `invalid_client`; a steady rate from one host is a misconfigured client or a probe |
 | `revoke_store_unavailable` (error) | `oauth/src/routes/revoke.mts` | `/oauth/revoke` is answering `503`: a client's revocation was not recorded, so the token it asked to end is still valid until it expires. `store` says whether the access-token denylist or the refresh-token family store failed, and `clientId` whose revocation was lost. A client that ignores the `503` keeps a live token it believes revoked — retries succeed once the store is back |
-| `token_binding_unavailable`, `protected_resource_binding_unavailable` (error) by `mechanism` and `reason` | `core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts` | a token-binding mechanism could not reach a verdict, and requests at `/oauth/token` (`token_binding_unavailable`) or at protected resources (`protected_resource_binding_unavailable`) are answering `503 temporarily_unavailable`. The dispatcher that answers owns the one line, with the mechanism's `reason` and its `cause`'s projection when it gives them. For DPoP: `reason: "replay_store_unavailable"` = the seen-set is unreachable, or refused the write — core's in-process set at its cap (`err.name: "ReplaySeenSetFullError"`, `err.reason: "full"`; see Sizing), a Redis at `maxmemory` under `noeviction`; `reason: "replay_store_fault"` = it answered with its own contract error (a `RangeError` or `expired-at-issue`) — a broken or hand-built seen-set, whose fix is in the composition, not in Redis. These replace DPoP's own `dpop_replay_store_unavailable` / `dpop_replay_store_fault` lines and the dispatchers' former warn lines |
+| `token_binding_unavailable`, `protected_resource_binding_unavailable` (error) by `mechanism` and `reason` | `core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts` | a token-binding mechanism could not reach a verdict, and requests at `/oauth/token` (`token_binding_unavailable`) or at protected resources (`protected_resource_binding_unavailable`) are answering `503 temporarily_unavailable`. The dispatcher that answers owns the one line, with the mechanism's `reason` and its `cause`'s projection when it gives them. For DPoP: `reason: "replay_store_unavailable"` = the seen-set is unreachable, or refused the write (a Redis at `maxmemory` under `noeviction`); `reason: "replay_store_full"` = core's in-process set holds DPoP's share of its cap (`err.name: "ReplaySeenSetFullError"`, `err.reason: "full"`; see Sizing) — a flood of fresh proofs, or a cap too small for the traffic; `reason: "replay_store_fault"` = it answered with its own contract error (a `RangeError` or `expired-at-issue`) — a broken or hand-built seen-set, whose fix is in the composition, not in Redis. These replace DPoP's own `dpop_replay_store_unavailable` / `dpop_replay_store_fault` lines and the dispatchers' former warn lines |
 | `shutdown_drain_deadline_exceeded`, `shutdown_cleanup_failed`, `shutdown_cleanup_timed_out`, `shutdown_server_close_failed` (error) + non-zero exit — formerly `graceful shutdown: drain deadline exceeded, closing remaining connections`, `…: cleanup failed`, `…: cleanup timed out`, `…: server close failed`; the drain starts with `shutdown_draining` and ends with `shutdown_complete` (info, `reason`, `drain`, `exitCode`) | `templates/standalone/src/shutdown.mts` | a replica did not drain within `drainTimeoutMs` (default 10 s), its cleanup did not finish within the allowance (45 s or more with federation grants on — a rotated upstream credential may be unwritten), or it could not release its connections |
 | `adapter_lifecycle_cleanup_failed` (error) with `phase`, `cleanupIndex` and `err` | `core/src/adapters/AdapterFactory.mts` | an adapter's own cleanup — typically the close of a connection its builder opened — threw while `handle.dispose()` drained them (`phase: "dispose"`) or while a failed boot did (`phase: "boot_failure"`). One line per failed cleanup, through the deployment's logger — the `logger` component at dispose, the logger the composition root handed in (bootstrap or override) when boot failed; the standalone passes one — and to stderr only when there is none; the drain goes on to the rest, even when the logger itself throws. A dispose then rejects, which the standalone reports as `graceful shutdown: cleanup failed`; a failed boot rethrows the error that failed it (a `BootError` for every refusal) |
 
@@ -910,16 +910,21 @@ for its lifetime and not until the process restarts. The replay seen-set is
 also capped at a million records (`replaySeenSet.memory.maxEntries`;
 `packages/core/src/replay-seen-set/adapters/memory.mts`): about 200 MB with
 the UUID `jti`s clients send, up to about 725 MB if every `jti` is a
-256-character one outside Latin-1. It fills at `maxEntries /
-oauth.dpop.replay-store-ttl-seconds` records a second — about 3 300 fresh
-DPoP proofs a second at the default 300 s, roughly what one process can
-verify — and a longer TTL lowers that rate in proportion. At the cap it
+256-character one outside Latin-1. DPoP proofs — recorded before any rate
+limit or token check, so anyone can send them — may fill only 90% of the
+cap: past that a new proof is refused and the last tenth is kept for the
+other consumers. DPoP's share fills at `0.9 × maxEntries /
+oauth.dpop.replay-store-ttl-seconds` records a second — about 3 000 fresh
+proofs a second at the default 300 s, roughly what one process can verify
+— and a longer TTL lowers that rate in proportion. At a limit the set
 reclaims what has expired, at most once per ten seconds, and otherwise
-refuses the new record rather than evict a live one. Every consumer shares
-the set, so all of them answer `503 temporarily_unavailable` until records
-expire: DPoP at the token endpoint and at protected resources, logged as
-`token_binding_unavailable` / `protected_resource_binding_unavailable`, and
-`private_key_jwt`, ID-JAG and WebAuthn, logged as
+refuses the new record rather than evict a live one. A DPoP flood therefore
+refuses DPoP proofs, `503 temporarily_unavailable` at the token endpoint and
+at protected resources, logged as `token_binding_unavailable` /
+`protected_resource_binding_unavailable` with `reason: "replay_store_full"`,
+while client authentication goes on. Only a set that is full to its cap
+refuses the other consumers too — `private_key_jwt`, ID-JAG and WebAuthn,
+logged as
 `client_assertion_refused`, `jwt_bearer_assertion_verifier_unavailable`,
 `webauthn_ceremony_store_unavailable` (registration) and
 `webauthn_grant_store_unavailable` (the passkey grant at `/oauth/token`,

@@ -101,7 +101,11 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   seen-set on a server whose policy is `noeviction`, or on one sized never
   to reach `maxmemory`. Core's in-process seen-set has a cap of its own
   (`replaySeenSet.memory.maxEntries`, a million records by default) and
-  refuses at it the same way.
+  refuses at it the same way, with a reserve this adapter does not have:
+  DPoP proofs fill at most 90% of it, so a DPoP flood leaves room for
+  `private_key_jwt` and WebAuthn. A Redis at `maxmemory` refuses every
+  consumer alike — keep the seen-set's instance sized for the flood, or on
+  one of its own.
 
 ## Adapters
 

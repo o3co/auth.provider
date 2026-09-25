@@ -873,6 +873,10 @@ export {
 } from "./replay-seen-set/factory.mjs";
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
+export {
+	DPOP_PROOF_REPLAY_SCOPE_PREFIX,
+	DPOP_PROOF_REPLAY_SHARE,
+} from "./replay-seen-set/scopes.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 // Canonical key helper (exported for integrators writing their own adapters
 // to preserve cross-adapter parity per A1 §7.3)

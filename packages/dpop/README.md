@@ -194,14 +194,17 @@ So of two requests carrying one proof, exactly one is accepted.
   that answers with its own contract error (a `RangeError`, or
   `expired-at-issue`) is broken rather than down: the same 503, with reason
   `replay_store_fault`, because the fix is in the composition, not in Redis.
-  A seen-set that is full refuses the write the same way, as
-  `replay_store_unavailable`: core's in-process set at its cap
-  (`ReplaySeenSetFullError`, `reason: "full"`; `replaySeenSet.memory.maxEntries`,
-  a million records by default), or a Redis at `maxmemory` under `noeviction`. Every proof is
-  recorded before the token endpoint's rate limit and before a protected
-  resource verifies the access token, so the rate that fills it,
-  `maxEntries / replay-store-ttl-seconds`, is a rate anyone can send; a longer
-  TTL lowers it in proportion. A Redis whose eviction policy deletes keys
+  A seen-set that is full refuses the write the same way. Core's in-process
+  set takes proofs only up to 90% of its cap (`replaySeenSet.memory.maxEntries`,
+  a million records by default) and keeps the rest for its other consumers,
+  so `private_key_jwt` and WebAuthn go on while DPoP is refused; that refusal
+  is reason `replay_store_full` (`ReplaySeenSetFullError`, `reason: "full"`).
+  A Redis at `maxmemory` under `noeviction` is `replay_store_unavailable`,
+  and it refuses every consumer alike. Every proof is recorded before the
+  token endpoint's rate limit and before a protected resource verifies the
+  access token, so the rate that fills DPoP's share,
+  `0.9 × maxEntries / replay-store-ttl-seconds`, is a rate anyone can send; a
+  longer TTL lowers it in proportion. A Redis whose eviction policy deletes keys
   instead (`allkeys-*`, `volatile-*`) makes room by dropping replay records,
   and a dropped record is a proof that can be replayed within its window
   ([the redis package's Requirements](../redis/README.md#requirements)).

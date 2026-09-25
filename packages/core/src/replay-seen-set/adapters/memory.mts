@@ -18,6 +18,7 @@ import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { canonicalKey } from "../../single-use/canonical-key.mjs";
 import { ChallengeStorageError } from "../../single-use/errors.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../../single-use/sweep.mjs";
+import { DPOP_PROOF_REPLAY_SCOPE_PREFIX, DPOP_PROOF_REPLAY_SHARE } from "../scopes.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
 
 /**
@@ -81,20 +82,29 @@ export interface MemoryReplaySeenSetOptions extends AmortizedSweepOptions {
 }
 
 /**
- * What `markSeen` throws when the set is at its cap and none of its records
- * has expired: a store fault, as a Redis seen-set's refused write at
- * `maxmemory` is — not one of the port's contract errors
- * (`ChallengeStorageError`, `RangeError`), which a consumer reads as its own
- * mistake. Every consumer refuses what it was recording, unrecorded: DPoP and
- * `private_key_jwt` answer `503 temporarily_unavailable`. `reason` is
- * `"full"`, which a logged projection keeps.
+ * What `markSeen` throws when the set is at its cap — or, for a DPoP proof,
+ * at DPoP's share of it — and none of its records has expired: a store fault,
+ * as a Redis seen-set's refused write at `maxmemory` is — not one of the
+ * port's contract errors (`ChallengeStorageError`, `RangeError`), which a
+ * consumer reads as its own mistake. Every consumer refuses what it was
+ * recording, unrecorded: `private_key_jwt` answers `503
+ * temporarily_unavailable`, and DPoP the same under its reason
+ * `replay_store_full`. `reason` is `"full"`, which a logged projection keeps;
+ * the message says which limit was reached.
  */
 export class ReplaySeenSetFullError extends Error {
 	readonly reason = "full" as const;
 
-	constructor(maxEntries: number) {
+	/**
+	 * @param maxEntries The set's cap.
+	 * @param dpopShare For a DPoP proof refused at DPoP's share: that share,
+	 *   in records.
+	 */
+	constructor(maxEntries: number, dpopShare?: number) {
 		super(
-			`memory ReplaySeenSet is at its cap of ${maxEntries} live records; refusing a new one rather than evicting one`,
+			dpopShare === undefined
+				? `memory ReplaySeenSet is at its cap of ${maxEntries} live records; refusing a new one rather than evicting one`
+				: `memory ReplaySeenSet holds ${dpopShare} live records, the share of its cap of ${maxEntries} that DPoP proofs may fill; refusing a new proof so the rest stays for the other consumers`,
 		);
 		this.name = "ReplaySeenSetFullError";
 	}
@@ -150,10 +160,17 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  * no room and is still refused (`false`). While it is full every consumer
  * sharing it refuses what it would record — DPoP proofs, `private_key_jwt`
  * assertions, ID-JAGs, WebAuthn challenges — until records expire, which is
- * the fail-closed answer the port asks of a store that cannot write. The
- * consumers share one budget: a DPoP flood that fills the set refuses the
- * others too, which is why the default cap sits where filling it costs as
- * much as the process's CPU ({@link DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES}).
+ * the fail-closed answer the port asks of a store that cannot write.
+ *
+ * DPoP proofs — the one consumer anyone can make write, before a rate limit
+ * or a token check — may fill only {@link DPOP_PROOF_REPLAY_SHARE} of the cap
+ * (`scopes.mts`): a proof is refused once the set holds that many records of
+ * any consumer, and the rest is kept for `private_key_jwt`, ID-JAG and
+ * WebAuthn, whose writes follow an authentication or a rate limit. So a DPoP
+ * flood refuses DPoP proofs, and client authentication goes on until the set
+ * itself is full. The default cap sits where filling even DPoP's share costs
+ * a flooder about as much as the process's CPU
+ * ({@link DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES}).
  *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
@@ -174,6 +191,7 @@ export function createMemoryReplaySeenSet(
 			`createMemoryReplaySeenSet: maxEntries must be a positive whole number (got ${String(maxEntries)})`,
 		);
 	}
+	const dpopShare = Math.ceil(maxEntries * DPOP_PROOF_REPLAY_SHARE);
 	const map = new Map<string, { expiresAtMs: number }>();
 	const schedule = createAmortizedSweep(
 		options,
@@ -225,12 +243,17 @@ export function createMemoryReplaySeenSet(
 			if (getLive(k, nowMs) !== undefined) {
 				return false;
 			}
-			// At the cap: reclaim what has expired, no more often than the
-			// sweep floor, and refuse if the set is still full. See "Why it has
-			// a cap, and refuses at it" above.
-			if (map.size >= maxEntries) {
+			// At the cap — DPoP's share of it, for a proof: reclaim what has
+			// expired, no more often than the sweep floor, and refuse if the set
+			// is still at the limit. See "Why it has a cap, and refuses at it"
+			// above.
+			const dpop = scope.startsWith(DPOP_PROOF_REPLAY_SCOPE_PREFIX);
+			const limit = dpop ? dpopShare : maxEntries;
+			if (map.size >= limit) {
 				if (schedule.due()) sweep(nowMs);
-				if (map.size >= maxEntries) throw new ReplaySeenSetFullError(maxEntries);
+				if (map.size >= limit) {
+					throw new ReplaySeenSetFullError(maxEntries, dpop ? dpopShare : undefined);
+				}
 			}
 			map.set(k, { expiresAtMs });
 			if (schedule.wrote()) sweep(nowMs);

@@ -284,7 +284,8 @@ describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 		expect(await set.markSeen("dpop-proof:k1", "jti-1", later())).toBe(true);
 		expect(await set.markSeen("client-assertion:c1", "jti-2", later())).toBe(true);
 
-		const refusal = await set.markSeen("dpop-proof:k1", "jti-3", later()).then(
+		// A consumer other than DPoP, which is refused earlier (below).
+		const refusal = await set.markSeen("client-assertion:c1", "jti-3", later()).then(
 			() => undefined,
 			(err: unknown) => err,
 		);
@@ -299,7 +300,7 @@ describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 		);
 
 		expect(set.size).toBe(2);
-		expect(await set.contains("dpop-proof:k1", "jti-3")).toBe(false);
+		expect(await set.contains("client-assertion:c1", "jti-3")).toBe(false);
 		expect(await set.contains("dpop-proof:k1", "jti-1")).toBe(true);
 		expect(await set.contains("client-assertion:c1", "jti-2")).toBe(true);
 	});
