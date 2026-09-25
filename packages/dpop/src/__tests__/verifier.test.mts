@@ -713,8 +713,9 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 			},
 		}) as unknown as Parameters<typeof createDPoPMechanism>[0]["logger"];
 
+	/** The warn lines under the event's own name: object-first, a snake_case event. */
 	const ttlWarnings = (warns: { obj: unknown; msg?: string }[]) =>
-		warns.filter((w) => (w.obj as { reason?: string })?.reason === "replay_ttl_below_iat_window");
+		warns.filter((w) => w.msg === "dpop_replay_ttl_below_window");
 
 	it("warns when replayTtlSeconds is below the requirement", () => {
 		const warns: { obj: unknown; msg?: string }[] = [];
@@ -728,13 +729,12 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 			logger: capturingLogger(warns),
 		});
 
-		const matched = ttlWarnings(warns);
-		expect(matched).toHaveLength(1);
-		expect(matched[0]?.obj).toMatchObject({
-			iatWindowSeconds: 180,
-			replayTtlSeconds: 300,
-			requiredTtlSeconds: 361,
-		});
+		expect(warns).toEqual([
+			{
+				obj: { iatWindowSeconds: 180, replayTtlSeconds: 300, requiredTtlSeconds: 361 },
+				msg: "dpop_replay_ttl_below_window",
+			},
+		]);
 	});
 
 	it("still warns at exactly 2x — the entry would die a second early", () => {
@@ -749,13 +749,14 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 			logger: capturingLogger(warns),
 		});
 
-		const matched = ttlWarnings(warns);
-		expect(matched).toHaveLength(1);
-		expect(matched[0]?.obj).toMatchObject({ requiredTtlSeconds: 301 });
-		// The text must state the requirement it fires on. "below 2x" is false
-		// here — the TTL is exactly 2x — and would read as a spurious warning.
-		expect(matched[0]?.msg).toContain("below 2 × iatWindowSeconds + 1 (requiredTtlSeconds)");
-		expect(matched[0]?.msg).not.toMatch(/below 2x iatWindowSeconds;/);
+		// The line states the requirement it fires on, 2W + 1, as a field — not
+		// "below 2x", which is false here: the TTL is exactly 2x.
+		expect(ttlWarnings(warns)).toEqual([
+			{
+				obj: { iatWindowSeconds: 150, replayTtlSeconds: 300, requiredTtlSeconds: 301 },
+				msg: "dpop_replay_ttl_below_window",
+			},
+		]);
 	});
 
 	it("does not warn at 2x + 1, nor for the defaults", () => {
