@@ -109,15 +109,14 @@ export function createFederationGrantLog(given: Logger | undefined): FederationG
 }
 
 /**
- * `error[key]`, or `undefined` when there is nothing to read or the read
- * throws (a getter). What classifies an error must never throw on it: a throw
- * in the routers' last error handler reaches Express's own, which answers
- * HTML and logs nothing of this package's.
+ * `error[key]`, or `undefined` when the read throws — a getter, a Proxy's
+ * trap, or `null` / `undefined`, which have nothing to read. A primitive's
+ * own properties are read as any value's: none holds `expose`, `status` or
+ * `type`. What classifies an error must never throw on it: a throw in the
+ * routers' last error handler reaches Express's own, which answers HTML and
+ * logs nothing of this package's.
  */
 export const readField = (error: unknown, key: string): unknown => {
-	if (error === null || (typeof error !== "object" && typeof error !== "function")) {
-		return undefined;
-	}
 	try {
 		return (error as Record<string, unknown>)[key];
 	} catch {

@@ -1135,10 +1135,21 @@ async function refreshUnderLock(
 		} catch {
 			classified = { reason: "unknown", structured: false };
 		}
+		// An outage first, before anything the body said: the upstream could not
+		// be reached, did not answer in time, or answered 5xx — on the error, its
+		// Error causes or the Response it was raised over. A 5xx is never a
+		// verdict on the credential, whatever OAuth code its body carries: a
+		// 503 saying `invalid_grant` must not send the user through consent
+		// again, nor one naming an interaction code stamp their absence. The
+		// refresh-error classifier alone knows a status only on the error
+		// itself and four connection codes, and reads an `error` field before
+		// the status; `isFederationUpstreamOutage` is the connect callback's
+		// own test. A 429 is no outage, and stays the rate limit below.
+		const outage = isFederationUpstreamOutage(settled.error);
 		// Only a STRUCTURED rejection ends the credentials. The classifier's
 		// message fallback is a guess, and a wrong one here would send a user
 		// through consent again for nothing.
-		if (classified.reason === "invalid_grant" && classified.structured) {
+		if (!outage && classified.reason === "invalid_grant" && classified.structured) {
 			const marked = await within(
 				settle(() =>
 					deps.store.requireReauthorization({
@@ -1173,14 +1184,15 @@ async function refreshUnderLock(
 		}
 		// The upstream asked for the user (#616, D11): one of the four interaction
 		// codes, read off the error's own field — the classifier puts nothing a
-		// message said there — and ahead of the transport it came with, since a
-		// 429 or a 5xx that names the user is the user. Nothing said the refresh
+		// message said there — and ahead of a 429 it came with, since a 429 that
+		// names the user is the user. Not beside an outage (above): a 5xx is never
+		// a verdict, whatever its body names (review of #690). Nothing said the refresh
 		// token is bad, so the credentials are kept; nothing is mended by waiting,
 		// so no wait is told. What is answered comes from the record: the stamp
 		// the record carries at the last look, or whatever replaced it — never
 		// the code in hand, which a renewal or a revocation may have overtaken
 		// while the stamp was being written.
-		if (isFederationGrantInteractionCode(classified.upstreamCode)) {
+		if (!outage && isFederationGrantInteractionCode(classified.upstreamCode)) {
 			const reason = `upstream_${classified.upstreamCode}` as const;
 			const noted = await stamp(
 				deps,
@@ -1233,15 +1245,11 @@ async function refreshUnderLock(
 				kind: "rate_limited",
 				...(advice !== undefined ? { retryAfterSeconds: advice } : {}),
 			};
-		} else if (classified.reason === "network" || isFederationUpstreamOutage(settled.error)) {
+		} else if (outage || classified.reason === "network") {
 			// The upstream could not be reached, did not answer in time, or said
-			// it is down: the outage this answer is. The refresh-error classifier
-			// alone knows a status only on the error itself and four connection
-			// codes; what the libraries raise for the rest — openid-client's
-			// ClientError over a 5xx Response, OAUTH_TIMEOUT, undici's TypeError
-			// over ECONNRESET or UND_ERR_SOCKET — is read by
-			// `isFederationUpstreamOutage`, the connect callback's own test.
-			// Stamped `unavailable` either way, so the backoff is unchanged.
+			// it is down: the outage this answer is (`outage`, above), or what the
+			// refresh-error classifier alone reads as one. Stamped `unavailable`
+			// either way, so the backoff is unchanged.
 			denial = unavailable("upstream", upstreamFailure);
 			failure = { at, kind: "unavailable" };
 		} else if (

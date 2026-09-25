@@ -86,7 +86,7 @@ describe("isFederationUpstreamOutage", () => {
 				"ERR_INVALID_URL",
 				"UND_ERR_CONNECT_TIMEOUT",
 			] as const
-		).map((code) => [
+		).map((code): [string, unknown] => [
 			`undici's fetch failure over a ${code} cause — the TLS layer, the URL or the socket`,
 			new TypeError("fetch failed", { cause: coded(code) }),
 		]),

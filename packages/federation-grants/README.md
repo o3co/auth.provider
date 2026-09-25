@@ -373,14 +373,18 @@ time, or answered with a 5xx is `503 temporarily_unavailable/upstream` — core'
 `isFederationUpstreamOutage` (the callback's own test, below) beside the
 refresh-error classifier's `network` — and one the upstream answered with a
 refusal is `502 upstream_rejected`, with its code when this provider knows it
-and `unknown` otherwise.
+and `unknown` otherwise. The outage is decided first: a 5xx is never a verdict
+on the credential, whatever OAuth code its body names — a 503 saying
+`invalid_grant` does not end the credential, and one naming an interaction code
+is not the user's absence. A 429 is no outage.
 
 An unknown grant id, a grant belonging to another client and one belonging to
 another subject all answer the same `404` body, byte for byte.
 
 A refresh the upstream refused for the user's absence — `interaction_required`,
 `login_required`, `consent_required` or `account_selection_required`, read off
-the error's own code and never off a message — answers
+the error's own code and never off a message, beside any status but a 5xx
+(which is the outage above) — answers
 `410 reauthorization_required` with the code as the description
 (`upstream_consent_required`), with no `Retry-After` and no cached token:
 nothing said the refresh token is bad, so it is kept; nothing is mended by
@@ -606,7 +610,10 @@ It checks, in this order:
    text says: an `AbortError` or `TimeoutError` (openid-client's
    `OAUTH_TIMEOUT` carries one), a connection code (`ECONNREFUSED`,
    `ECONNRESET`, `ENOTFOUND`, `ETIMEDOUT`, `UND_ERR_SOCKET`, …) on the error
-   or its causes, `fetch`'s `TypeError` over a coded socket or TLS error, or a
+   or its causes, `fetch`'s `TypeError` over a transport's code — a connection
+   code, the TLS layer's (`CERT_…`, `ERR_TLS_…`, `ERR_SSL_…`, the certificate-
+   verification names), or `ERR_INVALID_URL`; any other code there, such as an
+   adapter's validation error wrapped in a `TypeError`, is not an outage — or a
    5xx `status` on the error or on the `Response` it was raised over (an IdP
    answering 503; a deployment's own `fetch` — npm undici's `Response` —
    included) — each read only on what the library raised, never on the IdP's
