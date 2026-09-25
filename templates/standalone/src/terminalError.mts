@@ -17,14 +17,17 @@ import { errorEnvelope, type Logger, loggableError } from "@o3co/auth-provider-c
 import type { ErrorRequestHandler } from "express";
 
 /**
- * Terminal Express error handler (#293 item 8).
+ * Terminal Express error handler (#293 item 8), for the host's own routes.
  *
- * Anything a route threw past its own try/catch — and every body-parser
- * rejection, which fires before any route runs — used to fall through to
- * Express's default handler: an HTML 500 outside the structured-log pipeline,
- * carrying a stack trace outside production. A client that parses only the
- * RFC 6749 §5.2 JSON envelope this surface answers with everywhere else has
- * no way to read that page.
+ * The composed router answers its own errors: core mounts a terminal
+ * handler after every route it assembles (`core/src/middleware/terminalError.mts`),
+ * so nothing a module's route throws, and no body-parser refusal on one,
+ * reaches this handler. What does is an error from the routes `app.mts`
+ * mounts beside that router — health, readiness, metrics — which used to fall
+ * through to Express's default handler: an HTML 500 outside the
+ * structured-log pipeline, carrying a stack trace outside production. A
+ * client that parses only the RFC 6749 §5.2 JSON envelope this surface
+ * answers with everywhere else has no way to read that page.
  *
  * Body-parser failures (malformed JSON/form, over-limit, bad charset) carry
  * their own 4xx `status` and are the client's fault: keep the status, wrap it

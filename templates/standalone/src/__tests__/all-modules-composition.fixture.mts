@@ -925,8 +925,11 @@ export const padJson = (bytes: number, fields: Record<string, unknown> = {}): st
 export const padForm = (bytes: number, fields: string): string =>
 	`${fields}&pad=${"a".repeat(bytes)}`;
 
-/** What a parser's refusal of an oversized body is answered with, by the terminal handler. */
-export const TOO_LARGE = { error: "invalid_request", error_description: "request body too large" };
+/**
+ * What a parser's refusal of an oversized body is answered with on a route
+ * of the composed router — by core's terminal handler, which ends it.
+ */
+export const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
 
 // ---------------------------------------------------------------------------
 // Outages

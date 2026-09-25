@@ -20,7 +20,9 @@
  * Takes the `FrozenWorld` from stage 5, computes mount order via Kahn's
  * topological sort over `before`/`after` route tokens with
  * `declarationIndex` as tie-breaker, constructs an Express Router with all
- * routes mounted in mount-index order, and builds the public `AppHandle`.
+ * routes mounted in mount-index order and core's terminal error handler
+ * after them (`middleware/terminalError.mts`), and builds the public
+ * `AppHandle`.
  *
  * Per A2-β §5.6 + §6.3 + §8.1.
  */
@@ -35,6 +37,7 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
 import { protectedResourceBindingMw } from "../middleware/protectedResourceBinding.mjs";
+import { terminalErrorHandler } from "../middleware/terminalError.mjs";
 import {
 	type DispatchPolicy,
 	type TokenBindingMechanism,
@@ -848,6 +851,22 @@ export function assembleApp(
 	for (const orderedRoute of ordered) {
 		router.use(orderedRoute.contribution.mountPath, orderedRoute.contribution.handler as never);
 	}
+
+	// The router's own answer to an error a route let through — a body
+	// parser's refusal, or anything that escaped a handler — LAST, since
+	// Express hands an error only to handlers mounted after the layer that
+	// raised it. Without it such an error left the router for whatever the
+	// host had after it: Express's final handler, an HTML page with the stack
+	// outside production, for any composition root that did not copy the
+	// standalone template's. A request no route answered still passes on to
+	// the host: an error handler sees only errors. See
+	// `middleware/terminalError.mts`.
+	router.use(
+		terminalErrorHandler(
+			((frozen.components as Record<string, unknown>).logger as Logger | undefined) ??
+				consoleLogger,
+		),
+	);
 
 	// Step 3: Construct AppHandle (§6.3).
 	const dispose = buildDispose(frozen, options.lifecycleReg);

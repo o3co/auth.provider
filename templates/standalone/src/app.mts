@@ -151,8 +151,9 @@ await (async (): Promise<void> => {
 	// Step 5: Mount the composed auth router and start the HTTP server.
 	app.use(handle.router);
 	// Terminal error handler LAST (#293 item 8): Express routes an error only
-	// to handlers registered after the route that threw it. See
-	// `terminalError.mts` for what it catches and why.
+	// to handlers registered after the route that threw it. The composed
+	// router answers its own errors (core's terminal handler ends it), so
+	// this one catches the host routes' above. See `terminalError.mts`.
 	app.use(createTerminalErrorHandler(logger));
 	// Resolves once the socket is bound (`server_listening`); a port that
 	// cannot be bound rejects, and boot fails with that error (`listen.mts`).

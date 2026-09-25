@@ -71,6 +71,9 @@ const routesModule = defineModule({
 				router.post("/echo", (req, res) => {
 					res.status(200).json({ received: req.body });
 				});
+				router.get("/item/:id", (req, res) => {
+					res.status(200).json({ id: req.params.id });
+				});
 				router.get("/boom", () => {
 					throw Object.assign(new Error("store said: secret-in-message-marker"), {
 						command: { name: "set", args: ["secret-in-args-marker"] },
@@ -156,6 +159,20 @@ describe("createApp's router answers a body parser's refusal itself", () => {
 			await handle.dispose();
 		},
 	);
+
+	it("answers a path parameter Express could not decode as 400 malformed_path, nothing logged", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		const res = await request(app).get("/t/item/%E0%A4%A");
+
+		expect(res.status).toBe(400);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_path" });
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(otherLevels(logger)).toEqual([]);
+		await handle.dispose();
+	});
 
 	it("keeps a parsed body working", async () => {
 		const logger = spyLogger();
