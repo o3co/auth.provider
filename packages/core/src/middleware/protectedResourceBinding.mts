@@ -51,7 +51,6 @@ import { errorEnvelope } from "../errors/envelope.mjs";
 import { BINDING_PROFILES, matchConfirmation } from "../grants/confirmationMatch.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
@@ -61,6 +60,7 @@ import {
 	retryInstructionOf,
 	unavailableLogFields,
 	unavailableOf,
+	verdictLogFields,
 } from "./_responseHeaders.mjs";
 
 export interface ProtectedResourceBindingOptions {
@@ -179,8 +179,15 @@ export const protectedResourceBindingMw = ({
 					res.status(503).json(errorEnvelope(code, unavailable));
 					return;
 				}
+				// The same verdict line the token endpoint writes: the code the
+				// refusal carries, its `reason`, and its projection
+				// (`verdictLogFields`).
 				logger?.warn(
-					{ mechanism: mechanism.kind, err: loggableError(err) },
+					{
+						mechanism: mechanism.kind,
+						...(code !== undefined ? { code } : {}),
+						...verdictLogFields(err),
+					},
 					"protected_resource_binding_proof_invalid",
 				);
 				const retryInstruction = retryInstructionOf(err);

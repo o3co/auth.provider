@@ -148,6 +148,17 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 			"and `loggableError` of its `cause` — nothing else of the refusal, so exactly as strict " +
 			"as loggableError",
 	})),
+	...[
+		"packages/core/src/middleware/tokenBinding.mts",
+		"packages/core/src/middleware/protectedResourceBinding.mts",
+	].map((file) => ({
+		file,
+		projection: "verdictLogFields",
+		why:
+			"core's own (middleware/_responseHeaders.mts): `loggableError` of the refused proof and the " +
+			"`reason` that projection keeps — nothing but the projection, so exactly as strict as " +
+			"loggableError",
+	})),
 ];
 
 /**
