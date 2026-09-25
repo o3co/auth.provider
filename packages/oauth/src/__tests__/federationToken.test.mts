@@ -662,7 +662,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
-	describe("refresh: provider.refreshToken throws invalid_grant", () => {
+	describe("refresh: the upstream rejects the refresh token (a structured 400 invalid_grant)", () => {
 		it("returns 410 re_authentication_required + cleans up + emits audit event", async () => {
 			const auditSink: AuditSink = {
 				kind: "mock",
@@ -681,7 +681,13 @@ describe("POST /oauth/federation/:name/token", () => {
 				refreshToken: (rt: string) => Promise<never>;
 			} = {
 				...federationBase("google"),
-				refreshToken: vi.fn().mockRejectedValue(new Error("invalid_grant: token revoked")),
+				// What openid-client raises for a 400 whose body names the code.
+				refreshToken: vi.fn().mockRejectedValue(
+					Object.assign(new Error("server responded with an error in the response body"), {
+						error: "invalid_grant",
+						status: 400,
+					}),
+				),
 			};
 			const app = buildApp({
 				sessionFederationIndex,
@@ -2608,7 +2614,12 @@ describe("POST /oauth/federation/:name/token", () => {
 					sessionFederationIndex,
 					logger,
 					getFederationProviders: refreshingGoogle(
-						vi.fn().mockRejectedValue(new Error("invalid_grant: token revoked")),
+						vi.fn().mockRejectedValue(
+							Object.assign(new Error("server responded with an error in the response body"), {
+								error: "invalid_grant",
+								status: 400,
+							}),
+						),
 					),
 				}),
 				"google",
@@ -3001,18 +3012,18 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("temporarily_unavailable");
 		});
 
-		// SF-13 RED-6: defense-in-depth string fallback still works for legacy / non-openid-client
-		// errors that only carry the OAuth code in the message. Confirms we did not regress the
-		// existing behavior when removing the fragile path.
-		it("returns 410 from string fallback when error.message contains invalid_grant", async () => {
+		// A message that names invalid_grant is not the upstream's verdict: it is
+		// whatever the library, a proxy or the upstream wrote. The stored tokens
+		// are kept, and the failure is the unclassified 500.
+		it("returns 500 refresh_failed, not 410, when only error.message contains invalid_grant", async () => {
 			const providerError = new Error("400 invalid_grant: token revoked");
 			const app = buildRefreshFailure(providerError);
 			const token = await mintAccessToken();
 
 			const res = await postFedToken(app, "google", token);
 
-			expect(res.status).toBe(410);
-			expect(res.body.error).toBe("re_authentication_required");
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
 		});
 
 		// SF-13 RED-7: unknown / non-OAuth error → 500 + audit emit with reason in details. Pre-fix
@@ -3039,6 +3050,137 @@ describe("POST /oauth/federation/:name/token", () => {
 						reason: "unknown",
 					}),
 				}),
+			);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Only the upstream's own verdict ends the session's upstream tokens
+	// ---------------------------------------------------------------------------
+
+	describe("the stored tokens are ended only on a structured invalid_grant, never during an outage", () => {
+		/**
+		 * The session's link to google, its expired tokens and a provider whose
+		 * refresh rejects with `error`, plus the stores to look at afterwards.
+		 */
+		function refreshRejectingWith(error: unknown, logger?: Logger) {
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+				}),
+			});
+			const sessionFederationIndex = makeSessionFederationIndex();
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const provider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockRejectedValue(error),
+			} as FederationProvider;
+			const app = buildApp({
+				fedTokenStore,
+				sessionFederationIndex,
+				auditSink,
+				logger,
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+			});
+			return { app, fedTokenStore, sessionFederationIndex, auditSink };
+		}
+
+		const expectKept = (
+			fedTokenStore: FederationTokenStore,
+			sessionFederationIndex: SessionFederationIndex,
+			auditSink: AuditSink,
+		) => {
+			expect(fedTokenStore.delete).not.toHaveBeenCalled();
+			expect(sessionFederationIndex.removeFederation).not.toHaveBeenCalled();
+			expect(auditSink.record).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "federation.token.reauthentication_required" }),
+			);
+		};
+
+		it("keeps them and answers 503 when a 5xx answer's body says invalid_grant", async () => {
+			// An adapter whose library puts the body's code and the status on one
+			// error, as openid-client's ResponseBodyError does for a 4xx.
+			const logger = createMockLogger();
+			const { app, fedTokenStore, sessionFederationIndex, auditSink } = refreshRejectingWith(
+				Object.assign(new Error("server responded with an error in the response body"), {
+					name: "ResponseBodyError",
+					error: "invalid_grant",
+					status: 503,
+				}),
+				logger,
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "upstream federation provider temporarily unavailable",
+			});
+			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
+			expectOutageLine(
+				logger,
+				"federation_token_upstream_unavailable",
+				{ federation: "google", reason: "network" },
+				"ResponseBodyError",
+			);
+		});
+
+		it("keeps them and answers 503 when the 5xx is on the Response the error was raised over", async () => {
+			// oauth4webapi raises a 5xx it would not read as an
+			// OperationProcessingError over the Response, and an adapter may wrap
+			// that in an error carrying the code it expected.
+			const { app, fedTokenStore, sessionFederationIndex, auditSink } = refreshRejectingWith(
+				Object.assign(
+					new Error('"response" is not a conform Token Endpoint response', {
+						cause: new Response('{"error":"invalid_grant"}', { status: 502 }),
+					}),
+					{ error: "invalid_grant" },
+				),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(503);
+			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
+		});
+
+		it("keeps them when only the message says invalid_grant", async () => {
+			const { app, fedTokenStore, sessionFederationIndex, auditSink } = refreshRejectingWith(
+				new Error("invalid_grant: token revoked"),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.refresh_failed",
+					details: expect.objectContaining({ reason: "unknown" }),
+				}),
+			);
+		});
+
+		it("ends them on a structured 400 invalid_grant", async () => {
+			const { app, fedTokenStore, sessionFederationIndex, auditSink } = refreshRejectingWith(
+				Object.assign(new Error("server responded with an error in the response body"), {
+					name: "ResponseBodyError",
+					error: "invalid_grant",
+					status: 400,
+				}),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(410);
+			expect(res.body.error).toBe("re_authentication_required");
+			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
+			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "federation.token.reauthentication_required" }),
 			);
 		});
 	});

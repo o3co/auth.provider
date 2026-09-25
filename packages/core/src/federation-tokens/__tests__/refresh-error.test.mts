@@ -62,7 +62,8 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 
 		it("keeps the order the session-bound route has always had, where two readings apply", () => {
 			// A rejected token before a rate limit, a rate limit before an outage, an
-			// outage before a network code — and the same in the message fallback.
+			// outage before a network code. The message fallback reads an outage
+			// only, so a message naming both is an outage.
 			const network = { code: "ECONNREFUSED" };
 			expect(
 				classifyFederationRefreshError(upstream({ error: "invalid_grant", status: 429 })).reason,
@@ -80,7 +81,7 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 			expect(
 				classifyFederationRefreshError(new Error("invalid_grant after a 502 from the proxy"))
 					.reason,
-			).toBe("invalid_grant");
+			).toBe("network");
 		});
 
 		it("walks the cause chain four deep, and no deeper", () => {
@@ -95,20 +96,91 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 			expect(classifyFederationRefreshError(wrap(4)).reason).toBe("unknown");
 		});
 
-		it("prefers the rejected token over the status it came with", () => {
-			expect(
-				classifyFederationRefreshError(upstream({ error: "invalid_grant", status: 503 })).reason,
-			).toBe("invalid_grant");
+		describe("a rejected refresh token is a verdict, and an outage is none, whatever its body says", () => {
+			// Acting on `invalid_grant` ends the session's upstream tokens (the
+			// session-bound route) or sends the user through consent again (a
+			// federation grant). An upstream that is down says nothing about the
+			// credential, even when the body it answered with names a code.
+			it("reads an outage, not a rejected token, off a 5xx status on the error", () => {
+				for (const status of [500, 502, 503, 599]) {
+					for (const error of ["invalid_grant", "invalid_token"]) {
+						expect(
+							classifyFederationRefreshError(upstream({ error, status })),
+							`${status} ${error}`,
+						).toEqual({ reason: "network", structured: true, upstreamCode: error });
+					}
+				}
+			});
+
+			it("reads an outage off anything isFederationUpstreamOutage reads as one", () => {
+				const rejected = { error: "invalid_grant" };
+				const shapes: Record<string, unknown> = {
+					"a 5xx on the error's cause": Object.assign(
+						new Error("wrapped", {
+							cause: Object.assign(new Error("upstream"), { status: 502 }),
+						}),
+						rejected,
+					),
+					"the 5xx Response the error was raised over": Object.assign(
+						new Error('"response" is not a conform Token Endpoint response', {
+							cause: new Response(null, { status: 503 }),
+						}),
+						rejected,
+					),
+					"a request given up on": Object.assign(new Error("aborted"), {
+						name: "TimeoutError",
+						...rejected,
+					}),
+					"a transport code under fetch's TypeError": Object.assign(
+						new TypeError("fetch failed", {
+							cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+						}),
+						rejected,
+					),
+				};
+				for (const [label, error] of Object.entries(shapes)) {
+					expect(classifyFederationRefreshError(error), label).toMatchObject({
+						reason: "network",
+						structured: true,
+					});
+				}
+			});
+
+			it("reads an outage off a 5xx status on a thrown value that is not an Error", () => {
+				// What a hand-written adapter may throw. The status is read on the
+				// value itself, as it always was; only the ordering changed.
+				expect(classifyFederationRefreshError({ error: "invalid_grant", status: 503 })).toEqual({
+					reason: "network",
+					structured: true,
+					upstreamCode: "invalid_grant",
+				});
+			});
+
+			it("still reads a rejected token off a structured code under a 4xx", () => {
+				for (const status of [400, 401, 429]) {
+					expect(
+						classifyFederationRefreshError(upstream({ error: "invalid_grant", status })),
+						String(status),
+					).toMatchObject({ reason: "invalid_grant", structured: true });
+				}
+			});
 		});
 
-		it("falls back to the message for errors that carry nothing structured, and says that it did", () => {
-			// Kept for adapters that throw a plain Error. It is how the
-			// session-bound route still reaches its cleanup; a caller for which a
-			// wrong guess is expensive looks at `structured` first.
+		it("never reads a rejected token off a message", () => {
+			// A message is whatever the library, a proxy or the upstream wrote.
+			// Kept for adapters that throw a plain Error, the fallback reads an
+			// outage from it and nothing else.
 			expect(classifyFederationRefreshError(new Error("invalid_grant: token revoked"))).toEqual({
-				reason: "invalid_grant",
+				reason: "unknown",
 				structured: false,
 			});
+			expect(classifyFederationRefreshError("invalid_grant")).toEqual({
+				reason: "unknown",
+				structured: false,
+			});
+		});
+
+		it("falls back to the message for an outage when the error carries nothing structured, and says that it did", () => {
 			expect(classifyFederationRefreshError(new Error("upstream said 502"))).toEqual({
 				reason: "network",
 				structured: false,
@@ -122,7 +194,7 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 				classifyFederationRefreshError(
 					Object.assign(new Error("invalid_grant, said the gateway"), { error: "server_error" }),
 				),
-			).toEqual({ reason: "invalid_grant", structured: false, upstreamCode: "server_error" });
+			).toEqual({ reason: "unknown", structured: false, upstreamCode: "server_error" });
 			expect(
 				classifyFederationRefreshError(
 					Object.assign(new Error("upstream said 502"), {
