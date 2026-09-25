@@ -168,7 +168,7 @@ describe("retrieveFederationGrantToken — the cause a 503 was turned from", () 
 		expect(mark).not.toBe(failure);
 	});
 
-	it("reports a write it retried once, with the last cause, and carries that one", async () => {
+	it("reports a write it retried once per kind of failure, with the last cause and how many attempts, and carries that one", async () => {
 		await h.seed();
 		setNow(at(HOUR));
 		h.refresh.mockResolvedValue(refreshed("1", at(HOUR)));
@@ -183,7 +183,84 @@ describe("retrieveFederationGrantToken — the cause a 503 was turned from", () 
 		const writes = reported.filter((failure) => failure.during === "write");
 		expect(writes).toHaveLength(1);
 		expect(writes[0]?.error).toEqual(new Error(`write refused ${attempt}`));
+		expect(writes[0]?.attempts).toBe(attempt);
 		expect(failureOf(result)).toBe(writes[0]);
+	});
+
+	it("reports each distinct kind of write failure once, and carries the last kind", async () => {
+		await h.seed();
+		setNow(at(HOUR));
+		h.refresh.mockResolvedValue(refreshed("1", at(HOUR)));
+		let attempt = 0;
+		const reset = () => Object.assign(new Error("connection reset"), { code: "ECONNRESET" });
+		vi.spyOn(h.store, "replaceCredentials").mockImplementation(async () => {
+			attempt += 1;
+			throw attempt === 1 ? new TypeError("the record is not one") : reset();
+		});
+		const result = await settled();
+		expect(attempt).toBeGreaterThan(2);
+		const writes = reported.filter((failure) => failure.during === "write");
+		expect(writes.map((failure) => [(failure.error as Error).name, failure.attempts])).toEqual([
+			["TypeError", undefined],
+			["Error", attempt - 1],
+		]);
+		expect(failureOf(result)).toBe(writes[1]);
+	});
+
+	it("carries a write that hangs as not answered, and reports an earlier throw on its own", async () => {
+		await h.seed();
+		setNow(at(HOUR));
+		h.refresh.mockResolvedValue(refreshed("1", at(HOUR)));
+		const refused = new Error("write refused");
+		vi.spyOn(h.store, "replaceCredentials")
+			.mockRejectedValueOnce(refused)
+			.mockReturnValue(new Promise(() => {}));
+		const result = await settled();
+		expect(result).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+		const failure = failureOf(result);
+		expect(failure).toMatchObject({ during: "write" });
+		expect(failure?.error).toEqual(new Error("not answered in time; no longer waited for"));
+		// The throw before it is reported, and is not what the answer carries.
+		const earlier = reported.find((reportedFailure) => reportedFailure.error === refused);
+		expect(earlier).toMatchObject({ during: "write" });
+		expect(earlier).not.toBe(failure);
+	});
+
+	it("carries a write that hangs on its first attempt as not answered", async () => {
+		await h.seed();
+		setNow(at(HOUR));
+		h.refresh.mockResolvedValue(refreshed("1", at(HOUR)));
+		vi.spyOn(h.store, "replaceCredentials").mockReturnValue(new Promise(() => {}));
+		const result = await settled();
+		expect(result).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+		expect(failureOf(result)).toMatchObject({ during: "write" });
+		expect(reported.filter((failure) => failure.during === "write")).toEqual([failureOf(result)]);
+	});
+
+	it("carries a reauthorization mark that hangs as not answered", async () => {
+		await h.seed();
+		setNow(at(HOUR));
+		h.refresh.mockRejectedValue(Object.assign(new Error("refused"), { error: "invalid_grant" }));
+		vi.spyOn(h.store, "requireReauthorization").mockReturnValue(new Promise(() => {}));
+		const result = await settled();
+		expect(result).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+		const failure = failureOf(result);
+		expect(failure).toMatchObject({ during: "mark" });
+		expect(failure?.error).toEqual(new Error("not answered in time; no longer waited for"));
+	});
+
+	it("reports the upstream the hard deadline gave up on, after the caller was answered", async () => {
+		await h.seed();
+		setNow(at(HOUR));
+		h.refresh.mockReturnValue(new Promise(() => {}));
+		const answer = retrieve();
+		await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs + 100);
+		expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+		expect(reported).toEqual([]);
+		await vi.advanceTimersByTimeAsync(limits.upstreamHardTimeoutMs);
+		await Promise.all(h.background);
+		expect(reported.map((failure) => failure.during)).toEqual(["upstream"]);
+		expect(reported[0]?.error).toEqual(new Error("not answered in time; no longer waited for"));
 	});
 
 	it("carries nothing when the upstream did not answer before the caller stopped waiting", async () => {

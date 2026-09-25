@@ -891,7 +891,10 @@ describe("lodging without an id source of the caller's", () => {
  */
 describe("what a storage refusal carries, for the route that answers it", () => {
 	const failureOf = (result: unknown) => (result as { failure?: Record<string, unknown> }).failure;
-	const cleanupOf = (result: unknown) => (result as { cleanup?: Record<string, unknown> }).cleanup;
+	/** What the answer did not carry, and the route logs as warns: `absorbed`, or nothing. */
+	const absorbedOf = (result: unknown) =>
+		(result as { absorbed?: readonly Record<string, unknown>[] }).absorbed ?? [];
+	const connectionOf = (result: unknown) => (result as { connection?: unknown }).connection;
 
 	it("names the intent store and the error it threw", async () => {
 		const down = new Error("intent store down");
@@ -961,13 +964,70 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 			step: "create_pending",
 			error: down,
 		});
-		// Its own field, beside the failure: the same one any refusal carries.
-		expect(cleanupOf(result)).toEqual({
-			store: "federation_grant_intent",
-			step: "finish_intent",
-			error: closing,
+		// Its own list, beside the failure: the same one any answer carries.
+		expect(absorbedOf(result)).toEqual([
+			{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+		]);
+		expect(Object.keys(result)).not.toContain("absorbed");
+	});
+
+	it("carries a second write that threw and landed all the same, on the answer it let through", async () => {
+		const reset = new Error("connection reset");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				grantStore: {
+					...grants,
+					createPending: async (input) => {
+						await grants.createPending(input);
+						throw reset;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(result).toMatchObject({ ok: true, grantId: "id-1" });
+		expect(absorbedOf(result)).toEqual([
+			{ store: "federation_grant", step: "create_pending", error: reset },
+		]);
+		expect(Object.keys(result)).not.toContain("absorbed");
+	});
+
+	it("carries the question that could not be asked after a second write that threw", async () => {
+		const reset = new Error("connection reset");
+		const asked = new Error("still down");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				grantStore: {
+					...grants,
+					createPending: async () => {
+						throw reset;
+					},
+					isCurrentIntent: async () => {
+						throw asked;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant",
+			step: "create_pending",
+			error: reset,
 		});
-		expect(Object.keys(result)).not.toContain("cleanup");
+		expect(absorbedOf(result)).toEqual([
+			{ store: "federation_grant", step: "is_current_intent", error: asked },
+		]);
+	});
+
+	it("carries the connection a connection_not_configured refusal is about, where nothing enumerates it", async () => {
+		const client = { ...CLIENT, allowedFederationGrantConnections: ["okta-calendar", "retired"] };
+		const result = await lodgeFederationGrantIntent(
+			deps(),
+			initial({ client, connection: "retired" }),
+		);
+		expect(result).toEqual({ ok: false, reason: "connection_not_configured" });
+		expect(connectionOf(result)).toBe("retired");
+		expect(Object.keys(result)).not.toContain("connection");
 	});
 
 	it("names a second write the store refused", async () => {
@@ -1063,7 +1123,40 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 				step: "name_intent",
 				error: reset,
 			});
-			expect(cleanupOf(result)).toBeUndefined();
+			expect(absorbedOf(result)).toEqual([
+				{ store: "federation_grant", step: "is_current_intent", error: expect.any(Error) },
+			]);
+		});
+
+		it("carries a pointer write that threw and landed all the same, on the renewal it let through", async () => {
+			await establish();
+			const reset = new Error("connection reset");
+			const result = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: {
+						...grants,
+						nameIntent: async (input) => {
+							await grants.nameIntent(input);
+							throw reset;
+						},
+					},
+				}),
+				renewal(),
+			);
+			expect(result).toMatchObject({ ok: true, grantId: "g-est" });
+			expect(absorbedOf(result)).toEqual([
+				{ store: "federation_grant", step: "name_intent", error: reset },
+			]);
+		});
+
+		it("carries the renewed grant's connection when that connection is no longer configured", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({ connections: new Map() }),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "connection_not_configured" });
+			expect(connectionOf(result)).toBe("okta-calendar");
 		});
 
 		/**
@@ -1072,6 +1165,7 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 		 * still renewable. The answer is the re-read's; the intent that could
 		 * not be closed rides on it whichever answer it is.
 		 */
+		const reset = new Error("connection reset");
 		const lostAndUnclosed = (
 			reread: FederationGrantStore["inspect"],
 			closing: Error,
@@ -1080,7 +1174,7 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 				grantStore: {
 					...grants,
 					nameIntent: async () => {
-						throw new Error("connection reset");
+						throw reset;
 					},
 					isCurrentIntent: async () => false,
 					inspect: (() => {
@@ -1110,7 +1204,7 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 			],
 			["gone", async () => null, { ok: false, reason: "grant_not_found" }],
 		] as const)(
-			"carries an intent it could not close on a re-read that answers the grant %s",
+			"carries the write that threw and an intent it could not close on a re-read that answers the grant %s",
 			async (_label, reread, answered) => {
 				await establish();
 				const closing = new Error("close failed");
@@ -1119,12 +1213,12 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 					renewal(),
 				);
 				expect(result).toEqual(answered);
-				expect(cleanupOf(result)).toEqual({
-					store: "federation_grant_intent",
-					step: "finish_intent",
-					error: closing,
-				});
-				expect(Object.keys(result)).not.toContain("cleanup");
+				// The answer is the grant's; the write's error is not what it carries.
+				expect(absorbedOf(result)).toEqual([
+					{ store: "federation_grant", step: "name_intent", error: reset },
+					{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+				]);
+				expect(Object.keys(result)).not.toContain("absorbed");
 				expect(JSON.stringify(result)).not.toContain("close failed");
 			},
 		);
@@ -1141,7 +1235,9 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 				store: "federation_grant",
 				step: "name_intent",
 			});
-			expect(cleanupOf(stillRenewable)).toMatchObject({ step: "finish_intent", error: closing });
+			expect(absorbedOf(stillRenewable)).toEqual([
+				{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+			]);
 
 			const down = new Error("re-read down");
 			const unread = await lodgeFederationGrantReauthorization(
@@ -1155,7 +1251,11 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 				step: "inspect",
 				error: down,
 			});
-			expect(cleanupOf(unread)).toMatchObject({ step: "finish_intent", error: closing });
+			// The write that threw before the re-read is not lost behind it.
+			expect(absorbedOf(unread)).toEqual([
+				{ store: "federation_grant", step: "name_intent", error: reset },
+				{ store: "federation_grant_intent", step: "finish_intent", error: closing },
+			]);
 		});
 	});
 });

@@ -181,14 +181,14 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 		(res as unknown as { headersSent: boolean }).headersSent = headersSent;
 		const next = vi.fn();
 		parserRefusals(error, {} as Request, res, (passed?: unknown) => {
-			unexpectedErrors(log as never)(passed, {} as Request, res, next);
+			unexpectedErrors(log as never, "federation_grants")(passed, {} as Request, res, next);
 		});
 		return { state, next, log };
 	};
 	/** The last handler alone, as it sees an error raised after the parsers. */
 	const last = (error: unknown, log = logger()) => {
 		const { res, state } = fakeResponse();
-		unexpectedErrors(log as never)(error, {} as Request, res, vi.fn());
+		unexpectedErrors(log as never, "federation_grants")(error, {} as Request, res, vi.fn());
 		return { state, log };
 	};
 
@@ -255,6 +255,7 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(log.error).toHaveBeenCalledWith(
 			{
+				site: "federation_grants",
 				correlationId: "",
 				err: expect.objectContaining({ name: "Error", detail: "forbidden", status: 403 }),
 			},
@@ -268,6 +269,7 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 		);
 		expect(log.error).toHaveBeenCalledWith(
 			{
+				site: "federation_grants",
 				correlationId: "",
 				err: expect.objectContaining({ name: "TypeError", detail: "cannot read a property" }),
 			},

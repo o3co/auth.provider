@@ -2506,6 +2506,30 @@ describe("consent — what an outage logs", () => {
 		});
 	});
 
+	it("answers a client registry that cannot judge the question as the page's own lookup does, and logs it once", async () => {
+		// The judgement's read fails, on both methods: one answer for one
+		// outage, `/oauth/consent`'s — never `storage`, which names another store.
+		for (const method of ["GET", "POST"] as const) {
+			const w = world();
+			const { challenge } = await asked(w);
+			w.state.faults.set("findById", 0);
+			const response =
+				method === "GET"
+					? await w.page(challenge, "b-1")
+					: await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "client registry unavailable",
+			});
+			expect(written(await settledLines(w))).toEqual(["error client_repository_unavailable"]);
+			expect(payloadOf(w.lines, "client_repository_unavailable")).toMatchObject({
+				site: "federation_grant_consent",
+				step: "find",
+			});
+		}
+	});
+
 	it("logs the client registry that could not describe the client through core's one line", async () => {
 		const w = world();
 		const { challenge } = await asked(w);
@@ -2713,6 +2737,40 @@ describe("the callback — what an outage logs", () => {
 			Object.assign(new Error("timed out"), { name: "TimeoutError" }),
 			Object.assign(new TypeError("fetch failed"), {
 				cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+			}),
+		]) {
+			const w = world();
+			const { response } = await unavailable(w, () => {
+				w.state.exchangeThrows = thrown;
+			});
+			expect(returned(response).get("error")).toBe("temporarily_unavailable");
+			expect(written(await settledLines(w))).toEqual([
+				"error federation_grant_callback_unavailable",
+			]);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+				reason: "upstream",
+				step: "exchange",
+				err: { name: thrown.name },
+			});
+		}
+	});
+
+	it("logs an upstream answering 5xx as the outage — as openid-client raises it — like the refresh path does", async () => {
+		// The shapes the real library throws (federation-oidc's
+		// delegated-outage.test.mts): a 503 or 502 that oauth4webapi will not
+		// read is a ClientError over the Response; an OAuth error body under a
+		// 5xx carries the status on the error.
+		for (const thrown of [
+			Object.assign(
+				new Error("unexpected HTTP response status code", {
+					cause: new Response("<html>down</html>", { status: 503 }),
+				}),
+				{ name: "ClientError", code: "OAUTH_RESPONSE_IS_NOT_CONFORM" },
+			),
+			Object.assign(new Error("server responded with an error in the response body"), {
+				name: "ResponseBodyError",
+				status: 503,
+				error: "temporarily_unavailable",
 			}),
 		]) {
 			const w = world();

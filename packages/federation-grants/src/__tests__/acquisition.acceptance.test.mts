@@ -689,14 +689,15 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 			undefined,
 			logger,
 		);
+		// What boot wrote is not this flow's: every line after it is.
+		lines.length = 0;
 		try {
 			store.status = 401;
 			store.headers = { "WWW-Authenticate": 'Bearer error="invalid_token"' };
 			store.body = { error: "invalid_token" };
 			expect((await connectAs(app, "b-http-6")).get("error")).toBe("temporarily_unavailable");
 			expect(store.authorization).toEqual([`Bearer ${TOKEN}`]);
-			// Boot may write its own notices; the lines at error are the outage's.
-			expect(lines.filter(([level]) => level === "error")).toEqual([
+			expect(lines).toEqual([
 				[
 					"error",
 					expect.objectContaining({
@@ -762,10 +763,11 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 		});
 		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-ALICE", tid: "T-1" } };
 		const { handle, app } = await boot(undefined, unreachable, connections(), undefined, logger);
+		// What boot wrote is not this flow's: every line after it is.
+		lines.length = 0;
 		try {
 			expect((await connectAs(app, "b-http-7")).get("error")).toBe("temporarily_unavailable");
-			// Boot may write its own notices; the lines at error are the outage's.
-			expect(lines.filter(([level]) => level === "error")).toEqual([
+			expect(lines).toEqual([
 				[
 					"error",
 					expect.objectContaining({

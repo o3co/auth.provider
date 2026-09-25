@@ -394,11 +394,12 @@ describe("the lodging routes", () => {
 		});
 	});
 
-	it("logs an intent it could not close after a lost renewal as one warn, whatever the answer", async () => {
+	it("logs the write a lost renewal threw and the intent it could not close as warns, whatever the answer", async () => {
 		// The pointer write lost to a revocation, and the intent it named could
-		// not be closed: the answer is the grant's (410 grant_revoked), and the
-		// intent — which can activate nothing, and lapses with the flow budget —
-		// is one warn, where it used to be nothing.
+		// not be closed: the answer is the grant's (410 grant_revoked). The
+		// write's own error, which that answer does not carry, and the intent —
+		// which can activate nothing, and lapses with the flow budget — are one
+		// warn each, where they used to be nothing.
 		const h = harness();
 		await h.seed();
 		const revoke = h.store.revoke.bind(h.store);
@@ -410,14 +411,60 @@ describe("the lodging routes", () => {
 		const response = await renew(h);
 		expect(response.status).toBe(410);
 		expect(response.body).toEqual({ error: "grant_revoked", error_description: "subject" });
+		expect(written(await settled(h))).toEqual([
+			"warn federation_grant_lodge_step_failed",
+			"warn federation_grant_lodge_step_failed",
+		]);
+		expect(h.lines.map((line) => line.args[0])).toEqual([
+			{
+				operation: "reauthorize",
+				grantId: GRANT_ID,
+				correlationId: REQUEST_ID,
+				store: "federation_grant",
+				step: "name_intent",
+				err: expect.objectContaining({ name: "Error", detail: "connection reset" }),
+			},
+			{
+				operation: "reauthorize",
+				grantId: GRANT_ID,
+				correlationId: REQUEST_ID,
+				store: "federation_grant_intent",
+				step: "finish_intent",
+				err: expect.objectContaining({ name: "Error", detail: "close failed" }),
+			},
+		]);
+	});
+
+	it("logs a second write that threw and landed all the same as one warn, beside the 201", async () => {
+		const h = harness();
+		const create = h.store.createPending.bind(h.store);
+		vi.spyOn(h.store, "createPending").mockImplementation(async (input) => {
+			await create(input);
+			throw new Error("connection reset");
+		});
+		expect((await lodge(h)).status).toBe(201);
 		expect(written(await settled(h))).toEqual(["warn federation_grant_lodge_step_failed"]);
 		expect(payloadOf(h.lines, "federation_grant_lodge_step_failed")).toEqual({
+			operation: "create",
+			correlationId: REQUEST_ID,
+			store: "federation_grant",
+			step: "create_pending",
+			err: expect.objectContaining({ name: "Error", detail: "connection reset" }),
+		});
+	});
+
+	it("logs the renewed grant's connection when it is no longer configured — a renewal names none", async () => {
+		const h = harness();
+		await h.seed();
+		h.world.connections.delete(connection.name);
+		expect((await renew(h)).status).toBe(503);
+		expect(written(await settled(h))).toEqual(["error federation_grant_lodge_unavailable"]);
+		expect(payloadOf(h.lines, "federation_grant_lodge_unavailable")).toEqual({
 			operation: "reauthorize",
 			grantId: GRANT_ID,
 			correlationId: REQUEST_ID,
-			store: "federation_grant_intent",
-			step: "finish_intent",
-			err: expect.objectContaining({ name: "Error", detail: "close failed" }),
+			reason: "connection_not_configured",
+			connection: connection.name,
 		});
 	});
 
@@ -481,7 +528,7 @@ describe("what the router mounts in front of the handlers", () => {
 			json: () => res,
 			getHeader: (name: string) => headers[name],
 		};
-		unexpectedErrors(logger)(
+		unexpectedErrors(logger, "federation_grants")(
 			Object.assign(new Error("store 403"), { expose: true, status: 403 }),
 			{} as Request,
 			res as never,
@@ -489,8 +536,107 @@ describe("what the router mounts in front of the handlers", () => {
 		);
 		expect(written(lines)).toEqual(["error federation_grants_unexpected_error"]);
 		expect(payloadOf(lines, "federation_grants_unexpected_error")).toEqual({
+			site: "federation_grants",
 			correlationId: REQUEST_ID,
 			err: expect.objectContaining({ name: "Error", detail: "store 403", status: 403 }),
+		});
+	});
+});
+
+/**
+ * The refresh's own deadlines, reached through the real router on the real
+ * clock: the caller waits long enough (`upstreamTimeoutMs`) for the persist
+ * budget to run out first, and the hard deadline is short.
+ */
+const SHORT = {
+	upstreamTimeoutMs: 2_000,
+	upstreamHardTimeoutMs: 2_500,
+	persistRetryBudgetMs: 300,
+	refreshLockTtlMs: 5_000,
+};
+const NOT_ANSWERED = { name: "Error", detail: "not answered in time; no longer waited for" };
+
+describe("the token route — what a refresh that runs out of time logs", () => {
+	it("logs a credential write that hangs as the outage, not answered", async () => {
+		const h = harness({ limits: SHORT });
+		await seedExpired(h);
+		h.refresh.mockResolvedValue({
+			accessToken: "fresh",
+			refreshToken: "rt-2",
+			expiresIn: 3600,
+			expiresAt: new Date(h.world.now.getTime() + 3_600_000),
+			tokenType: "Bearer",
+		});
+		vi.spyOn(h.store, "replaceCredentials").mockReturnValue(new Promise(() => {}));
+		const response = await call(h, "token");
+		expect(response.status).toBe(503);
+		expect(response.body.error_description).toBe("storage");
+		expect(written(await settled(h))).toEqual(["error federation_grant_token_unavailable"]);
+		expect(payloadOf(h.lines, "federation_grant_token_unavailable")).toEqual({
+			grantId: GRANT_ID,
+			correlationId: REQUEST_ID,
+			reason: "storage",
+			store: "federation_grant",
+			step: "write",
+			err: expect.objectContaining(NOT_ANSWERED),
+		});
+	});
+
+	it("logs a credential write it retried as ONE outage line, with how many attempts — no line per attempt", async () => {
+		const h = harness({ limits: SHORT });
+		await seedExpired(h);
+		h.refresh.mockResolvedValue({
+			accessToken: "fresh",
+			refreshToken: "rt-2",
+			expiresIn: 3600,
+			expiresAt: new Date(h.world.now.getTime() + 3_600_000),
+			tokenType: "Bearer",
+		});
+		vi.spyOn(h.store, "replaceCredentials").mockRejectedValue(new Error("write refused"));
+		expect((await call(h, "token")).status).toBe(503);
+		expect(written(await settled(h))).toEqual(["error federation_grant_token_unavailable"]);
+		const payload = payloadOf(h.lines, "federation_grant_token_unavailable");
+		expect(payload).toMatchObject({
+			step: "write",
+			err: { name: "Error", detail: "write refused" },
+		});
+		expect(payload.attempts).toBeGreaterThan(1);
+	});
+
+	it("logs a reauthorization mark that hangs as the outage, not answered", async () => {
+		const h = harness({ limits: SHORT });
+		await seedExpired(h);
+		h.refresh.mockRejectedValue(Object.assign(new Error("refused"), { error: "invalid_grant" }));
+		vi.spyOn(h.store, "requireReauthorization").mockReturnValue(new Promise(() => {}));
+		expect((await call(h, "token")).status).toBe(503);
+		expect(written(await settled(h))).toEqual(["error federation_grant_token_unavailable"]);
+		expect(payloadOf(h.lines, "federation_grant_token_unavailable")).toMatchObject({
+			reason: "storage",
+			store: "federation_grant",
+			step: "mark",
+			err: NOT_ANSWERED,
+		});
+	});
+
+	it("logs the caller answered at the soft deadline, and the upstream abandoned at the hard one as a warn", async () => {
+		const h = harness({ limits: { ...SHORT, upstreamTimeoutMs: 100, upstreamHardTimeoutMs: 400 } });
+		await seedExpired(h);
+		h.refresh.mockReturnValue(new Promise(() => {}));
+		const response = await call(h, "token");
+		expect(response.status).toBe(503);
+		expect(response.body.error_description).toBe("upstream");
+		expect(written(await settled(h))).toEqual([
+			"error federation_grant_token_unavailable",
+			"warn federation_grant_token_step_failed",
+		]);
+		expect(payloadOf(h.lines, "federation_grant_token_unavailable")).toEqual({
+			grantId: GRANT_ID,
+			correlationId: REQUEST_ID,
+			reason: "upstream",
+		});
+		expect(payloadOf(h.lines, "federation_grant_token_step_failed")).toMatchObject({
+			step: "upstream",
+			err: NOT_ANSWERED,
 		});
 	});
 });

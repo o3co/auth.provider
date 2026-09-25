@@ -33,6 +33,7 @@ import type {
 	FederationGrantCredentialState,
 	FederationGrantCredentials,
 	FederationGrantRefresher,
+	FederationGrantRetrievalLimits,
 	FederationGrantStore,
 	RateLimiter,
 } from "@o3co/auth-provider-core";
@@ -138,6 +139,11 @@ export interface HarnessOptions {
 	readonly sink?: AuditSink;
 	readonly rateLimiter?: RateLimiter;
 	readonly background?: FederationGrantBackground;
+	/**
+	 * Retrieval limits over the defaults: short deadlines, so that a test can
+	 * reach a timeout through the real router on the real clock.
+	 */
+	readonly limits?: Partial<FederationGrantRetrievalLimits>;
 }
 
 export function harness(options: HarnessOptions = {}): Harness {
@@ -215,7 +221,10 @@ export function harness(options: HarnessOptions = {}): Harness {
 		},
 	}) as FederationGrantStore;
 
-	const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
+	const limits = {
+		...resolveFederationGrantRetrievalLimits({ federationGrants: {} }),
+		...options.limits,
+	};
 
 	const app = express();
 	app.use(
