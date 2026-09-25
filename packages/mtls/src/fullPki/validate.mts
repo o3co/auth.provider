@@ -110,6 +110,7 @@
  */
 
 import { X509Certificate } from "node:crypto";
+import { type LoggableError, loggableError } from "@o3co/auth-provider-core";
 import * as pkijs from "pkijs";
 import { checkClientLeafProfile } from "../pki.mjs";
 import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
@@ -177,9 +178,20 @@ export interface FullPkiOptions {
 	readonly fetchImpl?: typeof globalThis.fetch;
 }
 
+/**
+ * The verdict. A refusal names its `step` and a `detail` in this module's own
+ * words; `err` is the projection (core's `loggableError`) of a library error
+ * behind it, when one threw — pkijs, WebCrypto, the platform fetch — never
+ * its text. Whoever logs the refusal logs `err` beside `detail`.
+ */
 export type FullPkiResult =
 	| { readonly ok: true }
-	| { readonly ok: false; readonly step: string; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly step: string;
+			readonly detail: string;
+			readonly err?: LoggableError;
+	  };
 
 export interface FullPkiValidator {
 	validate(
@@ -208,7 +220,17 @@ type RevocationOutcome =
 			/** CRL distribution points that could not be used, for the per-point strictness (#446). */
 			readonly unavailable: readonly CrlPointUnavailable[];
 	  }
-	| { readonly kind: "unavailable"; readonly reason: string; readonly detail: string };
+	| {
+			readonly kind: "unavailable";
+			readonly reason: string;
+			readonly detail: string;
+			/** The projection of the library error behind `reason`, when one threw. */
+			readonly err?: LoggableError;
+	  };
+
+/** `{ err }` when there is one, for a spread into a result or a log line. */
+const withErr = (err: LoggableError | undefined): { err?: LoggableError } =>
+	err !== undefined ? { err } : {};
 
 const toPkijs = (certificate: X509Certificate): pkijs.Certificate =>
 	pkijs.Certificate.fromBER(certificate.raw);
@@ -341,6 +363,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 											kind: "unavailable",
 											reason: last.reason,
 											detail: describeUnavailable(own.unavailable),
+											...withErr(last.err),
 										};
 									}
 									return own;
@@ -358,7 +381,14 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		now: Date,
 	): Promise<RevocationOutcome> => {
 		const lookup = await (crlResolver as CrlResolver).resolve(certificate, issuer, now);
-		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		if (!lookup.ok) {
+			return {
+				kind: "unavailable",
+				reason: lookup.reason,
+				detail: lookup.detail,
+				...withErr(lookup.err),
+			};
+		}
 		// Every CRL here verified against `issuer`, whose subject is this
 		// certificate's issuer name, so the serial comparison is the whole
 		// check.
@@ -379,7 +409,14 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		now: Date,
 	): Promise<RevocationOutcome> => {
 		const lookup = await (ocspResolver as OcspResolver).resolve(certificate, issuer, now);
-		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		if (!lookup.ok) {
+			return {
+				kind: "unavailable",
+				reason: lookup.reason,
+				detail: lookup.detail,
+				...withErr(lookup.err),
+			};
+		}
 		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
 			uncheckedResponders.add(lookup.responder);
 			options.logger?.warn(
@@ -442,16 +479,24 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		// not answer is, and stays visible even while the CRL carries on.
 		if (ocsp.reason !== "no_responder") {
 			options.logger?.warn(
-				{ subject: toNode(certificate).subject, reason: ocsp.reason, detail: ocsp.detail },
+				{
+					subject: toNode(certificate).subject,
+					reason: ocsp.reason,
+					detail: ocsp.detail,
+					...withErr(ocsp.err),
+				},
 				"mtls_revocation_ocsp_fallback",
 			);
 		}
 		const crl = await byCrl(certificate, issuer, now);
 		if (crl.kind !== "unavailable") return crl;
+		// `err` goes with `reason`, and both are the CRL's: the OCSP failure's
+		// projection was on the fallback line above.
 		return {
 			kind: "unavailable",
 			reason: crl.reason,
 			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crl.reason} (${crl.detail})`,
+			...withErr(crl.err),
 		};
 	};
 
@@ -498,10 +543,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			try {
 				first = await engine.verify({ passedWhenNotRevValues: true });
 			} catch (err) {
+				// pkijs 3 catches inside `verify` and answers a result instead; this
+				// is for a version that does not. The error is the library's.
 				return {
 					ok: false,
 					step: "path validation failed",
-					detail: err instanceof Error ? err.message : String(err),
+					detail: "the path validation engine threw",
+					err: loggableError(err),
 				};
 			}
 			if (!first.result) {
@@ -611,13 +659,14 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					const subject = toNode(certificate).subject;
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: outcome.reason, detail: outcome.detail },
+							{ subject, reason: outcome.reason, detail: outcome.detail, ...withErr(outcome.err) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
 							detail: `${subject}: ${outcome.reason} — ${outcome.detail}`,
+							...withErr(outcome.err),
 						};
 					}
 					// Soft-fail. Logged at warn, never silently: an operator who chose
@@ -625,7 +674,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					// permanent soft-fail is an unrevocable PKI wearing a revocation
 					// configuration.
 					options.logger?.warn(
-						{ subject, reason: outcome.reason, detail: outcome.detail },
+						{ subject, reason: outcome.reason, detail: outcome.detail, ...withErr(outcome.err) },
 						"mtls_revocation_unavailable_allowed",
 					);
 					continue;
@@ -652,17 +701,18 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					const detail = describeUnavailable(outcome.unavailable);
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: last.reason, detail },
+							{ subject, reason: last.reason, detail, ...withErr(last.err) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
 							detail: `${subject}: ${last.reason} — ${detail}`,
+							...withErr(last.err),
 						};
 					}
 					options.logger?.warn(
-						{ subject, reason: last.reason, detail },
+						{ subject, reason: last.reason, detail, ...withErr(last.err) },
 						"mtls_revocation_partially_unavailable_allowed",
 					);
 				}

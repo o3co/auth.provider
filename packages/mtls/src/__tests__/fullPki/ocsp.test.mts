@@ -1084,7 +1084,7 @@ describe("OCSP resolver — through the guarded fetch", () => {
 		const { int, leaf } = await chain();
 		const fetchImpl = vi.fn(async (_url: URL, init: RequestInit) => {
 			expect(init.method).toBe("POST");
-			expect(init.redirect).toBe("error");
+			expect(init.redirect).toBe("manual");
 			expect((init.headers as Record<string, string>)["content-type"]).toBe(
 				"application/ocsp-request",
 			);

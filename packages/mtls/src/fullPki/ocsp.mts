@@ -140,9 +140,18 @@
  * used, `algorithm_not_permitted` included); `bad_signature` and
  * `nonce_mismatch` are never remembered in either direction, for the reason
  * `crl.mts` gives.
+ *
+ * ### What an unavailability says
+ *
+ * As in `crl.mts`: a `reason` and a `detail` in this module's own words, and
+ * the projection of a library error that threw on the way — pkijs parsing the
+ * response, WebCrypto checking its signature, the platform fetch — as `err`,
+ * never its text. Summed up over several responders, `reason` and `err` are
+ * the last failure's.
  */
 
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
+import { type LoggableError, loggableError } from "@o3co/auth-provider-core";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import {
@@ -259,7 +268,13 @@ export type OcspLookup =
 			 */
 			readonly responderUnchecked?: boolean;
 	  }
-	| { readonly ok: false; readonly reason: OcspUnavailableReason; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly reason: OcspUnavailableReason;
+			readonly detail: string;
+			/** The last failure's projection, beside its `reason`, when a library threw. */
+			readonly err?: LoggableError;
+	  };
 
 export type OcspResponders =
 	| { readonly ok: true; readonly urls: readonly string[] }
@@ -364,8 +379,6 @@ const RESPONSE_STATUS_NAMES: Readonly<Record<number, string>> = {
 const equalBytes = (a: Uint8Array, b: Uint8Array): boolean =>
 	a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
 
-const describeError = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-
 /** Reasons remembered for the negative window, and at which granularity. */
 type RespondersFailure =
 	| "fetch_failed"
@@ -412,6 +425,7 @@ type CacheEntry =
 			readonly kind: "unavailable";
 			readonly reason: RespondersFailure | CertificateFailure;
 			readonly detail: string;
+			readonly err?: LoggableError;
 			/** Epoch millis after which the responder is tried again. */
 			readonly expiresAt: number;
 	  };
@@ -432,7 +446,12 @@ type Answer =
 			 */
 			readonly delegate?: pkijs.Certificate;
 	  }
-	| { readonly ok: false; readonly reason: OcspUnavailableReason; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly reason: OcspUnavailableReason;
+			readonly detail: string;
+			readonly err?: LoggableError;
+	  };
 
 export interface OcspResolverOptions {
 	readonly fetch: GuardedFetch;
@@ -479,7 +498,12 @@ export type ResponderRevocationOutcome =
 	/** The CA named no source for the responder's certificate (§4.2.2.2.1, third option): local policy decides, which is to take the answer and report `responderUnchecked`. */
 	| { readonly kind: "unspecified" }
 	| { readonly kind: "revoked"; readonly detail: string }
-	| { readonly kind: "unavailable"; readonly reason: string; readonly detail: string };
+	| {
+			readonly kind: "unavailable";
+			readonly reason: string;
+			readonly detail: string;
+			readonly err?: LoggableError;
+	  };
 
 export type ResponderRevocationCheck = (
 	responder: pkijs.Certificate,
@@ -568,6 +592,7 @@ type Parsed =
 			readonly ok: false;
 			readonly reason: "unparseable" | "responder_error";
 			readonly detail: string;
+			readonly err?: LoggableError;
 	  };
 
 const parseResponse = (bytes: Uint8Array): Parsed => {
@@ -578,7 +603,8 @@ const parseResponse = (bytes: Uint8Array): Parsed => {
 		return {
 			ok: false,
 			reason: "unparseable",
-			detail: `not a DER OCSPResponse (${describeError(err)})`,
+			detail: "not a DER OCSPResponse",
+			err: loggableError(err),
 		};
 	}
 	const status = response.responseStatus.valueBlock.valueDec;
@@ -613,7 +639,8 @@ const parseResponse = (bytes: Uint8Array): Parsed => {
 		return {
 			ok: false,
 			reason: "unparseable",
-			detail: `not a DER BasicOCSPResponse (${describeError(err)})`,
+			detail: "not a DER BasicOCSPResponse",
+			err: loggableError(err),
 		};
 	}
 };
@@ -814,7 +841,7 @@ const verifySignature = async (
 	basic: pkijs.BasicOCSPResponse,
 	signer: pkijs.Certificate,
 	crypto: pkijs.ICryptoEngine,
-): Promise<{ ok: true } | { ok: false; detail: string }> => {
+): Promise<{ ok: true } | { ok: false; detail: string; err?: LoggableError }> => {
 	let verified = false;
 	try {
 		verified = await crypto.verifyWithPublicKey(
@@ -824,7 +851,9 @@ const verifySignature = async (
 			basic.signatureAlgorithm,
 		);
 	} catch (err) {
-		return { ok: false, detail: `signature check failed: ${describeError(err)}` };
+		// Thrown rather than answered `false`: a signature value WebCrypto
+		// cannot read, a key it cannot import. Its text stays on the projection.
+		return { ok: false, detail: "signature check failed", err: loggableError(err) };
 	}
 	return verified
 		? { ok: true }
@@ -928,11 +957,13 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		reason: RespondersFailure | CertificateFailure,
 		detail: string,
 		now: Date,
+		err?: LoggableError,
 	): void =>
 		store(key, {
 			kind: "unavailable",
 			reason,
 			detail,
+			...(err !== undefined ? { err } : {}),
 			expiresAt: now.getTime() + OCSP_NEGATIVE_CACHE_TTL_MS,
 		});
 
@@ -953,7 +984,12 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			expectContentType: OCSP_RESPONSE_MEDIA_TYPE,
 		});
 		if (!fetched.ok) {
-			return { ok: false, reason: "fetch_failed", detail: `${fetched.reason} (${fetched.detail})` };
+			return {
+				ok: false,
+				reason: "fetch_failed",
+				detail: `${fetched.reason} (${fetched.detail})`,
+				...(fetched.err !== undefined ? { err: fetched.err } : {}),
+			};
 		}
 
 		const parsed = parseResponse(fetched.bytes);
@@ -996,7 +1032,14 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		const signer = await identifySigner(basic, issuer, now, crypto, algorithms);
 		if (!signer.ok) return { ok: false, reason: signer.reason, detail: signer.detail };
 		const signature = await verifySignature(basic, signer.signer, crypto);
-		if (!signature.ok) return { ok: false, reason: "bad_signature", detail: signature.detail };
+		if (!signature.ok) {
+			return {
+				ok: false,
+				reason: "bad_signature",
+				detail: signature.detail,
+				...(signature.err !== undefined ? { err: signature.err } : {}),
+			};
+		}
 		// #468 / #550: the delegated responder's own certificate, checked here
 		// and again whenever this answer is served from the cache.
 		const delegate =
@@ -1004,7 +1047,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		let responderUnchecked = false;
 		if (delegate !== undefined) {
 			const verdict = await checkResponder(delegate, issuer, now);
-			if (!verdict.ok) return { ok: false, reason: verdict.reason, detail: verdict.detail };
+			if (!verdict.ok) return verdict;
 			responderUnchecked = verdict.unchecked;
 		}
 
@@ -1072,7 +1115,8 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		issuer: pkijs.Certificate,
 		now: Date,
 	): Promise<
-		{ ok: true; unchecked: boolean } | { ok: false; reason: OcspUnavailableReason; detail: string }
+		| { ok: true; unchecked: boolean }
+		| { ok: false; reason: OcspUnavailableReason; detail: string; err?: LoggableError }
 	> => {
 		if (options.responderRevocation === undefined) return { ok: true, unchecked: true };
 		const own = await options.responderRevocation(delegate, issuer, now);
@@ -1090,6 +1134,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				detail:
 					"the delegated responder's own revocation status is unavailable " +
 					`(${own.reason}): ${own.detail}`,
+				...(own.err !== undefined ? { err: own.err } : {}),
 			};
 		}
 		return { ok: true, unchecked: own.kind === "unspecified" };
@@ -1129,7 +1174,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				const verdict = await checkResponder(known.delegate, issuer, now);
 				if (!verdict.ok) {
 					cache.delete(statusCacheKey);
-					return { ok: false, reason: verdict.reason, detail: verdict.detail };
+					return verdict;
 				}
 				return {
 					ok: true,
@@ -1144,7 +1189,12 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		for (const key of [responderDownKey(url), certificateDownKey(url, issuerId, serial)]) {
 			const down = cache.get(key);
 			if (down?.kind === "unavailable" && down.expiresAt > now.getTime()) {
-				return { ok: false, reason: down.reason, detail: `${down.detail}; not retried yet` };
+				return {
+					ok: false,
+					reason: down.reason,
+					detail: `${down.detail}; not retried yet`,
+					...(down.err !== undefined ? { err: down.err } : {}),
+				};
 			}
 		}
 
@@ -1159,13 +1209,20 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			return answer;
 		}
 		if (RESPONDER_FAILURES.has(answer.reason)) {
-			remember(responderDownKey(url), answer.reason as RespondersFailure, answer.detail, now);
+			remember(
+				responderDownKey(url),
+				answer.reason as RespondersFailure,
+				answer.detail,
+				now,
+				answer.err,
+			);
 		} else if (CERTIFICATE_FAILURES.has(answer.reason)) {
 			remember(
 				certificateDownKey(url, issuerId, serial),
 				answer.reason as CertificateFailure,
 				answer.detail,
 				now,
+				answer.err,
 			);
 		}
 		// `bad_signature` and `nonce_mismatch` are left unremembered on purpose.
@@ -1181,7 +1238,12 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 
 			const issuerId = issuerKeyId(issuer);
 			const serial = serialHex(certificate);
-			const failures: { url: string; reason: OcspUnavailableReason; detail: string }[] = [];
+			const failures: {
+				url: string;
+				reason: OcspUnavailableReason;
+				detail: string;
+				err?: LoggableError;
+			}[] = [];
 			for (const url of responders.urls) {
 				const answer = await lookup(url, certificate, issuer, issuerId, serial, now);
 				if (answer.ok) {
@@ -1192,7 +1254,12 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 						...(answer.responderUnchecked ? { responderUnchecked: true } : {}),
 					};
 				}
-				failures.push({ url, reason: answer.reason, detail: answer.detail });
+				failures.push({
+					url,
+					reason: answer.reason,
+					detail: answer.detail,
+					...(answer.err !== undefined ? { err: answer.err } : {}),
+				});
 			}
 			const last = failures[failures.length - 1];
 			return {
@@ -1201,6 +1268,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				detail: failures
 					.map((entry) => `${entry.url}: ${entry.reason} (${entry.detail})`)
 					.join("; "),
+				...(last?.err !== undefined ? { err: last.err } : {}),
 			};
 		},
 	};

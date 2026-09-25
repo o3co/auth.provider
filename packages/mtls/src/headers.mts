@@ -136,7 +136,8 @@ const unquoteXfccField = (raw: string, fieldName: string): string => {
  * `By=` and `Hash=` are parsed-past but not used — they are informational.
  *
  * Parse failure → throws a plain `Error`. The call site (extractor.mts step 2)
- * wraps it into `MtlsError("malformed_header", "envoy XFCC parse failure: <detail>")`.
+ * wraps it into `MtlsError("malformed_header", "envoy header parse failure")`, this
+ * error as its `cause`.
  *
  * Per Wave 2 Phase 3 spec §6.2.
  */

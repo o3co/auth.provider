@@ -51,6 +51,10 @@ export type MtlsReasonCode =
  * sub-classification for audit emission; it must never reach the wire
  * verbatim (use a safe error description instead).
  *
+ * The message is this package's own fixed text. When a parser refused the
+ * material, its error is the standard `cause` — never copied into the
+ * message, since a parser's message is its reading of what the client sent.
+ *
  * Per Wave 2 Phase 3 spec §5.5 + design principle §3.4.
  */
 export class MtlsError extends Error {
@@ -58,8 +62,13 @@ export class MtlsError extends Error {
 	readonly reason: MtlsReasonCode;
 	readonly detail?: Record<string, unknown>;
 
-	constructor(reason: MtlsReasonCode, message: string, detail?: Record<string, unknown>) {
-		super(message);
+	constructor(
+		reason: MtlsReasonCode,
+		message: string,
+		detail?: Record<string, unknown>,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
 		this.name = "MtlsError";
 		this.reason = reason;
 		if (detail !== undefined) this.detail = detail;

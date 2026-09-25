@@ -49,9 +49,20 @@
  * usually are. The two homes state each other; see `core/src/net/special-use.mts`.
  *
  * On top of those: no redirects (a redirect is a second destination that
- * neither layer vetted), a byte cap read incrementally so a hostile responder
- * cannot exhaust memory before the check fires, a wall-clock timeout, and no
- * credentials.
+ * neither layer vetted — the fetch is made with `redirect: "manual"` and a
+ * redirect status it hands back is refused), a byte cap read incrementally so
+ * a hostile responder cannot exhaust memory before the check fires, a
+ * wall-clock timeout, and no credentials.
+ *
+ * ### What a refusal says
+ *
+ * A reason from a closed set (`FetchRejection`) and a `detail` in this
+ * module's own words — a status, a size, a transport's error code. When the
+ * platform fetch threw, its error rides beside them as `err`, core's
+ * `loggableError` projection, for the log line that reports the refusal.
+ * Nothing is read from an error's message, and none of it is copied into
+ * `detail`: the message is the platform's reading of what a network path or
+ * a responder did.
  *
  * ### GET and POST
  *
@@ -70,6 +81,8 @@
  * a direction that fails open.
  */
 
+import { type LoggableError, loggableError } from "@o3co/auth-provider-core";
+
 /** Why a fetch did not produce bytes. Values are stable — audit logs read them. */
 export type FetchRejection =
 	| "scheme_not_allowed"
@@ -85,7 +98,13 @@ export type FetchRejection =
 
 export type FetchOutcome =
 	| { readonly ok: true; readonly bytes: Uint8Array }
-	| { readonly ok: false; readonly reason: FetchRejection; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly reason: FetchRejection;
+			readonly detail: string;
+			/** The platform fetch's error, projected, when it threw one. */
+			readonly err?: LoggableError;
+	  };
 
 export interface GuardedFetchOptions {
 	/**
@@ -186,22 +205,34 @@ const splitHostPort = (entry: string): { host: string; port: string | null } => 
 	return { host: canonicalHost(trimmed.slice(0, colon)), port: trimmed.slice(colon + 1) };
 };
 
+/** A transport's error code: `ECONNREFUSED`, `ENOTFOUND`, `UND_ERR_SOCKET`. */
+const TRANSPORT_CODE = /^[A-Z][A-Z0-9_]{1,63}$/;
+
 /**
- * Every message on an error's `cause` chain, outermost first.
- *
- * undici — Node's `fetch` — reports most failures as `TypeError("fetch
- * failed")` with the actual reason on `cause`; the top-level message alone
- * tells an audit log nothing.
+ * The transport's own name for a failure, from the first `code` on the
+ * error's cause chain. undici — Node's `fetch` — reports every failure as
+ * `TypeError("fetch failed")` with the code on `cause`. A code is a closed
+ * vocabulary; the messages beside it are never read.
  */
-const describeError = (err: unknown): string => {
-	const messages: string[] = [];
+const transportCodeOf = (err: unknown): string | undefined => {
 	let current: unknown = err;
-	for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
-		messages.push(current.message);
-		current = current.cause;
+	for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth++) {
+		let code: unknown;
+		let cause: unknown;
+		try {
+			code = (current as { code?: unknown }).code;
+			cause = (current as { cause?: unknown }).cause;
+		} catch {
+			return undefined;
+		}
+		if (typeof code === "string" && TRANSPORT_CODE.test(code)) return code;
+		current = cause;
 	}
-	return messages.length > 0 ? messages.join(": ") : String(err);
+	return undefined;
 };
+
+/** The statuses that name another location (RFC 9110 §15.4); 304 names none. */
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 
 /**
  * Read at most `maxBytes` from the body, aborting as soon as the cap is
@@ -290,8 +321,11 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 				method: request.method ?? "GET",
 				// A redirect names a second destination that the allowlist never
 				// vetted, and following one is how an allowlisted host becomes an
-				// open proxy into everything it can reach.
-				redirect: "error",
+				// open proxy into everything it can reach. "manual" hands the
+				// redirect back unfollowed, so it is refused by its status below —
+				// "error" made the platform throw, with nothing but the error's
+				// text to tell the refusal from a network failure.
+				redirect: "manual",
 				signal: controller.signal,
 				credentials: "omit",
 				headers,
@@ -299,6 +333,15 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 					? {}
 					: { body: request.body as unknown as NonNullable<Parameters<typeof fetch>[1]>["body"] }),
 			});
+			if (REDIRECT_STATUSES.has(response.status) || response.type === "opaqueredirect") {
+				await response.body?.cancel().catch(() => undefined);
+				return {
+					ok: false,
+					reason: "redirect_refused",
+					detail:
+						response.type === "opaqueredirect" ? "opaque redirect" : `HTTP ${response.status}`,
+				};
+			}
 			if (!response.ok) {
 				return { ok: false, reason: "http_error", detail: `HTTP ${response.status}` };
 			}
@@ -326,17 +369,15 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 			}
 			return { ok: true, bytes: body.bytes };
 		} catch (err) {
-			const message = describeError(err);
 			if (controller.signal.aborted) {
 				return { ok: false, reason: "timeout", detail: `${options.timeoutMs}ms` };
 			}
-			// `redirect: "error"` surfaces as a TypeError from fetch — with the
-			// reason on `cause` under undici; naming it separately keeps the
-			// audit trail honest about which limit fired.
-			if (/redirect/i.test(message)) {
-				return { ok: false, reason: "redirect_refused", detail: message };
-			}
-			return { ok: false, reason: "network_error", detail: message };
+			return {
+				ok: false,
+				reason: "network_error",
+				detail: transportCodeOf(err) ?? "fetch failed",
+				err: loggableError(err),
+			};
 		} finally {
 			clearTimeout(timer);
 		}
