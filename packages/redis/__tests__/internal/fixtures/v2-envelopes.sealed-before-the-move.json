@@ -1,0 +1,63 @@
+{
+	"about": "v2 envelopes sealed by packages/redis/src/internal/crypto.mts sealCredential at d3d9c8f2 (before the envelope moved to core's sealing leaf). Every one must open, with the ring and the record below, to the plaintext below. Test key material only.",
+	"sealedAt": "d3d9c8f212c096b4c1802baf28044f19165678c9",
+	"ring": [
+		{
+			"id": "k-2026-09",
+			"key": "YJHTkZlgK4chYWrtwgLLSv54ckY5mr5s3rx3UNX2JYM="
+		},
+		{
+			"id": "k-2026-03",
+			"key": "Ga6Ac+298e4/CwMlFielsasZkg4XUW6sN5Bx6JhstOo="
+		},
+		{
+			"id": "K_a1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Zz9",
+			"key": "Ltt0H+8l/5TfsglwCGIRNXlnhthZZ2HFoSgxO2gOvwQ="
+		}
+	],
+	"cases": [
+		{
+			"name": "a federation grant's credential, sealed by the store's path under the ring's first key",
+			"sealedWith": "k-2026-09",
+			"binding": {
+				"credentialKey": "fg:{ImZnLTdiMWQyYzNlLTVmNjAtNGE4Yi05YzBkLWUxZjIwM2E0YjVjNiI}:cred",
+				"id": "fg-7b1d2c3e-5f60-4a8b-9c0d-e1f203a4b5c6",
+				"subject": "user-42",
+				"clientId": "backend-client",
+				"connection": "google",
+				"authorization": "[\"idr-3c9f\",\"azr-81e0\",\"https://accounts.google.com\",\"109876543210987654321\",[],[\"openid\",\"email\",\"https://www.googleapis.com/auth/calendar.readonly\"],\"1788253200000\",\"sid-5e2a\",[\"openid\",\"email\",\"https://www.googleapis.com/auth/calendar.readonly\"],\"1788253205000\",\"1819789200000\"]"
+			},
+			"record": "WyJvM2NvLmF1dGgtcHJvdmlkZXIuZmVkZXJhdGlvbi1ncmFudCIsMSwiZmc6e0ltWm5MVGRpTVdReVl6TmxMVFZtTmpBdE5HRTRZaTA1WXpCa0xXVXhaakl3TTJFMFlqVmpOaUl9OmNyZWQiLCJmZy03YjFkMmMzZS01ZjYwLTRhOGItOWMwZC1lMWYyMDNhNGI1YzYiLCJ1c2VyLTQyIiwiYmFja2VuZC1jbGllbnQiLCJnb29nbGUiLCJbXCJpZHItM2M5ZlwiLFwiYXpyLTgxZTBcIixcImh0dHBzOi8vYWNjb3VudHMuZ29vZ2xlLmNvbVwiLFwiMTA5ODc2NTQzMjEwOTg3NjU0MzIxXCIsW10sW1wib3BlbmlkXCIsXCJlbWFpbFwiLFwiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vYXV0aC9jYWxlbmRhci5yZWFkb25seVwiXSxcIjE3ODgyNTMyMDAwMDBcIixcInNpZC01ZTJhXCIsW1wib3BlbmlkXCIsXCJlbWFpbFwiLFwiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vYXV0aC9jYWxlbmRhci5yZWFkb25seVwiXSxcIjE3ODgyNTMyMDUwMDBcIixcIjE4MTk3ODkyMDAwMDBcIl0iXQ==",
+			"plaintext": "[1,\"1//0gRefreshTokenExample-abc_DEF\",[[\"ya29.a0AccessTokenExample\",\"Bearer\",\"1789905600000\",\"3599\",[\"openid\",\"email\"]]]]",
+			"envelope": "v2.ay0yMDI2LTA5.QXsGJkHaWuRLCYlU.IHUt4ZsxhDFjK6OQIBFHaJiBAutlHg5D0UAMpFjLaoHjadv3xpI90ZVOinKn4qE4qDejg5TsRDhPeoU_Wx5YwnR9e_zGA4AC5RIETjTfh3xrgCc-KhkuqUSJh18NBKUszywssGfqN6wzinM9-_um-QK9FiMpsd8UtQ.aiQFS9LG37kHTleZpN1rVg"
+		},
+		{
+			"name": "a credential sealed before the newer key was introduced: under the key now second in the ring",
+			"sealedWith": "k-2026-03",
+			"record": "WyJvM2NvLmF1dGgtcHJvdmlkZXIuZmVkZXJhdGlvbi1ncmFudCIsMSwiZmc6e0ltWm5MVGRpTVdReVl6TmxMVFZtTmpBdE5HRTRZaTA1WXpCa0xXVXhaakl3TTJFMFlqVmpOaUl9OmNyZWQiLCJmZy03YjFkMmMzZS01ZjYwLTRhOGItOWMwZC1lMWYyMDNhNGI1YzYiLCJ1c2VyLTQyIiwiYmFja2VuZC1jbGllbnQiLCJnb29nbGUiLCJbXCJpZHItM2M5ZlwiLFwiYXpyLTgxZTBcIixcImh0dHBzOi8vYWNjb3VudHMuZ29vZ2xlLmNvbVwiLFwiMTA5ODc2NTQzMjEwOTg3NjU0MzIxXCIsW10sW1wib3BlbmlkXCIsXCJlbWFpbFwiLFwiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vYXV0aC9jYWxlbmRhci5yZWFkb25seVwiXSxcIjE3ODgyNTMyMDAwMDBcIixcInNpZC01ZTJhXCIsW1wib3BlbmlkXCIsXCJlbWFpbFwiLFwiaHR0cHM6Ly93d3cuZ29vZ2xlYXBpcy5jb20vYXV0aC9jYWxlbmRhci5yZWFkb25seVwiXSxcIjE3ODgyNTMyMDUwMDBcIixcIjE4MTk3ODkyMDAwMDBcIl0iXQ==",
+			"plaintext": "[1,\"1//0gOlderRefreshToken\",[]]",
+			"envelope": "v2.ay0yMDI2LTAz.PI-lahMG_ev1_krv.x4awvK9JdDCxiLisS3bT2CD3XF3tl1j0o3I2ea0PiA.Q3tj-J5AgA2vXdIrgM_3uA"
+		},
+		{
+			"name": "the empty value under empty authenticated data: what the store seals at construction",
+			"sealedWith": "k-2026-09",
+			"record": "",
+			"plaintext": "",
+			"envelope": "v2.ay0yMDI2LTA5.Xe9eMc006SVcwIRN..R2YpvvggkWhrriaJAQh3Eg"
+		},
+		{
+			"name": "multi-byte UTF-8 in the value and binary authenticated data",
+			"sealedWith": "k-2026-09",
+			"record": "AAEC/v8ALg==",
+			"plaintext": "トークン 🔑 ü",
+			"envelope": "v2.ay0yMDI2LTA5.xpo4pzMtHiIDLCUI.R3OGnAqP7Jg-OOjoBz8KcqltJrk.DAvH3ZJUoO6chOsPWEOyvw"
+		},
+		{
+			"name": "a 64-character key id using every character class the id rule admits",
+			"sealedWith": "K_a1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Za1-Zz9",
+			"record": "cmVjb3JkIGJvdW5kIHRvIHRoZSBsb25nIGtleSBpZA==",
+			"plaintext": "rt-long-id",
+			"envelope": "v2.S19hMS1aYTEtWmExLVphMS1aYTEtWmExLVphMS1aYTEtWmExLVphMS1aYTEtWmExLVphMS1aYTEtWmExLVp6OQ.Tf4qSY6F7fd11M7O.m_PTl2Vtj_ORMQ.BNnqfWuFaFjl4_0kuMPpeA"
+		}
+	]
+}
