@@ -13,7 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { errorEnvelope, type Logger, loggableError } from "@o3co/auth-provider-core";
+import {
+	auditErrorText,
+	errorEnvelope,
+	type Logger,
+	loggableError,
+} from "@o3co/auth-provider-core";
 import type { ErrorRequestHandler } from "express";
 
 /**
@@ -35,7 +40,8 @@ import type { ErrorRequestHandler } from "express";
  * the error: an error a route let through can carry what an upstream said —
  * an OAuth library puts the token answer it refused on the cause chain, an
  * ioredis reply the command it answered — and a logger that serialises the
- * error writes all of it out.
+ * error writes all of it out. The `endpoint` beside it is the request's path,
+ * which the caller wrote: it is logged sanitised and capped (`auditErrorText`).
  *
  * Mount it AFTER every route (`app.use(handle.router)` included) — Express
  * routes errors only to handlers registered later.
@@ -60,7 +66,10 @@ export const createTerminalErrorHandler = (logger: Logger): ErrorRequestHandler 
 			res.status(httpStatus).json(errorEnvelope("invalid_request", description));
 			return;
 		}
-		logger.error({ err: loggableError(err), endpoint: req.path }, "unhandled_request_error");
+		logger.error(
+			{ err: loggableError(err), endpoint: auditErrorText(req.path) },
+			"unhandled_request_error",
+		);
 		res.status(500).json(errorEnvelope("server_error", "Internal server error"));
 	};
 };
