@@ -924,7 +924,15 @@ expire: DPoP at the token endpoint and at protected resources, logged as
 `webauthn_ceremony_store_unavailable` — each with
 `err.name: "ReplaySeenSetFullError"`. Sustained, that is a flood of fresh
 DPoP proofs, or more traffic than one replica's seen-set should carry: move
-to `REPLAY_SEEN_SET_ADAPTER=redis`.
+to `REPLAY_SEEN_SET_ADAPTER=redis`. The challenge store is capped the same
+way at a million challenges (`maxEntries` in
+`packages/core/src/challenges/adapters/memory.mts`, about 200 MB). It fills
+at `maxEntries / webauthn.challengeTtlMs` — over 8 000 options requests a
+second at the default 120 s, behind the options routes' rate limit — and at
+the cap refuses a new challenge rather than evict one a user is completing:
+the WebAuthn options routes answer `503 temporarily_unavailable`, logged as
+`webauthn_ceremony_store_unavailable` (`store: "challenge"`, `step:
+"issue"`) with `err.name: "ChallengeStoreFullError"`.
 
 ### Failure timing on the shared socket
 

@@ -826,7 +826,9 @@ export { SUBJECT_REVOCATION_ABSENCE_POLICY } from "./user-sessions/types.mjs";
 
 // Memory adapters (re-exported so consumers can construct without going through modules)
 export {
+	ChallengeStoreFullError,
 	createMemoryChallengeStore,
+	DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
 	type MemoryChallengeStore,
