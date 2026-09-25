@@ -228,7 +228,12 @@ Module-level messages that arrive wrapped in a factory failure:
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
   own: `mode "required" needs at least one encryption key`, at construction
   rather than at the first write — a ring that cannot seal would otherwise be
-  discovered after a user had already consented. A read never re-seals, so
+  discovered after a user had already consented. Every refusal of
+  `federationGrants.encryptionKeys` is a `RangeError` as the `cause`: no key,
+  `encryption key "<id>" must be canonical base64 of 32 bytes`,
+  `duplicate encryption key id`, and `encryption key id must match
+  ^[A-Za-z0-9_-]{1,64}$` (`packages/redis/src/federation-grant-store.mts`,
+  `packages/core/src/sealing/keyRing.mts`). A read never re-seals, so
   dropping the key that sealed a grant makes it read `key_unavailable` until
   it is put back; the rotation procedure below says when a key may leave.
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`).

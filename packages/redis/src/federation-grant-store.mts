@@ -384,9 +384,9 @@ export function createRedisFederationGrantStore(
 			? options.encryption.keys.map((entry) => ({ id: entry.id, key: Buffer.from(entry.key) }))
 			: [];
 	if (options.encryption.mode === "required") {
-		if (ring.length === 0) {
-			throw new Error('federation grant store: mode "required" needs at least one encryption key');
-		}
+		// A ring is a setting: every refusal of it, here or in core's sealing
+		// leaf, is a RangeError.
+		if (ring.length === 0) throw RANGE('mode "required" needs at least one encryption key');
 		// Refused here rather than at the first write: a ring that cannot seal is
 		// a configuration problem, and finding it out per grant means finding it
 		// out once a user has already consented.
@@ -885,7 +885,7 @@ export interface RedisFederationGrantStoreModuleOptions {
 }
 
 /**
- * Canonical base64 of exactly 32 bytes, or a refusal that names the key:
+ * Canonical base64 of exactly 32 bytes, or a RangeError that names the key:
  * core's rule for a configured sealing key (`decodeSealingKey`), applied at
  * boot so that a key that cannot be read is found before a user consents,
  * not per grant after.
@@ -893,9 +893,7 @@ export interface RedisFederationGrantStoreModuleOptions {
 const keyMaterial = (id: string, encoded: string): Buffer => {
 	const bytes = decodeSealingKey(encoded);
 	if (bytes === undefined) {
-		throw new Error(
-			`federation grant store: encryption key "${id}" must be canonical base64 of ${SEALING_KEY_BYTES} bytes`,
-		);
+		throw RANGE(`encryption key "${id}" must be canonical base64 of ${SEALING_KEY_BYTES} bytes`);
 	}
 	return bytes;
 };
