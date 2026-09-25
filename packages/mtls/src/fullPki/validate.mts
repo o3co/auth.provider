@@ -654,7 +654,8 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					};
 		// An outage when every source the certificate names failed as one; a
 		// source it names none of (no responder, no distribution point) was
-		// never asked, and says nothing either way.
+		// never asked, and says nothing either way — nor is it a member of the
+		// outage's cause, where it would spend one of the slots a log line keeps.
 		const asked = [ocsp, crlSide].filter(
 			(source) => source.reason !== "no_responder" && source.reason !== "no_distribution_point",
 		);
@@ -673,7 +674,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crlSide.reason} (${crlSide.detail})`,
 			...withCause(cause),
 			...(asked.length > 0 && asked.every((source) => source.outage) ? { outage: true } : {}),
-			failures: [...ocsp.failures, ...crlSide.failures],
+			failures: asked.flatMap((source) => source.failures),
 		};
 	};
 
