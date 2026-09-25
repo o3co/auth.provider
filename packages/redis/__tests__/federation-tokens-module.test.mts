@@ -3,8 +3,12 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { FederationTokenStoreClient } from "../src/clients.mjs";
 import {
+	createRedisFederationTokenStore,
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 	redisFederationTokenStoreModuleFor,
@@ -171,5 +175,145 @@ describe("redisFederationTokenStoreBuilder", () => {
 			encryption: { mode: "allow-plaintext" },
 		});
 		expect(store.kind).toBe("redis");
+	});
+});
+
+/**
+ * Stands in for the routes that read the store, so that the store is in the
+ * closure boot builds.
+ */
+const tokensReader = defineModule({
+	name: "test:federation-token-store-reader",
+	optional: ["federationTokenStore"] as const,
+	contributes: {
+		routes: [
+			{
+				mountPath: "/__test_noop__",
+				id: "test-noop",
+				handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+			},
+		],
+	},
+});
+
+/**
+ * Boots the module through `createApp` over a valid core configuration,
+ * requires the boot to fail on the store's provider, naming the module, and
+ * answers the BootError's cause.
+ */
+const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => {
+	const boot = createApp({
+		modules: [redisFederationTokenStoreModule, tokensReader],
+		bootstrapComponents: {
+			config: { ...makeValidCoreConfig(), ...extra },
+			pathResolver: (p: string) => p,
+			federationTokenStoreClient: fakeClient(),
+		} as never,
+	});
+	await expect(boot).rejects.toMatchObject({
+		name: "BootError",
+		reason: "provides-factory-failed",
+		details: { module: "redis-federation-token-store", componentKey: "federationTokenStore" },
+	});
+	return ((await boot.catch((err: unknown) => err)) as Error).cause;
+};
+
+const PLAINTEXT_UNDER_MULTI =
+	'[federation-tokens] mode "allow-plaintext" is refused because deployment.mode is "multi" ' +
+	"(a multi-replica deployment is never a development box). " +
+	'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
+	"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
+
+const KEY_OF_16 = Buffer.alloc(16, 7).toString("base64");
+
+describe("every setting the token store is given and cannot use is refused as a RangeError", () => {
+	let insecure: string | undefined;
+
+	beforeEach(() => {
+		insecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+	});
+
+	afterEach(() => {
+		if (insecure !== undefined) process.env.FEDERATION_TOKENS_ALLOW_INSECURE = insecure;
+	});
+
+	it("through the factory: a key that is not 32 bytes, plaintext where it is refused, a TTL past the Date range", () => {
+		const client = fakeClient() as unknown as FederationTokenStoreClient;
+		expect(() =>
+			createRedisFederationTokenStore({
+				client,
+				encryption: { mode: "required", key: Buffer.alloc(16, 7) },
+			}),
+		).toThrow(new RangeError("FederationTokenStore redis: encryption key must be 32 bytes"));
+		expect(() =>
+			createRedisFederationTokenStore({
+				client,
+				encryption: { mode: "allow-plaintext" },
+				deploymentMode: "multi",
+			}),
+		).toThrow(new RangeError(PLAINTEXT_UNDER_MULTI));
+		expect(() =>
+			createRedisFederationTokenStore({
+				client,
+				encryption: { mode: "required", key: Buffer.alloc(32, 7) },
+				ttl: 1e20,
+			}),
+		).toThrow(RangeError);
+	});
+
+	it("through the builder: a configured key that does not decode to 32 bytes, or none", () => {
+		const message =
+			"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)";
+		for (const key of [KEY_OF_16, Buffer.alloc(16, 7), undefined]) {
+			expect(
+				() =>
+					redisFederationTokenStoreBuilder({
+						client: fakeClient(),
+						encryption: { mode: "required", key },
+					}),
+				String(key),
+			).toThrow(new RangeError(message));
+		}
+	});
+
+	it.each([
+		[
+			"a key that does not decode to 32 bytes",
+			{ redisFederationTokenStore: { encryptionKey: KEY_OF_16 } },
+			"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
+		],
+		[
+			"no key under the default mode",
+			{ redisFederationTokenStore: {} },
+			"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
+		],
+		[
+			'plaintext under deployment.mode = "multi"',
+			{
+				redisFederationTokenStore: { encryptionMode: "allow-plaintext" },
+				deployment: { mode: "multi" },
+			},
+			PLAINTEXT_UNDER_MULTI,
+		],
+	])("at boot: %s is the BootError's cause, as a RangeError", async (_what, extra, message) => {
+		const cause = await bootRefusal(extra);
+		expect(cause).toStrictEqual(new RangeError(message));
+		expect(cause).toBeInstanceOf(RangeError);
+	});
+
+	it("leaves a missing client an Error: a composition fault, refused as every Redis builder refuses it", () => {
+		// Not a setting that is given and unusable, but a dependency that was not
+		// given; the module path never reaches it (`requires` refuses first).
+		let thrown: unknown;
+		try {
+			redisFederationTokenStoreBuilder({});
+		} catch (err) {
+			thrown = err;
+		}
+		expect((thrown as Error).constructor).toBe(Error);
+		expect((thrown as Error).message).toBe(
+			"federationTokenStore.redis: 'client' option is required",
+		);
 	});
 });

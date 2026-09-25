@@ -354,6 +354,36 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		}
 	});
 
+	it("refuses plaintext where it is refused as a RangeError, through the factory and at boot", async () => {
+		// `allow-plaintext` is a setting, and where the plaintext guard refuses it
+		// it is one the store is given and cannot use. The guard is shared with
+		// the federation-token store, which refuses it the same way.
+		const insecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		try {
+			const message =
+				'[federation-grants] mode "allow-plaintext" is refused because deployment.mode is "multi" ' +
+				"(a multi-replica deployment is never a development box). " +
+				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
+				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
+			expect(() =>
+				createRedisFederationGrantStore({
+					client,
+					encryption: { mode: "allow-plaintext" },
+					guard: { deploymentMode: "multi" },
+				}),
+			).toThrow(new RangeError(message));
+			const cause = await bootRefusal({
+				federationGrants: { encryptionMode: "allow-plaintext" },
+				deployment: { mode: "multi" },
+			});
+			expect(cause).toStrictEqual(new RangeError(message));
+			expect(cause).toBeInstanceOf(RangeError);
+		} finally {
+			if (insecure !== undefined) process.env.FEDERATION_TOKENS_ALLOW_INSECURE = insecure;
+		}
+	});
+
 	it("holds the retention and the listing allowance to a year, as core's schema does", () => {
 		// A typo nothing bounded — `tombstoneRetention = 1e18` — became a
 		// deadline Redis refuses after the script has written, and a record
