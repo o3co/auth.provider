@@ -216,7 +216,12 @@ describe("installGracefulShutdown (#290)", () => {
 			signals.get("SIGTERM")?.();
 			await vi.advanceTimersByTimeAsync(5_000);
 			expect(exit).toHaveBeenCalledWith(1);
-			expect(logger.error).toHaveBeenCalled();
+			// Each stage is an event: object-first, a snake_case name.
+			expect(logger.info).toHaveBeenCalledWith({ drainTimeoutMs: 5_000 }, "shutdown_draining");
+			expect(logger.error).toHaveBeenCalledWith(
+				{ drainTimeoutMs: 5_000 },
+				"shutdown_drain_deadline_exceeded",
+			);
 		} finally {
 			vi.useRealTimers();
 		}
@@ -316,7 +321,7 @@ describe("installGracefulShutdown (#290)", () => {
 					]),
 				},
 			},
-			"graceful shutdown: cleanup failed",
+			"shutdown_cleanup_failed",
 		);
 		for (const line of lines) {
 			expect(line).not.toContain("S3CRET");
@@ -362,7 +367,7 @@ describe("installGracefulShutdown (#290)", () => {
 					stack: FRAMES,
 				},
 			},
-			"graceful shutdown: server close failed",
+			"shutdown_server_close_failed",
 		);
 		// The frames, never the header line that repeats the message.
 		for (const line of lines) expect(line).not.toContain("Error [ERR_SERVER_NOT_RUNNING]");
@@ -395,8 +400,8 @@ describe("installGracefulShutdown (#290)", () => {
 			finishDraining();
 			await vi.advanceTimersByTimeAsync(5_000);
 			expect(logger.error).toHaveBeenCalledWith(
-				expect.objectContaining({ cleanupTimeoutMs: 5_000 }),
-				expect.stringContaining("cleanup timed out"),
+				{ cleanupTimeoutMs: 5_000 },
+				"shutdown_cleanup_timed_out",
 			);
 			expect(exit).toHaveBeenCalledWith(1);
 		} finally {
@@ -443,7 +448,7 @@ describe("installGracefulShutdown (#290)", () => {
 		await new Promise((resolve) => setImmediate(resolve));
 		expect(logger.info).toHaveBeenCalledWith(
 			{ reason: "cleanup-failed", drain: "drained", exitCode: 1 },
-			"graceful shutdown: complete",
+			"shutdown_complete",
 		);
 		expect(exit).toHaveBeenCalledWith(1);
 	});
@@ -455,7 +460,7 @@ describe("installGracefulShutdown (#290)", () => {
 		await new Promise((resolve) => setImmediate(resolve));
 		expect(logger.info).toHaveBeenCalledWith(
 			{ reason: "drained", drain: "drained", exitCode: 0 },
-			"graceful shutdown: complete",
+			"shutdown_complete",
 		);
 	});
 
