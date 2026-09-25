@@ -16,22 +16,26 @@ neighbour, a disabled grant still advertised, one module's parser setting
 another's body limit, or a memory store booting under `deployment.mode =
 "multi"` went unnoticed until the modules met in a deployment.
 
-**Owns.** The full-set suite in [`src/__tests__/`](src/__tests__/):
+**Owns.** The full set and the contracts checked on it
+([`src/__tests__/`](src/__tests__/)):
 
-- [`full-set.fixture.mts`](src/__tests__/full-set.fixture.mts) — the template's
-  composition (its fixture,
-  [`all-modules-composition.fixture.mts`](../../templates/standalone/src/__tests__/all-modules-composition.fixture.mts),
-  imported whole) with the device grant, DPoP, mTLS, token exchange, WebAuthn,
-  and the Apple and GitHub federations added as a deployment adds them, plus
-  the small modules a deployment writes itself (config bridges, a grant
-  policy). Its header says what is real and what is substituted.
-- [`full-set.test.mts`](src/__tests__/full-set.test.mts) — one replica, memory
-  stores: the added modules' boot, discovery and its switches, their flows,
-  body limits in two mount orders, and one store outage per added module.
-- [`full-set.redis.test.mts`](src/__tests__/full-set.redis.test.mts) — every
-  shared store on real Redis under `deployment.mode = "multi"`: nothing
-  declares replica-unsafe state, each added memory store is refused by name,
-  and two replicas on one database finish each other's flows.
+- **What it boots.** The template's composition with every package the
+  template does not depend on added the way a deployment adds them to that
+  manifest — the device grant, DPoP, mTLS, token exchange, WebAuthn, and the
+  Apple and GitHub federations — plus the small modules a deployment writes
+  itself (config bridges, a grant policy, a session-to-WebAuthn-subject
+  bridge). The composition, the body and outage helpers and the outage runner
+  are not copied: they are the template suite's, exported by its fixture,
+  [`all-modules-composition.fixture.mts`](../../templates/standalone/src/__tests__/all-modules-composition.fixture.mts).
+  Upstream identity providers are fakes; nothing reaches the network.
+- **What it checks, on one replica with every store in memory.** What the
+  added modules contribute: their boot, discovery and each added feature's
+  switch, their flows, their body limits in both mount orders, and one outage
+  per added store under the #685 rule.
+- **What it checks on real Redis, under `deployment.mode = "multi"`.** That
+  nothing in the full set declares replica-unsafe state, that each added
+  memory store is refused at boot by name, and that two replicas on one
+  database finish each other's flows.
 
 **Does not own.** The template's own composition, which its suite pins and
 ships in every scaffold
@@ -85,7 +89,7 @@ pnpm --filter @o3co/auth-provider-composition run test                          
 pnpm --filter @o3co/auth-provider-composition exec vitest run --maxWorkers=2    # vitest alone
 ```
 
-The Redis-backed file uses the Redis package's shared test container
+The real-Redis cases run on the Redis package's shared test container
 ([`redis-container.global.mts`](../../packages/redis/__tests__/support/redis-container.global.mts)),
-so it needs a container runtime, as `packages/redis` does. CI runs the suite
+so they need a container runtime, as `packages/redis` does. CI runs the suite
 in the `build-and-test` job's workspace test step.

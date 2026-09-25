@@ -15,10 +15,13 @@
  */
 
 /**
- * Every workspace package booted together on one replica: the standalone
- * template's composition with the seven packages it does not depend on added
- * to it (`full-set.fixture.mts`), held to the contracts that only exist when
- * all of them meet.
+ * Every workspace package booted together on one replica, every store in
+ * memory: the standalone template's composition with the seven packages it
+ * does not depend on added to it (`full-set.fixture.mts`), held to the
+ * contracts that only exist when all of them meet — the added modules' boot,
+ * discovery and each added feature's switch, their flows, their body limits
+ * in both mount orders (with `Content-Length` and chunked), and one outage
+ * per added store under the #685 rule.
  *
  * The template's own suite (`templates/standalone/src/__tests__/
  * all-modules-composition.test.mts`) pins its composition, and ships in every
