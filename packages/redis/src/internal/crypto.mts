@@ -21,6 +21,11 @@ import {
 
 const ALGO = "aes-256-gcm";
 const IV_LEN = 12;
+/**
+ * The only tag length written and the only one read: Node before 26 accepts
+ * a GCM tag of 4 to 16 bytes on decrypt unless told the length.
+ */
+const TAG_LEN = 16;
 const KEY_LEN = 32;
 const VERSION = "v1";
 
@@ -48,7 +53,7 @@ const aadBytes = (aad: Aad): Buffer => (typeof aad === "string" ? Buffer.from(aa
 export function encryptTokenField(plaintext: string, key: Buffer, aad?: Aad): string {
 	if (key.length !== KEY_LEN) throw new Error(`encryption key must be ${KEY_LEN} bytes`);
 	const iv = randomBytes(IV_LEN);
-	const cipher = createCipheriv(ALGO, key, iv);
+	const cipher = createCipheriv(ALGO, key, iv, { authTagLength: TAG_LEN });
 	if (aad !== undefined) cipher.setAAD(aadBytes(aad));
 	const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 	const tag = cipher.getAuthTag();
@@ -79,7 +84,10 @@ export function decryptTokenField(envelope: string, key: Buffer, aad?: Aad): str
 	const iv = Buffer.from(ivB64, "base64url");
 	const ct = Buffer.from(ctB64, "base64url");
 	const tag = Buffer.from(tagB64, "base64url");
-	const decipher = createDecipheriv(ALGO, key, iv);
+	// Every v1 envelope is written with a 12-byte IV and a 16-byte tag; GCM
+	// itself would take other lengths, and a shorter tag is a weaker one.
+	if (iv.length !== IV_LEN || tag.length !== TAG_LEN) throw new Error("invalid envelope format");
+	const decipher = createDecipheriv(ALGO, key, iv, { authTagLength: TAG_LEN });
 	if (aad !== undefined) decipher.setAAD(aadBytes(aad));
 	decipher.setAuthTag(tag);
 	const pt = Buffer.concat([decipher.update(ct), decipher.final()]);

@@ -38,6 +38,13 @@ import { checkSealingKeyRing, isSealingKeyId, type SealingKeyRing } from "./keyR
 
 const ALGO = "aes-256-gcm";
 const IV_LEN = 12;
+/**
+ * The only tag length sealed and the only one read. Node before 26 accepts
+ * a GCM tag of 4 to 16 bytes on decrypt unless the decipher is told the
+ * length, and a short tag is both easier to forge and a way to recover the
+ * authentication key.
+ */
+const TAG_LEN = 16;
 const VERSION = "v2";
 
 /**
@@ -117,10 +124,6 @@ const aad = (head: Buffer, keyId: Buffer, record: Buffer): Buffer =>
  * `checkSealingKeyRing`) and on a purpose outside {@link SealBinding.purpose}'s
  * rule: both are faults of the caller or its configuration, never of the
  * value.
- *
- * A wrong IV or tag length is not checked on open: `createDecipheriv` and
- * `setAuthTag` refuse both, and a check in front of them could only ever
- * report what they already do.
  */
 export function sealWithKeyRing(
 	plaintext: string,
@@ -133,7 +136,7 @@ export function sealWithKeyRing(
 	if (sealing === undefined) throw new RangeError("no encryption key to seal with");
 	const keyId = Buffer.from(sealing.id, "utf8");
 	const iv = randomBytes(IV_LEN);
-	const cipher = createCipheriv(ALGO, sealing.key, iv);
+	const cipher = createCipheriv(ALGO, sealing.key, iv, { authTagLength: TAG_LEN });
 	cipher.setAAD(aad(head, keyId, binding.record));
 	const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 	return [
@@ -170,12 +173,15 @@ export function openWithKeyRing(
 	if (keyId === undefined || iv === undefined || ct === undefined || tag === undefined) {
 		return { state: "unreadable" };
 	}
+	// Every envelope is sealed with a 12-byte IV and a 16-byte tag; GCM itself
+	// would take other lengths, and a shorter tag is a weaker one.
+	if (iv.length !== IV_LEN || tag.length !== TAG_LEN) return { state: "unreadable" };
 	const id = keyId.toString("utf8");
 	if (!isSealingKeyId(id)) return { state: "unreadable" };
 	const entry = ring.find((candidate) => candidate.id === id);
 	if (entry === undefined) return { state: "key_unavailable" };
 	try {
-		const decipher = createDecipheriv(ALGO, entry.key, iv);
+		const decipher = createDecipheriv(ALGO, entry.key, iv, { authTagLength: TAG_LEN });
 		decipher.setAAD(aad(head, keyId, binding.record));
 		decipher.setAuthTag(tag);
 		const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
