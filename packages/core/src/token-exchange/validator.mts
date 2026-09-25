@@ -32,9 +32,9 @@
 export interface ExchangeTokenValidationContext {
 	readonly role: "subject" | "actor";
 	/**
-	 * Reserved for validators that need request-resource context in a future
-	 * contract. The built-in grant handler enforces resource/audience binding
-	 * after policy evaluation, so v0.5.x validators should not rely on this.
+	 * Reserved; the built-in grant handler never sets it. It checks the
+	 * request's audience and resources against the subject token itself,
+	 * before the policy runs, so a validator must not rely on this.
 	 */
 	readonly requestedResources?: readonly string[];
 }
