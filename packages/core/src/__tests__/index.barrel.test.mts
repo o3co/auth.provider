@@ -170,3 +170,12 @@ describe("core barrel — the sealing leaf", () => {
 		}
 	});
 });
+
+describe("core barrel — the router's terminal error handler", () => {
+	it("re-exports it, for a host that mounts routes of its own beside the router", () => {
+		// The router `createApp` returns ends in it; a host's own routes (a
+		// health check, a metrics scrape) need the same answer after them.
+		expect(typeof core.terminalErrorHandler).toBe("function");
+		expect(core.terminalErrorHandler(core.consoleLogger)).toHaveLength(4);
+	});
+});

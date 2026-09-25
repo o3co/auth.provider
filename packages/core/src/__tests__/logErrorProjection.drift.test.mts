@@ -132,6 +132,13 @@
  * receiver named `sink` or `…Sink`; a sink held under another name is left
  * to review.
  *
+ * A sixth rule reads the arguments of every error built in a file that
+ * binds a caught error (`new …Error(…)`, a BootError's `message:` among
+ * them): the caught error's text flattened into them — `String(err)`,
+ * `err.message`, the error in a template's `${…}` — is flagged, since the
+ * error built from it is printed message first wherever it ends up.
+ * `THROWN_FLATTENING_ALLOWED` lists the sites that stay, with the reason.
+ *
  * Where it looks is `SOURCE_ROOTS` below: every workspace package's `src`
  * and the standalone template's, tests (`__tests__`) left out. A package
  * added under `packages/` or `templates/` fails "names every workspace
@@ -184,9 +191,10 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 		file,
 		projection: "unavailableLogFields",
 		why:
-			"core's own (middleware/_responseHeaders.mts): a token-binding refusal's string `reason` " +
-			"and `loggableError` of its `cause` — nothing else of the refusal, so exactly as strict " +
-			"as loggableError",
+			"core's own (middleware/_responseHeaders.mts): a token-binding refusal's `reason` when it " +
+			"is a code (`isLoggableReason`, the rule loggableError keeps a `reason` by) and " +
+			"`loggableError` of its `cause` — nothing else of the refusal, so exactly as strict as " +
+			"loggableError",
 	})),
 	...[
 		"packages/core/src/middleware/tokenBinding.mts",
@@ -509,6 +517,119 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 			"the NOSCRIPT classifier: ioredis's ReplyError carries no code, only Redis's reply text, and " +
 			"ioredis's own Script reads the same text the same way; the text decides a boolean and is " +
 			"never logged or thrown",
+	},
+];
+
+/**
+ * The third shape: a caught error's text in the message of an error built
+ * from it — in the arguments of any `new <Name>Error(…)`, a BootError's
+ * `message:` among them, whether that error is thrown or handed on
+ * (`reject(…)`, `next(…)`). A boot failure and a thrown refusal are printed
+ * whole, message first, so text flattened into one is text in the log the
+ * process ends in: the boot planner's `String(thrownValue)` put a parser's
+ * quoted input, a Redis reply's arguments and a thrown string there.
+ *
+ * Flagged, for a name the file binds as a caught error: `String(x)`,
+ * `JSON.stringify(x)`, `inspect(x)` / `util.inspect(x, …)`, `x.message`,
+ * `x.stack` and `x.toString()` (optionally chained, and through a cast of
+ * any type text: `(x as Error).message`, `(x as Error | undefined)?.message`,
+ * `(x as { message: string }).message`), `"…" + x` and `x + "…"`, and —
+ * inside a template's `${…}` — the error itself. Not flagged: `x` as a value elsewhere (`{ cause: x }`,
+ * `originalError: x`), a field of it that is not its text
+ * (`x.issues.length`, `x.code`), `x` handed to the rules that name an error
+ * without its text (`failureSummary`, `failureDetail`, `uncappedDetail`,
+ * `loggableError`). Not seen, and left to review: the message built into a
+ * variable first (`const text = String(err); throw new Error(text)`), and
+ * `new Error(err)`, whose argument is converted by the constructor.
+ */
+const ERROR_CONSTRUCTION = /\bnew\s+(?:[A-Z][\w$]*)?Error\s*\(/g;
+
+/** The calls that name an error without its text, which a message may hand one to. */
+const TEXTLESS_NAMINGS = ["failureSummary", "failureDetail", "uncappedDetail", "loggableError"];
+
+/**
+ * Whether `name`'s text is flattened into the arguments of an error's
+ * construction: `code` is them with literals blanked, `templates` the
+ * expressions of their templates' `${…}`.
+ */
+function flattenedInto(code: string, templates: readonly string[], name: string): boolean {
+	const n = name.replace(/\$/g, "\\$");
+	const text = new RegExp(
+		[
+			String.raw`\bString\(\s*${n}\s*\)`,
+			String.raw`\bJSON\.stringify\(\s*${n}\s*[,)]`,
+			// `inspect(x)`, `util.inspect(x, …)`: the whole error, printed.
+			String.raw`\binspect\(\s*${n}\s*[,)]`,
+			// `x.message`, and the same read through a cast of any type text:
+			// `(x as Error).message`, `(x as unknown as Error).stack`,
+			// `(x as Error | undefined)?.message`, `(x as { message: string }).message`.
+			String.raw`(?:(?<![\w$.])${n}|\(\s*${n}\s+as\s[^()]*\))\s*(?:\?\.|\.)\s*(?:message|stack|toString)\b`,
+			String.raw`""\s*\+\s*${n}(?![\w$])`,
+			String.raw`(?<![\w$.])${n}\s*\+\s*""`,
+		].join("|"),
+	);
+	if (text.test(code)) return true;
+	// The error itself — not a field read off it — in a template's `${…}`.
+	const whole = new RegExp(String.raw`(?<![\w$.])${n}(?![\w$]|\s*(?:\?\.|\.|\[))`, "g");
+	const named = new RegExp(String.raw`\b(?:${TEXTLESS_NAMINGS.join("|")})\(\s*$`);
+	return templates.some((expression) => {
+		if (text.test(expression)) return true;
+		for (const match of expression.matchAll(whole)) {
+			const at = match.index ?? 0;
+			if (
+				named.test(expression.slice(0, at)) &&
+				/^\s*\)/.test(expression.slice(at + name.length))
+			) {
+				continue;
+			}
+			return true;
+		}
+		return false;
+	});
+}
+
+/** The line of every error construction in `original` that flattens a caught error into its arguments. */
+function thrownMessageSitesIn(original: string): number[] {
+	const source = withoutComments(original);
+	const names = caughtNames(source);
+	const lines: number[] = [];
+	if (names.size === 0) return lines;
+	for (const construction of source.matchAll(ERROR_CONSTRUCTION)) {
+		const at = construction.index ?? 0;
+		const args = argumentsFrom(source, at + construction[0].length - 1);
+		const code = literalsBlanked(args);
+		const templates = templateExpressions(args);
+		for (const name of names) {
+			if (flattenedInto(code, templates, name)) {
+				lines.push(source.slice(0, at).split("\n").length);
+				break;
+			}
+		}
+	}
+	return lines;
+}
+
+function thrownMessageSites(): Map<string, number[]> {
+	const sites = new Map<string, number[]>();
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			const lines = thrownMessageSitesIn(readFileSync(file, "utf8"));
+			if (lines.length > 0) sites.set(relative(repoRoot, file), lines);
+		}
+	}
+	return sites;
+}
+
+/** The error constructions that keep a caught error's text, each file's count exact, with why. */
+const THROWN_FLATTENING_ALLOWED: ReadonlyArray<{
+	readonly file: string;
+	readonly sites: number;
+	readonly why: string;
+}> = [
+	{
+		file: "packages/core/src/jwt/verify.mts",
+		sites: 1,
+		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message (the site FLATTENING_ALLOWED lists)",
 	},
 ];
 
@@ -1150,5 +1271,129 @@ describe("a built-in audit event reaches its sink only through core's recordAudi
 		],
 	])("does not flag %s", (_label, source) => {
 		expect(sinkWritesIn(source)).toEqual([]);
+	});
+});
+
+describe("a caught error is not flattened into the message of an error built from it", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}: every such site is one this file lists, with its reason`, () => {
+		const unexpected: string[] = [];
+		for (const [file, lines] of thrownMessageSites()) {
+			const allowed = THROWN_FLATTENING_ALLOWED.find((entry) => entry.file === file)?.sites ?? 0;
+			if (lines.length > allowed) unexpected.push(`${file}:${lines.join(",")}`);
+		}
+		expect(unexpected).toEqual([]);
+	});
+
+	it("has no stale entry in THROWN_FLATTENING_ALLOWED", () => {
+		const sites = thrownMessageSites();
+		for (const { file, sites: allowed, why } of THROWN_FLATTENING_ALLOWED) {
+			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(allowed);
+		}
+	});
+
+	describe("the guard sees the shapes it exists for, and no others", () => {
+		const flags = (source: string): boolean => thrownMessageSitesIn(source).length > 0;
+
+		it.each([
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+			["the error in a template", "try { x() } catch (err) { throw new Error(`failed: ${err}`); }"],
+			[
+				"its message in a template",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`failed: ${err.message}`); }",
+			],
+			[
+				"its message, optionally chained",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`failed: ${err?.message}`); }",
+			],
+			["String(err)", `try { x() } catch (err) { throw new Error("failed: " + String(err)); }`],
+			["concatenation", `try { x() } catch (err) { throw new Error("failed: " + err); }`],
+			[
+				"its message as the argument",
+				`try { x() } catch (err) { throw new TypeError(err.message); }`,
+			],
+			["its stack", `try { x() } catch (err) { throw new Error(err.stack); }`],
+			["its toString()", `try { x() } catch (err) { throw new Error(err.toString()); }`],
+			["JSON.stringify of it", `try { x() } catch (err) { throw new Error(JSON.stringify(err)); }`],
+			[
+				"its message through a cast",
+				`try { x() } catch (err) { throw new Error("failed: " + (err as Error).message); }`,
+			],
+			[
+				"its stack through a cast",
+				`try { x() } catch (err) { throw new Error((err as Error).stack); }`,
+			],
+			[
+				"its toString() through a chain of casts",
+				`try { x() } catch (err) { throw new Error((err as unknown as Error).toString()); }`,
+			],
+			["inspect of it", `try { x() } catch (err) { throw new Error(inspect(err)); }`],
+			[
+				"its message through a union cast",
+				`try { x() } catch (err) { throw new Error("failed: " + (err as Error | undefined)?.message); }`,
+			],
+			[
+				"its message through an object-type cast",
+				`try { x() } catch (err) { throw new Error((err as { message: string }).message); }`,
+			],
+			[
+				"its stack through a union cast in a template",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`failed: ${(err as Error | null)?.stack}`); }",
+			],
+			[
+				"util.inspect of it, with options",
+				`try { x() } catch (err) { throw new Error(util.inspect(err, { depth: 5 })); }`,
+			],
+			[
+				"a BootError's message",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (thrownValue) { throw new BootError({ message: `factory failed: ${String(thrownValue)}`, reason, stage, details, cause: thrownValue }); }",
+			],
+			[
+				"an error handed to a promise, not thrown",
+				`p.catch((err) => reject(new RangeError(err.message)));`,
+			],
+			[
+				"an error an Express error handler passes on",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"app.use((failure, req, res, next) => { next(new Error(`wrapped: ${failure}`)); });",
+			],
+		])("flags %s", (_label, source) => {
+			expect(flags(source)).toBe(true);
+		});
+
+		it.each([
+			[
+				"the error as `cause`",
+				`try { x() } catch (err) { throw new Error("failed", { cause: err }); }`,
+			],
+			[
+				"a BootError carrying it, its message by the projection's rules",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (thrownValue) { throw new BootError({ message: `factory failed: ${failureSummary(thrownValue)}`, details: { originalError: thrownValue }, cause: thrownValue }); }",
+			],
+			[
+				"a field of it that is not its text",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"try { x() } catch (err) { throw new Error(`${err.issues.length} issue(s)`, { cause: err }); }",
+			],
+			[
+				"a refusal with fixed text and the error as cause",
+				`try { x() } catch (err) { throw new DPoPError("replay_store_fault", "the store broke its contract", undefined, undefined, { cause: err }); }`,
+			],
+			[
+				"a name that is not a caught error",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"const error = describe(code); throw new Error(`refused: ${error}`);",
+			],
+			[
+				"its message in a call that builds no error",
+				`try { x() } catch (err) { return { ok: false, text: String(err) }; }`,
+			],
+		])("does not flag %s", (_label, source) => {
+			expect(flags(source)).toBe(false);
+		});
 	});
 });

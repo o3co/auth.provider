@@ -519,6 +519,8 @@ export {
 	type ProtectedResourceBindingOptions,
 	protectedResourceBindingMw,
 } from "./middleware/protectedResourceBinding.mjs";
+// Middleware — the answer to an error a route let through; `createApp` ends its router with it
+export { terminalErrorHandler } from "./middleware/terminalError.mjs";
 // Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
 export {
 	type DispatchPolicy,
@@ -827,7 +829,9 @@ export { SUBJECT_REVOCATION_ABSENCE_POLICY } from "./user-sessions/types.mjs";
 
 // Memory adapters (re-exported so consumers can construct without going through modules)
 export {
+	ChallengeStoreFullError,
 	createMemoryChallengeStore,
+	DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
 	type MemoryChallengeStore,
@@ -858,10 +862,12 @@ export type {
 } from "./challenges/types.mjs";
 export {
 	createMemoryReplaySeenSet,
+	DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
 	type MemoryReplaySeenSet,
 	type MemoryReplaySeenSetOptions,
+	ReplaySeenSetFullError,
 } from "./replay-seen-set/adapters/memory.mjs";
 export {
 	createReplaySeenSetFactory,
@@ -870,6 +876,10 @@ export {
 } from "./replay-seen-set/factory.mjs";
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
+export {
+	DPOP_PROOF_REPLAY_SCOPE_PREFIX,
+	DPOP_PROOF_REPLAY_SHARE,
+} from "./replay-seen-set/scopes.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 // Canonical key helper (exported for integrators writing their own adapters
 // to preserve cross-adapter parity per A1 §7.3)

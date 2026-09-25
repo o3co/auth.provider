@@ -32,13 +32,15 @@
  *   `errWithCause` among them) hands anything else through untouched, so
  *   under pino's defaults, the standalone template's logger, `consoleLogger`
  *   or any other, every field below reaches the line, at every level.
- * - `detail`: the error's message, capped at 256 characters, with the two
+ * - `detail`: the error's message, capped at 256 characters, with the
  *   known quoting shapes removed — `detail` (RFC 7807's name for an
  *   occurrence's human-readable explanation) rather than `message`, for the
  *   reason above. A SyntaxError's message is dropped (V8's JSON.parse and
  *   body-parser quote the input); only ` at position N` survives, as
- *   `position`, N at most ten digits and none from a longer number. Redis's
- *   `, with args beginning with: …` is cut from any message. Other text a
+ *   `position`, N at most ten digits and none from a longer number. A
+ *   YAMLException's is dropped whole (js-yaml quotes the lines around the
+ *   fault). Redis's `, with args beginning with: …` is cut from any
+ *   message. Other text a
  *   peer wrote into a message is kept — the projection cannot tell it from
  *   this process's own — but on one line: every character that breaks a
  *   line or reorders it on screen ({@link lineSafeText}: C0, DEL, C1,
@@ -122,9 +124,9 @@ export interface LoggableError {
 	readonly name: string;
 	/**
 	 * The error's message, on one line (see {@link lineSafeText}). Absent for a
-	 * SyntaxError, which quotes its input; a Redis reply's echoed arguments are
-	 * cut. Not `message`, which would make a serializer take the projection
-	 * for an Error.
+	 * SyntaxError or a YAMLException, which quote their input; a Redis reply's
+	 * echoed arguments are cut. Not `message`, which would make a serializer
+	 * take the projection for an Error.
 	 */
 	readonly detail?: string;
 	/** A SyntaxError's `position N`, read out of its message. */
@@ -245,6 +247,14 @@ export const LOGGED_MAX_PROJECTIONS = 16;
 const REASON_CODE = /^[a-z]+(?:[_-][a-z]+)*$/;
 const REASON_MAX_LENGTH = 64;
 
+/**
+ * Whether `value` is a `reason` a log line may carry: a code — lowercase
+ * words joined by `_` or `-`, at most 64 characters. The projection's own
+ * rule, for a line that reads a `reason` off something other than an error.
+ */
+export const isLoggableReason = (value: unknown): value is string =>
+	typeof value === "string" && value.length <= REASON_MAX_LENGTH && REASON_CODE.test(value);
+
 /** A field that records an HTTP status beside `status`: `storeStatus`, `upstreamStatus`. */
 const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
 
@@ -355,6 +365,24 @@ const descriptionOf = (value: unknown): string | undefined => {
  * ReplyError (ioredis), node-redis's ErrorReply (named plain "Error").
  */
 const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
+
+/**
+ * The errors whose message quotes the input they could not parse, and is
+ * dropped whole: a SyntaxError (V8's JSON.parse and body-parser quote the
+ * input) and js-yaml's YAMLException (a snippet of the lines around the
+ * fault — a clients file's secrets, when a host's own module parses one).
+ */
+const QUOTES_ITS_INPUT: ReadonlySet<string> = new Set(["SyntaxError", "YAMLException"]);
+
+/**
+ * An error's message by the projection's rules, before `detail`'s cap:
+ * nothing for an error that quotes its input ({@link QUOTES_ITS_INPUT}) or
+ * for a message that is not a string; Redis's echoed arguments cut.
+ */
+const messageText = (name: string, message: unknown): string | undefined =>
+	typeof message !== "string" || QUOTES_ITS_INPUT.has(name)
+		? undefined
+		: message.replace(REDIS_ECHOED_ARGS, "");
 
 /** A V8 stack frame line. */
 const FRAME = /^ {4}at /;
@@ -502,11 +530,7 @@ const reasonOf = (err: object): string | undefined => {
 		return undefined;
 	}
 	const reason = read(err, "reason");
-	return typeof reason === "string" &&
-		reason.length <= REASON_MAX_LENGTH &&
-		REASON_CODE.test(reason)
-		? reason
-		: undefined;
+	return isLoggableReason(reason) ? reason : undefined;
 };
 
 /**
@@ -581,6 +605,22 @@ const responseFields = (value: unknown): LoggableError["response"] | undefined =
 		...(typeof contentType === "string" ? { contentType: capped(contentType) } : {}),
 	};
 };
+
+/**
+ * The text `detail` is cut from: `err`'s message by the projection's rules —
+ * nothing for a SyntaxError or a YAMLException, a message that is not a
+ * string or a value that is not an Error; a Redis reply's echoed arguments
+ * cut; on one line ({@link lineSafeText}'s filter) — without the
+ * 256-character cap. For a message read once and whole rather than a log
+ * field: a boot failure's, whose advice often runs past 256 characters
+ * (`boot/failure-summary.mts`).
+ */
+export function uncappedDetail(err: unknown): string | undefined {
+	if (!isError(err)) return undefined;
+	const rawName = read(err, "name");
+	const text = messageText(typeof rawName === "string" ? rawName : "Error", read(err, "message"));
+	return text === undefined ? undefined : oneLine(text);
+}
 
 /**
  * Project an error onto the fields a log line may carry — the rules are the
@@ -669,15 +709,12 @@ function ownFieldsOf(err: unknown): Draft {
 	const reason = reasonOf(err);
 	const command = commandOf(err);
 
-	let detail: string | undefined;
+	const text = messageText(name, rawMessage);
+	const detail = text === undefined ? undefined : capped(text);
 	let position: number | undefined;
-	if (typeof rawMessage === "string") {
-		if (name === "SyntaxError") {
-			const at = SYNTAX_POSITION.exec(rawMessage);
-			position = at ? Number(at[1]) : undefined;
-		} else {
-			detail = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
-		}
+	if (typeof rawMessage === "string" && name === "SyntaxError") {
+		const at = SYNTAX_POSITION.exec(rawMessage);
+		position = at ? Number(at[1]) : undefined;
 	}
 
 	return {

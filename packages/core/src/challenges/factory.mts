@@ -15,6 +15,7 @@
  */
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
+import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import { createMemoryChallengeStore } from "./adapters/memory.mjs";
 import type { ChallengeStore } from "./types.mjs";
 
@@ -37,9 +38,16 @@ export function createChallengeStoreFactory(): ChallengeStoreFactory {
 
 /**
  * Register the in-tree built-in builders on a ChallengeStoreFactory.
- * Currently registers "memory". Throws AdapterFactoryError reason "duplicate"
- * if any builtin name is already registered.
+ * Currently registers "memory", capped at the adapter config's `maxEntries`
+ * (`factory.create({ type: "memory", maxEntries })`, read as
+ * `challengeStore.memory.maxEntries` is: absent means the default, a value it
+ * cannot use is a RangeError naming the key). Throws AdapterFactoryError
+ * reason "duplicate" if any builtin name is already registered.
  */
 export function registerBuiltinChallengeStores(factory: ChallengeStoreFactory): void {
-	factory.register("memory", () => createMemoryChallengeStore());
+	factory.register("memory", (config) =>
+		createMemoryChallengeStore(
+			configuredMaxEntries(config.maxEntries, "ChallengeStore memory adapter maxEntries"),
+		),
+	);
 }

@@ -37,14 +37,19 @@
  * the live entries plus at most those that expired within one interval.
  */
 
-/** How a store's sweep is paced. A bad value falls back to the store's default rather than disabling the sweep. */
+/**
+ * How a store's sweep is paced; each value left out (`undefined`) takes the
+ * store's default.
+ * A value given that cannot be used is a `RangeError` naming the store and
+ * the option — never replaced by the default, which would leave a setting
+ * that says one thing and a store that does another.
+ */
 export interface AmortizedSweepOptions {
-	/** Writes between sweeps. A non-integer or non-positive value falls back to the default. */
+	/** Writes between sweeps: a positive whole number. */
 	readonly sweepInterval?: number;
 	/**
-	 * The least time between two sweeps, in milliseconds. `0` sweeps on the
-	 * write interval alone. A negative or non-integer value falls back to the
-	 * default rather than being read as no floor.
+	 * The least time between two sweeps: a whole number of milliseconds, `0`
+	 * or more. `0` sweeps on the write interval alone.
 	 */
 	readonly minSweepIntervalMs?: number;
 }
@@ -52,36 +57,60 @@ export interface AmortizedSweepOptions {
 export interface AmortizedSweep {
 	/** Count one write; `true` when the caller is to sweep now. */
 	wrote(): boolean;
+	/**
+	 * `true` when the caller may sweep now whatever the write count — at
+	 * least `minSweepIntervalMs` since the last sweep — and counts it as that
+	 * sweep. For a store at its cap, which reclaims what has expired before it
+	 * refuses: a sweep per refused write would make each one O(size) under
+	 * the flood that fills it.
+	 */
+	due(): boolean;
 }
 
+/**
+ * The pacing for a store: `owner` names it (the factory the options were
+ * given to) in the refusal of an option it cannot use.
+ */
 export function createAmortizedSweep(
 	options: AmortizedSweepOptions,
 	defaults: { readonly sweepInterval: number; readonly minSweepIntervalMs: number },
+	owner: string,
 ): AmortizedSweep {
+	// Only a setting left out takes the default: an explicit `null` is refused.
 	const sweepInterval =
-		typeof options.sweepInterval === "number" &&
-		Number.isInteger(options.sweepInterval) &&
-		options.sweepInterval > 0
-			? options.sweepInterval
-			: defaults.sweepInterval;
+		options.sweepInterval === undefined ? defaults.sweepInterval : options.sweepInterval;
+	if (!Number.isInteger(sweepInterval) || sweepInterval <= 0) {
+		throw new RangeError(
+			`${owner}: sweepInterval must be a positive whole number (got ${String(sweepInterval)})`,
+		);
+	}
 	const minSweepIntervalMs =
-		typeof options.minSweepIntervalMs === "number" &&
-		Number.isInteger(options.minSweepIntervalMs) &&
-		options.minSweepIntervalMs >= 0
-			? options.minSweepIntervalMs
-			: defaults.minSweepIntervalMs;
+		options.minSweepIntervalMs === undefined
+			? defaults.minSweepIntervalMs
+			: options.minSweepIntervalMs;
+	if (!Number.isInteger(minSweepIntervalMs) || minSweepIntervalMs < 0) {
+		throw new RangeError(
+			`${owner}: minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got ${String(minSweepIntervalMs)})`,
+		);
+	}
 	let writesSinceSweep = 0;
 	let lastSweepAtMonotonicMs = Number.NEGATIVE_INFINITY;
+
+	/** Past the floor: record the sweep and answer `true`. */
+	const pastFloor = (): boolean => {
+		const monotonicMs = performance.now();
+		if (monotonicMs - lastSweepAtMonotonicMs < minSweepIntervalMs) return false;
+		writesSinceSweep = 0;
+		lastSweepAtMonotonicMs = monotonicMs;
+		return true;
+	};
 
 	return {
 		wrote() {
 			writesSinceSweep += 1;
 			if (writesSinceSweep < sweepInterval) return false;
-			const monotonicMs = performance.now();
-			if (monotonicMs - lastSweepAtMonotonicMs < minSweepIntervalMs) return false;
-			writesSinceSweep = 0;
-			lastSweepAtMonotonicMs = monotonicMs;
-			return true;
+			return pastFloor();
 		},
+		due: pastFloor,
 	};
 }

@@ -14,10 +14,14 @@
  * limitations under the License.
  */
 import { defineModule } from "../modules/manifest/index.mjs";
+import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import { createMemoryReplaySeenSet } from "./adapters/memory.mjs";
 
 /**
- * Built-in module that provides the in-process memory ReplaySeenSet.
+ * Built-in module that provides the in-process memory ReplaySeenSet, capped
+ * at `replaySeenSet.memory.maxEntries` when the config sets it (the adapter's
+ * default otherwise); a value that is not a positive whole number refuses
+ * the boot, naming the key.
  * Per A1 §8.1.
  */
 export const memoryReplaySeenSetModule = defineModule({
@@ -28,7 +32,14 @@ export const memoryReplaySeenSetModule = defineModule({
 		reason:
 			"single-use records fork per replica — a private_key_jwt client assertion, the jti of an ID-JAG (jwt-bearer) assertion, a consumed WebAuthn challenge or, with DPoP enabled, a DPoP proof captured once can be replayed once against each replica",
 	},
+	requires: ["config"] as const,
 	provides: {
-		replaySeenSet: () => createMemoryReplaySeenSet(),
+		replaySeenSet: ({ config }) =>
+			createMemoryReplaySeenSet(
+				configuredMaxEntries(
+					config?.replaySeenSet?.memory?.maxEntries,
+					"replaySeenSet.memory.maxEntries",
+				),
+			),
 	},
 });

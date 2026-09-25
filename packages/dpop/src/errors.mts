@@ -37,6 +37,7 @@ export type DPoPReasonCode =
 	| "iat_out_of_window"
 	| "replay_detected"
 	| "replay_store_unavailable"
+	| "replay_store_full"
 	| "replay_store_fault"
 	| "multiple_headers"
 	| "ath_missing"
@@ -51,12 +52,13 @@ export type DPoPReasonCode =
  * failure but four. The nonce ones are `"use_dpop_nonce"` (§8 / §9, #530):
  * `nonce_required` and `nonce_invalid` are an instruction to retry with the
  * nonce the answer carries in `responseHeaders`, not a verdict on the
- * proof. `replay_store_unavailable` and `replay_store_fault` are
- * `"temporarily_unavailable"`: the replay record could not be read or
- * written — the store is down, or it broke its own contract — so the proof
- * was not judged at all, and core's dispatchers answer it 503
- * (`unavailable`). The two reasons keep an outage and a composition fault
- * apart in the audit record. The `reason`
+ * proof. `replay_store_unavailable`, `replay_store_full` and
+ * `replay_store_fault` are `"temporarily_unavailable"`: the replay record
+ * could not be read or written — the store is down, it is full (core's
+ * in-process set holding DPoP's share of its cap), or it broke its own
+ * contract — so the proof was not judged at all, and core's dispatchers
+ * answer it 503 (`unavailable`). The three reasons keep an outage, a flood
+ * or an undersized cap, and a composition fault apart in the log. The `reason`
  * field carries a granular sub-classification for audit emission — it must
  * never reach the wire.
  *
@@ -87,8 +89,8 @@ export class DPoPError extends Error {
 	readonly retryInstruction?: string;
 	/**
 	 * Core's `TokenBindingRefusal.unavailable`: set for
-	 * `replay_store_unavailable` and `replay_store_fault`, the refusals that
-	 * are the server's fault. The token endpoint and a protected resource
+	 * `replay_store_unavailable`, `replay_store_full` and `replay_store_fault`,
+	 * the refusals that are the server's fault. The token endpoint and a protected resource
 	 * answer them `503 temporarily_unavailable` with this description and no
 	 * challenge — the proof may be perfectly good. The description is the same
 	 * for both: what went wrong on the server is the operator's to read in the
@@ -97,7 +99,7 @@ export class DPoPError extends Error {
 	readonly unavailable?: string;
 
 	/**
-	 * @param options.cause For the two outage reasons: the replay store's error
+	 * @param options.cause For the three outage reasons: the replay store's error
 	 *   that stopped the verdict — core's `TokenBindingRefusal.cause`. The
 	 *   dispatcher that answers the 503 logs its projection; this package does
 	 *   not log the outage itself. For a `malformed_proof` a library refused
@@ -117,7 +119,10 @@ export class DPoPError extends Error {
 		this.name = "DPoPError";
 		this.reason = reason;
 		const nonceRefusal = reason === "nonce_required" || reason === "nonce_invalid";
-		const outage = reason === "replay_store_unavailable" || reason === "replay_store_fault";
+		const outage =
+			reason === "replay_store_unavailable" ||
+			reason === "replay_store_full" ||
+			reason === "replay_store_fault";
 		this.code = nonceRefusal
 			? "use_dpop_nonce"
 			: outage

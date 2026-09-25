@@ -458,6 +458,40 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
 	});
 
+	it("leaves out an outage's reason that is not a code, as the verdict line does", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const err = Object.assign(new Error("replay store down"), {
+			code: "temporarily_unavailable",
+			unavailable: "the replay store cannot be read; retry later",
+			reason: "replay store at 10.0.0.7 refused SET dpop-proof:free-text-marker",
+		});
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		const { res } = await run(
+			protectedResourceBindingMw({
+				mechanisms: [throwingMechanism("dpop", err)],
+				logger: logger as never,
+			}),
+			`DPoP ${token}`,
+		);
+		expect(res.statusCode).toBe(503);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ mechanism: "dpop", code: "temporarily_unavailable" },
+			"protected_resource_binding_unavailable",
+		);
+	});
+
 	it("logs a failed proof once at warn: its code, the refusal's reason, and its projection with the cause inside", async () => {
 		const token = await mintToken({ sub: "u1", cnf: { "x5t#S256": X5T } });
 		let parseError: unknown;

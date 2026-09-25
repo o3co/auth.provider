@@ -19,10 +19,14 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	defaultRefreshTokenFamilyRevocationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	defineModule,
 	type GrantDependencies,
 	type GrantPolicyHook,
 	type Logger,
+	type Module,
+	memoryRefreshTokenFamilyStoreModule,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
@@ -88,6 +92,16 @@ const keyStoreModule = defineModule({
 		keyStore: () => createSymmetricKeyStore("test-secret-for-auth-grant!!!!!"),
 	},
 });
+
+/**
+ * The refresh-token family store and core's two wrappers over it: what the
+ * refresh_token grant, on in `makeValidAppConfig()`, refuses to boot without.
+ */
+const familyStoreModules = [
+	memoryRefreshTokenFamilyStoreModule,
+	defaultRefreshTokenFamilyRotationModule,
+	defaultRefreshTokenFamilyRevocationModule,
+] as const;
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal express app wired to createOAuthRouter.
@@ -395,6 +409,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -419,6 +434,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -447,6 +463,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -456,6 +473,84 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 		// it must not be registered under === true opt-in semantics.
 		expect(handle.inspect.grants.has("client_credentials")).toBe(false);
 		await handle.dispose();
+	});
+});
+
+/**
+ * The refresh_token grant rotates each refresh token through its family,
+ * refuses a replayed one and revokes the family, and `/oauth/revoke` revokes
+ * the family the grant reads. Both family slots are optional to wire, and
+ * nothing decided what their absence meant: with the grant on and neither
+ * wired, a refresh token was served with no family record and redeemed with
+ * no rotation and no replay check, and `/oauth/revoke` answered 200 for a
+ * family the refresh path never read. The grant's own switch is the
+ * decision: on, both slots must be filled.
+ */
+describe("oauthAuthorizationModule — the refresh_token grant needs its token families", () => {
+	const withRefreshToken = (enabled: boolean) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: { ...base.oauth.grants, refresh_token: { enabled } },
+			},
+		};
+	};
+	const boot = (config: AppConfig, families: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+				...families,
+			],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+		});
+	const refusalOf = (config: AppConfig, families: readonly Module[]) =>
+		boot(config, families).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+
+	it("refuses to boot with the grant on and no family wired, naming both slots and the switch", async () => {
+		const refusal = await refusalOf(withRefreshToken(true), []);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "refresh_token" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(
+			/refresh_token grant is enabled \(oauth\.grants\.refresh_token\.enabled\) but refreshTokenFamilyRotation and refreshTokenFamilyRevocation are not wired/,
+		);
+		expect(message).toMatch(/memoryRefreshTokenFamilyStoreModule/);
+		expect(message).toMatch(/redisRefreshTokenFamilyStoreModule/);
+	});
+
+	it("refuses rotation without family revocation, naming the one missing", async () => {
+		const refusal = await refusalOf(withRefreshToken(true), [
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRotationModule,
+		]);
+		expect(refusal).toMatchObject({ name: "BootError", reason: "contribute-factory-failed" });
+		expect(String(refusal?.cause?.message)).toMatch(
+			/but refreshTokenFamilyRevocation is not wired/,
+		);
+	});
+
+	it("boots with both wired, and with the grant off and neither wired", async () => {
+		const wired = await boot(withRefreshToken(true), familyStoreModules);
+		expect(wired.inspect.grants.has("refresh_token")).toBe(true);
+		await wired.dispose();
+
+		const off = await boot(withRefreshToken(false), []);
+		expect(off.inspect.grants.has("refresh_token")).toBe(false);
+		await off.dispose();
 	});
 });
 
@@ -1547,7 +1642,7 @@ describe("oauthAuthorizationModule — declared absence for subjectRevocation (#
 		const config = makeValidAppConfig();
 		await expect(
 			createTestApp({
-				modules: [oauthAuthorizationModule({ config })],
+				modules: [oauthAuthorizationModule({ config }), ...familyStoreModules],
 				bootstrapComponents: {
 					config,
 					pathResolver: (s: string) => s,

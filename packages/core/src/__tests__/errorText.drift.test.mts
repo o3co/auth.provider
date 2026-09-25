@@ -378,9 +378,13 @@ describe("error text written in this repository's own words (RFC 6749 Appendix A
 		expect(written.filter((piece) => piece.kind === "code").length).toBeGreaterThan(300);
 	});
 
-	it("reads the standalone template, which answers with errorEnvelope too", () => {
-		// `create-app`'s copy is generated from it, so the template is the one read.
-		expect(written.some((piece) => piece.at.startsWith("templates/standalone/src/"))).toBe(true);
+	it("reads the standalone template's source, which create-app's copy is generated from", () => {
+		// The template answers every error through core's `terminalErrorHandler`
+		// and writes no error text of its own; the walk still covers its tree, so
+		// text it adds is held to the rule where it is written.
+		expect(
+			sources.some(({ file }) => relative(repoRoot, file).startsWith("templates/standalone/src/")),
+		).toBe(true);
 	});
 
 	it("keeps to printable ASCII without '\"' and '\\': quote with ', write 'section', no em dash", () => {

@@ -17,6 +17,7 @@
 import { inspect } from "node:util";
 import { runInNewContext } from "node:vm";
 import express from "express";
+import * as yaml from "js-yaml";
 import pino from "pino";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -29,6 +30,7 @@ import {
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
 	loggableError,
+	uncappedDetail,
 } from "#/logging/loggableError.mjs";
 
 /** The shape openid-client throws for a token response it refuses: the body two causes down. */
@@ -622,6 +624,34 @@ describe("loggableError — what a log line may carry of an error", () => {
 			// The whole projection, frames included: the header that quotes the
 			// input is not among them.
 			expect(JSON.stringify(loggableError(failed))).not.toContain("SHORTSECRET");
+		});
+
+		it("keeps a message whole for uncappedDetail, but on one line", () => {
+			// A boot failure's message carries it: uncapped, so a refusal's advice
+			// survives; filtered as every kept string is, so it cannot forge a line.
+			const long = `first line\nforged: line \u202etxt.exe ${"x".repeat(300)}`;
+			expect(uncappedDetail(new RangeError(long))).toBe(
+				`first line?forged: line ?txt.exe ${"x".repeat(300)}`,
+			);
+		});
+
+		it("drops a YAMLException's message, which quotes the lines around the fault", () => {
+			// js-yaml writes a snippet of the neighbouring lines into the message
+			// (and keeps the whole input on `mark.buffer`, which is never read):
+			// a clients file parsed by a host's own module carries its secrets.
+			let failed: unknown;
+			try {
+				yaml.load("web:\n  clientSecret: yaml-secret-marker\n  bad\nnext: 1\n");
+			} catch (err) {
+				failed = err;
+			}
+			expect(failed).toBeInstanceOf(yaml.YAMLException);
+			expect(shape(failed)).toEqual({ name: "YAMLException" });
+			expect(uncappedDetail(failed)).toBeUndefined();
+			expect(JSON.stringify(loggableError(failed))).not.toContain("yaml-secret-marker");
+			expect(inspect(loggableError(failed), { depth: Number.POSITIVE_INFINITY })).not.toContain(
+				"yaml-secret-marker",
+			);
 		});
 
 		it("cuts the arguments out of a Redis reply error, which echoes the command it refused", () => {

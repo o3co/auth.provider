@@ -148,8 +148,8 @@ export interface TokenBindingRefusal {
 	 * The mechanism's own name for the refusal (`replay_store_unavailable`,
 	 * `replay_store_fault`, mTLS's `malformed_header`), written on the
 	 * refusal's log line — the outage's or the verdict's — beside the `code`.
-	 * A code, lowercase words joined by `_` or `-`; the verdict line leaves
-	 * out anything else. Never sent.
+	 * A code, lowercase words joined by `_` or `-`; both lines leave out
+	 * anything else. Never sent.
 	 */
 	readonly reason?: string;
 }
