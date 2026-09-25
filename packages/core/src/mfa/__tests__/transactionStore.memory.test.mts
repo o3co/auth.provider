@@ -78,7 +78,10 @@ describe("the in-process MfaTransactionStore", () => {
 		const written = TX();
 		await store.create(written);
 		(written.user as Record<string, unknown>).id = "someone-else";
-		const got = (await store.get("tx-1")) as { user: { groups: string[] }; acrValues: string[] };
+		const got = (await store.get("tx-1")) as unknown as {
+			user: { groups: string[] };
+			acrValues: string[];
+		};
 		got.user.groups.push("admin");
 		got.acrValues.push("urn:other");
 		expect(await store.get("tx-1")).toStrictEqual(TX());
