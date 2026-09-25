@@ -54,9 +54,13 @@ package is added to `packages/` without being added here.
   defect; the fix that mends it turns the case red and turns it into a plain
   `it`. A store-outage case pins only the part of the #685 rule that is
   broken and asserts the rest, one test per part (`describeOutages` in the
-  template's fixture).
+  template's fixture). A row whose composition writes no line today names no
+  `event`, so nothing checks the name of the line a fix adds: the fix that
+  flips such a row adds its `event` in the same change.
 - The fakes are shared by every boot in a file and put back as they were made
-  before each one; a test that rotates a fake's key is refused.
+  before each one; a test that rotates a fake's key, or sets
+  `refreshTokenOnlyOnConsent` (it reads closure state no reset restores), is
+  refused, and makes a fake of its own instead.
 
 ## Known gaps
 

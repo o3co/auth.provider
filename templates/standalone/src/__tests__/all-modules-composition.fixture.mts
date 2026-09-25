@@ -342,6 +342,15 @@ export async function sharedUpstreams(): Promise<Upstreams> {
  * place (a fake may hold its own reference to one), recorded requests
  * cleared. A fake's signing key is checked, not restored: a rotated key is
  * refused.
+ *
+ * What a fake keeps in its closure is not restored either: core's fake IdP
+ * remembers whether consent was granted (`consentGranted`), how many codes it
+ * issued (`codesIssued`) and every authorization it recorded. Codes and
+ * authorizations are keyed per login, so a later boot's login is unaffected;
+ * consent is not, and it decides Google's refresh token only under
+ * `refreshTokenOnlyOnConsent`. That knob is therefore forbidden on a shared
+ * fake — the next reset refuses to run if a test set it; a test that needs it
+ * makes a fake of its own with `createFakeIdp`.
  */
 export function resettable(...fakes: readonly object[]): () => void {
 	const snapshots = fakes.map((fake) => ({
@@ -355,6 +364,11 @@ export function resettable(...fakes: readonly object[]): () => void {
 	}));
 	return () => {
 		for (const { fake, clone, kid } of snapshots) {
+			if (fake.refreshTokenOnlyOnConsent === true) {
+				throw new Error(
+					"a test set refreshTokenOnlyOnConsent on a shared fake upstream: the consent it reads is closure state no reset restores; make a fake of its own instead",
+				);
+			}
 			if (currentKidOf(fake) !== kid) {
 				throw new Error(
 					"a test rotated a shared fake upstream's key: the fakes are shared by every boot in the file; make a fake of its own instead",
@@ -941,7 +955,11 @@ export interface OutageCase<C extends Composition = Composition> {
 	readonly answer:
 		| { readonly status: number; readonly error?: string }
 		| { readonly redirect: string; readonly error: string };
-	/** The one line's name; absent where the composition writes no such line today. */
+	/**
+	 * The one line's name. Absent where the composition writes no such line
+	 * today — and then `event-name` is not checked at all, so the fix that
+	 * flips such a row adds its `event` in the same change.
+	 */
 	readonly event?: string;
 	/** Warn lines this route writes whatever the store does — not the outage's. */
 	readonly unrelatedWarns?: readonly string[];

@@ -971,6 +971,47 @@ const OUTAGES: readonly OutageCase[] = [
 	},
 	{
 		module: "session",
+		slot: "userRepository",
+		surface: "/session/login",
+		run: async (app, outage) => {
+			outage.down = true;
+			return (await login(app)).res;
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		defects: {
+			...withoutTheLine(
+				'packages/session `routes/Session.mts`: a user-repository failure at login is answered 503 "User directory temporarily unavailable" but logged only at warn, as "local login authenticate failed"',
+			),
+			"no-warn":
+				'packages/session `routes/Session.mts`: the outage\'s only line is the warn "local login authenticate failed"',
+		},
+	},
+	{
+		module: "oauth (client authentication)",
+		slot: "clientRepository",
+		surface: "/oauth/token",
+		run: async (app, outage) => {
+			outage.down = true;
+			return tokenRequest(app, M2M).send({ grant_type: "client_credentials", scope: "api.read" });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "client_repository_unavailable",
+	},
+	{
+		module: "oauth",
+		slot: "clientRepository",
+		surface: "/oauth/authorize",
+		run: async (app, outage) => {
+			const { cookies } = await login(app);
+			outage.down = true;
+			return authorize(app, cookies);
+		},
+		// JSON, not a redirect: no redirect target is trusted before the client is known.
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "client_repository_unavailable",
+	},
+	{
+		module: "session",
 		slot: "subjectSessionIndex",
 		surface: "/session/login",
 		run: async (app, outage) => {
@@ -1074,7 +1115,7 @@ const OUTAGES: readonly OutageCase[] = [
 ];
 
 describeOutages(
-	"a store outage answers 503 and is logged once, at error (#685)",
+	"a store or repository outage answers 503 and is logged once, at error (#685)",
 	OUTAGES,
 	(outage) => compose({ outage }),
 );

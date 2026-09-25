@@ -36,8 +36,8 @@
  *   shape a TLS-terminating proxy in front of the provider gives it — with the
  *   mTLS package's test certificate.
  * - WebAuthn registration reads `req.webauthnSubject`, which the package leaves
- *   to middleware the deployment writes; the fixture's sets it from the
- *   authenticated browser session.
+ *   to middleware the deployment writes; the fixture's stand-in sets it from
+ *   the authenticated browser session.
  *
  * The fakes are shared by every boot in a file and put back as they were made
  * before each one (`resettable`, from the template's fixture).
@@ -219,9 +219,14 @@ const grantPolicyModule = defineModule({
 });
 
 /**
- * The deployment's bridge from its session to `req.webauthnSubject`, which
- * WebAuthn's registration routes require and no package sets: the signed-in
- * user's opaque id, for an authenticated session only.
+ * A test stand-in for the deployment's bridge from its session to
+ * `req.webauthnSubject`, which WebAuthn's registration routes require and no
+ * package sets: the signed-in user's opaque id, for a session that says it is
+ * authenticated. It is not what a deployment should write: it does not check
+ * that the session is still live or has not been revoked (the user-session
+ * store), and it requires no step-up — recent authentication or MFA — which
+ * the WebAuthn README asks a real deployment to demand before enrolling a
+ * credential.
  */
 const webauthnSubjectModule = defineModule({
 	name: "deployment:webauthn-subject",
