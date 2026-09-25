@@ -37,7 +37,9 @@
  *   occurrence's human-readable explanation) rather than `message`, for the
  *   reason above. A SyntaxError's message is dropped (V8's JSON.parse and
  *   body-parser quote the input); only ` at position N` survives, as
- *   `position`, N at most ten digits and none from a longer number. Redis's
+ *   `position`, N at most ten digits and none from a longer number. A
+ *   YAMLException's is dropped whole (js-yaml quotes the lines around the
+ *   fault). Redis's
  *   `, with args beginning with: …` is cut from any message. Other text a
  *   peer wrote into a message is kept: the projection cannot tell it from
  *   this process's own.
@@ -115,9 +117,10 @@ export interface LoggableError {
 	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */
 	readonly name: string;
 	/**
-	 * The error's message. Absent for a SyntaxError, which quotes its input; a
-	 * Redis reply's echoed arguments are cut. Not `message`, which would make
-	 * a serializer take the projection for an Error.
+	 * The error's message. Absent for a SyntaxError or a YAMLException, which
+	 * quote their input; a Redis reply's echoed arguments are cut. Not
+	 * `message`, which would make a serializer take the projection for an
+	 * Error.
 	 */
 	readonly detail?: string;
 	/** A SyntaxError's `position N`, read out of its message. */
@@ -301,12 +304,20 @@ const descriptionOf = (value: unknown): string | undefined => {
 const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
 
 /**
+ * The errors whose message quotes the input they could not parse, and is
+ * dropped whole: a SyntaxError (V8's JSON.parse and body-parser quote the
+ * input) and js-yaml's YAMLException (a snippet of the lines around the
+ * fault — a clients file's secrets, when a host's own module parses one).
+ */
+const QUOTES_ITS_INPUT: ReadonlySet<string> = new Set(["SyntaxError", "YAMLException"]);
+
+/**
  * An error's message by the projection's rules, before `detail`'s cap:
- * nothing for a SyntaxError (V8's JSON.parse and body-parser quote the
- * input) or for a message that is not a string; Redis's echoed arguments cut.
+ * nothing for an error that quotes its input ({@link QUOTES_ITS_INPUT}) or
+ * for a message that is not a string; Redis's echoed arguments cut.
  */
 const messageText = (name: string, message: unknown): string | undefined =>
-	typeof message !== "string" || name === "SyntaxError"
+	typeof message !== "string" || QUOTES_ITS_INPUT.has(name)
 		? undefined
 		: message.replace(REDIS_ECHOED_ARGS, "");
 
