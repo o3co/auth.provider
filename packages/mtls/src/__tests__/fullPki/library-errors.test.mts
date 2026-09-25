@@ -220,7 +220,10 @@ describe("a CRL pkijs cannot use", () => {
 		);
 	});
 
-	it("the same under 'reject': the refusal carries the fixed detail, pkijs's error as its cause", async () => {
+	it("the same under 'reject': an outage — the fixed detail, pkijs's error as its cause, no line of its own", async () => {
+		// The source answered with bytes that are not a CRL: the server's
+		// outage, which the dispatcher answers 503 and logs once. The
+		// validator says so (`outage`) and writes nothing itself.
 		const { root, int, leaf } = await chain();
 		const logger = recordingLogger();
 		const result = await validator(
@@ -235,7 +238,9 @@ describe("a CRL pkijs cannot use", () => {
 			step: "revocation status unavailable",
 			detail: `CN=client: unparseable — ${INT_CRL_URL}: unparseable (not a DER CRL)`,
 			cause: expect.objectContaining({ name: "AsnError" }),
+			outage: true,
 		});
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("one whose signature value WebCrypto cannot read: 'bad_signature', fixed detail, the projection", async () => {
@@ -417,13 +422,16 @@ describe("the guarded fetch, against the platform fetch", () => {
 });
 
 describe("createMtlsMechanism — the refusal line carries the projection", () => {
-	it("mtls_full_pki_validation_failed has the revocation failure's err", async () => {
+	it("mtls_full_pki_validation_failed has the revocation failure's err, and the refusal its cause", async () => {
 		// The root's CRL, for the intermediate, is served clean; the
-		// intermediate's, for the leaf, is not DER.
+		// intermediate's, for the leaf, carries a signature value WebCrypto
+		// cannot read — a verdict on the list (`bad_signature`), not an
+		// outage, so the mechanism logs its refusal.
 		let rootCrl = new Uint8Array();
+		let intCrl = new Uint8Array();
 		const origin = await serve((req, res) => {
 			res.writeHead(200, { "content-type": "application/pkix-crl" });
-			res.end(Buffer.from(req.url === "/int.crl" ? GARBAGE : rootCrl));
+			res.end(Buffer.from(req.url === "/int.crl" ? intCrl : rootCrl));
 		});
 		const root = await mintCa("Root", 1);
 		rootCrl = await mintCrl({ issuer: root });
@@ -442,6 +450,7 @@ describe("createMtlsMechanism — the refusal line carries the projection", () =
 				crlDistributionPoints([`${origin}/int.crl`]),
 			],
 		});
+		intCrl = withUnreadableSignature(await mintCrl({ issuer: int }));
 		const warn = vi.fn();
 		const logger = {
 			warn,
@@ -482,7 +491,10 @@ describe("createMtlsMechanism — the refusal line carries the projection", () =
 			},
 		} as unknown as Request;
 
-		await expect(mech.extract(req)).rejects.toMatchObject({ reason: "chain_validation_failed" });
+		await expect(mech.extract(req)).rejects.toMatchObject({
+			reason: "chain_validation_failed",
+			cause: expect.objectContaining({ name: "AsnError" }),
+		});
 		const refusal = warn.mock.calls.filter(
 			([, event]) => event === "mtls_full_pki_validation_failed",
 		);
@@ -490,7 +502,7 @@ describe("createMtlsMechanism — the refusal line carries the projection", () =
 			[
 				{
 					step: "revocation status unavailable",
-					detail: `CN=client: unparseable — ${origin}/int.crl: unparseable (not a DER CRL)`,
+					detail: `CN=client: bad_signature — ${origin}/int.crl: bad_signature (signature check failed)`,
 					err: projectionOf("AsnError"),
 				},
 				"mtls_full_pki_validation_failed",
