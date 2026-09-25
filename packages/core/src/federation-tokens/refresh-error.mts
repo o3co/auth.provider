@@ -22,9 +22,10 @@ import { isError, isFederationUpstreamOutage } from "./upstreamOutage.mjs";
  * - `invalid_grant`: the IdP rejected the refresh token (revoked, expired,
  *   mismatched). Only ever the IdP's structured answer — an `error` of
  *   `invalid_grant` or `invalid_token` on what the library raised — and never
- *   during an outage: a caller may end the credential on it.
- * - `rate_limited`: the IdP answered 429, or named `too_many_requests` —
- *   under a 5xx too: asked to slow down, a caller does.
+ *   under a 429 or during an outage: a caller may end the credential on it.
+ * - `rate_limited`: the IdP answered 429, whatever code it named, or named
+ *   `too_many_requests` — under a 5xx too: asked to slow down, a caller does,
+ *   and the upstream has judged nothing about the credential.
  * - `network`: the IdP could not be reached, did not answer in time, or
  *   answered 5xx — whatever else its body said.
  * - `unknown`: anything else.
@@ -135,7 +136,7 @@ function retryAfterSeconds(error: object): number | undefined {
 
 function structuredReason(error: object): FederationRefreshErrorReason | undefined {
 	const e = error as { error?: unknown; status?: unknown };
-	// An outage first, before the codes that reject the refresh token: the
+	// An outage is read before the codes that reject the refresh token: the
 	// upstream could not be reached, did not answer in time, or answered 5xx — on the error, its
 	// Error causes or the Response it was raised over (`isFederationUpstreamOutage`),
 	// or a 5xx status on a thrown value that is not an Error, which a hand-written
@@ -145,6 +146,12 @@ function structuredReason(error: object): FederationRefreshErrorReason | undefin
 	const outage =
 		isFederationUpstreamOutage(error) ||
 		(typeof e.status === "number" && e.status >= 500 && e.status < 600);
+	// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4,
+	// read before any code that would end the credential: a 429 is the upstream
+	// asking for less, not a verdict on the refresh token, whatever its body
+	// names. RFC 6585 defines `too_many_requests` as an HTTP status name — some
+	// IdPs (Google, Microsoft) echo it back as the error code in `.error`.
+	if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
 	// openid-client v6 surfaces token-endpoint errors with `.error` populated
 	// from the IdP response body (RFC 6749 §5.2 error codes). `invalid_grant` is
 	// the canonical "refresh token rejected"; `invalid_token` is RFC 6750 §3.1 —
@@ -152,10 +159,6 @@ function structuredReason(error: object): FederationRefreshErrorReason | undefin
 	if (!outage && (e.error === "invalid_grant" || e.error === "invalid_token")) {
 		return "invalid_grant";
 	}
-	// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4.
-	// RFC 6585 defines `too_many_requests` as an HTTP status name — some IdPs
-	// (Google, Microsoft) echo it back as the error code in `.error`.
-	if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
 	if (outage) return "network";
 	// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT may be on
 	// the top-level error (legacy adapters) or wrapped as `.cause` of a TypeError

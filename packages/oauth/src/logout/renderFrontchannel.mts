@@ -27,6 +27,12 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	readonly rps: ReadonlyArray<FrontchannelRP>;
 	readonly issuer: string;
 	readonly sid: string;
+	/**
+	 * Where the page sends the browser once the iframes have had their time:
+	 * the validated `post_logout_redirect_uri` with the RP's `state` already
+	 * on it, exactly as the route's own redirect would carry it. Taken as
+	 * given; the caller composes it.
+	 */
 	readonly postLogoutRedirectUri?: string;
 	/** Defaults to 2000ms. */
 	readonly redirectDelayMs?: number;

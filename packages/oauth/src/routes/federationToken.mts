@@ -807,11 +807,13 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// (#593). Its reason is safe to act on alone: an outage — the upstream
 				// not reached, not in time, or answering 5xx, whatever its body says
 				// (a `too_many_requests` stays the 429) — is `network`, read before
-				// the codes that reject the refresh token, and
-				// `invalid_grant` is only ever the upstream's structured verdict, never
-				// a message's text. So the stored tokens below are ended on that
-				// verdict and on nothing else, and an outage keeps them for the retry.
-				const { reason } = classifyFederationRefreshError(error);
+				// the codes that reject the refresh token; a 429 is `rate_limited`
+				// whatever code it names; and `invalid_grant` is only ever the
+				// upstream's structured verdict, never a message's text. So the stored
+				// tokens below are ended on that verdict and on nothing else, and an
+				// outage or a rate limit keeps them for the retry.
+				const classified = classifyFederationRefreshError(error);
+				const { reason } = classified;
 				// The projection, never the error: the adapter's library puts the
 				// refresh answer it refused on the error's cause chain, and that
 				// answer holds the rotated refresh token. An upstream that cannot be
@@ -872,6 +874,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				}
 
 				if (reason === "rate_limited") {
+					// The upstream's own wait, when it named one in whole seconds
+					// (RFC 9110 §10.2.3); none is invented when it did not.
+					if (classified.retryAfterSeconds !== undefined) {
+						res.setHeader("Retry-After", String(classified.retryAfterSeconds));
+					}
 					return res.status(429).json({
 						error: "rate_limited",
 						error_description: "upstream IdP rate limit exceeded; retry later",

@@ -158,6 +158,23 @@ function extractLogoutParams(req: Request): {
 	};
 }
 
+/**
+ * The client an `id_token_hint` was issued to, whose registered
+ * `postLogoutRedirectUris` the logout's `post_logout_redirect_uri` is held to:
+ * `azp` when the hint names one that is among its audiences (OIDC Core §2), else
+ * its one audience — a string, or a list of one — else nobody, and the URI is
+ * dropped. A hint for several audiences and no `azp` does not say which client
+ * asked, and the first of them is not evidence of it.
+ */
+function issuedTo(payload: Record<string, unknown>): string | null {
+	const aud = payload.aud;
+	const audiences = typeof aud === "string" ? [aud] : Array.isArray(aud) ? aud : [];
+	const azp = payload.azp;
+	if (typeof azp === "string" && audiences.includes(azp)) return azp;
+	const [only] = audiences;
+	return audiences.length === 1 && typeof only === "string" ? only : null;
+}
+
 const HTML_ESCAPE: Record<string, string> = {
 	"&": "&amp;",
 	"<": "&lt;",
@@ -252,10 +269,11 @@ export interface LogoutRouterOptions {
  * Flow:
  *   1. Verify id_token_hint via keyStore. Fail → 400 invalid_token, on GET as
  *      on POST; a keystore that cannot answer → 503.
- *   2. Extract `sid` and `aud` (= client_id). Missing sid → 400
- *      invalid_request. Hold `post_logout_redirect_uri` to the client's
- *      registered `postLogoutRedirectUris` — the one value every later step
- *      uses. A GET whose hint is stale answers the confirmation page here.
+ *   2. Extract `sid` and the client the hint was issued to (`issuedTo`).
+ *      Missing sid → 400 invalid_request. Hold `post_logout_redirect_uri` to
+ *      the client's registered `postLogoutRedirectUris` — the one value every
+ *      later step uses. A GET whose hint is stale answers the confirmation
+ *      page here.
  *   3. Load session from userSessionStore. Missing → 200 JSON { logged_out: true } (no-op).
  *   4. Broadcast Back-Channel Logout to all registered RPs (best-effort).
  *   5. Resolve IdP end-session URI for the first federation (if any, if provider supportsEndSession).
@@ -318,37 +336,32 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	 * provider's origin answered `303` to any site.
 	 *
 	 * The client repository is asked only when there is a value to check, so a
-	 * logout that names none does not depend on it. When it cannot answer the
-	 * answer is `"unavailable"`, logged once as `client_repository_unavailable`
-	 * with `site`, and the route answers `503` before it has changed anything:
-	 * an outage is no verdict that the URI is unregistered, and a retry is the
-	 * same request.
+	 * logout that names none does not depend on it. When it cannot answer, the
+	 * URI is not used — an outage says nothing about whether it is registered —
+	 * and the logout goes on as if none had been sent, logged once at error as
+	 * `client_repository_unavailable` with `site`. Refusing the logout instead
+	 * would keep the session, its refresh-token families and the relying
+	 * parties' sessions alive to protect a redirect, and OIDC RP-Initiated
+	 * Logout forbids only the redirect.
 	 */
 	const registeredPostLogoutRedirectUri = async (
 		requested: unknown,
 		clientId: string | null,
 		logger: Pick<Logger, "error">,
 		site: "logout" | "federation_logout",
-	): Promise<{ readonly uri: string | undefined } | "unavailable"> => {
+	): Promise<string | undefined> => {
 		if (typeof requested !== "string" || requested.length === 0 || clientId === null) {
-			return { uri: undefined };
+			return undefined;
 		}
 		let client: Awaited<ReturnType<typeof opts.clientRepository.findById>>;
 		try {
 			client = await opts.clientRepository.findById(clientId);
 		} catch (error) {
 			logClientRepositoryUnavailable(logger, { site, step: "find", clientId }, error);
-			return "unavailable";
+			return undefined;
 		}
-		return {
-			uri: client?.postLogoutRedirectUris?.includes(requested) === true ? requested : undefined,
-		};
+		return client?.postLogoutRedirectUris?.includes(requested) === true ? requested : undefined;
 	};
-	const refuseClientRepositoryUnavailable = (res: Response): Response =>
-		res.status(503).json({
-			error: "temporarily_unavailable",
-			error_description: "client repository unavailable",
-		});
 
 	// POST /federation/:name/logout — mounted under /oauth → POST /oauth/federation/:name/logout
 	router.post(
@@ -360,9 +373,11 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// check: every log line and every audit event carries it sanitised and
 			// capped, as a client id is.
 			const federation = auditErrorText(name);
-			const { post_logout_redirect_uri: postLogoutRedirectUri, state } = req.body as Record<
+			// A POST with no body leaves `req.body` unset: the form parser only
+			// sets it for a form. Every field is read as the caller's, typed below.
+			const { post_logout_redirect_uri: postLogoutRedirectUri, state } = (req.body ?? {}) as Record<
 				string,
-				string | undefined
+				unknown
 			>;
 
 			const logger = opts.logger ?? console;
@@ -547,15 +562,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 			// Step 7b: the post_logout_redirect_uri the IdP end-session call may be
 			// handed (Step 11) — the caller's only when the token's client
-			// registered it; decided before anything is deleted, so a client
-			// repository that cannot answer is a 503 with nothing changed.
+			// registered it. A client repository that cannot answer drops it, and
+			// the disconnect goes on.
 			const allowedRedirect = await registeredPostLogoutRedirectUri(
 				postLogoutRedirectUri,
 				azp,
 				logger,
 				"federation_logout",
 			);
-			if (allowedRedirect === "unavailable") return refuseClientRepositoryUnavailable(res);
 
 			// Step 8: Get federation tokens (may be null — best-effort idTokenHint).
 			let fedTokens: Awaited<ReturnType<typeof opts.federationTokenStore.get>>;
@@ -611,7 +625,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					const endSessionResult = await provider.endSession({
 						idTokenHint: fedTokens?.idToken ?? undefined,
 						// Registered for the token's client, or none (Step 7b).
-						postLogoutRedirectUri: allowedRedirect.uri,
+						postLogoutRedirectUri: allowedRedirect,
 						state: typeof state === "string" ? state : undefined,
 					});
 					// Local state already cleared — redirect to IdP end-session URL.
@@ -715,16 +729,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			});
 		}
 
-		// Step 2: Extract sid and aud (client_id).
+		// Step 2: Extract sid and the client the hint was issued to.
 		const sid = typeof payload.sid === "string" ? payload.sid : null;
 		const sub = typeof payload.sub === "string" ? payload.sub : null;
-		const rawAud = payload.aud;
-		const aud: string | null =
-			typeof rawAud === "string"
-				? rawAud
-				: Array.isArray(rawAud) && typeof rawAud[0] === "string"
-					? rawAud[0]
-					: null;
+		const hintClient = issuedTo(payload);
 
 		// A hint that names no session can log nothing out, on GET as on POST:
 		// refused before the client repository is asked about its redirect, and
@@ -742,16 +750,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		// echoes it, before any RP or upstream hears of the logout, and before
 		// the cascade — and the only value every later step reads: the upstream
 		// end-session call (Step 5), the front-channel page (7a) and the redirect
-		// (7c). Unregistered or missing becomes `undefined`. A client repository
-		// that cannot answer is a 503 with nothing changed.
-		const allowedRedirect = await registeredPostLogoutRedirectUri(
+		// (7c). Unregistered, missing, or unknowable because the client
+		// repository cannot answer, it is `undefined`, and the logout goes on.
+		const validatedPostLogoutRedirectUri = await registeredPostLogoutRedirectUri(
 			postLogoutRedirectUri,
-			aud,
+			hintClient,
 			opts.logger ?? console,
 			"logout",
 		);
-		if (allowedRedirect === "unavailable") return refuseClientRepositoryUnavailable(res);
-		const validatedPostLogoutRedirectUri = allowedRedirect.uri;
 
 		if (req.method === "GET") {
 			const iat = typeof payload.iat === "number" ? payload.iat : 0;
@@ -953,6 +959,18 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			details: { sid, federations },
 		});
 
+		// Where the browser goes back to the RP, with its `state` (OIDC
+		// RP-Initiated Logout 1.0 §3): the same URL from the front-channel page
+		// (7a) and the redirect (7c).
+		let postLogoutRedirectTarget: string | undefined;
+		if (validatedPostLogoutRedirectUri) {
+			const redirectUrl = new URL(validatedPostLogoutRedirectUri);
+			if (typeof state === "string" && state.length > 0) {
+				redirectUrl.searchParams.set("state", state);
+			}
+			postLogoutRedirectTarget = redirectUrl.toString();
+		}
+
 		// 7a: Front-channel logout — if Accept: text/html AND any RP has a frontchannelLogoutUri.
 		// Use q-weighted negotiation: application/json is first so Accept: */* defaults to JSON.
 		// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
@@ -966,8 +984,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				rps,
 				issuer: opts.issuer,
 				sid,
-				// Use the allowlist-validated URI — prevents open redirect via HTML branch.
-				postLogoutRedirectUri: validatedPostLogoutRedirectUri,
+				// The allowlist-validated URI, with state — prevents open redirect via HTML branch.
+				postLogoutRedirectUri: postLogoutRedirectTarget,
 				logger: opts.logger,
 			});
 			res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -980,12 +998,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		}
 
 		// 7c: post_logout_redirect_uri — the registered value decided in Step 2.
-		if (validatedPostLogoutRedirectUri) {
-			const redirectUrl = new URL(validatedPostLogoutRedirectUri);
-			if (typeof state === "string" && state.length > 0) {
-				redirectUrl.searchParams.set("state", state);
-			}
-			return res.redirect(303, redirectUrl.toString());
+		if (postLogoutRedirectTarget) {
+			return res.redirect(303, postLogoutRedirectTarget);
 		}
 
 		// 7d: Default — JSON success.
