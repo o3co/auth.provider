@@ -70,7 +70,7 @@ subject, home, and the sections still cited from shipped code:
 
 ### A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5) [verified]
 
-Home: `packages/core/src/challenges/`, `packages/core/src/replay-seen-set/` (Redis adapters in `packages/redis`).
+Home: `packages/core/src/challenges/`, `packages/core/src/replay-seen-set/`, and `packages/core/src/single-use/` for what the two share — the canonical key (§7.3), `ChallengeStorageError` (§5.4) and the memory adapters' sweep pacing (Redis adapters in `packages/redis`).
 
 §4 breaking changes vs the closed PR #96 spec (SingleUseTokenStore never shipped) · §5.1 `ChallengeStore` primitive: epoch-ms expiry, issue/find/consume atomicity, N-parallel single-winner · §5.2 `ReplaySeenSet` + concurrency contract · §5.3 `ChallengeCeremony` 3-outcome union, no domain throws · §5.4 `ChallengeStorageError` + adapter throw matrix · §5.5 optional ComponentMap slots via declaration merge; unnamespaced names reserved first-party · §5.6 factory register-throws/replace · §6 default ceremony find→consume→markSeen, fail-closed · §6.1 acknowledged consume→markSeen propagation gap (bounded, no security impact) · §7.1 memory adapter contracts · §7.2 Redis adapter (single-key SET-NX, no transactions) · §7.3 canonical key encoding for cross-adapter parity · §8.1 module wiring + override path · §13.1 shared adapter contract-test suite — all [verified]
 

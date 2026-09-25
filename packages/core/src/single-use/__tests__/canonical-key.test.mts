@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import { canonicalKey } from "../canonical-key.mjs";
+import { canonicalKey } from "#/single-use/canonical-key.mjs";
 
 describe("canonicalKey", () => {
 	it("encodes scope and value with length prefixes (delimiter-collision safe)", () => {

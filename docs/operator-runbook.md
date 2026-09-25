@@ -829,7 +829,7 @@ bytes each" (`packages/core/src/device-authorization/memory.mts`).
 Core's in-process challenge store and replay seen-set, on a single replica,
 hold their live entries plus at most those that expired since the last sweep:
 each sweeps on its writes, at most once per 1000 writes and once per ten
-seconds (`packages/core/src/challenges/sweep.mts`), so a WebAuthn ceremony
+seconds (`packages/core/src/single-use/sweep.mts`), so a WebAuthn ceremony
 the user abandons, or an options request repeated in a loop, costs an entry
 for its lifetime and not until the process restarts.
 

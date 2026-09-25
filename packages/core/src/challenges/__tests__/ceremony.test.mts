@@ -3,11 +3,11 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it, vi } from "vitest";
+import { ChallengeStorageError } from "#/single-use/errors.mjs";
 import { createMemoryReplaySeenSet } from "../../replay-seen-set/adapters/memory.mjs";
 import type { ReplaySeenSet } from "../../replay-seen-set/types.mjs";
 import { createMemoryChallengeStore } from "../adapters/memory.mjs";
 import { createChallengeCeremony } from "../ceremony.mjs";
-import { ChallengeStorageError } from "../errors.mjs";
 
 const future = (): number => Date.now() + 60_000;
 

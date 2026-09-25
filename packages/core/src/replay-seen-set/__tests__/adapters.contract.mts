@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import { ChallengeStorageError } from "../../challenges/errors.mjs";
+import { ChallengeStorageError } from "#/single-use/errors.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
 
 export interface ReplaySeenSetContractFactory {

@@ -820,17 +820,11 @@ export {
 	type MemoryChallengeStore,
 	type MemoryChallengeStoreOptions,
 } from "./challenges/adapters/memory.mjs";
-// Canonical key helper (exported for integrators writing their own adapters
-// to preserve cross-adapter parity per A1 §7.3)
-export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
 // Default composition
 export {
 	type ChallengeCeremonyDeps,
 	createChallengeCeremony,
 } from "./challenges/ceremony.mjs";
-export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
-// Errors
-export { ChallengeStorageError } from "./challenges/errors.mjs";
 // Adapter factories
 export {
 	type ChallengeStoreFactory,
@@ -864,6 +858,12 @@ export {
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
+// Canonical key helper (exported for integrators writing their own adapters
+// to preserve cross-adapter parity per A1 §7.3)
+export { canonicalKey as canonicalChallengeKey } from "./single-use/canonical-key.mjs";
+export type { ChallengeStorageErrorReason } from "./single-use/errors.mjs";
+// Errors
+export { ChallengeStorageError } from "./single-use/errors.mjs";
 
 // ===========================================================================
 // A3 — RefreshTokenFamilyStore + RefreshTokenFamilyRotation + RefreshTokenFamilyRevocation
