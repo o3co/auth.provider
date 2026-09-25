@@ -546,15 +546,54 @@ describe("what the router mounts in front of the handlers", () => {
 /**
  * The refresh's own deadlines, reached through the real router on the real
  * clock: the caller waits long enough (`upstreamTimeoutMs`) for the persist
- * budget to run out first, and the hard deadline is short.
+ * budget to run out first — with a second and a half to spare for the look
+ * under the lock on a loaded machine — within a lock the budgets fit
+ * (`upstreamHardTimeoutMs + persistRetryBudgetMs + 1 s <= refreshLockTtlMs`).
  */
 const SHORT = {
-	upstreamTimeoutMs: 2_000,
-	upstreamHardTimeoutMs: 2_500,
-	persistRetryBudgetMs: 300,
+	upstreamTimeoutMs: 2_500,
+	upstreamHardTimeoutMs: 3_000,
+	persistRetryBudgetMs: 1_000,
 	refreshLockTtlMs: 5_000,
 };
+/** The soft deadline and the hard one a second apart, each well past the look under the lock. */
+const SOFT_THEN_HARD = { ...SHORT, upstreamTimeoutMs: 1_000, upstreamHardTimeoutMs: 1_500 };
 const NOT_ANSWERED = { name: "Error", detail: "not answered in time; no longer waited for" };
+
+describe("the token route — an upstream that is down", () => {
+	it("answers an IdP answering 503 to a refresh 503 upstream, logged once as the outage — not 502 unknown and a warn", async () => {
+		// As openid-client raises it (federation-oidc's delegated-outage tests):
+		// a ClientError over the Response it would not read.
+		const h = harness();
+		await seedExpired(h);
+		h.refresh.mockRejectedValue(
+			Object.assign(
+				new Error("unexpected HTTP response status code", {
+					cause: new Response("<html>down</html>", { status: 503 }),
+				}),
+				{ name: "ClientError", code: "OAUTH_RESPONSE_IS_NOT_CONFORM" },
+			),
+		);
+		const response = await call(h, "token");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "upstream",
+		});
+		expect(written(await settled(h))).toEqual(["error federation_grant_token_unavailable"]);
+		expect(payloadOf(h.lines, "federation_grant_token_unavailable")).toEqual({
+			grantId: GRANT_ID,
+			correlationId: REQUEST_ID,
+			reason: "upstream",
+			step: "upstream",
+			err: expect.objectContaining({
+				name: "ClientError",
+				code: "OAUTH_RESPONSE_IS_NOT_CONFORM",
+				response: expect.objectContaining({ status: 503 }),
+			}),
+		});
+	});
+});
 
 describe("the token route — what a refresh that runs out of time logs", () => {
 	it("logs a credential write that hangs as the outage, not answered", async () => {
@@ -627,7 +666,7 @@ describe("the token route — what a refresh that runs out of time logs", () => 
 	});
 
 	it("logs the caller answered at the soft deadline, and the upstream abandoned at the hard one as a warn", async () => {
-		const h = harness({ limits: { ...SHORT, upstreamTimeoutMs: 100, upstreamHardTimeoutMs: 400 } });
+		const h = harness({ limits: SOFT_THEN_HARD });
 		await seedExpired(h);
 		h.refresh.mockReturnValue(new Promise(() => {}));
 		const response = await call(h, "token");

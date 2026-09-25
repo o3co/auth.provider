@@ -86,6 +86,30 @@ describe("isFederationUpstreamOutage", () => {
 		],
 		["a thrown non-error", "ECONNREFUSED"],
 		["nothing", undefined],
+		[
+			"a refusal whose parsed IdP body says 503",
+			Object.assign(new Error("refused", { cause: { status: 503, error: "invalid_client" } }), {
+				name: "ResponseBodyError",
+				status: 400,
+				error: "invalid_client",
+			}),
+		],
+		[
+			"a refusal whose parsed IdP body names a connection code",
+			Object.assign(new Error("refused", { cause: { code: "ECONNRESET" } }), {
+				name: "ResponseBodyError",
+				status: 400,
+			}),
+		],
+		[
+			"a refusal whose parsed IdP body names a timeout",
+			Object.assign(new Error("refused", { cause: { name: "TimeoutError" } }), {
+				name: "ResponseBodyError",
+				status: 400,
+			}),
+		],
+		["a thrown plain object that looks like a timeout", { name: "TimeoutError" }],
+		["a thrown plain object that carries a 5xx status", { status: 503 }],
 	])("reads %s as no outage", (_label, error) => {
 		expect(isFederationUpstreamOutage(error)).toBe(false);
 	});

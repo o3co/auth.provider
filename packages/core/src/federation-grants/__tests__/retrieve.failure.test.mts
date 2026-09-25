@@ -263,6 +263,57 @@ describe("retrieveFederationGrantToken — the cause a 503 was turned from", () 
 		expect(reported[0]?.error).toEqual(new Error("not answered in time; no longer waited for"));
 	});
 
+	/**
+	 * What the real libraries raise for an upstream that is down or out of
+	 * reach (federation-oidc's delegated-outage.test.mts holds them to it) —
+	 * none of which the refresh-error classifier alone reads as `network`.
+	 * The messages carry no status digits: the answer must not come from text.
+	 */
+	const coded = (code: string) => Object.assign(new Error("socket failure"), { code });
+	const clientError = (code: string, cause: unknown) =>
+		Object.assign(new Error("client error", { cause }), { name: "ClientError", code });
+	it.each([
+		[
+			"openid-client's ClientError over a Response answering 503",
+			() =>
+				clientError(
+					"OAUTH_RESPONSE_IS_NOT_CONFORM",
+					new Response("<html>down</html>", { status: 503 }),
+				),
+		],
+		[
+			"undici's TypeError over ECONNRESET",
+			() => new TypeError("fetch failed", { cause: coded("ECONNRESET") }),
+		],
+		[
+			"undici's TypeError over UND_ERR_SOCKET",
+			() => new TypeError("fetch failed", { cause: coded("UND_ERR_SOCKET") }),
+		],
+		[
+			"openid-client's OAUTH_TIMEOUT over a TimeoutError",
+			() =>
+				clientError(
+					"OAUTH_TIMEOUT",
+					Object.assign(new Error("signal timed out"), { name: "TimeoutError" }),
+				),
+		],
+	])(
+		"answers %s as the upstream outage it is, and carries it — the backoff unchanged",
+		async (_label, make) => {
+			await h.seed();
+			setNow(at(HOUR));
+			const down = make();
+			h.refresh.mockRejectedValue(down);
+			const result = await settled();
+			expect(result).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+			expect(failureOf(result)).toMatchObject({ during: "upstream", error: down });
+			// Stamped as an outage, as before: what changed is the answer, not the wait.
+			expect((await h.store.find("g-1", at(HOUR)))?.refreshFailure).toMatchObject({
+				kind: "unavailable",
+			});
+		},
+	);
+
 	it("carries nothing when the upstream did not answer before the caller stopped waiting", async () => {
 		await h.seed();
 		setNow(at(HOUR));
