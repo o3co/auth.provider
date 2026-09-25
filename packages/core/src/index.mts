@@ -324,10 +324,13 @@ export {
 } from "./grants/logoutToken.mjs";
 // RFC 8707 resource indicators (#172, #173): the one reading of `resource`,
 // the audience derived from it, and the `invalid_target` check — shared by the
-// oauth grants, `/authorize` and the WebAuthn grant.
+// oauth grants, `/authorize` and the WebAuthn grant. `readTargetParameter` is
+// the strict reading underneath, which also reads RFC 8693's `audience`: the
+// token-exchange grant reads both with it and refuses a malformed one.
 export {
 	deriveAudienceFromResources,
 	extractResourceParam,
+	readTargetParameter,
 	unrepresentedResources,
 } from "./grants/resourceIndicator.mjs";
 export type { SenderConstraint } from "./grants/senderConstraint.mjs";

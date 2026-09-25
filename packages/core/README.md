@@ -77,6 +77,8 @@ A `GrantHandler.cleanup?()` is never called. `AppHandle.dispose()` runs each pro
 
 A grant that honours `resource` reads it with `extractResourceParam`, derives the audience it names with `deriveAudienceFromResources`, and refuses an issued `aud` that does not represent it with `unrepresentedResources` — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts). Each value is kept whole (a URI may contain a comma), the empty entries of a repeated parameter are dropped, and an all-empty parameter means none was requested. The oauth grants, `/authorize` and the WebAuthn grant all read it there, so a custom grant that does the same gives the same answer.
 
+Underneath is `readTargetParameter`, the strict reading of a target parameter — `resource`, or RFC 8693's `audience` — from a form or JSON body: the values it names (`[]` when none), or `null` when it is malformed, that is neither a string nor an array of strings. A malformed value is never converted to a string, since `String([["https://x"]])` names `https://x`. `extractResourceParam` reads a malformed `resource` as none requested. The token-exchange grant reads `resource` and `audience` with `readTargetParameter` and refuses a malformed one with `invalid_target`: RFC 8707 §2's answer to a `resource` the server "fails to parse", given to `audience` by symmetry.
+
 ### Error text (RFC 6749)
 
 RFC 6749 Appendix A.7 and A.8 limit `error` and `error_description` to `1*NQSCHAR`: printable ASCII without `"` and `\`. The rule is in [`src/errors/envelope.mts`](src/errors/envelope.mts):

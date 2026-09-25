@@ -15,17 +15,18 @@
  */
 
 /**
- * RFC 8707 resource indicators — the shared reading of the `resource` parameter,
- * the audience a request derives from it, and the check that an issued
- * audience represents it.
+ * RFC 8707 resource indicators — the shared reading of the `resource` parameter
+ * (and of RFC 8693's `audience`, the other target parameter), the audience a
+ * request derives from it, and the check that an issued audience represents
+ * it.
  *
  * Read by the oauth package's `client_credentials`, `refresh_token`,
- * `authorization_code` and jwt-bearer grants and `/authorize`, and by the
- * WebAuthn grant, which forwards `resource` to `grantPolicy`. Those packages
- * do not depend on one another, so the rule lives in core rather than in a
- * copy per package. The home is mapped in `docs/design-vocabulary.md` and
- * guarded by `designVocabulary.drift.test.mts`; the one grant that still reads
- * `resource` its own way, token exchange, is named there.
+ * `authorization_code` and jwt-bearer grants and `/authorize`, by the
+ * WebAuthn grant, which forwards `resource` to `grantPolicy`, and by the
+ * token-exchange grant, which reads `resource` and `audience` strictly. Those
+ * packages do not depend on one another, so the rule lives in core rather
+ * than in a copy per package. The home is mapped in
+ * `docs/design-vocabulary.md` and guarded by `designVocabulary.drift.test.mts`.
  *
  * Pure functions over a parsed parameter bag: no HTTP, no Express.
  *
@@ -35,29 +36,50 @@
  */
 
 /**
- * Extracts the `resource` parameter per RFC 8707 from a request's parameters —
- * a token request body, or the `/authorize` query or form.
+ * Reads a target parameter — RFC 8707 `resource`, or RFC 8693 `audience` — as
+ * a form or JSON body delivers it: the values it names, or `null` when it is
+ * malformed.
  *
- * Returns `null` when the parameter is absent, null, or an empty string.
- * A single string is normalised to a one-element array. An array whose every
- * element is a string is returned without its empty entries, and `null` when
- * none is left; any other array returns `null` (defensive against malformed /
- * injected input).
+ * - Absent, `null` or `""`: `[]`, nothing named. RFC 6749 §3.2 has a
+ *   parameter sent without a value treated as omitted.
+ * - A string: that one value, kept whole.
+ * - An array of strings (a repeated form parameter, or a JSON array): its
+ *   non-empty entries, in order, so the array shape agrees with the string
+ *   shape on what names nothing. `resource=&resource=https://x` reaches
+ *   Express as `["", "https://x"]`; an empty entry surviving into the
+ *   `invalid_target` check would be refused under an empty name. All-empty is
+ *   `[]`.
+ * - Anything else — a number, a boolean, an object, a nested array, an array
+ *   holding a non-string — `null`: malformed. RFC 8707 §2 answers a value the
+ *   server "fails to parse" with `invalid_target`. Nothing is converted to a
+ *   string: `String([["https://x"]])` is `"https://x"`, so a conversion would
+ *   name a target the client never sent as one.
+ *
+ * Only a JSON body can carry a malformed value: a form parses to a string or
+ * an array of strings.
  */
-export function extractResourceParam(body: Record<string, unknown>): readonly string[] | null {
-	const v = body.resource;
-	if (v === undefined || v === null || v === "") return null;
-	if (typeof v === "string") return [v];
-	if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
-		// Drop empty entries so the array shape agrees with the single-string
-		// shape on what "absent" means. `?resource=&resource=https://x` reaches
-		// Express as `["", "https://x"]`, and an empty entry surviving into
-		// Stage 2 enforcement would reject with an error naming a blank
-		// resource. All-empty collapses to null, i.e. not requested at all.
-		const nonEmpty = (v as readonly string[]).filter((x) => x !== "");
-		return nonEmpty.length > 0 ? nonEmpty : null;
+export function readTargetParameter(value: unknown): readonly string[] | null {
+	if (value === undefined || value === null || value === "") return [];
+	if (typeof value === "string") return [value];
+	if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) {
+		return (value as readonly string[]).filter((entry) => entry !== "");
 	}
 	return null;
+}
+
+/**
+ * Extracts the `resource` parameter per RFC 8707 from a request's parameters —
+ * a token request body, or the `/authorize` query or form — as
+ * {@link readTargetParameter} reads it.
+ *
+ * Returns `null` when it names nothing (absent, null, `""`, or empty entries
+ * only) and also when it is malformed: these callers read a malformed
+ * `resource` as none requested. The token-exchange grant, which refuses a
+ * malformed one with `invalid_target`, calls {@link readTargetParameter}.
+ */
+export function extractResourceParam(body: Record<string, unknown>): readonly string[] | null {
+	const resources = readTargetParameter(body.resource);
+	return resources !== null && resources.length > 0 ? resources : null;
 }
 
 /**

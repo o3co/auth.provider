@@ -77,6 +77,8 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 `resource` を扱うグラントは、`extractResourceParam` でそれを読み、それが名指す audience を `deriveAudienceFromResources` で導き、発行する `aud` がそれを表さなければ `unrepresentedResources` で拒否します — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts)。各値は分割せずにそのまま扱い（URI はカンマを含みうる）、繰り返されたパラメーターの空のエントリーは捨て、すべて空なら要求されなかったものとして扱います。oauth のグラント、`/authorize`、WebAuthn グラントはすべてここで読むので、同じことをするカスタムグラントも同じ答えになります。
 
+その下にあるのが `readTargetParameter` で、ターゲットパラメーター — `resource`、または RFC 8693 の `audience` — をフォームや JSON ボディから厳密に読みます。名指す値（何もなければ `[]`）を返し、文字列でも文字列の配列でもない不正な値には `null` を返します。不正な値を文字列に変換することはありません（`String([["https://x"]])` は `https://x` を名指してしまうため）。`extractResourceParam` は不正な `resource` を要求されなかったものとして読みます。トークン交換グラントは `resource` と `audience` を `readTargetParameter` で読み、不正なものを `invalid_target` で拒否します。これは RFC 8707 §2 が、サーバーが「解析できない」`resource` に与える答えで、`audience` にも対称性から同じ答えを返します。
+
 ### エラーのテキスト（RFC 6749）
 
 RFC 6749 付録 A.7 と A.8 は `error` と `error_description` を `1*NQSCHAR`（`"` と `\` を除く印字可能な ASCII）に限ります。この規則は [`src/errors/envelope.mts`](src/errors/envelope.mts) にあります。
