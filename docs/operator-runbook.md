@@ -912,7 +912,8 @@ also capped at a million records (`replaySeenSet.memory.maxEntries`;
 the UUID `jti`s clients send, up to about 725 MB if every `jti` is a
 256-character one outside Latin-1. DPoP proofs — recorded before any rate
 limit or token check, so anyone can send them — may fill only 90% of the
-cap: past that a new proof is refused and the last tenth is kept for the
+cap, and always at least one record less than it (a cap of 1 has no
+reserve): past that a new proof is refused and the rest is kept for the
 other consumers. DPoP's share fills at `0.9 × maxEntries /
 oauth.dpop.replay-store-ttl-seconds` records a second — about 3 000 fresh
 proofs a second at the default 300 s, roughly what one process can verify
@@ -955,7 +956,8 @@ anything. Either give the process the room (`--max-old-space-size`, and a
 container limit above it) or lower the caps to what it has:
 `replaySeenSet.memory.maxEntries` and `challengeStore.memory.maxEntries`
 (HOCON; a string of digits is accepted). Each module refuses to boot, with a
-RangeError naming its key, a value that is not a positive whole number. A
+RangeError naming its key, a value that is not a positive whole number or is
+above 16 777 216 (2^24, the most entries a `Map` holds). A
 lower cap lowers the rate that fills the store in proportion.
 
 ### Failure timing on the shared socket

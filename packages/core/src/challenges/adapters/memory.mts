@@ -17,6 +17,7 @@
 import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { canonicalKey } from "../../single-use/canonical-key.mjs";
 import { ChallengeStorageError } from "../../single-use/errors.mjs";
+import { usableMaxEntries } from "../../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../../single-use/sweep.mjs";
 import type { Challenge, ChallengeStore } from "../types.mjs";
 
@@ -69,8 +70,8 @@ export interface MemoryChallengeStoreOptions extends AmortizedSweepOptions {
 	/**
 	 * The most challenges the store holds, expired-but-unswept ones included;
 	 * {@link DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES} when absent. A value
-	 * that is not a positive whole number is a `RangeError`, never read as no
-	 * cap.
+	 * that is not a positive whole number, or is above 2^24 (the most entries
+	 * a `Map` holds), is a `RangeError`, never read as no cap.
 	 */
 	readonly maxEntries?: number;
 }
@@ -145,12 +146,10 @@ export interface MemoryChallengeStore extends ChallengeStore {
 export function createMemoryChallengeStore(
 	options: MemoryChallengeStoreOptions = {},
 ): MemoryChallengeStore {
-	const maxEntries = options.maxEntries ?? DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES;
-	if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
-		throw new RangeError(
-			`createMemoryChallengeStore: maxEntries must be a positive whole number (got ${String(maxEntries)})`,
-		);
-	}
+	const maxEntries = usableMaxEntries(
+		options.maxEntries ?? DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
+		"createMemoryChallengeStore",
+	);
 	const map = new Map<string, { expiresAtMs: number }>();
 	const schedule = createAmortizedSweep(
 		options,

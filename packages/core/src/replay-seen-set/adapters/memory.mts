@@ -17,6 +17,7 @@
 import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { canonicalKey } from "../../single-use/canonical-key.mjs";
 import { ChallengeStorageError } from "../../single-use/errors.mjs";
+import { usableMaxEntries } from "../../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../../single-use/sweep.mjs";
 import { DPOP_PROOF_REPLAY_SCOPE_PREFIX, DPOP_PROOF_REPLAY_SHARE } from "../scopes.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
@@ -75,8 +76,8 @@ export interface MemoryReplaySeenSetOptions extends AmortizedSweepOptions {
 	/**
 	 * The most records the set holds, expired-but-unswept ones included;
 	 * {@link DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES} when absent. A value
-	 * that is not a positive whole number is a `RangeError`, never read as no
-	 * cap.
+	 * that is not a positive whole number, or is above 2^24 (the most entries
+	 * a `Map` holds), is a `RangeError`, never read as no cap.
 	 */
 	readonly maxEntries?: number;
 }
@@ -185,13 +186,16 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
 export function createMemoryReplaySeenSet(
 	options: MemoryReplaySeenSetOptions = {},
 ): MemoryReplaySeenSet {
-	const maxEntries = options.maxEntries ?? DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES;
-	if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
-		throw new RangeError(
-			`createMemoryReplaySeenSet: maxEntries must be a positive whole number (got ${String(maxEntries)})`,
-		);
-	}
-	const dpopShare = Math.ceil(maxEntries * DPOP_PROOF_REPLAY_SHARE);
+	const maxEntries = usableMaxEntries(
+		options.maxEntries ?? DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
+		"createMemoryReplaySeenSet",
+	);
+	// DPoP's share, rounded up, and always a record short of the cap so the
+	// other consumers keep one; a cap of one has no reserve (`scopes.mts`).
+	const dpopShare =
+		maxEntries >= 2
+			? Math.min(Math.ceil(maxEntries * DPOP_PROOF_REPLAY_SHARE), maxEntries - 1)
+			: maxEntries;
 	const map = new Map<string, { expiresAtMs: number }>();
 	const schedule = createAmortizedSweep(
 		options,
