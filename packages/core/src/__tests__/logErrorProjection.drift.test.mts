@@ -991,6 +991,23 @@ describe("a caught error is not flattened into the message of an error built fro
 			["its toString()", `try { x() } catch (err) { throw new Error(err.toString()); }`],
 			["JSON.stringify of it", `try { x() } catch (err) { throw new Error(JSON.stringify(err)); }`],
 			[
+				"its message through a cast",
+				`try { x() } catch (err) { throw new Error("failed: " + (err as Error).message); }`,
+			],
+			[
+				"its stack through a cast",
+				`try { x() } catch (err) { throw new Error((err as Error).stack); }`,
+			],
+			[
+				"its toString() through a chain of casts",
+				`try { x() } catch (err) { throw new Error((err as unknown as Error).toString()); }`,
+			],
+			["inspect of it", `try { x() } catch (err) { throw new Error(inspect(err)); }`],
+			[
+				"util.inspect of it, with options",
+				`try { x() } catch (err) { throw new Error(util.inspect(err, { depth: 5 })); }`,
+			],
+			[
 				"a BootError's message",
 				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
 				"try { x() } catch (thrownValue) { throw new BootError({ message: `factory failed: ${String(thrownValue)}`, reason, stage, details, cause: thrownValue }); }",
