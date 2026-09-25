@@ -15,7 +15,7 @@
  */
 
 /**
- * jwks-etag.test.mts — the #293 item 4 caching contract of the JWKS route.
+ * router-etag.test.mts — the #293 item 4 caching contract of the JWKS route.
  *
  * The response body is computed once per key SET and revalidated with a
  * strong ETag; the cache is keyed on (kid, publicKey identity) pairs because
@@ -28,8 +28,8 @@ import express from "express";
 import { generateKeyPair } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createRouter } from "#/jwks/router.mjs";
 import type { KeyStore, ManagedKey } from "#/keys/KeyStore.mjs";
-import { createRouter } from "#/routes/Jwks.mjs";
 
 const makeStore = async () => {
 	const first = await generateKeyPair("EdDSA");

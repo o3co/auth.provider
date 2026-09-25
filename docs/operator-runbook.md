@@ -615,7 +615,7 @@ stream — its level is fixed at `info`.
 | `logout_store_unavailable` (error) by `store`; `logout_cascade_operation_failed`, `logout_cascade_cleanup_failed` (warn) | `oauth/src/routes/logout.mts`, `oauth/src/logout/cascadeLogout.mts` | RP-initiated logout is answering `503` because a session store could not be read or the cascade stopped (`store: "logout_cascade"`, `cascadeStep`); the warn lines name each operation that failed |
 | `authorization_grant_store_unavailable`, `session_grant_store_unavailable` (error) by `store` and `step` | `oauth/src/grants/authorization.mts`, `grants/session.mts` | code exchanges or session-grant token requests are answering `503` because a session store or the family store cannot answer |
 | `grant_policy_unavailable` (error) | `core/src/grants/grantPolicy.mts` (every grant through `evaluateGrantPolicy`, webauthn's included), `oauth-token-exchange/src/grant.mts`, `oauth/src/routes/authorize.mts` | the `grantPolicy` hook threw: every grant it gates is answering `503`, and `/authorize` redirects `temporarily_unavailable` |
-| `jwks_unavailable` (error) | `core/src/routes/Jwks.mts` | the JWKS endpoint is answering `503`: the keystore returned no publishable key (`keys: 0`), or could not answer at all (the error's projection) — relying parties cannot fetch a key to verify with |
+| `jwks_unavailable` (error) | `core/src/jwks/router.mts` | the JWKS endpoint is answering `503`: the keystore returned no publishable key (`keys: 0`), or could not answer at all (the error's projection) — relying parties cannot fetch a key to verify with |
 | `userinfo_store_unavailable`, `introspect_store_unavailable` (error) | `oauth/src/routes/userinfo.mts`, `oauth/src/routes.mts` | userinfo or introspection is answering `503` because the refresh-token family store (`store: "refresh_token_family"`) or the session store (`store: "user_session"`) is unreachable |
 | `token_exchange_family_store_unavailable` (error) | `oauth-token-exchange/src/grant.mts` | token exchanges are answering `503` because the refresh-token family store is unreachable; `role` says whether the `subject_token`'s or the `actor_token`'s family could not be read |
 | `revoke_all_for_subject_incomplete`, `revoke_all_watermark_failed`, `revoke_all_list_sids_failed`, `revoke_all_cascade_failed`, `revoke_all_remove_sid_failed` (error) | `core/src/user-sessions/revokeAllForSubject.mts` | a credential change did **not** fully invalidate what was issued. `incomplete` means a store was not wired (composition gap); the others mean a wired store threw (outage — retry) |
@@ -917,7 +917,7 @@ is deliberately not offered there.
 `GET /.well-known/jwks.json` (`oauth.jwt.jwksPath` to move it) publishes the
 current key plus every `previousKeys` entry whose `expiresAt` has not passed
 (`getVerificationKeys`, `packages/core/src/keys/KeyStore.mts`). The route
-(`packages/core/src/routes/Jwks.mts`):
+(`packages/core/src/jwks/router.mts`):
 
 - serialises the set **once per key set** and answers with a strong `ETag`
   (SHA-256 of the body); a poller sending `If-None-Match` gets `304` until the

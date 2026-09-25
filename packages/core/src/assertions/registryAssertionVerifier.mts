@@ -16,7 +16,6 @@
 
 import { createLocalJWKSet, decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import { parseScopeTokens } from "../federations/scope.mjs";
-import { createRemoteKeySetCache } from "../jwks/remoteKeySet.mjs";
 import { malformedNumericDateClaim } from "../jwt/numericDate.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
@@ -29,6 +28,7 @@ import {
 	isValidAssertionClockTolerance,
 	MAX_ASSERTION_LIFETIME_SECONDS,
 } from "./lifetime.mjs";
+import { createRemoteKeySetCache } from "./remoteKeySet.mjs";
 import type {
 	AssertionVerificationContext,
 	AssertionVerificationResult,

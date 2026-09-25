@@ -22,7 +22,7 @@ import {
 	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
 	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
 	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
-} from "#/jwks/remoteKeySet.mjs";
+} from "#/assertions/remoteKeySet.mjs";
 
 /**
  * v0.13.0 audit — the one place a `jwks_uri` becomes a key resolver. There

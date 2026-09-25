@@ -17,9 +17,9 @@
 import { createRequire } from "node:module";
 import type { Router } from "express";
 import { defineModule } from "../modules/index.mjs";
-import { createRouter as createJwksRouter } from "../routes/Jwks.mjs";
 import { resolveJwksCacheMaxAge } from "./cache.mjs";
 import { resolveJwksPath } from "./path.mjs";
+import { createRouter as createJwksRouter } from "./router.mjs";
 
 /**
  * JWKS publishing module. Contributes the `/.well-known/jwks.json` route

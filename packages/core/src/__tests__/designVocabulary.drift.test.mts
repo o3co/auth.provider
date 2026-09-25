@@ -166,7 +166,7 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept: "remote JSON Web Key Set — the cache (#484, #525)",
-		home: "packages/core/src/jwks/remoteKeySet.mts",
+		home: "packages/core/src/assertions/remoteKeySet.mts",
 		definition: /(?:function|const)\s+createRemoteKeySetCache\b/,
 	},
 	{
@@ -174,7 +174,7 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		// memo with its own tuning and its own (or no) fetch seam — in the home
 		// as anywhere else.
 		concept: "remote JSON Web Key Set — the one jose key set it builds (#484, #525)",
-		home: "packages/core/src/jwks/remoteKeySet.mts",
+		home: "packages/core/src/assertions/remoteKeySet.mts",
 		definition: /\bcreateRemoteJWKSet\s*\(/,
 		homeMatches: 1,
 	},

@@ -20,8 +20,8 @@ import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "#/jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, resolveJwksPath } from "#/jwks/path.mjs";
+import { createRouter } from "#/jwks/router.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
-import { createRouter } from "#/routes/Jwks.mjs";
 
 type RouteHandler = (req: Request, res: Response) => unknown | Promise<unknown>;
 

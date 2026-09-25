@@ -71,6 +71,17 @@ export {
 	ID_JAG_TYP,
 	type RegistryAssertionVerifierOptions,
 } from "./assertions/registryAssertionVerifier.mjs";
+// A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
+export {
+	createRemoteKeySetCache,
+	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
+	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
+	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
+	type RemoteKeySet,
+	type RemoteKeySetCache,
+	type RemoteKeySetCacheOptions,
+	type RemoteKeySetTuning,
+} from "./assertions/remoteKeySet.mjs";
 // #301: possession proof for the RFC 7523 jwt-bearer grant. The port is here;
 // the JWT implementation is the vendor-neutral one, and a platform attestation
 // (DeviceCheck, Play Integrity) is the operator's own.
@@ -376,17 +387,7 @@ export {
 export { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "./jwks/cache.mjs";
 export { jwksModule } from "./jwks/module.mjs";
 export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
-// A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
-export {
-	createRemoteKeySetCache,
-	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
-	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
-	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
-	type RemoteKeySet,
-	type RemoteKeySetCache,
-	type RemoteKeySetCacheOptions,
-	type RemoteKeySetTuning,
-} from "./jwks/remoteKeySet.mjs";
+export { createRouter as createJwksRouter, type JwksRouterOptions } from "./jwks/router.mjs";
 // A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
 export type { NumericDateClaim } from "./jwt/numericDate.mjs";
 export {
@@ -739,7 +740,6 @@ export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,
 } from "./routes/Healthcheck.mjs";
-export { createRouter as createJwksRouter, type JwksRouterOptions } from "./routes/Jwks.mjs";
 export {
 	createRouter as createReadinessRouter,
 	type ReadinessRouterOptions,
