@@ -57,10 +57,11 @@ export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
  * process's CPU would. A lower cap would let one client fill the set at a
  * rate it sends idly — and while it is full every consumer is refused (see
  * the factory). The memory it bounds is about 200 MB with the UUID `jti`s
- * clients send, and up to about 700 MB when every `jti` is a 256-character
+ * clients send, and up to about 725 MB when every `jti` is a 256-character
  * one outside Latin-1. A longer DPoP window lowers the rate that fills it in
- * proportion. Set `maxEntries` in a module of your own that builds the set;
- * past one replica, use the Redis seen-set.
+ * proportion. `memoryReplaySeenSetModule` reads the cap from
+ * `replaySeenSet.memory.maxEntries`; past one replica, use the Redis
+ * seen-set.
  */
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES = 1_000_000;
 

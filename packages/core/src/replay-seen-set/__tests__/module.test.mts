@@ -5,11 +5,12 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "#/boot/create-app.mjs";
 import { BootError, type BootstrapMap } from "#/boot/types.mjs";
+import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { defineModule, type Module } from "#/modules/manifest/index.mjs";
 import type { MemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
 import { DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES } from "#/replay-seen-set/adapters/memory.mjs";
 import { memoryReplaySeenSetModule } from "#/replay-seen-set/module.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * Boots `module` over the core fixture with `extra` merged in at the top,
@@ -75,6 +76,15 @@ describe("memoryReplaySeenSetModule", () => {
 			await handle.dispose();
 			return set;
 		};
+
+		it("survives the schema a composition root parses its config with", () => {
+			// `AppConfigSchema` strips what it does not declare, before any module runs.
+			const parsed = AppConfigSchema.parse({
+				...makeValidAppConfig(),
+				replaySeenSet: { memory: { maxEntries: "5000" } },
+			});
+			expect(parsed.replaySeenSet?.memory?.maxEntries).toBe("5000");
+		});
 
 		it("takes the default when the key is absent", async () => {
 			expect((await seenSetOf({})).maxEntries).toBe(DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES);

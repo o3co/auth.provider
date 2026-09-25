@@ -52,10 +52,11 @@ export const DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS = 10_000;
  * being the ceremony's (`webauthn.challengeTtlMs`, 120 s by default): at a
  * million that is over 8 000 options requests a second held for two minutes,
  * more than one process serves, and the authentication options route is
- * behind a per-IP rate limit besides. The memory it bounds is about 200 MB.
- * A longer window lowers the rate that fills it in proportion. Set
- * `maxEntries` in a module of your own that builds the store; past one
- * replica, use the Redis challenge store.
+ * behind a per-IP rate limit besides. The memory it bounds is about 180 MB.
+ * A longer window lowers the rate that fills it in proportion.
+ * `memoryChallengeStoreModule` reads the cap from
+ * `challengeStore.memory.maxEntries`; past one replica, use the Redis
+ * challenge store.
  */
 export const DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES = 1_000_000;
 

@@ -907,9 +907,9 @@ each sweeps on its writes, at most once per 1000 writes and once per ten
 seconds (`packages/core/src/single-use/sweep.mts`), so a WebAuthn ceremony
 the user abandons, or an options request repeated in a loop, costs an entry
 for its lifetime and not until the process restarts. The replay seen-set is
-also capped at a million records (`maxEntries` in
+also capped at a million records (`replaySeenSet.memory.maxEntries`;
 `packages/core/src/replay-seen-set/adapters/memory.mts`): about 200 MB with
-the UUID `jti`s clients send, up to about 700 MB if every `jti` is a
+the UUID `jti`s clients send, up to about 725 MB if every `jti` is a
 256-character one outside Latin-1. It fills at `maxEntries /
 oauth.dpop.replay-store-ttl-seconds` records a second — about 3 300 fresh
 DPoP proofs a second at the default 300 s, roughly what one process can
@@ -925,14 +925,27 @@ expire: DPoP at the token endpoint and at protected resources, logged as
 `err.name: "ReplaySeenSetFullError"`. Sustained, that is a flood of fresh
 DPoP proofs, or more traffic than one replica's seen-set should carry: move
 to `REPLAY_SEEN_SET_ADAPTER=redis`. The challenge store is capped the same
-way at a million challenges (`maxEntries` in
-`packages/core/src/challenges/adapters/memory.mts`, about 200 MB). It fills
+way at a million challenges (`challengeStore.memory.maxEntries`;
+`packages/core/src/challenges/adapters/memory.mts`, about 180 MB). It fills
 at `maxEntries / webauthn.challengeTtlMs` — over 8 000 options requests a
 second at the default 120 s, behind the options routes' rate limit — and at
 the cap refuses a new challenge rather than evict one a user is completing:
 the WebAuthn options routes answer `503 temporarily_unavailable`, logged as
 `webauthn_ceremony_store_unavailable` (`store: "challenge"`, `step:
 "issue"`) with `err.name: "ChallengeStoreFullError"`.
+
+**Heap headroom for the two caps.** A process that keeps both memory stores
+at their defaults needs room for them to fill: about 725 MB for the seen-set
+at its worst and about 180 MB for the challenge store, so about 1 GB of heap
+beyond everything else. Node sizes its default V8 heap from the memory the
+process can see, and in a small container that limit is well under 1 GB, so
+a flood fills the heap and the process dies before either cap refuses
+anything. Either give the process the room (`--max-old-space-size`, and a
+container limit above it) or lower the caps to what it has:
+`replaySeenSet.memory.maxEntries` and `challengeStore.memory.maxEntries`
+(HOCON; a string of digits is accepted). Each module refuses to boot, with a
+RangeError naming its key, a value that is not a positive whole number. A
+lower cap lowers the rate that fills the store in proportion.
 
 ### Failure timing on the shared socket
 

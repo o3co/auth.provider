@@ -14,11 +14,15 @@
  * limitations under the License.
  */
 import { defineModule } from "../modules/manifest/index.mjs";
+import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import { createMemoryChallengeStore } from "./adapters/memory.mjs";
 import { createChallengeCeremony } from "./ceremony.mjs";
 
 /**
- * Built-in module that provides the in-process memory ChallengeStore.
+ * Built-in module that provides the in-process memory ChallengeStore, capped
+ * at `challengeStore.memory.maxEntries` when the config sets it (the
+ * adapter's default otherwise); a value that is not a positive whole number
+ * refuses the boot, naming the key.
  * Per A1 §8.1.
  */
 export const memoryChallengeStoreModule = defineModule({
@@ -29,8 +33,15 @@ export const memoryChallengeStoreModule = defineModule({
 		reason:
 			"WebAuthn challenges fork per replica — a ceremony started on one replica cannot be completed on another",
 	},
+	requires: ["config"] as const,
 	provides: {
-		challengeStore: () => createMemoryChallengeStore(),
+		challengeStore: ({ config }) =>
+			createMemoryChallengeStore(
+				configuredMaxEntries(
+					config?.challengeStore?.memory?.maxEntries,
+					"challengeStore.memory.maxEntries",
+				),
+			),
 	},
 });
 

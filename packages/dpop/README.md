@@ -196,8 +196,8 @@ So of two requests carrying one proof, exactly one is accepted.
   `replay_store_fault`, because the fix is in the composition, not in Redis.
   A seen-set that is full refuses the write the same way, as
   `replay_store_unavailable`: core's in-process set at its cap
-  (`ReplaySeenSetFullError`, `reason: "full"`; `maxEntries`, a million records
-  by default), or a Redis at `maxmemory` under `noeviction`. Every proof is
+  (`ReplaySeenSetFullError`, `reason: "full"`; `replaySeenSet.memory.maxEntries`,
+  a million records by default), or a Redis at `maxmemory` under `noeviction`. Every proof is
   recorded before the token endpoint's rate limit and before a protected
   resource verifies the access token, so the rate that fills it,
   `maxEntries / replay-store-ttl-seconds`, is a rate anyone can send; a longer

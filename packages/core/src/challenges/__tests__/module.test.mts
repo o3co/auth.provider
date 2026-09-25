@@ -11,8 +11,9 @@ import {
 	defaultChallengeCeremonyModule,
 	memoryChallengeStoreModule,
 } from "#/challenges/module.mjs";
+import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { defineModule, type Module } from "#/modules/manifest/index.mjs";
-import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { makeValidAppConfig, makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * Boots `module` over the core fixture with `extra` merged in at the top,
@@ -78,6 +79,15 @@ describe("memoryChallengeStoreModule", () => {
 			await handle.dispose();
 			return store;
 		};
+
+		it("survives the schema a composition root parses its config with", () => {
+			// `AppConfigSchema` strips what it does not declare, before any module runs.
+			const parsed = AppConfigSchema.parse({
+				...makeValidAppConfig(),
+				challengeStore: { memory: { maxEntries: "5000" } },
+			});
+			expect(parsed.challengeStore?.memory?.maxEntries).toBe("5000");
+		});
 
 		it("takes the default when the key is absent", async () => {
 			expect((await storeOf({})).maxEntries).toBe(DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES);
