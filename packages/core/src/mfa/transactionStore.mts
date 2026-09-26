@@ -31,9 +31,11 @@
  * weekly hold. Each answer is judged on the time its caller passes, not on
  * the store's clock, so the callers' clocks must agree — the provider's is
  * NTP-synced (D22). A caller whose clock runs ahead is answered on its own
- * time, but erases nothing: the store keeps a failure, and a trust, for
- * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} after it stops counting, so a caller on
- * time still counts it.
+ * time, but what it erases is bounded: a store forgets a failure, or a trust,
+ * only {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} after it stops counting, judged no
+ * later than the store's own clock. A caller ahead by less than the allowance
+ * erases nothing a caller on time still counts, and one far ahead — on any
+ * subject — erases nothing either.
  *
  * What bounds it: a subject is a user the Store authenticated, but where the
  * Store lets anyone sign up anyone can mint subjects, and a subject's run
@@ -247,9 +249,10 @@ export const MFA_WEEKLY_WINDOW_MS = 7 * 86_400_000;
 
 /**
  * How long a store keeps a failure, or a trust, after it stops counting: a
- * day. A caller whose clock runs ahead by less than this erases nothing a
- * caller on time still counts. Clocks are NTP-synced (D22), so a day is far
- * more than a working deployment needs; it costs one more day of state.
+ * day, measured on the store's clock and never on a later one. A caller whose
+ * clock runs ahead by less than this erases nothing a caller on time still
+ * counts. Clocks are NTP-synced (D22), so a day is far more than a working
+ * deployment needs; it costs one more day of state.
  */
 export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
 

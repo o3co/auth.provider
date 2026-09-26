@@ -288,7 +288,8 @@ export function createMemoryMfaTransactionStore(
 
 	/**
 	 * Expired transactions by this store's clock; subject state by the latest
-	 * time a caller passed, and not at all before one has.
+	 * time a caller passed, and not at all before one has — but never later
+	 * than this store's clock (see `prune`).
 	 */
 	function sweep(storeNowMs: number): void {
 		for (const [id, tx] of transactions) {
@@ -302,13 +303,15 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/**
-	 * What the state no longer needs at `nowMs`: failures and trusts that
-	 * ended more than {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} before it — kept that
-	 * long so a caller whose clock runs ahead erases nothing a caller on time
-	 * still counts — and reservations nothing counts any more.
+	 * What the state no longer needs at `nowMs`, judged no later than this
+	 * store's clock — so a caller whose clock runs far ahead, on this subject
+	 * or another, erases nothing — and minus {@link MFA_CLOCK_SKEW_ALLOWANCE_MS},
+	 * so one ahead of the store by less than that erases nothing either: the
+	 * failures and trusts that ended before, and the reservations nothing
+	 * counts any more. What is kept still counts only at a caller's own time.
 	 */
 	function prune(state: SubjectState, nowMs: number, policy?: MfaLockoutPolicy): void {
-		const horizon = nowMs - MFA_CLOCK_SKEW_ALLOWANCE_MS;
+		const horizon = Math.min(nowMs, clock()) - MFA_CLOCK_SKEW_ALLOWANCE_MS;
 		state.week = state.week.filter((a) => a.atMs + MFA_WEEKLY_WINDOW_MS > horizon);
 		state.trusted = state.trusted.filter((t) => trustEndsAt(t, policy) > horizon);
 		for (const id of state.pending.keys()) {
