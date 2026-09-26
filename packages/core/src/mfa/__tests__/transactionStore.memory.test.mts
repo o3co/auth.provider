@@ -44,6 +44,8 @@ const POLICY: MfaLockoutPolicy = {
 };
 
 const T0 = Date.UTC(2026, 8, 1);
+const DAY = 86_400_000;
+const WEEK = 7 * DAY;
 
 const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 	id: "tx-1",
@@ -118,19 +120,64 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(store.subjects).toBe(1);
 		if (reserved.ok) await store.settleSubjectAttempt("user-1", reserved.reservation, "void");
 		expect(store.subjects).toBe(0);
-		await store.noteExemptSuccess("user-1", T0, POLICY);
+		await store.noteExemptSuccess("user-1", T0, POLICY, undefined);
 		expect(store.subjects).toBe(1);
 		await store.clearSubjectState("user-1");
 		expect(store.subjects).toBe(0);
 	});
 
-	it("keeps a subject's state while the week still counts a failure, and drops it after", async () => {
+	it("keeps a subject's state while a failure stands in its run or its week, and drops it once none does", async () => {
 		const store = createMemoryMfaTransactionStore();
-		const reserved = await store.reserveSubjectAttempt("user-1", T0, POLICY, undefined);
-		if (reserved.ok) await store.settleSubjectAttempt("user-1", reserved.reservation, "success");
+		const settle = async (at: number, outcome: "failure" | "success" | "void") => {
+			const reserved = await store.reserveSubjectAttempt("user-1", at, POLICY, undefined);
+			if (!reserved.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", reserved.reservation, outcome);
+		};
+		await settle(T0, "success");
 		expect(store.subjects).toBe(0);
-		const failed = await store.reserveSubjectAttempt("user-1", T0, POLICY, undefined);
-		if (failed.ok) await store.settleSubjectAttempt("user-1", failed.reservation, "failure");
+		await settle(T0, "failure");
+		expect(store.subjects).toBe(1);
+		// Two weeks on the week has let the failure go, but the consecutive run
+		// has not: only a success ends it (D21's hard limit counts it).
+		await settle(T0 + 2 * WEEK, "void");
+		expect(store.subjects).toBe(1);
+		await settle(T0 + 2 * WEEK, "success");
+		expect(store.subjects).toBe(0);
+	});
+
+	it("sweeps subject state on the latest time a caller passed, never on its own clock", async () => {
+		// The port judges the subject state on the callers' time. A store clock
+		// that runs ahead must not let the week go early.
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			sweepInterval: 1,
+			minSweepIntervalMs: 0,
+		});
+		const oneAWeek: MfaLockoutPolicy = { ...POLICY, weeklyBudget: 1 };
+		const reserved = await store.reserveSubjectAttempt("user-1", T0, oneAWeek, undefined);
+		if (!reserved.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
+		now = T0 + 30 * DAY;
+		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
+		const next = await store.reserveSubjectAttempt("user-1", T0 + 1, oneAWeek, undefined);
+		expect(next).toMatchObject({ ok: false, hold: "weekly" });
+	});
+
+	it("drops a subject whose only state is a trust that has ended, in the sweep", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			sweepInterval: 1,
+			minSweepIntervalMs: 0,
+		});
+		await store.noteExemptSuccess("user-1", T0, POLICY, undefined);
+		expect(store.subjects).toBe(1);
+		// Another subject's call carries the callers' time past the trust's end
+		// (trustedBrowserDays, with no failure in the week).
+		now = T0 + 31 * DAY;
+		await store.noteExemptSuccess("user-2", now, POLICY, undefined);
+		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
 		expect(store.subjects).toBe(1);
 	});
 });
