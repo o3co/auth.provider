@@ -537,6 +537,7 @@ export {
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
 export {
 	checkMfaLockoutPolicy,
+	checkNewMfaTransaction,
 	MFA_TRANSACTION_PATCH_KEYS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
@@ -547,6 +548,7 @@ export {
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	type MfaTransactionStoreFactory,
+	mfaTransactionPatchWrites,
 } from "./mfa/transactionStore.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {

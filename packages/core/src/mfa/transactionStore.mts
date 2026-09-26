@@ -79,17 +79,22 @@ export interface MfaTransaction {
 }
 
 /**
- * What `update` may change. A key present sets the field — to `undefined`
- * where the field allows it, which clears it; a key absent leaves the field
- * as it is. Nothing else about a transaction changes after `create`.
+ * What `update` may change. A key with a value sets the field; `null` clears
+ * a field that may be empty (`challenge`, `pendingEnrollment`,
+ * `lastSentAtMs`); a key absent — or present with `undefined`, which a spread
+ * or an optional property produces — leaves the field as it is, so a patch
+ * can never clear a limit by omission. A value a field does not admit is a
+ * `RangeError` ({@link mfaTransactionPatchWrites}), and so is `null` for a
+ * field that may not be empty. Nothing else about a transaction changes after
+ * `create`: any other key a patch carries is ignored.
  */
 export interface MfaTransactionPatch {
 	readonly enrollment?: MfaTransaction["enrollment"];
 	readonly emailProof?: MfaTransaction["emailProof"];
-	readonly challenge?: MfaTransaction["challenge"];
-	readonly pendingEnrollment?: MfaTransaction["pendingEnrollment"];
+	readonly challenge?: NonNullable<MfaTransaction["challenge"]> | null;
+	readonly pendingEnrollment?: NonNullable<MfaTransaction["pendingEnrollment"]> | null;
 	readonly sends?: number;
-	readonly lastSentAtMs?: number | undefined;
+	readonly lastSentAtMs?: number | null;
 }
 
 /** The keys an {@link MfaTransactionPatch} may carry, for an adapter that copies one field by field. */
@@ -101,6 +106,100 @@ export const MFA_TRANSACTION_PATCH_KEYS = [
 	"sends",
 	"lastSentAtMs",
 ] as const satisfies readonly (keyof MfaTransactionPatch)[];
+
+const isCount = (value: unknown): value is number =>
+	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const isInstant = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value);
+
+const isText = (value: unknown): value is string => typeof value === "string";
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Whether each field admits a value; `null` is decided before this. */
+const PATCH_VALUE_RULES: Readonly<Record<keyof MfaTransactionPatch, (value: unknown) => boolean>> =
+	{
+		enrollment: (v) => v === "none" || v === "allowed" || v === "required",
+		emailProof: (v) =>
+			v === "not_required" || v === "required" || (isRecord(v) && isInstant(v.provedAtMs)),
+		challenge: (v) =>
+			isRecord(v) &&
+			isText(v.factorId) &&
+			isText(v.kind) &&
+			isText(v.state) &&
+			isInstant(v.expiresAtMs),
+		pendingEnrollment: (v) =>
+			isRecord(v) && isText(v.kind) && isText(v.state) && isInstant(v.expiresAtMs),
+		sends: isCount,
+		lastSentAtMs: isInstant,
+	};
+
+/** The fields `null` may clear. */
+const CLEARABLE: ReadonlySet<keyof MfaTransactionPatch> = new Set([
+	"challenge",
+	"pendingEnrollment",
+	"lastSentAtMs",
+]);
+
+/**
+ * What a patch writes, field by field, after the rules of
+ * {@link MfaTransactionPatch}: each entry a patch key and its new value,
+ * `undefined` for a field `null` clears. A key absent or present with
+ * `undefined` is not an entry, and neither is a key outside
+ * {@link MFA_TRANSACTION_PATCH_KEYS}. Throws a `RangeError` naming the key for
+ * a value its field does not admit, before anything is written — every
+ * adapter calls it first.
+ */
+export function mfaTransactionPatchWrites(
+	patch: MfaTransactionPatch,
+): readonly (readonly [keyof MfaTransactionPatch, unknown])[] {
+	if (!isRecord(patch)) {
+		throw new RangeError("MfaTransactionStore.update: the patch must be an object");
+	}
+	const writes: (readonly [keyof MfaTransactionPatch, unknown])[] = [];
+	for (const key of MFA_TRANSACTION_PATCH_KEYS) {
+		if (!Object.hasOwn(patch, key)) continue;
+		const value = (patch as Readonly<Record<string, unknown>>)[key];
+		if (value === undefined) continue;
+		if (value === null) {
+			if (!CLEARABLE.has(key)) {
+				throw new RangeError(`MfaTransactionStore.update: ${key} cannot be cleared`);
+			}
+			writes.push([key, undefined]);
+			continue;
+		}
+		if (!PATCH_VALUE_RULES[key](value)) {
+			throw new RangeError(`MfaTransactionStore.update: ${key} is not a value it admits`);
+		}
+		writes.push([key, value]);
+	}
+	return writes;
+}
+
+/**
+ * Refuses, with a `RangeError`, a new transaction whose counters are not a
+ * fresh record's: `attempts` other than `0`, and a `version` or `sends` that
+ * is not a safe non-negative integer. A limit is only as good as the count it
+ * starts from — with `attempts` NaN, `NaN + 1 > max` is false and every
+ * reservation would pass. Every adapter calls it in `create`, beside its own
+ * check of the expiry against its clock.
+ */
+export function checkNewMfaTransaction(tx: MfaTransaction): void {
+	if (!isRecord(tx)) {
+		throw new RangeError("MfaTransactionStore.create: the transaction must be an object");
+	}
+	if (tx.attempts !== 0) {
+		throw new RangeError("MfaTransactionStore.create: attempts must be 0");
+	}
+	if (!isCount(tx.version)) {
+		throw new RangeError("MfaTransactionStore.create: version must be a safe non-negative integer");
+	}
+	if (!isCount(tx.sends)) {
+		throw new RangeError("MfaTransactionStore.create: sends must be a safe non-negative integer");
+	}
+}
 
 /**
  * D21's subject lock (`mfa.lockout`). Every field is a positive whole number;
@@ -158,14 +257,20 @@ export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 export interface MfaTransactionStore {
 	readonly kind: string;
 
-	/** Insert-only: a live id is refused. Refuses an `expiresAtMs` that is not a future instant with a `RangeError`. */
+	/**
+	 * Insert-only: a live id is refused. Refuses with a `RangeError` an
+	 * `expiresAtMs` that is not a future instant, and counters that are not a
+	 * fresh record's ({@link checkNewMfaTransaction}).
+	 */
 	create(tx: MfaTransaction): Promise<void>;
 	/** The transaction, or `null` once it expired. */
 	get(id: string): Promise<MfaTransaction | null>;
 	/**
-	 * Compare-and-set on `version`: applies `patch` and bumps `version` by one,
-	 * only if the transaction is still at `expectedVersion`. Answers the
-	 * transaction as written, or `null` when the version moved or it is gone.
+	 * Compare-and-set on `version`: applies `patch` by the rules of
+	 * {@link MfaTransactionPatch} and bumps `version` by one, only if the
+	 * transaction is still at `expectedVersion`. Answers the transaction as
+	 * written, or `null` when the version moved or it is gone. A patch value a
+	 * field does not admit is a `RangeError`, whatever the version.
 	 */
 	update(
 		id: string,
@@ -174,10 +279,12 @@ export interface MfaTransactionStore {
 	): Promise<MfaTransaction | null>;
 	/**
 	 * Atomic: `attempts` + 1, whatever the version. Answers `ok` while the
-	 * count is within `max`; the reservation past `max` deletes the
-	 * transaction and answers `{ ok: false, attempts: max }`. No live
-	 * transaction answers `{ ok: false, attempts: 0 }`. Refuses a `max` that is
-	 * not a positive whole number with a `RangeError`.
+	 * count is within `max`; the reservation past `max` — or any the store
+	 * cannot count, which fails closed — deletes the transaction and answers
+	 * `{ ok: false, attempts }` with the attempts it had reserved (`max`, unless
+	 * `max` was lowered in flight). No live transaction answers
+	 * `{ ok: false, attempts: 0 }`. Refuses a `max` that is not a positive
+	 * whole number with a `RangeError`.
 	 */
 	reserveAttempt(
 		id: string,

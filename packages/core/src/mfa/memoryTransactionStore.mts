@@ -48,7 +48,7 @@ import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
 	checkMfaLockoutPolicy,
-	MFA_TRANSACTION_PATCH_KEYS,
+	checkNewMfaTransaction,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptOutcome,
@@ -57,6 +57,7 @@ import {
 	type MfaTransaction,
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
+	mfaTransactionPatchWrites,
 } from "./transactionStore.mjs";
 
 /** Writing `create` calls between two sweeps of expired transactions. */
@@ -296,6 +297,7 @@ export function createMemoryMfaTransactionStore(
 		maxEntries,
 
 		async create(tx: MfaTransaction): Promise<void> {
+			checkNewMfaTransaction(tx);
 			const nowMs = clock();
 			if (!isStorableExpiry(tx.expiresAtMs) || tx.expiresAtMs <= nowMs) {
 				throw new RangeError(
@@ -325,12 +327,11 @@ export function createMemoryMfaTransactionStore(
 			expectedVersion: number,
 			patch: MfaTransactionPatch,
 		): Promise<MfaTransaction | null> {
+			const writes = mfaTransactionPatchWrites(patch);
 			const tx = live(id, clock());
 			if (tx === undefined || tx.version !== expectedVersion) return null;
 			const next: Record<string, unknown> = { ...tx, version: tx.version + 1 };
-			for (const key of MFA_TRANSACTION_PATCH_KEYS) {
-				if (Object.hasOwn(patch, key)) next[key] = patch[key];
-			}
+			for (const [key, value] of writes) next[key] = value;
 			const written = copyOf(next as unknown as MfaTransaction);
 			transactions.set(id, written);
 			return copyOf(written);
@@ -348,7 +349,8 @@ export function createMemoryMfaTransactionStore(
 			const tx = live(id, clock());
 			if (tx === undefined) return { ok: false, attempts: 0 };
 			const attempts = tx.attempts + 1;
-			if (attempts > max) {
+			// Fails closed: a count that is not a number is past every max.
+			if (!(attempts <= max)) {
 				transactions.delete(id);
 				return { ok: false, attempts: tx.attempts };
 			}
