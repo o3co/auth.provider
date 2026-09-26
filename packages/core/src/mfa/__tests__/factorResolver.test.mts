@@ -74,6 +74,23 @@ function reader(seen: { resolver?: MfaFactorResolver }) {
 	});
 }
 
+/** A module whose route reads `key`, so that the provider of `key` runs at boot. */
+function readsTheSlot(key: "auditSink") {
+	return defineModule({
+		name: `test:reads-${key}`,
+		requires: [key] as const,
+		contributes: {
+			routes: [
+				() => ({
+					id: `test-reads-${key}`,
+					mountPath: `/__test_reads_${key}__`,
+					handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+				}),
+			],
+		},
+	});
+}
+
 describe("mfaFactorResolver (D3, D7)", () => {
 	it("resolves every contributed factor by kind, and leaves a kind switched off by config absent", async () => {
 		const totp = factor("totp");
@@ -112,6 +129,122 @@ describe("mfaFactorResolver (D3, D7)", () => {
 			expect(handle.components.mfaFactorResolver).toBe(resolver);
 		} finally {
 			await handle.dispose();
+		}
+	});
+
+	it("reaches a provides factory that requires it, which reads it when a request comes", async () => {
+		// The coordinator is a `provides` factory, and it is built before the
+		// contributions are applied: the projection is in place from the
+		// start and fills as the contributions register, so a provider reads
+		// it lazily, not while it is being built.
+		const totp = factor("totp");
+		const contributing = defineModule({
+			name: "test:mfa-factors",
+			contributes: { mfaFactors: { totp: () => totp } },
+		});
+		let seenAtBuild: MfaFactorResolver | undefined;
+		let entriesAtBuild: unknown[] | undefined;
+		const coordinatorLike = defineModule({
+			name: "test:reads-the-resolver-from-provides",
+			requires: ["mfaFactorResolver"] as const,
+			provides: {
+				auditSink: ({ mfaFactorResolver }) => {
+					seenAtBuild = mfaFactorResolver;
+					entriesAtBuild = [...mfaFactorResolver.entries()];
+					return { emit: async () => {} } as never;
+				},
+			},
+		});
+		const handle = await createApp({
+			modules: [coordinatorLike, contributing, readsTheSlot("auditSink")],
+			bootstrapComponents,
+		});
+		try {
+			// Built before any contribution was applied: nothing was there yet.
+			expect(entriesAtBuild).toEqual([]);
+			expect(seenAtBuild).toBeDefined();
+			expect(seenAtBuild).toBe(handle.components.mfaFactorResolver);
+			expect(seenAtBuild?.get("totp")).toBe(totp);
+			expect([...(seenAtBuild?.entries() ?? [])]).toEqual([["totp", totp]]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("gives a provides factory the same projection of every synthetic key the world holds", async () => {
+		const seen: Record<string, unknown> = {};
+		const keys = [
+			"grantHandlerResolver",
+			"tokenExchangeValidatorResolver",
+			"federationProviders",
+			"federationRedirectPolicyResolver",
+			"mfaFactorResolver",
+		];
+		const provider = defineModule({
+			name: "test:reads-every-projection",
+			requires: keys as never,
+			provides: {
+				auditSink: (deps: Record<string, unknown>) => {
+					for (const key of keys) seen[key] = deps[key];
+					return { emit: async () => {} } as never;
+				},
+			},
+		} as never);
+		const handle = await createApp({
+			modules: [provider, readsTheSlot("auditSink")],
+			bootstrapComponents,
+		});
+		try {
+			for (const key of keys) {
+				expect(seen[key], key).toBeDefined();
+				expect(seen[key], key).toBe((handle.components as Record<string, unknown>)[key]);
+			}
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses at boot a factor contributed under a key that is not its kind", async () => {
+		// The resolver answers by key, and the coordinator reads a record's kind
+		// back through it: a factor filed under another kind would verify that
+		// kind's records.
+		for (const [name, modules] of [
+			[
+				"contributes",
+				[
+					defineModule({
+						name: "test:mfa-misfiled",
+						contributes: { mfaFactors: { totp: () => factor("email") } },
+					}),
+				],
+			],
+			[
+				"overrides",
+				[
+					defineModule({
+						name: "test:mfa-totp",
+						contributes: { mfaFactors: { totp: () => factor("totp") } },
+					}),
+					defineModule({
+						name: "test:mfa-totp-override",
+						overrides: { mfaFactors: { totp: () => factor("webauthn") } },
+					}),
+				],
+			],
+		] as const) {
+			const err = await createApp({ modules: [...modules], bootstrapComponents }).then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
+				},
+				(caught: unknown) => caught,
+			);
+			expect(err, name).toBeInstanceOf(BootError);
+			expect((err as BootError).reason, name).toBe("contribute-factory-failed");
+			expect((err as BootError).cause, name).toBeInstanceOf(RangeError);
+			expect(((err as BootError).cause as Error).message, name).toBe(
+				'mfaFactors "totp": the factor\'s kind must be the key it is contributed under',
+			);
 		}
 	});
 
