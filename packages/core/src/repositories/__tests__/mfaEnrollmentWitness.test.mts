@@ -32,6 +32,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { InMemoryUserRepository } from "#/repositories/InMemoryUserRepository.mjs";
 import type { User } from "#/repositories/types.mjs";
 import {
+	type MfaEnrollmentWitness,
+	readMfaEnrollmentWitness,
 	supportsMfaEnrollmentWitness,
 	type UserRepository,
 } from "#/repositories/UserRepository.mjs";
@@ -93,5 +95,37 @@ describe("the MFA enrollment witness (D12)", () => {
 		expect(supportsMfaEnrollmentWitness(repo)).toBe(false);
 		expect((await repo.authenticate("alice", "secret123"))?.mfaEnrolled).toBe(true);
 		expect((await repo.authenticate("bob", "secret456"))?.mfaEnrolled).toBeUndefined();
+	});
+});
+
+/*
+ * One reading of the witness, three answers. A Store that answers `1` or
+ * `"true"` passes a shape check that only asks for an object, and read as
+ * `=== true` it would silently be no witness — the downgrade D12 exists to
+ * prevent. So a value that is neither a boolean nor absent is malformed: the
+ * coordinator answers it 503, logged once, and never opens a first binding.
+ */
+describe("readMfaEnrollmentWitness (D12)", () => {
+	it("answers enrolled for true, and not_enrolled for false or absent", () => {
+		expect(readMfaEnrollmentWitness({ id: "u1", mfaEnrolled: true })).toBe("enrolled");
+		expect(readMfaEnrollmentWitness({ id: "u1", mfaEnrolled: false })).toBe("not_enrolled");
+		expect(readMfaEnrollmentWitness({ id: "u1" })).toBe("not_enrolled");
+		expect(readMfaEnrollmentWitness({ id: "u1", mfaEnrolled: undefined })).toBe("not_enrolled");
+	});
+
+	it("answers malformed for any other value, never not_enrolled", () => {
+		for (const value of [1, 0, "true", "false", "", null, {}, [], Number.NaN]) {
+			expect(readMfaEnrollmentWitness({ id: "u1", mfaEnrolled: value }), String(value)).toBe(
+				"malformed",
+			);
+		}
+	});
+
+	it("reads a User and the session's user snapshot alike", () => {
+		const user: User = { id: "u1", username: "alice", mfaEnrolled: true };
+		const snapshot: Readonly<Record<string, unknown>> = { id: "u1", mfaEnrolled: "yes" };
+		expect(readMfaEnrollmentWitness(user)).toBe("enrolled");
+		expect(readMfaEnrollmentWitness(snapshot)).toBe("malformed");
+		expectTypeOf<MfaEnrollmentWitness>().toEqualTypeOf<"enrolled" | "not_enrolled" | "malformed">();
 	});
 });
