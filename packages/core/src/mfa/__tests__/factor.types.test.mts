@@ -37,6 +37,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
 	MfaCeremonyContext,
+	MfaDigestMatch,
 	MfaDigests,
 	MfaFactor,
 	MfaKeyedDigest,
@@ -54,9 +55,12 @@ describe("the MfaFactor contract", () => {
 		expectTypeOf<MfaDigests["digest"]>().toEqualTypeOf<
 			(parts: readonly string[]) => MfaKeyedDigest
 		>();
+		// A digest whose key has left the ring is not a wrong code: D11 answers
+		// an unreadable factor 503, never "invalid".
 		expectTypeOf<MfaDigests["matchesDigest"]>().toEqualTypeOf<
-			(parts: readonly string[], stored: MfaKeyedDigest) => boolean
+			(parts: readonly string[], stored: MfaKeyedDigest) => MfaDigestMatch
 		>();
+		expectTypeOf<MfaDigestMatch>().toEqualTypeOf<"match" | "mismatch" | "key_unavailable">();
 		expect(true).toBe(true);
 	});
 
@@ -67,8 +71,12 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
-	it("says whether a verification takes the pending challenge (F5, F7)", () => {
-		expectTypeOf<MfaFactor["singleUseChallenge"]>().toEqualTypeOf<boolean | undefined>();
+	it("takes the pending challenge by default, and a factor opts in to reuse (F5, F7)", () => {
+		// Fail closed: a contributed WebAuthn-like factor that forgets the flag
+		// gets a challenge that answers one verification. The email factor opts
+		// in to a code that stands across attempts.
+		expectTypeOf<MfaFactor["reusableChallenge"]>().toEqualTypeOf<boolean | undefined>();
+		expectTypeOf<MfaFactor>().not.toHaveProperty("singleUseChallenge");
 		expect(true).toBe(true);
 	});
 
