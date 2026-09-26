@@ -450,7 +450,7 @@ export interface MfaCoordinator {
 
 Two calls, because the express session is regenerated between them: the transaction must be bound to the id the browser will hold, and the factor read must happen before anything is written.
 
-**Amended 2026-09-27 (build-order step 3).** `MfaTransactionStore` also keeps D25's email-proof requirement, apart from the lock state (see D25's amendment), and `noteExemptSuccess` takes the presented browser so a trusted one is renewed rather than added (D21's amendment).
+**Amended 2026-09-27 (build-order step 3).** `MfaTransactionStore` also keeps D25's email-proof requirement, apart from the lock state (see D25's amendment), and `noteExemptSuccess` takes the presented browser so a trusted one is renewed rather than added (D21's amendment). A patch clears `challenge`, `pendingEnrollment` or `lastSentAtMs` with `null`; a key present with `undefined` is absent, so no patch clears a limit by omission; a value a field does not admit is a `RangeError`, and keys outside the patch are ignored (`mfaTransactionPatchWrites`, which every adapter calls first). `create` refuses a transaction whose `attempts` is not `0`, or whose `version` or `sends` is not a safe non-negative integer (`checkNewMfaTransaction`). The coordinator bounds the transactions one session holds: the store's bound is its expiry, and for the in-process adapter a global cap.
 
 ### D9 — What the session records
 
