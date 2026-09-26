@@ -32,9 +32,10 @@
 export interface ExchangeTokenValidationContext {
 	readonly role: "subject" | "actor";
 	/**
-	 * Reserved for validators that need request-resource context in a future
-	 * contract. The built-in grant handler enforces resource/audience binding
-	 * after policy evaluation, so v0.5.x validators should not rely on this.
+	 * Reserved; the built-in grant handler never sets it. It checks the
+	 * request's audience and resources against the client's registration and
+	 * the subject token's audience before the policy runs, and against the
+	 * issued audience after it, so a validator must not rely on this.
 	 */
 	readonly requestedResources?: readonly string[];
 }
@@ -89,6 +90,17 @@ export interface ExchangeTokenValidator {
  *     that token too. A family left only in `claims` is neither checked nor
  *     inherited. Leave it unset for foreign tokens, whose families this
  *     provider's store does not hold; an empty string counts as unset.
+ *   - `sid`: the `UserSession` the token was issued under, for a token this
+ *     provider minted from a browser session — its `sid`, or the
+ *     `liveness_sid` of a token that was itself exchanged (`livenessSidOf`).
+ *     The grant handler checks that the session is still live against this
+ *     provider's user-session store (when one is wired) and carries it into
+ *     the issued token as `liveness_sid` — a liveness link, never a `sid`
+ *     (`grants/sessionClaims.mts`) — so a logout that ends the subject
+ *     token's session ends the exchanged token too.
+ *     A `sid` left only in `claims` is neither checked nor inherited. Leave
+ *     it unset for foreign tokens: another issuer's `sid` names no session
+ *     this provider's store holds. An empty string counts as unset.
  *   - `act`: nested actor chain from a prior exchange. The grant handler
  *     preserves this when applicable (RFC 8693 §4.1).
  *   - `may_act`: structured delegation constraint from the subject token. The
@@ -100,6 +112,7 @@ export interface ValidatedToken {
 	readonly scope?: string;
 	readonly aud?: string | readonly string[];
 	readonly familyId?: string;
+	readonly sid?: string;
 	readonly act?: Readonly<Record<string, unknown>>;
 	readonly may_act?:
 		| Readonly<Record<string, unknown>>

@@ -29,6 +29,7 @@
  */
 
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
+import { failureSummary } from "./failure-summary.mjs";
 import type { BootPlan, BootstrapMap, CleanupRecord, ComponentWorld } from "./types.mjs";
 import { BootError } from "./types.mjs";
 
@@ -117,7 +118,9 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * topological + declaration-stable order determined by `plan.providerActivations`.
  *
  * On factory failure:
- *   - Wraps the thrown value as `BootError reason="provides-factory-failed"`.
+ *   - Wraps the thrown value as `BootError reason="provides-factory-failed"`,
+ *     its message naming the thrown value by `failureSummary` (never
+ *     `String(thrown)`: see `failure-summary.mts`).
  *   - Runs a best-effort partial rollback of cleanups for components already
  *     materialised (in REVERSE order).
  *   - Cleanup errors are accumulated into `details.cleanupErrors` before the
@@ -197,7 +200,7 @@ export async function materializeComponents(
 			const cleanupErrors = await runCleanupsReverse(cleanups);
 
 			throw new BootError({
-				message: `Module "${moduleName}" provider factory for "${String(componentKey)}" failed: ${String(thrownValue)}`,
+				message: `Module "${moduleName}" provider factory for "${String(componentKey)}" failed: ${failureSummary(thrownValue)}`,
 				reason: "provides-factory-failed",
 				stage: "materializeComponents",
 				details: {

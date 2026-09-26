@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -194,6 +194,20 @@ So of two requests carrying one proof, exactly one is accepted.
   that answers with its own contract error (a `RangeError`, or
   `expired-at-issue`) is broken rather than down: the same 503, with reason
   `replay_store_fault`, because the fix is in the composition, not in Redis.
+  A seen-set that is full refuses the write the same way. Core's in-process
+  set takes proofs only up to 90% of its cap (`replaySeenSet.memory.maxEntries`,
+  a million records by default) and keeps the rest for its other consumers,
+  so `private_key_jwt` and WebAuthn go on while DPoP is refused; that refusal
+  is reason `replay_store_full` (`ReplaySeenSetFullError`, `reason: "full"`).
+  A Redis at `maxmemory` under `noeviction` is `replay_store_unavailable`,
+  and it refuses every consumer alike. Every proof is recorded before the
+  token endpoint's rate limit and before a protected resource verifies the
+  access token, so the rate that fills DPoP's share,
+  `0.9 × maxEntries / replay-store-ttl-seconds`, is a rate anyone can send; a
+  longer TTL lowers it in proportion. A Redis whose eviction policy deletes keys
+  instead (`allkeys-*`, `volatile-*`) makes room by dropping replay records,
+  and a dropped record is a proof that can be replayed within its window
+  ([the redis package's Requirements](../redis/README.md#requirements)).
   Either way the mechanism hands the store's error upward as the refusal's
   `cause` and logs nothing itself: core's dispatcher that answers the 503
   writes the outage's one line at error level — `token_binding_unavailable`
@@ -241,7 +255,7 @@ both run it ([docs/adapter-surface.md](../../docs/adapter-surface.md)).
   - `@o3co/auth-provider-device-grant` accepts it at `POST /oauth/device_authorization` ([`device-grant/src/module.mts`](../device-grant/src/module.mts));
   - `@o3co/auth-provider-federation-grants` accepts it on every client route under `/oauth/federation-grants`: `POST /:grantId/token`, `/:grantId/status` and `/:grantId/revoke`, and, with acquisition on, `POST /` and `/:grantId/reauthorize` ([`federation-grants/src/routes.mts`](../federation-grants/src/routes.mts)).
 
-  Without a seen-set, a client registered with `jwks` / `jwksUri` was refused `500 server_error` at every one of these. A composition that relied on DPoP's own store before this release, and now installs a seen-set for DPoP, turns all of them on. None is reachable without a client registered with keys, but the discovery document changes on its own, so check what it now offers.
+  Without a seen-set, a client registered with `jwks` / `jwksUri` was refused `500 server_error` at every one of these. A composition that relied on DPoP's own store before v0.16.0, and now installs a seen-set for DPoP, turns all of them on. None is reachable without a client registered with keys, but the discovery document changes on its own, so check what it now offers.
 
 - **Upgrading from a release with `oauth.dpop.replay-store`.** DPoP's Redis records move from `dpop:replay:<jkt>:<jti>` to the seen-set's `replay:…dpop-proof:<jkt>…` keys, and neither release reads the other's. While both serve against one Redis, a captured proof can be accepted once by an old replica and once by a new one. Each replica bounds a replay by its own `iat-window-seconds` (W): a proof the old release accepted can still be accepted by the new one for up to W<sub>old</sub> + W<sub>new</sub> + 1 seconds after the last old replica stops — 121 s at the default 60 on both — plus the largest clock skew between replicas. To avoid it:
   - cut over stop-then-start, starting the new release at least W<sub>old</sub> + W<sub>new</sub> + 1 seconds plus that skew after the last old replica stopped. No replica serves in the gap, so this is at least 121 s of downtime at the defaults, for every request, DPoP or not; or

@@ -15,6 +15,7 @@
  */
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
+import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import { createMemoryReplaySeenSet } from "./adapters/memory.mjs";
 import type { ReplaySeenSet } from "./types.mjs";
 
@@ -28,6 +29,16 @@ export function createReplaySeenSetFactory(): ReplaySeenSetFactory {
 	return createAdapterFactory<ReplaySeenSet>("ReplaySeenSet");
 }
 
+/**
+ * Register the in-tree built-in builders: `memory`, capped at the adapter
+ * config's `maxEntries` (`factory.create({ type: "memory", maxEntries })`,
+ * read as `replaySeenSet.memory.maxEntries` is: absent means the default, a
+ * value it cannot use is a RangeError naming the key).
+ */
 export function registerBuiltinReplaySeenSets(factory: ReplaySeenSetFactory): void {
-	factory.register("memory", () => createMemoryReplaySeenSet());
+	factory.register("memory", (config) =>
+		createMemoryReplaySeenSet(
+			configuredMaxEntries(config.maxEntries, "ReplaySeenSet memory adapter maxEntries"),
+		),
+	);
 }

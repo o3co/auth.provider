@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`.
 
@@ -219,7 +219,7 @@ A store any of these cannot reach is `503 temporarily_unavailable`, logged once 
 
 ## Store outages
 
-A store the grant or a ceremony route needs that cannot answer — the credential store, the challenge store or the ceremony over it (with its replay seen-set), the refresh-token family store — is the server's outage, never a verdict on the passkey: `503 temporarily_unavailable`, with an `error_description` naming the kind of store (`credential store unavailable`, `challenge store unavailable`, `refresh token store unavailable`), logged once at error level with `store`, `step` and the error's projection ([`src/internal/storeUnavailable.mts`](src/internal/storeUnavailable.mts)). No token is issued and no credential is reported stored.
+A store the grant or a ceremony route needs that cannot answer — the credential store, the challenge store or the ceremony over it (with its replay seen-set), the refresh-token family store — is the server's outage, never a verdict on the passkey: `503 temporarily_unavailable`, with an `error_description` naming the kind of store (`credential store unavailable`, `challenge store unavailable`, `refresh token store unavailable`), logged once at error level with `store`, `step` and the error's projection ([`src/internal/storeUnavailable.mts`](src/internal/storeUnavailable.mts)). No token is issued and no credential is reported stored. Core's in-process challenge store counts as one that cannot answer once it holds its cap of live challenges (`challengeStore.memory.maxEntries`, a million by default): it refuses a new challenge with `ChallengeStoreFullError` rather than evict one a user is completing, and the options route answers `503`.
 
 | Where | Store / step | Log line | What a retry meets |
 | --- | --- | --- | --- |
@@ -291,13 +291,13 @@ A passkey is the primary login on a native app and the access token is short-liv
 
 ## SECURITY — sender-constrained tokens
 
-**A sender-bound request produces a sender-bound access token.** When the request carries a DPoP proof or a client certificate, the resulting access token carries the matching RFC 7800 confirmation — `cnf.jkt` for DPoP, `cnf.x5t#S256` for mTLS — and a resource server that enforces binding accepts it only from the same key or certificate. This is the mechanism-agnostic copy the authorization-code and client-credentials grants perform; the webauthn grant does not have one of its own.
+**A sender-bound request produces a sender-bound access token.** When the request carries a DPoP proof or a client certificate, the resulting access token carries the matching RFC 7800 confirmation — `cnf.jkt` for DPoP, `cnf.x5t#S256` for mTLS — and a resource server that enforces binding accepts it only from the same key or certificate. It is the member the binding's mechanism owns (core's `ownedConfirmation`), the rule every grant applies: a contributed mechanism whose kind owns neither member, or a binding carrying a member its kind does not own, gets an unbound token, and a compound confirmation keeps the owned member alone. The webauthn grant has no rule of its own.
 
-**The gate is wider than the refresh token's.** The access token binds whenever the request carried a confirmation, with no further condition — including for a confidential client, whose refresh token stays unbound by default. The two are different questions: a confidential client re-authenticates itself at every refresh, which is why RFC 9449 §5 leaves its refresh token unbound rather than pin it to one key for days; nothing of the sort protects an access token, which a resource server checks on every call.
+**The gate is wider than the refresh token's.** The access token binds whenever the request carried a confirmation its mechanism owns, with no further condition — including for a confidential client, whose refresh token stays unbound by default. The two are different questions: a confidential client re-authenticates itself at every refresh, which is why RFC 9449 §5 leaves its refresh token unbound rather than pin it to one key for days; nothing of the sort protects an access token, which a resource server checks on every call.
 
-**`token_type` says which kind was minted.** A DPoP-bound access token is announced as `DPoP` (RFC 9449 §5). An mTLS-bound one keeps `Bearer` — it travels as a bearer token and is checked against the TLS client certificate (RFC 8705 §3). An unbound request is answered exactly as before: `Bearer`, and no `cnf` on either token.
+**`token_type` says which kind was minted** — core's `generateTokenResponse` reads it off the access token's `cnf`. A DPoP-bound access token is announced as `DPoP` (RFC 9449 §5). An mTLS-bound one keeps `Bearer` — it travels as a bearer token and is checked against the TLS client certificate (RFC 8705 §3). An unbound request is answered exactly as before: `Bearer`, and no `cnf` on either token.
 
-**A client registered `senderConstrained` is refused before this grant runs.** The `/token` route's shared dispatch gate rejects a request that presents no binding with `401 invalid_client`, and one whose binding kind is not in the client's `methods` with `400 unauthorized_client` — for every `grant_type`, this one included. The grant handler holds no second copy of that rule; its part is the other half, above — a request that proves its key gets a token bound to it ([#489](https://github.com/o3co/auth.provider/issues/489)).
+**A client registered `senderConstrained` is refused before this grant runs.** The `/token` route's shared dispatch gate rejects a request that presents no binding with `401 invalid_client`, one whose binding kind is not in the client's `methods` with `400 unauthorized_client`, and one whose binding carries no confirmation its kind owns with `400 invalid_request` — for every `grant_type`, this one included. The grant handler holds no second copy of that rule; its part is the other half, above — a request that proves its key gets a token bound to it ([#489](https://github.com/o3co/auth.provider/issues/489)).
 
 ## SECURITY — token revocation limitations
 

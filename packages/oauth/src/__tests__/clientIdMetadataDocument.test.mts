@@ -224,6 +224,108 @@ describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host
 	});
 });
 
+describe("createClientIdMetadataDocumentResolver — what a refusal logs of the client's text", () => {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+	const CONTROL = /[\u0000-\u001f\u007f]/;
+	/** The one warn line, as an assertion needs it: a failure prints this, not the line. */
+	const onlyLine = (warn: ReturnType<typeof vi.fn>, event: string) => {
+		expect(warn).toHaveBeenCalledTimes(1);
+		const [line, name] = warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe(event);
+		return line;
+	};
+
+	/**
+	 * A 200 answer whose Content-Type is `contentType`. A real `Response`
+	 * refuses a line break in a header value; a `fetch` a deployment wires is
+	 * under no such obligation, so that case is a Response-shaped answer.
+	 */
+	const answeringContentType = (contentType: string) => (): Response =>
+		({
+			status: 200,
+			headers: { get: (name: string) => (name === "content-type" ? contentType : null) },
+			body: null,
+		}) as unknown as Response;
+
+	it.each([
+		["control characters and 10 000 characters", `text/html\u001b[31m\u0007${"x".repeat(10_000)}`],
+		["a line break", `text/html\r\nFORGED cimd_document_rejected${"x".repeat(10_000)}`],
+	])("quotes a Content-Type carrying %s sanitised and capped", async (_label, contentType) => {
+		const { resolve, warn } = resolver({}, [answeringContentType(contentType)]);
+
+		expect(await resolve()).toBeNull();
+		const line = onlyLine(warn, "cimd_document_rejected");
+		const reason = String(line.reason);
+		const detail = String((line.err as { detail?: unknown }).detail);
+		expect({
+			reasonControl: CONTROL.test(reason),
+			detailControl: CONTROL.test(detail),
+			reasonClosed: reason.endsWith("...)"),
+		}).toEqual({ reasonControl: false, detailControl: false, reasonClosed: true });
+		expect(reason.startsWith("document is not JSON (Content-Type: text/html?")).toBe(true);
+	});
+
+	it("quotes a token_endpoint_auth_method the document names, sanitised as auditErrorText does", async () => {
+		const { resolve, warn } = resolver({}, [
+			() => json(document({ token_endpoint_auth_method: 'a"b\u2028c\u202e\u007f' })),
+		]);
+
+		expect(await resolve()).toBeNull();
+		expect(onlyLine(warn, "cimd_document_rejected").reason).toBe(
+			"token_endpoint_auth_method 'a?b?c??' is not allowed for a Client ID Metadata Document",
+		);
+	});
+
+	it("quotes a redirect_uris entry sanitised, and says why it is refused", async () => {
+		const { resolve, warn } = resolver({}, [
+			() => json(document({ redirect_uris: ["http://evil.example/cb\u2028\u202e"] })),
+		]);
+
+		expect(await resolve()).toBeNull();
+		expect(onlyLine(warn, "cimd_document_rejected").reason).toBe(
+			"redirect_uris entry 'http://evil.example/cb??' is not acceptable: http:// is accepted for loopback hosts only (localhost, 127.0.0.0/8, [::1]); got host \"evil.example\"",
+		);
+	});
+
+	it("still quotes an ordinary Content-Type exactly", async () => {
+		const { resolve, warn } = resolver({}, [
+			() => new Response("<html/>", { status: 200, headers: { "content-type": "text/html" } }),
+		]);
+
+		expect(await resolve()).toBeNull();
+		expect(onlyLine(warn, "cimd_document_rejected").reason).toBe(
+			"document is not JSON (Content-Type: text/html)",
+		);
+	});
+
+	// A real route never gets here with one: `/authorize` and client
+	// authentication refuse a client id over 256 characters
+	// (`MAX_CLIENT_ID_LENGTH`) before the resolver is asked. These drive the
+	// resolver directly, the one place a longer id could still reach a line.
+	const LONG_ID = `https://client.example/${"p".repeat(10_000)}`;
+
+	it("logs a 10 000-character client id capped when its document is refused", async () => {
+		const { resolve, warn } = resolver({}, [
+			() => new Response("<html/>", { status: 200, headers: { "content-type": "text/html" } }),
+		]);
+
+		expect(await resolve(LONG_ID)).toBeNull();
+		const clientId = String(onlyLine(warn, "cimd_document_rejected").clientId);
+		expect({ within200: clientId.length <= 200, head: clientId.slice(0, 23) }).toEqual({
+			within200: true,
+			head: "https://client.example/",
+		});
+	});
+
+	it("logs a 10 000-character client id capped when its host is not allowed", async () => {
+		const { resolve, warn } = resolver({ allowedHosts: ["other.example"] });
+
+		expect(await resolve(LONG_ID)).toBeNull();
+		const clientId = String(onlyLine(warn, "cimd_host_not_allowed").clientId);
+		expect(clientId.length <= 200).toBe(true);
+	});
+});
+
 describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 	it("refuses a redirect, a non-200, and a non-JSON body", async () => {
 		// Each of these is the client's own registration being wrong or absent,

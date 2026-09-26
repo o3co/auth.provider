@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
 
 auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。
 
@@ -121,7 +121,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 ## Store が自分で守るべきこと
 
 - **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は四つのエンドポイントすべてで、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンが四つの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
-- **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: このアダプターが投げるエラーは URL 全体を示し、セッションルートはそれをログに出す。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
+- **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: すべてのリクエスト行に載り、Store 自身のアクセスログにも途中のプロキシにも届く。このアダプターが投げるエラー（セッションルートがログに出す）はエンドポイントをオリジンとパスだけで示し、クエリやフラグメントは決して示さないので、少なくともこのデプロイのログにはクエリは届かない。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
 - **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。四つのエンドポイントのどれからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
 
 **拒否されたトークンが呼び出し元ごとにどう見えるか。** どの呼び出し元も `StoreCredentialRefusedError` を他の Store の障害 — `StoreTransportError` や `TimeoutError` も — と同じく扱い、違うのはログに出すものである:
@@ -133,7 +133,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)） | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable`（error、`err` 付き） |
 | federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant_callback_unavailable`（error、`store: "user_directory"`、`err` 付き） |
 
-`err` がログに出る場合、`StoreCredentialRefusedError` のメッセージは Store の URL、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。`StoreTransportError` のメッセージは URL、何が失敗したか、せいぜい通信のコードを示す。
+`err` がログに出る場合、`StoreCredentialRefusedError` のメッセージは Store のエンドポイント（オリジンとパス）、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。`StoreTransportError` のメッセージは同じくエンドポイント、何が失敗したか、せいぜい通信のコードを示す。このアダプターが投げるどのメッセージも URL のクエリ文字列やフラグメントを引用しない。
 
 ## コンストラクタでの検証
 
@@ -143,7 +143,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 **唯一の例外はループバック:** ホストが `localhost`、`127.0.0.0/8` 内のアドレス、`[::1]` のいずれかなら `http://` を受け付ける。その通信はマシンの外に出ないので、ローカル開発とプロセス内のテストフィクスチャに証明書は要らない。それ以外のホストは **プライベートレンジのアドレスやコンテナネットワークのサービス名も含めて** `https://` が必須（`http://10.0.0.5/…`、`http://user-service/…` は拒否される）: それらはデプロイが端から端まで制御していないネットワークを越えるものであり、「内部」は「暗号化済み」の同義語ではない。資格情報を埋め込んだ URL（`https://user:pass@…`）も拒否する。
 
-これは [`@o3co/auth-provider-core`](../core/README.ja.md) の `oauth.jwt.issuer` が適用するのと同じ規則で、例外を単一アドレス `127.0.0.1` から `127.0.0.0/8` ブロック全体に広げ、クエリ文字列を許している（issuer は持てないが、POST のエンドポイントは正当に持ちうる）。
+これは [`@o3co/auth-provider-core`](../core/README.ja.md) の `oauth.jwt.issuer` が適用するのと同じ規則で、例外を単一アドレス `127.0.0.1` から `127.0.0.0/8` ブロック全体に広げ、クエリ文字列を許している（issuer は持てないが、POST のエンドポイントは正当に持ちうる）。クエリは送られるが引用はされない: どのエラーもエンドポイントをオリジンとパスで示す。
 
 **`timeout` は `2147483647` ミリ秒以下の正の整数でなければならない。** `0`・負数・`NaN` は `setTimeout` ではいずれも「即時発火」に丸められ — すべてのリクエストが中断される — 、Node のタイマー範囲を超える値は 1ms に丸められるので、「気長に待つ」つもりの設定が最もせっかちな設定になる。空の環境変数による上書きはデフォルトにはならず起動失敗になる。期限は **ボディの読み取りを含む** やり取り全体に掛かる: ボディの読み取りは abort signal に頼らず期限と競わせる。リクエストの中断は進行中の読み取りを確実には止めないからである。これは slow-loris の形 — ヘッダーはすぐ届き、ボディが少しずつ届くか止まる — で、競わせなければ永久にハングする。期限を超えたリクエストは、エンドポイントを示す `timed out after <n>ms` のエラーで reject される。そのエラーの名前は四つのリクエストすべてで `TimeoutError` なので、名前で分類するレポーターはそれをタイムアウトと読む。
 

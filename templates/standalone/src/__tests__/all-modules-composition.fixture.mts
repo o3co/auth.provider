@@ -64,6 +64,7 @@ import {
 	type Logger,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
+	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
@@ -75,7 +76,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
-import { createTerminalErrorHandler } from "#/terminalError.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -583,6 +583,13 @@ export interface ComposeOptions {
 	readonly outage?: { readonly slot: string; readonly outage: Outage };
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
 	readonly shippedRefreshTokenFamilyStore?: boolean;
+	/**
+	 * Mount core's terminal error handler after the composed router again, as
+	 * `app.mts` does for its host routes (the default). `false` mounts the
+	 * router alone, as a composition root that copies nothing of `app.mts`
+	 * does.
+	 */
+	readonly terminalErrorHandler?: boolean;
 }
 
 /** The module list the template boots for `config`, as `app.mts` builds it. */
@@ -613,8 +620,9 @@ export interface Composition {
 
 /**
  * Boots the composition and mounts it as `app.mts` does: `helmet`, the
- * composed router, and the terminal error handler last, all on one logger
- * that is also the boot's `logger` component.
+ * composed router, and the terminal error handler last (unless
+ * `terminalErrorHandler` is `false`), all on one logger that is also the
+ * boot's `logger` component.
  */
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
 	const base = resolveConfig(options.env ?? SINGLE_ENV, options.referenceConfs);
@@ -638,7 +646,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 		}),
 	);
 	app.use(handle.router);
-	app.use(createTerminalErrorHandler(logger));
+	if (options.terminalErrorHandler !== false) app.use(terminalErrorHandler(logger));
 	return { app, handle, config, modules, logger, upstreams: fakes };
 }
 
@@ -918,8 +926,11 @@ export const padJson = (bytes: number, fields: Record<string, unknown> = {}): st
 export const padForm = (bytes: number, fields: string): string =>
 	`${fields}&pad=${"a".repeat(bytes)}`;
 
-/** What a parser's refusal of an oversized body is answered with, by the terminal handler. */
-export const TOO_LARGE = { error: "invalid_request", error_description: "request body too large" };
+/**
+ * What a parser's refusal of an oversized body is answered with on a route
+ * of the composed router — by core's terminal handler, which ends it.
+ */
+export const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
 
 // ---------------------------------------------------------------------------
 // Outages

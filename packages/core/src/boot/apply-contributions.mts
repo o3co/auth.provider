@@ -42,6 +42,7 @@ import type {
 	MfaFactorResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
+import { failureSummary } from "./failure-summary.mjs";
 import type {
 	CleanupRecord,
 	CollectedRouteContribution,
@@ -404,8 +405,9 @@ function warnOnTokenBindingSurfaceOverlap(
  *          `CollectedRouteContribution`; assign `declarationIndex`.
  *
  * On factory throw: wrap as `BootError reason="contribute-factory-failed"`,
- * `cause = thrown`, `stage = "applyContributions"`. Run stage-3 cleanups
- * from `material.cleanups` in REVERSE before propagating.
+ * `cause = thrown`, `stage = "applyContributions"`, its message naming the
+ * thrown value by `failureSummary` (never `String(thrown)`). Run stage-3
+ * cleanups from `material.cleanups` in REVERSE before propagating.
  *
  * Per A2-β §5.4.
  */
@@ -520,7 +522,7 @@ export async function applyContributions(
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
-					message: `Module "${moduleName}" contribution factory for kind "${entry.kind}" name "${name}" failed: ${String(thrownValue)}`,
+					message: `Module "${moduleName}" contribution factory for kind "${entry.kind}" name "${name}" failed: ${failureSummary(thrownValue)}`,
 					reason: "contribute-factory-failed",
 					stage: "applyContributions",
 					details: {
@@ -552,7 +554,7 @@ export async function applyContributions(
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
-					message: `Module "${moduleName}" override factory for kind "${entry.kind}" name "${name}" failed: ${String(thrownValue)}`,
+					message: `Module "${moduleName}" override factory for kind "${entry.kind}" name "${name}" failed: ${failureSummary(thrownValue)}`,
 					reason: "contribute-factory-failed",
 					stage: "applyContributions",
 					details: {
@@ -603,7 +605,7 @@ export async function applyContributions(
 					} catch (thrownValue) {
 						const cleanupErrors = await runCleanupsReverse(material.cleanups);
 						throw new BootError({
-							message: `Module "${moduleName}" route factory failed: ${String(thrownValue)}`,
+							message: `Module "${moduleName}" route factory failed: ${failureSummary(thrownValue)}`,
 							reason: "contribute-factory-failed",
 							stage: "applyContributions",
 							details: {
@@ -643,7 +645,7 @@ export async function applyContributions(
 				} catch (thrownValue) {
 					const cleanupErrors = await runCleanupsReverse(material.cleanups);
 					throw new BootError({
-						message: `Module "${moduleName}" list-kind factory for "${entry.kind}" failed: ${String(thrownValue)}`,
+						message: `Module "${moduleName}" list-kind factory for "${entry.kind}" failed: ${failureSummary(thrownValue)}`,
 						reason: "contribute-factory-failed",
 						stage: "applyContributions",
 						details: {

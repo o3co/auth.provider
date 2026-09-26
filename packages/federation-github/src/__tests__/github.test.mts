@@ -381,6 +381,22 @@ describe("createGithubProvider", () => {
 		);
 	});
 
+	it("endSession names an invalid postLogoutRedirectUri without repeating it", async () => {
+		// The value reaches a log line as the error's `detail`, which keeps a
+		// message's text; the adapter quotes nothing it was handed.
+		const p = createGithubProvider(baseConfig);
+		const refusal = await p
+			.endSession({ postLogoutRedirectUri: '%%bogus "\r\ninjected-line' })
+			.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+		expect(refusal).toBeInstanceOf(Error);
+		expect((refusal as Error).message).toMatch(/invalid postLogoutRedirectUri/);
+		expect((refusal as Error).message).not.toContain("injected-line");
+		expect((refusal as Error).message).not.toContain("%%bogus");
+	});
+
 	it("endSession honors configured endSessionEndpoint when present (I-1 — GitHub Enterprise support)", async () => {
 		const p = createGithubProvider({
 			...baseConfig,

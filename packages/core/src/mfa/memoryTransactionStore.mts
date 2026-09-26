@@ -162,10 +162,14 @@ export function createMemoryMfaTransactionStore(
 	const clock = options.now ?? Date.now;
 	const transactions = new Map<string, MfaTransaction>();
 	const subjects = new Map<string, SubjectState>();
-	const schedule = createAmortizedSweep(options, {
-		sweepInterval: DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
-		minSweepIntervalMs: DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
-	});
+	const schedule = createAmortizedSweep(
+		options,
+		{
+			sweepInterval: DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
+			minSweepIntervalMs: DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
+		},
+		"createMemoryMfaTransactionStore",
+	);
 
 	function live(id: string, nowMs: number): MfaTransaction | undefined {
 		const tx = transactions.get(id);

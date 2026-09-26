@@ -143,7 +143,7 @@ const baseCtxPublic: Omit<GrantContext, "tokenBinding"> = {
 // ---------------------------------------------------------------------------
 
 describe("mTLS cnf-claim propagation — authorization_code grant (§9.1)", () => {
-	describe("AT cnf propagation (mechanism-agnostic per RFC 7800)", () => {
+	describe("AT cnf propagation (the member the mTLS mechanism owns)", () => {
 		it("confidential client + mTLS → AT bound with x5t#S256, RT plain", async () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validCode }));
 			const handler = createAuthorizationGrant(deps);

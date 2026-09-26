@@ -1,6 +1,6 @@
 # `core/src/federations`
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 The federation adapter port: what an upstream-IdP adapter implements, and what everything downstream of it reads.
 
@@ -44,6 +44,7 @@ This directory owns the contract an adapter implements — `FederationProvider` 
 9. **The code-exchange URL carries `code`, the callback's RFC 9207 `iss`, and nothing else from the callback.** An `iss` already on the registered redirect URI is dropped when the callback carried none, so configuration cannot answer for the response — [`callback-url.test.mts`](./__tests__/callback-url.test.mts).
 10. **A client secret is resolved on every token request and never cached here**; an empty or non-string one is refused locally rather than posted upstream — [`client-secret.test.mts`](./__tests__/client-secret.test.mts). The S256 challenge is [`pkce.test.mts`](./__tests__/pkce.test.mts).
 11. **A token response has one reading.** `expires_in` as the adapter's library read it (openid-client applies `parseFloat`: the snapshot sees only the library's answer), `expiresAt` dated from when the library handed that answer over, and `null` on both when none was sent — no lifetime is assumed; `tokenType` as the library reported it; `scope` present exactly when sent, an empty one included, `""` for one that is not a string; refresh and id tokens only when non-empty. `federation-oidc`'s delegated reader is stricter on purpose — it reads the raw answer at arrival and refuses a lifetime that is not a number, because a grant's eligibility judges the issued lifetime (#593, D5). Every bundled adapter's login and refresh go through `federationTokenSnapshot` — [`token-snapshot.test.mts`](./__tests__/token-snapshot.test.mts).
+12. **An end-session request carries a validated `postLogoutRedirectUri`, or none.** Whoever calls `SupportsLogout.endSession` has already held the request's `post_logout_redirect_uri` to the `postLogoutRedirectUris` registered for the client that asked for the logout, and to the shape `checkRedirectUri` requires of every registration (a custom `ClientRepository` can hold an entry that fails it), so an adapter may redirect to it — and the Google, GitHub and Apple adapters do, when no end-session endpoint is configured. `EndSessionRequest` in [`types.mts`](./types.mts) states it; `oauth`'s two logout routes are the callers, pinned in its `logout.test.mts` and, through the real Google adapter, in the standalone template's `post-logout-redirect.test.mts`.
 
 ## Failure and lifecycle
 

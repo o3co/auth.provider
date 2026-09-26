@@ -159,8 +159,10 @@ export interface GrantContext {
 	 * `undefined` when no binding mechanism is enabled, when the request
 	 * did not carry the required proof / cert, or when the grant is
 	 * invoked outside the standard `/token` route. Grant handlers that
-	 * issue tokens propagate `tokenBinding.confirmation` into
-	 * `GenerateTokenOptions.confirmation`. See Wave 2 Token-binding Cluster
+	 * issue tokens stamp `ownedConfirmation(tokenBinding)` — the member the
+	 * binding's mechanism kind owns, never the confirmation verbatim — as
+	 * `GenerateTokenOptions.confirmation`, and `generateTokenResponse` reads
+	 * the response's `token_type` off it. See Wave 2 Token-binding Cluster
 	 * spec §4.1.
 	 */
 	readonly tokenBinding?: TokenBinding;

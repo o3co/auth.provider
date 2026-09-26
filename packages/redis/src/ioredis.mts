@@ -361,7 +361,8 @@ return flat
  * `KEYS[1]` = user-code index key; `ARGV[1]` = record key prefix, `ARGV[2]` =
  * now in epoch ms, `ARGV[3]` = `approved` | `denied`, `ARGV[4]` = subject,
  * `ARGV[5]` = `requested` | `narrow`, `ARGV[6]` = the caller's grantedScope
- * as a JSON array (read only under `narrow`). Returns `{'ok', record}`,
+ * as a JSON array (read only under `narrow`). An approval records `ARGV[2]`
+ * as `approvedAtMs`, in the same write. Returns `{'ok', record}`,
  * `{'already_decided', status}`, `{'expired'}` or `{'not_found'}`.
  *
  * The check and the write are one script because the record is reached
@@ -408,7 +409,7 @@ if ARGV[3] == 'approved' then
   end
   local encoded = '[]'
   if #granted > 0 then encoded = cjson.encode(granted) end
-  redis.call('HSET', codeKey, 'status', 'approved', 'subject', ARGV[4], 'grantedScope', encoded)
+  redis.call('HSET', codeKey, 'status', 'approved', 'subject', ARGV[4], 'grantedScope', encoded, 'approvedAtMs', ARGV[2])
 else
   redis.call('HSET', codeKey, 'status', 'denied')
 end
@@ -1342,8 +1343,8 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
  * importing the main entry (`@o3co/auth-provider-redis`) do NOT pull
  * `ioredis` types into their TypeScript dependency closure. The main entry
  * stays vendor-agnostic; only callers of `makeIoredisClients` need ioredis
- * installed. Future per-vendor wrappers (e.g. node-redis) will follow the
- * same `@o3co/auth-provider-redis/<vendor>` subpath convention.
+ * installed. A wrapper for another client library would take the same
+ * `@o3co/auth-provider-redis/<vendor>` subpath convention.
  *
  * Per Copilot review on PR #102.
  *

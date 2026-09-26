@@ -50,11 +50,11 @@ const OPTIONAL = [
 	// omitting them silently drops both features at the grant boundary.
 	"refreshTokenFamilyRotation", // A3 §5.2 — replaces legacy refreshTokenStore (#101)
 	// PB-1 (v0.5.1): the refresh grant must call `revokeFamily` on
-	// rotation `replayed` outcome (RFC 6819 §5.2.2). Listed optional so
-	// deployments without rotation wired (no replay path reachable)
-	// remain valid; when rotation IS wired, omitting revocation is
-	// caught at runtime by the fail-closed 503 path in
-	// `refreshToken.mts` rather than silently no-op-ing.
+	// rotation `replayed` outcome (RFC 6819 §5.2.2). Both family slots are
+	// optional to wire — a composition without the refresh_token grant
+	// needs neither — but not optional to decide: with the grant on, its
+	// factory below refuses to boot unless both are filled
+	// (`requireRefreshTokenFamilies`).
 	"refreshTokenFamilyRevocation",
 	// #376: the #296 subject watermark, consulted at RT redemption as
 	// the backstop for a partial credential-change cascade (#322).
@@ -71,6 +71,41 @@ const OPTIONAL = [
 	"sessionFederationIndex", // Amendment 4 (§1.1.4)
 	"logger", // D-4 — structured logger; security audit logs (PB-1/CC-2/SF-6)
 ] as const;
+
+/** The two slots the refresh_token grant keeps its token families in. */
+const REFRESH_TOKEN_FAMILY_SLOTS = [
+	"refreshTokenFamilyRotation",
+	"refreshTokenFamilyRevocation",
+] as const;
+
+/**
+ * Refuse the refresh_token grant a composition that has not wired both
+ * token-family slots.
+ *
+ * The grant rotates each refresh token through its family, refuses a
+ * replayed one and revokes the family (RFC 9700 §4.14.2, RFC 6819 §5.2.2.3),
+ * and `/oauth/revoke` revokes the family the grant reads. Without rotation a
+ * refresh token was served with no family record and redeemed with no
+ * rotation and no replay check; without revocation a detected replay was a
+ * 503 and a revoked family was never read. Neither is a mode a deployment
+ * chooses: one that does not want token families turns the grant off
+ * (`oauth.grants.refresh_token.enabled = false`), which is the decision the
+ * optional slots otherwise leave unmade.
+ */
+function requireRefreshTokenFamilies(deps: OAuthAuthorizationModuleDeps): void {
+	const missing = REFRESH_TOKEN_FAMILY_SLOTS.filter((slot) => deps[slot] === undefined);
+	if (missing.length === 0) return;
+	throw new Error(
+		"The refresh_token grant is enabled (oauth.grants.refresh_token.enabled) but " +
+			`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not wired. The grant ` +
+			"rotates each refresh token through its family and revokes the family on a replay, " +
+			"and /oauth/revoke revokes the family the grant reads; without them a refresh token " +
+			"cannot be rotated, detected as replayed or revoked. Wire a refresh-token family " +
+			"store (memoryRefreshTokenFamilyStoreModule for a single replica, or " +
+			"redisRefreshTokenFamilyStoreModule) with core's defaultRefreshTokenFamilyRotationModule " +
+			"and defaultRefreshTokenFamilyRevocationModule, or turn the grant off.",
+	);
+}
 
 /**
  * The deps every contribution of {@link oauthAuthorizationModule} receives:
@@ -120,7 +155,11 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 		grants.authorization_code = (deps) => createAuthorizationGrant(deps);
 	}
 	if (isExplicitlyEnabled(grantsCfg.refresh_token?.enabled)) {
-		grants.refresh_token = (deps) => createRefreshTokenGrant(deps);
+		grants.refresh_token = (deps) => {
+			// Refused at boot, not at the first refresh: see the function.
+			requireRefreshTokenFamilies(deps);
+			return createRefreshTokenGrant(deps);
+		};
 	}
 	// #301: RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
 	// inert without an `assertionVerifier` — the module lists it optional so a

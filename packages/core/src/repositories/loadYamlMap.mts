@@ -14,11 +14,61 @@
  * limitations under the License.
  */
 
+/*
+ * `loadYamlMap`: a YAML file of named entries (the static clients and users
+ * files), each validated against a schema, as a Map.
+ *
+ * A file that does not parse is refused with its path, the line and column,
+ * and the parser's reason — and nothing else. js-yaml's own exception quotes
+ * the lines around the fault in its message and holds the whole file in
+ * `mark.buffer`, and these files hold client secrets and password hashes: a
+ * boot failure prints the error it ends with, cause chain and fields
+ * included. So the exception is neither passed on nor kept as a `cause`, and
+ * what the parser wrote into its reason from the file — an alias or a tag
+ * name, which an unquoted value starting with `*` or `!` becomes — is cut off
+ * (`reasonOf`).
+ */
+
 import fs from "node:fs";
 // js-yaml 5 dropped the default export; import the namespace so `yaml.load`
 // resolves to the named export.
 import * as yaml from "js-yaml";
 import type { z } from "zod";
+
+/**
+ * Where js-yaml starts quoting the input in a reason: `"` (an alias or tag
+ * handle, `unidentified alias "<name>"`), `!<` (a tag, `unknown scalar tag
+ * !<<tag>>`) and `: ` (`tag name cannot contain such characters: <tag>`).
+ * Its fixed text never holds one; a `'` does not start a quotation there
+ * (`expected ':' after a mapping key`).
+ */
+const QUOTED_INPUT = /"|!<|: /;
+
+/** The reason's text before anything it quotes of the input: its first line, cut there. */
+const reasonOf = (reason: unknown): string => {
+	if (typeof reason !== "string") return "";
+	const firstLine = reason.split(/\r?\n/, 1)[0] ?? "";
+	const quoted = QUOTED_INPUT.exec(firstLine);
+	return (quoted === null ? firstLine : firstLine.slice(0, quoted.index)).trim();
+};
+
+/**
+ * The file's refusal: the path, the line and column (1-based, as an editor
+ * counts) and the reason, from js-yaml's `reason` and `mark` — never its
+ * message or its snippet. An error that is not js-yaml's names the file
+ * alone.
+ */
+const unparseable = (filePath: string, err: unknown): Error => {
+	if (!(err instanceof yaml.YAMLException)) return new Error(`Invalid YAML in ${filePath}`);
+	const { mark } = err;
+	const at =
+		mark !== undefined && Number.isInteger(mark.line) && Number.isInteger(mark.column)
+			? ` at ${mark.line + 1}:${mark.column + 1}`
+			: "";
+	// Never empty: every reason js-yaml writes opens with its own fixed text,
+	// so the cut in `reasonOf` always leaves some of it.
+	return new Error(`Invalid YAML in ${filePath}${at}: ${reasonOf(err.reason)}`);
+};
 
 export const loadYamlMap = <T extends z.ZodTypeAny>(
 	filePath: string,
@@ -32,7 +82,13 @@ export const loadYamlMap = <T extends z.ZodTypeAny>(
 		const trimmed = line.trim();
 		return trimmed !== "" && !trimmed.startsWith("#");
 	});
-	const raw = hasDocument ? yaml.load(content) : undefined;
+	let raw: unknown;
+	try {
+		raw = hasDocument ? yaml.load(content) : undefined;
+	} catch (err) {
+		// Not the exception, and not as a `cause`: see the file header.
+		throw unparseable(filePath, err);
+	}
 	if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) {
 		throw new Error(`Invalid configuration in ${filePath}: expected a YAML mapping`);
 	}

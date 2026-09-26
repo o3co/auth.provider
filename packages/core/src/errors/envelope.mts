@@ -67,6 +67,30 @@ export function auditErrorText(text: unknown): string | undefined {
 	return `${sanitised.slice(0, AUDITED_ERROR_TEXT_MAX_LENGTH - 3)}...`;
 }
 
+/** How many entries {@link auditErrorList} keeps unless told otherwise. */
+const AUDITED_LIST_MAX_ITEMS = 10;
+
+/**
+ * A list a client or a peer chose — the scopes it asked for, the resources it
+ * named — as a log line or an audit event records it: still a list, so a query
+ * that reads the field as one keeps working, with each entry through
+ * {@link auditErrorText} (sanitised, capped at 200 characters) and only the
+ * first `maxItems` kept (10 by default). A small, well-formed list comes back
+ * as it was. The caller that logs it adds how many entries there were when
+ * the list was cut (`kept.length < values.length`), so the line says so.
+ *
+ * `maxItems` must be a positive integer; anything else is a RangeError.
+ */
+export function auditErrorList(
+	values: readonly string[],
+	maxItems: number = AUDITED_LIST_MAX_ITEMS,
+): string[] {
+	if (!Number.isInteger(maxItems) || maxItems < 1) {
+		throw new RangeError(`auditErrorList: maxItems must be a positive integer (got ${maxItems})`);
+	}
+	return values.slice(0, maxItems).map((value) => auditErrorText(value));
+}
+
 /**
  * Whether `value` is a well-formed RFC 6749 error code: a non-empty string of
  * `NQSCHAR`s (Appendix A.7). A code from outside this provider's own source —

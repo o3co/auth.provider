@@ -328,6 +328,10 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 		// GitHub has no RP-Initiated Logout endpoint by default.
 		// Precedence: (1) configured endSessionEndpoint wins; (2) postLogoutRedirectUri redirect;
 		// (3) fallback to https://github.com/logout (preserves pre-Task-3 behaviour, supports GitHub Enterprise).
+		// (2) redirects to the URI as given, which is safe only because the
+		// caller hands this method one already matched against the client's
+		// registered postLogoutRedirectUris, or none (core's `EndSessionRequest`;
+		// `oauth`'s logout routes check it first).
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
 			if (config.endSessionEndpoint) {
 				let url: URL;
@@ -349,8 +353,11 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			try {
 				url = new URL(base);
 			} catch {
+				// Named, not quoted: the message reaches a log line as the error's
+				// `detail`, and the value is not this adapter's text. (The fallback
+				// above is always a URL, so only a handed value lands here.)
 				throw new Error(
-					`GitHub federation "github" received an invalid postLogoutRedirectUri: ${base}`,
+					'GitHub federation "github" received an invalid postLogoutRedirectUri: not a URL',
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);

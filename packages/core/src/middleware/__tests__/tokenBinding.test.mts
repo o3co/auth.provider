@@ -423,6 +423,39 @@ describe("a server-side outage is the mechanism's to state, and answers 503", ()
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
 	});
 
+	it("leaves out an outage's reason that is not a code, as the verdict line does", async () => {
+		// `reason` is the mechanism's name for the refusal — a code. A mechanism
+		// that wrote free text there (the store's reply, a key it read) put it on
+		// the outage line unfiltered, while the verdict line kept only a code.
+		const logger = spyLogger();
+		for (const reason of [
+			"replay store at 10.0.0.7 refused SET dpop-proof:free-text-marker",
+			"Replay_Store_Unavailable",
+			"replay_store_unavailable\nforged-line-marker",
+			`${"a".repeat(65)}`,
+		]) {
+			const refusal = Object.assign(new Error("replay store down"), {
+				code: "temporarily_unavailable",
+				unavailable: "the replay store cannot be read; retry later",
+				reason,
+			});
+			const mw = tokenBindingMw({
+				mechanisms: [dpopMechanism(refusal)],
+				dispatchPolicy: "intent-explicit",
+				logger: logger as never,
+			});
+			const res = fakeRes();
+			await mw(fakeReq(), res, vi.fn());
+			expect(res.status).toHaveBeenCalledWith(503);
+		}
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(4);
+		for (const [line, event] of logger.error.mock.calls as [Record<string, unknown>, string][]) {
+			expect(event).toBe("token_binding_unavailable");
+			expect(line).toEqual({ mechanism: "dpop", code: "temporarily_unavailable" });
+		}
+	});
+
 	it("logs a verdict once at warn: the refusal's reason, and its projection with the cause inside", async () => {
 		// A mechanism states why it refused (`reason`) and, when a parser
 		// refused the material, that parser's error (`cause`). The verdict line

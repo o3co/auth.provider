@@ -32,10 +32,12 @@
  *   Step 12: iat window
  *   Step 14: Replay check — one atomic `markSeen` on core's `ReplaySeenSet`
  *            under `dpop-proof:<jkt>`, kept for `replayTtlSeconds`. A store
- *            that cannot be read (`replay_store_unavailable`) or breaks its
- *            own contract (`replay_store_fault`) refuses the proof as the
- *            server's fault — answered 503 `temporarily_unavailable` — never
- *            as an invalid proof and never by leaking a raw Redis error.
+ *            that cannot be read (`replay_store_unavailable`), is full
+ *            (`replay_store_full`: core's in-process set holding DPoP's share
+ *            of its cap) or breaks its own contract (`replay_store_fault`)
+ *            refuses the proof as the server's fault — answered 503
+ *            `temporarily_unavailable` — never as an invalid proof and never
+ *            by leaking a raw Redis error.
  *   Step 15: Return TokenBinding
  *
  * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 + 13 and
@@ -48,10 +50,12 @@ import {
 	buildCanonicalRequestUrl,
 	ChallengeStorageError,
 	checkCanonicalIssuer,
+	DPOP_PROOF_REPLAY_SCOPE_PREFIX,
 	describeIssuerRejection,
 	type Logger,
 	loggableError,
 	type ReplaySeenSet,
+	ReplaySeenSetFullError,
 	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
@@ -198,19 +202,15 @@ const REGISTERED_JWS_ALGS: ReadonlySet<string> = new Set([
 const DEFAULT_IAT_WINDOW_SECONDS = 60;
 const DEFAULT_REPLAY_TTL_SECONDS = 300;
 
-/**
- * The seen-set scope a proof's `jti` is recorded under, per key:
- * `dpop-proof:<jkt>`. The seen-set is shared with other consumers
- * (`client-assertion:<client_id>`, `webauthn:*`, and
- * `jwt-bearer:id-jag:<issuer>` where a composition hands the jwt-bearer
- * verifier the same set), and its canonical key is length-prefixed, so no
- * record of theirs can collide with one of these.
- *
- * Not exported, as no other seen-set scope is from its package: the scope
- * is part of the stored key an operator can see in Redis, and the tests pin
- * the literal rather than this name.
- */
-const DPOP_PROOF_REPLAY_SCOPE_PREFIX = "dpop-proof:";
+// The seen-set scope a proof's `jti` is recorded under, per key, is core's
+// `DPOP_PROOF_REPLAY_SCOPE_PREFIX`: `dpop-proof:<jkt>`. The seen-set is
+// shared with other consumers (`client-assertion:<client_id>`, `webauthn:*`,
+// and `jwt-bearer:id-jag:<issuer>` where a composition hands the jwt-bearer
+// verifier the same set), and its canonical key is length-prefixed, so no
+// record of theirs can collide with one of these. Core owns the prefix
+// because its in-process seen-set reads it: DPoP proofs may fill only a
+// share of that set's cap. The scope is part of the stored key an operator
+// can see in Redis, and the tests pin the literal.
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -506,6 +506,19 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				// A DPoPError keeps its classification: a future refactor might
 				// shape seen-set errors directly as one.
 				if (err instanceof DPoPError) throw err;
+				// Core's in-process set refused the write because it holds DPoP's
+				// share of its cap (or is full): neither down nor broken, and named
+				// apart so an operator reads a flood or an undersized cap rather
+				// than a store to go and fix.
+				if (err instanceof ReplaySeenSetFullError) {
+					throw new DPoPError(
+						"replay_store_full",
+						"DPoP replay store is full; cannot record the proof",
+						undefined,
+						undefined,
+						{ cause: err },
+					);
+				}
 				// The seen-set's own contract errors — `expired-at-issue`, which a
 				// record computed from a positive TTL cannot earn, and RangeError
 				// for a non-finite expiry, which construction rules out — mean the

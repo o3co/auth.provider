@@ -309,6 +309,45 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 		expect(handler.captured.invoked).toBe(true);
 	});
 
+	// A binding whose kind the client allows but whose confirmation carries no
+	// member that kind owns (core's `ownedConfirmation` is undefined): every
+	// grant would mint an unbound Bearer token from it, which would downgrade
+	// the client's required constraint without a word. It is refused here,
+	// before any handler runs.
+	it.each([
+		["a DPoP binding presenting cnf.x5t#S256", "dpop", { "x5t#S256": "CROSSED-X5T" }],
+		["a contributed kind presenting cnf.jkt", "acme", { jkt: "ACME-JKT" }],
+	] as const)(
+		"refuses %s under a required constraint that allows its kind, before the handler runs",
+		async (_label, kind, confirmation) => {
+			const sc: SenderConstraint = { required: true, methods: [kind] };
+			const handler = capturingHandler();
+			const mechanism: TokenBindingMechanism = {
+				kind,
+				intentExplicit: true,
+				extract: async () => ({ kind, confirmation }) as unknown as TokenBinding,
+			};
+			const app = await buildApp(handler, {
+				clientRepo: makeInMemoryRepo(sc),
+				mountMw: true,
+				mechanisms: [mechanism],
+			});
+
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "client_credentials" });
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_request");
+			expect(res.body.error_description).toBe(
+				"sender-constrained binding carries no confirmation its mechanism owns",
+			);
+			expect(handler.captured.invoked).toBe(false);
+		},
+	);
+
 	it("emits WWW-Authenticate: Basic on the invalid_client 401 (RFC 7235 §3.1 conformance)", async () => {
 		// Sibling invalid_client 401s in clientAuthMw set this header; the
 		// new sender-constraint reject must too, for consistency and so

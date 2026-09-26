@@ -40,6 +40,11 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -228,5 +233,45 @@ describe("DPoP cnf-claim propagation — client_credentials grant (§9.1)", () =
 			// jkt MUST NOT appear in an mTLS-bound token
 			expect(cnf?.jkt).toBeUndefined();
 		});
+	});
+});
+
+describe("client_credentials stamps only the confirmation the binding's mechanism owns", () => {
+	/** A mechanism of the binding's own kind, handing the binding to the grant as extracted. */
+	const mechanismFor = (binding: TokenBinding): TokenBindingMechanism => ({
+		kind: binding.kind,
+		intentExplicit: true,
+		extract: async () => binding,
+	});
+
+	const issue = async (binding: TokenBinding) =>
+		request(await buildApp([mechanismFor(binding)]))
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access token, advertised as Bearer, for %s",
+		async (_label, binding) => {
+			const res = await issue(binding);
+			expect(res.status).toBe(200);
+			expect(decodeJwt(res.body.access_token as string).cnf).toBeUndefined();
+			expect(res.body.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const res = await issue(COMPOUND_DPOP_BINDING);
+		expect(res.status).toBe(200);
+		expect(decodeJwt(res.body.access_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(res.body.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const res = await issue(COMPOUND_MTLS_BINDING);
+		expect(res.status).toBe(200);
+		expect(decodeJwt(res.body.access_token as string).cnf).toEqual({ "x5t#S256": "OWNED-X5T" });
+		expect(res.body.token_type).toBe("Bearer");
 	});
 });

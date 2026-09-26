@@ -24,7 +24,7 @@
 
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { isFederationUpstreamOutage } from "#/federation-grants/upstreamOutage.mjs";
+import { isFederationUpstreamOutage } from "#/federation-tokens/upstreamOutage.mjs";
 
 /**
  * A Response from another copy of the fetch implementation — npm `undici`'s,

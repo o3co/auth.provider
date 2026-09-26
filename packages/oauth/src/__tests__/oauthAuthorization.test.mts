@@ -19,10 +19,14 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	defaultRefreshTokenFamilyRevocationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	defineModule,
 	type GrantDependencies,
 	type GrantPolicyHook,
 	type Logger,
+	type Module,
+	memoryRefreshTokenFamilyStoreModule,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
@@ -88,6 +92,16 @@ const keyStoreModule = defineModule({
 		keyStore: () => createSymmetricKeyStore("test-secret-for-auth-grant!!!!!"),
 	},
 });
+
+/**
+ * The refresh-token family store and core's two wrappers over it: what the
+ * refresh_token grant, on in `makeValidAppConfig()`, refuses to boot without.
+ */
+const familyStoreModules = [
+	memoryRefreshTokenFamilyStoreModule,
+	defaultRefreshTokenFamilyRotationModule,
+	defaultRefreshTokenFamilyRevocationModule,
+] as const;
 
 // ---------------------------------------------------------------------------
 // Helper: build a minimal express app wired to createOAuthRouter.
@@ -395,6 +409,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -419,6 +434,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -447,6 +463,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -456,6 +473,84 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 		// it must not be registered under === true opt-in semantics.
 		expect(handle.inspect.grants.has("client_credentials")).toBe(false);
 		await handle.dispose();
+	});
+});
+
+/**
+ * The refresh_token grant rotates each refresh token through its family,
+ * refuses a replayed one and revokes the family, and `/oauth/revoke` revokes
+ * the family the grant reads. Both family slots are optional to wire, and
+ * nothing decided what their absence meant: with the grant on and neither
+ * wired, a refresh token was served with no family record and redeemed with
+ * no rotation and no replay check, and `/oauth/revoke` answered 200 for a
+ * family the refresh path never read. The grant's own switch is the
+ * decision: on, both slots must be filled.
+ */
+describe("oauthAuthorizationModule — the refresh_token grant needs its token families", () => {
+	const withRefreshToken = (enabled: boolean) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: { ...base.oauth.grants, refresh_token: { enabled } },
+			},
+		};
+	};
+	const boot = (config: AppConfig, families: readonly Module[]) =>
+		createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+				...families,
+			],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+		});
+	const refusalOf = (config: AppConfig, families: readonly Module[]) =>
+		boot(config, families).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { cause?: { message?: unknown } },
+		);
+
+	it("refuses to boot with the grant on and no family wired, naming both slots and the switch", async () => {
+		const refusal = await refusalOf(withRefreshToken(true), []);
+		expect(refusal, "boot must be refused").toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			details: { module: "oauth-authorization", kind: "grants", name: "refresh_token" },
+		});
+		const message = String(refusal?.cause?.message);
+		expect(message).toMatch(
+			/refresh_token grant is enabled \(oauth\.grants\.refresh_token\.enabled\) but refreshTokenFamilyRotation and refreshTokenFamilyRevocation are not wired/,
+		);
+		expect(message).toMatch(/memoryRefreshTokenFamilyStoreModule/);
+		expect(message).toMatch(/redisRefreshTokenFamilyStoreModule/);
+	});
+
+	it("refuses rotation without family revocation, naming the one missing", async () => {
+		const refusal = await refusalOf(withRefreshToken(true), [
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRotationModule,
+		]);
+		expect(refusal).toMatchObject({ name: "BootError", reason: "contribute-factory-failed" });
+		expect(String(refusal?.cause?.message)).toMatch(
+			/but refreshTokenFamilyRevocation is not wired/,
+		);
+	});
+
+	it("boots with both wired, and with the grant off and neither wired", async () => {
+		const wired = await boot(withRefreshToken(true), familyStoreModules);
+		expect(wired.inspect.grants.has("refresh_token")).toBe(true);
+		await wired.dispose();
+
+		const off = await boot(withRefreshToken(false), []);
+		expect(off.inspect.grants.has("refresh_token")).toBe(false);
+		await off.dispose();
 	});
 });
 
@@ -873,6 +968,87 @@ describe("IH-6: /authorize openid scope gate", () => {
 			},
 			"authorize_rejected_missing_openid_scope",
 		);
+	});
+
+	it("logs the first ten requested scopes, each capped, and how many were sent", async () => {
+		// Every entry is a well-formed scope-token, so nothing refuses the
+		// request before the gate — but the caller chooses how many it sends
+		// and how long each is, and the line is not to grow with either.
+		const logger = createMockLogger();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-many-scopes" },
+			captureCode: vi.fn(),
+			logger,
+		});
+
+		// A form POST (OIDC Core §3.1.2.1), because a query this long outgrows
+		// the request line's size limit.
+		const res = await request(app)
+			.post("/oauth/authorize")
+			.type("form")
+			.send({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
+				state: "state-many-scopes",
+				scope: [
+					`long-${"s".repeat(10_000)}`,
+					...Array.from({ length: 999 }, (_, i) => `scope-${i}`),
+				].join(" "),
+			});
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location).searchParams.get("error")).toBe("invalid_scope");
+		const calls = vi
+			.mocked(logger.warn)
+			.mock.calls.filter(([, event]) => event === "authorize_rejected_missing_openid_scope");
+		expect(calls).toHaveLength(1);
+		const line = calls[0]?.[0] as { requestedScopes?: unknown; requestedScopeCount?: unknown };
+		const logged = Array.isArray(line.requestedScopes) ? (line.requestedScopes as string[]) : [];
+		expect({
+			array: Array.isArray(line.requestedScopes),
+			entries: logged.length,
+			firstWithin200: (logged[0] ?? "").length <= 200,
+			rest: logged.slice(1),
+			count: line.requestedScopeCount,
+		}).toEqual({
+			array: true,
+			entries: 10,
+			firstWithin200: true,
+			rest: Array.from({ length: 9 }, (_, i) => `scope-${i}`),
+			count: 1_000,
+		});
+	});
+
+	it("refuses a scope carrying a line break before any line is written of it", async () => {
+		// RFC 6749 §3.3 reads the scope strictly: a control character is no
+		// scope-token, so the request is refused as `invalid_scope` and the
+		// gate that logs never runs.
+		const logger = createMockLogger();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-crlf-scope" },
+			captureCode: vi.fn(),
+			logger,
+		});
+
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
+				state: "state-crlf-scope",
+				scope: `profile\r\nFORGED\u001b[31m${"a".repeat(10_000)}`,
+			});
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location).searchParams.get("error")).toBe("invalid_scope");
+		expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("FORGED");
+		expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("FORGED");
 	});
 
 	it("allows oidc-required requests that include openid", async () => {
@@ -1466,7 +1642,7 @@ describe("oauthAuthorizationModule — declared absence for subjectRevocation (#
 		const config = makeValidAppConfig();
 		await expect(
 			createTestApp({
-				modules: [oauthAuthorizationModule({ config })],
+				modules: [oauthAuthorizationModule({ config }), ...familyStoreModules],
 				bootstrapComponents: {
 					config,
 					pathResolver: (s: string) => s,

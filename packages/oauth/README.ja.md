@@ -33,7 +33,7 @@
 | モジュール | 提供するもの | 分けている理由 |
 |---|---|---|
 | [`oauthModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
-| [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` の absence policy を宣言する。 |
+| [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` の absence policy を宣言する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
 | [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config` と `keyStore`（任意で `userSessionStore` と、ストア障害の行を書き出す `logger`）だけである。 |
 | [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federationGrants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
 
@@ -190,7 +190,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `authorization_code` と `refresh_token` グラントが発行するアクセストークンとリフレッシュトークンは `family_id` — リフレッシュトークンファミリー。[イントロスペクション](#イントロスペクション-呼び出し元が問い合わせられるトークン)、[userinfo](#userinfo)、[ログアウト](#ログアウト)、federation token ルートが失効の確認に使う — と、コードレコードにあればセッション ID の `sid` を持つ。`sid` はログイン経路（ローカルログインかフェデレーションコールバック）が `/authorize` でコードに書き込む。
 
-**新しいファミリーはリフレッシュトークン自身の識別子で登録される。** リフレッシュトークンの `jti` と、その有効期間を測り始める時刻は署名の前に予約される。`refreshTokenFamilyRotation` が配線されていれば、トークンを返す前に、ファミリーがその `jti` で、その時刻に `oauth.refreshToken.expiresIn` を足した時刻 — トークンの `exp` — を期限として登録される。グラントはそれらを署名済みのトークンから読み戻さないので、`KeyStore` がトークンをどんな形で返しても、発行されたリフレッシュトークンがローテーションの記録を持たないことはない。答えられないファミリーストアは `503 temporarily_unavailable` で、`store: "refresh_token_family"` と `step: "register"` を付けて `authorization_grant_store_unavailable` としてログに出す。ローテーションを配線しなければファミリーは登録されず、リプレイ検出は働かない。
+**新しいファミリーはリフレッシュトークン自身の識別子で登録される。** リフレッシュトークンの `jti` と、その有効期間を測り始める時刻は署名の前に予約される。`refreshTokenFamilyRotation` が配線されていれば、トークンを返す前に、ファミリーがその `jti` で、その時刻に `oauth.refreshToken.expiresIn` を足した時刻 — トークンの `exp` — を期限として登録される。グラントはそれらを署名済みのトークンから読み戻さないので、`KeyStore` がトークンをどんな形で返しても、発行されたリフレッシュトークンがローテーションの記録を持たないことはない。答えられないファミリーストアは `503 temporarily_unavailable` で、`store: "refresh_token_family"` と `step: "register"` を付けて `authorization_grant_store_unavailable` としてログに出す。ローテーションを配線しなければファミリーは登録されず、リプレイ検出は働かない — そうした構成は `refresh_token` グラント無しでしか起動しないので、それらのリフレッシュトークンを引き換えるものは無い。
 
 **`userSessionStore` が配線されているとき、コードは生存中のセッションを名指さなければならない。** トークンのサブジェクトはそのセッションから来て、グラントは [ログアウト](#ログアウト)が見つけられるよう、新しいファミリーとクライアントをそのセッションに結び付ける:
 
@@ -204,9 +204,10 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 ### `refresh_token`
 
+- **トークンファミリーの 2 つのスロットが必須。** グラントが有効（`oauth.grants.refresh_token.enabled`）なとき、`refreshTokenFamilyRotation` と `refreshTokenFamilyRevocation` が配線されていなければ、モジュールは起動を拒否する — `refresh_token` グラントの `contribute-factory-failed` で、その `cause` が欠けているスロットを名指す。配線するのはファミリーストア（1 レプリカなら core の `memoryRefreshTokenFamilyStoreModule`、または `redisRefreshTokenFamilyStoreModule`）と、core の `defaultRefreshTokenFamilyRotationModule` と `defaultRefreshTokenFamilyRevocationModule`。それらが無いと、リフレッシュトークンはファミリーの記録無しに発行され、ローテーションもリプレイの確認も無しに引き換えられ、`/oauth/revoke` はこのグラントが一度も読まないファミリーに `200` を返していた。トークンファミリーを望まないデプロイはグラントを無効にする。ファミリーストアを配線せずに発行されたリフレッシュトークンはファミリーの記録を持たないので、配線した後は `oauth.refreshToken.unknownFamilyPolicy` がそれらを決める: 既定の `"reject"` はそれらを拒否し（`400 invalid_grant`、`unknown_family`）、そのユーザーは再ログインする。`"accept"` はひとりでに閉じる期間ではない: そうしたトークンを、同じファミリーで `oauth.refreshToken.expiresIn` の全期間を持つ新しいリフレッシュトークンと引き換え、ファミリーの記録はやはり書かない。したがってリフレッシュし続けるクライアントは、期限切れにならず、リプレイの確認も受けないチェーンを持ち続ける。待っても終わらない。`"reject"` に戻せば終わり、その時点でそうしたチェーンを持つ全員がサインアウトされる。
 - **セッションがまだ存在すること。** `userSessionStore` が配線され、リフレッシュトークンが `sid` を持つとき、グラントはセッションを読む: 無ければ `400 invalid_grant`、ストアの障害は `503 temporarily_unavailable`。
 - **ローテーションは何かに署名する前に予約される。** 新しいリフレッシュトークンの `jti` と、その有効期間を測り始める時刻が先に決まり、`RefreshTokenFamilyRotation.rotate` でファミリーストアにコミットされ、そのコミットが成立してから署名される。したがって競合に負けたリクエスト — リプレイ、失効済みファミリー、`reject` 下の未知のファミリー — は署名を 1 つも生まずに返る。署名のたびに課金されるリモート呼び出しになる KMS バックエンドの `SigningKeyProvider` ではこれが効く。発行されるトークンは予約されたとおりの `jti` を持ち、`exp` はストアがコミットした上限 — `RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs` から、その契約が記す前方ドリフトのための 1 秒のマージンを引き、秒に切り捨てたもの — を超えない。したがってリフレッシュトークンが、そのリプレイを捕まえるファミリーレコードより長く生きることはない。有効期間が残らない上限は、期限切れのリフレッシュトークンを載せた `200` ではなく `400 invalid_grant`（"refresh token family has reached its lifetime"）になる。
-- **その順序の代償。** `rotate` がコミットした時点で、提示されたトークンは使用済みになる。その後に署名器が失敗すると — KMS の障害 — 誰もトークンを持たないローテーションが残る: グラントは `503 temporarily_unavailable` を返し、ファミリー ID・使用済みの `jti`・予約された `jti` を付けて `refresh_token_rotation_orphaned` をログに出す。これはストアが実際にローテーションをコミットしたときだけで、ローテーションを配線していない構成や、`unknownFamilyPolicy` で受け入れた未知のファミリーは通常の署名器の振る舞いのままである。クライアントの再試行は古いトークンを提示し、それは今やリプレイとして読まれるので、ファミリーは失効し、ユーザーは再認証する。
+- **その順序の代償。** `rotate` がコミットした時点で、提示されたトークンは使用済みになる。その後に署名器が失敗すると — KMS の障害 — 誰もトークンを持たないローテーションが残る: グラントは `503 temporarily_unavailable` を返し、ファミリー ID・使用済みの `jti`・予約された `jti` を付けて `refresh_token_rotation_orphaned` をログに出す。これはストアが実際にローテーションをコミットしたときだけで、`unknownFamilyPolicy` で受け入れた未知のファミリーは通常の署名器の振る舞いのままである（ローテーションを配線していない構成は、このグラントでは起動しない）。クライアントの再試行は古いトークンを提示し、それは今やリプレイとして読まれるので、ファミリーは失効し、ユーザーは再認証する。
 - **リプレイはファミリーを失効させる**（RFC 6819 §5.2.2）。モジュールがローテーションと並べて `refreshTokenFamilyRevocation` を読むのはそのためである。また `iat` がサブジェクトの失効ウォーターマーク以前のリフレッシュトークンは `invalid_grant` になる。
 - **依存先が落ちていて検証できなかったトークンは `invalid_grant` ではなく `503 temporarily_unavailable`** — キーストア（"verification key unavailable"）やサブジェクトのウォーターマーク（"revocation store unavailable"）が答えない場合で、`site: "refresh_token"` 付きの `token_verification_unavailable` としてログに出す。RFC 6749 §5.2 の `invalid_grant` はクライアントにリフレッシュトークンを捨てさせるので、障害にそれで答えると、その間にリフレッシュした全員をログアウトさせてしまう。キーストアが持たない kid は引き続き `invalid_grant`。ファミリーストアやセッションストアの障害も `503` で、ストアと段階（`rotate`、またはリプレイが必要とする `revoke`）を付けて `refresh_token_store_unavailable` としてログに出す。
 
@@ -388,7 +389,7 @@ grant_type=client_credentials
 - **キャッシュしない。** キャッシュした否定は障害より長く残り、肯定はそもそも返されていない。
 - **自分のクライアントには 5xx（`502` か `503`）で答える。** `401 invalid_token` ではない。トークンはまったく問題ないかもしれず、`401` はクライアントにそれを捨ててやり直させる。
 
-[auth.proxy](https://github.com/o3co/auth.proxy) の validation モードはすでにそう振る舞う。2xx でないイントロスペクションの答えはキャッシュされず、クライアントには `502 Bad Gateway` が返る。このリリースより前は障害が `200 active: false` で返り、auth.proxy はそれを最大 30 秒キャッシュして `401` で答えていた。
+[auth.proxy](https://github.com/o3co/auth.proxy) の validation モードはすでにそう振る舞う。2xx でないイントロスペクションの答えはキャッシュされず、クライアントには `502 Bad Gateway` が返る。v0.16.0 より前は障害が `200 active: false` で返り、auth.proxy はそれを最大 30 秒キャッシュして `401` で答えていた。
 
 ### 予約文字を含む `client_id` は HTTP Basic でパーセントエンコードする
 
@@ -407,7 +408,7 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 ### 失効したファミリーと終了したセッション
 
 - **リフレッシュトークンファミリー。** `family_id` を持つトークンは、`refreshTokenFamilyRevocation` が配線されていれば `isFamilyRevoked` で確認される: 失効済みのファミリーは `active: false` を返して `introspect.family_revoked` を出す。答えられないストアは `503 temporarily_unavailable`（"refresh token store unavailable"）で、`introspect.store_unavailable` として監査し `introspect_store_unavailable` としてログに出す — 上と同じ理由で障害である。`family_id` の無いトークンは署名と失効ストアだけで検証される。失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶されるので、ファミリー自身のリフレッシュトークンが期限切れになっても答えは戻らない（core の `refresh-token-family/retention.mts`）。
-- **セッションの生存。** `sid` クレームを持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
+- **セッションの生存。** `sid` クレーム — またはトークン交換の結果が subject トークンのセッションへの生存確認専用のつながりとして持つ `liveness_sid`（core の `grants/sessionClaims.mts`） — を持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
 
 これらは問い合わせる呼び出し元にしか効かない: JWT を署名と `exp` だけでオフライン検証するリソースサーバーは失効を見ず、期限まで受け入れ続ける。
 
@@ -417,7 +418,7 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 サーバーが記録できなかった失効は `200` ではない。呼び出し元自身のトークンが検証を通り、その失効を記録するストア — `accessTokenDenylist` またはリフレッシュトークンのファミリーストア — が失敗したときは `503 temporarily_unavailable` を返し（§2.2.1: クライアントはトークンがまだ存在するとみなして再試行する）、`revoke_store_unavailable` を error レベルで、どちらのストアかを `store` に、失効を記録できなかったクライアントを `clientId` に入れてログに残す。検証を通らないトークン、このサーバーが失効できないトークン、他のクライアントのトークンはストアに届かないので、障害中も `200` のままである。
 
-- **リフレッシュトークン**は `refreshTokenFamilyRevocation` でそのファミリーを失効させる。そのスロットが無ければリクエストは何もしない `200`。
+- **リフレッシュトークン**は `refreshTokenFamilyRevocation` でそのファミリーを失効させる。そのスロットが無ければリクエストは何もしない `200` — それが無い構成は `refresh_token` グラントを有効にできないので、発行したリフレッシュトークンはどれも引き換えられない。
 - **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加され、`exp` に core の `REVOCATION_RETENTION_ALLOWANCE_MS` — 検証が許す 5 分の時計の許容（`DEFAULT_CLOCK_SKEW_MS`）、レプリカ間の許容、丸めの 1 秒 — を足した時刻まで — まだ検証を通りうる間 — 拒否される。それすら過ぎたトークンはこのプロバイダーでは検証を通らないので、失効させてもストアには問い合わせず `200` を返す。この denylist を使って `verifyJwt` を呼ぶ独自のリソースサーバーが既定より大きい `clockSkewMs` を渡すと、失効したトークンをその差の分だけ受け入れるので、そこでは既定値のままにすること。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
 - **キーストアが答えず検証できなかったトークン**は `503 temporarily_unavailable` — 要求を処理できないサーバーのための RFC 7009 §2.2.1 の答えで、クライアントはトークンがまだ存在するとみなして再試行する — で、`token_verification_unavailable` としてログに出す。そこで `200` を返すと、何も触れていないトークンを失効済みと告げることになる。キーストアが持たない kid は引き続き黙った `200`。
 
@@ -440,7 +441,8 @@ OIDC Core §5.3。`GET` と `POST` で受け付ける。永続化された `User
 | セッション未発見 | `401 invalid_token` |
 | キーストア、jti の denylist、サブジェクトのウォーターマークが答えない | `503 temporarily_unavailable`（"verification key unavailable" / "revocation store unavailable"）、チャレンジなし。`token_verification_unavailable` としてログ出力 |
 | リフレッシュトークンファミリーストアかセッションストアが答えない | `503 temporarily_unavailable`（"refresh token store unavailable" / "session store unavailable"）、チャレンジなし。`userinfo_store_unavailable` としてログ出力 |
-| `userSessionStore` 未配線、または `sid` クレームなし | `200 { sub }`（sub のみ、永続クレームなし） |
+| `userSessionStore` 未配線、または `sid` も `liveness_sid` もなし | `200 { sub }`（sub のみ、永続クレームなし） |
+| `liveness_sid` があり `sid` がない（トークン交換の結果）、セッションがアクティブ | `200 { sub }` — セッションは確認するが、そのどれも渡さない: 交換されたトークンの保持者はセッションのクライアントではない。スコープが何を言っていても同じ |
 | セッションがアクティブ | `200 { sub, ...スコープで絞ったクレーム }` |
 
 すべてのレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける（RFC 6750 §5.3）。障害は拒否される — クレームは返さない — が、`invalid_token` としてではない。RFC 6750 §3.1 はそれをトークンについての記述（"expired, revoked, malformed, or invalid"）と定義しており、クライアントにトークンを取り替えさせるからである。
@@ -460,9 +462,10 @@ OIDC Core §5.3。`GET` と `POST` で受け付ける。永続化された `User
 
 ### 発行
 
-- **アクセストークンの `cnf` は仕組みに依存しない。** どのバインディングの `confirmation` もそのまま流れる — DPoP の `{ jkt }`、mTLS の `{ "x5t#S256" }`。
+- **アクセストークンの `cnf` はバインディングの仕組みが所有するメンバーである。** どのグラントも、リクエストのバインディングに core の `ownedConfirmation` を適用したもの — DPoP の `{ jkt }`、mTLS の `{ "x5t#S256" }` — を刻み、仕組みが返した `confirmation` をそのまま刻むことはない。どちらのメンバーも所有しない kind の寄与された仕組みや、kind が所有しないメンバーを運ぶバインディングには、バインドされていないトークンを発行する。複合の confirmation は所有するメンバーだけを残す。WebAuthn グラント、デバイスグラント、トークン交換も同じ規則に従う。
 - **リフレッシュトークンの `cnf` は public クライアントには付け、confidential クライアントには要求があったときだけ付ける。** バインドされたアクセストークンを持つ public クライアントはバインドされたリフレッシュトークンを受け取り、次のリフレッシュが連続性を強制する。confidential クライアントはプレーンなリフレッシュトークンを受け取る — クライアント認証がリフレッシュ時の認証手段だからである（RFC 9449 §5、RFC 8705 §7.1） — ただし `oauth.tokenBinding.bindConfidentialClientRefreshTokens = true`（`OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`）ならそれもバインドする。その代償は鍵のローテーションである: バインドされたリフレッシュトークンは、その有効期間全体にわたってクライアントを 1 つの鍵か証明書に固定する。
-- **ワイヤー上の `token_type`:** `"DPoP"` は DPoP のバインディングのときだけ（RFC 9449 §5）。mTLS は `"Bearer"` のまま（RFC 8705 §3） — 証明書がバインディングの証拠であって、ワイヤー上のトークン型ではない。
+- **必須の送信者制約は格下げされない。** `senderConstrained: { required: true }` で登録されたクライアントについて、`/oauth/token` のディスパッチのゲートはどのグラントも動く前に次を拒否する: バインディングなし（`401 invalid_client`）、`methods` にない kind のバインディング（`400 unauthorized_client`）、その kind が所有するメンバーを confirmation に持たないバインディング（`400 invalid_request`、"sender-constrained binding carries no confirmation its mechanism owns"。監査は `token.issued.failure`、`reason: "sender_constraint_unowned_confirmation"`） — 最後のものは、制約のないクライアントが受け取るバインドなしの Bearer トークンとして発行されてしまうところだった。
+- **ワイヤー上の `token_type`** は core の `generateTokenResponse` がアクセストークンの `cnf` から読む: `cnf.jkt` なら `"DPoP"`（RFC 9449 §5）、mTLS（RFC 8705 §3 — 証明書がバインディングの証拠であって、ワイヤー上のトークン型ではない）とバインドなしは `"Bearer"`。応答の型がクレームと食い違うことはない。
 
 ### リフレッシュ時のマトリクス
 
@@ -504,14 +507,16 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと**バイト単位で完全一致**しなければならない。逆ドメインのカスタムスキームは正当なエントリーだが、それだからといって緩和はされない。
 - `state`（任意） — `post_logout_redirect_uri` へのリダイレクト時にそのまま返す
 
+`post_logout_redirect_uri` は、ヒントを検証しセッションを名指すと確かめた直後に 1 回だけ、ヒントの発行先クライアントのリストと照合し、以後は照合の結果だけを使う — 確認ページも、上流の end-session 呼び出しも、このエンドポイント自身のリダイレクトも。一致しないもの、あるいはこのデプロイメントが知らないクライアントのものは、送られなかったものとして扱う。特に、**フェデレーションの end-session 呼び出しには決して渡さない**。Google、GitHub、Apple は end-session エンドポイントを公開しておらず、設定されていなければそのアダプターは渡された URI へそのままリダイレクトするからである。クライアントは、ヒントの `azp` がその audience のひとつならそれ、そうでなければ唯一の audience（文字列、または要素 1 つのリスト）である。複数の audience を持ち `azp` の無いヒントはクライアントを名指さず、URI は捨てる。照合は完全一致で、末尾のスラッシュ、ホストやパスの大文字小文字の違い、クエリ・パス・フラグメントの追加、前方一致、別のスキームは別の URI である。一致したものは、起動時にすべての登録が満たすべき形（core の `checkRedirectUri`）も満たさなければならない。カスタムの `ClientRepository` は `ClientEntrySchema` を通らないので、URL でないエントリーや `javascript:` のような実行可能スキームのエントリーを持ち得る。そのような一致は未登録の URI と同じく捨ててログアウトを完了し、`site`、`clientId`、拒否の `reason`（エントリーそのものは載せない）付きの `logout_registered_redirect_uri_refused` として warn で 1 回ログに出す。`post_logout_redirect_uri` を指定しないリクエストはクライアントリポジトリに一切問い合わせない。答えられないクライアントリポジトリはログアウトを止めない: 登録済みかどうか分からないので URI は使わず、送られなかったものとしてログアウトを完了し、`site: "logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。
+
 `id_token_hint` の発行から 24 時間を超えた `GET` には、ログアウトする代わりに確認ページを返す。そのフォームはヒントと `state` をこのエンドポイントへ POST で送り返し、`post_logout_redirect_uri` はクライアントのアローリストにある場合だけ送り返す。
 
-検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。
+検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。セッションを名指さない（`sid` の無い）ものは、`GET` でも `POST` でも、確認ページより先に `400 invalid_request` になる。それでは何もログアウトできないからである。
 
-フロー: `id_token_hint` を検証 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
+フロー: `id_token_hint` を検証 → `post_logout_redirect_uri` をクライアントのリストと照合 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
-- `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）
-- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添える。フェデレーショントークンのレコードが読めなければ添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
+- `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）
+- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
@@ -530,7 +535,9 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 プロバイダー単位のフェデレーション切断。Authorization に `typ: at+jwt` の `Bearer <access_token>`。ボディ（任意）: `post_logout_redirect_uri`、`state`。
 
-フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+
+`post_logout_redirect_uri` を IdP の end-session 呼び出しに渡すのは、アクセストークンの発行先クライアント（その `azp`）の `postLogoutRedirectUris` のいずれかと完全一致したときだけである — このルートも呼び出し側が選んだ先へのリダイレクトで終わるので、`/oauth/logout` と同じ規則を適用する。一致しなければ捨て、アダプターは指定が無いときと同じように答える: Google と GitHub はブラウザーを自身のログアウトページへ送り、end-session エンドポイントが設定されていない Apple は拒否する。このルートはそれを失敗した end-session 呼び出しと同じく `200 {"disconnected": true}` で答える。`azp` の無いトークンには照合するリストが無く、一致したものは `/oauth/logout` と同じく `checkRedirectUri` を満たさなければならない。答えられないクライアントリポジトリは切断を止めない: URI を捨て、それが無いときと同じように答え、`site: "federation_logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。ボディの無い `POST` は URI を指定しない切断である。
 
 IdP の end-session 呼び出しが例外を投げた場合、ローカルの状態は既にクリア済みなので、応答は `200 {"disconnected": true}` で、オペレーター向けに監査イベント `federation.logout.idp_unreachable` を出す。
 
@@ -649,13 +656,13 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 403 | `forbidden` | クライアントが `allowedAzpForFederationToken` でオプトインしていない |
 | 404 | `federation_not_linked` | 指定のフェデレーションがこのセッションに紐付いていない |
 | 410 | `refresh_token_absent` | 保存済みトークンにリフレッシュトークンが無い（ログイン時に上流が返さなかった、またはロック後の再読み込みでそれの無いレコードが見つかった） |
-| 410 | `re_authentication_required` | IdP が `invalid_grant` / `invalid_token` を返した — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要 |
-| 429 | `rate_limited` | 上流 IdP のレート制限超過（`status: 429` または `error: "too_many_requests"`）。後で再試行する |
-| 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` フィールドでグループ化すること |
+| 410 | `re_authentication_required` | IdP がリフレッシュトークンを拒否した: ライブラリが投げたものの `error` が `invalid_grant` / `invalid_token` で、ステータスが 429 でも 5xx でもない — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要。429 や 5xx は本文が何を名乗ってもこれにならず、メッセージにコードを含むだけのエラーもならない。それらは保存済みトークンを残す（下の `429`、`503`、`500`） |
+| 429 | `rate_limited` | 上流 IdP のレート制限超過（本文がどのコードを名乗っていても `status: 429`、または `error: "too_many_requests"`）。保存済みトークンは残す。上流が秒数（1〜86400）で待ち時間を示したときは `Retry-After` にそれを載せ、示さなければ付けない |
+| 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー（`error` にコードが無く、メッセージが `invalid_grant` を名乗るだけのものを含む）、またはこのルートが読めない応答。保存済みトークンは残す。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった。続く競合が見えるよう、`federation`、`clientId`、`sid` 付きの `federation_token_lock_timeout` として warn でログに出す |
-| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む）。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
+| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、または上流の障害: 5xx を返した IdP（本文がどの OAuth コードを名乗っていても — ただし `too_many_requests` は上の `429` — 、ライブラリが本文を読んだか `Response` の上で投げたかにかかわらず）、時間内に答えなかった IdP、到達できなかった IdP（エラーやその cause に包まれた接続・トランスポートのコード）。判定は core の `isFederationUpstreamOutage` で、リフレッシュトークンを拒否するコードよりも先に行う。保存済みトークンは再試行のために残す。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
@@ -684,8 +691,8 @@ clients:
 - `federation.token.forbidden` — 403 のとき（クライアントがオプトインしていない）
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき
 - `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
-- `federation.token.reauthentication_required` — IdP から `invalid_grant` または `invalid_token` を受け取ったとき
-- `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま — トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
+- `federation.token.reauthentication_required` — IdP の構造化された `invalid_grant` または `invalid_token` を受け取ったとき（上の 410）
+- `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま、ただしサニタイズして 200 文字で切り詰める（core の `auditErrorText`）— トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
 
 ## jwt-bearer: 信頼する発行者 (#525)
 

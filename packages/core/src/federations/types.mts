@@ -204,10 +204,26 @@ export interface FederationProvider {
 }
 
 /**
- * Arguments for an OIDC RP-Initiated Logout (end-session) request. Unchanged from v0.3.x.
+ * Arguments for an OIDC RP-Initiated Logout (end-session) request.
  */
 export interface EndSessionRequest {
 	idTokenHint?: string;
+	/**
+	 * Where the browser goes after the upstream logout. **A caller passes only
+	 * a URI it has already validated**: one that matched, exactly, a
+	 * `postLogoutRedirectUris` entry registered for the client that asked for
+	 * the logout (OIDC RP-Initiated Logout 1.0 §3), and that passes
+	 * `checkRedirectUri` — a custom `ClientRepository` can hold an entry that
+	 * does not — or `undefined`. Never the `post_logout_redirect_uri` a request
+	 * carried, unchecked.
+	 *
+	 * An adapter may therefore treat it as a trusted redirect target, and the
+	 * bundled ones do: where the upstream publishes no end-session endpoint and
+	 * none is configured, Google, GitHub and Apple answer with this URI itself,
+	 * so an unchecked value here makes the provider's origin redirect to
+	 * anywhere; with an endpoint they forward it upstream. `oauth`'s two logout
+	 * routes hold it to the registered list before `endSession` is called.
+	 */
 	postLogoutRedirectUri?: string;
 	state?: string;
 }

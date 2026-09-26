@@ -250,6 +250,43 @@ describe("POST /oauth/webauthn/registration/options", () => {
 	);
 });
 
+describe("POST /oauth/webauthn/registration/options, the memory challenge store at its cap", () => {
+	it("answers 503, logs the store's refusal once, and keeps the challenge it holds", async () => {
+		// The memory store refuses a challenge past its cap rather than evict a
+		// live one: a ceremony that cannot start is the server's outage.
+		const stores = {
+			...memoryStores(),
+			challengeStore: createMemoryChallengeStore({ maxEntries: 1 }),
+		};
+		const logger = spyLogger();
+		const app = await boot(stores, logger);
+
+		const first = await supertest(app).post("/oauth/webauthn/registration/options").send({});
+		expect(first.status).toBe(200);
+		const second = await supertest(app).post("/oauth/webauthn/registration/options").send({});
+
+		expect(second.status).toBe(503);
+		expect(second.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "challenge store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe("webauthn_ceremony_store_unavailable");
+		expect(context).toMatchObject({
+			site: "registration_options",
+			store: "challenge",
+			step: "issue",
+			err: { name: "ChallengeStoreFullError", reason: "full" },
+		});
+		expect(context.err).not.toBeInstanceOf(Error);
+		expect(stores.challengeStore.size).toBe(1);
+		expect(
+			await stores.challengeStore.find(REGISTRATION_SCOPE, first.body.challenge as string),
+		).not.toBeNull();
+	});
+});
+
 describe("POST /oauth/webauthn/registration/verify", () => {
 	it("answers 503 and logs once when the ceremony cannot consume the challenge", async () => {
 		const stores = memoryStores();

@@ -18,6 +18,7 @@ import {
 	classifyFederationRefreshError,
 	isKnownFederationRefreshErrorCode,
 } from "../federation-tokens/refresh-error.mjs";
+import { isFederationUpstreamOutage } from "../federation-tokens/upstreamOutage.mjs";
 import { parseScopeTokens } from "../federations/scope.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
@@ -47,7 +48,6 @@ import {
 	type FederationGrantUnavailableReason,
 	hasFederationGrantAuthorization,
 } from "./types.mjs";
-import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 export type { FederationGrantRetrievalFailure } from "./types.mjs";
 
@@ -1126,7 +1126,7 @@ async function refreshUnderLock(
 
 	if (!settled.ok) {
 		const upstreamFailure = failed("upstream", settled.error);
-		// The classifier is the session-bound route's, unchanged, and it can
+		// The classifier is shared with the session-bound route, and it can
 		// throw on a thing that cannot be made a string. The failure ARRIVED all
 		// the same, which is what matters below.
 		let classified: ReturnType<typeof classifyFederationRefreshError>;
@@ -1135,21 +1135,27 @@ async function refreshUnderLock(
 		} catch {
 			classified = { reason: "unknown", structured: false };
 		}
-		// An outage first, before anything the body said: the upstream could not
+		// An outage, read before anything the body said: the upstream could not
 		// be reached, did not answer in time, or answered 5xx — on the error, its
-		// Error causes or the Response it was raised over. A 5xx is never a
-		// verdict on the credential, whatever OAuth code its body carries: a
-		// 503 saying `invalid_grant` must not send the user through consent
-		// again, nor one naming an interaction code stamp their absence. The
-		// refresh-error classifier alone knows a status only on the error
-		// itself and four connection codes, and reads an `error` field before
-		// the status; `isFederationUpstreamOutage` is the connect callback's
-		// own test. A 429 is no outage, and stays the rate limit below.
-		const outage = isFederationUpstreamOutage(settled.error);
-		// Only a STRUCTURED rejection ends the credentials. The classifier's
-		// message fallback is a guess, and a wrong one here would send a user
-		// through consent again for nothing.
-		if (!outage && classified.reason === "invalid_grant" && classified.structured) {
+		// Error causes or the Response it was raised over
+		// (`isFederationUpstreamOutage`, the connect callback's own test), or
+		// whatever else the classifier reads structurally as one: a 5xx status
+		// or a connection code on a thrown value that is not an Error, which a
+		// hand-written adapter may throw. Neither reads the IdP's parsed body,
+		// which openid-client carries as the error's cause. A 5xx is never a verdict on the
+		// credential, whatever OAuth code its body carries: a 503 naming an
+		// interaction code must not stamp the user's absence (below). A 429 is
+		// no outage, and stays the rate limit below. The classifier's
+		// message-only `network` is a guess, and is not an outage here.
+		const outage =
+			isFederationUpstreamOutage(settled.error) ||
+			(classified.reason === "network" && classified.structured);
+		// Only the upstream's structured rejection ends the credentials, which is
+		// all the classifier's `invalid_grant` ever is: it is never read during
+		// an outage — a 503 saying `invalid_grant` must not send the user through
+		// consent again — nor off a message, where a wrong guess would do the
+		// same for nothing.
+		if (classified.reason === "invalid_grant") {
 			const marked = await within(
 				settle(() =>
 					deps.store.requireReauthorization({

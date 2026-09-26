@@ -32,6 +32,8 @@ const OPTIONAL = [
 	"replaySeenSet",
 	"logger",
 	"auditSink",
+	"userSessionStore",
+	"subjectRevocation",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -46,8 +48,8 @@ describe("deviceGrantModule's deps are the slots it declares (#626 P2)", () => {
 	it("refuses, at compile time, a read of a slot the module never declared", () => {
 		if (false as boolean) {
 			const deps = {} as DeviceGrantModuleDeps;
-			// @ts-expect-error — `userSessionStore` is in neither requires nor optional
-			void deps.userSessionStore;
+			// @ts-expect-error — `consentStore` is in neither requires nor optional
+			void deps.consentStore;
 			// @ts-expect-error — nor is `grantPolicy`
 			void deps.grantPolicy;
 		}

@@ -22,9 +22,11 @@ import {
 	type ProtectedHeaderParameters,
 } from "jose";
 import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
+import { auditErrorText } from "../errors/envelope.mjs";
 import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { lineSafeText } from "../logging/loggableError.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
 /**
@@ -90,11 +92,16 @@ export type JwtVerificationReason =
 	// (`isVerificationUnavailable`).
 	| "revocation_unavailable";
 
+/** The longest jose message a verdict keeps: the cap `auditErrorText` applies to caller text. */
+const JOSE_MESSAGE_MAX_LENGTH = 200;
+
 /**
  * Thrown by {@link verifyJwt} on any verification failure. The `reason` field
  * is the audit-stable discriminator; `message` is a human-readable summary
- * suitable for `logger.warn` but NOT for client-facing error responses
- * (callers must map to RFC-compliant error envelopes themselves).
+ * suitable for `logger.warn` — what it quotes of the caller's token (a `typ`,
+ * a `crit` name jose quotes) is on one line and capped — but NOT for
+ * client-facing error responses (callers must map to RFC-compliant error
+ * envelopes themselves).
  */
 export class JwtVerificationError extends Error {
 	override readonly name = "JwtVerificationError";
@@ -492,9 +499,14 @@ export async function verifyJwt(
 				throw err;
 			}
 		} else if (headerTyp !== effectiveExpectedTyp) {
+			// Quoted sanitised and capped: the message is what a caller's log
+			// carries as the projected error's `detail`, and the header is
+			// whatever the caller wrote — CR/LF and ten thousand characters
+			// included. A `typ` is a media type (RFC 7515 §4.1.9), an open
+			// vocabulary, so there is no closed set to map it onto.
 			const err = new JwtVerificationError(
 				"typ",
-				`JWT typ ${headerTyp} does not match expected ${effectiveExpectedTyp}`,
+				`JWT typ ${auditErrorText(headerTyp)} does not match expected ${effectiveExpectedTyp}`,
 			);
 			emitRejection(logger, err, undefined, header);
 			throw err;
@@ -628,9 +640,15 @@ export async function verifyJwt(
 		payload = result.payload;
 	} catch (cause) {
 		const reason = classifyJoseError(cause);
+		// jose's text on one line and capped (`lineSafeText`): it is fixed
+		// text about the token but for one thing — an unrecognised `crit`
+		// entry is refused, before the signature, by quoting the name the
+		// caller wrote. Not `auditErrorText`, whose RFC 6749 set would turn
+		// every claim name jose quotes (`"exp" claim timestamp check failed`)
+		// into `?exp?`.
 		const err = new JwtVerificationError(
 			reason,
-			cause instanceof Error ? cause.message : String(cause),
+			lineSafeText(cause instanceof Error ? cause.message : String(cause), JOSE_MESSAGE_MAX_LENGTH),
 		);
 		emitRejection(logger, err, undefined, header);
 		throw err;
@@ -868,8 +886,9 @@ function emitRejection(
 			jti: payload?.jti,
 			sub: payload?.sub,
 			iss: payload?.iss,
-			// The client's header: logged only as the string it should be.
-			typ: typeof header?.typ === "string" ? header.typ : undefined,
+			// The client's header, read before its signature: logged only as
+			// the string it should be, sanitised and capped (`auditErrorText`).
+			typ: typeof header?.typ === "string" ? auditErrorText(header.typ) : undefined,
 		},
 		"jwt_verify_rejected",
 	);

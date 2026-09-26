@@ -653,6 +653,8 @@ export interface DeviceCodeRecordFields {
 	readonly subject?: string;
 	/** JSON array, set by an approval. */
 	readonly grantedScope?: string;
+	/** Epoch milliseconds, set by an approval: the `now` the decision was made at. */
+	readonly approvedAtMs?: string;
 	/** Epoch milliseconds of the previous poll. Absent until the first. */
 	readonly lastPolledAtMs?: string;
 }

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { MtlsError } from "#/errors.mjs";
+import { MtlsError, MtlsRevocationSourceError } from "#/errors.mjs";
 
 describe("MtlsError", () => {
 	it("hard-codes code to invalid_certificate regardless of reason", () => {
@@ -59,5 +59,31 @@ describe("MtlsError", () => {
 			const err = new MtlsError(reason, "test");
 			expect(err.reason).toBe(reason);
 		}
+	});
+});
+
+describe("MtlsRevocationSourceError — a source's own text, one line and capped", () => {
+	it("names the url, the detail and the subject on one line, each capped", () => {
+		const err = new MtlsRevocationSourceError({
+			source: "ocsp",
+			url: `http://ocsp.test/\u0085\u2028${"u".repeat(10_000)}`,
+			reason: "unexpected_content_type",
+			detail: `expected application/ocsp-response, got text/html\u202e\u2066${"d".repeat(10_000)}`,
+			subject: `CN=clïent\u2028${"s".repeat(10_000)}`,
+		});
+		expect({
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+			unsafe: /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(
+				`${err.message}${err.url}${err.subject}`,
+			),
+			messageWithin: err.message.length <= 3 * 256 + 64,
+			url: [err.url?.startsWith("http://ocsp.test/??u"), (err.url ?? "").length <= 256],
+			subject: [err.subject.startsWith("CN=clïent?s"), err.subject.length <= 256],
+		}).toEqual({
+			unsafe: false,
+			messageWithin: true,
+			url: [true, true],
+			subject: [true, true],
+		});
 	});
 });

@@ -42,7 +42,7 @@ import { oauthModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACCESS_TOKEN_TYPE, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
 import { ISSUER, keyStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -123,10 +123,13 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 	});
 
 	/** The README's "Register the grant" composition, booted for real. */
-	async function boot(): Promise<express.Express> {
+	async function boot(
+		extra: ReadonlyArray<ReturnType<typeof defineModule>> = [],
+	): Promise<express.Express> {
 		const config = makeConfig();
 		handle = await createApp({
 			modules: [
+				...extra,
 				oauthModule({ config }),
 				tokenExchangeModule,
 				memoryRefreshTokenFamilyStoreModule,
@@ -387,6 +390,72 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 			expect(res.body).toEqual({
 				error: "invalid_target",
 				error_description: "requested_resources_not_in_audience: https://elsewhere.example",
+			});
+		});
+	});
+
+	describe("the refusal's log line — the resources are the caller's", () => {
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+		const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+
+		it("logs the first ten resources, each sanitised and capped, and how many were sent", async () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => logger,
+			};
+			const app = await boot([
+				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+			]);
+			const subjectToken = await signSelfIssuedAccessToken({ aud: "billing" });
+			// A form body percent-decodes a line break and a control character;
+			// twelve resources, the first ten thousand characters long.
+			const hostile = `https://x.example\r\nFORGED level=error\u001b[31m${"r".repeat(10_000)}`;
+			const resources = [hostile, ...Array.from({ length: 11 }, (_, i) => `https://r${i}.example`)];
+
+			const res = await request(app)
+				.post("/oauth/token")
+				.auth(gateway.clientId, SECRET)
+				.type("form")
+				.send(
+					[
+						`grant_type=${encodeURIComponent(TOKEN_EXCHANGE_GRANT_TYPE)}`,
+						`subject_token=${encodeURIComponent(subjectToken)}`,
+						`subject_token_type=${encodeURIComponent(ACCESS_TOKEN_TYPE)}`,
+						...resources.map((resource) => `resource=${encodeURIComponent(resource)}`),
+					].join("&"),
+				);
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_target");
+			const lines = logger.warn.mock.calls.filter(
+				([, event]) => event === "token_exchange_resource_not_in_audience",
+			);
+			expect(lines).toHaveLength(1);
+			const line = lines[0]?.[0] as { missingResources?: unknown; missingResourceCount?: unknown };
+			const logged = Array.isArray(line.missingResources)
+				? (line.missingResources as string[])
+				: [];
+			expect({
+				array: Array.isArray(line.missingResources),
+				entries: logged.length,
+				control: logged.some((entry) => CONTROL.test(entry)),
+				within200: logged.every((entry) => entry.length <= 200),
+				first: (logged[0] ?? "").slice(0, 25),
+				rest: logged.slice(1),
+				count: line.missingResourceCount,
+			}).toEqual({
+				array: true,
+				entries: 10,
+				control: false,
+				within200: true,
+				first: "https://x.example??FORGED",
+				rest: Array.from({ length: 9 }, (_, i) => `https://r${i}.example`),
+				count: 12,
 			});
 		});
 	});

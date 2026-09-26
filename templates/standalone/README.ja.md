@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -13,7 +13,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）
 - この scaffold だけが持つモジュール — 署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
 - 設定をどこから読み、そのレイヤーをどう重ねるか — [`src/configPath.mts`](src/configPath.mts) と [`config/`](config/)
-- ホストプロセス: Express アプリ、そのセキュリティヘッダー、health / readiness / metrics の各ルート、起動処理、終端のエラーハンドラー — [`src/app.mts`](src/app.mts)。リスナーはソケットが bind されたときに `server_listening`（info、`port`）を 1 行ログに出し、bind できなければその bind のエラーで起動を失敗させ、その後のサーバーのエラーは `server_error`（error）としてログに出す — [`src/listen.mts`](src/listen.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
+- ホストプロセス: Express アプリ、そのセキュリティヘッダー、起動処理 — [`src/app.mts`](src/app.mts)。health / readiness / metrics の各ルート、合成されたルーター、その後ろの core の終端のエラーハンドラーを、マウントする順に — [`src/routes.mts`](src/routes.mts)。リスナーはソケットが bind されたときに `server_listening`（info、`port`）を 1 行ログに出し、bind できなければその bind のエラーで起動を失敗させ、その後のサーバーのエラーは `server_error`（error）としてログに出す — [`src/listen.mts`](src/listen.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
 - プロセスのライフサイクル: drain の deadline 付きのシグナル処理 — [`src/shutdown.mts`](src/shutdown.mts)
 - パッケージング: `Dockerfile`、compose ファイル群、`Makefile`
@@ -58,7 +58,7 @@ my-app:
 
 ロードバランサ配下で standalone サーバーを複数インスタンス動かすときは、`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` を**共有**の Redis 7.2+ インスタンスに向けること。共有の Redis URL が無いと、各レプリカは refresh token family を自分の接続（と、ローカル専用の Redis）に保持するため、トークンを発行していないレプリカに届いた refresh リクエストは `invalid_grant` を返し、ラウンドロビンの LB では 1 回おきにそうなる。
 
-**ロードバランサ配下では `HTTP_TRUST_PROXY` をプロキシのアドレスに設定すること。** デフォルトは `false` で、この場合 `req.ip` はクライアントではなく*ロードバランサの*アドレスになる。すると IP をキーとするすべての rate limit — OAuth エンドポイントの limiter と `POST /session/login` の総当たり対策ガード — が**全ユーザーで 1 つのバケットを共有する**: 誰からであれ最初の 20 回のログイン試行でウィンドウを使い切り、以降のユーザーは全員 `429` を受け取る。この障害は設定ミスではなく攻撃のように見えるため、深夜 3 時の診断が高くつく。このサービスの前段で何かが TLS を終端したりプロキシしたりしているなら必ず設定し、`X-Forwarded-For` を設定しているのがそのホップであることを確認すること。
+**ロードバランサ配下では `HTTP_TRUST_PROXY` をプロキシのアドレスに設定すること。** デフォルトは `false` で、この場合 `req.ip` はクライアントではなく*ロードバランサの*アドレスになる。すると IP をキーとするすべての rate limit — OAuth エンドポイントの limiter と `POST /session/login` の総当たり対策ガード — が**全ユーザーで 1 つのバケットを共有する**: 誰からであれ最初の 20 回のログイン試行でウィンドウを使い切り、以降のユーザーは全員 `429` を受け取る。この障害は設定ミスではなく攻撃のように見えるため、深夜 3 時の診断が高くつく。このサービスの前段で何かが TLS を終端したりプロキシしたりしているなら必ず設定し、`X-Forwarded-For` を設定しているのがそのホップであることを確認すること。`ip` のない監査イベントは、リクエストのアドレスがアドレスでなかった — `req.ip` がアドレス以外を入れた `X-Forwarded-For` から来た — ことを意味するので、`HTTP_TRUST_PROXY` がそのヘッダーを設定するホップだけを信頼しているか確認すること。
 
 取りうる形は 4 つで、いずれも Express 自身のものである:
 
@@ -528,7 +528,7 @@ worker:
 
 ## 組み込みルート
 
-`src/app.mts` はこれらを、合成された auth ルーターより前にホストアプリへマウントする。そのため auth パイプラインが劣化している間も応答し続ける — オペレーターがこれらを必要とするのはまさにそのときである。JWKS ルートはこれらに含まれない: それは `jwksModule` が提供する（上記参照）。
+`src/routes.mts` はこれらを、合成された auth ルーターより前にホストアプリへマウントする。そのため auth パイプラインが劣化している間も応答し続ける — オペレーターがこれらを必要とするのはまさにそのときである。そしてそれらすべての後ろに core の終端のエラーハンドラーをマウントするので、これらのルートが通してしまったエラーは auth のルートと同じく答えられる（`500 server_error`、`unhandled_request_error` として 1 回ログに出す）。JWKS ルートはこれらに含まれない: それは `jwksModule` が提供する（上記参照）。
 
 | メソッド | パス | 説明 |
 |---|---|---|

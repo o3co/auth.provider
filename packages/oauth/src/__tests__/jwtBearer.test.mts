@@ -46,6 +46,11 @@ import { decodeJwt, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "#/grants/jwtBearer.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 const config = {
@@ -816,6 +821,35 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		});
 	});
 
+	it("logs the refusal's reason sanitised and capped: a policy may echo the caller's resource", async () => {
+		// `boundPolicyAudience` quotes what the policy returned, and the grant
+		// forwards the caller's `resource` to the policy unchecked.
+		const warn = vi.fn();
+		const logger = { error: vi.fn(), warn, info: vi.fn(), debug: vi.fn() };
+		const hostile = `https://evil.example\r\nFORGED\u0085\u2028\u202e${"r".repeat(10_000)}`;
+		await build({
+			logger,
+			// The resource is read only under RFC 8707's flag.
+			config: { ...config, oauth: { ...config.oauth, resourceIndicator: { enabled: true } } },
+			grantPolicy: policyOf(
+				async (request) =>
+					({ outcome: "allow", grantedAudience: request.resource }) as GrantPolicyDecision,
+			),
+		}).handle(ctx({ resource: hostile }, client({ allowedAudiences: ["https://api.example"] })));
+
+		expect(warn).toHaveBeenCalledTimes(1);
+		const [line, event] = warn.mock.calls[0] as [{ reason: string }, string];
+		expect(event).toBe("jwt_bearer_policy_audience_refused");
+		expect({
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+			unsafe: /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/.test(
+				line.reason,
+			),
+			within200: line.reason.length <= 200,
+			quotes: line.reason.includes("https://evil.example??FORGED"),
+		}).toEqual({ unsafe: false, within200: true, quotes: true });
+	});
+
 	describe("RFC 8707 resource (#522)", () => {
 		// Every sibling minting at /token derives and enforces the audience
 		// from `resource` under `oauth.resourceIndicator.enabled`; this grant
@@ -1429,5 +1463,36 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 		// #326: the grant this module built is the one that refuses acquisition
 		// by omission, so the values really reached `createJwtBearerGrant`.
 		expect(handler.requiresExplicitGrantAllowlist).toBe(true);
+	});
+});
+
+describe("jwt-bearer grant stamps only the confirmation the binding's mechanism owns", () => {
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const { result } = await build({}).handle(ctx({}, { tokenBinding }));
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("expected tokens");
+			expect(decodeJwt(result.tokens.access_token as string).cnf).toBeUndefined();
+			expect(result.tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const { result } = await build({}).handle(ctx({}, { tokenBinding: COMPOUND_DPOP_BINDING }));
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("expected tokens");
+		expect(decodeJwt(result.tokens.access_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(result.tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const { result } = await build({}).handle(ctx({}, { tokenBinding: COMPOUND_MTLS_BINDING }));
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("expected tokens");
+		expect(decodeJwt(result.tokens.access_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(result.tokens.token_type).toBe("Bearer");
 	});
 });

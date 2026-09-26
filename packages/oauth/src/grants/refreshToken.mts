@@ -29,6 +29,7 @@ import {
 	isVerificationUnavailable,
 	loggableError,
 	matchConfirmation,
+	ownedConfirmation,
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
@@ -277,13 +278,13 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// `invalid_dpop_proof` / a future `invalid_client_certificate`
 			// (the proof / cert itself is well-formed; the grant is what
 			// cannot be honored).
-			// `presentedConfirmation` is mechanism-agnostic and feeds the
-			// AT cnf claim emission below (RFC 7800 — mechanism-neutral).
-			// `matchConfirmation` gates each cnf member on its owning
-			// mechanism kind (PR #185 / Codex Important #2) — see
-			// `core/grants/confirmationMatch.mts` for the kind-boundary and
-			// thumbprint-timing rationale.
-			const presentedConfirmation = ctx.tokenBinding?.confirmation;
+			// `presentedConfirmation` is the member the binding's mechanism
+			// kind owns (core's `ownedConfirmation`) and feeds the cnf claim
+			// emission below. `matchConfirmation` gates each cnf member on its
+			// owning mechanism kind the same way (PR #185 / Codex Important
+			// #2) — see `core/grants/confirmationMatch.mts` for the
+			// kind-boundary and thumbprint-timing rationale.
+			const presentedConfirmation = ownedConfirmation(ctx.tokenBinding);
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
 			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
 			const match = matchConfirmation((tokenPayload as { cnf?: unknown }).cnf, ctx.tokenBinding);
@@ -554,11 +555,14 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// Wave 2 Phase 2 §9.2 + Phase 3 §9.2 (mTLS rows): new tokens
 			// inherit the request-time binding.
 			//
-			// **AT cnf** is mechanism-agnostic. `presentedConfirmation`
-			// (defined above) is the full `ctx.tokenBinding?.confirmation`
-			// regardless of kind — DPoP `{jkt}`, mTLS `{x5t#S256}`, and
-			// future mechanisms all flow through unchanged because RFC 7800
-			// cnf claim shape is mechanism-neutral.
+			// **AT cnf** is `presentedConfirmation` (defined above): the
+			// member the binding's mechanism kind owns, and nothing for a
+			// kind that owns none. `ctx.tokenBinding` carries what a mechanism
+			// returned and `Confirmation` is extensible by mechanism, so a
+			// contributed kind presenting `{jkt}` or `{x5t#S256}`, a DPoP
+			// binding presenting an mTLS member, or a compound confirmation
+			// would otherwise be minted as a binding no owning mechanism
+			// validated.
 			//
 			// **New RT cnf** is gated on
 			// `(bindingIsDpop || bindingIsMtls) && isPublicClient`,
@@ -569,9 +573,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// BEFORE being added here (PR #185 / Codex Important #1
 			// convergence — silent degradation prevention).
 			//
-			// The wire-level `token_type` is "DPoP" only for the DPoP kind
-			// (mTLS keeps "Bearer" per RFC 8705 §3).
-			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
+			// The wire-level `token_type` is read off the new access token's
+			// confirmation by `generateTokenResponse`: "DPoP" for `cnf.jkt`,
+			// "Bearer" otherwise (mTLS keeps it per RFC 8705 §3).
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
 			// #275: `bindConfidentialClientRefreshTokens` opts a deployment out of
 			// the `isPublicClient` restriction.
@@ -602,7 +606,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const bindConfidentialClients =
 				config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
 			const bindNewRefreshToken =
-				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
+				(bindingIsDpop || bindingIsMtls) &&
+				presentedConfirmation !== undefined &&
+				(isPublicClient || bindConfidentialClients);
 
 			// #449: the rotation is a reservation, and a lost race must not have
 			// cost a signature. The new refresh token's identity — its `jti`, and
@@ -935,13 +941,10 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse(
-						{
-							accessToken: newAccessToken,
-							refreshToken: newRefreshToken,
-						},
-						{ tokenType },
-					),
+					tokens: generateTokenResponse({
+						accessToken: newAccessToken,
+						refreshToken: newRefreshToken,
+					}),
 				},
 			};
 		},

@@ -359,6 +359,36 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 		expect(decodeJwt(withSeenSet.body.access_token).sub).toBe(RP);
 	});
 
+	it("still authenticates when DPoP proofs have filled their share of a memory seen-set", async () => {
+		// Every consumer shares the seen-set, and DPoP records a proof before
+		// any rate limit or token check: a flood of fresh proofs that filled the
+		// set used to refuse client authentication too, for up to the replay
+		// window after it stopped.
+		const seenSet = createMemoryReplaySeenSet({ maxEntries: 10 });
+		let proofs = 0;
+		for (;;) {
+			try {
+				await seenSet.markSeen("dpop-proof:flood-key", `jti-${proofs}`, Date.now() + 300_000);
+				proofs += 1;
+			} catch {
+				break;
+			}
+		}
+		expect(proofs).toBe(9);
+
+		const res = await request(await buildJwtApp(seenSet))
+			.post("/oauth/token")
+			.type("form")
+			.send({
+				grant_type: "client_credentials",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+		expect(res.status).toBe(200);
+		expect(decodeJwt(res.body.access_token).sub).toBe(RP);
+		expect(seenSet.size).toBe(10);
+	});
+
 	it("a client registered with a JWKS authenticates with an assertion and receives a token", async () => {
 		const res = await request(await buildJwtApp())
 			.post("/oauth/token")

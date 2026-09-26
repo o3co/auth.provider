@@ -292,6 +292,12 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			// Google does not publish an OIDC end_session_endpoint in its discovery document.
 			// Operators MUST pass endSessionEndpoint explicitly for upstream logout.
 			// Absent that, redirect directly to postLogoutRedirectUri (or accounts.google.com/Logout).
+			// That redirect is safe only because of the caller's side of the
+			// contract (core's `EndSessionRequest`): the URI handed here is one
+			// already matched against the client's registered
+			// postLogoutRedirectUris, or none — `oauth`'s logout routes check it
+			// first. Handed a request's value unchecked, this would answer with
+			// wherever the request asked to go.
 			if (config.endSessionEndpoint) {
 				let url: URL;
 				try {
@@ -312,8 +318,11 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			try {
 				url = new URL(base);
 			} catch {
+				// Named, not quoted: the message reaches a log line as the error's
+				// `detail`, and the value is not this adapter's text. (The fallback
+				// above is always a URL, so only a handed value lands here.)
 				throw new Error(
-					`Google federation "google" received an invalid postLogoutRedirectUri: ${base}`,
+					'Google federation "google" received an invalid postLogoutRedirectUri: not a URL',
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);

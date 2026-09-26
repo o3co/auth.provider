@@ -24,6 +24,7 @@ import type {
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import {
+	auditErrorText,
 	boundPolicyAudience,
 	deriveAudienceFromResources,
 	evaluateGrantPolicy,
@@ -32,6 +33,7 @@ import {
 	generateTokenResponse,
 	isEmailVerified,
 	loggableError,
+	ownedConfirmation,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
@@ -347,8 +349,14 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 					// #521: an operator-triggered refusal logs, as
 					// `jwt_bearer_email_not_verified` does, so the operator who
 					// wired the policy can see why devices are being refused.
+					// The description quotes what the policy returned, which may
+					// be the caller's `resource` forwarded to it: sanitised and
+					// capped, as the token route records a grant's description.
 					deps.logger?.warn(
-						{ kind: assertionVerifier.kind, reason: policyAudience.result.errorDescription },
+						{
+							kind: assertionVerifier.kind,
+							reason: auditErrorText(policyAudience.result.errorDescription),
+						},
 						"jwt_bearer_policy_audience_refused",
 					);
 					return { result: policyAudience.result };
@@ -433,8 +441,11 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			}
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
-			const confirmation = ctx.tokenBinding?.confirmation;
-			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
+			// The member the binding's mechanism kind owns (core's
+			// `ownedConfirmation`), so a contributed mechanism cannot have a
+			// binding minted that no owning mechanism validated. The response's
+			// `token_type` is read off it by `generateTokenResponse`.
+			const confirmation = ownedConfirmation(ctx.tokenBinding);
 
 			// auth.proxy#90: the token never outlives the assertion — the rule
 			// token exchange holds a subject token to (RFC 8693 §2.2.1). A flat
@@ -509,7 +520,7 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken }, { tokenType }),
+					tokens: generateTokenResponse({ accessToken }),
 				},
 			};
 		},

@@ -100,6 +100,7 @@ export {
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
+	recordAuditEvent,
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
 // Audit
@@ -194,6 +195,7 @@ export type { OidcDiscoveryContribution } from "./discovery/types.mjs";
 // custom routes outside the bundled session/oauth surfaces benefits from
 // the same helper so the entire auth product surface emits a single shape.
 export {
+	auditErrorList,
 	auditErrorText,
 	type ErrorEnvelope,
 	errorEnvelope,
@@ -224,6 +226,10 @@ export type {
 	SupportsLock,
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
+// Whether a failed upstream call is an outage: the classifier reads it before
+// the codes that reject a refresh token, and the federation-grant connect
+// callback on its own.
+export { isFederationUpstreamOutage } from "./federation-tokens/upstreamOutage.mjs";
 // The federation adapter toolkit: the pure helpers every adapter builds its
 // requests with — the PKCE S256 challenge, the URL its library exchanges the
 // code at (RFC 9207 `iss` and nothing else from the callback), a
@@ -307,6 +313,7 @@ export {
 	isCompoundConfirmation,
 	matchConfirmation,
 	ownedConfirmation,
+	tokenTypeForConfirmation,
 } from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // Grant-policy evaluation and its bounds (#520): the one answer every minting
@@ -345,6 +352,9 @@ export {
 	unrepresentedResources,
 } from "./grants/resourceIndicator.mjs";
 export type { SenderConstraint } from "./grants/senderConstraint.mjs";
+// The two ways an access token names its session: `sid` (liveness and the
+// session's capabilities) and `liveness_sid` (a derived token's liveness link).
+export { LIVENESS_SID_CLAIM, livenessSidOf } from "./grants/sessionClaims.mjs";
 // Grant types and interfaces.
 //
 // `GrantRegistry` and `GrantRegistryError` (deprecated public re-exports
@@ -356,7 +366,6 @@ export type { SenderConstraint } from "./grants/senderConstraint.mjs";
 export {
 	formatObject,
 	type GenerateTokenOptions,
-	type GenerateTokenResponseOptions,
 	generateToken,
 	generateTokenResponse,
 	type Token,
@@ -475,6 +484,7 @@ export {
 	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,
 	type LoggableError,
+	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
 // Mail (the MFA ADR's D5): the port MFA codes and notices leave through
@@ -546,6 +556,8 @@ export {
 	type ProtectedResourceBindingOptions,
 	protectedResourceBindingMw,
 } from "./middleware/protectedResourceBinding.mjs";
+// Middleware — the answer to an error a route let through; `createApp` ends its router with it
+export { terminalErrorHandler } from "./middleware/terminalError.mjs";
 // Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
 export {
 	type DispatchPolicy,
@@ -862,7 +874,9 @@ export { SUBJECT_REVOCATION_ABSENCE_POLICY } from "./user-sessions/types.mjs";
 
 // Memory adapters (re-exported so consumers can construct without going through modules)
 export {
+	ChallengeStoreFullError,
 	createMemoryChallengeStore,
+	DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
 	type MemoryChallengeStore,
@@ -893,10 +907,12 @@ export type {
 } from "./challenges/types.mjs";
 export {
 	createMemoryReplaySeenSet,
+	DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
 	type MemoryReplaySeenSet,
 	type MemoryReplaySeenSetOptions,
+	ReplaySeenSetFullError,
 } from "./replay-seen-set/adapters/memory.mjs";
 export {
 	createReplaySeenSetFactory,
@@ -905,6 +921,10 @@ export {
 } from "./replay-seen-set/factory.mjs";
 export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
+export {
+	DPOP_PROOF_REPLAY_SCOPE_PREFIX,
+	DPOP_PROOF_REPLAY_SHARE,
+} from "./replay-seen-set/scopes.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 // Canonical key helper (exported for integrators writing their own adapters
 // to preserve cross-adapter parity per A1 §7.3)
@@ -1174,7 +1194,6 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
-export { isFederationUpstreamOutage } from "./federation-grants/upstreamOutage.mjs";
 // #593, D13: the two boundaries of a subject revocation, and how long each has
 // to be kept. The skew leaves `jwt/verify.mts` because the grants comparison
 // has to use the same allowance the watermark comparison already does.

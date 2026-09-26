@@ -129,6 +129,13 @@ const parseScope = (json: string | undefined): readonly string[] | undefined => 
 	}
 };
 
+/** An epoch-ms field as the scripts write it, or `undefined` when there is none to read. */
+const parseInstant = (value: string | undefined): number | undefined => {
+	if (value === undefined) return undefined;
+	const ms = Number(value);
+	return Number.isFinite(ms) ? ms : undefined;
+};
+
 /**
  * This adapter's `toAuthorization` — the Redis counterpart of the memory
  * adapter's — built from hash fields. A field the hash does not hold is
@@ -144,6 +151,10 @@ const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization =>
 	status: fields.status,
 	subject: fields.subject,
 	grantedScope: parseScope(fields.grantedScope),
+	// Absent before an approval, and on a record approved before the store
+	// recorded the instant; what a hash holds that is not a finite number
+	// reads as absent too, which a poll under a sessions boundary refuses.
+	approvedAtMs: parseInstant(fields.approvedAtMs),
 });
 
 const decisionOutcome = (reply: DeviceCodeDecisionReply): DeviceDecisionOutcome => {

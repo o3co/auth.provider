@@ -34,7 +34,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
-import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	expectBestEffortWarn,
 	expectOutageLine,
@@ -456,6 +456,43 @@ describe("POST /oauth/logout", () => {
 			expect(res.body.error).toBe("invalid_request");
 			expect(res.body.error_description).toMatch(/sid/);
 		});
+
+		// A hint that names no session can log nothing out, on GET or POST, and
+		// that is known before anything else is asked: neither the client
+		// repository (for post_logout_redirect_uri) nor, on a stale GET, the
+		// confirmation page — whose "Sign out" would only post the same hint
+		// back to this 400.
+		const hintWithoutSid = (iat?: number) => {
+			const jwt = new SignJWT({ sub: "u-1", aud: "client-1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
+				.setIssuer("https://auth.example.com")
+				.setExpirationTime("1h");
+			return (iat === undefined ? jwt.setIssuedAt() : jwt.setIssuedAt(iat)).sign(secretKey);
+		};
+
+		it("answers 400 without asking the client repository for post_logout_redirect_uri", async () => {
+			const findById = vi.fn().mockRejectedValue(storeReplyError());
+			const app = buildApp({ clientRepo: makeClientRepo({ findById }) });
+
+			const res = await postLogout(app, {
+				id_token_hint: await hintWithoutSid(),
+				post_logout_redirect_uri: "https://rp.example/logged-out",
+			});
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_request");
+			expect(findById).not.toHaveBeenCalled();
+		});
+
+		it("answers a stale GET 400, not with a confirmation page that can only fail", async () => {
+			const app = buildApp();
+			const stale = Math.floor((Date.now() - 25 * 60 * 60 * 1000) / 1000);
+
+			const res = await getLogout(app, { id_token_hint: await hintWithoutSid(stale) });
+
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_request");
+		});
 	});
 
 	describe("cascadeLogout returns failed (step 1: revokeFamily throws)", () => {
@@ -618,6 +655,44 @@ describe("POST /oauth/logout", () => {
 			// The validated URI MUST appear in the page
 			expect(res.text).toContain("trusted.example.com");
 		});
+
+		it("carries state on the page's redirect, as the 303 does", async () => {
+			// OIDC RP-Initiated Logout 1.0 §3: `state` is passed back to the RP
+			// on the post_logout_redirect_uri, whichever way the browser gets there.
+			const rpData = [
+				{
+					clientId: "client-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
+				},
+			];
+			const clientRepo = makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
+				}),
+			});
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionRPRegistry, clientRepo });
+
+			const res = await postLogout(
+				app,
+				{
+					id_token_hint: await mintIdToken(),
+					post_logout_redirect_uri: "https://trusted.example.com/logged-out",
+					state: "s-1",
+				},
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(200);
+			expect(res.text).toContain('"https://trusted.example.com/logged-out?state=s-1"');
+		});
 	});
 
 	describe("post_logout_redirect_uri in allowlist", () => {
@@ -726,6 +801,391 @@ describe("POST /oauth/logout", () => {
 				federation: "google",
 				store: "federation_token",
 				step: "get",
+			});
+		});
+	});
+
+	// The upstream end-session call is handed the caller's
+	// post_logout_redirect_uri only once it matched the client's registered
+	// list: an adapter for an IdP that publishes no end-session endpoint
+	// (Google, GitHub, Apple) redirects straight to what it is handed.
+	describe("the post_logout_redirect_uri the upstream end-session call is handed", () => {
+		const REGISTERED = "https://rp.example/logged-out";
+
+		function buildWithUpstream(opts: BuildAppOpts = {}) {
+			const endSession = vi.fn().mockResolvedValue({
+				url: new URL("https://accounts.google.com/Logout"),
+				method: "GET",
+			});
+			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
+			const app = buildApp({
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn(async () => ["google"]),
+				}),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [REGISTERED],
+					}),
+				}),
+				...opts,
+			});
+			return { app, endSession };
+		}
+
+		it("is none when the client has not registered it", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			const res = await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: "https://evil.example/landing",
+				state: "s-1",
+			});
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledOnce();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is none when the client is not known", async () => {
+			const { app, endSession } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById: vi.fn().mockResolvedValue(null) }),
+			});
+
+			await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is the registered one when it matches exactly", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: REGISTERED,
+				state: "s-1",
+			});
+
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: REGISTERED, state: "s-1" }),
+			);
+		});
+
+		it("asks the client repository nothing when the request names no post_logout_redirect_uri", async () => {
+			const findById = vi.fn().mockRejectedValue(storeReplyError());
+			const { app, endSession } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById }),
+			});
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(303);
+			expect(findById).not.toHaveBeenCalled();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("completes the logout without the redirect when the client repository cannot answer", async () => {
+			// An outage says nothing about whether the URI is registered, so it is
+			// not used; but refusing the logout for it would keep the session, its
+			// refresh-token families and the relying parties' sessions alive to
+			// protect a redirect. The logout runs as if no URI had been sent.
+			const logger = createMockLogger();
+			const sessionStore = makeSessionStore();
+			const refreshFamilyRevocation = makeFamilyRevocation();
+			const sessionRPRegistry = makeSessionRPRegistry({
+				listRPs: vi.fn(async () => [
+					{
+						clientId: "rp-1",
+						backchannelLogoutUri: "https://rp-1.example/backchannel",
+						backchannelLogoutSessionRequired: true,
+						frontchannelLogoutUri: undefined,
+						frontchannelLogoutSessionRequired: undefined,
+						registeredAt: new Date(),
+					},
+				]),
+			});
+			const fetchImpl = vi.fn().mockResolvedValue({ ok: true });
+			const browserSession = makeBrowserSession({ sid: "sid-1" });
+			const { app, endSession } = buildWithUpstream({
+				sessionStore,
+				refreshFamilyRevocation,
+				sessionRPRegistry,
+				fetchImpl,
+				browserSession,
+				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
+				logger,
+			});
+
+			const res = await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			// The answer a logout that named no URI gets: the upstream's own page.
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toBe("https://accounts.google.com/Logout");
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "logout",
+				step: "find",
+				clientId: "client-1",
+			});
+			// Everything a logout does, done.
+			expect(fetchImpl).toHaveBeenCalledOnce();
+			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+			expect(browserSession.destroyed).toBe(true);
+		});
+
+		// OIDC RP-Initiated Logout 1.0 §3: the URI must match a registered one
+		// exactly. Each of these is one character or one convention away.
+		it.each([
+			["a trailing slash", `${REGISTERED}/`],
+			["a different case in the path", "https://rp.example/Logged-Out"],
+			["a different case in the host", "https://RP.example/logged-out"],
+			["a query appended", `${REGISTERED}?next=%2F`],
+			["a path segment appended", `${REGISTERED}/more`],
+			["a fragment appended", `${REGISTERED}#top`],
+			["a prefix of it", "https://rp.example/logged"],
+			["another scheme", "http://rp.example/logged-out"],
+		])("is none for a near miss: %s", async (_label, nearMiss) => {
+			const { app, endSession } = buildWithUpstream();
+			await postLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: nearMiss,
+			});
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+
+			// And with no federation to hand it to, no redirect at all.
+			const plain = buildApp({
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [REGISTERED],
+					}),
+				}),
+			});
+			const res = await postLogout(plain, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: nearMiss,
+			});
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ logged_out: true });
+		});
+
+		// A custom ClientRepository bypasses ClientEntrySchema, so an entry
+		// `checkRedirectUri` would refuse at boot can reach this route: one the
+		// URL parser cannot read, or one in an executable scheme. Matching it
+		// exactly does not make it a place to send a browser — `new URL()` on
+		// the first ended a finished logout in a 500, and the second reached
+		// `window.location.href` on the front-channel page, which is script on
+		// this origin. Either is dropped with one warn, and the logout
+		// completes as if no URI had been sent.
+		describe("a registered entry this server would not redirect to", () => {
+			const UNPARSABLE = "::not a url";
+			const EXECUTABLE = "javascript:alert(document.domain)";
+			const cases = [
+				["one the URL parser cannot read", UNPARSABLE, "unparsable"],
+				["one in an executable scheme", EXECUTABLE, "executable-scheme"],
+			] as const;
+
+			const registering = (entry: string) =>
+				makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [entry],
+					}),
+				});
+
+			const expectRefusedOnce = (logger: MockLogger, reason: string) => {
+				expectBestEffortWarn(
+					logger,
+					"logout_registered_redirect_uri_refused",
+					{ site: "logout", clientId: "client-1", reason },
+					null,
+				);
+				expect(logger.error).not.toHaveBeenCalled();
+			};
+
+			it.each(cases)("is not the redirect (7c): %s", async (_label, entry, reason) => {
+				const logger = createMockLogger();
+				const sessionStore = makeSessionStore();
+				const app = buildApp({ sessionStore, clientRepo: registering(entry), logger });
+
+				const res = await postLogout(app, {
+					id_token_hint: await mintIdToken(),
+					post_logout_redirect_uri: entry,
+					state: "s-1",
+				});
+
+				expect(res.status).toBe(200);
+				expect(res.body).toEqual({ logged_out: true });
+				expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+				expectRefusedOnce(logger, reason);
+			});
+
+			it.each(cases)(
+				"is not handed to the upstream end-session call (7b): %s",
+				async (_label, entry, reason) => {
+					const logger = createMockLogger();
+					const { app, endSession } = buildWithUpstream({
+						clientRepo: registering(entry),
+						logger,
+					});
+
+					const res = await postLogout(app, {
+						id_token_hint: await mintIdToken(),
+						post_logout_redirect_uri: entry,
+					});
+
+					expect(res.status).toBe(303);
+					expect(res.headers.location).toBe("https://accounts.google.com/Logout");
+					expect(endSession).toHaveBeenCalledWith(
+						expect.objectContaining({ postLogoutRedirectUri: undefined }),
+					);
+					expectRefusedOnce(logger, reason);
+				},
+			);
+
+			it.each(cases)(
+				"is not where the front-channel page sends the browser (7a): %s",
+				async (_label, entry, reason) => {
+					const logger = createMockLogger();
+					const sessionRPRegistry = makeSessionRPRegistry({
+						listRPs: vi.fn(async () => [
+							{
+								clientId: "client-1",
+								frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+								registeredAt: new Date(),
+								backchannelLogoutUri: undefined,
+								backchannelLogoutSessionRequired: undefined,
+								frontchannelLogoutSessionRequired: undefined,
+							},
+						]),
+					});
+					const app = buildApp({ sessionRPRegistry, clientRepo: registering(entry), logger });
+
+					const res = await postLogout(
+						app,
+						{ id_token_hint: await mintIdToken(), post_logout_redirect_uri: entry },
+						{ Accept: "text/html" },
+					);
+
+					expect(res.status).toBe(200);
+					expect(res.headers["content-type"]).toMatch(/text\/html/);
+					expect(res.text).toContain("<iframe");
+					expect(res.text).not.toContain("<script>");
+					expect(res.text).not.toContain("javascript:");
+					expect(res.text).not.toContain("not a url");
+					expectRefusedOnce(logger, reason);
+				},
+			);
+		});
+
+		describe("which client's list the URI is held to", () => {
+			/** Only `client-1` is registered, with the one URI. */
+			const onlyClient1 = () =>
+				vi.fn<ClientRepository["findById"]>(async (clientId) =>
+					clientId === "client-1"
+						? {
+								clientId: "client-1",
+								tokenEndpointAuthMethod: "client_secret_basic",
+								allowedRedirectUris: [],
+								allowedScopes: [],
+								postLogoutRedirectUris: [REGISTERED],
+							}
+						: null,
+				);
+
+			it("is the azp's when the hint names one among its audiences", async () => {
+				const findById = onlyClient1();
+				const { app, endSession } = buildWithUpstream({
+					clientRepo: makeClientRepo({ findById }),
+				});
+
+				await postLogout(app, {
+					id_token_hint: await mintIdToken({ aud: ["other-client", "client-1"], azp: "client-1" }),
+					post_logout_redirect_uri: REGISTERED,
+				});
+
+				expect(findById).toHaveBeenCalledWith("client-1");
+				expect(endSession).toHaveBeenCalledWith(
+					expect.objectContaining({ postLogoutRedirectUri: REGISTERED }),
+				);
+			});
+
+			it("is nobody's for several audiences and no azp: the URI is dropped", async () => {
+				const findById = onlyClient1();
+				const { app, endSession } = buildWithUpstream({
+					clientRepo: makeClientRepo({ findById }),
+				});
+
+				await postLogout(app, {
+					id_token_hint: await mintIdToken({ aud: ["client-1", "other-client"] }),
+					post_logout_redirect_uri: REGISTERED,
+				});
+
+				expect(findById).not.toHaveBeenCalled();
+				expect(endSession).toHaveBeenCalledWith(
+					expect.objectContaining({ postLogoutRedirectUri: undefined }),
+				);
+			});
+
+			it("is the one audience's, as a string or a one-element list", async () => {
+				for (const aud of ["client-1", ["client-1"]]) {
+					const findById = onlyClient1();
+					const { app, endSession } = buildWithUpstream({
+						clientRepo: makeClientRepo({ findById }),
+					});
+
+					await postLogout(app, {
+						id_token_hint: await mintIdToken({ aud }),
+						post_logout_redirect_uri: REGISTERED,
+					});
+
+					expect(findById, JSON.stringify(aud)).toHaveBeenCalledWith("client-1");
+					expect(endSession).toHaveBeenCalledWith(
+						expect.objectContaining({ postLogoutRedirectUri: REGISTERED }),
+					);
+				}
+			});
+
+			it("is the one audience's when azp names a client outside it", async () => {
+				const findById = onlyClient1();
+				const { app, endSession } = buildWithUpstream({
+					clientRepo: makeClientRepo({ findById }),
+				});
+
+				await postLogout(app, {
+					id_token_hint: await mintIdToken({ aud: "client-1", azp: "other-client" }),
+					post_logout_redirect_uri: REGISTERED,
+				});
+
+				expect(findById).toHaveBeenCalledWith("client-1");
+				expect(findById).not.toHaveBeenCalledWith("other-client");
+				expect(endSession).toHaveBeenCalledWith(
+					expect.objectContaining({ postLogoutRedirectUri: REGISTERED }),
+				);
 			});
 		});
 	});
@@ -1200,6 +1660,32 @@ describe("GET /oauth/logout", () => {
 		expect(res.text).toContain('name="state"');
 	});
 
+	it("renders a stale-iat confirm page without the URI when the client repository cannot answer", async () => {
+		// The page may carry the URI only once it is known to be registered;
+		// an outage leaves it unknown, so the page goes without it, as a logout
+		// that named none would.
+		const logger = createMockLogger();
+		const sessionStore = makeSessionStore();
+		const clientRepo = makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) });
+		const app = buildApp({ sessionStore, clientRepo, logger });
+
+		const res = await getLogout(app, {
+			id_token_hint: await mintOldIdToken(),
+			post_logout_redirect_uri: "https://rp.example/logged-out",
+			state: "xyz",
+		});
+
+		expectLogoutConfirmation(res);
+		expect(res.text).not.toContain('name="post_logout_redirect_uri"');
+		expect(res.text).toContain('name="state"');
+		expectOutageLine(logger, "client_repository_unavailable", {
+			site: "logout",
+			step: "find",
+			clientId: "client-1",
+		});
+		expect(sessionStore.delete).not.toHaveBeenCalled();
+	});
+
 	it("HTML-escapes hidden input values to prevent attribute injection", async () => {
 		// state may carry attacker-influenced characters in the worst case;
 		// the GET-confirm path echoes it into an HTML attribute so it must
@@ -1395,6 +1881,190 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(res.headers.location).toContain("accounts.google.com");
 			expect(mockProvider.endSession).toHaveBeenCalledOnce();
 			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+	});
+
+	// The same rule as RP-initiated logout, for the client the access token
+	// was issued to (`azp`): the upstream is handed the caller's
+	// post_logout_redirect_uri only once that client has registered it.
+	describe("the post_logout_redirect_uri the upstream end-session call is handed", () => {
+		const REGISTERED = "https://rp.example/logged-out";
+
+		function buildWithUpstream(opts: BuildAppOpts = {}) {
+			const endSession = vi.fn().mockResolvedValue({
+				url: new URL("https://accounts.google.com/Logout"),
+				method: "GET",
+			});
+			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({ delete: vi.fn().mockResolvedValue(undefined) });
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn(async () => googleFederations),
+			});
+			const app = buildFedLogoutApp({
+				fedTokenStore,
+				sessionFederationIndex,
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				clientRepo: makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						postLogoutRedirectUris: [REGISTERED],
+					}),
+				}),
+				...opts,
+			});
+			return { app, endSession, fedTokenStore, sessionFederationIndex };
+		}
+
+		it("is none when the token's client has not registered it", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: "https://evil.example/landing",
+				state: "s-1",
+			});
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledOnce();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is none when the token's client is not known", async () => {
+			const { app, endSession } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById: vi.fn().mockResolvedValue(null) }),
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("asks the client repository nothing when the request names no post_logout_redirect_uri", async () => {
+			const findById = vi.fn().mockRejectedValue(storeReplyError());
+			const { app, endSession } = buildWithUpstream({ clientRepo: makeClientRepo({ findById }) });
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }));
+
+			expect(res.status).toBe(303);
+			expect(findById).not.toHaveBeenCalled();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is none when the token names no client", async () => {
+			const findById = vi.fn();
+			const { app, endSession } = buildWithUpstream({ clientRepo: makeClientRepo({ findById }) });
+
+			await postFedLogout(app, "google", await mintAccessToken(), {
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(findById).not.toHaveBeenCalled();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is the registered one when it matches exactly", async () => {
+			const { app, endSession } = buildWithUpstream();
+
+			await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: REGISTERED,
+				state: "s-1",
+			});
+
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: REGISTERED, state: "s-1" }),
+			);
+		});
+
+		it("disconnects without the redirect when the client repository cannot answer", async () => {
+			const logger = createMockLogger();
+			const { app, endSession, fedTokenStore, sessionFederationIndex } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
+				logger,
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toBe("https://accounts.google.com/Logout");
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "federation_logout",
+				step: "find",
+				clientId: "client-1",
+			});
+			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
+			expect(sessionFederationIndex.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+		});
+
+		// The same gap on this route: an entry a custom ClientRepository holds
+		// that `checkRedirectUri` would refuse is not handed to the adapter.
+		it.each([
+			["one the URL parser cannot read", "::not a url", "unparsable"],
+			["one in an executable scheme", "javascript:alert(document.domain)", "executable-scheme"],
+		] as const)(
+			"is none for a registered entry this server would not redirect to: %s",
+			async (_label, entry, reason) => {
+				const logger = createMockLogger();
+				const { app, endSession, fedTokenStore } = buildWithUpstream({
+					clientRepo: makeClientRepo({
+						findById: vi.fn().mockResolvedValue({
+							clientId: "client-1",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							postLogoutRedirectUris: [entry],
+						}),
+					}),
+					logger,
+				});
+
+				const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+					post_logout_redirect_uri: entry,
+				});
+
+				expect(res.status).toBe(303);
+				expect(res.headers.location).toBe("https://accounts.google.com/Logout");
+				expect(endSession).toHaveBeenCalledWith(
+					expect.objectContaining({ postLogoutRedirectUri: undefined }),
+				);
+				expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
+				expectBestEffortWarn(
+					logger,
+					"logout_registered_redirect_uri_refused",
+					{ site: "federation_logout", clientId: "client-1", reason },
+					null,
+				);
+				expect(logger.error).not.toHaveBeenCalled();
+			},
+		);
+	});
+
+	describe("a POST that carries no body", () => {
+		it("is a disconnect that names no post_logout_redirect_uri, not a 500", async () => {
+			// No Content-Type, no body: the form parser leaves `req.body` unset.
+			const app = buildFedLogoutApp();
+
+			const res = await request(app)
+				.post("/oauth/federation/google/logout")
+				.set("Authorization", `Bearer ${await mintAccessToken()}`);
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
 		});
 	});
 

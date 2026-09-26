@@ -119,4 +119,15 @@ describe("decryptTokenField reads only a 16-byte tag and a 12-byte IV", () => {
 			new Error("invalid envelope format"),
 		);
 	});
+
+	it("names no stored bytes when the version is not its own", () => {
+		// The first segment is whatever was stored. The token store drops this
+		// refusal without logging it today, so the fixed text is defence in
+		// depth: a caller that logs the error later must find no stored bytes.
+		const sealed = encryptTokenField(plaintext, key, aad);
+		const stored = sealed.replace(/^v1\./, "ya29-a-stored-token-fragment.");
+		expect(() => decryptTokenField(stored, key, aad)).toThrow(
+			new Error("unsupported envelope version"),
+		);
+	});
 });

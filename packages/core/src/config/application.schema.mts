@@ -301,7 +301,7 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 	{
 		name: "replay-store",
-		removedIn: "this release (#673)",
+		removedIn: "v0.16.0 (#673)",
 		note:
 			"Every accepted DPoP proof is now recorded in the replaySeenSet component — the " +
 			"seen-set private_key_jwt client authentication and WebAuthn record in — and the " +
@@ -1866,6 +1866,19 @@ export const fullSectionsSchema = z.object({
 	replaySeenSet: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+			// The memory seen-set's cap, read by `memoryReplaySeenSetModule`,
+			// which refuses at boot, with a RangeError naming this key, a value
+			// that is not a positive whole number (a string of digits, as an
+			// environment variable delivers one, is taken). Absent: the
+			// adapter's default.
+			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
+		})
+		.optional(),
+	// The memory challenge store's cap, read by `memoryChallengeStoreModule`,
+	// the same way as `replaySeenSet.memory.maxEntries` above.
+	challengeStore: z
+		.object({
+			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
 		.optional(),
 	// #527: where consent to a client that is not first-party is recorded.
