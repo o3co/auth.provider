@@ -4,6 +4,1653 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.16.0] - 2026-09-26
+
+**Upgrade note.** Upgrade every `@o3co/auth-provider-*` package to 0.16.0
+together. Core 0.16.0 refuses the configuration key `oauth.dpop.replay-store`,
+which `@o3co/auth-provider-dpop` 0.15.0 and older set in their own
+`reference.conf`, so core 0.16.0 beside an older dpop does not boot; and every
+package at 0.16.0 takes core `^0.16.0` as a peer. Each breaking change below
+is marked **BREAKING** and says what a consumer has to do. Most are under
+Changed and Removed; several, where the change is a fix, are under Fixed and
+Security. Before upgrading, check these in particular, each described in its
+entry:
+
+- An enabled device grant requires a user-session store
+  (`memorySessionStoresModule` on one replica, `redisSessionStoresModule`
+  otherwise), and approves a device only from a live session (Security).
+- A token exchanged from a session-bound token carries that session as
+  `liveness_sid`, not `sid`, and ends with it (Security).
+- `refresh_token` does not boot without both refresh-token family slots, and
+  `oauth.refreshToken.unknownFamilyPolicy = "accept"` does not close by
+  waiting: switching to `"reject"` signs out every holder of a family-less
+  chain at once (Security).
+- The memory replay seen-set and challenge store are capped at a million
+  entries each and answer `503` when full; with both at their defaults, plan
+  about 1 GB of heap headroom or lower the caps (Changed).
+- `handle.router` answers every error itself and no longer passes one to a
+  handler mounted after it, and the error descriptions of body refusals and
+  server errors changed (Changed).
+- Google shows its consent screen on every sign-in unless `accessType:
+  "online"` is set (Changed).
+- `@o3co/auth-provider-core` is a peer of every package, and session's Redis
+  libraries are optional peers you may have to install (Changed).
+
+### Added
+
+- **The Store can require a bearer token from this provider
+  (`@o3co/auth-provider-foundation`, `@o3co/auth-provider-core`, standalone
+  template)** ([#674](https://github.com/o3co/auth.provider/pull/674)).
+  `HttpUserRepository` sent the Store nothing but `Content-Type`, while
+  `authenticateByToken` and account linking send `<provider>:<sub>`, an
+  identifier rather than a secret: anyone who could reach
+  `authenticateByTokenUrl` could resolve a known identity to its user, and
+  anyone who could reach an open `linkFederatedIdentityUrl` could bind any
+  identity to any account. `repositories.user.http.bearerToken`
+  (`CLIENT_USER_BEARER_TOKEN`, declared in core's `reference.conf` and the
+  template's `application.conf`) sends `Authorization: Bearer <token>` on all
+  four Store requests: `authenticate`, `authenticateByToken`,
+  `linkFederatedIdentity` and the identity lookup. Unset, nothing is sent and
+  nothing changes. Boot refuses a value that is empty, is not a bare RFC 6750
+  token (whitespace, a `Bearer ` prefix) or carries less than 32 bytes of key
+  material; no message quotes it, and it never shows in `inspect()` or
+  `JSON.stringify` of the repository. With a token configured, a `401` or
+  `403` carrying a `WWW-Authenticate: Bearer` challenge means the Store
+  refused this deployment, not a user: it throws the exported
+  `StoreCredentialRefusedError` (with `storeStatus`, never `status`), the
+  callers answer `503 temporarily_unavailable` (the federation-grants connect
+  callback redirects `error=temporarily_unavailable`), and the log line names
+  `CLIENT_USER_BEARER_TOKEN`. A `401` or `403` without the challenge keeps its
+  wire meaning. The foundation README says what the Store must check and how
+  it must answer. What `HttpUserRepository` throws on a transport failure
+  changed with this; see Changed.
+
+  **Upgrade note.** Generate the token with `openssl rand -hex 32`. One token
+  goes to all four Store URLs, so they must be one trust domain. Have the
+  Store compare it in constant time, never log the header, and never put a
+  `Bearer` challenge on a user's wrong password; rotate by having the Store
+  accept both tokens first.
+
+- **Every module booted together: all-modules composition tests in the
+  scaffold, and `tools/composition` (standalone template,
+  `@o3co/auth-provider-oauth`; `tools/composition` is repository only)**
+  ([#691](https://github.com/o3co/auth.provider/pull/691)). Each package's
+  suites booted it alone, so defects that exist only in a composition — a
+  discovery document a neighbouring module made invalid, a disabled grant
+  still advertised, one module's parser setting another's body limit — reached
+  `develop`. The template's `all-modules-composition` tests boot every module
+  the template can turn on through its shipped HOCON, `buildModules` and
+  `createApp`, and check discovery, the happy paths, each module's body limits
+  in both mount orders, one row per store outage, and replica safety under
+  `deployment.mode = "multi"`; they ship in every scaffold.
+  `tools/composition`, a private workspace that is never published, adds the
+  device grant, DPoP, mTLS, token exchange, WebAuthn, Apple and GitHub, and
+  runs two replicas against one Redis. A contract the composition still breaks
+  is pinned as an expected failure that turns red once it is fixed. Two
+  defects it found are fixed: `oauthSessionModule` declares the `logger` slot
+  its grant writes to, so a session-store outage at `grant_type=session` is
+  logged as `session_grant_store_unavailable` instead of answered `503` in
+  silence; and the template's `standaloneRedisClientsModule` provides
+  `challengeStoreClient`, so adding WebAuthn with the Redis challenge store
+  boots instead of failing with `Missing required component
+  "challengeStoreClient"`.
+
+  **Upgrade note.** A deployment that provides `challengeStoreClient` from a
+  module of its own is refused at boot with `duplicate-provides` once it
+  adopts the new `modules.mts`; drop its provider and use the shared
+  socket's.
+
+- **Core exports the rules its own adapters and routes apply
+  (`@o3co/auth-provider-core`)**
+  ([#648](https://github.com/o3co/auth.provider/pull/648),
+  [#672](https://github.com/o3co/auth.provider/pull/672),
+  [#677](https://github.com/o3co/auth.provider/pull/677),
+  [#679](https://github.com/o3co/auth.provider/pull/679),
+  [#681](https://github.com/o3co/auth.provider/pull/681),
+  [#682](https://github.com/o3co/auth.provider/pull/682),
+  [#684](https://github.com/o3co/auth.provider/pull/684),
+  [#685](https://github.com/o3co/auth.provider/pull/685),
+  [#686](https://github.com/o3co/auth.provider/pull/686),
+  [#687](https://github.com/o3co/auth.provider/pull/687),
+  [#690](https://github.com/o3co/auth.provider/pull/690),
+  [#695](https://github.com/o3co/auth.provider/pull/695),
+  [#698](https://github.com/o3co/auth.provider/pull/698),
+  [#699](https://github.com/o3co/auth.provider/pull/699),
+  [#700](https://github.com/o3co/auth.provider/pull/700)). So that a custom
+  adapter, grant or route can hold its input to the same rules and refuse in
+  the same words, among them:
+  - expiries and lifetimes: `isStorableExpiry`, `isStorableLifetime`,
+    `MAX_STORABLE_EXPIRY_MS`, `isLifetimeSeconds`,
+    `resolveRefreshTokenLifetime` (beside `resolveAccessTokenLifetime`),
+    `MAX_DURATION_SECONDS` and `MAX_DURATION_MS`;
+  - rate-limit specs: `isUsableRateLimitSpec`, `assertUsableRateLimitSpecs`,
+    `readConfiguredRateLimitSpec` and `requireUsableConfiguredRateLimitSpec`;
+  - request parameters: RFC 6749's scope grammar (`parseScopeTokens`,
+    `isScopeToken`, `canonicalScope`, `readSpaceDelimitedParameter`,
+    `readIssuedScope`), `readTargetParameter`, the RFC 8707 readers that were
+    oauth's (`extractResourceParam`, `deriveAudienceFromResources`,
+    `unrepresentedResources`), and `normalizeAllowedOrigins`;
+  - identifiers and dates: `MAX_JTI_LENGTH` / `isRecordableJti`,
+    `MAX_KID_LENGTH` / `isWellFormedKid`, `MAX_CLIENT_ID_LENGTH` /
+    `isWellFormedClientId` / `assertRegistrableClientIds`, `isNumericDate`,
+    `MAX_ASSERTION_LIFETIME_SECONDS`, `assertionLifetime` and
+    `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS`;
+  - error text, audit events and logs: `sanitizeErrorText`, `auditErrorText`,
+    `auditErrorList`, `lineSafeText`, `isWellFormedErrorCode`, `auditedError`
+    (`AuditedError`), `recordAuditEvent`, `loggableError` with its
+    `LoggableError` shape and the `LOGGED_*` bounds, `guardedRead`, and
+    `terminalErrorHandler`, the error handler `createApp`'s router ends in;
+  - in-process stores: `ReplaySeenSetFullError`, `ChallengeStoreFullError`,
+    `DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES`,
+    `DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES`,
+    `DPOP_PROOF_REPLAY_SCOPE_PREFIX` and `DPOP_PROOF_REPLAY_SHARE`;
+  - federation adapters: `federationTokenSnapshot` (the one reading of a token
+    response every bundled adapter uses), `isFederationUpstreamOutage`, and
+    `createFakeIdp` on `@o3co/auth-provider-core/testing`, a fake OpenID
+    Provider that signs real id_tokens; and the federation-grant lodging types
+    (`FederationGrantLodgingRefused`, `FederationGrantLodgingFailure`,
+    `FederationGrantLodgingStepFailure`,
+    `FederationGrantLodgingAbsorbedCarrier`);
+  - tokens and records: `BEARER_TOKEN_TYPE`, `canonicalTokenType`,
+    `isBearerTokenType`, `tokenTypeForConfirmation`, `livenessSidOf`,
+    `toAssertionIssuerEntry`, `REVOCATION_RETENTION_ALLOWANCE_MS` and
+    `resolveFamilyAccessTokenHorizonMs`;
+  - sealing: `sealWithKeyRing` / `openWithKeyRing`, `checkSealingKeyRing`,
+    `decodeSealingKey` and `SEALING_KEY_BYTES`, the AES-256-GCM key-ring
+    envelope the federation-grant store seals with, with a caller-chosen
+    purpose bound into the authenticated data.
+
+### Changed
+
+- **BREAKING: Google shows its consent screen on every sign-in —
+  `prompt=consent` is sent with `access_type=offline` by default
+  (`@o3co/auth-provider-federation-google`, standalone template)**
+  ([#679](https://github.com/o3co/auth.provider/pull/679)). Google issues a
+  refresh token only on a consent screen, and without `prompt` it shows that
+  screen only the first time an app asks. The adapter sent
+  `access_type=offline` alone, so every session after a user's first had no
+  refresh token, and `POST /oauth/federation/google/token` answered `410
+  refresh_token_absent` once the access token expired. Every sign-in now shows
+  Google's consent screen and mints a refresh token; Google keeps at most 100
+  per account per client and silently invalidates the oldest. The new
+  `accessType` option is the way back: `"online"`
+  (`FEDERATIONS_GOOGLE_ACCESS_TYPE=online` in the template) sends neither
+  parameter, so consent is asked on the first sign-in only and no session
+  gets a refresh token. `"offline"` is the default, and only an omitted field
+  means it; any other value, `null` included, is refused at construction.
+
+  **Upgrade note.** A deployment that uses Google only to sign users in, and
+  does not call the federation token route for Google, sets `accessType:
+  "online"` before upgrading; otherwise its users meet Google's consent screen
+  on every sign-in.
+
+- **BREAKING: `@o3co/auth-provider-core` is a peer of every package, and
+  session's Redis libraries are optional peers (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-session`, `@o3co/auth-provider-webauthn`,
+  `@o3co/auth-provider-redis`, `@o3co/auth-provider-federation-grants`,
+  `@o3co/auth-provider-oauth-token-exchange`)**
+  ([#646](https://github.com/o3co/auth.provider/pull/646),
+  [#673](https://github.com/o3co/auth.provider/pull/673),
+  [#680](https://github.com/o3co/auth.provider/pull/680)). oauth, session and
+  webauthn depended on core directly, published as the exact core version, so
+  a deployment whose core differed got a second copy under that package, and a
+  `declare module "@o3co/auth-provider-core"` augmentation — session's
+  `federationRedirectPolicies` kind, webauthn's `webauthnConfig` slot —
+  reached one copy while the composition ran the other. They now take core as
+  a peer at `^<the version they were published with>`, as every other package
+  already did, and a required CI check reads every dependency section. Every
+  sibling package at 0.16.0 needs core 0.16.0; its peer range says so.
+  session takes `redis` (`^6.2.1`) and `connect-redis` (`^10.0.0`) as
+  optional peers instead of dependencies, so installing session — or a
+  federation adapter or the device grant, which name it as a peer — no longer
+  installs them; a Redis session store without them fails boot with one
+  message naming each missing package and the install command.
+  `@o3co/auth-provider-redis` no longer has a `./dpop` subpath and drops its
+  optional `@o3co/auth-provider-dpop` and `redis` (node-redis) peers; what
+  replaces the DPoP adapter is under Removed. Not breaking:
+  `@o3co/auth-provider-federation-grants` no longer names session as a peer,
+  and `@o3co/auth-provider-oauth-token-exchange` no longer installs `jose`.
+
+  **Upgrade note.** npm 7+ and pnpm install a missing peer on their own; yarn
+  and pnpm with `auto-install-peers=false` do not, so add
+  `@o3co/auth-provider-core` to your own dependencies, at the version of the
+  packages you install with it. On `session.storage.type = "redis"`, which is
+  core's default, install `redis@^6.2.1 connect-redis@^10.0.0` yourself; a
+  deployment on `"memory"` needs neither. The standalone template already
+  lists both.
+
+- **BREAKING: core answers every error on its routers, and `handle.router` no
+  longer passes an error to a handler mounted after it
+  (`@o3co/auth-provider-core`, standalone template)**
+  ([#700](https://github.com/o3co/auth.provider/pull/700)). The OAuth, session
+  and WebAuthn routers had no error handler of their own. Only the standalone
+  template mounted one, after `handle.router`, and it answered in its own
+  words, took any 4xx `status` for the client's mistake and logged the raw
+  path; any other composition answered with Express's HTML page, with the
+  stack outside production. `createApp`'s router now ends in core's
+  `terminalErrorHandler` (exported), which the template mounts after its
+  health, readiness and metrics routes in place of its own
+  `terminalError.mts`. A body-parser refusal, recognised by its error type or
+  zlib / brotli code, is `400 malformed_body`, `413 body_too_large` or `415
+  unsupported_encoding`, and a body-parser `verify` failure is `400
+  malformed_body` (it was `403`); a path parameter Express could not decode is
+  `400 malformed_path`. Any other 4xx marked `expose` keeps its status as
+  `request_refused`, a `401` its `WWW-Authenticate` and a `405` its `Allow`
+  when the value is printable ASCII of at most 1 KiB. Everything else is `500
+  server_error` / `unexpected_error`, logged once as `unhandled_request_error`
+  with the path sanitised, so an error carrying a 4xx `status` it did not mark
+  as the client's own is now a logged `500`. Every answer is JSON with
+  `Cache-Control: no-store` and `Pragma: no-cache`, the host's routes
+  included, and a response whose headers were already sent is closed, unless
+  it had already ended. The descriptions change: "malformed request body" is
+  `malformed_body`, "request body too large" `body_too_large`, and "Internal
+  server error" `server_error` / `unexpected_error`; `unsupported_encoding` is
+  new.
+
+  **Upgrade note.** An error tracker or handler mounted after `handle.router`
+  no longer sees errors from the auth routes: they arrive as
+  `unhandled_request_error` lines on the `logger` component, which core's
+  handler alone writes. A client or dashboard that matched the old
+  descriptions matches the new codes. A project scaffolded from an earlier
+  template keeps its own `terminalError.mts` (`createTerminalErrorHandler`);
+  mount core's `terminalErrorHandler` after your host routes instead.
+
+- **BREAKING: the memory replay seen-set and challenge store are capped, and
+  answer `503` when full (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-dpop`, `@o3co/auth-provider-webauthn`)**
+  ([#700](https://github.com/o3co/auth.provider/pull/700)). Neither in-process
+  store had a size cap, and DPoP writes a 300 s record for every fresh proof
+  before any rate limit or token check, so a flood of fresh proofs grew the
+  heap until the process died. Each now holds at most `maxEntries` —
+  `replaySeenSet.memory.maxEntries` / `challengeStore.memory.maxEntries`,
+  default 1 000 000, at most 2^24 — and at the cap refuses a new entry as a
+  store fault (`ReplaySeenSetFullError`, `ChallengeStoreFullError`), which its
+  consumers answer `503 temporarily_unavailable`; a live entry is never
+  evicted. DPoP proofs fill at most 90 % of the seen-set, rounded up and
+  always at least one record short of the cap (a cap of 1 has no reserve), so
+  a DPoP flood leaves room for `private_key_jwt`, ID-JAG and WebAuthn: past
+  its share a DPoP request is `503` with the new reason `replay_store_full`,
+  which takes about 3 000 fresh proofs a second at the default 300 s TTL. A
+  full challenge store makes the WebAuthn options routes `503`, and a passkey
+  sign-in that meets a full seen-set has already lost its challenge and
+  restarts from the options request. `memoryReplaySeenSetModule` and
+  `memoryChallengeStoreModule` require `config`, and an unusable `maxEntries`,
+  `sweepInterval` or `minSweepIntervalMs` — not a whole number from 1 to 2^24,
+  or not usable as a sweep setting — is a `RangeError` at boot; the built-in
+  `memory` adapter factories read `maxEntries` the same way. `DPoPReasonCode`
+  gains `replay_store_full`.
+
+  **Upgrade note.** With both memory stores at their defaults, a process
+  needs about 1 GB of heap headroom for them to fill — about 725 MB for the
+  seen-set at its worst, 180 MB for the challenge store. A small container's
+  default V8 heap is well under that, and a flood then kills the process
+  before either cap refuses anything: give it the room
+  (`--max-old-space-size`, and a container limit above it) or lower
+  `replaySeenSet.memory.maxEntries` and `challengeStore.memory.maxEntries`.
+  Sustained `replay_store_full`, or more than one replica, belongs on the
+  Redis seen-set (`REPLAY_SEEN_SET_ADAPTER=redis`), and the Redis README
+  recommends `maxmemory` with `noeviction`. An alert keyed on
+  `replay_store_unavailable` also sees `replay_store_full`.
+
+- **BREAKING: an outage answers `503 temporarily_unavailable`, never a
+  verdict on the token, the client or the user (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-oauth`, `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-session`, `@o3co/auth-provider-webauthn`,
+  `@o3co/auth-provider-device-grant`, `@o3co/auth-provider-federation-grants`)**
+  ([#671](https://github.com/o3co/auth.provider/pull/671),
+  [#684](https://github.com/o3co/auth.provider/pull/684),
+  [#685](https://github.com/o3co/auth.provider/pull/685),
+  [#686](https://github.com/o3co/auth.provider/pull/686),
+  [#689](https://github.com/o3co/auth.provider/pull/689),
+  [#690](https://github.com/o3co/auth.provider/pull/690)). When a store, the
+  key store, the client repository or an upstream IdP could not answer,
+  several routes answered as if the token, the client or the user were at
+  fault — `401 invalid_token`, `400 invalid_grant`, `200 {"active": false}`,
+  `login_required`, or a `200` from `/oauth/revoke` that revoked nothing — and
+  others with a `500`. RFC 6750's `invalid_token` and RFC 6749's
+  `invalid_grant` tell a client to discard its credential; an outage says
+  nothing about it. Each of these is now `503 temporarily_unavailable` with no
+  `WWW-Authenticate` challenge, logged once at error level with the error's
+  projection:
+  - a key store whose `getVerificationKey` throws anything but
+    `UnknownKidError` / `ExpiredKidError` (`verification_key_unavailable`), at
+    introspection, userinfo, the federation token and logout routes,
+    RP-initiated logout, `/oauth/revoke`, the refresh grant and token
+    exchange; `GET /.well-known/jwks.json` answers `503 jwks_unavailable`
+    where it answered `500`;
+  - the denylist, subject watermark, refresh-token family or session store at
+    introspection (was `active: false`), userinfo and the federation routes
+    (were `401`), and token exchange's denylist and watermark (were `400
+    invalid_grant`); token exchange's family-store outage was already `503`,
+    and now reads `refresh token store unavailable` (was `subject_token
+    validation store unavailable`), logged as
+    `token_exchange_family_store_unavailable`;
+  - a client repository that throws, at every client-authenticated endpoint
+    (was `401 invalid_client`) and at `/authorize` (was an unlogged `500`);
+  - the code store at `/authorize` (redirect `error=temporarily_unavailable`,
+    was `server_error`) and at the code exchange (was `500`); the session
+    store during `/authorize`'s liveness read under `prompt=none` (redirect
+    `temporarily_unavailable`, was `login_required`) and at `GET` / `POST
+    /oauth/consent` (was `401 login_required`; the parked request now stays
+    parked for the retry);
+  - the device-code store on all three device routes (was `500`;
+    `/oauth/device_authorization` no longer re-draws five times first). An
+    approval or denial that meets the outage may already be recorded, and
+    emits the new audit event `device.decision_outcome_unknown`;
+  - the cookie session's own store (express-session over connect-redis), the
+    user-session store on the login, logout and federation routes, and
+    WebAuthn's stores at its grant and its three ceremony routes (were `500`:
+    the federation callback's `500 server_error` / `session_create_failed`
+    among them);
+  - in federation grants, an intent store that cannot record a consent answer
+    (was `500`); a client registry that cannot answer the consent check, whose
+    description is now `client registry unavailable`; and an IdP that is down,
+    times out or answers `5xx` during a refresh (`503 temporarily_unavailable`
+    / `upstream`, was `502 upstream_rejected`) or at the connect callback's
+    code exchange (redirect `error=temporarily_unavailable`, was
+    `upstream_error`). A `5xx` whose body names `invalid_grant` or an
+    interaction code is an outage too, and the grant stays active: v0.15.0
+    read it as `410 reauthorization_required`, sending the user to reconnect
+    for the IdP's own failure. The reverse also holds: an exchange error that
+    was an outage only by its message text (`fetch failed`, `ECONNREFUSED`, …)
+    now redirects `error=upstream_error`. A custom `exchangeDelegatedCode`
+    reports an outage by the error's name, a transport `code` on the error or
+    an Error `cause`, or a 5xx `status` (`isFederationUpstreamOutage`).
+
+  The DPoP replay seen-set and mTLS revocation sources follow the same rule;
+  see their entries.
+
+  **Upgrade note.** Alert on the new error-level events — among them
+  `token_verification_unavailable`, `client_repository_unavailable`,
+  `revoke_store_unavailable`, `authorize_store_unavailable`,
+  `login_store_unavailable`, `session_middleware_store_unavailable`,
+  `webauthn_grant_store_unavailable`, `webauthn_ceremony_store_unavailable`,
+  `device_authorization_store_unavailable` and the
+  `federation_grant_*_unavailable` family — the session and WebAuthn ones
+  replace the `unhandled_request_error` 500s the v0.15.0 runbook pointed to;
+  `docs/operator-runbook.md` §4 lists them all. An alert keyed on `401`s or
+  `500`s from these routes misses them. A client should retry a `503` and keep
+  its token. A custom `ClientRepository` returns `null` for an unknown client
+  and never throws for one; a custom `KeyStore` answers a kid it does not hold
+  with `UnknownKidError` (or `ExpiredKidError`); a custom
+  `AssertionIssuerRegistry` returns `null` for an unknown issuer. Any other
+  throw from these ports now means the store could not answer, and turns what
+  used to be a refusal into a `503`. A resource server that introspects should
+  read a non-`200` answer as unknown, not as inactive; auth.proxy's validation
+  mode already does.
+
+- **BREAKING: under mTLS `full-pki` with `on-unavailable = "reject"`, a
+  revocation source that cannot answer is a `503`, not a verdict on the
+  certificate (`@o3co/auth-provider-mtls`, `@o3co/auth-provider-core`)**
+  ([#692](https://github.com/o3co/auth.provider/pull/692)). A CRL
+  distribution point or OCSP responder that was unreachable, timed out,
+  answered with an HTTP error or a redirect, or answered with something stale
+  or unparseable was answered as if the client's certificate were bad: `400
+  invalid_certificate` at the token endpoint, `401 invalid_token` at a
+  protected resource. It is now `503 temporarily_unavailable` with no
+  challenge, logged once at error as `token_binding_unavailable` /
+  `protected_resource_binding_unavailable` with `reason:
+  "revocation_unavailable"`, where it was `mtls_revocation_unavailable_rejected`
+  plus `mtls_full_pki_validation_failed` at warn. The outage covers the whole
+  path: one `MtlsRevocationUnavailableError` (an AggregateError, exported with
+  `MtlsRevocationSourceError`) names every certificate whose status could not
+  be determined, with each source's URL and reason on
+  `err.aggregateErrors[].detail`, and a verdict anywhere on the path still
+  wins. A revoked certificate, an OCSP `unknown`, a bad signature, an
+  unsupported shape or algorithm, a certificate that names no distribution
+  point or responder, and a URL the fetch guard will not fetch are still
+  verdicts. `MtlsError.code` / `MtlsErrorCode` widen from
+  `"invalid_certificate"` to `"invalid_certificate" |
+  "temporarily_unavailable"`, `MtlsReasonCode` gains
+  `"revocation_unavailable"`, and `MtlsError` gains an optional `unavailable`
+  and accepts `ErrorOptions`. `MtlsError` messages and revocation `detail`s
+  are the package's own words, with a library's text on `cause`; a subject is
+  written on one line (`O=X, CN=y`); a redirect is refused by its status
+  (`HTTP <status>`). `mtls_revocation_ocsp_fallback` and the
+  `…_unavailable_allowed` lines are written only when the whole path passes.
+
+  **Upgrade note.** A CA URL that is permanently wrong (`404`, `410`) now
+  gives a `503` on every request where it gave a `400`; the runbook's page
+  table has a row for the outage line. Code that switches exhaustively over
+  `MtlsErrorCode` or `MtlsReasonCode`, or treats every `MtlsError` as a
+  refused certificate, handles the new members.
+
+- **BREAKING: token exchange answers with RFC 8693's error codes, and judges
+  the request before the grant policy runs
+  (`@o3co/auth-provider-oauth-token-exchange`, `@o3co/auth-provider-core`)**
+  ([#671](https://github.com/o3co/auth.provider/pull/671),
+  [#677](https://github.com/o3co/auth.provider/pull/677),
+  [#687](https://github.com/o3co/auth.provider/pull/687)). RFC 8693 §2.2.2
+  answers an invalid or unacceptable token with `invalid_request`. A
+  `subject_token` or `actor_token` that fails validation, lacks or mismatches
+  its DPoP or mTLS proof, carries a compound `cnf`, belongs to a revoked
+  family or has expired is now `400 invalid_request`, not `invalid_grant`, and
+  an unsupported `subject_token_type`, `actor_token_type` or
+  `requested_token_type` is `invalid_request`, not `unsupported_token_type`;
+  the descriptions tell the checks apart. A revoked family reaches its own
+  answer, `family_revoked` (`actor_token family_revoked` for the actor):
+  the built-in validator used to refuse it first as `subject_token validation
+  failed`. The grant alone checks the refresh-token family, for the subject and
+  the actor and for every token type whose validator reports a `familyId`,
+  and refuses a family-bearing token when no family store is wired. The
+  request's `scope`, `audience` and `resource` are answered before the
+  `grantPolicy` runs, so no policy decision changes the caller's answer: an
+  `audience` the client is registered for but the subject token does not carry
+  is `400 invalid_target` even where a policy used to replace it (`200`), and
+  an unrepresentable `resource` is refused ahead of a policy deny. A policy
+  `grantedScope` or `grantedAudience` past the subject token's or the client's
+  ceilings is `500 server_error` (core's `policyOutOfBounds`), not `400
+  invalid_target` — nor a `200`, as it was for an audience outside the client's
+  registration; an empty `grantedAudience` is no decision. In a JSON body,
+  `resource` and `audience` must be a string or an array of strings: a nested
+  array or a number whose string form named an allowed target used to be
+  issued a token for it, and is now `400 invalid_target` (`resource must be a
+  string or an array of strings`). `createSelfIssuedAccessTokenValidator` no
+  longer takes `refreshTokenFamilyRevocation`, and throws if the key is
+  present. The log line `token_exchange_scope_widening_rejected` is now
+  `token_exchange_policy_scope_refused`, beside the new
+  `token_exchange_policy_audience_refused`. An exchanged token also carries
+  its session as `liveness_sid` now, not `sid`; that is under Security.
+
+  **Upgrade note.** A client that branches on `invalid_grant` or
+  `unsupported_token_type` from token exchange accepts `invalid_request`. A
+  policy that widens scope or audience is the thing to fix; the two
+  `token_exchange_policy_*_refused` warn lines name it. A caller that uses the
+  self-issued validator outside `createTokenExchangeGrant` checks `familyId`
+  itself, and refuses the token when it has no family store. Its `validate()`
+  now throws when the key store, the denylist or the subject watermark cannot
+  be read (`isVerificationUnavailable`), where it returned `null`; answer it
+  with `503`, not as an invalid token.
+
+- **BREAKING: `error` and `error_description` keep to RFC 6749's character set
+  everywhere, and an audit event carries an error as `details.cause`
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-oauth-token-exchange`, `@o3co/auth-provider-session`,
+  `@o3co/auth-provider-device-grant`, `@o3co/auth-provider-webauthn`,
+  `@o3co/auth-provider-federation-grants`)**
+  ([#677](https://github.com/o3co/auth.provider/pull/677),
+  [#682](https://github.com/o3co/auth.provider/pull/682)). RFC 6749 §5.2
+  limits both to printable ASCII without `"` and `\`. Descriptions quoted
+  values with `"`, cited sections with `§`, used em dashes, and echoed client
+  input, configuration and adapter text verbatim. Every description now
+  written — by `/oauth/token` for any grant, by `/authorize`'s error
+  redirects, by client authentication on `/oauth/token`, `/oauth/introspect`
+  and `/oauth/revoke`, and through core's `errorEnvelope` with everything
+  written through it (the token-binding and protected-resource binding, the
+  rate limiter, the CSRF guard, the session, federation, consent, device and
+  WebAuthn routes, contributed modules) — quotes with `'`, writes "section"
+  for `§`, uses ASCII punctuation, and sends any other character outside the
+  set as `?`. A description that is empty or not a string is omitted, or
+  replaced by a default (`denied by policy`, `policy denied`); a malformed
+  `error` code is sent as `invalid_request` on `/oauth/token`, `access_denied`
+  in an `/authorize` redirect, and `server_error` from `errorEnvelope`, except
+  that a contributed token-binding `kind` whose `invalid_<kind>_proof` is
+  malformed, and a redirect policy's malformed code under a 4xx (logged
+  `redirect_policy_error_malformed`), answer `invalid_request`; an `error_uri`
+  that is not an `http(s)` URI or a relative reference RFC 3986 parses, or
+  that carries userinfo, is dropped. The three descriptions for a grant type a
+  client may not use are one: `client is not authorized for grant_type
+  '<type>'`. The descriptions of body refusals and server errors changed again
+  with core's terminal handler (above), and the login's session-store `503`
+  reads `Session store unavailable`, not `Session store temporarily
+  unavailable` ([#689](https://github.com/o3co/auth.provider/pull/689)).
+  `rate_limit.unavailable`, `introspect.store_unavailable` and
+  `federation.logout.idp_unreachable` no longer carry the error's message as
+  `details.error`: the error is `details.cause`, `{ name, code?, cause?: {
+  name, code? } }`, so an audit sink never records peer-written text, and
+  `details.error` is only ever a string. A grant's `token.issued.failure`
+  gains `details.reason`, its sanitised description. The new log lines
+  (`token_error_code_malformed`, `error_envelope_code_malformed`,
+  `error_envelope_uri_malformed`, `redirect_policy_error_malformed`, …) are in
+  the runbook.
+
+  **Upgrade note.** A client or dashboard that matches an exact
+  `error_description` should match on the code; #677 and #682 list every
+  description that changed. A SIEM rule that read `details.error` on those
+  three audit events reads `details.cause.name` and `.code`.
+  `AuditEvent.details` is typed `AuditEventDetails`, so a custom event whose
+  literal `details.error` is not a string, or whose `details.cause` is not an
+  `AuditedError`, no longer compiles.
+
+- **BREAKING: `scope`, `prompt` and `acr_values` are read by RFC 6749's
+  grammar (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-device-grant`, `@o3co/auth-provider-webauthn`,
+  `@o3co/auth-provider-federation-grants`)**
+  ([#684](https://github.com/o3co/auth.provider/pull/684)). They were split on
+  a single space, so a tab, a newline, a quote or a backslash became part of a
+  name: `/authorize` issued a code for a scope narrowed to nothing, the
+  WebAuthn grant minted a scope exactly as sent, and `/userinfo` withheld
+  claims for a scope that was granted. A value a client sends is read strictly
+  — only the space delimits, and every entry must be a scope-token — so a
+  malformed `scope` is `invalid_scope` at every grant, at `/authorize` (which
+  narrowed it) and in the federation-grants bodies, and a malformed `prompt`
+  or `acr_values` is `invalid_request` (for `acr_values` it was
+  `unmet_authentication_requirements`). A malformed `prompt` that names `none`
+  is answered at the `redirect_uri`, never with the login page. A repeated
+  `scope` at the session, refresh and token-exchange grants is
+  `invalid_request`: it threw, or at token exchange was read as omitted and
+  inherited the subject's whole scope. A JSON `"scope": null` is an omitted
+  scope at every grant, where `client_credentials`, jwt-bearer and device
+  authorization answered `invalid_request`; any other `scope` that is not a
+  string is `invalid_request` everywhere. Duplicate entries are collapsed.
+  The scope this server reads off its own tokens and a token-exchange subject
+  can only narrow: an entry that is not a scope-token names nothing, so
+  `/userinfo` releases no claims for it, a refresh does not carry it, and an
+  exchange can neither ask for it nor inherit it. A federation-grant refresh
+  whose answered `scope` holds no valid scope-token is ineligible,
+  `malformed_token_response`.
+
+  **Upgrade note.** A client that separates scopes with anything but a single
+  space fixes its requests. A token minted before the upgrade with a scope
+  like `openid<TAB>email` keeps working, but that entry grants nothing; its
+  client should re-authorize.
+
+- **BREAKING: identifiers and dates in what a client presents are bounded
+  before anything is looked up or recorded (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-oauth`, `@o3co/auth-provider-dpop`,
+  `@o3co/auth-provider-oauth-token-exchange`)**
+  ([#684](https://github.com/o3co/auth.provider/pull/684),
+  [#685](https://github.com/o3co/auth.provider/pull/685)). A DPoP proof,
+  `private_key_jwt` assertion or ID-JAG whose `jti` is longer than 256
+  characters is refused, and nothing is recorded; the token endpoint checks a
+  DPoP proof before it authenticates the client, so an anonymous caller chose
+  the size of every stored record. A DPoP proof with an empty `jti` is refused
+  too. A JWT `kid` that is not a string, is empty, is over 256 characters or
+  carries a control character — `"kid": null` included, which fell back to the
+  signing kid as if absent — gets the unknown-kid answer without a key store
+  lookup, and a `typ` that is not a string is refused as `typ` instead of
+  throwing. A `client_id` with a control character or over 256 characters is
+  `401 invalid_client` (`400` at `/authorize`) without asking the repository,
+  and an assertion `iss` held to the same rule is `invalid_grant` without
+  asking the issuer registry. `exp`, `iat` and `nbf` must be finite and within
+  the Date range: an ID-JAG with `exp: 1e400` never expired and made the grant
+  answer `503`. An ID-JAG may live at most an hour
+  (`MAX_ASSERTION_LIFETIME_SECONDS`) plus its issuer's clock tolerance, since
+  its `jti` is kept until `exp`; a `private_key_jwt` assertion is held to the
+  same ceiling, now with the tolerance on top, so one minted up to 30 s past
+  an hour is accepted; oauth's `MAX_CLIENT_ASSERTION_LIFETIME_SECONDS` is now
+  an alias of core's `MAX_ASSERTION_LIFETIME_SECONDS` (3600). At boot, a
+  signing key or key store whose current or previous kid breaks the rule, a
+  registered client id or assertion issuer that does, and a clock tolerance
+  outside 0–300 s are refused.
+
+  **Upgrade note.** The likely hit is `OAUTH_JWT_KID` exported but empty: such
+  a deployment signed under the kid `""`, and now fails boot. Set a kid;
+  tokens already issued under `""` are then refused as `kid_unknown`, and
+  their users sign in again.
+
+- **BREAKING: each module parses the bodies of its own routes only, and the
+  token endpoint's middleware runs for its `POST` alone
+  (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-session`,
+  `@o3co/auth-provider-webauthn`, `@o3co/auth-provider-device-grant`,
+  `@o3co/auth-provider-federation-grants`, `@o3co/auth-provider-core`)**
+  ([#675](https://github.com/o3co/auth.provider/pull/675)). `oauthModule`
+  parsed every body under `/oauth`, `sessionModule` every body under
+  `/session`, and body-parser never parses a body twice, so a module listed
+  after them lost its own parser, limit and media types: the device grant's
+  16 KiB limit relaxed to 100 KiB and its JSON-only verification route
+  accepted a form approval, and the federation-grants consent route lost its
+  limit. Middleware mounted with `router.use(path)` also ran for every path
+  beneath it. Each module's parsers, throttles and client authentication are
+  now routes on exactly its own paths, and module order under `/oauth` and
+  `/session` does not matter. A route of your own under `/oauth` or
+  `/session`, or beneath an oauth route such as `/oauth/token/custom`,
+  receives its body unread. `tokenBindingMechanisms` and `grantMiddleware` run
+  for `POST /oauth/token` only; another method on it, or a path beneath it, is
+  now under the protected-resource sender-constraint check, so a `cnf`-bound
+  token presented there as a plain Bearer is `401 invalid_token`. Federation
+  grants answer an unsupported `Content-Encoding` `415` (was `400`), an
+  undecodable charset `415`, a corrupt compressed body `400`, too many form
+  parameters `413` (the last three were `500`) and a grant id Express cannot
+  percent-decode `400 malformed_path`, and log their `500`s as
+  `federation_grants_unexpected_error`. A `modules` entry that is a module
+  factory listed without being called is refused at boot with
+  `module-factory-not-called`; it booted with nothing contributed.
+
+  **Upgrade note.** A module of your own that mounts a route under `/oauth`
+  or `/session` and read `req.body` without a parser of its own mounts one,
+  scoped to its own path as a route rather than `router.use(path, parser)`.
+
+- **BREAKING: `deviceGrantModule` is a factory, and an enabled device grant
+  boots beside `oauthModule` (`@o3co/auth-provider-device-grant`,
+  `@o3co/auth-provider-core`)**
+  ([#639](https://github.com/o3co/auth.provider/pull/639),
+  [#675](https://github.com/o3co/auth.provider/pull/675),
+  [#686](https://github.com/o3co/auth.provider/pull/686)). An enabled device
+  grant could not boot beside `oauthModule`: its discovery contribution put an
+  absolute URL under `metadata`, which core refuses
+  (`discovery-document-invalid`). A disabled one was still advertised in
+  `grant_types_supported`. `deviceGrantModule({ config })` contributes the
+  grant only when `oauth.deviceAuthorization.enabled` is true, and
+  `device_authorization_endpoint` as an issuer-relative endpoint; disabled,
+  `/oauth/token` answers `unsupported_grant_type` for it. Boot refuses the
+  uncalled `modules: [deviceGrantModule]`, a factory config that disagrees
+  with the validated one about `enabled`, and an enabled grant whose store is
+  declared absent (`oauth.deviceAuthorization.store = "unsupported"`), which
+  booted and threw on every request. `POST /oauth/device/verification`
+  answers `415` to anything but `application/json`, after the CSRF guard and
+  before the session check. Both device routes set `Cache-Control: no-store`
+  on every exit, refuse a `Content-Length` over 16 KiB before reading the
+  body, answer parser refusals as JSON `413` / `415` / `400`, and answer an
+  unexpected failure with a JSON `500` logged as
+  `device_route_unexpected_error` instead of the host's error page. A custom
+  `DeviceCodeStore` rejects a collision with `DeviceCodeStoreError { reason:
+  "collision" }`: any other rejection of `create` is now an outage, not a
+  reason to draw new codes. The ioredis client reads the create script's reply
+  strictly: `1` is created, `0` a collision, anything else throws. An
+  enabled grant also needs a user-session store now, and approves only from a
+  live session; that is under Security.
+
+  **Upgrade note.** Write `deviceGrantModule({ config })`, passing the config
+  `createApp` validates.
+
+- **BREAKING: a rate limit is applied as configured or refused at boot, never
+  replaced by the default (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-redis`, `@o3co/auth-provider-webauthn`,
+  `@o3co/auth-provider-device-grant`)**
+  ([#686](https://github.com/o3co/auth.provider/pull/686)). The Redis limiter
+  replaced any spec it could not apply — a zero, NaN, fractional or negative
+  limit or window, a window past the Date range, a malformed `defaultLimit` —
+  with its default of 60 per 60 s, so `{ limit: 5 }` on
+  `oauth.deviceAuthorization.rateLimit` became 60; the in-process limiter
+  applied such a spec as written, and a zero window never limited anything.
+  The three seeded keys, `rateLimit.login`,
+  `oauth.deviceAuthorization.rateLimit` and
+  `webauthn.rateLimit.authenticationOptions`, were skipped when unusable, so
+  their routes ran on 60 per 60 s. Both limiters and the memory factory now
+  throw `RangeError` at construction for a spec, `defaultLimit` included,
+  that is not a positive whole `limit` and `windowSeconds` ending within the
+  Date range, and for a `limits` that is not an object of specs; a seeded key
+  that is given but unusable is a `RangeError` naming the key, and a numeric
+  string such as an environment substitution produces is read as its number.
+  A rate-limit window, `federationGrants.tombstoneRetention` and
+  `redisFederationGrantStore.listingAllowanceMs` are held to one year. With a
+  shared limiter wired, `POST /oauth/webauthn/authentication/options` now runs
+  on `webauthn.rateLimit.authenticationOptions` (default 30 per 60 s per IP)
+  rather than the limiter's 60, and boot warns
+  `webauthn_authentication_options_budget_mismatch` when that key is missing
+  or differs from the `webauthnConfig` slot.
+
+  **Upgrade note.** A `redisRateLimiter` or `memoryRateLimiter` entry in
+  `limits`, or a `defaultLimit`, that the Redis limiter used to drop silently
+  and serve as 60 per 60 s now stops boot; correct the spec to the budget you
+  meant. With a shared limiter and the defaults, the WebAuthn options route
+  tightens to 30 per minute per IP; an explicit
+  `limits.webauthn-authentication-options` still wins.
+  `createMemoryRateLimiter` requires `defaultLimit`, as its type says.
+
+- **BREAKING: a grant checks its token lifetimes when it is built
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-webauthn`, `@o3co/auth-provider-device-grant`,
+  `@o3co/auth-provider-oauth-token-exchange`)**
+  ([#684](https://github.com/o3co/auth.provider/pull/684)). `generateToken`
+  signed `exp = iat + expiresIn` for any number: a fraction, `NaN` (which
+  signed `"exp": null`), zero or less. The grants read their lifetimes per
+  request, so a hand-built configuration the schema would refuse was answered
+  `500` only after the request's authorization code, WebAuthn challenge,
+  ID-JAG `jti` or client assertion had been spent, and a missing
+  `oauth.refreshToken.expiresIn` signed a refresh token with no `exp`.
+  `generateToken` now throws `RangeError` for an `expiresIn` that is not a
+  positive whole number of seconds or that overflows, and
+  `createAuthorizationGrant`, `createRefreshTokenGrant`, `createWebAuthnGrant`,
+  `createJwtBearerGrant`, `createSessionGrant`, `createClientCredentialsGrant`
+  and `createTokenExchangeGrant` read their lifetimes when built, through
+  `resolveAccessTokenLifetime` and the new `resolveRefreshTokenLifetime`, and
+  throw `RangeError` there, so such a composition fails at boot. Changing
+  `oauth.*.expiresIn` on the configuration object after boot no longer takes
+  effect. `createDeviceCodeGrant` refuses an `accessTokenExpiresIn` over a
+  year, and `createDeviceAuthorizationHandler` a code lifetime or polling
+  interval outside the module schema's bounds. Configurations loaded through
+  the schema were already refused at boot and are unaffected.
+
+- **BREAKING: the four federation adapters read a token response one way
+  (`@o3co/auth-provider-federation-google`,
+  `@o3co/auth-provider-federation-apple`,
+  `@o3co/auth-provider-federation-github`,
+  `@o3co/auth-provider-federation-oidc`, `@o3co/auth-provider-core`)**
+  ([#679](https://github.com/o3co/auth.provider/pull/679)). They read the same
+  answer four ways: when `expires_in` was absent, Google and Apple assumed an
+  hour while GitHub and OIDC recorded none, and only OIDC returned `tokenType`
+  and `expiresIn`. Every adapter now reads its answers through core's
+  `federationTokenSnapshot`. A Google or Apple response without `expires_in`
+  records `expiresAt: null` and `expiresIn: null` instead of now + 3600 s;
+  both IdPs document `expires_in` on every response. Google, Apple and GitHub
+  links now record `tokenType: "bearer"`, while the federation token route
+  still answers `Bearer`. A GitHub link never carries an `id_token`: GitHub
+  issues none, so one in its answer is dropped rather than kept unverified.
+  The GitHub adapter takes a `fetch` option, as the other three do, for an
+  egress proxy.
+
+- **BREAKING: a logged error is a projection, and a log line is an event
+  (every package, standalone template)**
+  ([#679](https://github.com/o3co/auth.provider/pull/679),
+  [#681](https://github.com/o3co/auth.provider/pull/681),
+  [#685](https://github.com/o3co/auth.provider/pull/685),
+  [#688](https://github.com/o3co/auth.provider/pull/688),
+  [#689](https://github.com/o3co/auth.provider/pull/689),
+  [#690](https://github.com/o3co/auth.provider/pull/690),
+  [#692](https://github.com/o3co/auth.provider/pull/692)). A line that
+  reported a caught error handed the logger the error itself; what that leaked
+  is under Security. Every such line now carries `loggableError(err)` as its
+  `err`: `name`; the message as `detail`, not `message`; `code`, an integer
+  `status` and up to four `<word>Status` fields; a code-shaped `reason`,
+  `type`, and `command.name` for a Redis error; an OAuth `error` /
+  `error_description` within RFC 6749's character set; the stack's frames
+  without the header; and Error causes and AggregateError members, three deep
+  and at most sixteen projections to a line. A JSON parser's message is
+  dropped but for its `position`, and Redis's `, with args beginning with:`
+  tail is cut. It is plain data, so pino writes every field at every level,
+  with nothing to configure and no pino `type` of its own. A line that opened
+  with a string — which pino reads as a format, dropping every argument after
+  it, the error included — is now an object-first event, and an outage that
+  logged at warn, or not at all, is an error line. Renamed, among others:
+  `local login authenticate failed` → `login_store_unavailable`; `client
+  lookup failed` → `client_repository_unavailable`;
+  `refresh_token_revocation_store_unavailable` →
+  `token_verification_unavailable` (`site: "refresh_token"`); the federation
+  routes' `… failed` templates → `federation_token_store_unavailable` /
+  `federation_logout_store_unavailable`; the federation callback's store lines
+  → `federation_callback_store_unavailable`; `federation token exchange
+  failed` → `federation_callback_exchange_failed`; `federation_grant.failure`
+  → the `federation_grant_*_unavailable` error events, or the warn lines
+  `federation_grant_*_step_failed`, `federation_grant_token_contended` and
+  `federation_grant_callback_exchange_refused`, none with a `classification`;
+  DPoP's `dpop_replay_store_unavailable` → `token_binding_unavailable` /
+  `protected_resource_binding_unavailable` at error, `reason`
+  `replay_store_unavailable`, `replay_store_fault` or `replay_store_full`;
+  DPoP's replay-TTL sentence → `dpop_replay_ttl_below_window`; `Server is
+  running on …` → `server_listening`; `RedisCodeRepository: corrupted data …`
+  → `authorization_code_corrupt_record`; `redisCodeRepositoryBuilder is
+  deprecated …` → `adapter_builder_deprecated`; `[buildModules] … is
+  deprecated` → `config_key_deprecated`; the `user_session_corrupt_envelope:
+  …` and `session_rp_registry_corrupt_envelope: …` sentences keep their event
+  names and move what followed the colon into `reason` (`json_parse`,
+  `shape_invalid`); the plaintext-store lines → `federation_store_plaintext` /
+  `federation_store_plaintext_override`; the graceful-shutdown sentences →
+  `shutdown_*`; a failed adapter cleanup → `adapter_lifecycle_cleanup_failed`,
+  on the deployment's logger even when boot fails;
+  `sender_constraint_rejected`'s `reason` → `rejection`. The Redis stores now
+  log on the composition's logger, so a corrupt session envelope is reported
+  where it was silent. On the federation-grant client routes, client
+  authentication's lines, the rate limiter's and `rate_limit.unavailable` no
+  longer go through federation-grants' `[redacted]` wrapper: they are written
+  as core writes them elsewhere, with `step` and `err`.
+  `docs/operator-runbook.md` lists every event.
+
+  **Upgrade note.** Re-key alerts and queries on the event names and on
+  `err.detail` / `err.name`; a query on `err.message` or on pino's `err.type`
+  finds nothing. Error messages thrown by federation-oidc at boot, by mTLS and
+  by a Redis `MULTI` / `EXEC` failure no longer end with the library's text;
+  it is on `cause`.
+
+- **BREAKING: `HttpUserRepository` names a transport failure
+  (`@o3co/auth-provider-foundation`)**
+  ([#674](https://github.com/o3co/auth.provider/pull/674)). A transport
+  failure in `authenticate`, `authenticateByToken` or `linkFederatedIdentity`
+  was fetch's own `TypeError: fetch failed` with undici's error as `cause`. It
+  is now a `StoreTransportError` (exported, with `StoreTransportFailure`) that
+  has no `cause` and no `status`, a `reason` of `unreachable`,
+  `connection_closed`, `malformed_response` or `unreadable`, and at most one
+  allowlisted transport code as `err.code`; a body broken mid-read is
+  `unreadable`, not `TypeError: terminated`. A timeout on any of the four
+  requests is a `TimeoutError`, message unchanged. The identity lookup's
+  transport failures change type the same way, and a malformed head or a
+  closed connection now reads as such rather than `could not be reached`.
+
+  **Upgrade note.** Code that read `err.cause.code` reads `err.code`, and code
+  that matched `TypeError` or `"fetch failed"` matches `StoreTransportError`.
+
+- **BREAKING: a sealing-store setting the store cannot use is a
+  `RangeError`, and the federation-token key must be canonical base64
+  (`@o3co/auth-provider-redis`, `@o3co/auth-provider-core`)**
+  ([#695](https://github.com/o3co/auth.provider/pull/695)). Key-ring sealing
+  moved from the Redis package into a core leaf (under Added), and the
+  federation-grant store seals through it, byte for byte as before.
+  `redisFederationTokenStore.encryptionKey`
+  (`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`) is read as canonical base64
+  of 32 bytes: a trailing newline or other whitespace, the URL alphabet or
+  missing padding, each of which used to read as the same 32 bytes, now fails
+  boot. Both factories refuse an encryption key that is not a `Buffer`. The
+  grant store's key-ring refusals name the setting and the entry by its index,
+  and never quote an id. Every refusal of an unusable sealing setting — the
+  ring, a missing or unreadable key, a key prefix with a brace, the plaintext
+  guard, an unknown mode — is a `RangeError`, so a BootError's message reads
+  `RangeError: …` where it read `Error: …`. The two fixes this came with are
+  under Security.
+
+  **Upgrade note.** Re-encode the federation-token key with the standard
+  alphabet and padding; the key material is unchanged, so records at rest
+  still open.
+
+- **BREAKING (adapter implementers): one expiry rule in every store port
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-redis`)**
+  ([#673](https://github.com/o3co/auth.provider/pull/673),
+  [#686](https://github.com/o3co/auth.provider/pull/686)). An expiry,
+  lifetime or TTL that is not a finite number within the Date range is
+  refused with `RangeError` before anything is written, in the Redis and the
+  in-process adapters alike, and every `PX` or `PEXPIREAT` sent to Redis is
+  the remaining life rounded up to a whole millisecond. That holds for
+  `ChallengeStore.issue`, `ReplaySeenSet.markSeen`, `AccessTokenDenylist.add`,
+  `RefreshTokenFamilyStore.registerFamily` / `updateFamily`,
+  `DeviceCodeStore.create`, `CodeRepository.createCode` (a non-positive
+  `expiresIn` too, and a fractional `defaultExpiresIn` at construction in both
+  repositories), `UserSessionStore.create` (an Invalid Date, and an `authTime`
+  before 1970), `SessionRPRegistry.registerRP` (an Invalid Date
+  `registeredAt`), the session indexes, `ConsentStore.grant`,
+  `PendingConsentStore.set` and both refresh locks; `FederationTokenStore` and
+  the grant and intent stores' retention and allowances throw at
+  construction. The contract suites hold a custom adapter to the same.
+  `createMemoryChallengeStore` returns a `MemoryChallengeStore`, with `size`
+  and sweep options, as the replay seen-set does.
+
+  **Upgrade note.** Run the contract suites against a custom store; the port
+  docs and `docs/adapter-surface.md` state the rule, and core exports it as
+  `isStorableExpiry` / `isStorableLifetime`.
+
+- **BREAKING (TypeScript): every field of a record a store hands back is a
+  required key (`@o3co/auth-provider-core`, `@o3co/auth-provider-redis`,
+  `@o3co/auth-provider-oauth`)**
+  ([#626](https://github.com/o3co/auth.provider/issues/626),
+  [#651](https://github.com/o3co/auth.provider/pull/651),
+  [#652](https://github.com/o3co/auth.provider/pull/652),
+  [#653](https://github.com/o3co/auth.provider/pull/653),
+  [#654](https://github.com/o3co/auth.provider/pull/654),
+  [#655](https://github.com/o3co/auth.provider/pull/655),
+  [#656](https://github.com/o3co/auth.provider/pull/656),
+  [#657](https://github.com/o3co/auth.provider/pull/657),
+  [#658](https://github.com/o3co/auth.provider/pull/658),
+  [#659](https://github.com/o3co/auth.provider/pull/659),
+  [#660](https://github.com/o3co/auth.provider/pull/660),
+  [#661](https://github.com/o3co/auth.provider/pull/661),
+  [#662](https://github.com/o3co/auth.provider/pull/662)). A store that copies
+  a record field by field, and forgets one, dropped it without a sound, and
+  for some fields that widened what the record allows: an issuer's ceiling, a
+  consent's expiry, a code's `nonce` or `acr`. `FederationTokens`,
+  `AssertionIssuerEntry`, `RegisteredRP`, `ConsentRecord` /
+  `PendingConsentRecord`, `Code` / `CodeData`, `DeviceAuthorization`, the
+  federation grant's authorization, usage and credentials,
+  `FederationGrantIntent` and `UserSession.amr` now name every field as a
+  required key, holding `undefined` where there is nothing to record, so an
+  object literal of the type that leaves one out does not compile. The inputs
+  that carry these records are held the same way: `CreateCodeInput` names
+  every field but `expiresIn`; `CreateUserSessionInput.amr`,
+  `CreateDeviceAuthorizationInput.requestedScope`, the `expiresAt` of the
+  record `ConsentStore.grant` takes and the `state` of the one
+  `PendingConsentStore.set` takes are required keys; and in redis, so are
+  `GrantConsentInput.expiry`, `ConsentRecordFields.expiresAt` and
+  `NoteFederationGrantRefreshFailureInput.retryAfterSeconds` / `upstreamCode`.
+  Only `AssertionIssuerEntryInput` (what `add` and the composition take, the
+  old `AssertionIssuerEntry`) and
+  `ApproveDeviceAuthorizationInput.grantedScope` stay optional.
+  `FederationTokens.rawParams`, which nothing ever wrote, is removed; an old
+  Redis envelope that carries it is read with it ignored. The receivers that
+  take these records under `exactOptionalPropertyTypes` — the logout helpers,
+  `GenerateIdTokenOptions.amr` / `acr`, `FederationGrantRefreshFailureInput` —
+  accept an explicit `undefined`. At runtime, the bundled stores' records and
+  some inputs the library hands to ports carry unset fields as keys holding
+  `undefined`, which `in`, `Object.keys` and a spread that merges defaults
+  underneath all see; `JSON.stringify` output is unchanged apart from
+  `rawParams`. The Redis RP registry treats a stored record with a wrong-typed
+  logout field as corrupt. A store must not return `null` for an unset value.
+  The contract suites compare whole records with `toStrictEqual`, and no
+  longer require an adapter to accept a falsy `requestedScope` its types
+  forbid.
+
+  **Upgrade note.** `docs/upgrading-required-record-keys.md` says what an
+  implementer and a caller change, what is observable at runtime, and what to
+  do under `exactOptionalPropertyTypes`, with a checklist. The guarantee
+  covers a copy written as an object literal of the type, not one behind a
+  cast or in plain JavaScript.
+
+- **BREAKING (TypeScript): the federation adapter contract, its toolkit and
+  the token-exchange validator contract are imported from core, and module
+  wiring is typed against its manifest (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-session`, `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-oauth`)**
+  ([#642](https://github.com/o3co/auth.provider/pull/642),
+  [#646](https://github.com/o3co/auth.provider/pull/646),
+  [#679](https://github.com/o3co/auth.provider/pull/679)). What a module
+  registered was typed `unknown` where its consumer needed a
+  `FederationProvider` or an `ExchangeTokenValidator`, because those contracts
+  lived in packages core may not import. They now live in core and are
+  exported from core alone. From session: `FederationProvider`,
+  `FederationProfile`, `MappedClaims`, `RefreshedTokens`, `EndSessionRequest`,
+  `EndSessionResult`, `SupportsLogout`, `SupportsClaimMapping`,
+  `SupportsRefresh`, `SupportsDelegatedAuthorization` and their guards
+  (`supportsLogout`, `supportsClaimMapping`, `supportsRefresh`,
+  `supportsDelegatedAuthorization`), `DelegatedAuthorizationRequest`,
+  `DelegatedAuthorizationResult`, `DelegatedCodeExchangeRequest`,
+  `DelegatedRefreshRequest`, `DelegatedTokens`, `identityClaimsProblem`,
+  `selectIdentityClaims`, `RESERVED_DELEGATED_AUTHORIZATION_PARAMS`,
+  `RESERVED_IDENTITY_CLAIMS`, `FederationResponseMode`,
+  `resolveFederationResponseMode`, `FEDERATION_RESPONSE_MODES`,
+  `DEFAULT_FEDERATION_RESPONSE_MODE`, and the adapter toolkit —
+  `codeChallenge`, `callbackUrlForExchange`, `FederationClientSecret` and
+  `resolveClientSecret`. From oauth-token-exchange: `ExchangeTokenValidator`,
+  `ExchangeTokenValidationContext` and `ValidatedToken`. session keeps
+  `FederationResult` and `generateCodeVerifier`. Every contribution kind boot
+  awaits answers `Contributed<T>` (`T | Promise<T>`), session's
+  `FederationRedirectPolicyFactory` included, so a caller that invoked a
+  contributed factory itself awaits its answer. Module wiring is typed with
+  `defineModule<Requires, Optional>`: `GrantDependencies` is a type alias over
+  `ProviderDeps` with every field `readonly`, `config` typed `AppConfig` (no
+  index signature) and `pathResolver` gone; each bundled grant factory takes
+  only the slots it reads, and `TokenExchangeDependencies` loses the slots the
+  grant never read. `createOAuthRouter`'s `registry` parameter and the
+  `registry` it returns are `Pick<GrantHandlerResolver, "get">`, so
+  `entries()` is read off the planner's `grantHandlerResolver` instead, and the
+  `getFederationProviders` options of the federation token and logout routers
+  answer a map of `FederationProvider`.
+
+  **Upgrade note.** Repoint these imports to `@o3co/auth-provider-core`; the
+  moved types are unchanged. What they now reach did change:
+  `ContributesMap.federations` and `.tokenExchangeValidators`,
+  `ComponentMap.federationProviders`, the token-exchange validator resolver
+  and `TestInspect`'s two maps are typed with the contracts where they were
+  `unknown`, so a contribution that does not implement its contract no longer
+  compiles. A module that reads its own config section off `deps.config` types
+  it.
+
+- **BREAKING (TypeScript): exported unions gained members, and a few
+  signatures take more (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-dpop`, `@o3co/auth-provider-mtls`,
+  `@o3co/auth-provider-redis`)**
+  ([#673](https://github.com/o3co/auth.provider/pull/673),
+  [#675](https://github.com/o3co/auth.provider/pull/675),
+  [#685](https://github.com/o3co/auth.provider/pull/685),
+  [#686](https://github.com/o3co/auth.provider/pull/686),
+  [#692](https://github.com/o3co/auth.provider/pull/692),
+  [#695](https://github.com/o3co/auth.provider/pull/695),
+  [#700](https://github.com/o3co/auth.provider/pull/700)). `BootErrorReason`
+  gains `module-factory-not-called` (with `ModuleFactoryNotCalledDetails`),
+  and `RouteOrderTargetMissingDetails` a required `referencedByModule`.
+  `JwtVerificationReason` gains `verification_key_unavailable`.
+  `TokenBindingRefusal` gains `unavailable` and the optional `cause` and
+  `reason`. `DPoPError.code` / `DPoPErrorCode` gain `temporarily_unavailable`
+  and `DPoPReasonCode` `replay_store_fault` and `replay_store_full`;
+  `MtlsErrorCode` gains `temporarily_unavailable` and `MtlsReasonCode`
+  `revocation_unavailable`. `DeviceCodeStoreErrorReason` gains `collision`,
+  and `BUILT_IN_AUDIT_EVENT_TYPES` gains `device.decision_outcome_unknown` and
+  `federation.token.upstream_ineligible`. `evaluateGrantPolicy` takes a
+  required fifth argument, `{ scopeCeiling?, logger }`; a JavaScript caller
+  that still passes a ceiling positionally loses it, and falls back to the
+  narrower `effectiveScopes`. `RefreshTokenFamilyRevocationDeps` and
+  `RefreshTokenFamilyRotationDeps` require `accessTokenHorizonMs` — pass
+  `resolveFamilyAccessTokenHorizonMs(config)` — and the default family modules
+  require `config`. `resolveAccessTokenLifetime` throws a `RangeError` rather
+  than a plain `Error`. `FederationGrantKey` is a type alias of core's
+  `SealingKey`, no longer an interface.
+
+  **Upgrade note.** Add the new members to an exhaustive `switch` or a
+  `Record` keyed on these unions, and pass `{ logger }` — or `{ logger:
+  undefined }` — to `evaluateGrantPolicy`.
+
+- **The READMEs say what each package is responsible for, and what its code
+  does now (every package, standalone template, `create-app`,
+  `tools/live-check`)** ([#638](https://github.com/o3co/auth.provider/pull/638),
+  [#643](https://github.com/o3co/auth.provider/pull/643),
+  [#664](https://github.com/o3co/auth.provider/pull/664),
+  [#665](https://github.com/o3co/auth.provider/pull/665),
+  [#666](https://github.com/o3co/auth.provider/pull/666),
+  [#667](https://github.com/o3co/auth.provider/pull/667)). Every README carries
+  a `Last updated` date and a Responsibility section, cites files rather than
+  line numbers, and links definitions instead of copying them; `AGENTS.md`
+  records the rules. Corrections an operator acts on: the root quick start and
+  the template's Usage now boot as written, and the Docker example builds
+  `--target runtime`; the device-grant quick start boots; an absent
+  `allowedGrantTypes` admits every grant type that does not require an
+  explicit allowlist, which a core README had backwards; the session README
+  carries the browser session's threat model, including that every host on
+  the auth host's registrable domain is inside the trust boundary.
+  Documentation only.
+
+### Deprecated
+
+- **Core's first MFA surface: `createMfaRouter` and its `POST
+  /auth/mfa/verify` route, `createMfaProviderFactory`, `MfaProvider` and the
+  names around them (`@o3co/auth-provider-core`)**
+  ([#69](https://github.com/o3co/auth.provider/pull/69),
+  [#682](https://github.com/o3co/auth.provider/pull/682),
+  [#693](https://github.com/o3co/auth.provider/pull/693),
+  [#696](https://github.com/o3co/auth.provider/pull/696)). The extension
+  surface #69 added is marked `@deprecated`: `createMfaRouter`
+  (`MfaRouteDeps`), `createMfaProviderFactory` (`MfaProviderFactory`),
+  `MfaProvider` with `SupportsEnrollment`, `SupportsRevocation` and their
+  guards `supportsEnrollment` / `supportsRevocation`, the types its flow
+  passes around (`MfaChallenge`, `MfaIssueContext`, `MfaPendingTransaction`,
+  `MfaResumeState`, `MfaVerifyResult`, `MfaVerifyFailureReason`,
+  `EnrollResult`), and the `mfa-partial-wiring` boot check
+  (`MfaPartialWiringDetails`). Nothing in this repository wires it, and it is
+  not safe to wire as it stands: `createMfaRouter` continues its flows through
+  callbacks a composition writes, at a route with no CSRF guard; a failed
+  verification leaves its transaction open, so retries are unbounded until it
+  expires; and `MfaTransactionStore`'s get-then-delete lets two verifications
+  in flight at once both pass. `MfaFactor` (the `mfaFactors` contribution
+  type), `MfaCoordinator` and `MfaTransactionStore` are not marked: the design
+  keeps those names with a new contract, and their docs say so. The design
+  that replaces the rest is recorded in
+  `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (decision
+  D3); multi-factor authentication itself is not part of 0.16.0. One change
+  reaches a composition that wired the route anyway: a provider's
+  `failureReason` is sanitised to RFC 6749's character set, and one that is
+  empty or not a string is sent as `invalid`.
+
+### Removed
+
+- **BREAKING: DPoP's own replay store, its Redis adapter and
+  `oauth.dpop.replay-store` — DPoP records its proofs in core's replay
+  seen-set (`@o3co/auth-provider-dpop`, `@o3co/auth-provider-redis`,
+  `@o3co/auth-provider-core`)**
+  ([#669](https://github.com/o3co/auth.provider/pull/669),
+  [#673](https://github.com/o3co/auth.provider/pull/673)). DPoP kept a replay
+  port of its own that did what core's `ReplaySeenSet` already does for
+  `private_key_jwt` assertions, consumed WebAuthn challenges and ID-JAG
+  `jti`s, with no conformance suite. Removed: `DPoPReplayStore`,
+  `createMemoryDPoPReplayStore`, the `dpopReplayStore` slot and its
+  `ComponentMap` augmentation, `@o3co/auth-provider-redis/dpop`
+  (`createRedisDPoPReplayStore`, `DPoPReplayStoreClient`,
+  `RedisDPoPReplayStoreOptions`), and the key `oauth.dpop.replay-store`, which
+  now fails boot with `oauth.dpop.replay-store was removed in v0.16.0 (#673);
+  see CHANGELOG.` `createDPoPMechanism` takes a required `replaySeenSet` in
+  place of `replayStore`, and throws `RangeError` for a `replayTtlSeconds`
+  that is not a positive finite number. Each accepted proof is recorded as
+  `markSeen("dpop-proof:<jkt>", jti, now + replayTtlSeconds)`, after the
+  `iat`, nonce and `ath` checks, so a refused proof does not spend its `jti`;
+  `oauth.dpop.replay-store-ttl-seconds` stays, and so does its advisory floor:
+  below `2 × iat-window-seconds + 1`, DPoP warns
+  `dpop_replay_ttl_below_window`. DPoP enabled with no `replaySeenSet` fails
+  boot in every `deployment.mode`, naming `memoryReplaySeenSetModule` and
+  `redisReplaySeenSetModule`; the standalone template always wires one. A
+  seen-set that cannot be read, that breaks its own contract
+  (`replay_store_fault`) or whose DPoP share is full (`replay_store_full`,
+  under Changed) answers `503` rather than `400 invalid_dpop_proof` / `401
+  invalid_token`. With no logger wired, DPoP's warnings now reach the console.
+  Filling the slot also turns on `private_key_jwt` client authentication for
+  clients registered with `jwks` / `jwksUri`, which were refused `500
+  server_error` without it: at `/oauth/token`, `/oauth/introspect` and
+  `/oauth/revoke` (and discovery advertises it), at `POST
+  /oauth/device_authorization`, and on the federation-grants client routes.
+
+  **Upgrade note.** Delete `oauth.dpop.replay-store` and wire a seen-set
+  before deploying: `redisReplaySeenSetModule` (slot `replaySeenSet`, its
+  client `replaySeenSetClient` from `makeIoredisClients`) for several
+  replicas, `memoryReplaySeenSetModule` for one. A leftover `dpopReplayStore`
+  component is ignored. A custom `DPoPReplayStore` becomes a `ReplaySeenSet`
+  (`kind`, `markSeen(scope, key, expiresAtMs)`, `contains`), whose `markSeen`
+  answers `true` when the value is fresh. DPoP's Redis records move from
+  `dpop:replay:<jkt>:<jti>` to the seen-set's `replay:…dpop-proof:…` keys and
+  neither release reads the other's, so during a rolling upgrade a captured
+  proof can be accepted once by an old replica and once by a new one: for the
+  whole overlap, plus up to W_old + W_new + 1 s after the last old replica
+  stops (121 s at the default `iat-window-seconds` of 60), plus the clock skew
+  between replicas. To avoid it, cut over stop-then-start with that gap, or
+  run a lowered `oauth.dpop.iat-window-seconds` on both releases for the roll
+  — at 5 s on both, the window closes 11 s after the last old replica stops —
+  and restore it no earlier than W_low + W_full + 1 s after that. The old keys
+  expire on their own. The dpop README has the procedure.
+
+- **BREAKING (TypeScript): exports with no successor under the same name
+  (`@o3co/auth-provider-core`)**
+  ([#646](https://github.com/o3co/auth.provider/pull/646),
+  [#685](https://github.com/o3co/auth.provider/pull/685),
+  [#688](https://github.com/o3co/auth.provider/pull/688),
+  [#698](https://github.com/o3co/auth.provider/pull/698)). From core:
+  `GrantModule` (write a module with `defineModule` and contribute its grant
+  through `contributes.grants`); `GrantHandler.cleanup?()`, which nothing ever
+  called (release a handler's resources through its module's
+  `lifecycle[K].cleanup`); `addModule` and `cleanup` on the `GrantRegistry` of
+  `@o3co/auth-provider-core/testing`, which gains `entries()`;
+  `FederationProviderHandle` (use `FederationProvider`);
+  `FederationGrantRefreshedToken` (use `DelegatedTokens`, identical field for
+  field); `isRevocationUnavailable` (use `isVerificationUnavailable`, which
+  also recognises `verification_key_unavailable`, so a key-lookup outage is
+  answered `503` wherever it is used); `GenerateTokenResponseOptions`, with
+  `generateTokenResponse`'s options argument (`token_type` follows the access
+  token's confirmation; see Security).
+
+### Fixed
+
+- **BREAKING: WebAuthn configuration reads its environment, and refuses
+  origins no ceremony can match (`@o3co/auth-provider-webauthn`,
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`)**
+  ([#672](https://github.com/o3co/auth.provider/pull/672)).
+  `webauthnConfigSchema` refused what its own `reference.conf` delivers from
+  the environment, so `WEBAUTHN_CHALLENGE_TTL_MS`,
+  `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, `WEBAUTHN_ORIGIN` and
+  `WEBAUTHN_TOP_ORIGIN` could not be set that way. They can now, the origins as
+  a comma-separated list, and an empty `WEBAUTHN_TOP_ORIGIN` means "not
+  framed". The grant read RFC 8707 `resource` through its own drifted copy of
+  oauth's reader, so a policy saw blank entries; one reader now lives in core.
+  Entries that could never match a ceremony now fail boot, each message naming
+  the origin it should have been: an `origin` / `topOrigin` with a trailing
+  slash, path, query, fragment, uppercase host or scheme, or an explicit
+  default port; an IP-literal host (use `localhost`); an Android entry that is
+  not exactly `android:apk-key-hash:` and the 43-character unpadded base64url
+  SHA-256. The missing-`grantPolicy` error says how to fill the slot, and the
+  README's bootstrap example reads `config.webauthn` through the
+  `reference.conf` chain.
+
+  **Upgrade note.** No ceremony could use these entries, but a configuration
+  that lists one must correct or drop it to boot. The likely one is local
+  development: `http://127.0.0.1` and `http://[::1]` were accepted and are now
+  refused; use `http://localhost`.
+
+- **GitHub logins succeed (`@o3co/auth-provider-federation-github`)**
+  ([#670](https://github.com/o3co/auth.provider/pull/670)). The adapter read
+  `GET https://api.github.com/user` as OIDC UserInfo, which requires a string
+  `sub`; GitHub answers a numeric `id`, so every callback answered `502
+  exchange_failed`. `/user` is now read as GitHub's REST API. The identity is
+  `github:<id>` (a non-empty string `sub` still wins), and an `id` is accepted
+  only as a positive safe integer or a canonical decimal string, so two
+  GitHub users can never sign in as one account. A malformed row in
+  `/user/emails` no longer drops the verified address beside it. Both REST
+  requests send `Accept: application/vnd.github+json` and
+  `X-GitHub-Api-Version: 2022-11-28`. A failed `/user` is logged with the
+  adapter's own error.
+
+- **The federation token route records and reports the upstream's scope,
+  bounded by what was granted, and hands on only a token its caller can use
+  (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-session`,
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-redis`,
+  `@o3co/auth-provider-federation-google`,
+  `@o3co/auth-provider-federation-github`,
+  `@o3co/auth-provider-federation-apple`)**
+  ([#646](https://github.com/o3co/auth.provider/pull/646),
+  [#648](https://github.com/o3co/auth.provider/pull/648),
+  [#649](https://github.com/o3co/auth.provider/pull/649)). At v0.15.0 the link
+  recorded neither the upstream's `scope` nor its `token_type` — both `attach`
+  sites dropped them, and the Google, GitHub and Apple adapters discarded the
+  scope before that — so `POST /oauth/federation/:name/token` answered with no
+  `scope`, and with `token_type: Bearer` whatever the upstream issued. The
+  link now records the upstream's scope as both `scope` and `grantedScope`
+  (GitHub's comma-delimited answer is translated, and an answer that names
+  none is read as the requested list), and its `tokenType` verbatim. A
+  refresh's `200` carries `scope`, bounded by `grantedScope`, which only a
+  fresh authorization writes and no refresh moves (RFC 6749 §6); a record an
+  earlier release wrote keeps the scope it holds, none for a v0.15.0 link, as
+  the bound until the federation is linked again. The value can over-report:
+  after an upstream narrows and then goes silent, the record still names the
+  granted scope, so a client that re-prompts for consent on `scope` should
+  read it as an upper bound. An upstream token that is not a bearer token is
+  refused `502 upstream_token_ineligible` (`token_type_unsupported`,
+  `Retry-After: 300`, audit `federation.token.upstream_ineligible`). The route
+  also stopped believing an adapter's answer it cannot use: an answer with no
+  usable access token, a broken lifetime (`NaN`, negative, an Invalid Date) or
+  a type that is not a token type is `500 refresh_failed`, stored nowhere and
+  audited as `federation.token.refresh_failed` with `details.reason`
+  `no_access_token`, `invalid_expiry` or `invalid_token_type`; an empty
+  rotated refresh token is never stored; an absent `expiresAt` means the
+  upstream named no lifetime, not that the token expired; and a refresh token
+  the upstream rotated is kept from each of these refusals.
+
+- **A refresh token's family is registered from what the grant chose, before
+  it signs (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-webauthn`)**
+  ([#687](https://github.com/o3co/auth.provider/pull/687),
+  [#689](https://github.com/o3co/auth.provider/pull/689)). The
+  authorization-code and WebAuthn grants learned a new refresh token's `jti`
+  and `exp` by decoding the token they had just signed, and the
+  authorization-code grant registered the family only when that decode gave
+  both, so a `KeyStore` whose `sign` did not return a compact JWS over the
+  claims it was given served a refresh token with no rotation record. Both
+  grants now pick the `jti` and issue time before signing, as the refresh
+  grant does, and register the family under them with the expiry `issuedAt +
+  oauth.refreshToken.expiresIn`; a family-store outage costs the WebAuthn
+  grant no signature. Neither decodes its own tokens any more.
+
+- **Expiries a store could not hold, and in-process stores that did not forget
+  (`@o3co/auth-provider-redis`, `@o3co/auth-provider-core`)**
+  ([#673](https://github.com/o3co/auth.provider/pull/673),
+  [#686](https://github.com/o3co/auth.provider/pull/686)). A federation-token
+  store `ttl` in fractional seconds became a fractional `PX`, which Redis
+  refuses, so no federation token could be stored; it now works, and keys live
+  up to a millisecond longer than asked, never shorter. Where a Redis script
+  wrote before setting a deadline it could not take — device codes, consents,
+  the rate limiter's counter, the federation-grant indexes — the refusal left
+  keys with no TTL, and a tombstone retention past 2^53 made every lodging
+  fail; such values are refused before anything is written. A user session
+  with an Invalid Date `authTime` vanished on its first read from Redis, and
+  an RP with an Invalid Date `registeredAt` was dropped from the logout
+  fan-out. The in-process replay seen-set and challenge store dropped an
+  expired record only when the same value was looked up again, which for an
+  honoured assertion or an abandoned WebAuthn ceremony is never, so both grew
+  without bound; both now sweep as they write, once 1000 writes have built up
+  and at least ten seconds have passed on the monotonic clock (at the cap, the
+  ten-second floor is the only limit), and report `size`. Both are also capped
+  now; that is under Changed.
+
+- **The browser session survives what its store does
+  (`@o3co/auth-provider-session`)**
+  ([#689](https://github.com/o3co/auth.provider/pull/689)). The cookie
+  session's store handed its failures to `next(err)`: before a route ran they
+  became a `500`, and after the route answered, Express printed the stack to
+  stderr and dropped the connection. A load failure is now the `503` under
+  Changed, and a save that fails after the route answered is one error line
+  with the answer standing; a route that answered an outage drops the request's
+  session, so express-session neither writes to the failing store again nor
+  sets a cookie. A stored record the Redis store cannot read — a session, a
+  `form_post` transaction, a re-authentication ask — is read as absent, with a
+  `session_cookie_record_unreadable` warn; it used to fail every request from
+  that browser. `POST /session/login` saves the regenerated session before it
+  answers, where it could answer `200` for a session it never saved. A
+  contributed `resolveCallbackRedirect` that throws now reaches the terminal
+  handler's `500` with the user still signed in, instead of rolling the
+  session back under a mislabelled store line.
+
+- **Every published tarball carries the root `LICENSE`
+  (`@o3co/auth-provider-device-grant`, `@o3co/auth-provider-dpop`,
+  `@o3co/auth-provider-federation-grants`, `@o3co/auth-provider-mtls`)**
+  ([#676](https://github.com/o3co/auth.provider/pull/676),
+  [#680](https://github.com/o3co/auth.provider/pull/680)). These four
+  committed Apache-2.0's unfilled template (`Copyright [yyyy] [name of
+  copyright owner]`) as their own `LICENSE`, and pnpm packs the root file only
+  into a package that has none, so they shipped the template. The copies are
+  deleted, every published tarball carries the root file, and CI and the
+  release refuse a tarball without it before anything is published.
+
+- **The standalone fails boot on a port it cannot bind (standalone
+  template)** ([#692](https://github.com/o3co/auth.provider/pull/692)). Its
+  listener swallowed a failed bind and lost a later server error, and the next
+  one crashed the process. A port already taken now fails boot
+  (`EADDRINUSE`), the bound server logs `server_listening`, and a server error
+  after the bind is logged as `server_error`; the runbook's page table reads a
+  sustained one as file-descriptor exhaustion.
+
+- **A federation-token record with an unknown envelope version is refused
+  without quoting what was stored (`@o3co/auth-provider-redis`)**
+  ([#696](https://github.com/o3co/auth.provider/pull/696)). The store's
+  decryption threw `unsupported envelope version: <first segment>`, which
+  quoted the start of a stored ciphertext that is not a v1 envelope: a corrupt
+  or edited record. The bundled store drops such a record without logging; the
+  refusal is now fixed text, `unsupported envelope version`, for any caller
+  that logs it.
+
+- **mTLS's `reference.conf` describes `on-unavailable = "reject"` as it now
+  behaves (`@o3co/auth-provider-mtls`)**
+  ([#696](https://github.com/o3co/auth.provider/pull/696)). Its comment still
+  said that every undetermined revocation status refuses the certificate. A
+  source that cannot answer is an outage, answered `503` and logged once at
+  error (under Changed); what the source cannot be asked — a host missing from
+  `allowed-hosts`, no distribution point or responder — and an answer that
+  settles nothing, such as one the CA did not sign or `unknown`, refuse the
+  certificate. Comment only.
+
+### Security
+
+- **A key-ring envelope opens only with a full 16-byte GCM tag
+  (`@o3co/auth-provider-redis`, `@o3co/auth-provider-core`)**
+  ([#695](https://github.com/o3co/auth.provider/pull/695)). Up to v0.15.0, on
+  Node below 26, a v1 federation-token envelope or a v2 federation-grant
+  envelope whose GCM tag had been truncated was accepted: neither envelope
+  checked the length of its tag or IV, and Node took a tag cut to as little as
+  4 bytes (the engines floor is 22, and CI runs 24). For someone able to write
+  to Redis, forgery resistance against these records dropped from 2^-128 to
+  2^-32 per attempt, and short tags also expose the GHASH authentication key
+  to recovery. Both envelopes now read only a 12-byte IV and a 16-byte tag and
+  decipher with `authTagLength: 16`, so such an envelope is refused: a grant
+  credential reads as unreadable, and a token record as a corrupt record,
+  dropped on read as before. Every envelope this package has ever written has
+  those lengths, so nothing legitimately written is affected, and records at
+  rest open as before.
+
+- **`redisFederationTokenStoreBuilder` no longer reads an unknown encryption
+  mode as plaintext (`@o3co/auth-provider-redis`)**
+  ([#695](https://github.com/o3co/auth.provider/pull/695)). At v0.15.0 the
+  builder took any `encryption.mode` other than `"required"` — a typo
+  included — as `"allow-plaintext"`, and stored federation tokens unencrypted
+  wherever the plaintext guard did not stop it: outside production and
+  staging, without `deployment.mode = "multi"`, or with
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Only a caller that handed the builder
+  its configuration directly was exposed: the configuration schema already
+  refused such a mode on the module path. The builder and both factories now
+  throw `RangeError` for a mode other than `"required"` or
+  `"allow-plaintext"`.
+
+- **BREAKING: logout follows only a registered `post_logout_redirect_uri` — an
+  open redirect is closed (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-federation-google`,
+  `@o3co/auth-provider-federation-github`,
+  `@o3co/auth-provider-federation-apple`)**
+  ([#697](https://github.com/o3co/auth.provider/pull/697)). RP-initiated
+  logout handed the caller's raw `post_logout_redirect_uri` to the
+  federation's `endSession()`, and only then checked it against the client's
+  registered list. Google, GitHub and Apple publish no end-session endpoint,
+  and without one configured their adapters redirect straight to the URI they
+  are handed, so `/oauth/logout?id_token_hint=<a fresh id_token of one's
+  own>&post_logout_redirect_uri=https://evil.example` redirected from the
+  provider's own origin to any site; with an endpoint configured, the
+  unchecked URI was forwarded to the upstream. `POST
+  /oauth/federation/:name/logout` had the same flaw. Both routes now check the
+  URI once, up front — an exact match against the client's
+  `postLogoutRedirectUris`, plus core's `checkRedirectUri` — and only the
+  checked value, or nothing, reaches the confirmation page, `endSession()`,
+  the front-channel page and the redirect. On `/oauth/logout` the client is
+  the hint's `azp` when that is among its audiences, else its single audience,
+  else none (it used to be the first audience); on the federation route it is
+  the access token's `azp`, and a token without one loses the URI. A
+  client-repository outage drops the URI and the logout completes, logged as
+  `client_repository_unavailable` with `site: "logout"` or
+  `"federation_logout"`. A registered entry that fails `checkRedirectUri` —
+  only a custom `ClientRepository` can hold one — is dropped with one warn,
+  `logout_registered_redirect_uri_refused`, naming the client and the reason,
+  never the entry. A hint without `sid` is refused `400` first, a stale GET
+  included. The front-channel page returns `state` to the RP, a federation
+  logout POST with no body is a disconnect, and the adapters no longer quote
+  the URI in their errors.
+
+  **Upgrade note.** Register every RP's post-logout URIs exactly: an
+  unregistered or malformed one is never followed and never forwarded. Google
+  and GitHub federations without an end-session endpoint then send the browser
+  to their own logout page. An Apple federation without an
+  `endSessionEndpoint`, handed no registered URI, refuses locally: `POST
+  /oauth/federation/:name/logout` answers `200 {"disconnected":true}` where it
+  answered `303` to that URI, `/oauth/logout` completes without the IdP
+  redirect, both log `federation_logout_end_session_failed` /
+  `logout_federation_end_session_failed` at warn, and the federation route
+  audits `federation.logout.idp_unreachable` although no IdP was contacted. A
+  composition that calls `endSession()` itself passes only a validated URI
+  (`EndSessionRequest.postLogoutRedirectUri` says so).
+
+- **BREAKING: a device approval needs the live session behind the cookie, and
+  an enabled device grant needs a user-session store
+  (`@o3co/auth-provider-device-grant`, `@o3co/auth-provider-core`,
+  `@o3co/auth-provider-redis`)**
+  ([#698](https://github.com/o3co/auth.provider/pull/698)). `POST
+  /oauth/device/verification` approved a device code on the browser cookie
+  alone. A cookie can outlive its session — logged out elsewhere, ended by
+  `revokeAllForSubject`, deleted out of band — and such a cookie could still
+  approve, while the device token that followed carried no `sid` and no
+  `family_id`, so nothing revoked it. The route also skipped
+  `oauth.requireEmailVerified` and the subject's sessions boundary, and a
+  revocation landing between the approval and the device's poll never reached
+  the token the poll minted. Every verification action now reads the live
+  `UserSession` behind the cookie's `sid`, which must name the cookie's
+  subject, and, with `subjectRevocation` wired, the subject's sessions
+  boundary. A missing, ended or covered session is `401 login_required`; a
+  cookie with no `sid` reads `session identifier (sid) is required`; a subject
+  mismatch also logs `device_verification_session_subject_mismatch` (warn).
+  `approve` honours `requireEmailVerified` (`403 access_denied`). An outage of
+  either store is `503`, logged once
+  (`device_verification_session_liveness_unavailable`,
+  `device_code_grant_revocation_unavailable`). The poll refuses an approval
+  that a later sessions boundary covers — `400 invalid_grant`, and the device
+  starts again — through the new required `DeviceAuthorization.approvedAtMs`,
+  which both bundled stores record (the Redis decide script in the same
+  `HSET`).
+
+  **Upgrade note.** Enabling `oauth.deviceAuthorization` requires a
+  `userSessionStore` component: `memorySessionStoresModule` on one replica,
+  `redisSessionStoresModule` otherwise; boot says so.
+  `createDeviceVerificationHandler` takes the required `userSessionStore`
+  (a missing one throws when the handler is built) and `requireEmailVerified`,
+  and an optional `subjectRevocation`; `createDeviceCodeGrant` takes an
+  optional `subjectRevocation`. A custom `DeviceCodeStore` records the `nowMs`
+  that `approve` is handed and returns it as `approvedAtMs`, and a hand-built
+  record names it. During a rolling upgrade under `deployment.mode =
+  "multi"`, approvals written by replicas not yet upgraded carry no approval
+  time; while a boundary is in force for that subject, the poll refuses them
+  and the device starts again.
+
+- **BREAKING: an exchanged token carries its session as `liveness_sid`, not
+  `sid`, and ends with it (`@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`)**
+  ([#698](https://github.com/o3co/auth.provider/pull/698)). After a logout, a
+  session-grant token went inactive but the token exchanged from it stayed
+  active, and a token whose session had ended could still be exchanged. An
+  exchanged token now carries its subject's session as `liveness_sid`, never
+  `sid`. Introspection and `/userinfo`'s liveness check read it, so the token
+  goes inactive when that session logs out, `/session/logout` included, and no
+  capability authorised on `sid` — the session's claims, its upstream tokens —
+  is reachable with it: `/userinfo` answers such a token `{ sub }`, and the
+  federation token and logout routes refuse it `401 missing sid claim`.
+  Exchanging a token whose session has ended, or whose `sid` names another
+  subject's session, is `400 invalid_request` (`session_invalid`). A
+  session-store outage there is `503`, logged as
+  `token_exchange_session_store_unavailable` (the actor's reads `actor_token
+  session store unavailable`), and the family and validation outage lines now
+  reach the console logger when no logger is wired.
+
+  **Upgrade note.** A resource server or client that read `sid` off an
+  exchanged token reads `liveness_sid`, and gets neither the session's claims
+  nor its federation tokens with it. A custom `ExchangeTokenValidator` for
+  this provider's own tokens reports `ValidatedToken.sid` from `sid` or
+  `liveness_sid` (core's `livenessSidOf`).
+
+- **BREAKING: a token carries only the confirmation its binding's mechanism
+  owns, and a required sender constraint is never downgraded
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-device-grant`)**
+  ([#698](https://github.com/o3co/auth.provider/pull/698)). Only token
+  exchange narrowed the `cnf` it stamped to the member the binding's mechanism
+  owns; every other grant stamped whatever a mechanism returned, so a client
+  that required a sender constraint could be issued an unbound token, and the
+  device grant advertised its DPoP-bound access token as `token_type:
+  "Bearer"` (RFC 9449 §5). Every grant now stamps
+  `ownedConfirmation(ctx.tokenBinding)` only, and the dispatch gate refuses a
+  `senderConstrained: { required: true }` client whose binding's confirmation
+  its mechanism does not own: `400 invalid_request`, audited with reason
+  `sender_constraint_unowned_confirmation`, where it used to get a token. This
+  reaches deployments that list a contributed mechanism kind in `methods`; an
+  unconstrained client gets an unbound Bearer token from such a binding.
+  `token_type` is read off the access token's `cnf` by one core reading,
+  `tokenTypeForConfirmation`, which introspection also uses, so a device-grant
+  token polled with a DPoP proof is `token_type: "DPoP"`.
+
+  **Upgrade note.** `generateTokenResponse(tokens)` takes no options argument,
+  and `GenerateTokenResponseOptions` is gone: `token_type` follows the access
+  token's `confirmation`. A custom grant stamps it through `generateToken`
+  (`ownedConfirmation(ctx.tokenBinding)`), and a hand-built `Token` sets
+  `confirmation` to be advertised as DPoP.
+
+- **BREAKING: refresh tokens are always replay-checked — `refresh_token` does
+  not boot without its family slots (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`)**
+  ([#700](https://github.com/o3co/auth.provider/pull/700)). With
+  `refresh_token` enabled and no family store wired, refresh tokens had no
+  family record, no rotation and no replay check, and `/oauth/revoke` answered
+  `200` for a family the grant never read. `oauthAuthorizationModule` now
+  refuses to boot with `oauth.grants.refresh_token.enabled` on unless both
+  `refreshTokenFamilyRotation` and `refreshTokenFamilyRevocation` are wired.
+
+  **Upgrade note.** Refresh tokens issued without a family store have no
+  family record. Under the default `oauth.refreshToken.unknownFamilyPolicy =
+  "reject"` they are refused after the upgrade, and their users sign in
+  again. Under `"accept"` they are redeemed, without replay detection, for as
+  long as it is set: a family-less token is redeemed for a new one of the full
+  lifetime, still with no record, so a client that keeps refreshing holds a
+  chain that never expires. `"accept"` does not close by waiting. Switching to
+  `"reject"` signs out every holder of such a chain at once; plan it as a
+  forced re-login.
+
+- **BREAKING: a federation refresh ends a session's upstream tokens only on
+  the upstream's structured verdict (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-oauth`, `@o3co/auth-provider-federation-grants`)**
+  ([#697](https://github.com/o3co/auth.provider/pull/697)). `POST
+  /oauth/federation/:name/token` deleted a session's upstream tokens, and
+  unlinked the federation, whenever a 5xx or 429 body, an error message, or a
+  code inside the IdP's parsed body said `invalid_grant`, so an outage or a
+  rate limit could end a user's upstream connection.
+  `classifyFederationRefreshError` now reads an outage first, treats a 429 as
+  a rate limit whatever it names, takes `invalid_grant` only from the
+  structured `error` code, and reads a network code only off the thrown value
+  or an Error cause; `isFederationUpstreamOutage` moves beside it (its export
+  is unchanged), and federation-grant retrieval relies on it. The route
+  answers an upstream 5xx, timeout or transport failure `503`
+  (`federation_token_upstream_unavailable`), where it answered `500
+  refresh_failed`, or `410` when the body said `invalid_grant`, and a 429
+  `429`, with the upstream's `Retry-After` when it gave one (digits only, at
+  most 86400). Both keep the tokens and emit no `refresh_failed` audit.
+
+  **Upgrade note.** A custom adapter that reports a rejected refresh token by
+  throwing a plain `Error("invalid_grant …")` must set `error`, as
+  openid-client's `ResponseBodyError` does: `invalid_grant` found only in a
+  message is now `unknown`, a `500` with the tokens kept. One that throws
+  `TypeError("fetch failed", { cause: { code: "ENOTFOUND" } })` gets `500`,
+  not `503`: throw the cause as an Error, as undici does.
+
+- **BREAKING: a credential goes only to the configured Store URL — a
+  redirect is refused, never followed (`@o3co/auth-provider-foundation`)**
+  ([#668](https://github.com/o3co/auth.provider/pull/668)).
+  `HttpUserRepository` followed redirects on `authenticate`,
+  `authenticateByToken` and `linkFederatedIdentity`. On a `307` or `308`,
+  fetch re-sent the request body — the user's `{ email, password }`, the `{
+  token }` handle, or the link request — to the `Location`, which the
+  https-or-loopback rule never saw; on a `301`, `302` or `303` it turned the
+  request into a GET to the `Location` and took that answer as the
+  authenticated or linked user. Every Store request now uses `redirect:
+  "manual"`, as the identity lookup already did: a 3xx is an unexpected
+  status, the body is discarded, the `Location` is never contacted, and the
+  caller answers `503 temporarily_unavailable`, logging `Unexpected HTTP status
+  30x from <url>`.
+
+  **Upgrade note.** If a configured Store URL redirects — a host alias, an
+  added trailing slash, a moved path — every local login, federated login,
+  account link and jwt-bearer identity resolution through it now fails with
+  `503`. Configure the URL the Store answers on.
+
+- **BREAKING: a YAML typo and a failed boot print nothing from the file
+  (`@o3co/auth-provider-core`)**
+  ([#700](https://github.com/o3co/auth.provider/pull/700)). A syntax error in
+  `clients.yaml` or `users.yaml` printed neighbouring secrets at boot: js-yaml
+  quotes the lines around the fault and holds the whole file, and the boot
+  planner flattened the error into its message and kept it as the printed
+  cause. `loadYamlMap`, and so the yaml and static client and user adapters,
+  now refuses such a file with `Invalid YAML in <file> at <line>:<col>:
+  <reason>`, a plain `Error` with no `mark`, `reason`, `cause` or snippet.
+  Every BootError message, and `DiscoveryDocumentInvalidDetails.detail`, names
+  a thrown error by `loggableError`'s rules — one line, no `SyntaxError` or
+  `YAMLException` text, Redis's echoed arguments cut, `a thrown <type>` for a
+  non-Error — instead of `String(err)`. A printed BootError shows its cause,
+  `details.originalError` and cleanup errors as projections, while `cause` and
+  `details.originalError` still hold the thrown value. The token-binding
+  outage line keeps a refusal's `reason` only when it is a code, and the drift
+  guard fails the build on a caught error's text flattened into the message of
+  an error built from it.
+
+  **Upgrade note.** Code that caught a `YAMLException` from `loadYamlMap`, or
+  read its `mark`, matches the plain `Error` and its message instead.
+
+- **Logs no longer carry credentials or token records
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-session`,
+  `@o3co/auth-provider-oauth`, `@o3co/auth-provider-redis`,
+  `@o3co/auth-provider-dpop`, `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-foundation`, standalone template)**
+  ([#674](https://github.com/o3co/auth.provider/pull/674),
+  [#679](https://github.com/o3co/auth.provider/pull/679),
+  [#681](https://github.com/o3co/auth.provider/pull/681),
+  [#685](https://github.com/o3co/auth.provider/pull/685),
+  [#692](https://github.com/o3co/auth.provider/pull/692)). A logger that
+  serialises every own property of what it is handed — pino's err serializer,
+  and `consoleLogger` through `console.*` — wrote out what caught errors
+  carried: a federation token write's `command.args` under `encryption.mode =
+  "allow-plaintext"`, which is the token record; openid-client's refusal of a
+  token response, whose cause chain holds the response with its access and
+  refresh tokens; a refused Redis `AUTH`, whose `command.args` holds the
+  configured password; jose's claim errors, which carry a client assertion's
+  or DPoP proof's payload; the stored text a corrupt Redis record's
+  `SyntaxError` quotes; the refused `SET` and key of a seen-set outage;
+  `handle.dispose()`'s AggregateError, with what a failed store write wrote;
+  and undici's parser error, whose `data` holds bytes a Store or proxy
+  reflected back, a password or bearer token among them. Each such line now
+  carries the `loggableError` projection (under Changed), which never includes
+  a command's `args`, a body, a payload or a non-Error cause, and a guard over
+  every package's source fails the build on a caught error handed to a logger
+  any other way. DPoP's refusals of a JWK or `htu` it cannot use no longer
+  quote the input, and `normalizeHtu` no longer quotes the userinfo it refuses.
+
+  **Upgrade note.** A deployment that copied the Redis README's
+  `io.on("error")` listener logs the raw error, and should log `{ err:
+  loggableError(err) }` instead; otherwise a password its Redis refuses
+  reaches the log.
+
+- **Caller- and peer-written text reaches log lines and audit events sanitised
+  and bounded, and a Store URL's query string stays out of the log (every
+  package, standalone template)**
+  ([#699](https://github.com/o3co/auth.provider/pull/699)). Log lines and
+  audit events are read by systems that split on line breaks, and the
+  standalone writes every audit event into its log. Several carried text a
+  caller or a peer wrote, unsanitised and uncapped: a JWT `typ` and jose's
+  quote of a `crit` name, both read before the signature is checked; a token
+  exchange's resources and repeated audiences; `/authorize`'s requested
+  scopes; the request path; an upstream's `token_type`; an IdP's `sub` on
+  federation-grant events; a Client ID Metadata Document's Content-Type, auth
+  method and redirect URIs; a jwt-bearer policy refusal that echoed the
+  caller's `resource`; a federation grant's path id and asserted subject; an
+  mTLS certificate's subject, CRL URLs and OCSP answers; and every audit
+  event's `ip` and `userAgent` — behind `trust proxy`, `req.ip` is whatever
+  the caller wrote in `X-Forwarded-For`. Error projections kept the line
+  breaks and bidi controls a library quoted. Every error the Store client
+  threw quoted the configured Store URL whole, query string included, so a
+  credential put in the query (`?api_key=…`) reached the log. Such values now
+  go through `auditErrorText` (RFC 6749's character set, 200 characters); a
+  list through the new `auditErrorList`, which stays an array and keeps the
+  first 10 entries, adding `requestedScopeCount` / `missingResourceCount` only
+  when it cut; and legible text — a certificate subject, jose's messages,
+  every `loggableError` string — through the new `lineSafeText`, which turns
+  control, line-separator, bidi and directional characters into `?`, keeps
+  non-ASCII letters, and caps at 256 characters without splitting one. Every
+  built-in audit event reaches its sink through core's new `recordAuditEvent`:
+  `ip` is an IPv4 or IPv6 address (any zone stripped) or absent, `userAgent`
+  is capped at 200 characters, key order is kept, and a sink that throws never
+  throws into the route. The Store client names an endpoint by origin and path
+  only; the query string is still sent. A CIMD refusal of a redirect URI said
+  `[object Object]` and now gives the reason, and token exchange names each
+  widened audience once. The log-projection guard fails the build on a request
+  value reaching a logger or `emitAuditEvent` unsanitised, and on a sink write
+  outside core's audit factory. No field changes type.
+
+  **Upgrade note.** An audit event with no `ip` means the request's address
+  was not an address: behind `trust proxy`, check that `HTTP_TRUST_PROXY`
+  trusts only the hop that sets `X-Forwarded-For`. `rate_limit.unavailable`
+  no longer carries `ip: "unknown"`. `MtlsRevocationSourceError.url` and
+  `.subject` hold the bounded text.
+
+- **A revocation holds (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-redis`)**
+  ([#673](https://github.com/o3co/auth.provider/pull/673),
+  [#684](https://github.com/o3co/auth.provider/pull/684),
+  [#685](https://github.com/o3co/auth.provider/pull/685)). `/oauth/revoke`
+  caught every error, the store write included, so a Redis outage became a
+  debug log and a `200`: the client was told its token was revoked while it
+  kept verifying until it expired, and a non-integer `exp`, which Redis
+  refused as a `PX`, did the same. A revoked access token's denylist entry
+  lasted only until `exp`, while the verifier accepts a token for five minutes
+  past it, so a token revoked while live verified again once its entry lapsed.
+  A revoked refresh-token family was kept only until the family's own expiry,
+  after which its still-valid access tokens passed the family check again, and
+  revoking a family whose record had already expired recorded nothing. Now a
+  store write that fails answers `503 temporarily_unavailable` (RFC 7009
+  §2.2.1), logged as `revoke_store_unavailable` with the `clientId`, and so
+  does a key store that cannot verify the token
+  (`token_verification_unavailable`); a denylist entry is kept until `exp`
+  plus `REVOCATION_RETENTION_ALLOWANCE_MS` — the verifier's five-minute
+  tolerance, the one-second replica allowance and a rounding second; a revoked
+  family is kept until the later of its own expiry and now +
+  `oauth.accessToken.maxExpiresIn`, plus the same allowance, and revoking a
+  family with no record writes a revoked one; and every `PX` is rounded up.
+  Redis `atdeny:` and `rtfam:` keys live correspondingly longer.
+
+  **Upgrade note.** Alert on `revoke_store_unavailable`: while it fires, the
+  tokens clients asked to revoke are still valid, and a client's retry
+  succeeds once the store is back.
+
+- **DPoP proofs are replay-checked across replicas
+  (`@o3co/auth-provider-dpop`, `@o3co/auth-provider-core`)**
+  ([#669](https://github.com/o3co/auth.provider/pull/669),
+  [#673](https://github.com/o3co/auth.provider/pull/673),
+  [#688](https://github.com/o3co/auth.provider/pull/688)). With DPoP enabled
+  and no `dpopReplayStore` wired, `dpopModule` fell back to a per-process
+  store and booted under `deployment.mode = "multi"`, so a captured proof could
+  be replayed once against each replica while its `iat` was within that
+  replica's window: up to 121 s at the defaults. DPoP now records its proofs
+  in the replay seen-set (under Removed), whose memory module declares itself
+  replica-unsafe: under `multi`, core's guard refuses it, naming
+  `core-replay-seen-set-memory` — whose reason now names exactly what it
+  records: a `private_key_jwt` assertion, an ID-JAG's `jti`, a consumed
+  WebAuthn challenge and a DPoP proof — and with the mode unset, the one
+  `replica_unsafe_adapters` warning covers DPoP.
+
 ## [0.15.0] - 2026-09-22
 
 ### Added

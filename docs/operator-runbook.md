@@ -1199,7 +1199,7 @@ before you flip — and a relying party holding the secret can also mint.
    | --- | --- | --- |
    | `oauth.refreshToken.legacyTokenCompat` | removed | `oauth.refreshToken.legacyTokenCompat was removed in v0.6.0 (Phase G / M4); see CHANGELOG.` |
    | `oauth.authorize.allowUnmarkedClients` (and the env tombstone `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) | removed | boot error with migration instructions: mark every client `firstParty: true`, then delete the key and the variable |
-   | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed in …`: DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either — see the DPoP note below |
+   | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed in v0.16.0 (#673); see CHANGELOG. …`: DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either — see the DPoP note below |
    | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
    | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
@@ -1276,7 +1276,7 @@ before you flip — and a relying party holding the secret can also mint.
 - Under `DEPLOYMENT_MODE=multi`, a mixed fleet during the roll is fine for
   every Redis-backed store — the schemas below are what decide whether the
   *older* release can read what the *newer* one wrote. The one exception is
-  the release that moves DPoP onto the replay seen-set: its replay records
+  v0.16.0, which moves DPoP onto the replay seen-set: its replay records
   change keys, so a mixed fleet opens a replay window (see the DPoP note in
   [Before you upgrade](#before-you-upgrade)).
 

@@ -389,7 +389,7 @@ grant_type=client_credentials
 - **キャッシュしない。** キャッシュした否定は障害より長く残り、肯定はそもそも返されていない。
 - **自分のクライアントには 5xx（`502` か `503`）で答える。** `401 invalid_token` ではない。トークンはまったく問題ないかもしれず、`401` はクライアントにそれを捨ててやり直させる。
 
-[auth.proxy](https://github.com/o3co/auth.proxy) の validation モードはすでにそう振る舞う。2xx でないイントロスペクションの答えはキャッシュされず、クライアントには `502 Bad Gateway` が返る。このリリースより前は障害が `200 active: false` で返り、auth.proxy はそれを最大 30 秒キャッシュして `401` で答えていた。
+[auth.proxy](https://github.com/o3co/auth.proxy) の validation モードはすでにそう振る舞う。2xx でないイントロスペクションの答えはキャッシュされず、クライアントには `502 Bad Gateway` が返る。v0.16.0 より前は障害が `200 active: false` で返り、auth.proxy はそれを最大 30 秒キャッシュして `401` で答えていた。
 
 ### 予約文字を含む `client_id` は HTTP Basic でパーセントエンコードする
 

@@ -395,7 +395,7 @@ An audience outside that set, an unknown or expired token, one revoked through t
 - **Do not cache it.** A cached negative would outlast the outage, and a cached positive was never given.
 - **Answer your own client with a 5xx** (`502` or `503`), not `401 invalid_token`. The token may be perfectly good, and a `401` sends the client to throw it away and start again.
 
-[auth.proxy](https://github.com/o3co/auth.proxy) already behaves this way in validation mode. A non-2xx introspection answer is not cached, and its client gets `502 Bad Gateway`. Before this release, an outage came back as `200 active: false`, which auth.proxy cached for up to 30 seconds and answered with `401`.
+[auth.proxy](https://github.com/o3co/auth.proxy) already behaves this way in validation mode. A non-2xx introspection answer is not cached, and its client gets `502 Bad Gateway`. Before v0.16.0, an outage came back as `200 active: false`, which auth.proxy cached for up to 30 seconds and answered with `401`.
 
 ### A `client_id` with reserved characters must be percent-encoded in HTTP Basic
 
