@@ -487,26 +487,73 @@ export {
 	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
-export { createMfaProviderFactory } from "./mfa/factory.mjs";
-export type { MfaRouteDeps } from "./mfa/route.mjs";
-export { createMfaRouter } from "./mfa/route.mjs";
-// MFA
+// Mail (the MFA ADR's D5): the port MFA codes and notices leave through
+export type { MailMessage, MailSender } from "./mail/types.mjs";
+// MFA (the MFA ADR): the coordinator slot and its absence policy; the stores,
+// their memory adapters, factories and modules
+export {
+	MFA_ABSENCE_POLICY,
+	type MfaCoordinator,
+	type PrimaryAuthentication,
+} from "./mfa/coordinator.mjs";
+// MFA — the second-factor contract (the manifest group below exports its
+// MfaFactor name)
 export type {
-	EnrollResult,
-	MfaChallenge,
-	MfaCoordinator,
-	MfaIssueContext,
-	MfaPendingTransaction,
-	MfaProvider,
-	MfaProviderFactory,
-	MfaResumeState,
-	MfaTransactionStore,
-	MfaVerifyFailureReason,
-	MfaVerifyResult,
-	SupportsEnrollment,
-	SupportsRevocation,
-} from "./mfa/types.mjs";
-export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
+	MfaCeremonyContext,
+	MfaChallengeContext,
+	MfaDigestMatch,
+	MfaDigests,
+	MfaEnrolledFactor,
+	MfaEnrollmentCompletion,
+	MfaEnrollmentCompletionContext,
+	MfaEnrollmentContext,
+	MfaFactorData,
+	MfaFactorState,
+	MfaKeyedDigest,
+	MfaVerification,
+	MfaVerifyContext,
+} from "./mfa/factor.mjs";
+export type {
+	MfaFactorRecord,
+	MfaFactorRecordUpdate,
+	MfaFactorStore,
+	MfaFactorStoreFactory,
+} from "./mfa/factorStore.mjs";
+export {
+	createMfaFactorStoreFactory,
+	createMfaTransactionStoreFactory,
+	registerBuiltinMfaFactorStores,
+	registerBuiltinMfaTransactionStores,
+} from "./mfa/factory.mjs";
+export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
+export {
+	createMemoryMfaTransactionStore,
+	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
+	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
+	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
+	type MemoryMfaTransactionStore,
+	type MemoryMfaTransactionStoreOptions,
+	MfaTransactionStoreFullError,
+} from "./mfa/memoryTransactionStore.mjs";
+export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
+export {
+	checkMfaLockoutPolicy,
+	checkMfaTransactionTransitions,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_LOCKOUT_MAX_HARD_LIMIT,
+	MFA_TRANSACTION_PATCH_KEYS,
+	MFA_WEEKLY_WINDOW_MS,
+	type MfaLockoutPolicy,
+	type MfaSubjectAttemptOutcome,
+	type MfaSubjectAttemptReservation,
+	type MfaSubjectHold,
+	type MfaTransaction,
+	type MfaTransactionPatch,
+	type MfaTransactionStore,
+	type MfaTransactionStoreFactory,
+	mfaTransactionPatchWrites,
+	newMfaTransactionRecord,
+} from "./mfa/transactionStore.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {
 	browserFacingCorsRoutes,
@@ -564,6 +611,7 @@ export type {
 	// @o3co/auth-provider-core/modules/manifest directly.
 	MfaFactor,
 	MfaFactorFactory,
+	MfaFactorResolver,
 	Module,
 	ModuleSpec,
 	OidcDiscoveryContributionFactory,
@@ -680,6 +728,11 @@ export {
 	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
+export {
+	MFA_EMAIL_RATE_LIMIT_PREFIX,
+	MFA_RATE_LIMIT_PREFIX,
+	resolveMfaLimitSpecs,
+} from "./ratelimit/mfaSpec.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 export { resolveSeededLimitSpecs } from "./ratelimit/seededSpecs.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
@@ -749,7 +802,13 @@ export type {
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
 	LinkFederatedIdentityResult,
+	MfaEnrollmentWitness,
+	SupportsMfaEnrollmentWitness,
 	UserRepository,
+} from "./repositories/UserRepository.mjs";
+export {
+	readMfaEnrollmentWitness,
+	supportsMfaEnrollmentWitness,
 } from "./repositories/UserRepository.mjs";
 export {
 	createRouter as createHealthcheckRouter,

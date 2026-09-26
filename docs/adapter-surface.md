@@ -16,15 +16,15 @@ Adapter freedom applies **within** authentication and token issuance. It is not
 a licence to grow the responsibility.
 
 `UserRepository` is the clearest case, and the shape of the rule. It is
-`authenticate` / `authenticateByToken`, plus one optional member,
-`linkFederatedIdentity` (#482). Creating users, changing passwords, flipping
-verification state, linking a device to a user, upgrading an anonymous identity
-to a registered one — all of that belongs to the Store, and for all of it the
-library only ever *reads the result*. The one exception is the link below.
+`authenticate` / `authenticateByToken`, plus optional members for the flows this
+library drives. Creating users, changing passwords, flipping verification
+state, linking a device to a user, upgrading an anonymous identity to a
+registered one — all of that belongs to the Store, and for all of it the library
+only ever *reads the result*. The two exceptions are below.
 
-`linkFederatedIdentity` is the one call through which the library causes a
-write, and it passes the document's own test: the `?link=1` flow is one this
-library drives end to end, so the flow needs the seam. What still holds is the
+`linkFederatedIdentity` (#482) is one of two calls through which the library
+causes a write, and it passes the document's own test: the `?link=1` flow is one
+this library drives end to end, so the flow needs the seam. What still holds is the
 part that matters — the **Store decides**. The library relays the verified
 identity and the session it is bound to, and relays `refused` / `conflict` back
 unchanged; it never merges accounts, never links implicitly, and never links on
@@ -39,12 +39,37 @@ so where the temptation is highest:
   delivers it, writes the new credential, and *then* calls in to invalidate what
   was already minted.
 
-That last one is the pattern for anything that looks like it needs a new slot:
-the library is downstream of the action, never the one taking it. **Message
-delivery is the worked example of a slot that does not belong here** — there is
-no flow in this library that sends anything, so a delivery port would be a seam
-with no caller on this side of the boundary. Full IdPs ship one because they own
-the flows that send; verify/issue-only libraries do not.
+`markMfaEnrolled` is the other, the MFA enrollment witness (the MFA ADR's
+D12), and it passes the same test from the opposite side. Enrollment, removal
+and the operator reset of a second factor are this library's own flows, end to
+end, so here **the provider decides and the Store only persists**: after the
+first counting factor is written the provider marks the subject enrolled, and
+after the last is removed it clears the mark — in that order, so a crash leaves
+a factor without a witness, never a witness without a factor. The Store answers
+the mark back as `User.mfaEnrolled` on `authenticate`, read only through
+`readMfaEnrollmentWitness`: a value that is neither a boolean nor absent is
+malformed, answered `503`, and never read as "not enrolled". Why it is a Store write at
+all: the witness has to survive the factor store it vouches for. A factor store
+that loses its records — a Redis restarted without persistence, an eviction, a
+restore from an old backup — would otherwise read as "never enrolled", and every
+affected account would accept a first binding from whoever holds its password.
+A repository without the capability (`supportsMfaEnrollmentWitness`), and a
+Store that answers no field, leave the witness absent; the factor store's
+durability is then the whole defence.
+
+`revokeAllForSubject`, the last of the three call sites above, is the pattern
+for anything that looks like it needs a new slot: the library is downstream of
+the action, never the one taking it. **Message
+delivery is the worked example of where the line falls.** The one flow this
+library drives end to end that must send is multi-factor authentication: the
+one-time codes of its email factor and proof, and the security notices it owes
+a user whose factors changed (the MFA ADR's D5). So there is a delivery port,
+`mailSender`, and it is that narrow: a rendered message — one recipient, a
+subject, plain text — handed to whatever delivers it. Templates, links, sign-up,
+password reset and account recovery by e-mail stay the Store's and the
+deployment's; a deployment that delivers through its own mail service implements
+`send` and nothing else. Full IdPs ship more because they own the flows that
+send; this library owns only these.
 
 The line also cuts the other way, and `assertionVerifier` is the example. A
 device presenting a signed credential *is* an authentication modality, so
@@ -94,6 +119,7 @@ a composition root. Listed because a module may `require` them.
 | --- | --- | --- | --- | --- |
 | `federationRedirectPolicyResolver` | `ReadonlyMap<string, FederationRedirectPolicy>` | optional | `session/federations/contributes.mts` | Synthetic key: the assembled per-federation `redirect_to` policies. |
 | `grantHandlerResolver` | `GrantHandlerResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled grant registry, resolved from every module's `contributes.grants`. |
+| `mfaFactorResolver` | `MfaFactorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: every second factor contributed as `contributes.mfaFactors`, by kind. A factory that answered `null` (the factor switched off by its configuration) claims its kind and is absent from the resolver. In place before the `provides` factories run and filled as the contributions register, so a provider (the coordinator) holds it and reads it at request time; a read while the provides factories run refuses the boot. A factor whose `kind` is not its key refuses boot. |
 | `tokenExchangeValidatorResolver` | `TokenExchangeValidatorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled RFC 8693 subject/actor token validators. |
 
 ## Component slots
@@ -121,6 +147,10 @@ a composition root. Listed because a module may `require` them.
 | `googleFederationConfig` | `GoogleProviderConfig` | optional | `federation-google/google.mts` | Config slice for the bundled Google federation module. |
 | `grantPolicy` | `GrantPolicyHook` | optional | `core/policy/types.mts` | Deployment-supplied hook consulted at grant dispatch, for policy this library does not model. |
 | `keyStore` | `KeyStore` | required | `core/keys/KeyStore.mts` | Signing and verification keys. `sign()` is the seam a KMS/HSM implements without surrendering the private key (#303). |
+| `mfaFactorStore` | `MfaFactorStore` | optional | `core/mfa/factorStore.mts` | Enrolled second factors (the MFA ADR's D7): one record per factor, keyed by subject and id, whose `data` the coordinator seals before it arrives and every store keeps byte for byte without reading. `update` is a compare-and-set on the record's `version`; a store that cannot answer throws, because an outage read as "no factors" would open a first binding. Bundled adapter: memory (`memoryMfaFactorStoreModule`, single replica; a restart empties it, which it warns about). |
+| `mfaTransactionStore` | `MfaTransactionStore` | optional | `core/mfa/transactionStore.mts` | MFA transactions and the subject lock (the MFA ADR's D8, D21). A transaction is the single-use record of one second-factor ceremony, bound to the browser session that started it; every operation a race could split is atomic in the store — `reserveAttempt` spends an attempt before a proof is checked, `takeChallenge` answers a challenge once, `consume` gives the transaction to one verification. The subject state bounds guessable proofs across transactions on the time the caller passes: the consecutive run with its short backoff and hard limit, the weekly budget no success refunds, and the browsers an exempt success trusts against the weekly hold. No Store variant: this is verification state. Bundled adapter: memory (`memoryMfaTransactionStoreModule`, single replica). |
+| `mfaCoordinator` | `MfaCoordinator` | optional | `core/mfa/coordinator.mts` | Not an adapter seam: what the login route and `/authorize` consult about MFA (the MFA ADR's D8) — the `amr` values a step-up can reach, a decision after the primary authentication (none, challenge, enroll), and the login transaction bound to the regenerated session. Declared in core so neither `session` nor `oauth` imports an optional feature; filled by the MFA package. Optional to wire, not optional to decide once a module reading it attaches `MFA_ABSENCE_POLICY` (below). |
+| `mailSender` | `MailSender` | optional | `core/mail/types.mts` | Where multi-factor authentication's one-time codes and security notices leave the provider (the MFA ADR's D5; the boundary section says why it is here). `send` takes a rendered message and resolves only when the relay accepted it; a rejection is never "sent". In core because its implementer and its consumer must not depend on each other. No bundled adapter; `createRecordingMailSender` (`@o3co/auth-provider-core/testing`) stands in for tests. |
 | `oidcFederationConfigs` | `Readonly<Record<string, OidcProviderConfig>>` | optional | `federation-oidc/module.mts` | Config of every generic OpenID Connect federation instance, keyed by federation name; each `oidcFederationModule(<name>)` reads its own entry. `readOidcFederationConfigs` builds it from `config.federations` (#524). |
 | `rateLimiter` | `RateLimiter` | optional | `core/ratelimit/types.mts` | Shared counters for the OAuth endpoints and the login brute-force guard. |
 | `refreshTokenFamilyRevocation` | `RefreshTokenFamilyRevocation` | optional | `core/refresh-token-family/types.mts` | Family-wide revoke, used on replay detection and on the credential-change cascade. |
@@ -133,7 +163,7 @@ a composition root. Listed because a module may `require` them.
 | `subjectRevocation` | `SubjectRevocation` | optional | `core/user-sessions/types.mts` | Per-subject not-before watermark: what a credential change stamps so tokens minted before it stop verifying. Absence must be declared (#406). |
 | `subjectRevocationService` | `SubjectRevocationService` | optional | `core/user-sessions/subjectRevocationService.mts` | Not an adapter seam: the composed operation a Store calls to end everything one subject holds (#593, D13) — the boundary, their sessions, and their federation grants. It is a component rather than the free `revokeAllForSubject` because building it needs every session store plus the cascade, and because the one decision it carries — whether a caller MAY ask for the subject's established grants to be kept — belongs to the operator (`federationGrants.allowKeepOnSubjectRevocation`) and not to the caller. Filled by an explicitly installed module in `@o3co/auth-provider-oauth`, where `cascadeLogout` lives. |
 | `subjectSessionIndex` | `SubjectSessionIndex` | optional | `core/user-sessions/types.mts` | Subject → live sessions, so a credential change can enumerate what to cascade over. Absence must be declared (#406). |
-| `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken`, plus the optional `linkFederatedIdentity` a `?link=1` flow relays to the Store, which decides — see the boundary section. The optional pair `supportsFederatedIdentityLookup` / `findSubjectByFederatedIdentity` is what a federation-grant callback asks (D7 check 5, #611): whether the Store covers a registration with the claims its connection names — asked at boot — and who holds an identity from it, given the registration, the `sub` and those verified claims (Entra's `tid`/`oid` for a directory Store), as `linked` / `unlinked` / `indeterminate`. The bundled `InMemoryUserRepository` covers none. |
+| `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken`, plus the optional `linkFederatedIdentity` a `?link=1` flow relays to the Store, which decides, and the optional `markMfaEnrolled`, the MFA enrollment witness the provider writes and the Store answers back as `User.mfaEnrolled` — see the boundary section. The optional pair `supportsFederatedIdentityLookup` / `findSubjectByFederatedIdentity` is what a federation-grant callback asks (D7 check 5, #611): whether the Store covers a registration with the claims its connection names — asked at boot — and who holds an identity from it, given the registration, the `sub` and those verified claims (Entra's `tid`/`oid` for a directory Store), as `linked` / `unlinked` / `indeterminate`. The bundled `InMemoryUserRepository` covers none. |
 | `userSessionStore` | `UserSessionStore` | optional | `core/user-sessions/types.mts` | The session records themselves, keyed by `sid`. |
 | `webauthnConfig` | `WebAuthnConfig` | optional | `webauthn/config.mts` | Config slice for the WebAuthn module. |
 | `webauthnCredentialStore` | `WebAuthnCredentialStore` | optional | `core/webauthn-credentials/types.mts` | Registered passkeys. |
@@ -183,6 +213,13 @@ that safety.
 | `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `oauth.deviceAuthorization.store = "unsupported"` |
 
+Declared, and attached by no bundled module yet. The constant fixes the line an
+operator will be told to write once a module that reads the slot attaches it:
+
+| Policy | Declared absent by | For the slot |
+| --- | --- | --- |
+| `MFA_ABSENCE_POLICY` | `mfa.mode = "off"` | `mfaCoordinator` |
+
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than
 two. `deviceCodeStore` joined with #443, which this paragraph missed while it
@@ -218,6 +255,8 @@ out-of-tree adapter can import and run:
 | `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
 | `FederationGrantStore` | `packages/core/src/federation-grants/__tests__/store.contract.mts` |
 | `FederationGrantIntentStore` | `packages/core/src/federation-grants/__tests__/intentStore.contract.mts` |
+| `MfaFactorStore` | `packages/core/src/mfa/__tests__/factorStore.contract.mts` |
+| `MfaTransactionStore` | `packages/core/src/mfa/__tests__/transactionStore.contract.mts` |
 | `PendingConsentStore` | `packages/core/src/consents/__tests__/pending.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |

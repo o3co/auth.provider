@@ -500,6 +500,7 @@ const LEAVES: Readonly<
 		},
 	],
 	"logging/": [],
+	"mail/": [],
 	"net/": [],
 	"sealing/": [],
 	"security/": [],

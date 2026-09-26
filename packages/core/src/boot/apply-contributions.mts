@@ -20,7 +20,8 @@
  * Takes the `ComponentWorld` from stage 3 plus the merged
  * `ContributionCollectorMap`, and:
  *   - Step 0: prepares synthetic read-side projections (`grantHandlerResolver`,
- *     `tokenExchangeValidatorResolver`, `federationProviders`) into the working
+ *     `tokenExchangeValidatorResolver`, `federationProviders`,
+ *     `federationRedirectPolicyResolver`, `mfaFactorResolver`) into the working
  *     component map before any factory runs.
  *   - Step 2: iterates modules in `BootPlan.initOrder`, pre-scanning for
  *     collector conflicts, then invoking name-keyed contribution factories and
@@ -35,8 +36,10 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
+import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
+	MfaFactorResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import { failureSummary } from "./failure-summary.mjs";
@@ -229,6 +232,67 @@ function makeFederationRedirectPolicyResolver(
 }
 
 /**
+ * Instantiate a stable read-side `MfaFactorResolver` over the `mfaFactors`
+ * collector. A kind whose factory answered `null` — the factor switched off
+ * by its configuration — is registered in the collector, so a second
+ * contribution of it is still a duplicate, and is absent from what the
+ * resolver answers. Reads through at call time, like the other resolvers.
+ * @internal
+ */
+function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>): MfaFactorResolver {
+	return {
+		get: (kind: string) => collector.get(kind) ?? undefined,
+		entries: function* (): IterableIterator<readonly [string, MfaFactor]> {
+			for (const [kind, factor] of collector.entries()) {
+				if (factor !== null) yield [kind, factor] as const;
+			}
+		},
+	};
+}
+
+/**
+ * Whether the projections of one boot's working map may be read: closed while
+ * stage 3 runs the `provides` factories, open from stage 4 on. Keyed by the
+ * working map, which stages 3 and 4 share.
+ */
+const projectionGates = new WeakMap<object, { open: boolean }>();
+
+/**
+ * A projection that refuses a read of its contents while its gate is closed.
+ * Read during stage 3 it would be empty — the contributions behind it
+ * register in stage 4 — so a provider that computed something from it then
+ * would keep an empty answer; the read throws instead, and the boot is
+ * refused (`provides-factory-failed`). Only the view's own members — `get`,
+ * `entries`, a map view's `size` and iterator — are its contents: `then`
+ * (which `await` reads; it answers `undefined`, so the view is not
+ * thenable), `Symbol.toStringTag`, `Symbol.toPrimitive` and what
+ * `Object.prototype` supplies pass, so a factory may hold, await, return or
+ * print it. Reading it at request time is the contract.
+ */
+function readableFromStage4<T extends object>(view: T, key: string, gate: { open: boolean }): T {
+	return new Proxy(view, {
+		get(target, property, receiver) {
+			if (property === "then") return undefined;
+			if (!gate.open && Object.hasOwn(target, property)) {
+				throw new Error(
+					`${key} was read while the provides factories run: it fills as the contributions register, so read it at request time`,
+				);
+			}
+			return Reflect.get(target, property, receiver);
+		},
+	});
+}
+
+/**
+ * Stage 4 opens the projections of `components` for reading (step 0).
+ * @internal
+ */
+export function openSyntheticProjections(components: Record<string, unknown>): void {
+	const gate = projectionGates.get(components);
+	if (gate !== undefined) gate.open = true;
+}
+
+/**
  * Step 0 — prepareSyntheticProjections.
  *
  * For each name-keyed collector that has a corresponding synthetic
@@ -238,36 +302,77 @@ function makeFederationRedirectPolicyResolver(
  * Only injects the resolver if the corresponding collector is present in the
  * `contributionKinds` map. Does NOT inject `undefined`.
  *
+ * `createApp` runs it before stage 3 (`materializeComponents`), so a
+ * `provides` factory that requires a synthetic key is handed the projection
+ * the world keeps, which fills as stage 4 registers the contributions. A
+ * provider holds it and reads it at request time: a read while the provides
+ * factories run throws (see `readableFromStage4`) and refuses the boot,
+ * rather than answer an empty view. A projection already in the map is kept,
+ * so the pass in stage 4 does not replace the object a provider holds; that
+ * pass opens them for reading (`openSyntheticProjections`).
+ *
  * Per A2-β §5.4 step 0.
  * @internal
  */
-function prepareSyntheticProjections(
+export function prepareSyntheticProjections(
 	components: Record<string, unknown>,
 	contributionKinds: ContributionCollectorMap,
 ): void {
-	if (contributionKinds.grants !== undefined) {
-		const resolver = makeGrantHandlerResolver(
-			contributionKinds.grants as NameKeyedCollector<unknown>,
-		);
-		components.grantHandlerResolver = resolver;
+	let gate = projectionGates.get(components);
+	if (gate === undefined) {
+		gate = { open: false };
+		projectionGates.set(components, gate);
 	}
-	if (contributionKinds.tokenExchangeValidators !== undefined) {
-		const resolver = makeTokenExchangeValidatorResolver(
-			contributionKinds.tokenExchangeValidators as NameKeyedCollector<unknown>,
+	const readGate = gate;
+	const inject = (key: string, make: () => object): void => {
+		if (!Object.hasOwn(components, key)) {
+			components[key] = readableFromStage4(make(), key, readGate);
+		}
+	};
+	const { grants, tokenExchangeValidators, federations, federationRedirectPolicies, mfaFactors } =
+		contributionKinds;
+	if (grants !== undefined) {
+		inject("grantHandlerResolver", () =>
+			makeGrantHandlerResolver(grants as NameKeyedCollector<unknown>),
 		);
-		components.tokenExchangeValidatorResolver = resolver;
 	}
-	if (contributionKinds.federations !== undefined) {
-		const view = makeFederationProviders(
-			contributionKinds.federations as NameKeyedCollector<unknown>,
+	if (tokenExchangeValidators !== undefined) {
+		inject("tokenExchangeValidatorResolver", () =>
+			makeTokenExchangeValidatorResolver(tokenExchangeValidators as NameKeyedCollector<unknown>),
 		);
-		components.federationProviders = view;
 	}
-	if (contributionKinds.federationRedirectPolicies !== undefined) {
-		const view = makeFederationRedirectPolicyResolver(
-			contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>,
+	if (federations !== undefined) {
+		inject("federationProviders", () =>
+			makeFederationProviders(federations as NameKeyedCollector<unknown>),
 		);
-		components.federationRedirectPolicyResolver = view;
+	}
+	if (federationRedirectPolicies !== undefined) {
+		inject("federationRedirectPolicyResolver", () =>
+			makeFederationRedirectPolicyResolver(
+				federationRedirectPolicies as NameKeyedCollector<unknown>,
+			),
+		);
+	}
+	if (mfaFactors !== undefined) {
+		inject("mfaFactorResolver", () => makeMfaFactorResolver(mfaFactors));
+	}
+}
+
+/**
+ * Refuse a contributed value its kind's projection could not answer for:
+ * an `mfaFactors` factor whose `kind` is not the key it is contributed or
+ * overridden under — the resolver answers by key, and the coordinator reads
+ * a record's kind back through it, so a factor filed under another kind
+ * would verify that kind's records. `null` (switched off) passes. Throws a
+ * `RangeError`, which the caller reports as a failed contribution factory.
+ * @internal
+ */
+function checkNameKeyedValue(kind: string, name: string, value: unknown): void {
+	if (kind !== "mfaFactors" || value === null) return;
+	if ((value as { kind?: unknown } | undefined)?.kind !== name) {
+		throw new RangeError(
+			`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
+		);
 	}
 }
 
@@ -362,7 +467,8 @@ function warnOnTokenBindingSurfaceOverlap(
  *
  * Steps:
  *   0. `prepareSyntheticProjections` — inject stable read-side resolvers for
- *      `grants`, `tokenExchangeValidators`, `federations` into the working
+ *      `grants`, `tokenExchangeValidators`, `federations`,
+ *      `federationRedirectPolicies`, `mfaFactors` into the working
  *      component map so contribution factories can capture resolver references
  *      that are fully populated at request time.
  *   2. Name-keyed pass (in `BootPlan.initOrder`):
@@ -400,6 +506,7 @@ export async function applyContributions(
 	// Step 0: prepareSyntheticProjections. Per A2-β §5.4 step 0.
 	// ---------------------------------------------------------------------------
 	prepareSyntheticProjections(components, contributionKinds);
+	openSyntheticProjections(components);
 
 	// Modules that mounted a `tokenBindingMw` through the legacy v0.7
 	// `grantMiddleware` slot. Collected here because module provenance is only
@@ -493,6 +600,7 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = await factory(deps);
+				checkNameKeyedValue(entry.kind, name, value);
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -525,6 +633,7 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = await factory(deps);
+				checkNameKeyedValue(entry.kind, name, value);
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({

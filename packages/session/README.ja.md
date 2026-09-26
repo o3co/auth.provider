@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -162,7 +162,6 @@ const handle = await createApp({
 | --- | --- |
 | `POST /session/login` | `["pwd"]` |
 | フェデレーションのコールバック | プロバイダーがプロファイルに載せた上流 IdP の `amr`（`profile.amr`、文字列の配列）に、`fed` — 「フェデレーション経由」を表すデプロイ定義のマーカーで、`FEDERATED_AMR` として export — を加えたもの。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。 |
-| 再開された MFA ログイン（`POST /auth/mfa/verify`、デプロイが組み立てる） | デプロイの再開ハンドラーが記録するもの: 最初の要素の値に `mfa`、その要素自身の値（`otp` など）を加えたもの。`CreateUserSessionInput.amr` がその継ぎ目。 |
 | アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない |
 
 再認証は *新しい* セッションである: `POST /session/login` とフェデレーションのコールバックは常に新しい `authTime` でセッションを作り、`max_age` と `prompt=login` が測るのはそれである。既に認証済みのブラウザをそのまま `/authorize` に送り返すログインページは、そこで `login_required` を返され、ループしない。

@@ -240,9 +240,9 @@ export const createRouter = (
 	// narrowed to the cookie domain only when one was configured — so with
 	// `session.domain` at its `null` default the route stored any URL on the
 	// internet under `req.session.redirectTo`. Nothing in this repository
-	// redirects to that key today, but it is declared on `SessionData` and
-	// `MfaResumeState`'s `flow: "login"` variant designs a consumer for it, so
-	// what an embedder reads back has to be a value the deployment named.
+	// redirects to that key today, but it is declared on `SessionData`, and an
+	// MFA login transaction carries it back to the page (`MfaTransaction.redirectTo`),
+	// so what an embedder reads back has to be a value the deployment named.
 	//
 	// Built here rather than per request so a dead allowlist entry (a typo, or
 	// a target outside `session.domain`) fails boot instead of refusing logins

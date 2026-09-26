@@ -346,6 +346,8 @@ export interface MfaFactor {
 
 A factor never sees a key, a store or a transaction: the coordinator opens and seals data, passes the subject's records of that kind decoded, and writes what the factor returns. That keeps sealing in one place and lets `packages/webauthn` implement a factor without depending on `packages/mfa`.
 
+**Amended 2026-09-27 (build-order step 3): what the contract hands a factor.** D11's keyed digests — an email code over (transaction id, factor id, code), a recovery code over the normalised code, each kept with its key id — need the transaction id and the ring, and a factor holds neither. Every context therefore carries `transactionId` and `digests`: `digest(parts)` answers `{keyId, digest}` (HMAC-SHA-256 under the current key, the parts length-prefixed, bound to the factor's kind) and `matchesDigest(parts, stored)` compares in constant time under the key `stored` names, answering `"match"`, `"mismatch"` or `"key_unavailable"` — the last when that key has left the ring, which the factor answers as an outage (the coordinator's `503` and `mfa_factor_unreadable`), never as a wrong code. The ring stays with the coordinator. Every call runs under a transaction: one outside a login or step-up — self-service enrollment, regenerating recovery codes (F4) — runs under an `enroll` transaction the coordinator opens for it. The contract also gains: `sign_count_regression` among a verification's refusals (F7, D28); `reusableChallenge`, by which a factor opts in to a challenge that stays across attempts (an email code, F5) — absent, a verification takes it (WebAuthn), so a factor that forgets the flag fails closed; and an optional `enrollable(user)`, so a kind a user cannot enroll (email without an address) is not offered and no throw is read as an outage.
+
 **Adapters.**
 
 - **Memory** (core, `memoryMfaFactorStoreModule`): `replicaSafety.unsafe` — "enrolled second factors fork per replica and vanish on restart". Development only; D12 is why that matters.
@@ -448,6 +450,8 @@ export interface MfaCoordinator {
 
 Two calls, because the express session is regenerated between them: the transaction must be bound to the id the browser will hold, and the factor read must happen before anything is written.
 
+**Amended 2026-09-27 (build-order step 3).** `MfaTransactionStore` also keeps D25's email-proof requirement, apart from the lock state (see D25's amendment), and `noteExemptSuccess` takes the presented browser so a trusted one is renewed rather than added (D21's amendment). A patch clears `challenge`, `pendingEnrollment` or `lastSentAtMs` with `null`; a key present with `undefined` is absent, so no patch clears a limit by omission; a value a field does not admit is a `RangeError`, and keys outside the patch are ignored (`mfaTransactionPatchWrites`, which every adapter calls first). `create` refuses a transaction whose `attempts` is not `0`, whose `version` or `sends` is not a safe non-negative integer, or whose fields its type does not admit, and keeps only the fields a transaction has (`newMfaTransactionRecord`). `update` refuses a transition that would refund a limit or undo a requirement — `sends` going down, `lastSentAtMs` moving back (clearing it after a failed delivery is allowed: the retry still costs a send), a required email proof becoming anything but met, a met one undone, `enrollment` lowered (`checkMfaTransactionTransitions`); sub-objects keep only their known fields. The coordinator bounds the transactions one session holds: the store's bound is its expiry, and for the in-process adapter a global cap.
+
 ### D9 — What the session records
 
 `UserSession` and `CreateUserSessionInput` gain one required key (the #626 shape, so a copy that forgets it fails to compile):
@@ -502,9 +506,11 @@ Rejected: **three separate keys**, three things a copy can forget; **a new `sid`
 - **Every factor's `data` is sealed**, with authenticated data `o3co:mfa:factor` ‖ subject ‖ factor id ‖ kind, length-prefixed: a record copied to another subject, or relabelled as another kind, does not open.
 - **Pending enrollment state** is sealed with the transaction id in the authenticated data.
 - **Codes that are compared, never recovered, are digested** under the ring (HMAC-SHA-256): email codes over `(transaction id, factor id, code)`; recovery codes over the normalised code. Each digest is stored **with its key id**, so rotation never makes a code unverifiable. Comparison uses core's `constantTimeStringEqual`.
-- **Rotation**: add the new key last, then move it first. Factors do not expire, so a retired key stays until nothing is sealed under it; every TOTP or WebAuthn use re-seals under the current key; dormant factors do not migrate. The runbook has the procedure; the coordinator logs `mfa_factor_sealed_with_retired_key` (info, once per key id per process).
+- **Rotation**: add the new key last, then move it first. Factors do not expire, so a retired key stays until nothing is sealed under it and no stored digest names it (recovery-code digests live inside sealed data but name their own key; count both); every TOTP or WebAuthn use re-seals under the current key; dormant factors do not migrate. The runbook has the procedure; the coordinator logs `mfa_factor_sealed_with_retired_key` (info, once per key id per process).
 - **A factor that does not open** is never "no factor": it counts for F3's rule, its verification is `503` with one `mfa_factor_unreadable` error line, and the user uses another factor or a recovery code.
 - **No plaintext mode**, and **a development sample key**: the template's `config/development.conf` carries a published sample key; the MFA schema refuses that exact key when the environment the configuration was selected by is `production` or `staging`, or `deployment.mode = "multi"` (#473's rule).
+
+**Amended 2026-09-27 (build-order step 3).** A factor asks for these digests through its context's `digests` (`digest`, `matchesDigest`); the coordinator makes them under the ring and binds them to the factor's kind, so no factor holds a key (D7's amendment).
 
 ### D12 — Losing the factor store must not downgrade every account
 
@@ -519,6 +525,8 @@ Rejected: **three separate keys**, three things a copy can forget; **a new `sid`
   - A repository without the capability and a Store that answers no field leave the witness absent; the durability requirements are then the whole defence.
 - **Recovering from a lost factor store** (runbook): the mass `503` is the design refusing to downgrade. Restore the factor store from its AOF or a backup; if that is impossible, reset the affected subjects (`resetMfaForSubject` with `requireEmailProof: true`, D25), in bulk from the Store's list of users marked enrolled, and tell them they will re-enroll.
 - Rejected: **a marker in the same Redis** (lost with the records); **refusing a first binding for any subject seen before** (the provider keeps no subject list).
+
+**Amended 2026-09-27 (build-order step 3).** The durability requirements extend to the transaction store's key family that holds D25's email-proof requirement: a lost requirement lets a password holder bind without the proof. PR 6's `redisMfaTransactionStoreModule` therefore runs the same boot check as the factor store — it refuses an `allkeys-*` eviction policy and warns when there is no persistence — or the runbook requires the same of it; the in-process transaction store says in its replica-safety reason that a restart loses the requirement. The witness is read only through `readMfaEnrollmentWitness`: `true` enrolled, `false` or absent not enrolled, anything else (`null` included) malformed — `503`, never a first binding; a drift guard holds every package to it.
 
 The template's default is decided in O6.
 
@@ -673,6 +681,8 @@ Core's reference and schema hold what core's consumers read with the MFA package
 | `mail.smtp { host, port, secure, user, password, from }` (smtp) | `SMTP_*` | port 587, `starttls` | D5 |
 | `repositories.user.http.{list,create,update,delete}MfaFactor(s)Url`, `markMfaEnrolledUrl` (foundation) | `CLIENT_USER_*` | unset | D7, D12 |
 
+**Amended 2026-09-27 (build-order step 3): what core's schema accepts before the MFA package exists.** Core's schema admits only `mfa.mode = "off"` until a module honours another mode — the build order's step 7 or 8, whichever comes first, widens it — so an operator who writes `required` before then is refused at boot rather than left believing logins ask for a second factor. Until the flip (step 22) the schema also defaults a missing section or mode to `"off"`, as core's `reference.conf` does, so a hand-built configuration declares the coordinator's absence once a module attaches `MFA_ABSENCE_POLICY`; the flip removes both defaults (O2). Core also owns `mfaTransactionStore.memory.maxEntries` (default 100 000): the in-process transaction store's cap, at which it refuses a new transaction as a store fault rather than evict one in flight.
+
 **Why TOTP is the only counting factor on by default.** It needs nothing from the deployment. Email needs an SMTP relay and WebAuthn a relying-party id that depends on where the page is served.
 
 **The template** (`templates/standalone`): `buildModules` installs `mfaModules` and the two stores when `mfa.mode` is not `off`, `mfaEmailFactorModule` when email is enabled, `smtpMailSenderModule` when `SMTP_HOST` is set, and `webauthnMfaFactorModule` with a `webauthnConfig` bootstrap when WebAuthn is enabled; nothing when the mode is `off`. `application.conf` repeats each `${?…}` line and ships D15's table. `.env.example` gains `MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`) and `MFA_NOTICES`; `docker-compose.yml` gains a Mailpit service and points `SMTP_HOST` at it.
@@ -729,6 +739,8 @@ Core's reference and schema hold what core's consumers read with the MFA package
 - **Hard limit**: 100 consecutive failures hold guessable proofs until an exempt success, a credential change or an operator reset — NIST SP 800-63B-4's cap on consecutive failures.
 - **Credential change**: `revokeAllForSubject` — what a Store calls after a password change — clears the subject's MFA lock state (`clearSubjectState`) when an `MfaTransactionStore` is wired. The password change is the remedy for an attacker who holds the password, and it ends the lock that attacker caused.
 
+**Amended 2026-09-27 (build-order step 3): the lock's readings, as the port states them.** (a) Before any lock, `memorySeconds` without a failure starts the count again, as it does after a lock ends; neither ends the run the hard limit counts. (b) A guessable success ends the run up to its own reservation, and an exempt success up to its time: an attempt reserved after it, still in flight, starts the next run. (c) Each answer is judged on the time its caller passes, so callers' clocks must agree (NTP, D22); a store forgets a failure or a trust only a day (`MFA_CLOCK_SKEW_ALLOWANCE_MS`) after it stops counting, judged no later than the store's own clock, so a caller ahead by less than the allowance erases nothing another still counts, and a caller far ahead — on any subject, the in-process sweep included — erases nothing. (d) An exempt success from a browser already trusted renews that browser's trust under a fresh cookie value rather than adding one, so a user's daily WebAuthn sign-ins never push their other browsers out of the five. (e) `threshold` must not exceed `hardLimit`, and `hardLimit` must not exceed NIST's 100. (f) A password change clearing the week (`clearSubjectState`) is kept, as decided: it ends the hold the password's holder caused.
+
 | Other control | Scope | Default | Where | On its store's outage |
 | --- | --- | --- | --- | --- |
 | Flood guard | per IP, every `/session/mfa` POST | 60 per 5 min | `rateLimiter`, prefix `mfa` | `rateLimit.failMode` |
@@ -768,6 +780,8 @@ The honest statement for a deployment without mail: MFA protects every account f
 - **Recovery codes** (on by default): generated with the first counting factor, shown once, regenerated with recent MFA; exempt from the subject lock, and an exempt success (D21); each use audited and answered with the count left. A recovery code satisfies the second factor (`amr` `recovery`, plus `mfa`); under `required`, a subject with no usable counting factor left must enroll one before the session is written (F3).
 - **An operator reset** for a user who lost everything: `resetMfaForSubject(subject, { requireEmailProof?, revokeSessions? })`, reached as `handle.components` like `revokeAllForSubject`. It removes every factor record, clears the subject's lock state, clears the witness last (D12), audits `mfa.factor.removed` (`by: "operator"`), and mails a notice under `mail`. `requireEmailProof: true` makes the user's next first binding require the email proof whatever `mfa.enrollment.requireEmailProof` says; `revokeSessions: true` also calls `revokeAllForSubject`. No HTTP admin surface; it never enrolls anything. The runbook requires out-of-band identity proofing before calling it: the reset is the account-takeover path if it is not.
 - Rejected: **no recovery**; **email-link recovery** — it makes the mailbox a single factor that bypasses the second one; **security questions** (`kba`).
+
+**Amended 2026-09-27 (build-order step 3): where `requireEmailProof: true` is kept.** The reset empties the factor store, the witness is a boolean, and the lock state is cleared by the reset and by every later password change, so none of them can hold the requirement until the next first binding. `MfaTransactionStore` keeps it as a flag of its own (D8): `requireEmailProofAtNextBinding(subject)` sets it, `emailProofRequiredAtNextBinding(subject)` reads it when deciding whether a first binding needs the proof, and `consumeEmailProofRequirement(subject)` clears it atomically at that binding. It has no expiry, and `clearSubjectState` leaves it.
 
 Decided in O8.
 
@@ -882,6 +896,14 @@ The PR numbers below are the plan at acceptance, and the rest of this record cit
 | 22. `feat!`: on by default | Core's `mfa.mode` reference default removed (O2), the template's and create-app's default `required`; CHANGELOG draft in the PR description (release policy R2) | Core: a composition with neither the modules nor a declaration refused; the template: a fresh scaffold refuses until `MFA_ENCRYPTION_KEY` and mail or `MFA_NOTICES`, then logs in through a first binding |
 
 A follow-up outside this repository: auth.proxy maps `step_up` to a step-up route instead of `session_unauthorized`.
+
+**Amended 2026-09-27 (build-order step 3): what the ports oblige later steps to do.**
+
+- **Step 6** (Redis stores): `redisMfaTransactionStoreModule` holds the email-proof requirement's key family to D12's durability check (refuses `allkeys-*`, warns without persistence). Both stores meet the contract suites as amended at step 3: the clock-skew and far-ahead cases, create-side field validation, the transition rules, trust renewal scoped to the subject, and the email-proof requirement.
+- **Step 8** (verification): the store has no lifetime ceiling of its own. The MFA module refuses at boot a `mfa.transactionTtlSeconds` outside its range, and the coordinator derives every `expiresAtMs` from it and nothing else. `mfa.lockout` is checked at boot with `checkMfaLockoutPolicy(policy, "mfa.lockout")`. `secondFactorMethods` is computed lazily from `mfaFactorResolver`. `noteExemptSuccess` is called only after the exempt proof's transaction is consumed.
+- **Step 12** (reset): `resetMfaForSubject(subject, { requireEmailProof: true })` refuses when no `mailSender` is wired or the account has no address — nobody could then give the proof. The first binding consumes the requirement only after the first counting factor is written.
+- **Step 19** (foundation): the Store's wire contract says `mfaEnrolled` is a boolean or absent; `null`, a number or a string reads as malformed, which is `503`.
+- **Step 20** (runbook): the reset procedure says that an in-process transaction store loses the email-proof requirement at a restart.
 
 ---
 

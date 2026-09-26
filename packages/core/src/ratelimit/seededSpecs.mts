@@ -16,6 +16,7 @@
 
 import { resolveDeviceVerificationLimitSpec } from "./deviceVerificationSpec.mjs";
 import { resolveLoginLimitSpec } from "./loginSpec.mjs";
+import { resolveMfaLimitSpecs } from "./mfaSpec.mjs";
 import type { RateLimitSpec } from "./types.mjs";
 import { resolveWebAuthnAuthenticationOptionsLimitSpec } from "./webauthnSpec.mjs";
 
@@ -28,8 +29,10 @@ import { resolveWebAuthnAuthenticationOptionsLimitSpec } from "./webauthnSpec.mj
  * so a spec seeded into one adapter cannot be forgotten in the other — which
  * is how `device_verification` went unseeded in both while `login` was
  * seeded in each. The prefixes: `login` (`rateLimit.login`),
- * `device_verification` (`oauth.deviceAuthorization.rateLimit`) and
- * `webauthn-authentication-options` (`webauthn.rateLimit.authenticationOptions`).
+ * `device_verification` (`oauth.deviceAuthorization.rateLimit`),
+ * `webauthn-authentication-options` (`webauthn.rateLimit.authenticationOptions`),
+ * `mfa` (`mfa.rateLimit.routes`) and `mfa-email`
+ * (`mfa.factors.email.sendLimit`).
  * An operator-declared entry for any prefix still wins; see the individual
  * resolvers.
  */
@@ -37,7 +40,10 @@ export const resolveSeededLimitSpecs = (
 	limits: Readonly<Record<string, RateLimitSpec>>,
 	config: unknown,
 ): Record<string, RateLimitSpec> =>
-	resolveWebAuthnAuthenticationOptionsLimitSpec(
-		resolveDeviceVerificationLimitSpec(resolveLoginLimitSpec(limits, config), config),
+	resolveMfaLimitSpecs(
+		resolveWebAuthnAuthenticationOptionsLimitSpec(
+			resolveDeviceVerificationLimitSpec(resolveLoginLimitSpec(limits, config), config),
+			config,
+		),
 		config,
 	);

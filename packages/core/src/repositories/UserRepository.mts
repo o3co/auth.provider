@@ -166,6 +166,40 @@ export interface UserRepository {
 	findSubjectByFederatedIdentity?(
 		identity: FederatedIdentityLookup,
 	): Promise<FederatedIdentityLookupResult>;
+	/**
+	 * Tell the Store whether `subject` has a second factor enrolled — the MFA
+	 * enrollment witness it answers on `authenticate` as `User.mfaEnrolled`
+	 * (the MFA ADR's D12). Optional; detected by
+	 * {@link supportsMfaEnrollmentWitness}.
+	 *
+	 * The provider decides and the Store only persists. It is called with
+	 * `true` after the first counting factor has been written, and with
+	 * `false` after the last one was removed or an operator reset every factor
+	 * — so a crash between the two leaves a factor without a witness, never a
+	 * witness without a factor. A verification whose `User` lacks the witness
+	 * while a counting factor exists marks it again. Idempotent. A backend that
+	 * cannot answer throws.
+	 */
+	markMfaEnrolled?(subject: string, enrolled: boolean): Promise<void>;
+}
+
+/** A `UserRepository` that can write the MFA enrollment witness. */
+export interface SupportsMfaEnrollmentWitness {
+	markMfaEnrolled(subject: string, enrolled: boolean): Promise<void>;
+}
+
+/**
+ * Whether `repository` can write the MFA enrollment witness (the MFA ADR's
+ * D12), detected by method presence like the other optional capabilities. A
+ * repository without it leaves the witness to whatever the Store answers on
+ * `authenticate`, which may be nothing.
+ */
+export function supportsMfaEnrollmentWitness(
+	repository: UserRepository,
+): repository is UserRepository & SupportsMfaEnrollmentWitness {
+	return (
+		typeof (repository as Partial<SupportsMfaEnrollmentWitness>).markMfaEnrolled === "function"
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -183,4 +217,28 @@ declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly userRepository: UserRepository;
 	}
+}
+
+/**
+ * What the MFA enrollment witness says (the MFA ADR's D12): `enrolled`,
+ * `not_enrolled`, or `malformed` — a value the Store should not have answered.
+ */
+export type MfaEnrollmentWitness = "enrolled" | "not_enrolled" | "malformed";
+
+/**
+ * The one reading of `User.mfaEnrolled`, for the `User` a login's
+ * `authenticate` answered and for the session's snapshot of it alike: `true`
+ * is `enrolled`; `false` or absent is `not_enrolled`; any other value — `1`,
+ * `"true"`, `null` — is `malformed`. A malformed witness is never read as
+ * "not enrolled", which would open a first binding to whoever holds the
+ * password: the coordinator answers it `503 temporarily_unavailable`, with one
+ * error line (`mfa_enrollment_witness_malformed`), and binds nothing.
+ */
+export function readMfaEnrollmentWitness(
+	user: Readonly<Record<string, unknown>>,
+): MfaEnrollmentWitness {
+	const value = user.mfaEnrolled;
+	if (value === true) return "enrolled";
+	if (value === false || value === undefined) return "not_enrolled";
+	return "malformed";
 }

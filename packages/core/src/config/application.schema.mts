@@ -1149,6 +1149,32 @@ export const CoreConfigSchema = z.object({
 				.optional(),
 		),
 	}),
+	// The MFA ADR's D19: whether a password login asks for a second factor.
+	// Declared here, in the schema `createApp` parses itself, so a composition
+	// that never ran `AppConfigSchema` is refused too. `"off"` — the reference
+	// default — is the only value this release can honour: no module here asks
+	// for or verifies a second factor, and a mode written but not honoured
+	// would let an operator believe their logins ask for one. The build order's
+	// step 7 or 8, whichever first honours another mode, widens the literal.
+	//
+	// Until the flip (step 22), a missing section or mode reads as "off" here
+	// as it does in `reference.conf`, so a hand-built configuration still
+	// declares the coordinator's absence (`MFA_ABSENCE_POLICY`); the flip
+	// removes the default (the ADR's O2). A deliberate, temporary exception to
+	// the 2026-04-30 ADR (defaults live in HOCON): the parsed type always
+	// carries `mfa`. The rest of the section belongs to the package that reads
+	// it and passes through.
+	mfa: z
+		.object({
+			mode: z
+				.literal("off", {
+					error:
+						'mfa.mode must be "off": no module in this release asks for or verifies a second factor',
+				})
+				.default("off"),
+		})
+		.passthrough()
+		.default({ mode: "off" }),
 });
 
 export type CoreConfig = z.infer<typeof CoreConfigSchema>;
@@ -1532,6 +1558,10 @@ export const fullSectionsSchema = z.object({
 		// `/consent` is the default, from HOCON — the deployment's page, not the
 		// `/oauth/consent` JSON API that page calls.
 		consent: z.object({ url: z.string() }).optional(),
+		// The MFA ADR's D6: the deployment's page `/authorize` sends a browser
+		// to for a step-up, `/mfa` by default, from HOCON. Nothing sends a
+		// browser there in this release.
+		mfa: z.object({ url: z.string() }).optional(),
 		// IH-10: `client` / `authCallback` removed — no production consumer
 		// reads them. The pre-fix env-var-only HOCON lines silently leaked
 		// values into AppConfig that nothing consumed.
@@ -1774,6 +1804,27 @@ export const fullSectionsSchema = z.object({
 	federationGrantIntentStore: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// The MFA ADR's D19: which store keeps enrolled factors, and which keeps
+	// MFA transactions and the lock state. Declared for the reason the other
+	// switches are — undeclared, an operator's choice is stripped before a
+	// composition root reads it. Read only by a composition that installs
+	// MFA, which `mfa.mode = "off"` means none does in this release. The
+	// factor store may be kept in the Store; a transaction is verification
+	// state and has no Store variant. Defaults live in `reference.conf`.
+	mfaFactorStore: z
+		.object({
+			adapter: z.enum(["memory", "redis", "store"]).optional(),
+		})
+		.optional(),
+	mfaTransactionStore: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
+			// The memory store's cap, read by `memoryMfaTransactionStoreModule`
+			// the way `challengeStore.memory.maxEntries` is read. Absent: the
+			// adapter's default.
+			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
 		.optional(),
 	// #593, D16: this adapter's own layout, beside the other stores' prefixes.

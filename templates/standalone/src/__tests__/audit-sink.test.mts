@@ -57,6 +57,9 @@ const keyPair = generateKeyPairSync("ed25519", {
 const baseConfig: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
+	// The parsed config always carries `mfa`: "off" until the release that
+	// turns MFA on (the MFA ADR's D19).
+	mfa: { mode: "off" },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

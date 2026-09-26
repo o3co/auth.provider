@@ -67,7 +67,6 @@ describe("stage-1 check registries (#368)", () => {
 		]);
 		expect(STAGE_ONE_POST_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"grant-policy-issuer",
-			"mfa-partial-wiring",
 			"federation-stores-wiring",
 			"declared-absence",
 			"replica-safety",

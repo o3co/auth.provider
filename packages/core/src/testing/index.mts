@@ -62,4 +62,8 @@ export {
 	makeValidCoreConfig,
 	makeValidFullSections,
 } from "./fixtures/valid-config.mjs";
+export {
+	createRecordingMailSender,
+	type RecordingMailSender,
+} from "./recordingMailSender.mjs";
 export type { TestInspect } from "./test-inspect.mjs";

@@ -24,6 +24,7 @@ import {
 } from "../federation-grants/module.mjs";
 import { memoryFederationTokenStoreModule } from "../federation-tokens/module.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "../mfa/module.mjs";
 import type { Module, ReplicaSafetyDeclaration } from "../modules/manifest/index.mjs";
 import { memoryRateLimiterModule } from "../ratelimit/module.mjs";
 import { memoryRefreshTokenFamilyStoreModule } from "../refresh-token-family/module.mjs";
@@ -121,6 +122,8 @@ export const REPLICA_UNSAFE_BUNDLED_MODULES: readonly Module[] = [
 	memoryConsentStoreModule,
 	memoryFederationGrantStoreModule,
 	memoryFederationGrantIntentStoreModule,
+	memoryMfaFactorStoreModule,
+	memoryMfaTransactionStoreModule,
 ];
 
 /**

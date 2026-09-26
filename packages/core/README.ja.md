@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-26
+最終更新: 2026-09-27
 
 ## 責務と役割
 
@@ -8,7 +8,7 @@
 
 グラントタイプと `/oauth/*` エンドポイント（`@o3co/auth-provider-oauth` と各グラントパッケージ）は持ちません: core が自分でマウントするルートは discovery ドキュメントだけで、JWKS、health、readiness のルーターは composition root が組み込みます。永続アダプター（`@o3co/auth-provider-redis`）、フェデレーションアダプター（`@o3co/auth-provider-federation-*` パッケージ群）、ログインとブラウザーセッション（`@o3co/auth-provider-session`）、Store クライアント（`@o3co/auth-provider-foundation`）は持ちません。内部のどのディレクトリが何を持ち、なぜ分かれているかは [src/README.md](src/README.md) にあります。
 
-語彙: **the Store** は auth.provider の用語で、利用者側の上流ユーザーサービス — identity・クレデンシャル・メール検証状態の system of record — を指します。定義は [`src/repositories/types.mts`](src/repositories/types.mts) の `User` doc にあり、auth.provider は Store が公開した状態を読むだけで、書き込むことはありません。このパッケージのソースが引用する design-campaign 識別子は [docs/design-campaign-index.md](../../docs/design-campaign-index.md) で解決できます。
+語彙: **the Store** は auth.provider の用語で、利用者側の上流ユーザーサービス — identity・クレデンシャル・メール検証状態の system of record — を指します。定義は [`src/repositories/types.mts`](src/repositories/types.mts) の `User` doc にあり、auth.provider は Store が公開した状態を読み、Store への書き込みを引き起こすのは、自身のフローが必要とする 2 つの任意の中継（`linkFederatedIdentity` と、MFA 登録の証人 `markMfaEnrolled`）だけです。このパッケージのソースが引用する design-campaign 識別子は [docs/design-campaign-index.md](../../docs/design-campaign-index.md) で解決できます。
 
 ## インストール
 
@@ -56,7 +56,9 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `rateLimit` | `login`: 同梱の両リミッターが初期値に使う `/session/login` の予算（`windowMs`、`limit`）。`failMode`: OAuth エンドポイントのリミッターのバックエンドが失敗したときの動作 — `closed` は `503` を返し、`open` はリクエストを通してエラーをログに出す。OAuth エンドポイントの制限値そのものはリミッターモジュールのもの（`memoryRateLimiter.*` / `redisRateLimiter.*`） |
 | `federations` | フェデレーションプロバイダー。名前をキーとする `{ enabled, type?, … }`。core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）だけで、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは [ルート README](../../README.md) に一覧がある |
 | `repositories` | client、user、code の Repository 設定 — それぞれ `type` とそのサブセクション |
-| `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`） |
+| `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`）。`mfa.url`: `/authorize` で第二要素を求めるページ（デフォルト `/mfa`）。まだブラウザーをそこへ送るものはない |
+| `mfa.mode` | パスワードログインが第二要素を求めるかどうか — [MFA](#mfa) を参照。このリリースが受け付ける値は `"off"`（既定）だけである: ここには第二要素を求めるモジュールも検証するモジュールもないので、ほかの値はキーを名指しして起動を拒否する。`mfa` セクションの残りはそれを読むパッケージのもので、そのまま通す |
+| `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込む composition だけが読み、`mfa.mode` が `"off"` の間はどれも組み込まない |
 | `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
 
 ### グラントシステム
@@ -406,12 +408,14 @@ const userRepo = new InMemoryUserRepository(users);
 
 #### MFA
 
-> **非推奨。** この節のものはどれも配線されておらず、[`docs/adr/2026-09-25-multi-factor-authentication.md`](docs/adr/2026-09-25-multi-factor-authentication.md) の多要素認証の設計（D3）で置き換えられる。理由は三つある。`createMfaRouter` は CSRF ガードのないルートでフローの続きをコールバックに委ねる。検証に失敗してもトランザクションは期限まで再試行を受け付ける。`MfaTransactionStore` は get と delete が別々の操作なので、同時に進む二つの検証がどちらも通る。D3 で削除される名前には `@deprecated` が付いている。`MfaFactor`（と `mfaFactors` contribution）、`MfaCoordinator`、`MfaTransactionStore` は名前は残るが、契約が変わる。これを前提に実装しないこと。
+多要素認証のポート。設計は [MFA の ADR](docs/adr/2026-09-25-multi-factor-authentication.md) にある。このリポジトリでそれを参照するものはまだない: `POST /session/login`、`/authorize`、フェデレーションのコールバックは第二要素を求めない。
 
-- `MfaProvider` と任意の `SupportsEnrollment` / `SupportsRevocation` capability、ガード `supportsEnrollment()` / `supportsRevocation()`、`MfaCoordinator` / `MfaTransactionStore` 型 — [`src/mfa/types.mts`](src/mfa/types.mts)。ファクトリー `createMfaProviderFactory()` — [`src/mfa/factory.mts`](src/mfa/factory.mts)。
-- `createMfaRouter(express, deps)` は `POST /auth/mfa/verify { transaction_id, proof }` を作る: 保留中のトランザクションを `MfaTransactionStore` から読み、トランザクションの `providerKind` のプロバイダーで proof を検証し、再開するフローを呼び出し側が渡す `onAuthorizeResume` / `onFederationResume` / `onLoginResume` コールバックに渡す。
-- core が提供するのはポートとルーターだけで、それを使うものは何もない。このリポジトリのどのルートも MFA を参照しない: `/oauth/authorize`、session のログイン、フェデレーションのコールバックは `MfaCoordinator.listEnrolled` を呼ばずトランザクションも始めない。`createMfaRouter` をマウントするものはなく、boot が集める `mfaFactors` contribution を読むプロダクトコードもない。MFA を使いたい composition root は、自分のログインフローでトランザクションを始め、ルーターをマウントし、コールバックを渡す。
-- `mfaCoordinator` を提供しながら `mfaProviderFactory` と `mfaTransactionStore` の両方は提供しない構成を、boot は拒否する（`mfa-partial-wiring`）。
+- `MfaFactor` — 第二要素が実装する契約と、それが受け取るもの — [`src/mfa/factor.mts`](src/mfa/factor.mts)。要素は鍵、ストア、トランザクションのどれにも触れない: 受け取るのは開封済みのレコードのデータ、1 つのセレモニーの 2 つのリクエストの間に保持する状態、トランザクションの ID、そして鍵リングの下で代わりに作られる鍵付きダイジェスト（`MfaDigests`、照合するだけで復元しないコード用）である。検証は、要素が再利用を選ばない限り（`reusableChallenge`、メール要素）保留中のチャレンジを取り出す。鍵がリングから外れたダイジェストは `key_unavailable` を答え、障害として扱われ、誤ったコードにはならない（`MfaDigestMatch`）。要素はユーザーが登録できるかどうかを示す（`enrollable`）。すべての呼び出しはトランザクションの下で行われる — ログインやステップアップ以外では、コーディネーターが開く `enroll` トランザクションの下で。パッケージは要素を種別をキーに `contributes.mfaFactors` として提供する（`MfaFactorFactory`）。設定で要素が無効なら、ファクトリーは `null` を返す。boot は contribution を synthetic key `mfaFactorResolver` として射影し、`null` を返した種別はそこに現れない。その種別は占有されたままなので、同じ種別の 2 つ目の contribution は重複になる。resolver は `provides` ファクトリーの実行前から存在し、boot が contribution を登録するにつれて埋まるので、provider（コーディネーター）はそれを requires に宣言でき、リクエスト時に読む。provides ファクトリーの実行中に読むと起動が拒否されるので、コーディネーターは `secondFactorMethods` を遅延して計算する。`kind` が提供時のキーと異なる要素は起動を拒否される。
+- `MailSender` と `MailMessage` — MFA のワンタイムコードとセキュリティ通知が出ていくポートで、`mailSender` スロットを埋める — [`src/mail/types.mts`](src/mail/types.mts)。`send` はレンダリング済みのメッセージを受け取り、リレーが受理したときだけ解決する。アダプターは同梱しない。テストは `@o3co/auth-provider-core/testing` の `createRecordingMailSender()` を使う: 受理したものを保持し、停止中のリレーの代わりにもなる（`failWith`、`recover`）。
+- `MfaCoordinator` — ログインのルートと `/authorize` が MFA について問い合わせるもので、`mfaCoordinator` スロットを埋める — と `PrimaryAuthentication` — [`src/mfa/coordinator.mts`](src/mfa/coordinator.mts)。`decideAfterPrimary` は何かを書く前に対象ユーザーの要素を読み、障害時は例外を投げる。`openLoginTransaction` は再生成後にブラウザーが持つセッション ID にトランザクションを結びつける。`MFA_ABSENCE_POLICY` は、スロットを読むモジュールにとって、埋まっていないスロットを `mfa.mode = "off"` という宣言にする。これを付けている同梱モジュールはまだない。
+- 登録の証人（witness）— 失われた要素ストアが「一度も登録していない」と読まれることを防ぐ（D12）: Store が `authenticate` で答える `User.mfaEnrolled`（`readMfaEnrollmentWitness()` でだけ読む: `enrolled`、`not_enrolled`（`false` か無し）、`malformed`（それ以外の値。`503` で答え、決して「登録していない」とは読まない））と、任意の `UserRepository.markMfaEnrolled(subject, enrolled)`。後者は `supportsMfaEnrollmentWitness()` で検出する — [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts)。`InMemoryUserRepository` は `markMfaEnrolled` を持たない。
+- `MfaFactorStore` — 対象ユーザーの登録済み要素を保持する場所 — と `MfaFactorRecord` — [`src/mfa/factorStore.mts`](src/mfa/factorStore.mts)。レコードの `data` はストアに届く前に封印され、ストアはそれを 1 バイトも変えずに保持する。`update` は `version` に対する compare-and-set。応答できないストアは「要素なし」と答えず例外を投げる。インプロセスのアダプター `createMemoryMfaFactorStore()` とそのモジュール `memoryMfaFactorStoreModule` は開発用と単一レプリカ用: 再起動で空になり、モジュールはそのことを一度だけ警告し（`mfa_factor_store_in_memory`）、`deployment.mode = "multi"` はこのモジュールを拒否する。`createMfaFactorStoreFactory()` / `registerBuiltinMfaFactorStores()` で名前から組み立てられる。すべてのアダプターは [`src/mfa/__tests__/factorStore.contract.mts`](src/mfa/__tests__/factorStore.contract.mts) を実行する。
+- `MfaTransactionStore` — MFA のトランザクションと対象ユーザーのロック状態を保持する場所 — と `MfaTransaction`、`MfaTransactionPatch`、`MfaLockoutPolicy` — [`src/mfa/transactionStore.mts`](src/mfa/transactionStore.mts)。トランザクションは第二要素の 1 回のセレモニーの使い捨ての記録である。`reserveAttempt`、`takeChallenge`、`consume` はアトミックなので、同時に飛んでいる試行はそれぞれ消費され、チャレンジは一度だけ答えられ、トランザクションを消費する検証は 1 つだけである。`create` は型が認めない値のフィールドと、新しい記録のカウンターで始まらないトランザクションを拒否し、トランザクションが持つフィールドだけを保持する（`newMfaTransactionRecord`）。`update` はパッチのキーだけを書き — 値は設定し、`null` は空にできるフィールドを消し、`undefined` は無いものとして扱い、それ以外は `RangeError`（`mfaTransactionPatchWrites`）— 上限を払い戻したり要件を取り消したりする遷移を拒否する: `sends` の減少、最後の送信時刻を戻すこと（配信失敗の後に消すのは許され、その再送も 1 回の送信に数える）、必須のメール証明を満たす以外の変更、満たされた証明の取り消し、`enrollment` の引き下げ（`checkMfaTransactionTransitions`）。すべてのアダプターがこの 3 つを呼ぶ。対象ユーザーの状態は推測可能な証明に対するロックで、呼び出し側それぞれが渡す時刻で判断するので、呼び出し側の時計は揃っていなければならない: 連続した失敗（`threshold` 回の失敗から始まり `maxSeconds` まで倍になる短いバックオフで、最後のロックが終わってから — ロックの前なら直前の失敗から — `memorySeconds` で忘れられる。`hardLimit` に達すると免除要素での成功まで保留。成功は自分の予約までの連続を終わらせる）、どの成功も払い戻さない任意の連続 7 日間（`MFA_WEEKLY_WINDOW_MS`）の失敗の週次予算、そして免除要素での成功が週次の保留に対して信頼するブラウザー（すでに信頼されたブラウザーからの成功は追加ではなく更新）。ストアは失敗を、数えなくなってから `MFA_CLOCK_SKEW_ALLOWANCE_MS`（1 日）後に、自分の時計より後にはならない時刻で判断して初めて忘れるので、それより少しだけ時計が進んでいる呼び出し側がほかの呼び出し側がまだ数える失敗を消すことはなく、大きく進んでいる呼び出し側も、どの対象ユーザーについても何も消さない。`clearSubjectState`（オペレーターのリセットとパスワード変更）は連続、週、信頼を消す。パスワード変更で週次予算が消えるのは意図したものである。ロックとは別に、ストアはオペレーターのリセットが求めたメール証明の要件を、対象ユーザーの次の最初の結び付けが消費するまで保持する（`requireEmailProofAtNextBinding`、`emailProofRequiredAtNextBinding`、`consumeEmailProofRequirement`）。`clearSubjectState` はそれを消さない。`checkMfaLockoutPolicy()` はストアが適用できないポリシーを `RangeError` で拒否する。`hardLimit` を超える `threshold` や、NIST の 100（`MFA_LOCKOUT_MAX_HARD_LIMIT`）を超える `hardLimit` もそこに含まれる。インプロセスのアダプター `createMemoryMfaTransactionStore()` と `memoryMfaTransactionStoreModule` は開発用と単一レプリカ用で、`deployment.mode = "multi"` では拒否される。このアダプターが保持するトランザクションは `mfaTransactionStore.memory.maxEntries` 件まで（`DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES`、10 万件）で、上限に達すると生きているトランザクションを追い出さず、新しいトランザクションをストア障害 `MfaTransactionStoreFullError` として拒否する。`createMfaTransactionStoreFactory()` / `registerBuiltinMfaTransactionStores()` で名前から組み立てられる。すべてのアダプターは [`src/mfa/__tests__/transactionStore.contract.mts`](src/mfa/__tests__/transactionStore.contract.mts) を実行する。
 - factor は同梱しない。`@o3co/auth-provider-webauthn` はパスキーを `mfaFactors` contribution ではなくグラント（`contributes.grants`）として提供する。
 
 #### 監査（Audit）
@@ -452,6 +456,7 @@ const userRepo = new InMemoryUserRepository(users);
 - `RateLimiter.check(key, ctx)` で atomic check + increment
 - Factory: `createRateLimiterFactory()`。`registerBuiltinRateLimiters()` が登録するのは `"memory"` だけ。`"redis"` バックエンドは `@o3co/auth-provider-redis`（`redisRateLimiterBuilder`、または宣言的な `redisRateLimiterModule`）にあり、ここで登録されないことを `ratelimit/__tests__/factory.test.mts` が検査している
 - deny 時には core が 429 + `Retry-After` で応答。判定の `reason` を RFC 6749 の文字の範囲で `error_description` とし、ないとき・空のとき・文字列でないときは `Rate limit exceeded` とする
+- 同梱の 2 つのリミッターは、それぞれの設定セクションにあるエンドポイントごとの予算を seed する（`resolveSeededLimitSpecs`、[`src/ratelimit/seededSpecs.mts`](src/ratelimit/seededSpecs.mts)）。その中に MFA のプレフィックス `mfa`（`MFA_RATE_LIMIT_PREFIX`、`mfa.rateLimit.routes` から）と `mfa-email`（`MFA_EMAIL_RATE_LIMIT_PREFIX`、`mfa.factors.email.sendLimit` から）がある — [`src/ratelimit/mfaSpec.mts`](src/ratelimit/mfaSpec.mts)。プレフィックスに対するオペレーター自身の `limits` の項目が優先する。与えられていないキーは何も seed しない。与えられたが使えないキーは、そのキーを名指しする `RangeError` で起動を拒否する
 
 #### リフレッシュトークンファミリー（RFC 6819 §5.2.2.3 の replay 検出）
 
