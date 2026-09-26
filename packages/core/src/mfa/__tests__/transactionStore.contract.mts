@@ -1094,6 +1094,28 @@ export function runMfaTransactionStoreContract(
 			expect(held(await check(store, at + 21, browsers[0]))).toMatchObject({ hold: "weekly" });
 		});
 
+		it("renews only a browser the subject itself trusts: another subject's value, or an unknown one, is a new browser", async () => {
+			const store = await factory();
+			const t = start();
+			const at = await fillTheWeek(store, t);
+			await fillTheWeek(store, t, "user-2");
+			const mine: string[] = [];
+			for (let i = 0; i < 5; i++) {
+				mine.push((await store.noteExemptSuccess("user-1", at + i, POLICY, undefined)).browser);
+			}
+			const { browser: theirs } = await store.noteExemptSuccess("user-2", at, POLICY, undefined);
+			// Neither value is one user-1 trusts: each is a new browser, and the two
+			// oldest of user-1's give way.
+			await store.noteExemptSuccess("user-1", at + 10, POLICY, theirs);
+			await store.noteExemptSuccess("user-1", at + 11, POLICY, "not-a-browser");
+			for (const browser of mine.slice(0, 2)) {
+				expect(held(await check(store, at + 20, browser))).toMatchObject({ hold: "weekly" });
+			}
+			for (const browser of mine.slice(2)) await settled(store, at + 20, "void", browser);
+			// user-2's trust is untouched by user-1's calls.
+			await settled(store, at + 20, "void", theirs, "user-2");
+		});
+
 		it("ends the run and lifts a backoff lock on an exempt success, and the week stands", async () => {
 			const store = await factory();
 			const t = start();
