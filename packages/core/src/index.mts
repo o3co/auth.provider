@@ -538,6 +538,8 @@ export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./m
 export {
 	checkMfaLockoutPolicy,
 	checkNewMfaTransaction,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
+	MFA_LOCKOUT_MAX_HARD_LIMIT,
 	MFA_TRANSACTION_PATCH_KEYS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,

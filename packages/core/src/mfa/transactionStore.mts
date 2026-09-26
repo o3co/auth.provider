@@ -28,8 +28,20 @@
  * The subject state is D21's lock, for guessable proofs only: the
  * consecutive run with its short backoff and hard limit, the weekly budget
  * no success refunds, and the browsers an exempt success trusts against the
- * weekly hold. It is judged on the time the caller passes, so one clock
- * decides a subject's schedule whichever replica answers.
+ * weekly hold. Each answer is judged on the time its caller passes, not on
+ * the store's clock, so the callers' clocks must agree — the provider's is
+ * NTP-synced (D22). A caller whose clock runs ahead is answered on its own
+ * time, but erases nothing: the store keeps a failure, and a trust, for
+ * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} after it stops counting, so a caller on
+ * time still counts it.
+ *
+ * What bounds it: a subject is a user the Store authenticated, but where the
+ * Store lets anyone sign up anyone can mint subjects, and a subject's run
+ * never expires — only a success, an exempt success or `clearSubjectState`
+ * ends it (D21's hard limit counts it across weeks). Transactions are bounded
+ * by their expiry and the login rate limit, not per subject: one account can
+ * open as many as it logs in, so the coordinator must bound the transactions
+ * one session holds (the MFA package's concern, not the store's).
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
@@ -206,17 +218,23 @@ export function checkNewMfaTransaction(tx: MfaTransaction): void {
  * {@link checkMfaLockoutPolicy} is the rule.
  */
 export interface MfaLockoutPolicy {
-	/** Consecutive failures that start the short backoff (5). */
+	/** Consecutive failures that start the short backoff (5); at most `hardLimit`. */
 	readonly threshold: number;
 	/** The first backoff lock, in seconds (900); each further failure doubles it. */
 	readonly baseSeconds: number;
 	/** The longest backoff lock, in seconds (86400). */
 	readonly maxSeconds: number;
-	/** How long after the last lock ends the backoff is forgotten, in seconds (86400). */
+	/**
+	 * How long after the last lock ends the backoff is forgotten, in seconds
+	 * (86400). Before any lock, the same quiet period after the previous
+	 * failure starts the count again: failures that never reached the
+	 * threshold are forgotten as a lock would be. Neither ends the run the
+	 * hard limit counts.
+	 */
 	readonly memorySeconds: number;
 	/** Failures allowed in any rolling seven days (10). */
 	readonly weeklyBudget: number;
-	/** Consecutive failures that hold guessable proofs until an exempt success (100). */
+	/** Consecutive failures that hold guessable proofs until an exempt success (100); at most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}. */
 	readonly hardLimit: number;
 	/** Browsers trusted at once (5). */
 	readonly trustedBrowsers: number;
@@ -226,6 +244,17 @@ export interface MfaLockoutPolicy {
 
 /** The weekly budget's window: any rolling seven days (D21). */
 export const MFA_WEEKLY_WINDOW_MS = 7 * 86_400_000;
+
+/**
+ * How long a store keeps a failure, or a trust, after it stops counting: a
+ * day. A caller whose clock runs ahead by less than this erases nothing a
+ * caller on time still counts. Clocks are NTP-synced (D22), so a day is far
+ * more than a working deployment needs; it costs one more day of state.
+ */
+export const MFA_CLOCK_SKEW_ALLOWANCE_MS = 86_400_000;
+
+/** The most consecutive failures a lockout policy may allow: NIST SP 800-63B-4's cap, which D21 cites. */
+export const MFA_LOCKOUT_MAX_HARD_LIMIT = 100;
 
 /** Which hold refused a guessable attempt. `hard` lifts only on an exempt success, a credential change or an operator reset. */
 export type MfaSubjectHold = "backoff" | "weekly" | "hard";
@@ -242,9 +271,10 @@ export type MfaSubjectAttemptReservation =
 
 /**
  * How a reserved attempt ended. `failure`: it stands. `success`: a guessable
- * proof verified — it ends the consecutive run, and is not a failure. `void`:
- * the proof was right but the factor's write lost or failed — the attempt is
- * removed, and the run goes on.
+ * proof verified — it ends the consecutive run up to and including this
+ * reservation (an attempt reserved after it, still in flight, starts the
+ * next), and is not a failure. `void`: the proof was right but the factor's
+ * write lost or failed — the attempt is removed, and the run goes on.
  */
 export type MfaSubjectAttemptOutcome = "failure" | "success" | "void";
 
@@ -311,7 +341,11 @@ export interface MfaTransactionStore {
 		policy: MfaLockoutPolicy,
 		browser: string | undefined,
 	): Promise<MfaSubjectAttemptReservation>;
-	/** Settle a reservation, once; settling one already settled, or one never made, changes nothing. */
+	/**
+	 * Settle a reservation, once, under the subject that made it; settling one
+	 * already settled, one never made, or one under another subject changes
+	 * nothing. An outcome it does not know is a `RangeError`.
+	 */
 	settleSubjectAttempt(
 		subject: string,
 		reservation: string,
@@ -319,17 +353,28 @@ export interface MfaTransactionStore {
 	): Promise<void>;
 	/**
 	 * An exempt success (a recovery code, WebAuthn, the 80-bit email proof):
-	 * ends the run and a hard hold, and trusts a new browser against the
-	 * weekly hold. Answers the value the browser presents from then on — 32
-	 * bytes from the CSPRNG, base64url — of which the store keeps a digest.
-	 * The week stands.
+	 * ends the run up to `nowMs` (an attempt reserved later stays) and with it
+	 * a hard hold, and trusts the browser against the weekly hold. Answers the
+	 * value the browser presents from then on — 32 bytes from the CSPRNG,
+	 * base64url — of which the store keeps a digest. When `browser` is one
+	 * already trusted, its trust is renewed under the new value rather than a
+	 * second one added, so a user's daily exempt sign-ins never push their
+	 * other browsers out of the `trustedBrowsers` list. The week stands. Call
+	 * it only after the transaction holding the exempt proof was consumed.
 	 */
 	noteExemptSuccess(
 		subject: string,
 		nowMs: number,
 		policy: MfaLockoutPolicy,
+		browser: string | undefined,
 	): Promise<{ readonly browser: string }>;
-	/** Forget everything about `subject`'s lock: the operator reset and a credential change (D21, D25). */
+	/**
+	 * Forget everything about `subject`'s lock — the run, the week and the
+	 * trusted browsers: the operator reset and a credential change (D21, D25).
+	 * A password change clearing the weekly budget is the owner's decision:
+	 * it is the remedy for an attacker who holds the password, and it ends
+	 * the hold that attacker caused.
+	 */
 	clearSubjectState(subject: string): Promise<void>;
 }
 
@@ -341,13 +386,20 @@ const isPositiveWhole = (value: unknown): value is number =>
 
 /**
  * Refuses a lockout policy a store cannot apply as written, with a
- * `RangeError` naming `setting` and the field: every field a positive whole
- * number, `maxSeconds` at least `baseSeconds`, and every duration one that
- * ends within the Date range.
+ * `RangeError` naming `setting` and the field: an object, every field a
+ * positive whole number, `maxSeconds` at least `baseSeconds`, `threshold` at
+ * most `hardLimit` (else the backoff would never engage before the hard
+ * hold), `hardLimit` at most {@link MFA_LOCKOUT_MAX_HARD_LIMIT}, and every
+ * duration one that ends within the Date range. The MFA module calls it at
+ * boot with `"mfa.lockout"`, so a bad setting refuses the boot; every store
+ * operation that takes a policy calls it again.
  *
  * @param setting - where the policy was read from, for the message.
  */
 export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.lockout"): void {
+	if (!isRecord(policy)) {
+		throw new RangeError(`${setting} must be an object`);
+	}
 	for (const field of [
 		"threshold",
 		"baseSeconds",
@@ -364,6 +416,14 @@ export function checkMfaLockoutPolicy(policy: MfaLockoutPolicy, setting = "mfa.l
 	}
 	if (policy.maxSeconds < policy.baseSeconds) {
 		throw new RangeError(`${setting}.maxSeconds must be at least ${setting}.baseSeconds`);
+	}
+	if (policy.threshold > policy.hardLimit) {
+		throw new RangeError(`${setting}.threshold must be at most ${setting}.hardLimit`);
+	}
+	if (policy.hardLimit > MFA_LOCKOUT_MAX_HARD_LIMIT) {
+		throw new RangeError(
+			`${setting}.hardLimit must be at most ${MFA_LOCKOUT_MAX_HARD_LIMIT} (NIST SP 800-63B-4's cap on consecutive failures)`,
+		);
 	}
 	for (const [field, ms] of [
 		["maxSeconds", policy.maxSeconds * 1000],

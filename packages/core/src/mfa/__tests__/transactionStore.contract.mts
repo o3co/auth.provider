@@ -1089,7 +1089,7 @@ export function runMfaTransactionStoreContract(
 			}
 			for (const notAPolicy of [null, undefined, "mfa.lockout", 5]) {
 				await expect(
-					check(store, t, undefined, notAPolicy as never),
+					store.reserveSubjectAttempt("user-1", t, notAPolicy as never, undefined),
 					String(notAPolicy),
 				).rejects.toThrow(RangeError);
 			}
