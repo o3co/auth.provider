@@ -26,6 +26,7 @@
  * planner assembles it, and nothing else may supply it.
  */
 
+import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
 import { BootError } from "#/boot/types.mjs";
 import { createApp, defineModule } from "#/index.mjs";
@@ -165,6 +166,34 @@ describe("mfaFactorResolver (D3, D7)", () => {
 		} finally {
 			await handle.dispose();
 		}
+	});
+
+	it("lets a provides factory await, return or inspect a projection while it is built: only a read of its contents is refused", async () => {
+		// An async factory that returns the projection, or a debug line that
+		// prints its deps, touches `then`, `Symbol.toStringTag` and the like —
+		// none of which reads what the contributions will fill.
+		const seen: string[] = [];
+		const holder = defineModule({
+			name: "test:holds-the-resolver-while-built",
+			requires: ["mfaFactorResolver"] as const,
+			provides: {
+				auditSink: async ({ mfaFactorResolver }) => {
+					const awaited = await Promise.resolve(mfaFactorResolver);
+					seen.push(awaited === mfaFactorResolver ? "awaited" : "replaced");
+					seen.push(inspect(mfaFactorResolver).length > 0 ? "inspected" : "");
+					seen.push(Object.prototype.toString.call(mfaFactorResolver));
+					seen.push(String(mfaFactorResolver));
+					expect(() => mfaFactorResolver.get("totp")).toThrow(/read it at request time/);
+					return { emit: async () => {} } as never;
+				},
+			},
+		});
+		const handle = await createApp({
+			modules: [holder, readsTheSlot("auditSink")],
+			bootstrapComponents,
+		});
+		await handle.dispose();
+		expect(seen).toEqual(["awaited", "inspected", "[object Object]", "[object Object]"]);
 	});
 
 	it("refuses the boot when a provides factory reads a projection while it is built", async () => {

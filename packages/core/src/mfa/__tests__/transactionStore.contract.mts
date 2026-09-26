@@ -368,10 +368,11 @@ export function runMfaTransactionStoreContract(
 			// only ever met, never waived (D24), and a met one stays met. An
 			// enrollment requirement is never lowered.
 			const store = await factory();
-			const tx = TX({ sends: 2, emailProof: "required", enrollment: "required" });
+			const tx = TX({ sends: 2, emailProof: "required", enrollment: "required", lastSentAtMs: 5 });
 			await store.create(tx);
 			const bad: [string, unknown][] = [
 				["sends down", { sends: 1 }],
+				["the last send moved back", { lastSentAtMs: 4 }],
 				["email proof waived", { emailProof: "not_required" }],
 				["enrollment lowered to none", { enrollment: "none" }],
 				["enrollment lowered to allowed", { enrollment: "allowed" }],
@@ -380,15 +381,18 @@ export function runMfaTransactionStoreContract(
 				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
 			}
 			expect(await store.get("tx-1")).toStrictEqual(tx);
-			// What may move: sends up, the proof met, the requirements kept.
+			// What may move: sends up, the last send later, the proof met, the
+			// requirements kept.
 			const moved = await store.update("tx-1", 1, {
 				sends: 3,
+				lastSentAtMs: 6,
 				emailProof: { provedAtMs: 1234 },
 				enrollment: "required",
 			});
 			expect(moved).toStrictEqual({
 				...tx,
 				sends: 3,
+				lastSentAtMs: 6,
 				emailProof: { provedAtMs: 1234 },
 				version: 2,
 			});

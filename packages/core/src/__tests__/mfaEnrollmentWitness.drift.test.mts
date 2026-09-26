@@ -100,6 +100,13 @@ describe("the MFA enrollment witness has one reading (D12)", () => {
 		expect(offenders).toEqual([]);
 	});
 
+	it("scans every package's product sources and the standalone template's, not their tests", () => {
+		const sources = productSources();
+		expect(sources).toContain("templates/standalone/src/buildModules.mts");
+		expect(sources).toContain("packages/session/src/routes/Session.mts");
+		expect(sources.filter((file) => /(^|\/)__tests__\/|\.test\.m?ts$/.test(file))).toEqual([]);
+	});
+
 	it("sees the reader's own read, so the scan is not vacuous", () => {
 		const [reader] = [...ALLOWED];
 		expect(productSources()).toContain(reader);
