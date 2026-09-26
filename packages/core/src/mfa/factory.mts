@@ -22,6 +22,7 @@
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { configuredMaxEntries } from "../single-use/max-entries.mjs";
 import type { MfaFactorStore, MfaFactorStoreFactory } from "./factorStore.mjs";
 import { createMemoryMfaFactorStore } from "./memoryFactorStore.mjs";
 import { createMemoryMfaTransactionStore } from "./memoryTransactionStore.mjs";
@@ -65,9 +66,16 @@ export function createMfaTransactionStoreFactory(): MfaTransactionStoreFactory {
 }
 
 /**
- * Registers the in-tree builders: `memory`. Throws `AdapterFactoryError`
- * (`duplicate`) when one is already registered.
+ * Registers the in-tree builders: `memory`, capped at the adapter config's
+ * `maxEntries` (`factory.create({ type: "memory", maxEntries })`, read as
+ * `mfaTransactionStore.memory.maxEntries` is: absent means the default, a
+ * value it cannot use is a `RangeError` naming the key). Throws
+ * `AdapterFactoryError` (`duplicate`) when one is already registered.
  */
 export function registerBuiltinMfaTransactionStores(factory: MfaTransactionStoreFactory): void {
-	factory.register("memory", () => createMemoryMfaTransactionStore());
+	factory.register("memory", (config) =>
+		createMemoryMfaTransactionStore(
+			configuredMaxEntries(config.maxEntries, "MfaTransactionStore memory adapter maxEntries"),
+		),
+	);
 }

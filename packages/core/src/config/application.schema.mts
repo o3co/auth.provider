@@ -1811,6 +1811,10 @@ export const fullSectionsSchema = z.object({
 	mfaTransactionStore: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+			// The memory store's cap, read by `memoryMfaTransactionStoreModule`
+			// the way `challengeStore.memory.maxEntries` is read. Absent: the
+			// adapter's default.
+			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
 		.optional(),
 	// #593, D16: this adapter's own layout, beside the other stores' prefixes.

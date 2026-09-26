@@ -28,11 +28,23 @@
  * port requires. Expired transactions are swept as the store is written to,
  * paced like the challenge store's sweep, and a subject's state is dropped
  * once nothing in it can hold an attempt again.
+ *
+ * It holds at most `maxEntries` transactions. A transaction is opened at every
+ * password login that needs a second factor and at every step-up or enrollment
+ * a session starts, and one the user abandons is never presented again: the
+ * sweep bounds the store by time, and the login rate decides its size. At the
+ * cap the store reclaims what has expired, no more often than the sweep floor,
+ * and if it is still full refuses the new transaction with
+ * {@link MfaTransactionStoreFullError}, a store fault. It never evicts a live
+ * transaction, which would end the ceremony of a user already typing a code.
+ * The subject state is not counted: it is keyed by subjects, whom the Store
+ * vouches for, not by values a caller can mint.
  */
 
 import { createHash, randomBytes } from "node:crypto";
 import { isStorableExpiry } from "../adapters/expiry.mjs";
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
+import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
 	checkMfaLockoutPolicy,
@@ -53,9 +65,44 @@ export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL = 1_000;
 /** The least time between two sweeps, in milliseconds. */
 export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS = 10_000;
 
+/**
+ * The most transactions the in-process store holds by default. A transaction
+ * carries the login's `User` snapshot, so it is larger than a challenge or a
+ * seen `jti`, and the cap is lower than theirs. Within the ten-minute default
+ * lifetime it is about 170 new transactions a second on one replica — more
+ * password logins than one process verifies.
+ */
+export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES = 100_000;
+
 export interface MemoryMfaTransactionStoreOptions extends AmortizedSweepOptions {
 	/** The clock a transaction expires by, in epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
+	/**
+	 * The most transactions the store holds, expired-but-unswept ones included;
+	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES} when absent. A
+	 * value that is not a positive whole number, or is above 2^24 (the most
+	 * entries a `Map` holds), is a `RangeError`, never read as no cap.
+	 */
+	readonly maxEntries?: number;
+}
+
+/**
+ * What `create` throws when the store is at its cap and none of its
+ * transactions has expired: a store fault, as a Redis store's refused write
+ * at `maxmemory` is — not the port's refusal of a bad expiry (a `RangeError`),
+ * which a caller reads as something it did. The MFA routes answer it `503
+ * temporarily_unavailable`. `reason` is `"full"`, which a logged projection
+ * keeps.
+ */
+export class MfaTransactionStoreFullError extends Error {
+	readonly reason = "full" as const;
+
+	constructor(maxEntries: number) {
+		super(
+			`memory MfaTransactionStore is at its cap of ${maxEntries} live transactions; refusing a new one rather than evicting one`,
+		);
+		this.name = "MfaTransactionStoreFullError";
+	}
 }
 
 /** In-process transaction store, with what is resident exposed for observability. */
@@ -64,6 +111,8 @@ export interface MemoryMfaTransactionStore extends MfaTransactionStore {
 	readonly transactions: number;
 	/** Subjects with lock state resident. */
 	readonly subjects: number;
+	/** The most transactions it holds (`maxEntries`); at it, a new transaction is refused. */
+	readonly maxEntries: number;
 }
 
 interface Attempt {
@@ -160,6 +209,13 @@ export function createMemoryMfaTransactionStore(
 	options: MemoryMfaTransactionStoreOptions = {},
 ): MemoryMfaTransactionStore {
 	const clock = options.now ?? Date.now;
+	const maxEntries = usableMaxEntries(
+		// Only a cap left out takes the default: an explicit `null` is refused.
+		options.maxEntries === undefined
+			? DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES
+			: options.maxEntries,
+		"createMemoryMfaTransactionStore",
+	);
 	const transactions = new Map<string, MfaTransaction>();
 	const subjects = new Map<string, SubjectState>();
 	const schedule = createAmortizedSweep(
@@ -237,6 +293,8 @@ export function createMemoryMfaTransactionStore(
 			return subjects.size;
 		},
 
+		maxEntries,
+
 		async create(tx: MfaTransaction): Promise<void> {
 			const nowMs = clock();
 			if (!isStorableExpiry(tx.expiresAtMs) || tx.expiresAtMs <= nowMs) {
@@ -246,6 +304,12 @@ export function createMemoryMfaTransactionStore(
 			}
 			if (live(tx.id, nowMs) !== undefined) {
 				throw new Error("an MFA transaction with this id already exists");
+			}
+			// At the cap: reclaim what has expired, no more often than the sweep
+			// floor, and refuse if the store is still full. See the file header.
+			if (transactions.size >= maxEntries) {
+				if (schedule.due()) sweep(nowMs);
+				if (transactions.size >= maxEntries) throw new MfaTransactionStoreFullError(maxEntries);
 			}
 			transactions.set(tx.id, copyOf(tx));
 			if (schedule.wrote()) sweep(nowMs);

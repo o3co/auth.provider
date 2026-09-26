@@ -525,10 +525,12 @@ export {
 export { createMemoryMfaFactorStore } from "./mfa/memoryFactorStore.mjs";
 export {
 	createMemoryMfaTransactionStore,
+	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL,
 	type MemoryMfaTransactionStore,
 	type MemoryMfaTransactionStoreOptions,
+	MfaTransactionStoreFullError,
 } from "./mfa/memoryTransactionStore.mjs";
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
 export {

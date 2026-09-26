@@ -955,6 +955,18 @@ the WebAuthn options routes answer `503 temporarily_unavailable`, logged as
 `webauthn_ceremony_store_unavailable` (`store: "challenge"`, `step:
 "issue"`) with `err.name: "ChallengeStoreFullError"`.
 
+Core's in-process MFA transaction store (`memoryMfaTransactionStoreModule`,
+`mfaTransactionStore.adapter = "memory"`; nothing installs it while
+`mfa.mode` is `"off"`) sweeps the same way and is capped at a hundred
+thousand transactions (`mfaTransactionStore.memory.maxEntries`;
+`packages/core/src/mfa/memoryTransactionStore.mts`). A transaction carries
+the login's user snapshot, so it is larger than a challenge; at the default
+ten-minute lifetime the cap is about 170 new transactions a second on one
+replica. At the cap it reclaims what has expired and otherwise refuses a new
+transaction with `MfaTransactionStoreFullError` rather than end a ceremony in
+flight. The subject lock state is not counted: it is kept per subject the
+Store vouches for.
+
 **Heap headroom for the two caps.** A process that keeps both memory stores
 at their defaults needs room for them to fill: about 725 MB for the seen-set
 at its worst and about 180 MB for the challenge store, so about 1 GB of heap

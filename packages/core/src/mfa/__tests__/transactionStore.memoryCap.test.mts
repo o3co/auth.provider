@@ -296,3 +296,13 @@ describe("mfaTransactionStore.memory.maxEntries", () => {
 		}
 	});
 });
+
+describe("core barrel — the memory MFA transaction store's cap", () => {
+	it("re-exports the default and the refusal, for a caller that tells a full store from another fault", async () => {
+		const core = await import("#/index.mjs");
+		expect(core.DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES).toBe(
+			DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES,
+		);
+		expect(core.MfaTransactionStoreFullError).toBe(MfaTransactionStoreFullError);
+	});
+});
