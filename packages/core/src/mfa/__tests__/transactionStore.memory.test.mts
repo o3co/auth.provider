@@ -227,6 +227,11 @@ describe("memoryMfaTransactionStoreModule", () => {
 			/unknown to the replica that receives the verification/,
 		);
 		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(/per replica/);
+		// With a durable factor store beside it, a restart after an operator
+		// reset lets a password holder bind without the email proof (D25).
+		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
+			/a restart loses the email proof an operator reset required/,
+		);
 	});
 
 	it("provides an in-process mfaTransactionStore", async () => {

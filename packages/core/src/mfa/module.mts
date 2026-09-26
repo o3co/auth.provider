@@ -53,8 +53,11 @@ export const memoryMfaFactorStoreModule = defineModule({
 
 /**
  * Provides the in-process {@link MfaTransactionStore}. A restart loses the
- * ceremonies in flight — each user starts again from the password — and the
- * subject lock state, which a restart therefore lifts. Capped at
+ * ceremonies in flight — each user starts again from the password — the
+ * subject lock state, which a restart therefore lifts, and the email-proof
+ * requirement an operator reset recorded (D25): beside a durable factor
+ * store, a password holder can then make the next first binding without the
+ * proof. Capped at
  * `mfaTransactionStore.memory.maxEntries` when the config sets it (the
  * adapter's default otherwise); a value that is not a positive whole number
  * refuses the boot, naming the key.
@@ -65,7 +68,7 @@ export const memoryMfaTransactionStoreModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica",
+			"MFA transactions and attempt limits fork per replica — a transaction started on one replica is unknown to the replica that receives the verification, and the attempt limits, the lockout and the trusted browsers are counted per replica; and a restart loses the email proof an operator reset required, so beside a durable factor store a password holder can then bind without it",
 	},
 	requires: ["config"] as const,
 	provides: {

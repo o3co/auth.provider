@@ -526,6 +526,8 @@ Rejected: **three separate keys**, three things a copy can forget; **a new `sid`
 - **Recovering from a lost factor store** (runbook): the mass `503` is the design refusing to downgrade. Restore the factor store from its AOF or a backup; if that is impossible, reset the affected subjects (`resetMfaForSubject` with `requireEmailProof: true`, D25), in bulk from the Store's list of users marked enrolled, and tell them they will re-enroll.
 - Rejected: **a marker in the same Redis** (lost with the records); **refusing a first binding for any subject seen before** (the provider keeps no subject list).
 
+**Amended 2026-09-27 (build-order step 3).** The durability requirements extend to the transaction store's key family that holds D25's email-proof requirement: a lost requirement lets a password holder bind without the proof. PR 6's `redisMfaTransactionStoreModule` therefore runs the same boot check as the factor store — it refuses an `allkeys-*` eviction policy and warns when there is no persistence — or the runbook requires the same of it; the in-process transaction store says in its replica-safety reason that a restart loses the requirement. The witness is read only through `readMfaEnrollmentWitness`: `true` enrolled, `false` or absent not enrolled, anything else (`null` included) malformed — `503`, never a first binding; a drift guard holds every package to it.
+
 The template's default is decided in O6.
 
 ---
@@ -894,6 +896,14 @@ The PR numbers below are the plan at acceptance, and the rest of this record cit
 | 22. `feat!`: on by default | Core's `mfa.mode` reference default removed (O2), the template's and create-app's default `required`; CHANGELOG draft in the PR description (release policy R2) | Core: a composition with neither the modules nor a declaration refused; the template: a fresh scaffold refuses until `MFA_ENCRYPTION_KEY` and mail or `MFA_NOTICES`, then logs in through a first binding |
 
 A follow-up outside this repository: auth.proxy maps `step_up` to a step-up route instead of `session_unauthorized`.
+
+**Amended 2026-09-27 (build-order step 3): what the ports oblige later steps to do.**
+
+- **Step 6** (Redis stores): `redisMfaTransactionStoreModule` holds the email-proof requirement's key family to D12's durability check (refuses `allkeys-*`, warns without persistence). Both stores meet the contract suites as amended at step 3: the clock-skew and far-ahead cases, create-side field validation, the transition rules, trust renewal scoped to the subject, and the email-proof requirement.
+- **Step 8** (verification): the store has no lifetime ceiling of its own. The MFA module refuses at boot a `mfa.transactionTtlSeconds` outside its range, and the coordinator derives every `expiresAtMs` from it and nothing else. `mfa.lockout` is checked at boot with `checkMfaLockoutPolicy(policy, "mfa.lockout")`. `secondFactorMethods` is computed lazily from `mfaFactorResolver`. `noteExemptSuccess` is called only after the exempt proof's transaction is consumed.
+- **Step 12** (reset): `resetMfaForSubject(subject, { requireEmailProof: true })` refuses when no `mailSender` is wired or the account has no address — nobody could then give the proof. The first binding consumes the requirement only after the first counting factor is written.
+- **Step 19** (foundation): the Store's wire contract says `mfaEnrolled` is a boolean or absent; `null`, a number or a string reads as malformed, which is `503`.
+- **Step 20** (runbook): the reset procedure says that an in-process transaction store loses the email-proof requirement at a restart.
 
 ---
 

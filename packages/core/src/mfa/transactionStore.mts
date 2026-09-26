@@ -515,7 +515,11 @@ export interface MfaTransactionStore {
 	/**
 	 * Atomic read-and-clear, at the first binding the requirement was for:
 	 * `true` for the one caller that cleared it, `false` when none was
-	 * recorded or another caller cleared it first.
+	 * recorded or another caller cleared it first. Call it only after the
+	 * email proof was verified and the first counting factor written — create,
+	 * then consume — so a binding that fails leaves the requirement standing.
+	 * The adapter that keeps it must be as durable as the factor store: a lost
+	 * requirement lets a password holder bind without the proof.
 	 */
 	consumeEmailProofRequirement(subject: string): Promise<boolean>;
 }
