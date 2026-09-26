@@ -135,22 +135,20 @@ describe("mfaFactorResolver (D3, D7)", () => {
 	it("reaches a provides factory that requires it, which reads it when a request comes", async () => {
 		// The coordinator is a `provides` factory, and it is built before the
 		// contributions are applied: the projection is in place from the
-		// start and fills as the contributions register, so a provider reads
-		// it lazily, not while it is being built.
+		// start and fills as the contributions register, so a provider holds
+		// it and reads it at request time.
 		const totp = factor("totp");
 		const contributing = defineModule({
 			name: "test:mfa-factors",
 			contributes: { mfaFactors: { totp: () => totp } },
 		});
-		let seenAtBuild: MfaFactorResolver | undefined;
-		let entriesAtBuild: unknown[] | undefined;
+		let held: MfaFactorResolver | undefined;
 		const coordinatorLike = defineModule({
 			name: "test:reads-the-resolver-from-provides",
 			requires: ["mfaFactorResolver"] as const,
 			provides: {
 				auditSink: ({ mfaFactorResolver }) => {
-					seenAtBuild = mfaFactorResolver;
-					entriesAtBuild = [...mfaFactorResolver.entries()];
+					held = mfaFactorResolver;
 					return { emit: async () => {} } as never;
 				},
 			},
@@ -160,15 +158,49 @@ describe("mfaFactorResolver (D3, D7)", () => {
 			bootstrapComponents,
 		});
 		try {
-			// Built before any contribution was applied: nothing was there yet.
-			expect(entriesAtBuild).toEqual([]);
-			expect(seenAtBuild).toBeDefined();
-			expect(seenAtBuild).toBe(handle.components.mfaFactorResolver);
-			expect(seenAtBuild?.get("totp")).toBe(totp);
-			expect([...(seenAtBuild?.entries() ?? [])]).toEqual([["totp", totp]]);
+			expect(held).toBeDefined();
+			expect(held).toBe(handle.components.mfaFactorResolver);
+			expect(held?.get("totp")).toBe(totp);
+			expect([...(held?.entries() ?? [])]).toEqual([["totp", totp]]);
 		} finally {
 			await handle.dispose();
 		}
+	});
+
+	it("refuses the boot when a provides factory reads a projection while it is built", async () => {
+		// Read then, it would be empty: the contributions register after the
+		// provides factories run. A coordinator that computed its
+		// `secondFactorMethods` from it at build time would offer no step-up;
+		// the read fails the boot instead of answering an empty view.
+		const contributing = defineModule({
+			name: "test:mfa-factors",
+			contributes: { mfaFactors: { totp: () => factor("totp") } },
+		});
+		const eager = defineModule({
+			name: "test:reads-the-resolver-while-built",
+			requires: ["mfaFactorResolver"] as const,
+			provides: {
+				auditSink: ({ mfaFactorResolver }) => {
+					void [...mfaFactorResolver.entries()];
+					return { emit: async () => {} } as never;
+				},
+			},
+		});
+		const err = await createApp({
+			modules: [eager, contributing, readsTheSlot("auditSink")],
+			bootstrapComponents,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(caught: unknown) => caught,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("provides-factory-failed");
+		expect(((err as BootError).cause as Error).message).toBe(
+			"mfaFactorResolver was read while the provides factories run: it fills as the contributions register, so read it at request time",
+		);
 	});
 
 	it("gives a provides factory the same projection of every synthetic key the world holds", async () => {
