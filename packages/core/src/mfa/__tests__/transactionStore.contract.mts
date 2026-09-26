@@ -155,6 +155,46 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("never")).toBeNull();
 		});
 
+		it("lets exactly one of N concurrent creates of one id through", async () => {
+			const store = await factory();
+			const results = await Promise.allSettled(
+				Array.from({ length: 10 }, (_, i) => store.create(TX({ subject: `user-${i}` }))),
+			);
+			const created = results.filter((r) => r.status === "fulfilled");
+			expect(created).toHaveLength(1);
+			const winner = results.indexOf(created[0] as PromiseSettledResult<void>);
+			expect((await store.get("tx-1"))?.subject).toBe(`user-${winner}`);
+		});
+
+		it("refuses a new transaction whose counters are not a fresh record's, with a RangeError, and records nothing", async () => {
+			// A limit is only as good as the count it starts from: NaN + 1 > max
+			// is false, so a transaction created with attempts NaN would pass every
+			// reservation.
+			const store = await factory();
+			const bad: [string, Partial<Record<keyof MfaTransaction, unknown>>][] = [
+				["attempts 1", { attempts: 1 }],
+				["attempts -1000", { attempts: -1000 }],
+				["attempts NaN", { attempts: Number.NaN }],
+				["attempts missing", { attempts: undefined }],
+				["version -1", { version: -1 }],
+				["version 1.5", { version: 1.5 }],
+				["version NaN", { version: Number.NaN }],
+				["version past 2^53", { version: 2 ** 53 }],
+				["sends -1", { sends: -1 }],
+				["sends 0.5", { sends: 0.5 }],
+				["sends missing", { sends: undefined }],
+			];
+			for (const [name, overrides] of bad) {
+				await expect(store.create(TX(overrides as Partial<MfaTransaction>)), name).rejects.toThrow(
+					RangeError,
+				);
+			}
+			expect(await store.get("tx-1")).toBeNull();
+			// A fresh record: no attempt reserved, any count of sends, any version.
+			await store.create(TX({ sends: 0, version: 0 }));
+			expect((await store.get("tx-1"))?.version).toBe(0);
+		});
+
 		it("is insert-only: a live id is refused, and the first record stands", async () => {
 			const store = await factory();
 			const first = TX();
@@ -188,12 +228,12 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("tx-1")).not.toBeNull();
 		});
 
-		it("updates at the current version: a present key sets, undefined clears, an absent key keeps; version + 1", async () => {
+		it("updates at the current version: a present key sets, null clears, an absent key keeps; version + 1", async () => {
 			const store = await factory();
 			const tx = TX({ challenge: CHALLENGE, sends: 1, lastSentAtMs: 5 });
 			await store.create(tx);
 			const updated = await store.update("tx-1", 1, {
-				challenge: undefined,
+				challenge: null,
 				emailProof: { provedAtMs: 1234 },
 				enrollment: "required",
 				sends: 2,
@@ -210,7 +250,7 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("tx-1")).toStrictEqual(expected);
 			const again = await store.update("tx-1", 2, {
 				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99 },
-				lastSentAtMs: undefined,
+				lastSentAtMs: null,
 			});
 			expect(again).toStrictEqual({
 				...expected,
@@ -218,6 +258,92 @@ export function runMfaTransactionStoreContract(
 				lastSentAtMs: undefined,
 				version: 3,
 			});
+			expect(await store.update("tx-1", 3, { pendingEnrollment: null })).toStrictEqual({
+				...expected,
+				version: 4,
+				lastSentAtMs: undefined,
+			});
+		});
+
+		it("reads a key present with undefined as absent: it keeps the field, and never clears a limit", async () => {
+			// `{ sends: undefined }` compiles, and read as a write it would clear the
+			// send count (D21) or the email-proof gate (D24). Only null clears, and
+			// only a field that may be empty.
+			const store = await factory();
+			const tx = TX({
+				challenge: CHALLENGE,
+				emailProof: "required",
+				enrollment: "required",
+				sends: 2,
+				lastSentAtMs: 5,
+			});
+			await store.create(tx);
+			const updated = await store.update("tx-1", 1, {
+				challenge: undefined,
+				pendingEnrollment: undefined,
+				emailProof: undefined,
+				enrollment: undefined,
+				sends: undefined,
+				lastSentAtMs: undefined,
+			});
+			expect(updated).toStrictEqual({ ...tx, version: 2 });
+		});
+
+		it("refuses, with a RangeError, a value a field does not admit, and changes nothing", async () => {
+			const store = await factory();
+			const tx = TX({ challenge: CHALLENGE, sends: 1 });
+			await store.create(tx);
+			const bad: [string, unknown][] = [
+				["enrollment null", { enrollment: null }],
+				["enrollment unknown", { enrollment: "maybe" }],
+				["emailProof null", { emailProof: null }],
+				["emailProof unknown", { emailProof: "yes" }],
+				["emailProof NaN", { emailProof: { provedAtMs: Number.NaN } }],
+				["challenge not a challenge", { challenge: "sealed" }],
+				["challenge missing its state", { challenge: { ...CHALLENGE, state: undefined } }],
+				["challenge expiry NaN", { challenge: { ...CHALLENGE, expiresAtMs: Number.NaN } }],
+				[
+					"pendingEnrollment missing its kind",
+					{ pendingEnrollment: { state: "s", expiresAtMs: 9 } },
+				],
+				["sends null", { sends: null }],
+				["sends negative", { sends: -1 }],
+				["sends fractional", { sends: 1.5 }],
+				["lastSentAtMs NaN", { lastSentAtMs: Number.NaN }],
+				["lastSentAtMs text", { lastSentAtMs: "5" }],
+			];
+			for (const [name, patch] of bad) {
+				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
+			}
+			expect(await store.get("tx-1")).toStrictEqual(tx);
+		});
+
+		it("changes only the patch keys: a patch that carries any other field moves none of them", async () => {
+			// A patch spread from a transaction compiles; an adapter that wrote the
+			// whole object would refund attempts, rebind the session, extend the
+			// expiry or swap the user.
+			const store = await factory();
+			const tx = TX();
+			await store.create(tx);
+			await store.reserveAttempt("tx-1", 5);
+			const updated = await store.update("tx-1", 1, {
+				sends: 1,
+				id: "tx-other",
+				purpose: "enroll",
+				attempts: 0,
+				version: 99,
+				sessionId: "attacker-session",
+				subject: "user-2",
+				sid: "sid-other",
+				user: { id: "user-2" },
+				redirectTo: "https://evil.example/",
+				createdAtMs: 0,
+				expiresAtMs: tx.expiresAtMs + 86_400_000,
+			} as never);
+			const expected = { ...tx, attempts: 1, sends: 1, version: 2 };
+			expect(updated).toStrictEqual(expected);
+			expect(await store.get("tx-1")).toStrictEqual(expected);
+			expect(await store.get("tx-other")).toBeNull();
 		});
 
 		it("answers null for a version that moved or a transaction that is gone, and changes nothing", async () => {
@@ -250,6 +376,15 @@ export function runMfaTransactionStoreContract(
 			}
 			expect((await store.get("tx-1"))?.attempts).toBe(5);
 			expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: false, attempts: 5 });
+			expect(await store.get("tx-1")).toBeNull();
+		});
+
+		it("answers a refused reservation with the attempts the transaction had reserved, even under a lower max", async () => {
+			// A max lowered by configuration while a transaction is in flight.
+			const store = await factory();
+			await store.create(TX());
+			for (let n = 1; n <= 4; n++) await store.reserveAttempt("tx-1", 5);
+			expect(await store.reserveAttempt("tx-1", 3)).toEqual({ ok: false, attempts: 4 });
 			expect(await store.get("tx-1")).toBeNull();
 		});
 
