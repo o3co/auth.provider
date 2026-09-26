@@ -26,7 +26,6 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { BootError } from "#/boot/types.mjs";
 import { createApp, defineModule } from "#/index.mjs";
 import {
 	MFA_ABSENCE_POLICY,
@@ -72,14 +71,16 @@ describe("MFA_ABSENCE_POLICY (D20)", () => {
 		expect(policy.hint).toMatch(/second factor/);
 	});
 
-	it('refuses a composition that reads the slot, leaves it empty and does not write mfa.mode = "off"', async () => {
-		const err = await boot(makeValidCoreConfig()).then(
-			() => undefined,
-			(caught: unknown) => caught,
-		);
-		expect(err).toBeInstanceOf(BootError);
-		expect((err as BootError).reason).toBe("component-absence-undeclared");
-		expect((err as BootError).message).toMatch(/mfa\.mode/);
+	it('boots a composition that reads the slot and leaves it empty on the schema\'s default mode, "off"', async () => {
+		// Until the release that turns MFA on, `mfa.mode` defaults to "off" in
+		// the schema createApp parses, so a hand-built configuration that never
+		// wrote the key declares the absence. That release removes the default
+		// (the ADR's O2), and an unwritten mode is then refused
+		// (component-absence-undeclared); until a module honours another mode,
+		// the schema refuses every value but "off" before this guard runs.
+		const handle = await boot(makeValidCoreConfig());
+		expect(handle.components.mfaCoordinator).toBeUndefined();
+		await handle.dispose();
 	});
 
 	it('boots it once mfa.mode = "off" is written', async () => {

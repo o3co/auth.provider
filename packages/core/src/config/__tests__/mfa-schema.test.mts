@@ -103,6 +103,25 @@ describe("the MFA configuration core owns (D19)", () => {
 		expect(issues?.map((issue) => issue.path.join("."))).toContain("mfa.mode");
 	});
 
+	it('reads a configuration with no mfa section, or no mode, as mode "off" until the flip', () => {
+		// A hand-built composition root that never wrote the key still boots once
+		// a module attaches MFA_ABSENCE_POLICY: before the release that turns MFA
+		// on, "off" is the default in the schema as well as in reference.conf.
+		// That release removes the default (the ADR's O2).
+		const { mfa: _absent, ...withoutMfa } = makeValidCoreConfig() as Record<string, unknown>;
+		expect((CoreConfigSchema.parse(withoutMfa) as { mfa?: { mode?: string } }).mfa?.mode).toBe(
+			"off",
+		);
+		expect(
+			(
+				CoreConfigSchema.parse({ ...withoutMfa, mfa: { transactionTtlSeconds: 600 } }) as {
+					mfa?: Record<string, unknown>;
+				}
+			).mfa,
+		).toEqual({ mode: "off", transactionTtlSeconds: 600 });
+		expect(AppConfigSchema.parse(makeValidAppConfig()).mfa?.mode).toBe("off");
+	});
+
 	it("keeps the rest of the mfa section for the package that owns it", () => {
 		const parsed = CoreConfigSchema.parse({
 			...makeValidCoreConfig(),
