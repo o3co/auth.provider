@@ -218,3 +218,27 @@ declare module "@o3co/auth-provider-core" {
 		readonly userRepository: UserRepository;
 	}
 }
+
+/**
+ * What the MFA enrollment witness says (the MFA ADR's D12): `enrolled`,
+ * `not_enrolled`, or `malformed` — a value the Store should not have answered.
+ */
+export type MfaEnrollmentWitness = "enrolled" | "not_enrolled" | "malformed";
+
+/**
+ * The one reading of `User.mfaEnrolled`, for the `User` a login's
+ * `authenticate` answered and for the session's snapshot of it alike: `true`
+ * is `enrolled`; `false` or absent is `not_enrolled`; any other value — `1`,
+ * `"true"`, `null` — is `malformed`. A malformed witness is never read as
+ * "not enrolled", which would open a first binding to whoever holds the
+ * password: the coordinator answers it `503 temporarily_unavailable`, with one
+ * error line (`mfa_enrollment_witness_malformed`), and binds nothing.
+ */
+export function readMfaEnrollmentWitness(
+	user: Readonly<Record<string, unknown>>,
+): MfaEnrollmentWitness {
+	const value = user.mfaEnrolled;
+	if (value === true) return "enrolled";
+	if (value === false || value === undefined) return "not_enrolled";
+	return "malformed";
+}

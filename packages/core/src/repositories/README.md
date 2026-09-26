@@ -1,6 +1,6 @@
 # repositories
 
-Last updated: 2026-09-26
+Last updated: 2026-09-27
 
 ## Responsibility
 
@@ -28,7 +28,7 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 - Every field of `Code` is a required key, `undefined` where `/authorize` recorded nothing, and `createCode` takes `CreateCodeInput` — the same keys but `code`, with only `expiresIn` optional (#626). A repository's copy that forgets a field, or an `/authorize` that forgets to pass one, fails to compile.
 - The bundled registration path (`ClientEntrySchema`, read by the `yaml` / `static` adapters) holds every registered redirect-URI list to `../net/redirect-uri` at boot. A custom `ClientRepository` bypasses that schema by design; `checkRedirectUri` is exported so it can hold its own registrations to the same rules, and nothing in the port makes it. The federation-grant flow does not rely on either: at request time it checks the redirect URI it was handed against the registration and refuses one that already carries the flow's result parameter (`../federation-grants/lodge.mts`).
 - `findSubjectByFederatedIdentity` must change nothing — no login, link or provisioning — and answers `linked` / `unlinked` / `indeterminate`; `linkFederatedIdentity` answers `refused` or `conflict`. Both are the Store's decisions, not core's.
-- The MFA enrollment witness (the MFA ADR's D12): `User.mfaEnrolled`, answered by the Store on `authenticate` and read as `=== true`, and `markMfaEnrolled(subject, enrolled)`, detected by `supportsMfaEnrollmentWitness`. The bundled user adapter has no `markMfaEnrolled`; it answers whatever its entries carry.
+- The MFA enrollment witness (the MFA ADR's D12): `User.mfaEnrolled`, answered by the Store on `authenticate` and read only through `readMfaEnrollmentWitness` — `enrolled`, `not_enrolled` (`false` or absent), or `malformed` (any other value, which is `503` and never a first binding) — and `markMfaEnrolled(subject, enrolled)`, detected by `supportsMfaEnrollmentWitness`. The bundled user adapter has no `markMfaEnrolled`; it answers whatever its entries carry.
 - Record types are readonly; a consumer that wants to mutate copies.
 
 ## Dependencies

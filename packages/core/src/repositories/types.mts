@@ -289,10 +289,12 @@ export interface User {
 	 * enrolled a second factor, as the Store answers it on `authenticate`. It
 	 * lives outside the factor store so that losing that store does not read
 	 * as "never enrolled" — which would let whoever holds the password bind
-	 * their own authenticator. Only `true` is a witness; `false`, absence and
-	 * a non-boolean are not. The provider tells the Store through
-	 * `UserRepository.markMfaEnrolled` where the repository has it; a Store
-	 * that answers no field leaves the witness absent.
+	 * their own authenticator. Read it through `readMfaEnrollmentWitness`
+	 * only: `true` is a witness; `false` and absence say the subject has not
+	 * enrolled; any other value is malformed, which the coordinator answers
+	 * `503` and never reads as "not enrolled". The provider tells the Store
+	 * through `UserRepository.markMfaEnrolled` where the repository has it; a
+	 * Store that answers no field leaves the witness absent.
 	 */
 	readonly mfaEnrolled?: boolean;
 	readonly [key: string]: unknown;
