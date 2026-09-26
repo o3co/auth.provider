@@ -104,8 +104,8 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 /**
  * A challenge a verification takes (a WebAuthn assertion's, F7). An email
  * code is read, not taken, and stays across attempts (F5): the store offers
- * both, and the factor's `singleUseChallenge` decides which the coordinator
- * calls.
+ * both, and the factor's `reusableChallenge` (absent: taken) decides which
+ * the coordinator calls.
  */
 const CHALLENGE = {
 	factorId: "factor-1",

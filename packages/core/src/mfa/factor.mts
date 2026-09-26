@@ -62,11 +62,21 @@ export interface MfaKeyedDigest {
 }
 
 /**
+ * What comparing a value with a stored digest found. `key_unavailable`: the
+ * key the digest names has left the ring, so the value cannot be judged — the
+ * factor is unreadable, which the coordinator answers `503` with one
+ * `mfa_factor_unreadable` line (D11), never as a wrong code.
+ */
+export type MfaDigestMatch = "match" | "mismatch" | "key_unavailable";
+
+/**
  * Keyed digests under the MFA key ring, made by the coordinator so that a
  * factor never holds a key (D11). A code that is compared and never recovered
  * is kept as one: an email code over `[transactionId, factorId, code]`, a
  * recovery code over its normalised form. Each digest carries its key id, so
- * rotating the ring never makes a code unverifiable.
+ * rotating the ring never makes a code unverifiable while that key stays in
+ * the ring — a key leaves it only once no sealed data and no stored digest
+ * names it.
  */
 export interface MfaDigests {
 	/**
@@ -77,16 +87,23 @@ export interface MfaDigests {
 	digest(parts: readonly string[]): MfaKeyedDigest;
 	/**
 	 * Whether `parts` digest to `stored` under the key `stored` names,
-	 * compared in constant time. `false` when that key has left the ring.
+	 * compared in constant time: `match` or `mismatch`, and `key_unavailable`
+	 * when that key has left the ring — which a factor answers as an outage
+	 * (it throws, and the coordinator answers `503`), never as `invalid`.
 	 */
-	matchesDigest(parts: readonly string[], stored: MfaKeyedDigest): boolean;
+	matchesDigest(parts: readonly string[], stored: MfaKeyedDigest): MfaDigestMatch;
 }
 
 /** What every call to a factor is handed. */
 export interface MfaCeremonyContext {
 	/** The subject the ceremony is for: `User.id`. */
 	readonly subject: string;
-	/** The MFA transaction this call belongs to — to bind a digest to it (D11), never to store. */
+	/**
+	 * The MFA transaction this call belongs to — to bind a digest to it (D11),
+	 * never to store. Every call has one: a call outside a login or step-up —
+	 * self-service enrollment, regenerating recovery codes (F4) — runs under an
+	 * `enroll` transaction the coordinator opens for it.
+	 */
 	readonly transactionId: string;
 	/** The time the coordinator judges this request by, in epoch milliseconds. */
 	readonly nowMs: number;
@@ -112,11 +129,10 @@ export interface MfaVerifyContext extends MfaCeremonyContext {
 	/**
 	 * The state the factor's `challenge` returned for this transaction:
 	 * **taken** from it — read and cleared in one step, so it answers one
-	 * verification — for a factor whose `singleUseChallenge` is true
-	 * (WebAuthn, F7); **read**, and left for the next attempt, for any other
-	 * (an email code stands until a re-send replaces it or the transaction is
-	 * consumed, F5). `undefined` when none is pending or the factor needs no
-	 * challenge.
+	 * verification — by default (WebAuthn, F7); **read**, and left for the
+	 * next attempt, for a factor whose `reusableChallenge` is true (an email
+	 * code stands until a re-send replaces it or the transaction is consumed,
+	 * F5). `undefined` when none is pending or the factor needs no challenge.
 	 */
 	readonly state: MfaFactorState | undefined;
 	/** The proof as the request carried it. The factor reads it and refuses what it cannot read as `malformed`. */
@@ -187,12 +203,13 @@ export interface MfaFactor {
 	 */
 	enrollable?(user: Readonly<Record<string, unknown>>): boolean;
 	/**
-	 * Whether a verification takes the pending challenge, so that one challenge
-	 * answers one verification (WebAuthn, F7). Absent or false: the challenge
-	 * stays on the transaction across attempts until a new one replaces it
-	 * (an email code, F5). See {@link MfaVerifyContext.state}.
+	 * Whether the pending challenge stays on the transaction across attempts
+	 * until a new one replaces it (an email code, F5). Absent or false — the
+	 * default, which fails closed — a verification takes it, so one challenge
+	 * answers one verification (WebAuthn, F7). See
+	 * {@link MfaVerifyContext.state}.
 	 */
-	readonly singleUseChallenge?: boolean;
+	readonly reusableChallenge?: boolean;
 	/** Prepare a verification: send a code, answer WebAuthn request options. Absent for a factor that needs none. */
 	challenge?(
 		ctx: MfaChallengeContext,

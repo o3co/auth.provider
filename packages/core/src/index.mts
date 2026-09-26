@@ -501,6 +501,7 @@ export {
 export type {
 	MfaCeremonyContext,
 	MfaChallengeContext,
+	MfaDigestMatch,
 	MfaDigests,
 	MfaEnrolledFactor,
 	MfaEnrollmentCompletion,
