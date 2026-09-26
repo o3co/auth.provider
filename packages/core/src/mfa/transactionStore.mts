@@ -376,6 +376,24 @@ export interface MfaTransactionStore {
 	 * the hold that attacker caused.
 	 */
 	clearSubjectState(subject: string): Promise<void>;
+
+	// The email proof the operator reset requires (D25).
+	/**
+	 * Record that `subject`'s next first binding requires the 80-bit email
+	 * proof, whatever `mfa.enrollment.requireEmailProof` says — the operator
+	 * reset's `requireEmailProof: true`. Idempotent. It has no expiry, and
+	 * `clearSubjectState` leaves it: the reset clears the lock state and a
+	 * password change clears it again, and neither may lift the requirement.
+	 */
+	requireEmailProofAtNextBinding(subject: string): Promise<void>;
+	/** Whether the requirement is recorded for `subject`. */
+	emailProofRequiredAtNextBinding(subject: string): Promise<boolean>;
+	/**
+	 * Atomic read-and-clear, at the first binding the requirement was for:
+	 * `true` for the one caller that cleared it, `false` when none was
+	 * recorded or another caller cleared it first.
+	 */
+	consumeEmailProofRequirement(subject: string): Promise<boolean>;
 }
 
 /** Domain-specific AdapterFactory alias for {@link MfaTransactionStore}. */

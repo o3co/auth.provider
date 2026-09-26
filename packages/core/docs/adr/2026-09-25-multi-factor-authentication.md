@@ -450,6 +450,8 @@ export interface MfaCoordinator {
 
 Two calls, because the express session is regenerated between them: the transaction must be bound to the id the browser will hold, and the factor read must happen before anything is written.
 
+**Amended 2026-09-27 (build-order step 3).** `MfaTransactionStore` also keeps D25's email-proof requirement, apart from the lock state (see D25's amendment), and `noteExemptSuccess` takes the presented browser so a trusted one is renewed rather than added (D21's amendment).
+
 ### D9 — What the session records
 
 `UserSession` and `CreateUserSessionInput` gain one required key (the #626 shape, so a copy that forgets it fails to compile):
@@ -776,6 +778,8 @@ The honest statement for a deployment without mail: MFA protects every account f
 - **Recovery codes** (on by default): generated with the first counting factor, shown once, regenerated with recent MFA; exempt from the subject lock, and an exempt success (D21); each use audited and answered with the count left. A recovery code satisfies the second factor (`amr` `recovery`, plus `mfa`); under `required`, a subject with no usable counting factor left must enroll one before the session is written (F3).
 - **An operator reset** for a user who lost everything: `resetMfaForSubject(subject, { requireEmailProof?, revokeSessions? })`, reached as `handle.components` like `revokeAllForSubject`. It removes every factor record, clears the subject's lock state, clears the witness last (D12), audits `mfa.factor.removed` (`by: "operator"`), and mails a notice under `mail`. `requireEmailProof: true` makes the user's next first binding require the email proof whatever `mfa.enrollment.requireEmailProof` says; `revokeSessions: true` also calls `revokeAllForSubject`. No HTTP admin surface; it never enrolls anything. The runbook requires out-of-band identity proofing before calling it: the reset is the account-takeover path if it is not.
 - Rejected: **no recovery**; **email-link recovery** — it makes the mailbox a single factor that bypasses the second one; **security questions** (`kba`).
+
+**Amended 2026-09-27 (build-order step 3): where `requireEmailProof: true` is kept.** The reset empties the factor store, the witness is a boolean, and the lock state is cleared by the reset and by every later password change, so none of them can hold the requirement until the next first binding. `MfaTransactionStore` keeps it as a flag of its own (D8): `requireEmailProofAtNextBinding(subject)` sets it, `emailProofRequiredAtNextBinding(subject)` reads it when deciding whether a first binding needs the proof, and `consumeEmailProofRequirement(subject)` clears it atomically at that binding. It has no expiry, and `clearSubjectState` leaves it.
 
 Decided in O8.
 

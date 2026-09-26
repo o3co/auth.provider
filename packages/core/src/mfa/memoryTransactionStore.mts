@@ -30,7 +30,10 @@
  * written to, paced like the challenge store's sweep, and a subject's state is
  * dropped once nothing in it can hold an attempt again: a failure and a trust
  * are kept {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} after they stop counting, and a
- * failure in the consecutive run is kept until a success ends the run.
+ * failure in the consecutive run is kept until a success ends the run. The
+ * email-proof requirement the operator reset records is kept apart from the
+ * lock state: no sweep and no `clearSubjectState` removes it, only its
+ * consumption at the next first binding.
  *
  * It holds at most `maxEntries` transactions. A transaction is opened at every
  * password login that needs a second factor and at every step-up or enrollment
@@ -252,6 +255,8 @@ export function createMemoryMfaTransactionStore(
 	);
 	const transactions = new Map<string, MfaTransaction>();
 	const subjects = new Map<string, SubjectState>();
+	/** Subjects whose next first binding requires the email proof (D25): no expiry, never swept. */
+	const emailProofRequired = new Set<string>();
 	/** The order of the next reservation. */
 	let nextSeq = 0;
 	/**
@@ -547,7 +552,20 @@ export function createMemoryMfaTransactionStore(
 		},
 
 		async clearSubjectState(subject: string): Promise<void> {
+			// The email-proof requirement is not lock state: it stays.
 			subjects.delete(subject);
+		},
+
+		async requireEmailProofAtNextBinding(subject: string): Promise<void> {
+			emailProofRequired.add(subject);
+		},
+
+		async emailProofRequiredAtNextBinding(subject: string): Promise<boolean> {
+			return emailProofRequired.has(subject);
+		},
+
+		async consumeEmailProofRequirement(subject: string): Promise<boolean> {
+			return emailProofRequired.delete(subject);
 		},
 	};
 }
