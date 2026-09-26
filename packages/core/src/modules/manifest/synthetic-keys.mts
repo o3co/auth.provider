@@ -26,9 +26,10 @@ import type {
  * to route factories that dispatch by `grant_type` at request time. Per
  * A2-α §6.5 + Amendment 3.
  *
- * The boot planner instantiates this resolver during `applyContributions`
- * (Phase 4 / A2-β §5.4) and freezes the underlying registry; the resolver
- * exposes only `get` and `entries`, no write surface.
+ * The boot planner instantiates this resolver before the `provides`
+ * factories run (it fills in `applyContributions`, Phase 4 / A2-β §5.4) and
+ * freezes the underlying registry; the resolver exposes only `get` and
+ * `entries`, no write surface.
  */
 export interface GrantHandlerResolver {
 	readonly get: (grantType: string) => GrantHandler | undefined;
@@ -109,7 +110,10 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 // ComponentMap declaration-merge for synthetic resolver slots.
 //
 // The boot planner injects these projections into the working component map
-// at `applyContributions` step 0 (see `boot/apply-contributions.mts`). Without
+// before stage 3 runs the `provides` factories (`prepareSyntheticProjections`
+// in `boot/apply-contributions.mts`), so a provider may require one; it reads
+// the projection lazily, at request time, because the contributions behind it
+// register only in stage 4. Without
 // declaration-merging them onto ComponentMap, downstream modules cannot
 // declare `requires: ["grantHandlerResolver"]` etc. through the typed
 // `defineModule` surface — `ComponentKey = keyof ComponentMap` would not

@@ -260,39 +260,68 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
  * Only injects the resolver if the corresponding collector is present in the
  * `contributionKinds` map. Does NOT inject `undefined`.
  *
+ * `createApp` runs it before stage 3 (`materializeComponents`), so a
+ * `provides` factory that requires a synthetic key is handed the projection
+ * the world keeps: empty while the factory runs, and filled as stage 4
+ * registers the contributions. A provider therefore reads it lazily, at
+ * request time, never while it is being built. A projection already in the
+ * map is kept, so the pass in stage 4 does not replace the object a
+ * provider holds.
+ *
  * Per A2-β §5.4 step 0.
  * @internal
  */
-function prepareSyntheticProjections(
+export function prepareSyntheticProjections(
 	components: Record<string, unknown>,
 	contributionKinds: ContributionCollectorMap,
 ): void {
-	if (contributionKinds.grants !== undefined) {
-		const resolver = makeGrantHandlerResolver(
-			contributionKinds.grants as NameKeyedCollector<unknown>,
+	const inject = (key: string, make: () => unknown): void => {
+		if (!Object.hasOwn(components, key)) components[key] = make();
+	};
+	const { grants, tokenExchangeValidators, federations, federationRedirectPolicies, mfaFactors } =
+		contributionKinds;
+	if (grants !== undefined) {
+		inject("grantHandlerResolver", () =>
+			makeGrantHandlerResolver(grants as NameKeyedCollector<unknown>),
 		);
-		components.grantHandlerResolver = resolver;
 	}
-	if (contributionKinds.tokenExchangeValidators !== undefined) {
-		const resolver = makeTokenExchangeValidatorResolver(
-			contributionKinds.tokenExchangeValidators as NameKeyedCollector<unknown>,
+	if (tokenExchangeValidators !== undefined) {
+		inject("tokenExchangeValidatorResolver", () =>
+			makeTokenExchangeValidatorResolver(tokenExchangeValidators as NameKeyedCollector<unknown>),
 		);
-		components.tokenExchangeValidatorResolver = resolver;
 	}
-	if (contributionKinds.federations !== undefined) {
-		const view = makeFederationProviders(
-			contributionKinds.federations as NameKeyedCollector<unknown>,
+	if (federations !== undefined) {
+		inject("federationProviders", () =>
+			makeFederationProviders(federations as NameKeyedCollector<unknown>),
 		);
-		components.federationProviders = view;
 	}
-	if (contributionKinds.federationRedirectPolicies !== undefined) {
-		const view = makeFederationRedirectPolicyResolver(
-			contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>,
+	if (federationRedirectPolicies !== undefined) {
+		inject("federationRedirectPolicyResolver", () =>
+			makeFederationRedirectPolicyResolver(
+				federationRedirectPolicies as NameKeyedCollector<unknown>,
+			),
 		);
-		components.federationRedirectPolicyResolver = view;
 	}
-	if (contributionKinds.mfaFactors !== undefined) {
-		components.mfaFactorResolver = makeMfaFactorResolver(contributionKinds.mfaFactors);
+	if (mfaFactors !== undefined) {
+		inject("mfaFactorResolver", () => makeMfaFactorResolver(mfaFactors));
+	}
+}
+
+/**
+ * Refuse a contributed value its kind's projection could not answer for:
+ * an `mfaFactors` factor whose `kind` is not the key it is contributed or
+ * overridden under — the resolver answers by key, and the coordinator reads
+ * a record's kind back through it, so a factor filed under another kind
+ * would verify that kind's records. `null` (switched off) passes. Throws a
+ * `RangeError`, which the caller reports as a failed contribution factory.
+ * @internal
+ */
+function checkNameKeyedValue(kind: string, name: string, value: unknown): void {
+	if (kind !== "mfaFactors" || value === null) return;
+	if ((value as { kind?: unknown } | undefined)?.kind !== name) {
+		throw new RangeError(
+			`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
+		);
 	}
 }
 
@@ -519,6 +548,7 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = await factory(deps);
+				checkNameKeyedValue(entry.kind, name, value);
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -551,6 +581,7 @@ export async function applyContributions(
 			let value: unknown;
 			try {
 				value = await factory(deps);
+				checkNameKeyedValue(entry.kind, name, value);
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({

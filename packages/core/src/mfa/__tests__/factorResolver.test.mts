@@ -51,9 +51,9 @@ const factor = (kind: string): MfaFactor => ({
 });
 
 /**
- * Reads the resolver by requiring it, from a contribution factory: the
- * planner assembles a synthetic key before contribution factories run and
- * after the `provides` factories, so this is where a module reads one.
+ * Reads the resolver by requiring it, from a contribution factory. A
+ * `provides` factory may require it too (the case below): the projection is
+ * in place before stage 3 and fills in stage 4.
  */
 function reader(seen: { resolver?: MfaFactorResolver }) {
 	return defineModule({

@@ -29,8 +29,15 @@
  */
 
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
+import { prepareSyntheticProjections } from "./apply-contributions.mjs";
 import { failureSummary } from "./failure-summary.mjs";
-import type { BootPlan, BootstrapMap, CleanupRecord, ComponentWorld } from "./types.mjs";
+import type {
+	BootPlan,
+	BootstrapMap,
+	CleanupRecord,
+	ComponentWorld,
+	ContributionCollectorMap,
+} from "./types.mjs";
 import { BootError } from "./types.mjs";
 
 // ---------------------------------------------------------------------------
@@ -114,8 +121,11 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
  * Stage 3 of the A2-β boot planner pipeline.
  *
  * Pre-seeds `bootstrapComponents` into the working component map, applies
- * `overrideComponents` substitutions, then runs each provider factory in the
- * topological + declaration-stable order determined by `plan.providerActivations`.
+ * `overrideComponents` substitutions, injects the synthetic projections of
+ * `contributionKinds` when it is given (`createApp` gives it: a provider
+ * that requires one reads it lazily, filled once stage 4 registers the
+ * contributions), then runs each provider factory in the topological +
+ * declaration-stable order determined by `plan.providerActivations`.
  *
  * On factory failure:
  *   - Wraps the thrown value as `BootError reason="provides-factory-failed"`,
@@ -132,6 +142,7 @@ export async function materializeComponents(
 	plan: BootPlan,
 	bootstrapComponents: BootstrapMap,
 	overrideComponents: Partial<ComponentMap> | undefined,
+	contributionKinds?: ContributionCollectorMap,
 ): Promise<ComponentWorld> {
 	// Working component map — typed internally as a plain Record for mutation.
 	const components: Record<string, unknown> = {};
@@ -158,6 +169,13 @@ export async function materializeComponents(
 			components[key] = value;
 			externalKeys.add(key as ComponentKey);
 		}
+	}
+
+	// Step 2b: the synthetic projections — stable read-through views of the
+	// collectors stage 4 fills — so a provider that requires one is handed the
+	// object the world keeps (the MFA coordinator reads `mfaFactorResolver`).
+	if (contributionKinds !== undefined) {
+		prepareSyntheticProjections(components, contributionKinds);
 	}
 
 	// Step 3: Run providers in plan.providerActivations order. Per A2-β §5.3 step 3.
