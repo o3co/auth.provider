@@ -1,0 +1,1 @@
+{"version":3,"file":"callback-url.d.mts","sourceRoot":"","sources":["../../src/federations/callback-url.mts"],"names":[],"mappings":"AAgBA;;;;;;;;;;;;;;;;;;;;;;GAsBG;AACH,wBAAgB,sBAAsB,CAAC,MAAM,EAAE;IAC9C,QAAQ,CAAC,WAAW,EAAE,MAAM,CAAC;IAC7B,QAAQ,CAAC,IAAI,EAAE,MAAM,CAAC;IACtB,QAAQ,CAAC,cAAc,CAAC,EAAE,QAAQ,CAAC,MAAM,CAAC,MAAM,EAAE,MAAM,CAAC,CAAC,CAAC;CAC3D,GAAG,GAAG,CAYN"}

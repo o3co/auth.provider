@@ -1,0 +1,928 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import {
+	decodeJwt,
+	decodeProtectedHeader,
+	type JWTPayload as JoseJWTPayload,
+	errors as joseErrors,
+	jwtVerify,
+	type ProtectedHeaderParameters,
+} from "jose";
+import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
+import { auditErrorText } from "../errors/envelope.mjs";
+import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
+import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
+import type { Logger } from "../logging/Logger.mjs";
+import { lineSafeText } from "../logging/loggableError.mjs";
+import type { SubjectRevocation } from "../user-sessions/types.mjs";
+
+/**
+ * Token type — drives default `typ` expectation and selects appropriate
+ * post-signature claim checks (e.g. `azp` on refresh tokens).
+ */
+export type JwtType = "access_token" | "refresh_token" | "id_token";
+
+/**
+ * Discriminator for {@link JwtVerificationError}. One reason per failure mode
+ * keeps caller `catch` blocks structurally exhaustive when the exhaustive
+ * switch over this union is type-checked.
+ */
+export type JwtVerificationReason =
+	| "alg"
+	| "iss"
+	| "aud"
+	| "typ"
+	| "azp"
+	| "nonce"
+	| "signature"
+	| "expired"
+	| "not_yet_valid"
+	| "kid_unknown"
+	// `kid_expired` is distinct from `kid_unknown`: an expired kid is an
+	// operator-rotation signal (the previous key's expiresAt has passed), an
+	// unknown kid is an attacker-fabricated header signal. SIEM filters can
+	// page differently on each.
+	| "kid_expired"
+	// The keystore could not answer the lookup: it threw something other than
+	// the `UnknownKidError` / `ExpiredKidError` its contract uses for the two
+	// findings — a remote key service that timed out, a vault that refused
+	// the connection. An outage, like `revocation_unavailable`, and never
+	// `kid_unknown`: that reason says the header named a key nobody holds,
+	// and every caller answers it as the client's fault.
+	| "verification_key_unavailable"
+	// Wave 1 (§4.5) / #296: a revocation *finding*, or a fail-closed refusal
+	// when the watermark cannot be compared — the jti is on the
+	// AccessTokenDenylist (explicitly revoked via RFC 7009); the token's `iat`
+	// is at or before the subject's revocation watermark; or a watermark is in
+	// force and the token carries no `iat` to compare against it (#376: a token
+	// that cannot prove it postdates a credential change is not honoured).
+	// Distinct from `expired` so SIEM filters can tell natural expiry apart
+	// from an operator-initiated revocation event. Never emitted for a store
+	// that could not be consulted: that is `revocation_unavailable`, for both
+	// stores (#408, #459).
+	| "revoked"
+	// #408 / #459: a revocation store — the subject watermark (#408) or the jti
+	// denylist (#459) — could not be consulted. Verification still fails closed
+	// — an unreachable backend must never read as "not revoked" — but the
+	// failure is an outage, not a finding, and the two must not be reported as
+	// one thing: `emitRejection` logs this field, not the message, so under a
+	// shared reason a backend blip and a genuine revocation were the same
+	// `jwt_verify_rejected reason=revoked` line for every token on every replica.
+	//
+	// The refresh grant is where that mattered enough to split the reason: it
+	// mapped every verification error to `400 invalid_grant`, and per RFC 6749
+	// §5.2 a client discards its refresh token on that. A transient store outage
+	// therefore did not degrade the service, it force-logged-out every user who
+	// refreshed during it — while the same handler already answered family-store
+	// outages with `503 temporarily_unavailable`. Every caller now answers this
+	// reason and `verification_key_unavailable` alike: `503`, with the token still refused
+	// (`isVerificationUnavailable`).
+	| "revocation_unavailable";
+
+/** The longest jose message a verdict keeps: the cap `auditErrorText` applies to caller text. */
+const JOSE_MESSAGE_MAX_LENGTH = 200;
+
+/**
+ * Thrown by {@link verifyJwt} on any verification failure. The `reason` field
+ * is the audit-stable discriminator; `message` is a human-readable summary
+ * suitable for `logger.warn` — what it quotes of the caller's token (a `typ`,
+ * a `crit` name jose quotes) is on one line and capped — but NOT for
+ * client-facing error responses (callers must map to RFC-compliant error
+ * envelopes themselves).
+ */
+export class JwtVerificationError extends Error {
+	override readonly name = "JwtVerificationError";
+	constructor(
+		readonly reason: JwtVerificationReason,
+		message: string,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
+	}
+}
+
+/**
+ * The reasons that report an outage — a dependency the verifier could not
+ * consult — rather than a finding about the token.
+ */
+export type VerificationUnavailableReason =
+	| "verification_key_unavailable"
+	| "revocation_unavailable";
+
+/**
+ * Whether `err` is a {@link JwtVerificationError} reporting an outage: the
+ * keystore could not answer the key lookup (`verification_key_unavailable`), or a
+ * revocation store could not be consulted — the subject watermark (#408) or
+ * the jti denylist (#459) (`revocation_unavailable`). One predicate for every
+ * dependency: a caller that answers an outage differently from a finding must
+ * not have to know which one was down.
+ *
+ * A predicate rather than an inline `instanceof` + `reason` pair at each call
+ * site, because the answer changes what a caller says on the wire and getting
+ * it wrong is not visible in a test that only checks the happy path.
+ *
+ * Every caller answers it `503 temporarily_unavailable`, never with a verdict
+ * on the token. RFC 6750 §3.1's `invalid_token` says the token "is expired,
+ * revoked, malformed, or invalid for other reasons" and invites the client to
+ * get a new one; RFC 6749 §5.2's `invalid_grant` makes a client discard its
+ * refresh token; RFC 7662's `active: false` tells a resource server the token
+ * is not active. An outage says none of those things — the token may be
+ * perfectly good — and each of them sends the client to replace a credential,
+ * which meets the same outage at the token endpoint. The token is still
+ * refused: verification fails closed either way.
+ */
+export function isVerificationUnavailable(
+	err: unknown,
+): err is JwtVerificationError & { readonly reason: VerificationUnavailableReason } {
+	return (
+		err instanceof JwtVerificationError &&
+		(err.reason === "verification_key_unavailable" || err.reason === "revocation_unavailable")
+	);
+}
+
+/**
+ * The `error_description` a caller puts beside `temporarily_unavailable` for
+ * an outage {@link isVerificationUnavailable} recognises: which dependency
+ * was down, and nothing about the token.
+ */
+export const VERIFICATION_UNAVAILABLE_DESCRIPTION: Readonly<
+	Record<VerificationUnavailableReason, string>
+> = Object.freeze({
+	verification_key_unavailable: "verification key unavailable",
+	revocation_unavailable: "revocation store unavailable",
+});
+
+/**
+ * The revocation stores that a verification consults, travelling as one
+ * bundle (#367) so a call site cannot forget half of them.
+ *
+ * - `denylist` — Wave 1 (§4.5): `denylist.has(jti)` runs after all
+ *   signature/expiry/type checks; a hit throws `reason: "revoked"`.
+ * - `subjectRevocation` — #296: a token whose `iat` is at or before the
+ *   subject's revocation watermark throws `reason: "revoked"`. The companion
+ *   to the denylist rather than a replacement: the denylist revokes a token
+ *   by identity, the watermark revokes every token a subject held as of a
+ *   moment — which is what a credential change needs, since the jtis
+ *   outstanding for a subject are not enumerable.
+ *
+ * Either store failing to answer throws `reason: "revocation_unavailable"`
+ * (#408, #459): still a refusal, but an outage rather than a finding.
+ *
+ * Both fields stay individually optional inside the bundle: whether each
+ * store exists is the composition's decision (#363). What the bundle removes
+ * is the call site's ability to not ask.
+ */
+export interface JwtRevocationSources {
+	readonly denylist?: AccessTokenDenylist;
+	readonly subjectRevocation?: SubjectRevocation;
+}
+
+/**
+ * What a `verifyJwt` call consults about revocation — the sources the
+ * composition wired, or the literal `"none"` for the few surfaces where a
+ * revoked token is still safe to act on. See
+ * {@link JwtVerifyOptions.revocation} for when each is correct.
+ */
+export type VerifyRevocation = "none" | JwtRevocationSources;
+
+export interface JwtVerifyOptions {
+	/** Token type — selects default `typ` expectation. */
+	readonly type: JwtType;
+	/**
+	 * Required `iss` claim — exact match. Pass an empty string to skip iss
+	 * pinning when the operator has not configured `oauth.jwt.issuer` and
+	 * the call site has no other source of expected issuer; the verifier
+	 * emits a `jwt_verify_iss_skipped` warning so the gap is audit-visible.
+	 */
+	readonly expectedIssuer: string;
+	/**
+	 * Required `aud` claim — must be present (string) or contain (array).
+	 *
+	 * Optional only because bearer-as-credential routes (introspect Bearer
+	 * self-intro, /userinfo, /logout id_token_hint) cannot establish the
+	 * calling-client identity *before* JWT verification, so the audience to
+	 * pin against is unknown at the verify call. At those sites the caller
+	 * passes `undefined`; the verifier emits a `jwt_verify_aud_skipped`
+	 * warning so the gap is audit-visible. All sites that DO know the
+	 * calling client (token / refresh / federation / token-exchange) MUST
+	 * supply this.
+	 */
+	readonly expectedAudience?: string | readonly string[];
+	/**
+	 * Optional `azp` claim binding. When provided, `payload.azp` must equal
+	 * this value or verification fails with `reason: "azp"`. Used by refresh
+	 * token verification to bind the RT to the authorized party (D-6 PB-2).
+	 */
+	readonly expectedAzp?: string;
+	/**
+	 * Optional `nonce` claim binding. Used by id_token verification to bind
+	 * the token to the original authorization request (PB-4+5).
+	 */
+	readonly expectedNonce?: string;
+	/**
+	 * Clock skew tolerance in milliseconds applied to `exp`/`nbf`/`iat`
+	 * checks. Default: 300_000 (5 min) per RFC 8725 §3.10 guidance.
+	 *
+	 * An access-token denylist entry (`/oauth/revoke`) is kept until `exp` plus
+	 * the default only. A larger value here would accept a revoked token for
+	 * the difference once its entry lapses, so keep the default wherever the
+	 * denylist is consulted.
+	 */
+	readonly clockSkewMs?: number;
+	/**
+	 * Cross-replica clock allowance for the subject-revocation watermark
+	 * comparison, in milliseconds. Default: 1_000.
+	 *
+	 * Deliberately **not** `clockSkewMs`. That one is five minutes, sized for
+	 * `exp`/`nbf`, and using it here would refuse every token minted in the
+	 * five minutes after a credential change — including the one from the
+	 * re-login the change sends the user to. This allowance runs in the other
+	 * direction and has to stay small enough that a legitimate post-reset
+	 * login is not caught by it (#408).
+	 *
+	 * What it buys: the comparison is `iat <= watermark`, second-truncated and
+	 * inclusive, which covers a token minted in the same second as the reset.
+	 * A minting replica whose clock runs a second or more ahead of the replica
+	 * that wrote the watermark stamps `iat` past it, and tokens minted *just
+	 * before* the credential change survive it — the exact case the inclusive
+	 * comparison exists to catch, one second further out. One second of
+	 * allowance covers the skew a monitored fleet actually has.
+	 *
+	 * The cost is bounded and one-sided: a token minted within the allowance
+	 * *after* a reset is refused, which costs its holder one retry. Set to `0`
+	 * for the pre-#408 exact comparison.
+	 *
+	 * Rounded **up** to whole seconds, because the comparison is in seconds and
+	 * truncating would make the guard weaker than the configured value. A
+	 * negative value is clamped to `0`: it would move the boundary earlier than
+	 * the watermark itself and let pre-revocation tokens through.
+	 */
+	readonly subjectRevocationSkewMs?: number;
+	/**
+	 * Override default `typ` for this {@link JwtType}. Pass `null` to skip
+	 * `typ` checking entirely (legacy migration paths only).
+	 */
+	readonly expectedTyp?: string | null;
+	/**
+	 * Override expected algorithms passed to jose. Default: `[keyStore.algorithm]`.
+	 * Setting an explicit list is required when verifying tokens issued by an
+	 * upstream provider whose alg differs from the local KeyStore.
+	 */
+	readonly expectedAlgs?: readonly string[];
+	/**
+	 * Audit logger. All rejection paths emit a structured warn record with
+	 * `{reason, jti, sub, iss, typ}` bindings so SIEM filters can index by
+	 * reason without scraping message text. Optional — when absent the
+	 * rejection is silent (caller handles it via the thrown error).
+	 */
+	readonly logger?: Logger;
+	/**
+	 * SF-1 transition flag for the v0.4.x→v0.5.x typ-header rollout.
+	 *
+	 * The default is `false`: tokens whose `typ` header is absent are
+	 * rejected. Operators with v0.4.x tokens still in circulation can set
+	 * this to `true` for their own bounded migration window — when true,
+	 * typ-less tokens are accepted and emit a `jwt_verify_legacy_typ`
+	 * warning. The v0.5.x default was `true`; Phase G S2 flips it.
+	 */
+	readonly legacyTypAccept?: boolean;
+	/**
+	 * REQUIRED: what this verification consults about revocation (#367).
+	 *
+	 * The two checks used to be independent optional options whose omission
+	 * "preserved current behavior" — which meant a new call site skipped
+	 * revocation silently, the same seam shape that produced the #277/#287/
+	 * #322 silent no-ops. Ten call sites hand-forwarded them; the eleventh
+	 * would have failed open with no symptom. Making the field required turns
+	 * that omission into a type error, and makes the deliberate skip a
+	 * greppable, reviewable literal:
+	 *
+	 *   - `{ denylist?, subjectRevocation? }` — consult what the composition
+	 *     wired. This is the shape for every surface that ACCEPTS a token as
+	 *     a credential; forward both slots even when they may be undefined,
+	 *     because "the deployment wired nothing" is the composition's
+	 *     decision (#363), not the call site's.
+	 *   - `"none"` — this call site does not ask about revocation ON
+	 *     PRINCIPLE, and says so in a code review-able way. Correct only
+	 *     where the operation is safe or meaningful for a revoked token:
+	 *     revoking it again (idempotent), logging it out, or reading an
+	 *     id_token_hint.
+	 */
+	readonly revocation: VerifyRevocation;
+	/**
+	 * Wave 1 (§4.5): SECURITY GUARDRAIL — set true ONLY in the /oauth/revoke
+	 * AT path. Spreading this flag to other call sites bypasses token-lifetime
+	 * enforcement. CI lint must restrict `ignoreExpiration: true` to revoke handler.
+	 *
+	 * Default: `false` (exp check runs as normal).
+	 */
+	readonly ignoreExpiration?: boolean;
+}
+
+export interface VerifiedJwt {
+	readonly payload: JoseJWTPayload;
+	readonly header: ProtectedHeaderParameters;
+	readonly type: JwtType;
+}
+
+const DEFAULT_TYP_BY_TYPE: Record<JwtType, string> = {
+	access_token: "at+jwt",
+	refresh_token: "rt+jwt",
+	// #394: the standard spelling. What token-confusion refusal needs is
+	// "disjoint from at+jwt", which `JWT` satisfies; the nonstandard `id+jwt`
+	// bought nothing but failed strict external RPs that validate `typ`.
+	//
+	// #394 accepted `id+jwt` alongside it for a migration window, so id_tokens
+	// already issued kept their `id_token_hint` value. #402 closed that window:
+	// its conditions were "one refresh-token lifetime after the release that
+	// shipped the flip" and "the legacy-acceptance log line has gone quiet",
+	// and neither means anything for a provider with no deployment behind it —
+	// there is no population of `id+jwt` tokens to protect. `id+jwt` is now one
+	// more wrong spelling, refused as an ordinary typ mismatch.
+	id_token: "JWT",
+};
+
+/**
+ * Maps the v0.3-era `payload.type` legacy claim back to a {@link JwtType}.
+ * v0.3 tokens predated the `typ` header convention; refresh tokens emitted
+ * `payload.type = "refresh"` instead. Unknown values map to `undefined`
+ * (the verifier accepts them under `legacyTypAccept` rather than rejecting,
+ * matching the philosophy that an unrecognized legacy hint is not evidence
+ * of cross-type confusion).
+ */
+const LEGACY_PAYLOAD_TYPE_MAP: Record<string, JwtType> = {
+	refresh: "refresh_token",
+	access: "access_token",
+};
+
+export const DEFAULT_CLOCK_SKEW_MS = 300_000;
+
+/**
+ * Default watermark allowance (#408). One second, because the comparison is
+ * already second-truncated, so this is the smallest value that covers a
+ * minting replica a whole second ahead of the watermark writer — and every
+ * additional second is a second of post-reset logins refused. See
+ * `JwtVerifyOptions.subjectRevocationSkewMs`.
+ */
+export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
+
+/**
+ * Whether `cause` is the finding `name` names: an instance of the class, or —
+ * when a composition holds two copies of this package, a keystore built
+ * against one and the verifier from the other — an object carrying that
+ * `name`. The finding errors set `name` to their own class name, and nothing
+ * else in this package uses those names.
+ */
+const isFinding = (cause: unknown, cls: abstract new (...args: never[]) => Error, name: string) =>
+	cause instanceof cls ||
+	(typeof cause === "object" && cause !== null && (cause as { name?: unknown }).name === name);
+
+/**
+ * How long past a token's `exp` a record that revokes it must still be kept:
+ * the tolerance with which this verifier accepts an expired token
+ * ({@link DEFAULT_CLOCK_SKEW_MS}), the cross-replica allowance
+ * ({@link DEFAULT_SUBJECT_REVOCATION_SKEW_MS}) and a whole second for the
+ * rounding of `exp` to seconds. A denylist entry kept only until `exp`, or a
+ * revoked refresh-token family kept only until its last token's `exp`,
+ * leaves exactly that window in which the revoked token is accepted again.
+ */
+export const REVOCATION_RETENTION_ALLOWANCE_MS =
+	DEFAULT_CLOCK_SKEW_MS + DEFAULT_SUBJECT_REVOCATION_SKEW_MS + 1_000;
+
+/**
+ * Centralized JWT verification with alg / iss / aud / typ pinning.
+ *
+ * The verifier:
+ *  1. decodes the protected header (without signature check) to read `kid`
+ *     and `typ`,
+ *  2. validates `typ` against the expected value (legacy compat is opt-in
+ *     via {@link JwtVerifyOptions.legacyTypAccept}),
+ *  3. resolves the verification key by `kid` via
+ *     {@link KeyStore.getVerificationKey} (falls back to the current signing
+ *     kid when the JWT has no `kid` header) — a keystore that cannot answer
+ *     is `verification_key_unavailable`, an outage, not `kid_unknown`,
+ *  4. delegates to jose `jwtVerify` with explicit `algorithms`, `issuer`, and
+ *     `audience` options — pinning all three at the security-critical layer,
+ *  5. enforces `iat <= now + clockSkewMs` post-signature (jose does not
+ *     validate `iat`-in-future by default), and
+ *  6. enforces optional `azp` / `nonce` claim bindings post-signature.
+ *
+ * On any failure the verifier throws {@link JwtVerificationError} with a
+ * stable {@link JwtVerificationReason}. Callers map that to their own error
+ * envelope (e.g. RFC 6750 `error: "invalid_token"`) — except an outage
+ * ({@link isVerificationUnavailable}), which every caller answers
+ * `503 temporarily_unavailable`.
+ */
+export async function verifyJwt(
+	jwt: string,
+	keyStore: KeyStore,
+	options: JwtVerifyOptions,
+): Promise<VerifiedJwt> {
+	const {
+		type,
+		expectedIssuer,
+		expectedAudience,
+		expectedAzp,
+		expectedNonce,
+		clockSkewMs = DEFAULT_CLOCK_SKEW_MS,
+		subjectRevocationSkewMs = DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+		expectedTyp,
+		expectedAlgs,
+		logger,
+		legacyTypAccept = false,
+		revocation,
+		ignoreExpiration = false,
+	} = options;
+	// "none" and an empty bundle behave identically below; the distinction is
+	// for the reader and the reviewer, not the machine.
+	const denylist = revocation === "none" ? undefined : revocation.denylist;
+	const subjectRevocation = revocation === "none" ? undefined : revocation.subjectRevocation;
+
+	let header: ProtectedHeaderParameters;
+	try {
+		header = decodeProtectedHeader(jwt);
+	} catch {
+		const err = new JwtVerificationError("signature", "JWT header decode failed");
+		emitRejection(logger, err, undefined, undefined);
+		throw err;
+	}
+
+	// typ check — header-only, runs before signature as a cheap token-type-
+	// confusion screen. typ is in the public protected header (not part of
+	// the signed claims set), so checking it pre-signature is a no-op for an
+	// attacker who controls the header but not the key; it does NOT add a
+	// timing oracle since rejecting on typ short-circuits before the HMAC /
+	// RSA op the attacker would otherwise time. Pre-signature placement also
+	// short-circuits id_token / logout_token tokens reaching an at+jwt-only
+	// route (they would still fail signature against the same KeyStore, but
+	// failing here keeps the audit log honest about *why*).
+	const effectiveExpectedTyp = expectedTyp === undefined ? DEFAULT_TYP_BY_TYPE[type] : expectedTyp;
+	if (effectiveExpectedTyp !== null) {
+		// The header is the client's JSON: `typ` may be any value. One that is
+		// not a string is refused before any message is built from it — a
+		// `{"toString": null}` would otherwise throw a TypeError here.
+		const headerTyp: unknown = header.typ;
+		if (headerTyp !== undefined && typeof headerTyp !== "string") {
+			const err = new JwtVerificationError("typ", "JWT typ header is not a string");
+			emitRejection(logger, err, undefined, header);
+			throw err;
+		}
+		if (headerTyp === undefined) {
+			if (legacyTypAccept) {
+				logger?.warn(
+					{
+						reason: "typ",
+						typ: undefined,
+						expectedTyp: effectiveExpectedTyp,
+					},
+					"jwt_verify_legacy_typ",
+				);
+			} else {
+				const err = new JwtVerificationError(
+					"typ",
+					`JWT typ header is required (expected ${effectiveExpectedTyp})`,
+				);
+				emitRejection(logger, err, undefined, header);
+				throw err;
+			}
+		} else if (headerTyp !== effectiveExpectedTyp) {
+			// Quoted sanitised and capped: the message is what a caller's log
+			// carries as the projected error's `detail`, and the header is
+			// whatever the caller wrote — CR/LF and ten thousand characters
+			// included. A `typ` is a media type (RFC 7515 §4.1.9), an open
+			// vocabulary, so there is no closed set to map it onto.
+			const err = new JwtVerificationError(
+				"typ",
+				`JWT typ ${auditErrorText(headerTyp)} does not match expected ${effectiveExpectedTyp}`,
+			);
+			emitRejection(logger, err, undefined, header);
+			throw err;
+		}
+	}
+
+	// kid resolution — fall back to current signing kid when the JWT has no
+	// kid header (back-compat with tokens signed before kid was emitted).
+	//
+	// The client's input is judged first, and only then is the keystore asked:
+	// a `kid` that is not a well-formed key id (`keys/kid.mts`: a non-empty
+	// string of at most `MAX_KID_LENGTH` characters, no control character)
+	// names no key this server issued — the keystores refuse to be built with
+	// one — and is `kid_unknown` here. A present `kid: null` is such a value,
+	// not an absent kid. What the keystore then throws is about the keystore,
+	// never about the shape of the input — which is what lets anything but its
+	// two findings mean it could not answer.
+	const headerKid: unknown = header.kid;
+	if (headerKid !== undefined && !isWellFormedKid(headerKid)) {
+		const err = new JwtVerificationError(
+			"kid_unknown",
+			`JWT kid header is not a key id: a string of 1 to ${MAX_KID_LENGTH} characters with no control character`,
+		);
+		emitRejection(logger, err, undefined, header);
+		throw err;
+	}
+	let verificationKey: Awaited<ReturnType<KeyStore["getVerificationKey"]>>;
+	try {
+		// The fallback is inside the classification too: a remote keystore
+		// that cannot say which kid is current cannot answer either.
+		verificationKey = await keyStore.getVerificationKey(
+			headerKid ?? keyStore.getSigningKidFallback(),
+		);
+	} catch (cause) {
+		// KeyStore distinguishes the two findings via typed errors
+		// (ExpiredKidError / UnknownKidError) so SIEM pipelines can tell
+		// operator-rotation expiry apart from attacker-fabricated header
+		// values without coupling to message text — by class, or by `name`
+		// when the keystore came from another copy of this package. Anything
+		// else it throws is the keystore failing to answer, which says
+		// nothing about the token: `verification_key_unavailable`, with what it
+		// threw kept as the cause so a caller's log names the dependency.
+		const expired = isFinding(cause, ExpiredKidError, "ExpiredKidError");
+		if (expired || isFinding(cause, UnknownKidError, "UnknownKidError")) {
+			const err = expired
+				? new JwtVerificationError("kid_expired", "JWT kid names a retired key")
+				: new JwtVerificationError("kid_unknown", "JWT kid names no key this keystore holds");
+			emitRejection(logger, err, undefined, header);
+			throw err;
+		}
+		const err = new JwtVerificationError(
+			"verification_key_unavailable",
+			"verification key lookup failed (fail-closed)",
+			{ cause },
+		);
+		emitRejection(logger, err, undefined, header);
+		throw err;
+	}
+
+	const algorithms = expectedAlgs ?? [keyStore.algorithm];
+	const clockSkewSeconds = Math.floor(clockSkewMs / 1000);
+
+	// Audience pinning is OPT-IN. When the caller cannot establish the
+	// expected audience before verification (introspect Bearer self-intro,
+	// /userinfo, /logout id_token_hint — bearer-as-credential routes), the
+	// jose `audience` option is omitted and the gap is logged so the audit
+	// trail records that the aud check was deliberately skipped at this
+	// site rather than silently bypassed.
+	const audienceForJose: string | string[] | undefined =
+		expectedAudience === undefined
+			? undefined
+			: typeof expectedAudience === "string"
+				? expectedAudience
+				: [...expectedAudience];
+	if (expectedAudience === undefined) {
+		// Once-per-(logger, reason, type) so /userinfo and other hot bearer-as-
+		// credential routes don't flood ingestion with a warn record per request.
+		// Operators see the gap on first occurrence; volume signal is preserved
+		// in route-level request counters, not the audit log.
+		warnAuditGapOnce(logger, "aud", type, { iss: expectedIssuer }, "jwt_verify_aud_skipped");
+	}
+	// Issuer pinning is normally required, but operators who haven't
+	// configured `oauth.jwt.issuer` (e.g. partial-config test fixtures, dev
+	// composition roots) still need verification to function. Empty-string
+	// expectedIssuer is the explicit skip — different from passing a real
+	// expected issuer so it's auditable.
+	const skipIssuer = expectedIssuer === "";
+	if (skipIssuer) {
+		warnAuditGapOnce(logger, "iss", type, {}, "jwt_verify_iss_skipped");
+	}
+
+	// ignoreExpiration: when true, pass a currentDate set to 1 second before
+	// the token's own exp so jose's exp check always passes. We decode the
+	// payload (unauthenticated, signature checked in the jwtVerify call below)
+	// purely to read the numeric exp claim.
+	//
+	// CAVEAT: this also shifts the reference for nbf validation — jose checks
+	// `nbf > currentDate + tolerance` against the same currentDate. A token
+	// with nbf set close to exp (legal but unusual) could be wrongly rejected
+	// with reason "not_yet_valid" when ignoreExpiration is true. This is
+	// acceptable for the /oauth/revoke AT path because issued access tokens
+	// always have iat ≈ nbf ≪ exp. iat-future check (post-signature, below)
+	// uses Date.now() directly and is unaffected.
+	//
+	// SECURITY GUARDRAIL: use only in the /oauth/revoke AT path (§4.5).
+	let ignoreExpirationCurrentDate: Date | undefined;
+	if (ignoreExpiration) {
+		try {
+			const rawPayload = decodeJwt(jwt);
+			if (typeof rawPayload.exp === "number") {
+				// Set currentDate to exp - 1s so exp check passes exactly.
+				ignoreExpirationCurrentDate = new Date((rawPayload.exp - 1) * 1000);
+			}
+		} catch {
+			// If decodeJwt fails, fall through — jwtVerify will reject the JWT
+			// anyway (malformed), so skipping exp-bypass is safe.
+		}
+	}
+
+	let payload: JoseJWTPayload;
+	try {
+		const result = await jwtVerify(jwt, verificationKey, {
+			algorithms: [...algorithms],
+			...(skipIssuer ? {} : { issuer: expectedIssuer }),
+			...(audienceForJose !== undefined ? { audience: audienceForJose } : {}),
+			clockTolerance: clockSkewSeconds,
+			...(ignoreExpirationCurrentDate !== undefined
+				? { currentDate: ignoreExpirationCurrentDate }
+				: {}),
+		});
+		payload = result.payload;
+	} catch (cause) {
+		const reason = classifyJoseError(cause);
+		// jose's text on one line and capped (`lineSafeText`): it is fixed
+		// text about the token but for one thing — an unrecognised `crit`
+		// entry is refused, before the signature, by quoting the name the
+		// caller wrote. Not `auditErrorText`, whose RFC 6749 set would turn
+		// every claim name jose quotes (`"exp" claim timestamp check failed`)
+		// into `?exp?`.
+		const err = new JwtVerificationError(
+			reason,
+			lineSafeText(cause instanceof Error ? cause.message : String(cause), JOSE_MESSAGE_MAX_LENGTH),
+		);
+		emitRejection(logger, err, undefined, header);
+		throw err;
+	}
+
+	// Legacy cross-type acceptance guard (Copilot review): when the header
+	// `typ` was absent and `legacyTypAccept` waved through the typ check,
+	// a v0.3-era token whose `payload.type` claim contradicts the expected
+	// {@link JwtType} would otherwise pass — e.g. a typ-less RT carrying
+	// `payload.type: "refresh"` accepted as an access token at /userinfo.
+	// Map the legacy claim back to the type universe and reject contradictions.
+	if (header.typ === undefined && typeof payload.type === "string") {
+		const mappedType = LEGACY_PAYLOAD_TYPE_MAP[payload.type];
+		if (mappedType !== undefined && mappedType !== type) {
+			const err = new JwtVerificationError(
+				"typ",
+				`JWT legacy payload.type ${payload.type} maps to ${mappedType}, expected ${type}`,
+			);
+			emitRejection(logger, err, payload, header);
+			throw err;
+		}
+	}
+
+	// iat in future beyond skew — jose does not enforce this; RFC 8725 §3.10
+	// recommends rejecting because a future iat indicates clock tampering or
+	// token replay from a forged time source.
+	if (typeof payload.iat === "number") {
+		const nowSeconds = Math.floor(Date.now() / 1000);
+		if (payload.iat > nowSeconds + clockSkewSeconds) {
+			const err = new JwtVerificationError(
+				"not_yet_valid",
+				`JWT iat ${payload.iat} is in the future beyond clock skew`,
+			);
+			emitRejection(logger, err, payload, header);
+			throw err;
+		}
+	}
+
+	if (expectedAzp !== undefined && payload.azp !== expectedAzp) {
+		const err = new JwtVerificationError(
+			"azp",
+			`JWT azp ${String(payload.azp)} does not match expected ${expectedAzp}`,
+		);
+		emitRejection(logger, err, payload, header);
+		throw err;
+	}
+
+	if (expectedNonce !== undefined && payload.nonce !== expectedNonce) {
+		const err = new JwtVerificationError("nonce", `JWT nonce mismatch (expected ${expectedNonce})`);
+		emitRejection(logger, err, payload, header);
+		throw err;
+	}
+
+	// Wave 1 (§4.5): denylist check — runs after all signature/expiry/type checks
+	// so revocation is only consulted for otherwise-valid tokens. This ordering
+	// ensures `reason: "revoked"` is never emitted for tokens that would already
+	// fail on structural grounds (expired, wrong typ, etc.) — keeping the audit
+	// signal crisp.
+	//
+	// Fail-closed on denylist backend errors: if `denylist.has` throws (e.g.
+	// Redis network failure), we cannot determine revocation state. Treating
+	// "unknown" as "active" would let revoked tokens through during outages,
+	// so the token is refused.
+	//
+	// #459: refused as `revocation_unavailable`, not `revoked`. This path used
+	// to throw `revoked` with the cause in the message, on the theory that
+	// operators could tell an outage from a revocation there — but
+	// `emitRejection` logs the reason, not the message, so a Redis blip and a
+	// genuinely revoked token were the same `jwt_verify_rejected reason=revoked`
+	// line, for every token on every replica until Redis returned. #408 split
+	// the outage from the finding for the watermark below; the denylist path
+	// predates that and now takes the same reason, so `isVerificationUnavailable`
+	// covers both stores and a caller answers both outages the same way.
+	if (denylist !== undefined) {
+		const jti = typeof payload.jti === "string" ? payload.jti : undefined;
+		if (jti !== undefined) {
+			let isRevoked: boolean;
+			try {
+				isRevoked = await denylist.has(jti);
+			} catch (cause) {
+				// The store's error is the cause, never folded into the message:
+				// a caller's log projects it (`loggableError`), and its text must
+				// not ride past that as the verdict's own words.
+				const err = new JwtVerificationError(
+					"revocation_unavailable",
+					"denylist consult failed (fail-closed)",
+					{ cause },
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			if (isRevoked) {
+				const err = new JwtVerificationError(
+					"revoked",
+					`JWT jti ${jti} is in the revocation denylist`,
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+		}
+	}
+
+	// #296: per-subject not-before watermark. A credential change cannot
+	// enumerate the jtis a subject currently holds, so it records the moment
+	// before which none of them count and this consults it.
+	//
+	// Same fail-closed stance, same outage reason (#408 here, #459 above) and
+	// same ordering rationale as the denylist above: an unreachable backend must
+	// not read as "not revoked", and the check runs only for otherwise-valid
+	// tokens so `reason: "revoked"` stays crisp.
+	if (subjectRevocation !== undefined) {
+		const sub = typeof payload.sub === "string" ? payload.sub : undefined;
+		const iat = typeof payload.iat === "number" ? payload.iat : undefined;
+		if (sub !== undefined) {
+			let watermark: Date | null;
+			try {
+				watermark = await subjectRevocation.revokedBefore(sub);
+			} catch (cause) {
+				// #408: still fail closed — an unreachable store must never read
+				// as "not revoked" — but report it as the outage it is. Reported
+				// as `revoked`, it was indistinguishable from a finding, and the
+				// refresh grant's blanket `invalid_grant` mapping turned a
+				// transient outage into a forced logout for every user who
+				// refreshed during it (RFC 6749 §5.2).
+				// The store's error is the cause, never folded into the message
+				// (see the denylist consult above).
+				const err = new JwtVerificationError(
+					"revocation_unavailable",
+					"subject revocation consult failed (fail-closed)",
+					{ cause },
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			// A token with no `iat` cannot prove it postdates an in-force
+			// watermark, so it is refused while one exists (#376 review): every
+			// token this provider mints carries `iat`, which makes an iat-less
+			// token exactly the legacy/foreign shape a credential change must
+			// not keep honouring. When the subject has no watermark, absence of
+			// `iat` stays a non-event, as before.
+			if (watermark !== null && iat === undefined) {
+				const err = new JwtVerificationError(
+					"revoked",
+					`JWT for subject ${sub} carries no iat to compare against an in-force ` +
+						"subject revocation watermark (fail-closed)",
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			// Inclusive on purpose. `iat` is second-truncated and a multi-replica
+			// deployment has independent clocks, so a token minted a few hundred
+			// milliseconds *before* the revocation routinely lands in the same
+			// second as the watermark. Killing one minted just after costs a
+			// retry; letting one from just before survive is the vulnerability.
+			//
+			// #408 widens that by `subjectRevocationSkewMs` for the same reason
+			// one second further out: same-second inclusivity covers a replica
+			// whose clock agrees to within a second, and a replica running a
+			// full second ahead of the watermark writer stamps `iat` past the
+			// boundary, so tokens minted just *before* the credential change
+			// survive it. The allowance is its own small value and not
+			// `clockSkewMs` — five minutes here would refuse the re-login the
+			// credential change sends the user to.
+			//
+			// `ceil`, not `floor`, and clamped at zero. The comparison is in
+			// whole seconds, so a sub-second remainder has to round *up* or the
+			// guard is weaker than what the operator configured — 1500ms would
+			// behave as 1000ms, which is the wrong direction for an allowance
+			// whose whole job is to catch a replica that is ahead. A negative
+			// value would move the boundary earlier than the watermark itself
+			// and let pre-revocation tokens through, so it is floored at zero
+			// rather than trusted.
+			const watermarkBoundarySeconds =
+				watermark === null
+					? 0
+					: Math.floor(watermark.getTime() / 1000) +
+						Math.max(0, Math.ceil(subjectRevocationSkewMs / 1000));
+			if (watermark !== null && iat !== undefined && iat <= watermarkBoundarySeconds) {
+				const err = new JwtVerificationError(
+					"revoked",
+					`JWT for subject ${sub} predates the subject revocation watermark`,
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+		}
+	}
+
+	return { payload, header, type };
+}
+
+function classifyJoseError(cause: unknown): JwtVerificationReason {
+	if (cause instanceof joseErrors.JWTExpired) {
+		return "expired";
+	}
+	if (cause instanceof joseErrors.JOSEAlgNotAllowed) {
+		return "alg";
+	}
+	if (cause instanceof joseErrors.JWTClaimValidationFailed) {
+		switch (cause.claim) {
+			case "iss":
+				return "iss";
+			case "aud":
+				return "aud";
+			case "nbf":
+			case "iat":
+				return "not_yet_valid";
+			case "exp":
+				return "expired";
+			default:
+				// Unrecognized claim validation — fall through to generic
+				// signature reason rather than invent a new bucket.
+				return "signature";
+		}
+	}
+	if (cause instanceof joseErrors.JWSSignatureVerificationFailed) {
+		return "signature";
+	}
+	if (cause instanceof joseErrors.JWSInvalid || cause instanceof joseErrors.JWTInvalid) {
+		return "signature";
+	}
+	return "signature";
+}
+
+function emitRejection(
+	logger: Logger | undefined,
+	err: JwtVerificationError,
+	payload: JoseJWTPayload | undefined,
+	header: ProtectedHeaderParameters | undefined,
+): void {
+	if (!logger) return;
+	logger.warn(
+		{
+			reason: err.reason,
+			jti: payload?.jti,
+			sub: payload?.sub,
+			iss: payload?.iss,
+			// The client's header, read before its signature: logged only as
+			// the string it should be, sanitised and capped (`auditErrorText`).
+			typ: typeof header?.typ === "string" ? auditErrorText(header.typ) : undefined,
+		},
+		"jwt_verify_rejected",
+	);
+}
+
+/**
+ * Per-logger once-per-(reason, type) memoization for audit-gap warnings
+ * (`jwt_verify_aud_skipped`, `jwt_verify_iss_skipped`). Hot bearer-as-
+ * credential routes (e.g. /userinfo) would otherwise emit one warn record
+ * per request — operationally noisy and a real ingestion-cost issue.
+ *
+ * The map is keyed by Logger identity so each unique logger instance gets
+ * its own dedupe set: production deployments with a singleton logger emit
+ * each gap exactly once; tests that construct fresh mock loggers per case
+ * see a fresh emission per test (so assertions on warn calls remain
+ * deterministic). WeakMap auto-clears on logger GC.
+ */
+const auditGapEmitted = new WeakMap<Logger, Set<string>>();
+
+function warnAuditGapOnce(
+	logger: Logger | undefined,
+	reason: "aud" | "iss",
+	type: JwtType,
+	bindings: Record<string, unknown>,
+	msg: string,
+): void {
+	if (!logger) return;
+	let seen = auditGapEmitted.get(logger);
+	if (!seen) {
+		seen = new Set<string>();
+		auditGapEmitted.set(logger, seen);
+	}
+	const key = `${reason}:${type}`;
+	if (seen.has(key)) return;
+	seen.add(key);
+	logger.warn({ reason, type, ...bindings }, msg);
+}

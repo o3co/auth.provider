@@ -1,0 +1,1 @@
+{"version":3,"file":"factory.d.mts","sourceRoot":"","sources":["../../src/federations/factory.mts"],"names":[],"mappings":"AAgBA,OAAO,EAAE,KAAK,cAAc,EAAwB,MAAM,0BAA0B,CAAC;AAGrF,OAAO,KAAK,EAAE,kBAAkB,EAAE,MAAM,aAAa,CAAC;AAEtD,MAAM,MAAM,yBAAyB,GAAG,cAAc,CAAC,kBAAkB,CAAC,CAAC;AAE3E,wBAAgB,+BAA+B,IAAI,yBAAyB,CAE3E;AAiDD,wBAAgB,0BAA0B,CAAC,OAAO,EAAE,yBAAyB,GAAG,IAAI,CAUnF"}

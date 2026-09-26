@@ -1,0 +1,101 @@
+/**
+ * The token-exchange validator port (#626 P1).
+ *
+ * What `oauth-token-exchange` registers as an
+ * `exchangeTokenValidators` contribution and what the boot planner hands
+ * back are one type, which they could not be while the contract lived in
+ * that package: core may not import it. The grant that consumes a
+ * validator still lives there; only the contract is here.
+ */
+/**
+ * Role of a token within a Token Exchange request.
+ * - "subject": the token being exchanged (`subject_token`)
+ * - "actor":   the token of the party performing the exchange (`actor_token`)
+ */
+export interface ExchangeTokenValidationContext {
+    readonly role: "subject" | "actor";
+    /**
+     * Reserved; the built-in grant handler never sets it. It checks the
+     * request's audience and resources against the client's registration and
+     * the subject token's audience before the policy runs, and against the
+     * issued audience after it, so a validator must not rely on this.
+     */
+    readonly requestedResources?: readonly string[];
+}
+export interface ExchangeTokenValidator {
+    /**
+     * Validates a token presented in a Token Exchange request.
+     *
+     * Consumers register one validator per `subject_token_type` / `actor_token_type`
+     * URI.
+     *
+     * Return contract:
+     *   - Returning `null` signals a validation failure — the grant handler will
+     *     respond with `invalid_request` (RFC 8693 §2.2.2), described as
+     *     `subject_token validation failed` / `actor_token validation failed`.
+     *   - Throwing signals an infrastructure failure (e.g. Redis unavailable) —
+     *     the grant handler will respond with `temporarily_unavailable` (503).
+     *
+     * The `context.role` hints whether the token is being presented as the
+     * `subject` (token being exchanged) or `actor` (delegation actor).
+     * Validators MAY apply different rules per role (e.g. stricter issuer
+     * allowlist for actor) but SHOULD default to identical validation.
+     */
+    validate(token: string, context: ExchangeTokenValidationContext): Promise<ValidatedToken | null>;
+}
+/**
+ * Structured representation of a validated exchange token.
+ *
+ * The structured fields (`sub`, `scope`, `aud`, `familyId`, `act`) are the
+ * canonical values the grant handler consumes. `claims` carries the raw JWT
+ * payload for policy hooks that need custom claim forwarding.
+ *
+ * Invariant: structured fields are projections of `claims`. When both are
+ * present they MUST be equal. Validators are responsible for enforcing this.
+ * `familyId` is populated for a token carrying one of this provider's
+ * refresh-token families in its `family_id` claim, whatever token type the
+ * validator is registered for; see the field list below.
+ *
+ * Required fields:
+ *   - `sub`: mandatory. Used as the subject of the newly issued token.
+ *   - `claims`: mandatory (may be empty `{}`). Passed to policy hooks for
+ *     custom claim forwarding.
+ *
+ * Optional fields (populate when known):
+ *   - `scope`: enables scope narrowing. Absent means no declared scope.
+ *   - `aud`: enables aud propagation for single-aud subjects.
+ *   - `familyId`: the token's refresh-token family, for a token this
+ *     provider issued under one. The grant handler checks it against this
+ *     provider's family store (refusing the token when none is wired) and
+ *     copies it into the issued token, so a later family revocation reaches
+ *     that token too. A family left only in `claims` is neither checked nor
+ *     inherited. Leave it unset for foreign tokens, whose families this
+ *     provider's store does not hold; an empty string counts as unset.
+ *   - `sid`: the `UserSession` the token was issued under, for a token this
+ *     provider minted from a browser session — its `sid`, or the
+ *     `liveness_sid` of a token that was itself exchanged (`livenessSidOf`).
+ *     The grant handler checks that the session is still live against this
+ *     provider's user-session store (when one is wired) and carries it into
+ *     the issued token as `liveness_sid` — a liveness link, never a `sid`
+ *     (`grants/sessionClaims.mts`) — so a logout that ends the subject
+ *     token's session ends the exchanged token too.
+ *     A `sid` left only in `claims` is neither checked nor inherited. Leave
+ *     it unset for foreign tokens: another issuer's `sid` names no session
+ *     this provider's store holds. An empty string counts as unset.
+ *   - `act`: nested actor chain from a prior exchange. The grant handler
+ *     preserves this when applicable (RFC 8693 §4.1).
+ *   - `may_act`: structured delegation constraint from the subject token. The
+ *     grant handler reads the raw `claims.may_act` value so validators can
+ *     preserve malformed claims for fail-closed handling.
+ */
+export interface ValidatedToken {
+    readonly sub: string;
+    readonly scope?: string;
+    readonly aud?: string | readonly string[];
+    readonly familyId?: string;
+    readonly sid?: string;
+    readonly act?: Readonly<Record<string, unknown>>;
+    readonly may_act?: Readonly<Record<string, unknown>> | readonly Readonly<Record<string, unknown>>[];
+    readonly claims: Readonly<Record<string, unknown>>;
+}
+//# sourceMappingURL=validator.d.mts.map
