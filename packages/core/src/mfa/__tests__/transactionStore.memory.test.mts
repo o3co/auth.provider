@@ -164,6 +164,22 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(next).toMatchObject({ ok: false, hold: "weekly" });
 	});
 
+	it("keeps an email-proof requirement through every sweep: it has no expiry", async () => {
+		let now = T0;
+		const store = createMemoryMfaTransactionStore({
+			now: () => now,
+			sweepInterval: 1,
+			minSweepIntervalMs: 0,
+		});
+		await store.requireEmailProofAtNextBinding("user-1");
+		now = T0 + 400 * DAY;
+		await store.noteExemptSuccess("user-2", now, POLICY, undefined);
+		await store.create(TX({ id: "sweeps", createdAtMs: now, expiresAtMs: now + 600_000 }));
+		expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
+		// Not lock state: the subject count does not include it.
+		expect(store.subjects).toBe(1);
+	});
+
 	it("drops a subject whose only state is a trust that has ended, in the sweep", async () => {
 		let now = T0;
 		const store = createMemoryMfaTransactionStore({

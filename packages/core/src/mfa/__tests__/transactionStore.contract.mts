@@ -1099,4 +1099,45 @@ export function runMfaTransactionStoreContract(
 			).rejects.toThrow(RangeError);
 		});
 	});
+
+	describe("MfaTransactionStore contract: the email proof at the next first binding (D25)", () => {
+		// The operator reset's `requireEmailProof: true` must hold until the
+		// subject's next first binding. The factor store has been emptied, the
+		// witness is a boolean, and the lock state is cleared by the same reset
+		// and by every password change, so the requirement is a flag of its own.
+		it("records the requirement for one subject, idempotently, and reads it", async () => {
+			const store = await factory();
+			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
+			await store.requireEmailProofAtNextBinding("user-1");
+			await store.requireEmailProofAtNextBinding("user-1");
+			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
+			expect(await store.emailProofRequiredAtNextBinding("user-2")).toBe(false);
+		});
+
+		it("keeps it through clearSubjectState, which the reset and a password change call", async () => {
+			const store = await factory();
+			await store.requireEmailProofAtNextBinding("user-1");
+			await store.clearSubjectState("user-1");
+			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(true);
+		});
+
+		it("is consumed once: of N consumes in flight one answers true, and it is gone", async () => {
+			const store = await factory();
+			await store.requireEmailProofAtNextBinding("user-1");
+			await store.requireEmailProofAtNextBinding("user-2");
+			const results = await Promise.all(
+				Array.from({ length: 10 }, () => store.consumeEmailProofRequirement("user-1")),
+			);
+			expect(results.filter(Boolean)).toHaveLength(1);
+			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
+			expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
+			expect(await store.emailProofRequiredAtNextBinding("user-2")).toBe(true);
+		});
+
+		it("answers false to a consume when nothing required the proof", async () => {
+			const store = await factory();
+			expect(await store.consumeEmailProofRequirement("user-1")).toBe(false);
+			expect(await store.emailProofRequiredAtNextBinding("user-1")).toBe(false);
+		});
+	});
 }
