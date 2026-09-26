@@ -1154,17 +1154,27 @@ export const CoreConfigSchema = z.object({
 	// that never ran `AppConfigSchema` is refused too. `"off"` — the reference
 	// default — is the only value this release can honour: no module here asks
 	// for or verifies a second factor, and a mode written but not honoured
-	// would let an operator believe their logins ask for one. The rest of the
-	// section belongs to the package that reads it and passes through.
+	// would let an operator believe their logins ask for one. The build order's
+	// step 7 or 8, whichever first honours another mode, widens the literal.
+	//
+	// Until the flip (step 22), a missing section or mode reads as "off" here
+	// as it does in `reference.conf`, so a hand-built configuration still
+	// declares the coordinator's absence (`MFA_ABSENCE_POLICY`); the flip
+	// removes the default (the ADR's O2). A deliberate, temporary exception to
+	// the 2026-04-30 ADR (defaults live in HOCON): the parsed type always
+	// carries `mfa`. The rest of the section belongs to the package that reads
+	// it and passes through.
 	mfa: z
 		.object({
-			mode: z.literal("off", {
-				error:
-					'mfa.mode must be "off": no module in this release asks for or verifies a second factor',
-			}),
+			mode: z
+				.literal("off", {
+					error:
+						'mfa.mode must be "off": no module in this release asks for or verifies a second factor',
+				})
+				.default("off"),
 		})
 		.passthrough()
-		.optional(),
+		.default({ mode: "off" }),
 });
 
 export type CoreConfig = z.infer<typeof CoreConfigSchema>;

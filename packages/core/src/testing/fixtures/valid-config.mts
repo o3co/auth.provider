@@ -138,6 +138,10 @@ export function makeValidCoreConfig() {
 			// `allowUnmarkedClients` migration flag was removed, and /authorize
 			// enforces the first-party invariant unconditionally.
 		},
+		// The MFA ADR's D19: the one mode this release honours, as
+		// `reference.conf` and the schema's default give it. A test of the
+		// default removes the key.
+		mfa: { mode: "off" },
 	} satisfies CoreConfig;
 }
 
