@@ -346,6 +346,8 @@ export interface MfaFactor {
 
 A factor never sees a key, a store or a transaction: the coordinator opens and seals data, passes the subject's records of that kind decoded, and writes what the factor returns. That keeps sealing in one place and lets `packages/webauthn` implement a factor without depending on `packages/mfa`.
 
+**Amended 2026-09-27 (build-order step 3): what the contract hands a factor.** D11's keyed digests — an email code over (transaction id, factor id, code), a recovery code over the normalised code, each kept with its key id — need the transaction id and the ring, and a factor holds neither. Every context therefore carries `transactionId` and `digests`: `digest(parts)` answers `{keyId, digest}` (HMAC-SHA-256 under the current key, the parts length-prefixed, bound to the factor's kind) and `matchesDigest(parts, stored)` compares in constant time under the key `stored` names. The ring stays with the coordinator. The contract also gains: `sign_count_regression` among a verification's refusals (F7, D28); `singleUseChallenge`, which says whether a verification takes the pending challenge (WebAuthn) or reads it and leaves it for the next attempt (an email code, F5); and an optional `enrollable(user)`, so a kind a user cannot enroll (email without an address) is not offered and no throw is read as an outage.
+
 **Adapters.**
 
 - **Memory** (core, `memoryMfaFactorStoreModule`): `replicaSafety.unsafe` — "enrolled second factors fork per replica and vanish on restart". Development only; D12 is why that matters.
@@ -505,6 +507,8 @@ Rejected: **three separate keys**, three things a copy can forget; **a new `sid`
 - **Rotation**: add the new key last, then move it first. Factors do not expire, so a retired key stays until nothing is sealed under it; every TOTP or WebAuthn use re-seals under the current key; dormant factors do not migrate. The runbook has the procedure; the coordinator logs `mfa_factor_sealed_with_retired_key` (info, once per key id per process).
 - **A factor that does not open** is never "no factor": it counts for F3's rule, its verification is `503` with one `mfa_factor_unreadable` error line, and the user uses another factor or a recovery code.
 - **No plaintext mode**, and **a development sample key**: the template's `config/development.conf` carries a published sample key; the MFA schema refuses that exact key when the environment the configuration was selected by is `production` or `staging`, or `deployment.mode = "multi"` (#473's rule).
+
+**Amended 2026-09-27 (build-order step 3).** A factor asks for these digests through its context's `digests` (`digest`, `matchesDigest`); the coordinator makes them under the ring and binds them to the factor's kind, so no factor holds a key (D7's amendment).
 
 ### D12 — Losing the factor store must not downgrade every account
 

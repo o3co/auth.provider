@@ -101,9 +101,15 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 	};
 };
 
+/**
+ * A challenge a verification takes (a WebAuthn assertion's, F7). An email
+ * code is read, not taken, and stays across attempts (F5): the store offers
+ * both, and the factor's `singleUseChallenge` decides which the coordinator
+ * calls.
+ */
 const CHALLENGE = {
 	factorId: "factor-1",
-	kind: "email",
+	kind: "webauthn",
 	state: "sealed-challenge-state",
 	expiresAtMs: Date.now() + 10 * MINUTE,
 };
@@ -308,8 +314,8 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("takes nothing at a version that moved, and leaves the challenge for the version that holds it", async () => {
-			// A code re-sent since the verification read the transaction: only the
-			// latest counts.
+			// A challenge replaced since the verification read the transaction
+			// (new request options): only the latest counts.
 			const store = await factory();
 			await store.create(TX({ challenge: CHALLENGE }));
 			const resent = { ...CHALLENGE, state: "sealed-resent" };

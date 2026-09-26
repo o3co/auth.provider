@@ -501,12 +501,14 @@ export {
 export type {
 	MfaCeremonyContext,
 	MfaChallengeContext,
+	MfaDigests,
 	MfaEnrolledFactor,
 	MfaEnrollmentCompletion,
 	MfaEnrollmentCompletionContext,
 	MfaEnrollmentContext,
 	MfaFactorData,
 	MfaFactorState,
+	MfaKeyedDigest,
 	MfaVerification,
 	MfaVerifyContext,
 } from "./mfa/factor.mjs";
