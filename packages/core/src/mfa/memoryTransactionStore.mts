@@ -58,7 +58,7 @@ import { usableMaxEntries } from "../single-use/max-entries.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../single-use/sweep.mjs";
 import {
 	checkMfaLockoutPolicy,
-	checkNewMfaTransaction,
+	checkMfaTransactionTransitions,
 	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
@@ -69,6 +69,7 @@ import {
 	type MfaTransactionPatch,
 	type MfaTransactionStore,
 	mfaTransactionPatchWrites,
+	newMfaTransactionRecord,
 } from "./transactionStore.mjs";
 
 /** Writing `create` calls between two sweeps of expired transactions. */
@@ -354,14 +355,14 @@ export function createMemoryMfaTransactionStore(
 		maxEntries,
 
 		async create(tx: MfaTransaction): Promise<void> {
-			checkNewMfaTransaction(tx);
+			const record = newMfaTransactionRecord(tx);
 			const nowMs = clock();
-			if (!isStorableExpiry(tx.expiresAtMs) || tx.expiresAtMs <= nowMs) {
+			if (!isStorableExpiry(record.expiresAtMs) || record.expiresAtMs <= nowMs) {
 				throw new RangeError(
 					"MfaTransactionStore.create: expiresAtMs must be a future instant within the Date range",
 				);
 			}
-			if (live(tx.id, nowMs) !== undefined) {
+			if (live(record.id, nowMs) !== undefined) {
 				throw new Error("an MFA transaction with this id already exists");
 			}
 			// At the cap: reclaim what has expired, no more often than the sweep
@@ -370,7 +371,7 @@ export function createMemoryMfaTransactionStore(
 				if (schedule.due()) sweep(nowMs);
 				if (transactions.size >= maxEntries) throw new MfaTransactionStoreFullError(maxEntries);
 			}
-			transactions.set(tx.id, copyOf(tx));
+			transactions.set(record.id, record);
 			if (schedule.wrote()) sweep(nowMs);
 		},
 
@@ -387,6 +388,7 @@ export function createMemoryMfaTransactionStore(
 			const writes = mfaTransactionPatchWrites(patch);
 			const tx = live(id, clock());
 			if (tx === undefined || tx.version !== expectedVersion) return null;
+			checkMfaTransactionTransitions(tx, writes);
 			const next: Record<string, unknown> = { ...tx, version: tx.version + 1 };
 			for (const [key, value] of writes) next[key] = value;
 			const written = copyOf(next as unknown as MfaTransaction);

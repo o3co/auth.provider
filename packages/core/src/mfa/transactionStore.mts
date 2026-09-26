@@ -132,23 +132,44 @@ const isText = (value: unknown): value is string => typeof value === "string";
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Whether each field admits a value; `null` is decided before this. */
-const PATCH_VALUE_RULES: Readonly<Record<keyof MfaTransactionPatch, (value: unknown) => boolean>> =
-	{
-		enrollment: (v) => v === "none" || v === "allowed" || v === "required",
-		emailProof: (v) =>
-			v === "not_required" || v === "required" || (isRecord(v) && isInstant(v.provedAtMs)),
-		challenge: (v) =>
-			isRecord(v) &&
-			isText(v.factorId) &&
-			isText(v.kind) &&
-			isText(v.state) &&
-			isInstant(v.expiresAtMs),
-		pendingEnrollment: (v) =>
-			isRecord(v) && isText(v.kind) && isText(v.state) && isInstant(v.expiresAtMs),
-		sends: isCount,
-		lastSentAtMs: isInstant,
-	};
+/**
+ * Each patch field's rule: the value as the store keeps it — sub-objects
+ * copied to their known fields only — or `undefined` when the field does not
+ * admit it. `null` is decided before this.
+ */
+const PATCH_VALUE_RULES: Readonly<
+	Record<keyof MfaTransactionPatch, (value: unknown) => { readonly value: unknown } | undefined>
+> = {
+	enrollment: (v) =>
+		v === "none" || v === "allowed" || v === "required" ? { value: v } : undefined,
+	emailProof: (v) => {
+		if (v === "not_required" || v === "required") return { value: v };
+		return isRecord(v) && isInstant(v.provedAtMs)
+			? { value: { provedAtMs: v.provedAtMs } }
+			: undefined;
+	},
+	challenge: (v) =>
+		isRecord(v) &&
+		isText(v.factorId) &&
+		isText(v.kind) &&
+		isText(v.state) &&
+		isInstant(v.expiresAtMs)
+			? {
+					value: {
+						factorId: v.factorId,
+						kind: v.kind,
+						state: v.state,
+						expiresAtMs: v.expiresAtMs,
+					},
+				}
+			: undefined,
+	pendingEnrollment: (v) =>
+		isRecord(v) && isText(v.kind) && isText(v.state) && isInstant(v.expiresAtMs)
+			? { value: { kind: v.kind, state: v.state, expiresAtMs: v.expiresAtMs } }
+			: undefined,
+	sends: (v) => (isCount(v) ? { value: v } : undefined),
+	lastSentAtMs: (v) => (isInstant(v) ? { value: v } : undefined),
+};
 
 /** The fields `null` may clear. */
 const CLEARABLE: ReadonlySet<keyof MfaTransactionPatch> = new Set([
@@ -159,12 +180,14 @@ const CLEARABLE: ReadonlySet<keyof MfaTransactionPatch> = new Set([
 
 /**
  * What a patch writes, field by field, after the rules of
- * {@link MfaTransactionPatch}: each entry a patch key and its new value,
+ * {@link MfaTransactionPatch}: each entry a patch key and its new value as the
+ * store keeps it — a sub-object copied to its known fields only — or
  * `undefined` for a field `null` clears. A key absent or present with
  * `undefined` is not an entry, and neither is a key outside
  * {@link MFA_TRANSACTION_PATCH_KEYS}. Throws a `RangeError` naming the key for
  * a value its field does not admit, before anything is written — every
- * adapter calls it first.
+ * adapter calls it first, and {@link checkMfaTransactionTransitions} once it
+ * holds the record at the expected version.
  */
 export function mfaTransactionPatchWrites(
 	patch: MfaTransactionPatch,
@@ -184,35 +207,129 @@ export function mfaTransactionPatchWrites(
 			writes.push([key, undefined]);
 			continue;
 		}
-		if (!PATCH_VALUE_RULES[key](value)) {
+		const admitted = PATCH_VALUE_RULES[key](value);
+		if (admitted === undefined) {
 			throw new RangeError(`MfaTransactionStore.update: ${key} is not a value it admits`);
 		}
-		writes.push([key, value]);
+		writes.push([key, admitted.value]);
 	}
 	return writes;
 }
 
+const ENROLLMENT_RANK: Readonly<Record<MfaTransaction["enrollment"], number>> = {
+	none: 0,
+	allowed: 1,
+	required: 2,
+};
+
 /**
- * Refuses, with a `RangeError`, a new transaction whose counters are not a
- * fresh record's: `attempts` other than `0`, and a `version` or `sends` that
- * is not a safe non-negative integer. A limit is only as good as the count it
- * starts from — with `attempts` NaN, `NaN + 1 > max` is false and every
- * reservation would pass. Every adapter calls it in `create`, beside its own
- * check of the expiry against its clock.
+ * Refuses, with a `RangeError`, writes that would refund a limit or undo a
+ * requirement of `current`: `sends` going down (D21's send limit counts up
+ * only); an email proof moving from `"required"` to anything but met, or from
+ * met to anything but met (D24: a required proof is met, never waived);
+ * `enrollment` going down (`none` < `allowed` < `required`). A requirement may
+ * be raised. Every adapter calls it on the record at the expected version,
+ * before it writes.
  */
-export function checkNewMfaTransaction(tx: MfaTransaction): void {
-	if (!isRecord(tx)) {
-		throw new RangeError("MfaTransactionStore.create: the transaction must be an object");
+export function checkMfaTransactionTransitions(
+	current: MfaTransaction,
+	writes: readonly (readonly [keyof MfaTransactionPatch, unknown])[],
+): void {
+	for (const [key, next] of writes) {
+		if (key === "sends" && (next as number) < current.sends) {
+			throw new RangeError("MfaTransactionStore.update: sends cannot go down");
+		}
+		if (
+			key === "enrollment" &&
+			ENROLLMENT_RANK[next as MfaTransaction["enrollment"]] < ENROLLMENT_RANK[current.enrollment]
+		) {
+			throw new RangeError("MfaTransactionStore.update: enrollment cannot be lowered");
+		}
+		if (key === "emailProof") {
+			const met = typeof next === "object";
+			if (typeof current.emailProof === "object" && !met) {
+				throw new RangeError("MfaTransactionStore.update: a met email proof stays met");
+			}
+			if (current.emailProof === "required" && next !== "required" && !met) {
+				throw new RangeError("MfaTransactionStore.update: a required email proof can only be met");
+			}
+		}
 	}
-	if (tx.attempts !== 0) {
-		throw new RangeError("MfaTransactionStore.create: attempts must be 0");
+}
+
+const isTextOrAbsent = (value: unknown): boolean => value === undefined || isText(value);
+
+/**
+ * The record a store keeps for a new transaction, or a `RangeError`: every
+ * field of {@link MfaTransaction} held to its type — the patch fields to the
+ * same rules as a patch, `enrollment` and `emailProof` required — and the
+ * counters a fresh record's: `attempts` `0`, and a `version` or `sends` that is
+ * a safe non-negative integer. A limit is only as good as the count it starts
+ * from: with `attempts` NaN, `NaN + 1 > max` is false and every reservation
+ * would pass; with `emailProof` missing, no D24 gate. The record holds only
+ * the fields a transaction has, sub-objects copied to their known fields.
+ * Every adapter calls it in `create`, beside its own check of the expiry
+ * against its clock.
+ */
+export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
+	const refuse = (what: string): never => {
+		throw new RangeError(`MfaTransactionStore.create: ${what}`);
+	};
+	if (!isRecord(tx)) refuse("the transaction must be an object");
+	if (tx.attempts !== 0) refuse("attempts must be 0");
+	if (!isCount(tx.version)) refuse("version must be a safe non-negative integer");
+	if (!isCount(tx.sends)) refuse("sends must be a safe non-negative integer");
+	if (!isText(tx.id) || !isText(tx.sessionId) || !isText(tx.subject)) {
+		refuse("id, sessionId and subject must be strings");
 	}
-	if (!isCount(tx.version)) {
-		throw new RangeError("MfaTransactionStore.create: version must be a safe non-negative integer");
+	if (tx.purpose !== "login" && tx.purpose !== "step_up" && tx.purpose !== "enroll") {
+		refuse("purpose is not a value it admits");
 	}
-	if (!isCount(tx.sends)) {
-		throw new RangeError("MfaTransactionStore.create: sends must be a safe non-negative integer");
+	if (!isTextOrAbsent(tx.sid) || !isTextOrAbsent(tx.redirectTo)) {
+		refuse("sid and redirectTo must be strings or absent");
 	}
+	if (
+		tx.primary !== undefined &&
+		!(isRecord(tx.primary) && isText(tx.primary.method) && isInstant(tx.primary.authTimeMs))
+	) {
+		refuse("primary is not a value it admits");
+	}
+	if (tx.user !== undefined && !isRecord(tx.user)) refuse("user must be an object or absent");
+	if (tx.acrValues !== undefined && !(Array.isArray(tx.acrValues) && tx.acrValues.every(isText))) {
+		refuse("acrValues must be a list of strings or absent");
+	}
+	if (!isInstant(tx.createdAtMs)) refuse("createdAtMs must be an instant");
+	const field = (key: keyof MfaTransactionPatch, optional: boolean): unknown => {
+		const value = (tx as unknown as Readonly<Record<string, unknown>>)[key];
+		if (value === undefined && optional) return undefined;
+		const admitted = PATCH_VALUE_RULES[key](value);
+		if (admitted === undefined) return refuse(`${key} is not a value it admits`);
+		return admitted.value;
+	};
+	return {
+		id: tx.id,
+		purpose: tx.purpose,
+		sessionId: tx.sessionId,
+		subject: tx.subject,
+		sid: tx.sid,
+		primary:
+			tx.primary === undefined
+				? undefined
+				: { method: tx.primary.method, authTimeMs: tx.primary.authTimeMs },
+		user: tx.user === undefined ? undefined : structuredClone(tx.user),
+		redirectTo: tx.redirectTo,
+		enrollment: field("enrollment", false) as MfaTransaction["enrollment"],
+		emailProof: field("emailProof", false) as MfaTransaction["emailProof"],
+		acrValues: tx.acrValues === undefined ? undefined : [...tx.acrValues],
+		challenge: field("challenge", true) as MfaTransaction["challenge"],
+		pendingEnrollment: field("pendingEnrollment", true) as MfaTransaction["pendingEnrollment"],
+		attempts: 0,
+		sends: tx.sends,
+		lastSentAtMs: field("lastSentAtMs", true) as number | undefined,
+		createdAtMs: tx.createdAtMs,
+		expiresAtMs: tx.expiresAtMs,
+		version: tx.version,
+	};
 }
 
 /**
@@ -292,8 +409,12 @@ export interface MfaTransactionStore {
 
 	/**
 	 * Insert-only: a live id is refused. Refuses with a `RangeError` an
-	 * `expiresAtMs` that is not a future instant, and counters that are not a
-	 * fresh record's ({@link checkNewMfaTransaction}).
+	 * `expiresAtMs` that is not a future instant, and a field its type does not
+	 * admit or counters that are not a fresh record's
+	 * ({@link newMfaTransactionRecord}). It keeps only the fields a transaction
+	 * has. The lifetime has no ceiling here: it is `mfa.transactionTtlSeconds`,
+	 * which the MFA module refuses at boot when it is out of range, and the
+	 * coordinator derives `expiresAtMs` from nothing else.
 	 */
 	create(tx: MfaTransaction): Promise<void>;
 	/** The transaction, or `null` once it expired. */
