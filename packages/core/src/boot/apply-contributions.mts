@@ -258,17 +258,22 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 const projectionGates = new WeakMap<object, { open: boolean }>();
 
 /**
- * A projection that refuses every read while its gate is closed. Read during
- * stage 3 it would be empty — the contributions behind it register in stage
- * 4 — so a provider that computed something from it then would keep an empty
- * answer; the read throws instead, and the boot is refused
- * (`provides-factory-failed`). Holding it is fine; reading it at request time
- * is the contract.
+ * A projection that refuses a read of its contents while its gate is closed.
+ * Read during stage 3 it would be empty — the contributions behind it
+ * register in stage 4 — so a provider that computed something from it then
+ * would keep an empty answer; the read throws instead, and the boot is
+ * refused (`provides-factory-failed`). Only the view's own members — `get`,
+ * `entries`, a map view's `size` and iterator — are its contents: `then`
+ * (which `await` reads; it answers `undefined`, so the view is not
+ * thenable), `Symbol.toStringTag`, `Symbol.toPrimitive` and what
+ * `Object.prototype` supplies pass, so a factory may hold, await, return or
+ * print it. Reading it at request time is the contract.
  */
 function readableFromStage4<T extends object>(view: T, key: string, gate: { open: boolean }): T {
 	return new Proxy(view, {
 		get(target, property, receiver) {
-			if (!gate.open) {
+			if (property === "then") return undefined;
+			if (!gate.open && Object.hasOwn(target, property)) {
 				throw new Error(
 					`${key} was read while the provides factories run: it fills as the contributions register, so read it at request time`,
 				);

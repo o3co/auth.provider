@@ -95,7 +95,8 @@ export interface MfaTransaction {
 /**
  * What `update` may change. A key with a value sets the field; `null` clears
  * a field that may be empty (`challenge`, `pendingEnrollment`,
- * `lastSentAtMs`); a key absent — or present with `undefined`, which a spread
+ * `lastSentAtMs` — clearing the last send lifts the resend cooldown after a
+ * failed delivery, and the retry still costs a send); a key absent — or present with `undefined`, which a spread
  * or an optional property produces — leaves the field as it is, so a patch
  * can never clear a limit by omission. A value a field does not admit is a
  * `RangeError` ({@link mfaTransactionPatchWrites}), and so is `null` for a
@@ -225,10 +226,12 @@ const ENROLLMENT_RANK: Readonly<Record<MfaTransaction["enrollment"], number>> = 
 /**
  * Refuses, with a `RangeError`, writes that would refund a limit or undo a
  * requirement of `current`: `sends` going down (D21's send limit counts up
- * only); an email proof moving from `"required"` to anything but met, or from
- * met to anything but met (D24: a required proof is met, never waived);
- * `enrollment` going down (`none` < `allowed` < `required`). A requirement may
- * be raised. Every adapter calls it on the record at the expected version,
+ * only); `lastSentAtMs` moving back; an email proof moving from `"required"`
+ * to anything but met, or from met to anything but met (D24: a required proof
+ * is met, never waived); `enrollment` going down (`none` < `allowed` <
+ * `required`). A requirement may be raised. Clearing `lastSentAtMs` (`null`)
+ * is deliberate: after a failed delivery (F5) the user may retry at once, and
+ * the retry still costs a send. Every adapter calls it on the record at the expected version,
  * before it writes.
  */
 export function checkMfaTransactionTransitions(
@@ -238,6 +241,14 @@ export function checkMfaTransactionTransitions(
 	for (const [key, next] of writes) {
 		if (key === "sends" && (next as number) < current.sends) {
 			throw new RangeError("MfaTransactionStore.update: sends cannot go down");
+		}
+		if (
+			key === "lastSentAtMs" &&
+			next !== undefined &&
+			current.lastSentAtMs !== undefined &&
+			(next as number) < current.lastSentAtMs
+		) {
+			throw new RangeError("MfaTransactionStore.update: lastSentAtMs cannot move back");
 		}
 		if (
 			key === "enrollment" &&

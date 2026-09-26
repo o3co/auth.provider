@@ -22,8 +22,8 @@
  * as "not enrolled", which is the downgrade D12 exists to prevent, and it
  * would look harmless in a diff.
  *
- * So no product file in any package reads `mfaEnrolled` but the reader
- * itself: a property access (`user.mfaEnrolled`, `user?.mfaEnrolled`), an
+ * So no product file in any package, nor in the standalone template, reads
+ * `mfaEnrolled` but the reader itself: a property access (`user.mfaEnrolled`, `user?.mfaEnrolled`), an
  * element access by the literal name, or a destructuring binding. Read with
  * TypeScript's parser, so a comment or a string that names the field is not a
  * read, and the declaration on `User` is not one either. Tests are left out:
@@ -63,7 +63,10 @@ function witnessReads(source: string): number[] {
 	return lines;
 }
 
-/** Every product source file under `packages/<name>/src`, relative to the root, `/`-separated. */
+/**
+ * Every product source file under `packages/<name>/src` and
+ * `templates/standalone/src`, relative to the root, `/`-separated.
+ */
 function productSources(): string[] {
 	const found: string[] = [];
 	const walk = (dir: string): void => {
@@ -87,11 +90,12 @@ function productSources(): string[] {
 		const src = join(repoRoot, "packages", pkg.name, "src");
 		if (pkg.isDirectory() && existsSync(src)) walk(src);
 	}
+	walk(join(repoRoot, "templates", "standalone", "src"));
 	return found.sort();
 }
 
 describe("the MFA enrollment witness has one reading (D12)", () => {
-	it("is read by no product file but readMfaEnrollmentWitness's", () => {
+	it("is read by no product file, the template's included, but readMfaEnrollmentWitness's", () => {
 		const offenders = productSources()
 			.filter((file) => !ALLOWED.has(file))
 			.flatMap((file) =>
