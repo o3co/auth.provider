@@ -180,6 +180,27 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(store.subjects).toBe(1);
 	});
 
+	it("lets no caller far ahead on another subject erase, through the sweep, what a caller on time still counts", async () => {
+		// The sweep prunes every subject; the time it prunes at is the latest a
+		// caller passed, but never later than the store's own clock.
+		const store = createMemoryMfaTransactionStore({ sweepInterval: 1, minSweepIntervalMs: 0 });
+		const t = Date.now();
+		const oneAWeek: MfaLockoutPolicy = { ...POLICY, weeklyBudget: 1 };
+		const reserved = await store.reserveSubjectAttempt("user-1", t, oneAWeek, undefined);
+		if (!reserved.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
+		for (const ahead of [t + 10 * DAY, 8.64e15]) {
+			await store.reserveSubjectAttempt("user-2", ahead, oneAWeek, undefined);
+			await store.create(
+				TX({ id: `sweeps-${ahead}`, createdAtMs: Date.now(), expiresAtMs: Date.now() + 600_000 }),
+			);
+		}
+		expect(await store.reserveSubjectAttempt("user-1", t + 1, oneAWeek, undefined)).toMatchObject({
+			ok: false,
+			hold: "weekly",
+		});
+	});
+
 	it("drops a subject whose only state is a trust that has ended, in the sweep", async () => {
 		let now = T0;
 		const store = createMemoryMfaTransactionStore({

@@ -828,6 +828,36 @@ export function runMfaTransactionStoreContract(
 			expect(held(await check(store, at + 1))).toMatchObject({ hold: "weekly" });
 		});
 
+		it("lets no caller far ahead erase what a caller on time still counts, for its subject or another", async () => {
+			// A replica whose clock is ten days ahead is answered on its time, but
+			// the week it cannot see stands for every caller on time — the
+			// subject it asked about and every other — and keeps standing once
+			// its clock is corrected.
+			const store = await factory();
+			const t = start();
+			const at = await fillTheWeek(store, t);
+			await fillTheWeek(store, t, "user-2");
+			expect((await check(store, t + 10 * DAY, undefined, POLICY, "user-3")).ok).toBe(true);
+			expect((await check(store, t + 10 * DAY)).ok).toBe(true);
+			expect(held(await check(store, at + 1))).toMatchObject({ hold: "weekly" });
+			expect(held(await check(store, at + 1, undefined, POLICY, "user-2"))).toMatchObject({
+				hold: "weekly",
+			});
+		});
+
+		it("keeps a trust through a caller less than a day ahead of its end", async () => {
+			const store = await factory();
+			const t = start();
+			const at = await fillTheWeek(store, t);
+			const { browser } = await store.noteExemptSuccess("user-1", at, POLICY, undefined);
+			// The trust ends when the week empties, a week after the last failure
+			// (at - 2 minutes); a caller twelve hours past that sees it ended…
+			const ends = at - 2 * MINUTE + WEEK;
+			expect((await check(store, ends + 12 * HOUR)).ok).toBe(true);
+			// …and a caller on time is still let through the weekly hold by it.
+			await settled(store, at + HOUR, "void", browser);
+		});
+
 		it("takes an attempt settled void out of the week", async () => {
 			const store = await factory();
 			const t = start();
