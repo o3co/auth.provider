@@ -195,6 +195,51 @@ export function runMfaTransactionStoreContract(
 			expect((await store.get("tx-1"))?.version).toBe(0);
 		});
 
+		it("refuses, with a RangeError, a new transaction with a field its type does not admit, and records nothing", async () => {
+			// The same value rules as a patch: a transaction created with
+			// `emailProof` missing would carry no D24 gate at all.
+			const store = await factory();
+			const bad: [string, unknown][] = [
+				["purpose unknown", { purpose: "admin" }],
+				["enrollment unknown", { enrollment: "maybe" }],
+				["enrollment missing", { enrollment: undefined }],
+				["emailProof missing", { emailProof: undefined }],
+				["emailProof unknown", { emailProof: "yes" }],
+				["emailProof NaN", { emailProof: { provedAtMs: Number.NaN } }],
+				["challenge not a challenge", { challenge: "x" }],
+				["challenge missing its state", { challenge: { ...CHALLENGE, state: undefined } }],
+				[
+					"pendingEnrollment missing its state",
+					{ pendingEnrollment: { kind: "totp", expiresAtMs: 9 } },
+				],
+				["lastSentAtMs NaN", { lastSentAtMs: Number.NaN }],
+				["lastSentAtMs text", { lastSentAtMs: "5" }],
+			];
+			for (const [name, overrides] of bad) {
+				await expect(store.create(TX(overrides as Partial<MfaTransaction>)), name).rejects.toThrow(
+					RangeError,
+				);
+			}
+			expect(await store.get("tx-1")).toBeNull();
+		});
+
+		it("keeps only the fields a transaction has, and only the known fields of each sub-object", async () => {
+			const store = await factory();
+			const tx = TX({
+				emailProof: { provedAtMs: 1234 },
+				challenge: CHALLENGE,
+				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99 },
+			});
+			await store.create({
+				...tx,
+				admin: true,
+				emailProof: { provedAtMs: 1234, by: "operator" },
+				challenge: { ...CHALLENGE, secret: "123456" },
+				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99, secret: "JBSW" },
+			} as never);
+			expect(await store.get("tx-1")).toStrictEqual(tx);
+		});
+
 		it("is insert-only: a live id is refused, and the first record stands", async () => {
 			const store = await factory();
 			const first = TX();
@@ -316,6 +361,79 @@ export function runMfaTransactionStoreContract(
 				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
 			}
 			expect(await store.get("tx-1")).toStrictEqual(tx);
+		});
+
+		it("refuses, with a RangeError, a patch that would refund a limit or undo a requirement, and changes nothing", async () => {
+			// Sends only count up (D21's send limit). A required email proof is
+			// only ever met, never waived (D24), and a met one stays met. An
+			// enrollment requirement is never lowered.
+			const store = await factory();
+			const tx = TX({ sends: 2, emailProof: "required", enrollment: "required" });
+			await store.create(tx);
+			const bad: [string, unknown][] = [
+				["sends down", { sends: 1 }],
+				["email proof waived", { emailProof: "not_required" }],
+				["enrollment lowered to none", { enrollment: "none" }],
+				["enrollment lowered to allowed", { enrollment: "allowed" }],
+			];
+			for (const [name, patch] of bad) {
+				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
+			}
+			expect(await store.get("tx-1")).toStrictEqual(tx);
+			// What may move: sends up, the proof met, the requirements kept.
+			const moved = await store.update("tx-1", 1, {
+				sends: 3,
+				emailProof: { provedAtMs: 1234 },
+				enrollment: "required",
+			});
+			expect(moved).toStrictEqual({
+				...tx,
+				sends: 3,
+				emailProof: { provedAtMs: 1234 },
+				version: 2,
+			});
+			for (const [name, patch] of [
+				["met proof back to required", { emailProof: "required" }],
+				["met proof waived", { emailProof: "not_required" }],
+			] as const) {
+				await expect(store.update("tx-1", 2, patch as never), name).rejects.toThrow(RangeError);
+			}
+			// A proof met again (a later proof in the same transaction) stays met.
+			expect(
+				(await store.update("tx-1", 2, { emailProof: { provedAtMs: 5678 } }))?.emailProof,
+			).toStrictEqual({ provedAtMs: 5678 });
+		});
+
+		it("lets a requirement be raised: none to allowed to required, and not_required to required", async () => {
+			const store = await factory();
+			await store.create(TX({ enrollment: "none", emailProof: "not_required" }));
+			const raised = await store.update("tx-1", 1, {
+				enrollment: "allowed",
+				emailProof: "required",
+			});
+			expect(raised).toMatchObject({ enrollment: "allowed", emailProof: "required" });
+			expect(await store.update("tx-1", 2, { enrollment: "required" })).toMatchObject({
+				enrollment: "required",
+			});
+		});
+
+		it("copies only the known fields of a patch's sub-objects", async () => {
+			const store = await factory();
+			await store.create(TX());
+			const updated = await store.update("tx-1", 1, {
+				emailProof: { provedAtMs: 1234, by: "operator" },
+				challenge: { ...CHALLENGE, secret: "123456" },
+				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99, secret: "JBSW" },
+			} as never);
+			expect(updated).toMatchObject({ version: 2 });
+			expect(updated?.emailProof).toStrictEqual({ provedAtMs: 1234 });
+			expect(updated?.challenge).toStrictEqual(CHALLENGE);
+			expect(updated?.pendingEnrollment).toStrictEqual({
+				kind: "totp",
+				state: "sealed",
+				expiresAtMs: 99,
+			});
+			expect(await store.get("tx-1")).toStrictEqual(updated);
 		});
 
 		it("changes only the patch keys: a patch that carries any other field moves none of them", async () => {
