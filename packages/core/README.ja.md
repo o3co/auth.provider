@@ -56,7 +56,9 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `rateLimit` | `login`: 同梱の両リミッターが初期値に使う `/session/login` の予算（`windowMs`、`limit`）。`failMode`: OAuth エンドポイントのリミッターのバックエンドが失敗したときの動作 — `closed` は `503` を返し、`open` はリクエストを通してエラーをログに出す。OAuth エンドポイントの制限値そのものはリミッターモジュールのもの（`memoryRateLimiter.*` / `redisRateLimiter.*`） |
 | `federations` | フェデレーションプロバイダー。名前をキーとする `{ enabled, type?, … }`。core が読むのは `enabled`（boot 時のフェデレーションストア配線チェック）だけで、`type` とエントリの残りはそれを読むアダプターパッケージのもの — アダプターパッケージは [ルート README](../../README.md) に一覧がある |
 | `repositories` | client、user、code の Repository 設定 — それぞれ `type` とそのサブセクション |
-| `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`） |
+| `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`）。`mfa.url`: `/authorize` で第二要素を求めるページ（デフォルト `/mfa`）。まだブラウザーをそこへ送るものはない |
+| `mfa.mode` | パスワードログインが第二要素を求めるかどうか — [MFA](#mfa) を参照。このリリースが受け付ける値は `"off"`（既定）だけである: ここには第二要素を求めるモジュールも検証するモジュールもないので、ほかの値はキーを名指しして起動を拒否する。`mfa` セクションの残りはそれを読むパッケージのもので、そのまま通す |
+| `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込む composition だけが読み、`mfa.mode` が `"off"` の間はどれも組み込まない |
 | `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
 
 ### グラントシステム
