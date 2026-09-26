@@ -714,6 +714,7 @@ stream — its level is fixed at `info`.
 | `federation_store_plaintext` (warn, `store`, `mode`) | `redis/src/internal/encryption-mode.mts` | a sealing store runs `allow-plaintext` where that is allowed (development); set `mode = "required"` and a key before it leaves development |
 | `config_key_deprecated` (warn, `key`, `env`, `replacement`, `replacementEnv`) | `templates/standalone/src/buildModules.mts` | `key = "repositories.code.type"`: move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`). `key = "oauth.accessToken.expiresIn"`: the deprecated key decides the access-token default; move the value to `oauth.accessToken.defaultExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`). Both were `[buildModules] … is deprecated` console lines |
 | `adapter_builder_deprecated` (warn, `builder`, `replacement`) | `redis/src/code-repository.mts` | a composition registers `redisCodeRepositoryBuilder`; wire `redisCodeRepositoryModule` instead |
+| `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; nothing installs it while `mfa.mode` is `"off"` |
 
 ### Data corruption — a stored record could not be read
 
@@ -960,23 +961,27 @@ Core's in-process MFA transaction store (`memoryMfaTransactionStoreModule`,
 `mfa.mode` is `"off"`) sweeps the same way and is capped at a hundred
 thousand transactions (`mfaTransactionStore.memory.maxEntries`;
 `packages/core/src/mfa/memoryTransactionStore.mts`). A transaction carries
-the login's user snapshot, so it is larger than a challenge; at the default
-ten-minute lifetime the cap is about 170 new transactions a second on one
-replica. At the cap it reclaims what has expired and otherwise refuses a new
-transaction with `MfaTransactionStoreFullError` rather than end a ceremony in
-flight. The subject lock state is not counted: it is kept per subject the
-Store vouches for.
+the login's user snapshot, so it is larger than a challenge: about 1.1 KB
+with a small `User`, so about 110 MB at the cap, growing with what the
+Store answers on `authenticate`. At the default ten-minute lifetime the cap
+is about 170 new transactions a second on one replica. At the cap it
+reclaims what has expired and otherwise refuses a new transaction with
+`MfaTransactionStoreFullError` rather than end a ceremony in flight. The
+subject lock state is not counted: it is kept per subject a login created,
+and a subject's consecutive run is kept until a success ends it.
 
-**Heap headroom for the two caps.** A process that keeps both memory stores
-at their defaults needs room for them to fill: about 725 MB for the seen-set
-at its worst and about 180 MB for the challenge store, so about 1 GB of heap
-beyond everything else. Node sizes its default V8 heap from the memory the
+**Heap headroom for the caps.** A process that keeps the memory stores at
+their defaults needs room for them to fill: about 725 MB for the seen-set at
+its worst and about 180 MB for the challenge store, so about 1 GB of heap
+beyond everything else — and about 110 MB more, scaled by the `User` the
+Store answers, when the MFA transaction store is in memory too. Node sizes its default V8 heap from the memory the
 process can see, and in a small container that limit is well under 1 GB, so
-a flood fills the heap and the process dies before either cap refuses
-anything. Either give the process the room (`--max-old-space-size`, and a
-container limit above it) or lower the caps to what it has:
-`replaySeenSet.memory.maxEntries` and `challengeStore.memory.maxEntries`
-(HOCON; a string of digits is accepted). Each module refuses to boot, with a
+a flood fills the heap and the process dies before a cap refuses anything.
+Either give the process the room (`--max-old-space-size`, and a container
+limit above it) or lower the caps to what it has:
+`replaySeenSet.memory.maxEntries`, `challengeStore.memory.maxEntries` and
+`mfaTransactionStore.memory.maxEntries` (HOCON; a string of digits is
+accepted). Each module refuses to boot, with a
 RangeError naming its key, a value that is not a positive whole number or is
 above 16 777 216 (2^24, the most entries a `Map` holds). A
 lower cap lowers the rate that fills the store in proportion.

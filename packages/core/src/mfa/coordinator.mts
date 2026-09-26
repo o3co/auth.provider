@@ -58,7 +58,14 @@ export interface MfaCoordinator {
 	 * outage; the caller answers `503` and writes nothing.
 	 */
 	decideAfterPrimary(p: PrimaryAuthentication): Promise<"none" | "challenge" | "enroll">;
-	/** After the caller regenerated the express session: opens the login transaction, bound to the new id. */
+	/**
+	 * After the caller regenerated the express session: opens the login
+	 * transaction, bound to the new id. A throw is an outage — a store that
+	 * cannot answer, or one that is full (`MfaTransactionStoreFullError`) — and
+	 * never a verdict: the caller answers `503 temporarily_unavailable`, logged
+	 * once, and leaves the regenerated session unauthenticated, so the browser
+	 * holds nothing it can use and logs in again.
+	 */
 	openLoginTransaction(
 		p: PrimaryAuthentication,
 		decision: "challenge" | "enroll",

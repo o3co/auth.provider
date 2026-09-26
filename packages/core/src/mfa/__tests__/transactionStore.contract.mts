@@ -20,7 +20,7 @@ import {
 	type MfaSubjectAttemptReservation,
 	type MfaTransaction,
 	type MfaTransactionStore,
-} from "../transactionStore.mjs";
+} from "#/mfa/transactionStore.mjs";
 
 /**
  * The `MfaTransactionStore` contract (the MFA ADR's D8 and D21), for every

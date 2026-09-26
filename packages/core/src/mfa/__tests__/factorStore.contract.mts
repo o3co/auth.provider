@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import type { MfaFactorRecord, MfaFactorStore } from "../factorStore.mjs";
+import type { MfaFactorRecord, MfaFactorStore } from "#/mfa/factorStore.mjs";
 
 /**
  * The `MfaFactorStore` contract (the MFA ADR's D7), for every adapter.

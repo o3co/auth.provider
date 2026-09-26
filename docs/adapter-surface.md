@@ -57,8 +57,9 @@ A repository without the capability (`supportsMfaEnrollmentWitness`), and a
 Store that answers no field, leave the witness absent; the factor store's
 durability is then the whole defence.
 
-That last one is the pattern for anything that looks like it needs a new slot:
-the library is downstream of the action, never the one taking it. **Message
+`revokeAllForSubject`, the last of the three call sites above, is the pattern
+for anything that looks like it needs a new slot: the library is downstream of
+the action, never the one taking it. **Message
 delivery is the worked example of where the line falls.** The one flow this
 library drives end to end that must send is multi-factor authentication: the
 one-time codes of its email factor and proof, and the security notices it owes
