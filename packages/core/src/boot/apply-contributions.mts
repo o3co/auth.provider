@@ -251,6 +251,43 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 }
 
 /**
+ * Whether the projections of one boot's working map may be read: closed while
+ * stage 3 runs the `provides` factories, open from stage 4 on. Keyed by the
+ * working map, which stages 3 and 4 share.
+ */
+const projectionGates = new WeakMap<object, { open: boolean }>();
+
+/**
+ * A projection that refuses every read while its gate is closed. Read during
+ * stage 3 it would be empty — the contributions behind it register in stage
+ * 4 — so a provider that computed something from it then would keep an empty
+ * answer; the read throws instead, and the boot is refused
+ * (`provides-factory-failed`). Holding it is fine; reading it at request time
+ * is the contract.
+ */
+function readableFromStage4<T extends object>(view: T, key: string, gate: { open: boolean }): T {
+	return new Proxy(view, {
+		get(target, property, receiver) {
+			if (!gate.open) {
+				throw new Error(
+					`${key} was read while the provides factories run: it fills as the contributions register, so read it at request time`,
+				);
+			}
+			return Reflect.get(target, property, receiver);
+		},
+	});
+}
+
+/**
+ * Stage 4 opens the projections of `components` for reading (step 0).
+ * @internal
+ */
+export function openSyntheticProjections(components: Record<string, unknown>): void {
+	const gate = projectionGates.get(components);
+	if (gate !== undefined) gate.open = true;
+}
+
+/**
  * Step 0 — prepareSyntheticProjections.
  *
  * For each name-keyed collector that has a corresponding synthetic
@@ -262,11 +299,12 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
  *
  * `createApp` runs it before stage 3 (`materializeComponents`), so a
  * `provides` factory that requires a synthetic key is handed the projection
- * the world keeps: empty while the factory runs, and filled as stage 4
- * registers the contributions. A provider therefore reads it lazily, at
- * request time, never while it is being built. A projection already in the
- * map is kept, so the pass in stage 4 does not replace the object a
- * provider holds.
+ * the world keeps, which fills as stage 4 registers the contributions. A
+ * provider holds it and reads it at request time: a read while the provides
+ * factories run throws (see `readableFromStage4`) and refuses the boot,
+ * rather than answer an empty view. A projection already in the map is kept,
+ * so the pass in stage 4 does not replace the object a provider holds; that
+ * pass opens them for reading (`openSyntheticProjections`).
  *
  * Per A2-β §5.4 step 0.
  * @internal
@@ -275,8 +313,16 @@ export function prepareSyntheticProjections(
 	components: Record<string, unknown>,
 	contributionKinds: ContributionCollectorMap,
 ): void {
-	const inject = (key: string, make: () => unknown): void => {
-		if (!Object.hasOwn(components, key)) components[key] = make();
+	let gate = projectionGates.get(components);
+	if (gate === undefined) {
+		gate = { open: false };
+		projectionGates.set(components, gate);
+	}
+	const readGate = gate;
+	const inject = (key: string, make: () => object): void => {
+		if (!Object.hasOwn(components, key)) {
+			components[key] = readableFromStage4(make(), key, readGate);
+		}
 	};
 	const { grants, tokenExchangeValidators, federations, federationRedirectPolicies, mfaFactors } =
 		contributionKinds;
@@ -455,6 +501,7 @@ export async function applyContributions(
 	// Step 0: prepareSyntheticProjections. Per A2-β §5.4 step 0.
 	// ---------------------------------------------------------------------------
 	prepareSyntheticProjections(components, contributionKinds);
+	openSyntheticProjections(components);
 
 	// Modules that mounted a `tokenBindingMw` through the legacy v0.7
 	// `grantMiddleware` slot. Collected here because module provenance is only

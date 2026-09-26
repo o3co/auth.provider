@@ -111,9 +111,10 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 //
 // The boot planner injects these projections into the working component map
 // before stage 3 runs the `provides` factories (`prepareSyntheticProjections`
-// in `boot/apply-contributions.mts`), so a provider may require one; it reads
-// the projection lazily, at request time, because the contributions behind it
-// register only in stage 4. Without
+// in `boot/apply-contributions.mts`), so a provider may require one and hold
+// it; it reads the projection lazily, at request time, because the
+// contributions behind it register only in stage 4 — a read while the
+// provides factories run throws, and the boot is refused. Without
 // declaration-merging them onto ComponentMap, downstream modules cannot
 // declare `requires: ["grantHandlerResolver"]` etc. through the typed
 // `defineModule` surface — `ComponentKey = keyof ComponentMap` would not

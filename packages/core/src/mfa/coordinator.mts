@@ -50,7 +50,13 @@ export interface PrimaryAuthentication {
  * transaction is bound to the session id the browser will hold.
  */
 export interface MfaCoordinator {
-	/** The `amr` values the installed factors can add: what a step-up can reach. */
+	/**
+	 * The `amr` values the installed factors can add: what a step-up can
+	 * reach. Computed lazily — a getter over `mfaFactorResolver`, read at
+	 * request time — because the resolver cannot be read while the
+	 * coordinator is built: the factors register after the `provides`
+	 * factories run, and a read then refuses the boot.
+	 */
 	readonly secondFactorMethods: ReadonlySet<string>;
 	/**
 	 * Reads the subject's factors and the enrollment witness, and decides:
