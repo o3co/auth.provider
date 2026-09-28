@@ -32,8 +32,8 @@
  *   period 15-120 s — the step-8 owner decision, the ADR stating no bounds
  *   for either — SHA1, SHA256 or SHA512), the window every verification
  *   allows (0-2, D22), and the issuer an authenticator app shows, defaulting
- *   to the host `oauth.jwt.issuer` names. Read on its own too, for the factor,
- *   which never holds a key.
+ *   — for a factor that is on — to the host `oauth.jwt.issuer` names. Read on
+ *   its own too, for the factor, which never holds a key.
  *
  * No default is written here: they live in `config/reference.conf` (ADR
  * 2026-04-30). A refusal is a `RangeError` whose message starts with the key.
@@ -69,7 +69,21 @@ const wholeNumber = (min: number, max: number, unit: string) => {
 };
 
 const ISSUER_RULE =
-	"must be a non-empty name without a colon, which the otpauth label puts between the issuer and the account";
+	"must be well-formed text, not blank, with no control character and no colon — the otpauth label puts one between the issuer and the account";
+
+/** Whether `text` carries a C0 control character, DEL or a C1 control character. */
+const hasControlCharacter = (text: string): boolean =>
+	[...text].some((character) => {
+		const code = character.codePointAt(0) ?? 0;
+		return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+	});
+
+/** An issuer the otpauth label can carry, and an authenticator app can show. */
+const isShowableIssuer = (issuer: string): boolean =>
+	issuer.isWellFormed() &&
+	issuer.trim() !== "" &&
+	!hasControlCharacter(issuer) &&
+	!issuer.includes(":");
 
 /** `mfa.factors.totp`: the TOTP factor's switch and parameters (D19). */
 export const mfaTotpConfigSchema = z.object(
@@ -83,8 +97,7 @@ export const mfaTotpConfigSchema = z.object(
 		window: wholeNumber(0, 2, " steps"),
 		issuer: z
 			.string({ error: ISSUER_RULE })
-			.min(1, { error: ISSUER_RULE })
-			.refine((issuer) => !issuer.includes(":"), { error: ISSUER_RULE })
+			.refine(isShowableIssuer, { error: ISSUER_RULE })
 			.optional(),
 	},
 	{ error: SECTION_MISSING },
@@ -112,10 +125,18 @@ export const mfaConfigSchema = z.object(
 	{ error: SECTION_MISSING },
 );
 
-/** `mfa.factors.totp` as the factor and its module read it: the switch, the parameters, and the issuer resolved. */
-export interface MfaTotpSettings extends TotpFactorSettings {
-	readonly enabled: boolean;
-}
+/**
+ * `mfa.factors.totp` as the factor and its module read it: the switch and the
+ * parameters, and — for a factor that is on — the issuer resolved. A
+ * switched-off factor keeps only an issuer written for it: the default is not
+ * derived, so a factor nothing uses never refuses the boot over it.
+ */
+export type MfaTotpSettings =
+	| (TotpFactorSettings & { readonly enabled: true })
+	| (Omit<TotpFactorSettings, "issuer"> & {
+			readonly enabled: false;
+			readonly issuer: string | undefined;
+	  });
 
 /** What this package reads from the `mfa` section. */
 export interface MfaSettings {
@@ -184,14 +205,15 @@ function totpSettings(
 	totp: z.infer<typeof mfaTotpConfigSchema>,
 	config: ConfigShape,
 ): MfaTotpSettings {
-	return {
-		enabled: totp.enabled,
+	const parameters = {
 		algorithm: totp.algorithm,
 		digits: totp.digits,
 		period: totp.period,
 		window: totp.window,
-		issuer: totp.issuer ?? issuerHost(config),
 	};
+	return totp.enabled
+		? { enabled: true, ...parameters, issuer: totp.issuer ?? issuerHost(config) }
+		: { enabled: false, ...parameters, issuer: totp.issuer };
 }
 
 /** `mfa.factors.totp`, read on its own — what the TOTP factor's module reads. A `RangeError` names each key refused. */
