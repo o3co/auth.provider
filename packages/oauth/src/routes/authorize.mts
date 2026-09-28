@@ -779,11 +779,13 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 /**
  * #481 — `max_age` (OIDC Core §3.1.2.1): the seconds since the End-User's
  * authentication that the RP will accept. A non-negative integer, or a
- * refusal; absent means no constraint.
+ * refusal; absent means no constraint, and so does an empty value — RFC 6749
+ * §3.1: "Parameters sent without a value MUST be treated as if they were
+ * omitted from the request."
  */
 const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefined } | null => {
 	const raw = ctx.params.max_age;
-	if (raw === undefined) return { value: undefined };
+	if (raw === undefined || raw === "") return { value: undefined };
 	if (typeof raw !== "string" || !/^[0-9]+$/.test(raw)) {
 		redirectError(ctx, "invalid_request", "max_age must be a non-negative integer");
 		return null;
@@ -993,14 +995,18 @@ const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean => {
  * ignored, as it always was, and discovery keeps `claims_parameter_supported`
  * absent, which reads as `false`.
  *
- * A value that is not a JSON object cannot be told not to name `acr`, so it
- * is malformed, as a malformed `acr_values` is. A repeat never reaches here
+ * An empty value is omitted (RFC 6749 §3.1). Any other value that is not a
+ * JSON object cannot be told not to name `acr`, so it is malformed, as a
+ * malformed `acr_values` is. A repeat never reaches here
  * (`checkSingleValuedParams`). Runs before the re-authentication decision, so
- * a refused request never sends the browser through a login first.
+ * a refused request is never sent by a `prompt=login` or `max_age` to log in
+ * first. (An unauthenticated browser is still sent to the login page before
+ * this runs, as for every parameter: its `redirect_uri` is not yet trusted to
+ * answer at — #284's ordering.)
  */
 const checkClaimsParameter = (ctx: AuthorizeContext): boolean => {
 	const raw = ctx.params.claims;
-	if (raw === undefined) return true;
+	if (raw === undefined || raw === "") return true;
 	let claims: unknown;
 	try {
 		claims = JSON.parse(raw as string);
@@ -1609,7 +1615,8 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// never reaches the repository or the policy hook either.
 		if (!checkSingleValuedParams(ctx)) return;
 		// The MFA ADR's D15: `acr` is asked for through `acr_values` alone —
-		// refused here, before a re-authentication could send the browser away.
+		// refused here, before a `prompt=login` or `max_age` sends the browser to
+		// log in.
 		if (!checkClaimsParameter(ctx)) return;
 		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
