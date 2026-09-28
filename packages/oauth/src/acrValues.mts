@@ -28,6 +28,7 @@ import {
 	type AcrTable,
 	auditErrorList,
 	auditErrorText,
+	federationTrustsUpstreamAmr,
 	type Logger,
 	producibleAmr,
 	readMfaMode,
@@ -46,25 +47,33 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  * - No second factor can: `/authorize` consults no `mfaCoordinator` before
  *   D17's single decision (the MFA ADR's build order, step 13), which adds
  *   the coordinator's `secondFactorMethods` here.
- * - A federation installed makes every entry satisfiable: every federation's
- *   upstream `amr` is recorded beside `fed` and counts, as #481 shipped,
- *   until the build order's step 5 lets a federation be untrusted and
- *   narrows `trustedFederation` to the trusted ones.
+ * - An installed federation that trusts its upstream IdP's `amr`
+ *   (`federations.<name>.trustUpstreamAmr`, D13) makes every entry
+ *   satisfiable: the federation callback records what that IdP asserts
+ *   beside `fed`, where it counts. One that does not adds `fed` alone — the
+ *   callback keeps its IdP's values apart, and they meet no `acr`.
  *
  * `federations` is the map a composition installed, read when this runs: at
- * composition, after every federation's contribution has registered.
+ * composition, after every federation's contribution has registered. Each
+ * one's switch is read from `config` by the reading the federation callback
+ * writes the session by, so the two cannot disagree; a switch that is given
+ * but unusable is a `RangeError`, which refuses the composition.
  */
 export const vouchableAcrValues = (
 	configured: AcrTable,
 	federations: ReadonlyMap<string, unknown> | undefined,
+	config: unknown,
 ): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } => {
-	const federationInstalled = federations !== undefined && federations.size > 0;
+	const installed = [...(federations?.keys() ?? [])];
+	// Every installed federation's switch is read, not only up to the first
+	// trusted one: an unusable switch refuses the composition wherever it is.
+	const trusted = installed.map((name) => federationTrustsUpstreamAmr(config, name));
 	return vouchableAcrTable(
 		configured,
 		producibleAmr({
 			secondFactorMethods: undefined,
-			federationInstalled,
-			trustedFederation: federationInstalled,
+			federationInstalled: installed.length > 0,
+			trustedFederation: trusted.includes(true),
 		}),
 	);
 };

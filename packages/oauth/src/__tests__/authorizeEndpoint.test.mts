@@ -58,8 +58,13 @@ const REDIRECT_URI = "https://app.example/cb";
 const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
-const makeConfig = (oauthOverrides: Record<string, unknown>, loginUrl = "/login"): AppConfig =>
+const makeConfig = (
+	oauthOverrides: Record<string, unknown>,
+	loginUrl = "/login",
+	federations: Record<string, unknown> = {},
+): AppConfig =>
 	({
+		federations,
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
@@ -101,8 +106,12 @@ const makeApp = async (opts: {
 	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
 	userSessionStore?: UserSessionStore;
 	logger?: Logger;
-	/** Install one federation, as a federation module's contribution would. */
-	federation?: true;
+	/**
+	 * Install one federation, as a federation module's contribution would —
+	 * `"trusted"` with `federations.google.trustUpstreamAmr = true` (the MFA
+	 * ADR's D13), `"untrusted"` with the switch absent.
+	 */
+	federation?: "trusted" | "untrusted";
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -138,7 +147,11 @@ const makeApp = async (opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
-		config: makeConfig(opts.oauth ?? {}, opts.loginUrl),
+		config: makeConfig(
+			opts.oauth ?? {},
+			opts.loginUrl,
+			opts.federation === "trusted" ? { google: { trustUpstreamAmr: true } } : {},
+		),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -1722,23 +1735,41 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
-		it("keeps an entry only an upstream IdP can meet while a federation is installed", async () => {
-			// Every federation's upstream `amr` is recorded beside `fed` until
-			// the upstream split (the MFA ADR's build order, step 5), so such a
-			// composition can meet any entry — as #481 shipped.
+		it("keeps an entry only an upstream IdP can meet while an installed federation trusts its amr", async () => {
+			// The MFA ADR's D13: a trusted federation's upstream `amr` is recorded
+			// beside `fed` and counts, so such a composition can meet any entry.
 			const createCode = mintingCode();
 			const { app } = await makeApp({
 				session,
 				oauth: { authorize: { acrValues } },
 				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
 				createCode,
-				federation: true,
+				federation: "trusted",
 			});
 			const params = redirectParams(
 				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
 			);
 			expect(params.get("code")).toBe("code-x");
 			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:mfa" }));
+		});
+
+		it("answers an entry only an upstream IdP can meet unmet while the installed federation does not trust its amr", async () => {
+			// The MFA ADR's D13: an untrusted IdP's `amr` counts for no `acr`, so
+			// the entry is dropped at boot — and a session that carries the value
+			// does not revive it.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
+				createCode,
+				federation: "untrusted",
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+			expect(createCode).not.toHaveBeenCalled();
 		});
 
 		it("meets an any-of entry through any one of its alternatives", async () => {
@@ -1750,7 +1781,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				},
 				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"]),
 				createCode,
-				federation: true,
+				federation: "trusted",
 			});
 			const params = redirectParams(
 				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
@@ -1766,7 +1797,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
 				},
 				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"]),
-				federation: true,
+				federation: "trusted",
 			});
 			const params = redirectParams(
 				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
@@ -1892,12 +1923,31 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 	});
 
-	it("says nothing when a federation is installed: every entry can be met", async () => {
+	it("says nothing when an installed federation trusts its upstream amr: every entry can be met", async () => {
 		const logger = createMockLogger();
-		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: true });
+		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: "trusted" });
 		for (const level of [logger.info, logger.warn, logger.error]) {
 			expect(linesFor(level)).toEqual([]);
 		}
+	});
+
+	it("drops what only an upstream IdP could meet when the installed federation does not trust it", async () => {
+		// The MFA ADR's D13: the federation adds `fed` alone, so every entry
+		// needing anything else is dropped as without one — an entry needing
+		// `fed` stays.
+		const logger = createMockLogger();
+		await makeApp({
+			oauth: { authorize: { acrValues: { ...acrValues, "urn:example:fed": ["fed"] } } },
+			logger,
+			federation: "untrusted",
+		});
+		expect(linesFor(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, EVENT],
+			[{ acr: "urn:example:phr", unproducible: ["hwk", "swk"] }, EVENT],
+		]);
+		expect(linesFor(logger.warn)).toEqual([
+			[{ acr: "urn:example:kba", unproducible: ["kba"] }, EVENT],
+		]);
 	});
 
 	it("bounds what it logs of an entry", async () => {
@@ -2059,6 +2109,7 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 		const { dropped } = vouchableAcrValues(
 			{ "urn:example:any": [[]], "urn:example:kba": [["kba"]] },
 			undefined,
+			{},
 		);
 		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
 		expect(logger.warn.mock.calls).toEqual([
@@ -2078,7 +2129,7 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 		// carries, and the count says how many there were.
 		const lacked = Array.from({ length: 12 }, (_, i) => `x${i}`);
 		const logger = createMockLogger();
-		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined);
+		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined, {});
 		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
 		expect(logger.warn.mock.calls).toEqual([
 			[

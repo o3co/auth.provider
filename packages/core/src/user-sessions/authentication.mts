@@ -66,3 +66,33 @@ export function requirementSession(session: UserSession | null): MfaRequirementS
 	if (session === null) return null;
 	return { authentication: sessionAuthentication(session), amr: vouchedAmr(session) };
 }
+
+/**
+ * Whether federation `name`'s upstream IdP's `amr` counts (the MFA ADR's
+ * D13): `federations.<name>.trustUpstreamAmr`, beside `enabled` in both of a
+ * section's shapes. `true` records what the IdP asserted in the session's
+ * `amr` beside `fed`, where tokens carry it and `acr` is matched against it;
+ * absent or `false` keeps it apart, for the record only. A value that is
+ * given but is neither is a `RangeError` naming the key and quoting nothing
+ * of the value — read as either answer, a typo would decide what this
+ * provider vouches for. Core's schema coerces the spellings an environment
+ * variable delivers before this reads it; a hand-built configuration meets
+ * this refusal instead.
+ *
+ * Read at composition by the federation callback, which writes the split,
+ * and by the `acr` drop, which counts a trusted federation as able to
+ * produce any value — one reading, so the two cannot disagree.
+ */
+export function federationTrustsUpstreamAmr(config: unknown, name: string): boolean {
+	const federations = (config as { federations?: unknown } | null | undefined)?.federations;
+	if (typeof federations !== "object" || federations === null) return false;
+	if (!Object.hasOwn(federations, name)) return false;
+	const section = (federations as Record<string, unknown>)[name];
+	if (typeof section !== "object" || section === null) return false;
+	const trust = Object.hasOwn(section, "trustUpstreamAmr")
+		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
+		: undefined;
+	if (trust === undefined) return false;
+	if (typeof trust === "boolean") return trust;
+	throw new RangeError(`federations.${name}.trustUpstreamAmr must be true or false`);
+}

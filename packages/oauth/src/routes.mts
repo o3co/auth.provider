@@ -278,7 +278,7 @@ export const createOAuthRouter = async (
 	// The MFA ADR's D15: `/authorize` answers `acr_values` only from the entries
 	// this composition can satisfy — the same table discovery advertises — and
 	// an entry dropped is said once, here, at composition.
-	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders());
+	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config);
 	logUnsatisfiableAcrValues(acrValues.dropped, config, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token
 	// endpoint used to compute `config.oauth.jwt.issuer ?? req.get("host")`, so an

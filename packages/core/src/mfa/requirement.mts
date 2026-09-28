@@ -313,8 +313,8 @@ export interface ProducibleAmr {
  * - `federationInstalled`: a federation is installed, so a federation callback
  *   can write `fed`. Without one, nothing records `fed`.
  * - `trustedFederation`: one of them is a federation whose upstream `amr`
- *   counts — every installed federation, until the build order's step 5 gives
- *   each a `trustUpstreamAmr` switch. A trusted federation that is not
+ *   counts (`federations.<name>.trustUpstreamAmr`, read by
+ *   `federationTrustsUpstreamAmr`, D13). A trusted federation that is not
  *   installed is a `RangeError`.
  */
 export function producibleAmr(installed: {
