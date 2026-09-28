@@ -538,8 +538,110 @@ describe("the overrides guard reads what the pass reads (D3)", () => {
 	});
 });
 
+describe("a factor's values are read once, at registration, and the reach is recomputed from that snapshot alone (D3)", () => {
+	const mfaWith = (reach: readonly string[]) =>
+		mfaModule({ reach: new Set(reach) } as Partial<SessionRequirement>);
+	const factorModule = (value: () => unknown) =>
+		defineModule({ name: "test:factors", contributes: { mfaFactors: { totp: value as never } } });
+	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
+
+	it("a getter that answers a valid list at registration and another afterwards: the recomputation reads what was validated", async () => {
+		const shifting = (later: readonly string[]) => {
+			let reads = 0;
+			return factorModule(() => ({
+				...factor("totp", [], true),
+				get amrValues() {
+					reads++;
+					return reads === 1 ? ["otp"] : later;
+				},
+			}));
+		};
+		// A requirement reaching a value the factor never declared at
+		// registration is refused, whatever a later read says.
+		const err = await refusal(boot([shifting(["x"]), ...stores, mfaWith(["x", "mfa"])], expected));
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
+		expect(err.message).toMatch(/reach/);
+		// And the validated list is what the reach is compared with, not a
+		// primary's marker a later read answers.
+		for (const later of [["pwd"], ["x"]]) {
+			const seen: { resolver?: SessionRequirementResolver } = {};
+			const handle = await boot(
+				[shifting(later), ...stores, mfaWith(["otp", "mfa"]), consumer(seen)],
+				expected,
+			);
+			try {
+				expect([...(seen.resolver?.get("mfa")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+			} finally {
+				await handle.dispose();
+			}
+		}
+	});
+
+	it("a mutable list pushed to after registration: the recomputation reads the snapshot", async () => {
+		const amrValues = ["otp"];
+		let pushedAfter = false;
+		// The requirement's own factory runs in the name-keyed pass after the
+		// factor registered, and pushes onto the list the factor handed in.
+		const late = defineModule({
+			name: "test:mfa",
+			requires: ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as never,
+			contributes: {
+				sessionRequirements: {
+					mfa: (deps: { mfaFactorResolver?: { get(kind: string): unknown } }) => {
+						pushedAfter = deps.mfaFactorResolver?.get("totp") !== undefined;
+						amrValues.push("x");
+						return {
+							name: "mfa",
+							reach: new Set(["otp", "x", "mfa"]),
+							stepUpPage: { url: "/mfa", params: {} },
+							remediations: ["mfa.step_up"],
+							hintKeys: [],
+							admit: async () => ({ outcome: "met" as const }),
+						};
+					},
+				},
+			},
+		} as never);
+		const err = await refusal(
+			boot(
+				[factorModule(() => ({ ...factor("totp", [], true), amrValues })), ...stores, late],
+				expected,
+			),
+		);
+		expect(pushedAfter).toBe(true);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
+	});
+
+	it("addsMfa is read once too: a getter answering true at registration and false afterwards changes nothing", async () => {
+		let reads = 0;
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[
+				factorModule(() => ({
+					...factor("totp", ["otp"], true),
+					get addsMfa() {
+						reads++;
+						return reads === 1;
+					},
+				})),
+				...stores,
+				mfaWith(["otp", "mfa"]),
+				consumer(seen),
+			],
+			expected,
+		);
+		try {
+			expect([...(seen.resolver?.get("mfa")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
 describe("a raw throw at the end of stage 4 is a BootError with the cleanups run (D3, D7)", () => {
-	it("a factor whose amrValues throw on the second read — the recomputation's — fails as the mfa contribution, not as a raw TypeError", async () => {
+	it("a factor whose amrValues throw on a later read — the requirement's own getter's — fails as the mfa contribution, not as a raw TypeError", async () => {
 		let reads = 0;
 		const flaky = defineModule({
 			name: "test:factors",
