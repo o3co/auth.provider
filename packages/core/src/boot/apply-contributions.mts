@@ -484,11 +484,12 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *   and `mfaTransactionStore`, whose reach equals what core recomputes from
  *   the enabled factors, and whose `remediations` include `mfa.step_up` —
  *   `contribute-factory-failed`, naming the module;
+ * - `mfa.mode` other than `off` with no requirement named `mfa` —
+ *   `session-requirement-missing`, before the declaration is compared, so a
+ *   composition that asks for MFA without the module is told to install it;
  * - the declaration: whenever a module requires or reads
  *   `sessionRequirementResolver`, `sessionRequirements.expected` must be the
  *   set of registered names — `session-requirements-undeclared`;
- * - `mfa.mode` other than `off` with no requirement named `mfa` —
- *   `session-requirement-missing`;
  *
  * and the one boot line, `session_requirements_registered` at info with each
  * requirement's name, module and remediations in order, when a consumer or a
@@ -579,6 +580,25 @@ async function checkSessionRequirements(
 		)
 		.map(([moduleName]) => moduleName);
 	const config = components.config;
+	// Before the declaration: a composition that asks for MFA without the
+	// module is told to install it, not to fix a list.
+	const mode = readMfaMode(config);
+	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
+		await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message:
+				`mfa.mode = "${mode}" asks for a second factor, but no requirement named "${MFA_REQUIREMENT_NAME}" is registered: ` +
+				'install the MFA module, or set mfa.mode = "off".',
+			reason: "session-requirement-missing",
+			stage: "applyContributions",
+			details: {
+				reason: "session-requirement-missing",
+				configKey: "mfa.mode",
+				mode,
+				requirement: MFA_REQUIREMENT_NAME,
+			},
+		});
+	}
 	if (consumedBy.length > 0) {
 		const declared = (config as { sessionRequirements?: { expected?: unknown } } | undefined)
 			?.sessionRequirements?.expected;
@@ -605,23 +625,6 @@ async function checkSessionRequirements(
 				},
 			});
 		}
-	}
-	const mode = readMfaMode(config);
-	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
-		await runCleanupsReverse(material.cleanups);
-		throw new BootError({
-			message:
-				`mfa.mode = "${mode}" asks for a second factor, but no requirement named "${MFA_REQUIREMENT_NAME}" is registered: ` +
-				'install the MFA module, or set mfa.mode = "off".',
-			reason: "session-requirement-missing",
-			stage: "applyContributions",
-			details: {
-				reason: "session-requirement-missing",
-				configKey: "mfa.mode",
-				mode,
-				requirement: MFA_REQUIREMENT_NAME,
-			},
-		});
 	}
 	if (consumedBy.length > 0 || registrations.length > 0) {
 		const logger = components.logger as Logger | undefined;

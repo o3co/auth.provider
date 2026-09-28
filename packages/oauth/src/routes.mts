@@ -52,9 +52,11 @@ import {
 	type SenderConstraint,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
+	type SessionRequirementResolver,
 	type SessionRPRegistry,
 	type SubjectRevocation,
 	sanitizeErrorText,
+	stepUpReach,
 	tokenTypeForConfirmation,
 	type UserSessionStore,
 	verifyJwt,
@@ -190,6 +192,7 @@ export const createOAuthRouter = async (
 		pendingConsentStore,
 		clientIdMetadataDocuments: clientIdMetadataDocumentSeams = {},
 		getFederationProviders = () => undefined,
+		requirements,
 		logger = consoleLogger,
 	}: {
 		/**
@@ -262,6 +265,16 @@ export const createOAuthRouter = async (
 		 * And again at request time, by the federation logout and token routes.
 		 */
 		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
+		/**
+		 * The registered session requirements (the session-admission ADR's
+		 * D1, D6): what a step-up can add decides which acr entries this
+		 * composition can satisfy (`./acrValues.mts`). `oauthModule` passes the
+		 * synthetic key `sessionRequirementResolver`, which the boot planner has
+		 * filled before any route factory runs; a router built by hand without
+		 * one reaches nothing. Every consumer of admission in this router takes
+		 * it as required in A3.
+		 */
+		requirements?: SessionRequirementResolver;
 		logger?: Logger;
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
@@ -278,8 +291,11 @@ export const createOAuthRouter = async (
 	// The MFA ADR's D15: `/authorize` answers `acr_values` only from the entries
 	// this composition can satisfy — the same table discovery advertises — and
 	// an entry dropped is said once, here, at composition.
-	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config);
-	logUnsatisfiableAcrValues(acrValues.dropped, config, logger);
+	// What the registered requirements can add to a session by a step-up: read
+	// once here, after every name-keyed contribution registered (D6).
+	const reach = stepUpReach(Array.from(requirements?.entries() ?? [], ([, r]) => r));
+	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config, reach);
+	logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token
 	// endpoint used to compute `config.oauth.jwt.issuer ?? req.get("host")`, so an
 	// unconfigured deployment behind a trusted proxy minted tokens whose issuer the

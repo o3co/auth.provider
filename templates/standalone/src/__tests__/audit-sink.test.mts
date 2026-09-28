@@ -58,8 +58,10 @@ const baseConfig: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
 	// The parsed config always carries `mfa`: "off" until the release that
-	// turns MFA on (the MFA ADR's D19).
+	// turns MFA on (the MFA ADR's D19) — and, as `app.mts` derives from it,
+	// the posture on session admission (the session-admission ADR's D7).
 	mfa: { mode: "off" },
+	sessionRequirements: { expected: [] },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

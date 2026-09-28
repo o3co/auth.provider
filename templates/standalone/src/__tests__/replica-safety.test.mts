@@ -67,7 +67,7 @@ import {
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildModules } from "../buildModules.mjs";
+import { buildModules, withSessionRequirements } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 
 // The redis session-store builder dynamically imports these (#474 puts the
@@ -170,11 +170,13 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 
 function resolveConfig(env: Record<string, string>): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	return validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
-		AppConfigSchema,
+	return withSessionRequirements(
+		validate(
+			parseFile(envConfPath, { env })
+				.withFallback(parseFile(applicationConfPath, { env }))
+				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+			AppConfigSchema,
+		),
 	);
 }
 
