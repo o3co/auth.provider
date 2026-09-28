@@ -92,5 +92,10 @@ describe("the UserSessionStore contract suite, in both copies", () => {
 		expect(callersOf(here, "runUserSessionStoreContract")).toContain(
 			"redis.userSessionStore.test.mts",
 		);
+		// The step-up capability's suite (the MFA ADR's D9), which the Redis
+		// store claims.
+		expect(callersOf(here, "runSecondFactorUpdateContract")).toContain(
+			"redis.userSessionStore.test.mts",
+		);
 	});
 });

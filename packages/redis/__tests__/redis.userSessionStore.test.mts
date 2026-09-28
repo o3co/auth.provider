@@ -20,7 +20,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
-import { runUserSessionStoreContract } from "./userSessionStore.contract.mjs";
+import {
+	runSecondFactorUpdateContract,
+	runUserSessionStoreContract,
+} from "./userSessionStore.contract.mjs";
 
 let raw: Redis;
 
@@ -34,23 +37,23 @@ afterAll(async () => {
 });
 
 let suiteCounter = 0;
-runUserSessionStoreContract(
-	async () => {
-		suiteCounter += 1;
-		const { userSessionStoreClient } = makeIoredisClients(raw);
-		return createRedisUserSessionStore({
-			client: userSessionStoreClient,
-			keyPrefix: `t14:${suiteCounter}:`,
-		});
-	},
-	// A relative PX: the session is gone when its key is.
-	{
-		expiry: keysExpire(
-			() => raw,
-			() => `t14:${suiteCounter}:`,
-		),
-	},
+/** A store on a key prefix of its own, one per case, as both suites need. */
+const freshStore = async () => {
+	suiteCounter += 1;
+	const { userSessionStoreClient } = makeIoredisClients(raw);
+	return createRedisUserSessionStore({
+		client: userSessionStoreClient,
+		keyPrefix: `t14:${suiteCounter}:`,
+	});
+};
+// A relative PX: the session is gone when its key is.
+const expiry = keysExpire(
+	() => raw,
+	() => `t14:${suiteCounter}:`,
 );
+runUserSessionStoreContract(freshStore, { expiry });
+// The step-up capability, which the Redis store claims (the MFA ADR's D9).
+runSecondFactorUpdateContract(freshStore, { expiry });
 
 describe("a session Redis holds from before the MFA ADR's D9", () => {
 	// The envelope a release before `authentication` wrote, byte for byte in
