@@ -1079,6 +1079,8 @@ return {1, fields}
  * failed refresh is forgotten, because this refresh succeeded. Neither
  * horizon moves — the credential's deadline is set to the same expiry it
  * already had, so a rotation does not extend what the user consented to.
+ * A credential the server's clock has already reclaimed is not replaced:
+ * there is nothing to rotate, and the write is refused in this same step.
  */
 const LUA_FG_REPLACE = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -1090,6 +1092,14 @@ local version = fg_num(g['version'])
 if version == nil or version ~= expected then return {0} end
 local expiresAt = fg_num(g['expiresAtMs'])
 if expiresAt == nil or not (now < expiresAt) then return {0} end
+-- The credential it replaces must still be there (#631): its key's deadline
+-- is the expiry on the server's clock, and once that has fired the refresh is
+-- refused HERE, in the step that writes. The adapter's own read of the
+-- credential is a round trip earlier, and the deadline can fire between the
+-- two; written all the same, the new credential would take the same past
+-- deadline and be gone at once, after a reply that said it was written
+-- (Copilot).
+if redis.call('EXISTS', KEYS[2]) == 0 then return {0} end
 redis.call('HDEL', KEYS[1],
   'ineligible', 'failureAt', 'failureKind', 'failureCount',
   'failureRetryAfterSeconds', 'failureUpstreamCode')
