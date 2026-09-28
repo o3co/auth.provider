@@ -33,19 +33,21 @@ The `mfa` section beside core's `mfa.mode`. Core's `AppConfigSchema` passes the 
 
 | Key | Env | Default | Meaning |
 | --- | --- | --- | --- |
-| `mfa.encryptionKeys` | `MFA_ENCRYPTION_KEY` feeds the first entry | none | The key ring, `[{ id, key }]`: each key canonical base64 of 32 bytes (`openssl rand -base64 32`); the first seals, every key opens (D11) |
+| `mfa.encryptionKeys` | `MFA_ENCRYPTION_KEY` feeds the first entry | none | The key ring, `[{ id?, key }]`: each key canonical base64 of 32 bytes (`openssl rand -base64 32`); the first seals, every key opens (D11). An entry without an `id` is named by its key's fingerprint |
 | `mfa.factors.totp.enabled` | `MFA_TOTP_ENABLED` | `true` | Whether the TOTP factor is offered |
 | `mfa.factors.totp.algorithm` | — | `SHA1` | `SHA1`, `SHA256` or `SHA512`, for new enrollments |
 | `mfa.factors.totp.digits` | — | `6` | 6 to 8, for new enrollments |
 | `mfa.factors.totp.period` | — | `30` | 15 to 120 seconds, for new enrollments |
 | `mfa.factors.totp.window` | — | `1` | 0 to 2 steps either side of now, for every verification |
-| `mfa.factors.totp.issuer` | `MFA_TOTP_ISSUER` | the host of `oauth.jwt.issuer` | The issuer an authenticator app shows; no colon |
+| `mfa.factors.totp.issuer` | `MFA_TOTP_ISSUER` | for a factor that is on, the hostname of `oauth.jwt.issuer` | The issuer an authenticator app shows: well-formed text, not blank, with no control character and no colon |
 
-A key your `application.conf` sets shadows the substitution `reference.conf` makes for it; repeat the `${?VAR}` line after your value to let the environment override it again. The ring has no environment form beyond its first key: to rotate, write it in a deployment-owned layer — add the new key last, then move it first — and keep a retired key until nothing sealed under it is left. Opening data sealed under a key that is no longer first logs `mfa_factor_sealed_with_retired_key` (info, the key id) once per key id.
+A key your `application.conf` sets shadows the substitution `reference.conf` makes for it; repeat the `${?VAR}` line after your value to let the environment override it again.
 
-**Refused**, each a `RangeError` whose message starts with the key and quotes no key or id: an empty ring or one without `MFA_ENCRYPTION_KEY`; a key that is not canonical base64 of 32 bytes; a duplicate id or one outside `A-Za-z0-9_-` (1 to 64 characters); a TOTP parameter out of its range; a section missing because `reference.conf` is not layered.
+**Key ids and rotation.** An entry written without an `id` — as `reference.conf`'s, which `MFA_ENCRYPTION_KEY` feeds — is named by its key's fingerprint: `k` and the first 16 characters of base64url(HMAC-SHA-256(key, `o3co:mfa:key-id`)), which tells nothing of the key. So a key changed in place leaves what the old one sealed `key_unavailable`, naming the old fingerprint — put that key back — never `unreadable`, which no key cures. An entry written with an `id` keeps it: never change its key in place. To rotate, write the ring in a deployment-owned layer: add the new key last as an entry of its own (a new `id`, or none), then move it first, and keep the old key until nothing sealed under it, and no digest naming it, is left. Opening data sealed under a key that is no longer first logs `mfa_factor_sealed_with_retired_key` (info, the key id) once per key id. Core's envelope seals with a random 96-bit AES-GCM nonce, and a factor's data is re-sealed at every use, so rotate each key well before 2^32 seals under it — the bound NIST SP 800-38D sets for random nonces.
 
-**The development sample key.** [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) is a published key a development configuration may put in the ring in place of a key of its own. Everyone holds it, so it is refused — wherever it sits in the ring — when the environment the configuration was selected by is `production` or `staging`, when `NODE_ENV` is either, and under `deployment.mode = "multi"`: #473's rule, as for the Redis federation stores' plaintext mode. The environment reaches the refusal from the composition root (the standalone passes `CONFIG_ENV || NODE_ENV`), through the MFA module's options once that module lands.
+**Refused**, each a `RangeError` whose message starts with the key and quotes no key or id: an empty ring or one without `MFA_ENCRYPTION_KEY`; a key that is not canonical base64 of 32 bytes; a duplicate id — a fingerprint that equals a written id, or one key listed twice, among them — or one outside `A-Za-z0-9_-` (1 to 64 characters); a TOTP parameter out of its range, or an issuer outside its rule; for a factor that is on and has no issuer written, an `oauth.jwt.issuer` with no host to default it to (naming `MFA_TOTP_ISSUER`); a section missing because `reference.conf` is not layered. `mfaConfigSchema` holds the shapes and TOTP's ranges; the ring's refusals and the sample key's are made when the settings are read, where the keys are decoded and the environment is known.
+
+**The development sample key.** [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) is a published key a development configuration may put in the ring in place of a key of its own. Everyone holds it, so it is refused — wherever it sits in the ring — when the environment the configuration was selected by is `production` or `staging`, when `NODE_ENV` is either (each read whatever its case and the whitespace around it), and under `deployment.mode = "multi"`: #473's rule, as for the Redis federation stores' plaintext mode. The environment reaches the refusal from the composition root (the standalone passes `CONFIG_ENV || NODE_ENV`), through the MFA module's options once that module lands.
 
 ## The TOTP factor
 
@@ -54,12 +56,12 @@ A key your `application.conf` sets shadows the substitution `reference.conf` mak
 - A verification adds `otp`, and `mfa` beside it (D14). The factor counts as MFA, and its six-to-eight-digit proof is guessable, so the subject lock applies to it (D21).
 - A code is accepted at the steps `T - window` to `T + window`, and only when its step is after the factor's `lastUsedStep` — the same code twice, or an older code once a newer one was accepted, is refused as `replayed` (RFC 6238 §5.2). There is no drift resynchronisation (D22). HOTP and TOTP are pinned by RFC 4226 Appendix D's and RFC 6238 Appendix B's vectors.
 - Each factor keeps the algorithm, digits and period it was enrolled with, so changing them in the configuration never breaks an enrollment; the window applies to every verification.
-- Enrolling hands out a secret of the algorithm's output length (20, 32 or 64 bytes) in RFC 4648 base32 without padding, and the `otpauth://totp/<issuer>:<account>?secret=…&issuer=…&algorithm=…&digits=…&period=…` URI authenticator apps read, the account being the user's email, else the username. The page renders it as a QR code (D6). The proof of possession binds the factor at the step it matched.
+- Enrolling hands out a secret of the algorithm's output length (20, 32 or 64 bytes) in RFC 4648 base32 without padding, and the `otpauth://totp/<issuer>:<account>?secret=…&issuer=…&algorithm=…&digits=…&period=…` URI authenticator apps read, the account being the user's email, else the username — well-formed text, or the enrollment is refused. The page renders it as a QR code (D6). The proof of possession binds the factor at the step it matched.
 
 ## API
 
 | Export | What it is |
 | --- | --- |
 | [`mfaTotpFactorModule`](src/totp/module.mts) | The module contributing `mfaFactors.totp` |
-| [`mfaConfigSchema`](src/config.mts) | The schema of the `mfa` keys this package reads |
+| [`mfaConfigSchema`](src/config.mts) | The shapes of the `mfa` keys this package reads, and TOTP's ranges — not the ring's or the sample key's refusals, which reading the settings makes |
 | [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) | The published development key, refused outside development |

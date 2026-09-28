@@ -111,7 +111,14 @@ const RING_SHAPE = "must be a list of { id?, key } entries";
 
 const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
 
-/** The `mfa` section's keys this package reads: the key ring and the factors (D19). `mfa.mode` is core's. */
+/**
+ * The shapes of the `mfa` keys this package reads — the key ring and the
+ * factors (D19) — and TOTP's ranges. The ring's refusals (a key that is not
+ * 32 bytes, an empty ring, a duplicate id) and the sample key's are not the
+ * schema's: `readMfaSettings` makes them, where the keys are decoded and the
+ * environment is known, and they are what D20 calls the MFA config schema's.
+ * `mfa.mode` is core's.
+ */
 export const mfaConfigSchema = z.object(
 	{
 		encryptionKeys: z.array(
