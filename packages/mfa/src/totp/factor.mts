@@ -137,10 +137,20 @@ function readCode(proof: unknown, digits: number): string | undefined {
 		: undefined;
 }
 
-/** The label's account: the account's email, else its username — or a `RangeError` when it has neither. */
+/**
+ * The label's account: the account's email, else its username. A
+ * `RangeError` when it has neither — core's `User` requires a username, so
+ * that is a broken Store answer — or when the one it would use is not
+ * well-formed text, which the URI's percent-encoding cannot write. Neither is
+ * quoted.
+ */
 function accountOf(user: Readonly<Record<string, unknown>>): string {
 	for (const candidate of [user.email, user.username]) {
-		if (typeof candidate === "string" && candidate.length > 0) return candidate;
+		if (typeof candidate !== "string" || candidate.length === 0) continue;
+		if (!candidate.isWellFormed()) {
+			throw new RangeError("a TOTP factor's label must be well-formed text; the account's is not");
+		}
+		return candidate;
 	}
 	throw new RangeError(
 		"a TOTP factor is labelled with the account's email or username; it has neither",
