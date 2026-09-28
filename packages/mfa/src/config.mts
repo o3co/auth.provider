@@ -215,10 +215,12 @@ function refuseSampleKey(ring: SealingKeyRing, config: ConfigShape, options: Mfa
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
 	const index = ring.findIndex((entry) => sample !== undefined && entry.key.equals(sample));
 	if (index === -1) return;
-	// Both names are consulted; the one that matched is the one reported.
-	const productionEnvironment = [options.environment, process.env.NODE_ENV].find(
-		(name): name is string => name !== undefined && PRODUCTION_ENVIRONMENTS.has(name),
-	);
+	// Both names are consulted, each whatever its case and the whitespace
+	// around it — "Production" or "production\n" names production as surely —
+	// and the one that matched is the one reported, normalised.
+	const productionEnvironment = [options.environment, process.env.NODE_ENV]
+		.map((name) => (typeof name === "string" ? name.trim().toLowerCase() : undefined))
+		.find((name): name is string => name !== undefined && PRODUCTION_ENVIRONMENTS.has(name));
 	const reasons: string[] = [];
 	if (productionEnvironment !== undefined) {
 		reasons.push(`the environment is "${productionEnvironment}"`);
