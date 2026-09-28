@@ -50,12 +50,14 @@ export function stubFactor(
 }
 
 /** The factors a composition might install, by what each declares (the MFA ADR's D14). */
-export const FACTORS = {
+export const FACTORS: Readonly<
+	Record<"totp" | "webauthn" | "email" | "recovery", () => MfaFactor>
+> = {
 	totp: () => stubFactor("totp", ["otp"]),
 	webauthn: () => stubFactor("webauthn", ["hwk", "swk"]),
 	email: () => stubFactor("email", ["email"], { addsMfa: false }),
 	recovery: () => stubFactor("recovery_code", ["recovery"], { counting: false }),
-} as const;
+};
 
 /** A resolver over `factors`, as core's `mfaFactorResolver` answers: by kind, in the order given, read through at call time. */
 export function resolverOver(factors: MfaFactor[]): MfaFactorResolver {

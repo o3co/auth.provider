@@ -60,6 +60,7 @@ import {
 import { z } from "zod";
 import type { TotpFactorSettings } from "./totp/factor.mjs";
 import { TOTP_ALGORITHMS } from "./totp/rfc6238.mjs";
+import { MFA_TRANSACTION_TTL_SECONDS } from "./transactions.mjs";
 
 /**
  * A published key for development only — canonical base64 of 32 bytes, the
@@ -119,9 +120,6 @@ export const mfaTotpConfigSchema = z.object(
 const RING_SHAPE = "must be a list of { id?, key } entries";
 
 const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
-
-/** The shortest and the longest a transaction may live, in seconds (the step-8 owner decision). */
-const MFA_TRANSACTION_TTL_SECONDS = { min: 60, max: 1800 } as const;
 
 const POSITIVE_WHOLE = "must be a positive whole number";
 const positiveWhole = z
