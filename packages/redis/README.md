@@ -646,7 +646,10 @@ operations is one script on one Cluster slot.
 the version as text and carries the fixed part over byte for byte — it never
 decodes the JSON, since `cjson` writes an empty array back as `{}`. No key
 carries a TTL. A stored record the adapter cannot read back refuses the
-subject's whole list: never "no factor", which would open a first binding.
+subject's whole list: never "no factor", which would open a first binding. So
+`create` and `update` refuse with a `RangeError`, before anything is written,
+whatever a read would refuse — a binding outside D24's three, a field that is
+not the type the record declares, a date that is not a valid one.
 
 **The transactions.** Every operation the port calls atomic is one script:
 insert-only `create`; `update`, a compare-and-set on the version and on the
@@ -654,7 +657,10 @@ incarnation `create` wrote, after core's own checks of the patch; and
 `reserveAttempt`, `takeChallenge` and `consume`. A record is kept as core's
 `newMfaTransactionRecord` answers it and read back through the same function,
 so it has the in-process store's shape; one that does not read back is
-answered as absent, and the ceremony starts again. The record travels as JSON,
+answered as absent, and the ceremony starts again. So is one at or past its
+`expiresAtMs` on the store's own clock (`now`, `Date.now` by default): the key
+expires on the server's clock, and a server running behind must not let a
+ceremony complete past its deadline. The record travels as JSON,
 as the session envelope's `claims` and the cookie session's `user` do, so a
 login continuation's `user` and `claims` must be JSON-representable: a `Date`
 comes back as its string and an `undefined` value as a missing key, where the
@@ -676,18 +682,27 @@ its own with no TTL: `clearSubjectState` leaves it, and consuming it is one
 `DEL`.
 
 **Durability at boot (D12).** Before providing its store each module asks the
-server, through its client's `durability()` — `CONFIG GET maxmemory-policy`
-and `save`, and `INFO persistence`: an `allkeys-*` policy refuses the boot
-(`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`); RDB
-snapshots without AOF (`mfa_factor_store_lossy`,
+server, through its client's `durability()`, each part on its own: the policy
+from `INFO memory` — `CONFIG GET maxmemory-policy` only where INFO does not
+say, so a managed server that blocks `CONFIG` is still held to the refusal —
+AOF from `INFO persistence`, and `CONFIG GET save` only when AOF is off, to
+tell RDB snapshots from none. The policy is judged by an allow-list:
+`allkeys-lru`, `-lfu` and `-random` refuse the boot
+(`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`) whatever
+else could not be read; `noeviction` passes; the four `volatile-*` policies
+pass the factor store, whose keys carry no TTL, and are one warning from the
+transaction store (`mfa_transaction_store_lock_evictable`) — its lock and
+week keys carry a TTL once no run is counted, and an evicted one lifts a D21
+hold early. RDB snapshots without AOF (`mfa_factor_store_lossy`,
 `mfa_transaction_store_lossy`) and no persistence (`…_volatile`) are each one
-warning; a server that refuses `CONFIG`, as many managed services do, is one
-warning that the check could not run (`…_durability_unchecked`), and the boot
-goes on. The transaction store runs the check because of the email-proof
-requirement (D12's step-3 amendment), and warns once more on a `volatile-*`
-policy (`mfa_transaction_store_lock_evictable`): its lock and week keys carry
-a TTL once no run is counted, and an evicted one lifts a D21 hold early.
-`noeviction` is what both stores' key families are meant to run on.
+warning. A part that could not be read — a question the server refused
+(`NOPERM`, an unknown or renamed command, a disabled one), or answered without
+the value — and a policy the allow-list does not know are named in one
+warning that the check could not run (`…_durability_unchecked`: `unread`,
+`maxmemoryPolicy`), and the boot goes on; any other reply error, and a server
+that cannot be reached, fails it. The transaction store runs the check
+because of the email-proof requirement (D12's step-3 amendment). `noeviction`
+is what both stores' key families are meant to run on.
 
 ## Contract tests
 
