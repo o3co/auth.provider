@@ -42,6 +42,7 @@ const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	({
 		subject: "user-1",
 		user: { id: "user-1", groups: ["staff"], joined: new Date("2020-01-01T00:00:00Z") },
+		claims: { email: "user-1@example.test", emailVerified: true, groups: ["staff"] },
 		recorded: {
 			amr: ["pwd"],
 			authentication: {
@@ -158,6 +159,9 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 		["an authTime that is not a date", { authTime: "2026-09-28" }],
 		["an invalid authTime", { authTime: new Date(Number.NaN) }],
 		["a redirectTo that is not a string", { redirectTo: ["/"] }],
+		["no claims", { claims: undefined }],
+		["claims that are not an object", { claims: "email" }],
+		["claims that are a list", { claims: ["email"] }],
 		["no request", { request: undefined }],
 		["a request whose ip is not a string", { request: { ip: 7 } }],
 	])("refuses %s with a RangeError", (_label, over) => {

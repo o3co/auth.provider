@@ -51,6 +51,7 @@ const NOW = new Date("2026-09-28T12:00:00Z");
 const facts = () => ({
 	subject: "user-1",
 	user: { id: "user-1", groups: ["staff"] },
+	claims: { email: "user-1@example.test", emailVerified: true, groups: ["staff"] },
 	authTime: NOW,
 	redirectTo: "/after",
 	request: { ip: "198.51.100.7", userAgent: "test" },
@@ -162,6 +163,22 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		expect(isEstablishment(admission.establishment)).toBe(true);
 		expect(Object.isFrozen(admission.establishment)).toBe(true);
 		expect(admission.establishment.primary).toBe(built);
+	});
+
+	it("carries the route's claims — extractUserClaims(user) — as a frozen copy sharing nothing with the facts, and refuses facts without them", () => {
+		const source = facts();
+		const built = passwordPrimary(source);
+		expect(built.claims).toEqual(source.claims);
+		expect(built.claims).not.toBe(source.claims);
+		expect(Object.isFrozen(built.claims)).toBe(true);
+		(source.claims.groups as string[]).push("admin");
+		expect(built.claims.groups).toEqual(["staff"]);
+		for (const claims of [undefined, null, "email", 7, ["email"]]) {
+			expect(
+				() => passwordPrimary({ ...facts(), claims: claims as never }),
+				JSON.stringify(claims),
+			).toThrow(RangeError);
+		}
 	});
 
 	it("passwordPrimary records pwd alone: a route cannot hand in an amr or an mfaAt, and its facts are checked", () => {
@@ -419,8 +436,10 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
 			]),
 		});
-		// A persisted continuation is plain data: a JSON round trip resumes it.
+		// A persisted continuation is plain data: a JSON round trip resumes it,
+		// the claims with it.
 		const persisted = JSON.parse(JSON.stringify(first.continuation)) as PrimaryContinuation;
+		expect(persisted.primary.claims).toEqual(facts().claims);
 		if (first.outcome !== "interrupt") throw new Error("unreachable");
 		const second = await resumePrimary(deps([mfa, risk]), persisted, {
 			requirement: "risk",
@@ -428,6 +447,7 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		});
 		expect(second.outcome).toBe("establish");
 		if (second.outcome !== "establish") throw new Error("unreachable");
+		expect(second.establishment.primary.claims).toEqual(facts().claims);
 		expect(second.establishment.primary.recorded).toEqual({
 			amr: ["pwd", "otp", "mfa", "risk-ok"],
 			authentication: { primary: "pwd", federation: undefined, upstreamAmr: undefined, mfaAt: NOW },
@@ -558,6 +578,7 @@ describe("establishWithoutAsking — a federated login's establishment, from the
 	const federated = {
 		subject: "user-1",
 		user: { id: "user-1" },
+		claims: { email: "user-1@example.test", name: "User One" },
 		federation: "google",
 		upstreamAmr: ["mfa", "hwk"],
 		trusted: false,
@@ -572,6 +593,7 @@ describe("establishWithoutAsking — a federated login's establishment, from the
 		expect(establishment.primary).toEqual({
 			subject: "user-1",
 			user: { id: "user-1" },
+			claims: { email: "user-1@example.test", name: "User One" },
 			recorded: {
 				amr: ["fed"],
 				authentication: {
