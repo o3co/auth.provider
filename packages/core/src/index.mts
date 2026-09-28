@@ -304,9 +304,12 @@ export {
 	composeAmr,
 	EMAIL_OTP_AMR,
 	FEDERATED_AMR,
+	HARDWARE_KEY_AMR,
 	MFA_AMR,
+	OTP_AMR,
 	PASSWORD_AMR,
 	RECOVERY_CODE_AMR,
+	SOFTWARE_KEY_AMR,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "./grants/authenticationClaims.mjs";

@@ -49,6 +49,22 @@ export const FEDERATED_AMR = "fed";
  */
 export const MFA_AMR = "mfa";
 
+/** RFC 8176 `otp`: a one-time password from a device — a TOTP code (D14). */
+export const OTP_AMR = "otp";
+
+/**
+ * RFC 8176 `hwk`: proof of possession of a hardware-secured key — a WebAuthn
+ * credential whose backup-state flag is clear, bound to one device (D14).
+ */
+export const HARDWARE_KEY_AMR = "hwk";
+
+/**
+ * RFC 8176 `swk`: proof of possession of a software-secured key — a WebAuthn
+ * credential that is backed up or synced, protected by the platform's sync
+ * rather than one device's hardware (D14).
+ */
+export const SOFTWARE_KEY_AMR = "swk";
+
 /**
  * A one-time code mailed to the account's enrolled address. Deployment-defined,
  * as `fed` is: RFC 8176's `otp` would claim a one-time-password device. It
@@ -81,8 +97,12 @@ export function wellFormedAcr(value: unknown): string | undefined {
  * `mfa` comes from `addsMfa` alone: a factor that lists it among its own
  * values is a `RangeError`, as is an empty or non-string value — otherwise a
  * factor that does not add `mfa` (the email code, by default) could meet
- * `urn:o3co:acr:mfa` by naming it. What the session held is the record's and
- * is copied as it was, each value once. The input is never written through.
+ * `urn:o3co:acr:mfa` by naming it. So is a factor that lists a primary's
+ * marker, `pwd` or `fed`: the baseline is decided on the primary (D13), and a
+ * second factor must not change it. What the session held is the record's
+ * and is copied as it was, each value once — so a caller composes onto
+ * `vouchedAmr(session)`, never onto an `amr` the D9 split has not been
+ * applied to. The input is never written through.
  */
 export function composeAmr(
 	held: readonly string[],
@@ -95,6 +115,11 @@ export function composeAmr(
 		if (value === MFA_AMR) {
 			throw new RangeError(
 				`composeAmr: a factor adds "${MFA_AMR}" through addsMfa, never among its own amr values`,
+			);
+		}
+		if (value === PASSWORD_AMR || value === FEDERATED_AMR) {
+			throw new RangeError(
+				`composeAmr: "${value}" marks a primary authentication, never a second factor's amr`,
 			);
 		}
 	}

@@ -34,9 +34,12 @@
 import {
 	EMAIL_OTP_AMR,
 	FEDERATED_AMR,
+	HARDWARE_KEY_AMR,
 	MFA_AMR,
+	OTP_AMR,
 	PASSWORD_AMR,
 	RECOVERY_CODE_AMR,
+	SOFTWARE_KEY_AMR,
 } from "../grants/authenticationClaims.mjs";
 import type { SessionAuthentication } from "../user-sessions/types.mjs";
 
@@ -230,9 +233,9 @@ export function decideMfaRequirement(input: MfaRequirementInput): MfaRequirement
  * is what the operator chose, and the boot line says so at `info`.
  */
 const SECOND_FACTOR_AMR: ReadonlySet<string> = new Set([
-	"otp",
-	"hwk",
-	"swk",
+	OTP_AMR,
+	HARDWARE_KEY_AMR,
+	SOFTWARE_KEY_AMR,
 	EMAIL_OTP_AMR,
 	RECOVERY_CODE_AMR,
 	MFA_AMR,
