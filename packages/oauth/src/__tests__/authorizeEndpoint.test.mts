@@ -1610,6 +1610,16 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(params.get("error_description")).toMatch(/urn:example:mfa/);
 		});
 
+		it("meets no acr where no session store is wired: there is no amr to read", async () => {
+			// The no-store composition is authenticated on the cookie alone
+			// (`live: true, session: null`); nothing records how, so nothing is met.
+			const { app } = await makeApp({ session, oauth: { authorize: { acrValues } } });
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:pwd" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+		});
+
 		it("refuses an acr this deployment has not configured rather than accepting it silently", async () => {
 			const { app } = await makeApp({
 				session,
@@ -2061,5 +2071,20 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 		for (const level of [logger.info, logger.error, logger.debug, logger.trace, logger.fatal]) {
 			expect(level).not.toHaveBeenCalled();
 		}
+	});
+
+	it("keeps the first ten values an entry lacks, and counts them all when it cut", () => {
+		// Values an operator wrote; `auditErrorList` bounds the list the line
+		// carries, and the count says how many there were.
+		const lacked = Array.from({ length: 12 }, (_, i) => `x${i}`);
+		const logger = createMockLogger();
+		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined);
+		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ acr: "urn:example:many", unproducible: lacked.slice(0, 10), unproducibleCount: 12 },
+				ACR_VALUE_UNSATISFIABLE,
+			],
+		]);
 	});
 });
