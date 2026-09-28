@@ -732,9 +732,17 @@ describe("answerInterruption — the login's interruption answer, exported (the 
 		const app = express();
 		app.use(cookieSession(cookieStore));
 		const thrown: unknown[] = [];
+		let opened = 0;
+		const open = async () => {
+			opened += 1;
+			return INTERRUPTION;
+		};
 		app.post("/complete", async (req, res) => {
 			for (const admission of [
 				{ outcome: "establish" },
+				// Shaped like an interruption but answered as another outcome.
+				{ outcome: "establish", requirement: "fixture", open },
+				{ outcome: "unavailable", store: "fixture", open },
 				{ outcome: "interrupt", requirement: "fixture" },
 				undefined,
 			]) {
@@ -755,8 +763,9 @@ describe("answerInterruption — the login's interruption answer, exported (the 
 		const res = await request(app).post("/complete");
 
 		expect(res.status).toBe(204);
-		expect(thrown).toHaveLength(3);
+		expect(thrown).toHaveLength(5);
 		for (const err of thrown) expect(err).toBeInstanceOf(RangeError);
 		expect(trace).toEqual([]);
+		expect(opened).toBe(0);
 	});
 });
