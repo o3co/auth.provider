@@ -860,6 +860,7 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	},
 	{
 		file: "packages/redis/src/mfa-factor-store.mts",
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text the guard matches, not a template
 		read: "value=`${record.version}\\n${fixedPart(record)}\\n${mutablePart(record)}`",
 		count: 1,
 		why: "the MFA factor store's client create (HSETNX), handed the text of the factor record it was given: a second factor's, no session record",
