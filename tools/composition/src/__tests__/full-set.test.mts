@@ -142,8 +142,9 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-dpop": ["dpop"],
 	"@o3co/auth-provider-federation-apple": ["federation:apple"],
 	"@o3co/auth-provider-federation-github": ["federation:github"],
-	// Private, and with no module yet (the MFA ADR's build-order step 8).
-	"@o3co/auth-provider-mfa": [],
+	// Private until the template wires it (the MFA ADR's build-order step
+	// 20); the TOTP factor alone until its MFA module lands.
+	"@o3co/auth-provider-mfa": ["mfa-totp-factor"],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	"@o3co/auth-provider-webauthn": [
@@ -238,6 +239,15 @@ describe("the full set boots together", () => {
 		]);
 		const discovery = await request(app).get(DISCOVERY_PATHS[0]);
 		expect([...discovery.body.grant_types_supported].sort()).toEqual(ALL_GRANTS);
+	});
+
+	it("contributes the MFA package's TOTP factor from its reference.conf, and no requirement named mfa: the MFA module is not installed", async () => {
+		const { handle, config } = await boot();
+		expect(handle.components.mfaFactorResolver?.get("totp")?.amrValues).toEqual(["otp"]);
+		expect(
+			[...(handle.components.sessionRequirementResolver?.entries() ?? [])].map(([name]) => name),
+		).toEqual(FIXTURE_REQUIREMENTS);
+		expect(config.mfa.mode).toBe("off");
 	});
 
 	it("hands the deployment's logger to every added module that answers a request or binds a token", async () => {
@@ -336,7 +346,7 @@ describe("the session requirements a deployment writes", () => {
 
 	it("refuse the boot under mfa.mode other than off while no requirement named mfa is registered, before the declaration is compared", async () => {
 		const err = await refused({
-			adjust: (config) => ({ ...config, mfa: { mode: "required" } }) as typeof config,
+			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
 		});
 		expect(err.reason).toBe("session-requirement-missing");
 		expect(err.details).toMatchObject({
