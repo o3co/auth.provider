@@ -67,6 +67,8 @@ import { createHash, randomBytes } from "node:crypto";
 import {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
+	consoleLogger,
+	defineModule,
 	isStorableExpiry,
 	type MfaTransaction,
 	type MfaTransactionPatch,
@@ -74,7 +76,9 @@ import {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { MfaSubjectKeys, MfaTransactionStoreClient } from "./clients.mjs";
+import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
 
 /** The key namespace `redisMfaTransactionStore.keyPrefix` defaults to. */
@@ -343,3 +347,52 @@ export function createRedisMfaTransactionStore(
 		},
 	};
 }
+
+// --- the module ------------------------------------------------------------
+
+const moduleConfigSchema = z.object({
+	redisMfaTransactionStore: z
+		.object({ keyPrefix: z.string().default(DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX) })
+		.default({ keyPrefix: DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX }),
+});
+
+/**
+ * `defineModule` manifest for the Redis {@link MfaTransactionStore} (the MFA
+ * ADR's D8, D10, D12, D19): `mfaTransactionStore` off the
+ * `mfaTransactionStoreClient` slot, with its keys under
+ * `redisMfaTransactionStore.keyPrefix` (`mfat:`).
+ *
+ * Declares no `replicaSafety`: a transaction started on one replica is
+ * verified on another, and the attempt limits and the lock are counted once
+ * for all of them. It holds the email-proof requirement an operator reset
+ * records, which must last as the enrolled factors do (D12's step-3
+ * amendment), so before it provides the store it runs the factor store's
+ * durability check: an `allkeys-*` eviction policy refuses the boot
+ * (`mfa-transaction-store-evictable`); RDB snapshots without AOF
+ * (`mfa_transaction_store_lossy`), no persistence
+ * (`mfa_transaction_store_volatile`) and a server that refuses `CONFIG`
+ * (`mfa_transaction_store_durability_unchecked`) are each one warning on the
+ * `logger` slot, or on `consoleLogger`.
+ */
+export const redisMfaTransactionStoreModule = defineModule({
+	name: "redis-mfa-transaction-store",
+	requires: ["mfaTransactionStoreClient", "config"] as const,
+	optional: ["logger"] as const,
+	configSchema: moduleConfigSchema,
+	provides: {
+		mfaTransactionStore: async (deps) => {
+			const { keyPrefix } = moduleConfigSchema.parse(deps.config ?? {}).redisMfaTransactionStore;
+			// Built first, so a prefix it refuses is refused before the server is asked.
+			const store = createRedisMfaTransactionStore({
+				client: deps.mfaTransactionStoreClient,
+				keyPrefix,
+			});
+			await checkRedisMfaStoreDurability(
+				"mfaTransactionStore",
+				() => deps.mfaTransactionStoreClient.durability(),
+				deps.logger ?? consoleLogger,
+			);
+			return store;
+		},
+	},
+});

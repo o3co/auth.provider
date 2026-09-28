@@ -42,12 +42,16 @@
  * (D12, D28).
  */
 
-import type {
-	MfaFactorRecord,
-	MfaFactorRecordUpdate,
-	MfaFactorStore,
+import {
+	consoleLogger,
+	defineModule,
+	type MfaFactorRecord,
+	type MfaFactorRecordUpdate,
+	type MfaFactorStore,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { MfaFactorStoreClient } from "./clients.mjs";
+import { checkRedisMfaStoreDurability } from "./internal/mfa-durability.mjs";
 import { checkMfaKeyPrefix, mfaKeyPart } from "./internal/mfa-keys.mjs";
 
 /** The key namespace `redisMfaFactorStore.keyPrefix` defaults to. */
@@ -202,3 +206,47 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		},
 	};
 }
+
+// --- the module ------------------------------------------------------------
+
+const moduleConfigSchema = z.object({
+	redisMfaFactorStore: z
+		.object({ keyPrefix: z.string().default(DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX) })
+		.default({ keyPrefix: DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX }),
+});
+
+/**
+ * `defineModule` manifest for the Redis {@link MfaFactorStore} (the MFA ADR's
+ * D7, D10, D12, D19): `mfaFactorStore` off the `mfaFactorStoreClient` slot —
+ * the shared socket `makeIoredisClients` wraps, or a dedicated database or
+ * instance, which D12 prefers — with its keys under
+ * `redisMfaFactorStore.keyPrefix` (`mfaf:`).
+ *
+ * Declares no `replicaSafety`: every replica reads the one store, so a
+ * composition with it may declare `deployment.mode = "multi"`. Before it
+ * provides the store it runs D12's durability check against the server
+ * (`internal/mfa-durability.mts`): an `allkeys-*` eviction policy refuses the
+ * boot (`mfa-factor-store-evictable`); RDB snapshots without AOF
+ * (`mfa_factor_store_lossy`), no persistence (`mfa_factor_store_volatile`)
+ * and a server that refuses `CONFIG` (`mfa_factor_store_durability_unchecked`)
+ * are each one warning on the `logger` slot, or on `consoleLogger`.
+ */
+export const redisMfaFactorStoreModule = defineModule({
+	name: "redis-mfa-factor-store",
+	requires: ["mfaFactorStoreClient", "config"] as const,
+	optional: ["logger"] as const,
+	configSchema: moduleConfigSchema,
+	provides: {
+		mfaFactorStore: async (deps) => {
+			const { keyPrefix } = moduleConfigSchema.parse(deps.config ?? {}).redisMfaFactorStore;
+			// Built first, so a prefix it refuses is refused before the server is asked.
+			const store = createRedisMfaFactorStore({ client: deps.mfaFactorStoreClient, keyPrefix });
+			await checkRedisMfaStoreDurability(
+				"mfaFactorStore",
+				() => deps.mfaFactorStoreClient.durability(),
+				deps.logger ?? consoleLogger,
+			);
+			return store;
+		},
+	},
+});

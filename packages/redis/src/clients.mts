@@ -1368,6 +1368,27 @@ export interface FederationGrantIntentStoreClient {
 // --- MfaFactorStoreClient (the MFA ADR's D7) --------------------------------
 
 /**
+ * What a Redis server says about keeping what it is written — read at boot
+ * by the two MFA store modules (the MFA ADR's D12).
+ */
+export type RedisDurability =
+	| {
+			readonly checked: true;
+			/** `CONFIG GET maxmemory-policy`. */
+			readonly maxmemoryPolicy: string;
+			/** `INFO persistence` reports `aof_enabled:1`. */
+			readonly appendOnly: boolean;
+			/** `CONFIG GET save` is not empty: RDB snapshots are taken. */
+			readonly snapshots: boolean;
+	  }
+	| {
+			/** The server refused to say — `CONFIG` renamed, disabled or not permitted, as on many managed services. */
+			readonly checked: false;
+			/** What it answered instead, as the driver raised it. Logged by its projection only. */
+			readonly refusal: unknown;
+	  };
+
+/**
  * What an update writes over a factor record's version and its mutable part,
  * each as the text the record keeps.
  */
@@ -1412,6 +1433,12 @@ export interface MfaFactorStoreClient {
 	remove(key: string, field: string): Promise<void>;
 	/** Remove the whole hash (`DEL`). Idempotent. */
 	removeAll(key: string): Promise<void>;
+	/**
+	 * What the server says about keeping what it is written (D12). A reply
+	 * that refuses the question is `{ checked: false }`; a server that cannot
+	 * be asked at all rejects.
+	 */
+	durability(): Promise<RedisDurability>;
 }
 
 // --- MfaTransactionStoreClient (the MFA ADR's D8, D21, D25) -----------------
@@ -1552,6 +1579,8 @@ export interface MfaTransactionStoreClient {
 	emailProofRequired(key: string): Promise<boolean>;
 	/** Remove the requirement at `key` (`DEL`); resolves whether this call removed it. */
 	consumeEmailProof(key: string): Promise<boolean>;
+	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are (D12). */
+	durability(): Promise<RedisDurability>;
 }
 
 declare module "@o3co/auth-provider-core" {

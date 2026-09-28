@@ -25,6 +25,7 @@ import type {
 	PendingConsentStoreClient,
 	RateLimiterClient,
 	RateLimitIncrement,
+	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
@@ -2615,6 +2616,51 @@ return written
 
 const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
 
+/** Whether `err` is the server's answer rather than a failure to reach it. */
+const isReplyError = (err: unknown): boolean => err instanceof Error && err.name === "ReplyError";
+
+/** `CONFIG GET <name>`'s value: the reply is `[name, value]`, or empty for a name the server does not know. */
+const configValue = (reply: unknown, name: string): string | undefined =>
+	Array.isArray(reply) && reply[0] === name && typeof reply[1] === "string" ? reply[1] : undefined;
+
+/**
+ * What `io`'s server says about keeping what it is written (the MFA ADR's
+ * D12): `CONFIG GET maxmemory-policy` and `save`, and `INFO persistence`'s
+ * `aof_enabled`. A reply error — `CONFIG` renamed, disabled or not permitted
+ * — and an answer without the values is a check that could not run; any
+ * other failure is the caller's.
+ */
+async function redisDurability(io: Redis): Promise<RedisDurability> {
+	let policyReply: unknown;
+	let saveReply: unknown;
+	let info: string;
+	try {
+		policyReply = await io.config("GET", "maxmemory-policy");
+		saveReply = await io.config("GET", "save");
+		info = await io.info("persistence");
+	} catch (err) {
+		if (isReplyError(err)) return { checked: false, refusal: err };
+		throw err;
+	}
+	const maxmemoryPolicy = configValue(policyReply, "maxmemory-policy");
+	const save = configValue(saveReply, "save");
+	const aof = /^aof_enabled:([01])\r?$/m.exec(info)?.[1];
+	if (maxmemoryPolicy === undefined || save === undefined || aof === undefined) {
+		return {
+			checked: false,
+			refusal: new Error(
+				"the server answered CONFIG GET maxmemory-policy, CONFIG GET save or INFO persistence without the value",
+			),
+		};
+	}
+	return {
+		checked: true,
+		maxmemoryPolicy,
+		appendOnly: aof === "1",
+		snapshots: save.trim() !== "",
+	};
+}
+
 /**
  * The `MfaFactorStore`'s client over one ioredis connection (the MFA ADR's
  * D7). Also part of {@link makeIoredisClients}; built on its own so a
@@ -2644,6 +2690,7 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 		async removeAll(key) {
 			await io.del(key);
 		},
+		durability: () => redisDurability(io),
 	};
 }
 
@@ -3170,5 +3217,6 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		async consumeEmailProof(key) {
 			return (await io.del(key)) === 1;
 		},
+		durability: () => redisDurability(io),
 	};
 }
