@@ -1304,10 +1304,40 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 
 		it("refuses a max_age that is not a non-negative integer", async () => {
 			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(1)) });
-			for (const bad of ["-1", "abc", "1.5", ""]) {
+			for (const bad of ["-1", "abc", "1.5", " "]) {
 				const res = await authorize(app, { ...baseQuery, max_age: bad });
 				expect(redirectParams(res).get("error"), bad).toBe("invalid_request");
 			}
+		});
+
+		it("reads an empty max_age as omitted (RFC 6749 §3.1): no freshness asked for", async () => {
+			// "Parameters sent without a value MUST be treated as if they were
+			// omitted from the request." A session of any age proceeds, on GET and
+			// POST alike, and no ask is recorded.
+			const createCode = mintingCode();
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(600)),
+				createCode,
+			});
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "" })).get("code"),
+			).toBe("code-x");
+			expect(
+				redirectParams(await authorizePost(harness.app, { ...baseQuery, max_age: "" })).get("code"),
+			).toBe("code-x");
+			expect(harness.records.size).toBe(0);
+		});
+
+		it("reads an empty max_age as omitted where no session store is wired, too", async () => {
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(1)),
+				sessionStore: false,
+			});
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "" })).get("code"),
+			).toBe("code-x");
 		});
 
 		it("refuses a repeated max_age like every other single-valued parameter", async () => {
@@ -1894,6 +1924,16 @@ describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => 
 			expect(createCode).not.toHaveBeenCalled();
 		},
 	);
+
+	it("reads an empty claims as omitted (RFC 6749 §3.1), on GET and POST", async () => {
+		const { app } = await makeApp({});
+		expect(redirectParams(await authorize(app, { ...baseQuery, claims: "" })).get("code")).toBe(
+			"code-x",
+		);
+		expect(redirectParams(await authorizePost(app, { ...baseQuery, claims: "" })).get("code")).toBe(
+			"code-x",
+		);
+	});
 
 	it("ignores every other use of claims, as before", async () => {
 		const { app } = await makeApp({});
