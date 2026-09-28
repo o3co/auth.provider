@@ -334,6 +334,36 @@ describe.each(CASES)("$module.name", (c) => {
 		expect(calls).toEqual([]);
 	});
 
+	it.each(["", "lru", "noeviction-strict", "allkeys-coldest", "volatile-oldest", "NOEVICTION"])(
+		"warns that it could not check a policy it does not know (%j), naming it — neither refused nor passed",
+		async (policy) => {
+			// An allow-list: a future server's policy, or a value no server sends,
+			// is judged by no prefix.
+			const { logger, calls } = recordingLogger();
+			expect((await boot({ ...DURABLE, maxmemoryPolicy: policy }, logger)).kind).toBe("redis");
+			expect(calls).toEqual([
+				{
+					level: "warn",
+					args: [{ store: c.slot, adapter: "redis", maxmemoryPolicy: policy }, c.unchecked],
+				},
+			]);
+		},
+	);
+
+	it("judges the policy on its own when a server answers CONFIG GET save with nothing", async () => {
+		// AOF off and no answer for save: persistence alone falls back to the
+		// warning; a known allkeys-* policy is still refused.
+		const noSave = { appendOnly: false, snapshots: undefined, refusal: undefined } as const;
+		await expect(boot({ ...noSave, maxmemoryPolicy: "allkeys-lru" })).rejects.toMatchObject({
+			reason: c.evictable,
+		});
+		const { logger, calls } = recordingLogger();
+		await boot({ ...noSave, maxmemoryPolicy: "noeviction" }, logger);
+		expect(calls).toEqual([
+			{ level: "warn", args: [{ store: c.slot, adapter: "redis", unread: ["save"] }, c.unchecked] },
+		]);
+	});
+
 	it("warns that the check could not run for the part it could not read alone", async () => {
 		// AOF is off, and the server would not say whether it takes snapshots:
 		// neither the lossy nor the volatile notice can be told, so it names
