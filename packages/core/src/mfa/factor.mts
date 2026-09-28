@@ -185,6 +185,15 @@ export type MfaEnrollmentCompletion =
 export interface MfaFactor {
 	/** The kind its records carry (`MfaFactorRecord.kind`), and the key it is contributed under. */
 	readonly kind: string;
+	/**
+	 * Every `amr` value a verification of this factor may add (D14), declared
+	 * once: what `amrFor` answers for any record is among them. The MFA
+	 * requirement's reach and the drop of unsatisfiable `acr` entries are
+	 * computed from it at boot (the session-admission ADR's D3, D6) — the
+	 * list the MFA ADR's D8 assumed for `secondFactorMethods`. Non-empty
+	 * strings, never a primary's marker, never `mfa`: `addsMfa` says that.
+	 */
+	readonly amrValues: readonly string[];
 	/** The `amr` values a verification adds (D14). May depend on the factor's data: a WebAuthn credential is `hwk` or `swk`. */
 	amrFor(data: MfaFactorData): readonly string[];
 	/** Whether a verification also adds `mfa` (D14). */

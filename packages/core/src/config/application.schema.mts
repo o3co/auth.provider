@@ -1168,24 +1168,39 @@ export const CoreConfigSchema = z.object({
 	// would let an operator believe their logins ask for one. The build order's
 	// step 7 or 8, whichever first honours another mode, widens the literal.
 	//
-	// Until the flip (step 22), a missing section or mode reads as "off" here
-	// as it does in `reference.conf`, so a hand-built configuration still
-	// declares the coordinator's absence (`MFA_ABSENCE_POLICY`); the flip
-	// removes the default (the ADR's O2). A deliberate, temporary exception to
-	// the 2026-04-30 ADR (defaults live in HOCON): the parsed type always
-	// carries `mfa`. The rest of the section belongs to the package that reads
-	// it and passes through.
+	// The MFA ADR's D19 and the session-admission ADR's D7: `mfa.mode` admits
+	// its three values, `off` by reference default — core keeps the key and
+	// the default because this schema is strip-mode (a key the MFA package
+	// alone declared would be dropped silently), and whether a mode other than
+	// `off` is honoured is boot's to refuse: `session-requirement-missing`
+	// when no requirement named `mfa` is registered. A value that is none of
+	// the three is refused here, naming the key. A hand-built configuration
+	// that never wrote the key reads as `off`, a deliberate exception to the
+	// 2026-04-30 ADR (defaults live in HOCON): the parsed type always carries
+	// `mfa`. The rest of the section belongs to the package that reads it and
+	// passes through.
 	mfa: z
 		.object({
 			mode: z
-				.literal("off", {
-					error:
-						'mfa.mode must be "off": no module in this release asks for or verifies a second factor',
+				.enum(["off", "optional", "required"], {
+					error: 'mfa.mode must be "off", "optional" or "required"',
 				})
 				.default("off"),
 		})
 		.passthrough()
 		.default({ mode: "off" }),
+	// The session-admission ADR's D7: the requirement names a composition
+	// expects, compared at the end of boot's stage 4 with what registered —
+	// required whenever a consumer of admission is installed, `[]` allowed,
+	// and with no default here or in `reference.conf`: every composition
+	// states its posture.
+	sessionRequirements: z
+		.object({
+			expected: z.array(
+				z.string().min(1, { error: "sessionRequirements.expected names each requirement" }),
+			),
+		})
+		.optional(),
 });
 
 export type CoreConfig = z.infer<typeof CoreConfigSchema>;

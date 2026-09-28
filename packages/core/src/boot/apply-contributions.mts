@@ -21,11 +21,18 @@
  * `ContributionCollectorMap`, and:
  *   - Step 0: prepares synthetic read-side projections (`grantHandlerResolver`,
  *     `tokenExchangeValidatorResolver`, `federationProviders`,
- *     `federationRedirectPolicyResolver`, `mfaFactorResolver`) into the working
- *     component map before any factory runs.
+ *     `federationRedirectPolicyResolver`, `mfaFactorResolver`,
+ *     `sessionRequirementResolver`) into the working component map before any
+ *     factory runs.
  *   - Step 2: iterates modules in `BootPlan.initOrder`, pre-scanning for
  *     collector conflicts, then invoking name-keyed contribution factories and
  *     routing results to `collector.register` or `collector.replace`.
+ *   - Step 2b: the session-requirement checks of the session-admission ADR's
+ *     D3 and D7, once every name-keyed contribution has registered and before
+ *     any list-shaped factory reads a requirement's reach — each reach and
+ *     page, the name `mfa` bound to core's MFA ports, the declaration
+ *     `sessionRequirements.expected`, `mfa.mode` asking for a requirement that
+ *     is not installed — and the boot line `session_requirements_registered`.
  *   - Step 3: iterates modules in input-array order, invoking list-shaped
  *     contribution factories and routing results to `collector.append`.
  *
@@ -34,14 +41,21 @@
 
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { readMfaMode } from "../mfa/mode.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
-import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
+import type { MfaFactor, SessionRequirement } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
+import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
+import {
+	checkRegisteredReach,
+	MFA_REQUIREMENT_NAME,
+	registeredRequirement,
+} from "../session-admission/requirement.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import type {
 	CleanupRecord,
@@ -329,8 +343,14 @@ export function prepareSyntheticProjections(
 			components[key] = readableFromStage4(make(), key, readGate);
 		}
 	};
-	const { grants, tokenExchangeValidators, federations, federationRedirectPolicies, mfaFactors } =
-		contributionKinds;
+	const {
+		grants,
+		tokenExchangeValidators,
+		federations,
+		federationRedirectPolicies,
+		mfaFactors,
+		sessionRequirements,
+	} = contributionKinds;
 	if (grants !== undefined) {
 		inject("grantHandlerResolver", () =>
 			makeGrantHandlerResolver(grants as NameKeyedCollector<unknown>),
@@ -356,22 +376,264 @@ export function prepareSyntheticProjections(
 	if (mfaFactors !== undefined) {
 		inject("mfaFactorResolver", () => makeMfaFactorResolver(mfaFactors));
 	}
+	// The session-requirement resolver is branded by its home: the object the
+	// planner records is the gated view a consumer is handed, so `admitSession`
+	// knows it and a home-made object forges nothing (the session-admission
+	// ADR's D1).
+	if (
+		sessionRequirements !== undefined &&
+		!Object.hasOwn(components, "sessionRequirementResolver")
+	) {
+		components.sessionRequirementResolver = sessionRequirementResolverOver(
+			{
+				get: (name) => sessionRequirements.get(name),
+				entries: () => sessionRequirements.entries(),
+			},
+			(view) => readableFromStage4(view, "sessionRequirementResolver", readGate),
+		);
+	}
 }
 
+/** `oauth.jwt.issuer` as the parsed configuration carries it, for the pages a requirement declares; `undefined` when it is not a string. */
+const issuerOf = (config: unknown): string | undefined => {
+	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt
+		?.issuer;
+	return typeof issuer === "string" && issuer.length > 0 ? issuer : undefined;
+};
+
 /**
- * Refuse a contributed value its kind's projection could not answer for:
- * an `mfaFactors` factor whose `kind` is not the key it is contributed or
- * overridden under — the resolver answers by key, and the coordinator reads
- * a record's kind back through it, so a factor filed under another kind
- * would verify that kind's records. `null` (switched off) passes. Throws a
- * `RangeError`, which the caller reports as a failed contribution factory.
+ * The value a name-keyed contribution registers, or a `RangeError` — which
+ * the caller reports as a failed contribution factory — for one its kind's
+ * projection could not answer for:
+ *
+ * - an `mfaFactors` factor whose `kind` is not the key it is contributed or
+ *   overridden under — the resolver answers by key, and a record's kind is
+ *   read back through it, so a factor filed under another kind would verify
+ *   that kind's records. `null` (switched off by its configuration) passes,
+ *   and stays claimed;
+ * - a `sessionRequirements` value that is `null` — a requirement is switched
+ *   off by not installing it, never by answering nothing — or whose `name`
+ *   is not the key; what registers is the copy `registeredRequirement`
+ *   makes, its page held to the issuer's origin (the session-admission ADR's
+ *   D3). Its `reach` is not read here: the end of the name-keyed pass reads
+ *   it once (`checkSessionRequirements`).
  * @internal
  */
-function checkNameKeyedValue(kind: string, name: string, value: unknown): void {
-	if (kind !== "mfaFactors" || value === null) return;
-	if ((value as { kind?: unknown } | undefined)?.kind !== name) {
-		throw new RangeError(
-			`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
+function checkNameKeyedValue(kind: string, name: string, value: unknown, config: unknown): unknown {
+	if (kind === "mfaFactors") {
+		if (value === null) return value;
+		if ((value as { kind?: unknown } | undefined)?.kind !== name) {
+			throw new RangeError(
+				`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
+			);
+		}
+		return value;
+	}
+	if (kind === "sessionRequirements") {
+		if (value === null || value === undefined) {
+			throw new RangeError(
+				`sessionRequirements "${name}": a requirement is never null — switch it off by not installing it`,
+			);
+		}
+		if ((value as { name?: unknown }).name !== name) {
+			throw new RangeError(
+				`sessionRequirements "${name}": the requirement's name must be the key it is contributed under`,
+			);
+		}
+		return registeredRequirement(value, issuerOf(config));
+	}
+	return value;
+}
+
+/** One registered session requirement, with the module that contributed it. */
+interface RequirementRegistration {
+	readonly name: string;
+	readonly module: string;
+	readonly requirement: SessionRequirement;
+}
+
+/** The three ports an MFA implementation is wired to (the session-admission ADR's D3). */
+const MFA_PORTS = ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as const;
+/** The remediation the MFA requirement's step-up route admits with (D4). */
+const MFA_STEP_UP = "mfa.step_up";
+
+/** The reach core recomputes from the enabled factors: each one's `amrValues`, and `mfa` when one adds it. */
+function reachOfFactors(resolver: MfaFactorResolver | undefined): ReadonlySet<string> {
+	const reach = new Set<string>();
+	for (const [, factor] of resolver?.entries() ?? []) {
+		for (const value of factor.amrValues) reach.add(value);
+		if (factor.addsMfa) reach.add(MFA_REQUIREMENT_NAME);
+	}
+	return reach;
+}
+
+const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
+	a.size === b.size && [...a].every((value) => b.has(value));
+
+/**
+ * Step 2b (the session-admission ADR's D3, D7): over every registered
+ * session requirement, once the name-keyed pass is done and before any
+ * list-shaped factory reads a reach —
+ *
+ * - each `reach`, read once (`checkRegisteredReach`): a Set of non-empty
+ *   strings, no primary's marker, a second-factor value under the name `mfa`
+ *   alone, a page exactly when the reach is not empty — `contribute-factory-failed`,
+ *   naming the module and the requirement;
+ * - the name `mfa`, reserved and bound to core's MFA ports: accepted only
+ *   from a module whose `requires` lists `mfaFactorResolver`, `mfaFactorStore`
+ *   and `mfaTransactionStore`, whose reach equals what core recomputes from
+ *   the enabled factors, and whose `remediations` include `mfa.step_up` —
+ *   `contribute-factory-failed`, naming the module;
+ * - the declaration: whenever a module requires or reads
+ *   `sessionRequirementResolver`, `sessionRequirements.expected` must be the
+ *   set of registered names — `session-requirements-undeclared`;
+ * - `mfa.mode` other than `off` with no requirement named `mfa` —
+ *   `session-requirement-missing`;
+ *
+ * and the one boot line, `session_requirements_registered` at info with each
+ * requirement's name, module and remediations in order, when a consumer or a
+ * requirement is installed. A failure runs the stage-3 cleanups first, as a
+ * failed factory does.
+ * @internal
+ */
+async function checkSessionRequirements(
+	material: ComponentWorld,
+	components: Record<string, unknown>,
+	collector: NameKeyedCollector<SessionRequirement> | undefined,
+): Promise<void> {
+	if (collector === undefined) return;
+	const registrations: RequirementRegistration[] = [];
+	for (const moduleName of material.plan.initOrder) {
+		const validatedModule = material.plan.validated.byName.get(moduleName);
+		if (!validatedModule) continue;
+		for (const entry of validatedModule.normalised.contributesEntries) {
+			if (entry.kind !== "sessionRequirements" || typeof entry.key !== "string") continue;
+			const requirement = collector.get(entry.key);
+			if (requirement !== undefined) {
+				registrations.push({ name: entry.key, module: moduleName, requirement });
+			}
+		}
+	}
+	const failed = async (registration: RequirementRegistration, cause: unknown): Promise<never> => {
+		const cleanupErrors = await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message: `Module "${registration.module}" contribution factory for kind "sessionRequirements" name "${registration.name}" failed: ${failureSummary(cause)}`,
+			reason: "contribute-factory-failed",
+			stage: "applyContributions",
+			details: {
+				reason: "contribute-factory-failed",
+				module: registration.module,
+				kind: "sessionRequirements",
+				name: registration.name,
+				originalError: cause,
+				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+			},
+			cause,
+		});
+	};
+	for (const registration of registrations) {
+		let reach: ReadonlySet<string>;
+		try {
+			reach = checkRegisteredReach(registration.requirement);
+		} catch (cause) {
+			return failed(registration, cause);
+		}
+		if (registration.name !== MFA_REQUIREMENT_NAME) continue;
+		const blueprint = material.plan.depsBlueprint.get(registration.module);
+		const requires = (blueprint?.requires ?? []) as readonly string[];
+		const missing = MFA_PORTS.filter((port) => !requires.includes(port));
+		if (missing.length > 0) {
+			return failed(
+				registration,
+				new RangeError(
+					`a requirement named "${MFA_REQUIREMENT_NAME}" is accepted only from a module whose requires list ${MFA_PORTS.join(", ")}: it does not require ${missing.join(", ")}`,
+				),
+			);
+		}
+		const recomputed = reachOfFactors(
+			components.mfaFactorResolver as MfaFactorResolver | undefined,
+		);
+		if (!sameSet(reach, recomputed)) {
+			return failed(
+				registration,
+				new RangeError(
+					`the "${MFA_REQUIREMENT_NAME}" requirement's reach must be what the installed factors reach — [${[...recomputed].join(", ")}] — and is [${[...reach].join(", ")}]`,
+				),
+			);
+		}
+		if (!registration.requirement.remediations.includes(MFA_STEP_UP)) {
+			return failed(
+				registration,
+				new RangeError(
+					`the "${MFA_REQUIREMENT_NAME}" requirement must declare "${MFA_STEP_UP}" among its remediations`,
+				),
+			);
+		}
+	}
+	const registered = registrations.map((registration) => registration.name);
+	const consumedBy = [...material.plan.depsBlueprint]
+		.filter(([, blueprint]) =>
+			[...blueprint.requires, ...blueprint.optional].includes(
+				"sessionRequirementResolver" as ComponentKey,
+			),
+		)
+		.map(([moduleName]) => moduleName);
+	const config = components.config;
+	if (consumedBy.length > 0) {
+		const declared = (config as { sessionRequirements?: { expected?: unknown } } | undefined)
+			?.sessionRequirements?.expected;
+		const declaredNames =
+			Array.isArray(declared) && declared.every((name) => typeof name === "string")
+				? (declared as readonly string[])
+				: undefined;
+		if (declaredNames === undefined || !sameSet(new Set(declaredNames), new Set(registered))) {
+			await runCleanupsReverse(material.cleanups);
+			throw new BootError({
+				message:
+					`sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
+					`${declaredNames === undefined ? "nothing is declared" : `[${declaredNames.join(", ")}] is declared`}, ` +
+					`[${registered.join(", ")}] registered, and ${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
+					"consult session admission. Write the key to state what this composition expects (`[]` for none).",
+				reason: "session-requirements-undeclared",
+				stage: "applyContributions",
+				details: {
+					reason: "session-requirements-undeclared",
+					configKey: "sessionRequirements.expected",
+					declared: declaredNames,
+					registered,
+					consumedBy,
+				},
+			});
+		}
+	}
+	const mode = readMfaMode(config);
+	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
+		await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message:
+				`mfa.mode = "${mode}" asks for a second factor, but no requirement named "${MFA_REQUIREMENT_NAME}" is registered: ` +
+				'install the MFA module, or set mfa.mode = "off".',
+			reason: "session-requirement-missing",
+			stage: "applyContributions",
+			details: {
+				reason: "session-requirement-missing",
+				configKey: "mfa.mode",
+				mode,
+				requirement: MFA_REQUIREMENT_NAME,
+			},
+		});
+	}
+	if (consumedBy.length > 0 || registrations.length > 0) {
+		const logger = components.logger as Logger | undefined;
+		(logger ?? consoleLogger).info(
+			{
+				requirements: registrations.map(({ name, module, requirement }) => ({
+					name,
+					module,
+					remediations: [...requirement.remediations],
+				})),
+			},
+			"session_requirements_registered",
 		);
 	}
 }
@@ -599,8 +861,7 @@ export async function applyContributions(
 
 			let value: unknown;
 			try {
-				value = await factory(deps);
-				checkNameKeyedValue(entry.kind, name, value);
+				value = checkNameKeyedValue(entry.kind, name, await factory(deps), components.config);
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -632,8 +893,7 @@ export async function applyContributions(
 
 			let value: unknown;
 			try {
-				value = await factory(deps);
-				checkNameKeyedValue(entry.kind, name, value);
+				value = checkNameKeyedValue(entry.kind, name, await factory(deps), components.config);
 			} catch (thrownValue) {
 				const cleanupErrors = await runCleanupsReverse(material.cleanups);
 				throw new BootError({
@@ -655,6 +915,14 @@ export async function applyContributions(
 			collector.replace(name, value);
 		}
 	}
+
+	// ---------------------------------------------------------------------------
+	// Step 2b: the session-requirement checks and the boot line, once every
+	// name-keyed contribution has registered (the session-admission ADR's D3,
+	// D7) and before a list-shaped factory reads a requirement's reach.
+	// ---------------------------------------------------------------------------
+
+	await checkSessionRequirements(material, components, contributionKinds.sessionRequirements);
 
 	// ---------------------------------------------------------------------------
 	// Step 3: List-shaped pass in INPUT-ARRAY order.

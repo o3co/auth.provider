@@ -22,6 +22,7 @@ import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mj
 import type { MfaFactor as ConcreteMfaFactor } from "../../mfa/factor.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
+import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { Contributed } from "./contributed.mjs";
 import type { ProviderDeps } from "./provider.mjs";
@@ -85,6 +86,13 @@ export type ExchangeTokenValidator = ConcreteExchangeTokenValidator;
 export type MfaFactor = ConcreteMfaFactor;
 
 /**
+ * Type produced by a `SessionRequirementFactory<Deps>` contribution: the
+ * requirement contract in `packages/core/src/session-admission/requirement.mts`
+ * (the session-admission ADR's D3).
+ */
+export type SessionRequirement = ConcreteSessionRequirement;
+
+/**
  * Type produced by an `AuditHookFactory<Deps>` contribution. Substituted
  * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
  * `AuditSink` interface from `packages/core/src/audit/types.mts`.
@@ -117,6 +125,15 @@ export type ExchangeTokenValidatorFactory<Deps> = (
  * contribution of it is a duplicate.
  */
 export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor | null>;
+/**
+ * A `sessionRequirements` entry (the session-admission ADR's D3): a
+ * requirement every consumer of a browser session asks through admission,
+ * keyed by its `name`. Never `null`: a requirement is switched off by not
+ * installing it, so nothing can quietly remove one from behind the
+ * consumers. Its `reach` may be a getter: it is read after the name-keyed
+ * pass, never at registration.
+ */
+export type SessionRequirementFactory<Deps> = (deps: Deps) => Contributed<SessionRequirement>;
 export type AuditHookFactory<Deps> = (deps: Deps) => Contributed<AuditHook>;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPolicyHookContribution>;
 
@@ -178,7 +195,7 @@ export type TokenBindingMechanismFactory<Deps> = (
  *
  * Per A2-α §4.5 collision policy:
  * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
- *   `mfaFactors`): throw on duplicate at boot (enforced in Phase 4 / A2-β).
+ *   `mfaFactors`, `sessionRequirements`): throw on duplicate at boot (enforced in Phase 4 / A2-β).
  * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
  *   `grantMiddleware`): allow duplicates; routes additionally throw on
  *   duplicate `id` / undecorated-mountPath collisions.
@@ -197,6 +214,15 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	};
 	readonly mfaFactors?: {
 		readonly [kind: string]: MfaFactorFactory<Deps>;
+	};
+	/**
+	 * Session requirements (the session-admission ADR's D3), name-keyed:
+	 * projected by the synthetic key `sessionRequirementResolver`, which every
+	 * consumer of admission requires. Neither overridable nor replaceable
+	 * (`session-requirement-kind-guard`).
+	 */
+	readonly sessionRequirements?: {
+		readonly [name: string]: SessionRequirementFactory<Deps>;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];
