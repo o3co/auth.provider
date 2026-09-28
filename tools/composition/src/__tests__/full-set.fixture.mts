@@ -302,7 +302,7 @@ function requirementModules(interrupt: ReadonlySet<string>): Module[] {
 							return pageReach;
 						},
 						stepUpPage: { url: "/fixture/step-up", params: { requirement: "fixture-page" } },
-						remediations: ["fixture.step_up"],
+						remediations: ["fixture-page.step_up"],
 						hintKeys: ["fixture_hint"],
 						admit: async () => ({ outcome: "met" }),
 						admitPrimary: interruption(FIXTURE_INTERRUPTION.page),

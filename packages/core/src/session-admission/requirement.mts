@@ -286,6 +286,82 @@ export const isHintKey = (key: unknown): key is string =>
 export const isHintToken = (value: unknown): value is string =>
 	typeof value === "string" && HINT_TOKEN.test(value);
 
+// ---------------------------------------------------------------------------
+// The actions (D4)
+// ---------------------------------------------------------------------------
+
+const action = <N extends string, G extends AdmissionGrade>(
+	name: N,
+	grade: G,
+): { readonly name: N; readonly grade: G } => Object.freeze({ name, grade });
+
+/**
+ * The bundled consumers' actions, each with its grade (D4). A deployment's
+ * own route builds `{ name, grade }` for what it does and is treated by its
+ * grade; `remediation` is accepted only for a name a registered requirement
+ * declared, else treated as `credential_change`. A requirement's remediation
+ * may not take the name of a bundled action of another grade
+ * (`registeredRequirement`); the one bundled remediation, `mfa.step_up`, is
+ * the MFA requirement's own route.
+ */
+export const ADMISSION_ACTIONS = Object.freeze({
+	"oauth.authorize": action("oauth.authorize", "use"),
+	"oauth.consent": action("oauth.consent", "use"),
+	"oauth.session_grant": action("oauth.session_grant", "use"),
+	"oauth.code_exchange": action("oauth.code_exchange", "use"),
+	"device.lookup": action("device.lookup", "use"),
+	"device.approve": action("device.approve", "use"),
+	"device.deny": action("device.deny", "use"),
+	"federation_grants.connect": action("federation_grants.connect", "use"),
+	"federation_grants.consent": action("federation_grants.consent", "use"),
+	"federation_grants.callback": action("federation_grants.callback", "use"),
+	"session.link": action("session.link", "credential_change"),
+	"session.link_callback": action("session.link_callback", "use"),
+	"webauthn.register": action("webauthn.register", "credential_change"),
+	"mfa.manage": action("mfa.manage", "credential_change"),
+	"mfa.step_up": action("mfa.step_up", "remediation"),
+});
+
+/** A bundled action's name. */
+export type AdmissionActionName = keyof typeof ADMISSION_ACTIONS;
+
+/** A remediation's route, after the requirement's own name and a dot (D4): a lower-case identifier. */
+const REMEDIATION_ROUTE = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * `remediations` as a requirement may declare them (D4): each the
+ * requirement's own route, `<name>.<route>`, declared once, and never a
+ * bundled action of another grade — that is a consumer's, and a requirement
+ * declaring it would make admission skip the requirements for it.
+ */
+function checkRemediations(name: string, value: unknown, refuse: (what: string) => never): void {
+	if (!isNameList(value)) refuse("remediations must be a list of names");
+	const prefix = `${name}.`;
+	const seen = new Set<string>();
+	for (const remediation of value as readonly string[]) {
+		const route = remediation.startsWith(prefix) ? remediation.slice(prefix.length) : undefined;
+		if (route === undefined || !REMEDIATION_ROUTE.test(route)) {
+			refuse(
+				`remediation "${remediation}" is not a route of this requirement's own: a remediation is named "${prefix}<route>", the route a lower-case identifier`,
+			);
+		}
+		const bundled = (ADMISSION_ACTIONS as Record<string, AdmissionAction | undefined>)[remediation];
+		if (bundled !== undefined && bundled.grade !== "remediation") {
+			refuse(
+				`remediation "${remediation}" is a bundled action graded ${bundled.grade} — a consumer's, not a route a requirement owns`,
+			);
+		}
+		if (seen.has(remediation)) refuse(`remediation "${remediation}" is declared twice`);
+		seen.add(remediation);
+	}
+}
+
+/** Whether `value` is an iterable that is not a string: what a reach may be given as. */
+const isIterableOfValues = (value: unknown): value is Iterable<unknown> =>
+	typeof value === "object" &&
+	value !== null &&
+	typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function";
+
 /** The copies `registeredRequirement` made: what `sealRegisteredReach` seals. */
 const registeredCopies = new WeakSet<SessionRequirement>();
 
@@ -315,10 +391,12 @@ function seal(requirement: SessionRequirement, values: Iterable<string>): Readon
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
- * non-empty `name`, `remediations` and `hintKeys` as lists of names, a
- * `stepUpPage` that is a page when present (`checkStepUpPage`, on `issuer`'s
- * origin when one is given), `hintKeys` each a hint name (`isHintKey`),
- * `admit` a function, `admitPrimary` one or absent — and copied: the lists and the page are the copy's own, and a
+ * non-empty `name`, `remediations` the requirement's own routes
+ * (`checkRemediations`: `<name>.<route>`, each once, none a bundled action of
+ * another grade), a `stepUpPage` that is a page when present
+ * (`checkStepUpPage`, on `issuer`'s origin when one is given), `hintKeys`
+ * each a hint name (`isHintKey`), `admit` a function, `admitPrimary` one or
+ * absent — and copied: the lists and the page are the copy's own, and a
  * getter is read once here, so what the resolver answers at request time is
  * what was registered. `reach` is NOT read here: a requirement's reach may
  * be a getter over what registers in the same pass (the MFA requirement's,
@@ -344,7 +422,7 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 	// once: a getter is read here and never again.
 	const page = value.stepUpPage;
 	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
-	if (!isNameList(value.remediations)) refuse("remediations must be a list of names");
+	checkRemediations(name, value.remediations, refuse);
 	if (!isNameList(value.hintKeys) || !value.hintKeys.every(isHintKey)) {
 		refuse(
 			"hintKeys must be a list of hint names: lower-case identifiers of at most 32 characters, none a name core reserves",
@@ -375,8 +453,9 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 
 /**
  * A registered requirement's `reach`, read once after the name-keyed pass
- * (D3): a `Set` of non-empty strings, none a primary's marker (`pwd`,
- * `fed`), none a second-factor value unless the requirement is named `mfa`
+ * (D3): a `Set` — or any other iterable that is not a string, answered as a
+ * `Set` — of non-empty strings, none a primary's marker (`pwd`, `fed`), none
+ * a second-factor value unless the requirement is named `mfa`
  * (`SECOND_FACTOR_AMR`), and a `stepUpPage` exactly when the reach is not
  * empty. The end of boot's stage 4 runs it over every registration
  * (`contribute-factory-failed`, naming the requirement), and the contract
@@ -389,9 +468,9 @@ export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySe
 		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
 	};
 	const reach: unknown = requirement.reach;
-	if (!(reach instanceof Set)) return refuse("reach must be a Set of amr values");
+	if (!isIterableOfValues(reach)) return refuse("reach must be a Set of amr values");
 	const read = new Set<string>();
-	for (const entry of reach as Set<unknown>) {
+	for (const entry of reach) {
 		if (!isNonEmptyString(entry)) refuse("reach holds a value that is not a non-empty string");
 		const value = entry as string;
 		if (value === PASSWORD_AMR || value === FEDERATED_AMR) {
@@ -422,12 +501,12 @@ export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySe
  */
 export function snapshotReach(requirement: SessionRequirement): ReadonlySet<string> {
 	const reach: unknown = requirement.reach;
-	if (!(reach instanceof Set)) {
+	if (!isIterableOfValues(reach)) {
 		throw new RangeError(
 			`session requirement "${requirement.name}": reach must be a Set of amr values`,
 		);
 	}
-	return seal(requirement, reach as Set<string>);
+	return seal(requirement, reach as Iterable<string>);
 }
 
 /**

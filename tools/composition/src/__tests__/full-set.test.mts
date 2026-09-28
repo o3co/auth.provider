@@ -276,7 +276,7 @@ describe("the session requirements a deployment writes", () => {
 				{
 					name: "fixture-page",
 					module: "deployment:requirement-page",
-					remediations: ["fixture.step_up"],
+					remediations: ["fixture-page.step_up"],
 				},
 				{ name: "fixture-bare", module: "deployment:requirement-bare", remediations: [] },
 			],
