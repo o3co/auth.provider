@@ -32,6 +32,7 @@ import type {
 import {
 	ADMISSION_ACTIONS,
 	checkStepUpPage,
+	issuedRemediationActions,
 	registeredRequirement,
 	sealRegisteredReach,
 } from "#/session-admission/requirement.mjs";
@@ -99,6 +100,39 @@ describe("checkStepUpPage — the deployment's page for a step-up (D2, D3)", () 
 		expect(checkStepUpPage({ url: "/step?next=1#top", params: {} }, ISSUER).url).toBe(
 			"/step?next=1#top",
 		);
+	});
+
+	it("copies params from their own enumerable keys, once: a Proxy that hides redirect_to from one probe, or a getter that changes type between reads, cannot get past", () => {
+		let probes = 0;
+		const hiding = new Proxy(
+			{},
+			{
+				getOwnPropertyDescriptor(_target, key) {
+					if (key !== "redirect_to") return undefined;
+					probes++;
+					return probes <= 1
+						? undefined
+						: { value: "https://evil.test", enumerable: true, configurable: true, writable: true };
+				},
+				ownKeys: () => ["redirect_to"],
+				get: (_target, key) => (key === "redirect_to" ? "https://evil.test" : undefined),
+			},
+		);
+		expect(() => checkStepUpPage({ url: "/mfa", params: hiding }, ISSUER)).toThrow(/redirect_to/);
+		let reads = 0;
+		const shifting = {
+			get a() {
+				reads++;
+				return reads === 1 ? "ok" : { toString: () => "x" };
+			},
+		};
+		const page = checkStepUpPage({ url: "/mfa", params: shifting }, ISSUER);
+		expect(page.params).toEqual({ a: "ok" });
+		expect(typeof page.params.a).toBe("string");
+		// The consumer's return parameter in the page's own query is refused too.
+		expect(() =>
+			checkStepUpPage({ url: "/mfa?redirect_to=https://evil.test", params: {} }, ISSUER),
+		).toThrow(/redirect_to/);
 	});
 
 	it("refuses params that carry redirect_to — the consumer's return parameter — or a value that is not a string", () => {
@@ -191,18 +225,58 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		).toEqual(["mfa.step_up"]);
 	});
 
-	it("issues one branded remediation action per declared route on the registered copy, keyed by route, frozen", () => {
-		const registered = resolverForTests([
-			requirement("x", { remediations: ["x.step_up", "x.recover"] }),
-		]).get("x");
-		expect(registered?.actions).toEqual({
+	it("issues one branded remediation action per declared route to the module that holds the requirement object — issuedRemediationActions(original) — never through the resolver", () => {
+		const original = requirement("x", { remediations: ["x.step_up", "x.recover"] });
+		expect(issuedRemediationActions(original)).toBeUndefined();
+		const registered = resolverForTests([original]).get("x");
+		const issued = issuedRemediationActions(original);
+		expect(issued).toEqual({
 			step_up: { name: "x.step_up", grade: "remediation" },
 			recover: { name: "x.recover", grade: "remediation" },
 		});
-		expect(Object.isFrozen(registered?.actions)).toBe(true);
-		expect(Object.isFrozen(registered?.actions.step_up)).toBe(true);
-		expect(registeredRequirement(requirement("y")).actions).toEqual({});
-		expect(Object.isFrozen(registeredRequirement(requirement("y")).actions)).toBe(true);
+		expect(Object.isFrozen(issued)).toBe(true);
+		expect(Object.isFrozen(issued?.step_up)).toBe(true);
+		// The resolver hands out the registered copy, which carries none of
+		// them: a consumer with the resolver cannot mint a remediation action.
+		expect("actions" in (registered as object)).toBe(false);
+		expect(issuedRemediationActions(registered as SessionRequirement)).toBeUndefined();
+		expect(issuedRemediationActions({ ...original })).toBeUndefined();
+		const bare = requirement("y");
+		registeredRequirement(bare);
+		expect(issuedRemediationActions(bare)).toEqual({});
+	});
+
+	it("reads each field of the value once, into a copy it validates: a getter answering differently to a second read changes nothing", () => {
+		let names = 0;
+		const renaming = {
+			...requirement("x", { remediations: ["oauth.authorize"] }),
+			get name() {
+				names++;
+				return names === 1 ? "oauth" : "x";
+			},
+		};
+		// Read once as "oauth": its remediation is a consumer's action, refused.
+		expect(() => resolverForTests([renaming as never])).toThrow(/oauth\.authorize/);
+		let reads = 0;
+		const swapping = {
+			...requirement("x"),
+			get remediations() {
+				reads++;
+				return reads === 1 ? ["x.ok"] : ["mfa.step_up", "oauth.authorize"];
+			},
+		};
+		const registered = resolverForTests([swapping as never]).get("x");
+		expect(registered?.remediations).toEqual(["x.ok"]);
+		expect(Object.keys(issuedRemediationActions(swapping as never) ?? {})).toEqual(["ok"]);
+		let keys = 0;
+		const hinting = {
+			...requirement("x"),
+			get hintKeys() {
+				keys++;
+				return keys === 1 ? ["level"] : ["user"];
+			},
+		};
+		expect(resolverForTests([hinting as never]).get("x")?.hintKeys).toEqual(["level"]);
 	});
 
 	it("registers a copy, as boot does: the page and the lists are the copy's own, a page getter is read once, and admit delegates", async () => {

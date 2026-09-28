@@ -73,6 +73,7 @@ const TX = (id: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
 			request: {},
 		},
 		done: [],
+		interruptedBy: "mfa",
 	},
 	redirectTo: undefined,
 	enrollment: "none",

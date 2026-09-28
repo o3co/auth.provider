@@ -651,17 +651,24 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 		expect(admission).toEqual({ outcome: "unmet", requirement: "acr", session });
 	});
 
-	it("step_up + step_up: one trip — the requirement's page, the acr hint, and unmet when it comes back still unmet", async () => {
-		const stepping: SessionRequirement = {
-			...reaching("first", ["otp", "mfa"]),
+	it("step_up + step_up: one trip — the requirement's page, the acr hint filtered to what that requirement's reach can finish, and unmet when it comes back still unmet", async () => {
+		const stepping = (reach: readonly string[]): SessionRequirement => ({
+			...reaching("first", reach),
 			admit: async () => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }),
-		};
-		const admission = await ask([stepping, reaching("keys", ["hwk"])], [PHR]);
-		expect(admission).toEqual({
+		});
+		// `first` reaches otp and mfa: it cannot finish phr, which wants hwk — no hint.
+		expect(await ask([stepping(["otp", "mfa"]), reaching("keys", ["hwk"])], [PHR])).toEqual({
 			outcome: "step_up",
 			requirement: "first",
 			session,
 			page: { url: "/first", params: { via: "first" } },
+			acrValues: [],
+			whenStillUnmet: "unmet",
+		});
+		// `first` reaches hwk: its trip finishes phr — the hint.
+		expect(await ask([stepping(["hwk"]), reaching("keys", ["swk"])], [PHR, MFA])).toMatchObject({
+			outcome: "step_up",
+			requirement: "first",
 			acrValues: [PHR],
 			whenStillUnmet: "unmet",
 		});
