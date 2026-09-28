@@ -90,7 +90,11 @@ export interface ReauthAskRecord {
 	 * parameter itself. A return to a different request finds nothing.
 	 */
 	readonly request: string;
-	/** When this record was written: what its window is measured from. */
+	/**
+	 * When the first ask of this request was written: kept across the writes
+	 * of its later trips, for the cap the MFA ADR's D17 measures from it. A
+	 * record's window is measured from its last write.
+	 */
 	readonly createdAt: number;
 	/**
 	 * When the browser was sent to the login page — the freshness reference
@@ -134,6 +138,20 @@ export interface ReauthAskStore {
 
 const isInstant = (value: unknown): value is number =>
 	typeof value === "number" && Number.isFinite(value);
+
+/**
+ * When `record` was last written: every write records a stage at the moment
+ * it is written — the login trip `loginAskedAt`, a step-up trip its entry in
+ * `stepUpAskedAt` — so the latest of them, or `createdAt` for a record with
+ * none, is that write. Each write opens a window of its own
+ * (`REAUTH_ASK_TTL_MS`); `createdAt` is kept across them (the MFA ADR's D17).
+ */
+const lastWrittenAt = (record: ReauthAskRecord): number =>
+	Math.max(
+		record.createdAt,
+		record.loginAskedAt ?? Number.NEGATIVE_INFINITY,
+		...Object.values(record.stepUpAskedAt),
+	);
 
 /**
  * Reject anything that is not the record this module wrote. A record in the
@@ -206,6 +224,12 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 							createdAt: record.createdAt,
 							loginAskedAt: record.loginAskedAt,
 							stepUpAskedAt: { ...record.stepUpAskedAt },
+							// For one release: an older replica reads `askedAt` and
+							// `request` alone, so a login ask stays readable to it during a
+							// rolling upgrade; a step-up alone asked for no login and
+							// writes none. Drop it in the release after the one that
+							// ships session admission, when no replica reads it.
+							...(record.loginAskedAt === undefined ? {} : { askedAt: record.loginAskedAt }),
 						},
 					},
 					(err?: unknown) => (err ? reject(err as Error) : resolve()),
@@ -228,7 +252,7 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 				store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
 			});
 			if (record.request !== request) return null;
-			if (record.createdAt + REAUTH_ASK_TTL_MS <= Date.now()) return null;
+			if (lastWrittenAt(record) + REAUTH_ASK_TTL_MS <= Date.now()) return null;
 			return record;
 		},
 	};

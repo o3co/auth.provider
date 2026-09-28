@@ -192,7 +192,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		res: Response,
 		challenge: unknown,
 	): Promise<PendingConsentRecord | null> => {
-		if (!req.session?.isAuthenticated) {
+		// The flag as every reader reads it (the session-admission ADR's D2):
+		// exactly `true`, never merely truthy.
+		if (req.session?.isAuthenticated !== true) {
 			jsonError(res, 401, "login_required", "no authenticated session");
 			return null;
 		}

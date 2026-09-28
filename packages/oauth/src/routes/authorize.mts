@@ -938,7 +938,9 @@ const sendToLogin = async (
 	const askRequest = askRequestOf(ctx);
 	const askId = await recordAsk(ctx, askStore, {
 		request: askRequest,
-		createdAt: now,
+		// Kept across the trips of one request: the MFA ADR's D17 caps a
+		// chain of them from it.
+		createdAt: ask?.createdAt ?? now,
 		loginAskedAt: now,
 		stepUpAskedAt: { ...ask?.stepUpAskedAt },
 	});
@@ -1061,20 +1063,30 @@ const stepUpTrip = async (
 		);
 		return;
 	}
-	const now = Date.now();
-	const askRequest = askRequestOf(ctx);
-	const askId = await recordAsk(ctx, askStore, {
-		request: askRequest,
-		createdAt: now,
-		loginAskedAt: ask?.loginAskedAt,
-		stepUpAskedAt: { ...trips, [requirement]: now },
-	});
-	if (askId === null) return;
 	const target = new URL(page.url, ctx.opts.issuer);
+	// Registration holds a page to the issuer's origin (core's
+	// `checkStepUpPage`); a resolver built without an issuer does not. The
+	// URL this endpoint is about to send a browser to is checked anyway, and
+	// one off the origin is a composition fault, never followed.
+	if (target.origin !== ctx.issuerOrigin) {
+		ctx.opts.logger.error({ requirement }, "authorize_step_up_page_off_origin");
+		redirectError(ctx, "server_error", "the step-up page is not on this server's origin");
+		return;
+	}
 	for (const [name, value] of Object.entries(page.params)) target.searchParams.set(name, value);
 	if (admission.acrValues.length > 0) {
 		target.searchParams.set("acr_values", admission.acrValues.join(" "));
 	}
+	const now = Date.now();
+	const askRequest = askRequestOf(ctx);
+	const askId = await recordAsk(ctx, askStore, {
+		request: askRequest,
+		// Kept across the trips of one request, as the login trip keeps it.
+		createdAt: ask?.createdAt ?? now,
+		loginAskedAt: ask?.loginAskedAt,
+		stepUpAskedAt: { ...trips, [requirement]: now },
+	});
+	if (askId === null) return;
 	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askRequest, askId));
 	ctx.res.redirect(target.toString());
 };

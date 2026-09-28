@@ -824,9 +824,10 @@ export const createOAuthRouter = async (
 				if (errorDescription) errorBody.error_description = errorDescription;
 				// The session-admission ADR's D8: a grant whose session can be met
 				// by a step-up names the requirement beside `invalid_grant`, so an
-				// updated client can offer it (the MFA ADR's D16 row). A
-				// requirement's name, held to the same character set as `error`.
-				const stepUp = stepUpOf(result);
+				// updated client can offer it (the MFA ADR's D16 row) — beside
+				// `invalid_grant` alone, the one error it qualifies. A requirement's
+				// name, held to the same character set as `error`.
+				const stepUp = error === "invalid_grant" ? stepUpOf(result) : undefined;
 				if (stepUp !== undefined && isWellFormedErrorCode(stepUp)) errorBody.step_up = stepUp;
 				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
 				// The token endpoint is not a protected resource (RFC 6750 §3 applies to

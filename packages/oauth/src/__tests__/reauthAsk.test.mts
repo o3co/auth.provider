@@ -81,6 +81,8 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 			createdAt: askedAt,
 			loginAskedAt: askedAt,
 			stepUpAskedAt: {},
+			// For one release, what an older replica reads.
+			askedAt,
 		});
 	});
 
