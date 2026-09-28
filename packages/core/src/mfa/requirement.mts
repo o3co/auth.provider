@@ -52,15 +52,20 @@ import type { SessionAuthentication } from "../user-sessions/types.mjs";
 export type MfaMode = "off" | "optional" | "required";
 
 /**
- * `mfa.mode` as a consumer reads it, off any config-shaped value: the mode
- * when it is one of the three, else `undefined` — absent, or a value core's
- * schema refuses at boot (a hand-built configuration can still hold one).
- * What `undefined` means is the caller's to decide: until the flip, core's
- * schema and reference default it to `"off"` (D19).
+ * `mfa.mode` as a consumer reads it, off any config-shaped value: the mode, or
+ * `undefined` when it is absent — which only absence is. What absence means is
+ * the caller's to decide: until the flip, core's schema and reference default
+ * it to `"off"` (D19). A value that is given but is not one of the three — a
+ * typo, a casing slip, `""`, `null` — is a `RangeError` naming `mfa.mode` and
+ * quoting nothing of the value, never `undefined`: read as absent, a typo
+ * would default to `"off"` and switch MFA off. Core's schema refuses such a
+ * value at boot; this refuses it in a hand-built configuration too.
  */
 export function readMfaMode(config: unknown): MfaMode | undefined {
 	const mode = (config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode;
-	return mode === "off" || mode === "optional" || mode === "required" ? mode : undefined;
+	if (mode === undefined) return undefined;
+	if (mode === "off" || mode === "optional" || mode === "required") return mode;
+	throw new RangeError('mfa.mode must be "off", "optional" or "required"');
 }
 
 /**

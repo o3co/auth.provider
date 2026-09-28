@@ -74,16 +74,18 @@ export const vouchableAcrValues = (
  * configured an `acr` this deployment can never meet — except under
  * `mfa.mode = "off"` for an entry only a second factor would meet, which is
  * the operator's choice and is said at `info`, so an MFA-off deployment that
- * keeps the template's MFA entries is not warned at every boot. The entry is
- * the operator's text, bounded as a log line bounds text all the same.
+ * keeps the template's MFA entries is not warned at every boot. An absent
+ * mode is `"off"`; one that is given but unusable is a `RangeError`
+ * (`readMfaMode`), which refuses the composition. The entry is the operator's
+ * text, bounded as a log line bounds text all the same.
  */
 export const logUnsatisfiableAcrValues = (
 	dropped: readonly UnsatisfiableAcrValue[],
 	config: unknown,
 	logger: Logger,
 ): void => {
-	// `undefined` — absent, or a value core's schema refuses at boot — reads as
-	// core's default until the flip, `"off"` (D19).
+	// Only an absent mode reads as core's default until the flip, `"off"` (D19);
+	// a given but unusable one is a RangeError, which refuses the composition.
 	const mfaOff = (readMfaMode(config) ?? "off") === "off";
 	for (const entry of dropped) {
 		const unproducible = auditErrorList(entry.unproducible);
