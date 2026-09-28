@@ -581,6 +581,8 @@ The template's default is decided in O6.
 - **The `claims` parameter**: a request whose `claims` names `acr` — essential or not, in `id_token` or `userinfo` — is refused with `invalid_request` ("request acr through acr_values"), by #284's rule. Every other use of `claims` stays ignored, and discovery keeps `claims_parameter_supported` absent.
 - The names are decided in O9.
 
+**Amended 2026-09-28 (session admission): D15's drop and its severity.** Where D15 says an entry is producible "with a coordinator" and the boot line's severity depends on `mfa.mode`, it reads: an entry is producible when `pwd`, `fed` (a federation installed), a trusted federation's anything, or the union of the registered requirements' `reach` covers one of its alternatives — `mfa` among them when the `mfa` requirement's reach carries it — and a dropped entry is logged `info` when one alternative lacks only second-factor values and no registered requirement reaches them, `warn` otherwise, whatever `mfa.mode` says (the session-admission ADR's D6). The table, `acr_values_supported`, the `claims` refusal and the `phr` / `phrh` examples stand.
+
 ### D16 — The requirement rule, and every consumer of an authenticated browser session
 
 Core's requirement rule (`packages/core/src/mfa/requirement.mts`) is one pure function over `sessionAuthentication(session)`, `vouchedAmr(session)`, the configuration and `mfaCoordinator.secondFactorMethods`:
