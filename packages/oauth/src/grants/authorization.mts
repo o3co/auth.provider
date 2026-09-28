@@ -35,6 +35,7 @@ import {
 	type Token,
 	type UserSession,
 	unrepresentedResources,
+	vouchedAmr,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
@@ -600,8 +601,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 
 			// #481: how, and to which acr, the user authenticated — read once, in the
 			// shape every grant reads, and stamped on the id_token, the access token
-			// and the refresh token alike.
-			const amr = wellFormedAmr(userSession?.amr);
+			// and the refresh token alike. `amr` is what the session vouches for
+			// (the MFA ADR's D9, D13): never a value an untrusted upstream IdP
+			// asserted, which a session written before the split still holds.
+			const amr = wellFormedAmr(userSession ? vouchedAmr(userSession) : undefined);
 			const acr = wellFormedAcr(codeData.acr);
 
 			// TODO-F-3: both access_token and refresh_token carry family_id and, when

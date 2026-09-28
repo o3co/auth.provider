@@ -26,6 +26,7 @@ import {
 	ownedConfirmation,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
+	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
@@ -142,7 +143,9 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 						};
 					}
 					userId = tracked.sub;
-					trackedAmr = wellFormedAmr(tracked.amr);
+					// What the session vouches for (the MFA ADR's D9, D13), never
+					// the record's own `amr`.
+					trackedAmr = wellFormedAmr(vouchedAmr(tracked));
 				} catch (err) {
 					// The outage's one line: error level, the error's projection.
 					deps.logger?.error(

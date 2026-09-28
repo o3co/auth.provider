@@ -410,7 +410,70 @@ const requirementRuleCalls = (source: string): string[] => {
 const withoutRequirementSession = (source: string): string[] =>
 	requirementRuleCalls(source).filter((args) => !/\brequirementSession\s*\(/.test(args));
 
+/**
+ * Where a session's own `amr` and `authentication` may be read (the MFA ADR's
+ * D9): the readers themselves, the requirement rule (whose input they build),
+ * and the two bundled stores, which copy the record.
+ */
+const SESSION_RECORD_READERS: ReadonlySet<string> = new Set([
+	"packages/core/src/user-sessions/authentication.mts",
+	REQUIREMENT_RULE_HOME,
+	"packages/core/src/user-sessions/memory/userSessionStore.mts",
+	"packages/redis/src/userSessionStore.mts",
+]);
+
+/**
+ * Reads of a session's `amr` or `authentication` off the record —
+ * `session.amr`, `userSession?.authentication`, `tracked.amr` — in `source`,
+ * comments removed. By the name the code gives the session, so it catches the
+ * shape every consumer has used; a reader that names its session otherwise
+ * is for review to catch. A consumer reads them through `sessionAuthentication`
+ * / `vouchedAmr` (`core/src/user-sessions/authentication.mts`): the record's
+ * own `amr` still holds an untrusted IdP's values in a session written before
+ * the upstream split.
+ */
+const sessionRecordReads = (source: string): string[] => {
+	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+	return [...code.matchAll(/\b(?:\w*[sS]ession|tracked)\??\.(?:amr|authentication)\b/g)].map(
+		(match) => match[0],
+	);
+};
+
 describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
+	it("reads a session's amr and authentication off the record, and ignores a comment and what the readers answer", () => {
+		const sample = [
+			"// wellFormedAmr(userSession?.amr) — a comment, not a read",
+			"const a = wellFormedAmr(userSession?.amr);",
+			"const b = wellFormedAmr(tracked.amr);",
+			"const c = session.authentication?.mfaAt;",
+			"const d = wellFormedAmr(vouchedAmr(userSession));",
+			"const e = requirementSession(session)?.amr ?? [];",
+			"const f = wellFormedAmr(claims.amr);",
+		].join("\n");
+		expect(sessionRecordReads(sample)).toEqual([
+			"userSession?.amr",
+			"tracked.amr",
+			"session.authentication",
+		]);
+	});
+
+	it("reads a session's amr and authentication only through the D9 readers", () => {
+		const offenders = Object.fromEntries(
+			listShippedSources()
+				.map(
+					(file) =>
+						[relative(repoRoot, file).split(sep).join("/"), readFileSync(file, "utf8")] as const,
+				)
+				.filter(([rel]) => !SESSION_RECORD_READERS.has(rel))
+				.map(([rel, source]) => [rel, sessionRecordReads(source)] as const)
+				.filter(([, reads]) => reads.length > 0),
+		);
+		expect(
+			offenders,
+			"read a session through sessionAuthentication / vouchedAmr (core/src/user-sessions/authentication.mts)",
+		).toEqual({});
+	});
+
 	it("reads the requirement rule's calls, and flags one whose session input bypasses requirementSession", () => {
 		const sample = [
 			"// selectAcr(requested, session.amr, table, reach) — a comment, not a call",
