@@ -180,6 +180,8 @@ function world(options: WorldOptions = {}) {
 		/** Ids the router draws, in order, before it falls back to random ones. */
 		ids: [] as string[],
 		auditFails: false,
+		/** Held until released, by event type: an audit write still in flight when the drain begins. */
+		auditGates: new Map<string, Promise<void>>(),
 		/** Browsers whose requests carry their cookie session without the express session's id. */
 		withoutSessionId: new Set<string>(),
 		authorizerMissing: false,
@@ -308,6 +310,7 @@ function world(options: WorldOptions = {}) {
 			auditSink: {
 				kind: "test",
 				record: async (event) => {
+					await state.auditGates.get(event.type);
 					if (state.auditFails) throw new Error("injected: the audit sink is down");
 					events.push(event);
 				},
@@ -2549,25 +2552,32 @@ describe("consent — what an outage logs", () => {
 		});
 	});
 
-	it("logs the judgement that could not be made, which it used to answer in silence — the session's part as admission's line", async () => {
-		const w = world();
-		const { challenge, grantId } = await asked(w);
-		w.state.sessionsBoundary = new Error("boundary down");
-		const response = await w.page(challenge, "b-1");
-		expect(response.status).toBe(503);
-		expect(response.body).toEqual({
-			error: "temporarily_unavailable",
-			error_description: "storage",
-		});
-		expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
-		expect(payloadOf(w.lines, "session_admission_unavailable")).toMatchObject({
-			grantId,
-			correlationId: response.headers["x-request-id"],
-			store: "revocation_boundary",
-			action: "federation_grants.consent",
-			err: { name: "Error", detail: "boundary down" },
-		});
-	});
+	it.each(["GET", "POST"] as const)(
+		"logs the judgement that could not be made on %s, which it used to answer in silence — the session's part as admission's line, with the method",
+		async (method) => {
+			const w = world();
+			const { challenge, grantId } = await asked(w);
+			w.state.sessionsBoundary = new Error("boundary down");
+			const response =
+				method === "GET"
+					? await w.page(challenge, "b-1")
+					: await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
+			expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
+				method,
+				grantId,
+				correlationId: response.headers["x-request-id"],
+				store: "revocation_boundary",
+				action: "federation_grants.consent",
+				err: expect.objectContaining({ name: "Error", detail: "boundary down" }),
+			});
+		},
+	);
 
 	it("answers a client registry that cannot judge the question as the page's own lookup does, and logs it once", async () => {
 		// The judgement's read fails, on both methods: one answer for one
@@ -3261,6 +3271,46 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 		expect(read.body).toEqual(noPending);
 		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(400);
 		expect(w.authorized).toEqual([]);
+	});
+
+	it("registers admission's audit write with the drain, as every audit write of this router is", async () => {
+		// A shutdown that has begun waits for the subject-mismatch event
+		// admission writes, as it waits for the route's own.
+		const w = world();
+		const { handle } = await w.lodge();
+		w.browsers.set("b-1", { isAuthenticated: true, user: { id: "alice" }, sid: "sid-bob" });
+		w.durable.set("sid-bob", {
+			sid: "sid-bob",
+			sub: "bob",
+			authTime: w.state.now,
+			createdAt: w.state.now,
+			expiresAt: new Date(w.state.now.getTime() + DAY),
+			claims: {},
+			...passwordSessionAuthentication(),
+		});
+		let release = (): void => undefined;
+		w.state.auditGates.set(
+			"session.admission.subject_mismatch",
+			new Promise<void>((resolve) => {
+				release = resolve;
+			}),
+		);
+		expect((await w.connect(handle, "b-1")).status).toBe(403);
+		let drained = false;
+		const draining = w.background.drain().then(() => {
+			drained = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(drained).toBe(false);
+		release();
+		await draining;
+		expect(w.events.map((event) => event.type)).toContain("session.admission.subject_mismatch");
+	});
+
+	it("refuses to be built without the subject revocation it reads the sessions boundary through: no boundary is no backstop", () => {
+		expect(() =>
+			createFederationGrantBrowserRouter({ requirements: resolverForTests([]) } as never),
+		).toThrow(/subjectRevocation/);
 	});
 
 	it("refuses to be built without requirements, or with a resolver the planner did not build", () => {
