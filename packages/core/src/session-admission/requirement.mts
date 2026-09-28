@@ -352,6 +352,7 @@ export const ADMISSION_ACTIONS = Object.freeze({
 	"oauth.consent": action("oauth.consent", "use"),
 	"oauth.session_grant": action("oauth.session_grant", "use"),
 	"oauth.code_exchange": action("oauth.code_exchange", "use"),
+	"oauth.refresh": action("oauth.refresh", "use"),
 	"device.lookup": action("device.lookup", "use"),
 	"device.approve": action("device.approve", "use"),
 	"device.deny": action("device.deny", "use"),
