@@ -92,6 +92,7 @@ import {
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type Establishment,
+	type InterruptAdmission,
 	type InterruptionAnswer,
 	isHintKey,
 	isHintToken,
@@ -857,6 +858,9 @@ function stepUpThroughOne(
 /** The establishments `admitPrimary`, `resumePrimary` and `establishWithoutAsking` built. */
 const knownEstablishments = new WeakSet<object>();
 
+/** The interruptions `admitPrimary` and `resumePrimary` answered. */
+const knownInterruptions = new WeakSet<object>();
+
 /**
  * The primaries core's builders made (`passwordPrimary`, and
  * `establishWithoutAsking`'s own): what `admitPrimary` accepts. A
@@ -902,6 +906,11 @@ export function passwordPrimary(facts: PasswordLoginFacts): PrimaryAuthenticatio
 /** Whether `value` is an `Establishment` one of the three built: a copy, or an object shaped like one, is not. */
 export function isEstablishment(value: unknown): value is Establishment {
 	return typeof value === "object" && value !== null && knownEstablishments.has(value);
+}
+
+/** Whether `value` is an interruption `admitPrimary` or `resumePrimary` answered: a copy, or an object shaped like one, is not. */
+export function isInterruptAdmission(value: unknown): value is InterruptAdmission {
+	return typeof value === "object" && value !== null && knownInterruptions.has(value);
 }
 
 const establish = (primary: PrimaryAuthentication): Establishment => {
@@ -1059,8 +1068,8 @@ async function askEvery(
 			// The continuation names who interrupted: `resumePrimary` accepts
 			// that requirement's completion alone (D5).
 			const continuation = continuationOf(primary, done, name);
-			return {
-				outcome: "interrupt",
+			const interruption = Object.freeze({
+				outcome: "interrupt" as const,
 				requirement: name,
 				continuation,
 				open: async (sessionId: string) => {
@@ -1074,7 +1083,9 @@ async function askEvery(
 						requirement.hintKeys,
 					);
 				},
-			};
+			});
+			knownInterruptions.add(interruption);
+			return interruption as unknown as InterruptAdmission;
 		}
 		return unavailableAtEstablishment(
 			deps,

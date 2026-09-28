@@ -25,7 +25,6 @@ export {
 	type AnswerInterruptionDeps,
 	type AnswerInterruptionResult,
 	answerInterruption,
-	type InterruptAdmission,
 	type InterruptionReporter,
 	type InterruptionStep,
 } from "./answer-interruption.mjs";

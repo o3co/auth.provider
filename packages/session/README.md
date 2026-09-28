@@ -375,8 +375,9 @@ route calls it, and so does a requirement's completion route when
 — tells the caller's reporter of a failure once (`store` and `step`, as
 above), so each caller logs in its own vocabulary, and answers what it sent
 (`answered`, or `unavailable` with the store and the step). Anything that is
-not an interruption `admitPrimary` or `resumePrimary` answered is a
-`RangeError` before the session is touched. A completion route builds its
+not an interruption `admitPrimary` or `resumePrimary` answered — core's
+`isInterruptAdmission`, so a copy of one or an object shaped like one too —
+is a `RangeError` before the session is touched. A completion route builds its
 `CsrfProtection` with `createCsrfProtectionFromConfig(config.session)`: the
 token is signed, not stored, so it and the login router's accept each
 other's.

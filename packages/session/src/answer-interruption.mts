@@ -48,7 +48,11 @@
  * session id no browser holds.
  */
 
-import type { InterruptionAnswer, PrimaryAdmission } from "@o3co/auth-provider-core";
+import {
+	type InterruptAdmission,
+	type InterruptionAnswer,
+	isInterruptAdmission,
+} from "@o3co/auth-provider-core";
 import type { Request, Response } from "express";
 import type { CsrfProtection } from "./csrf.mjs";
 import {
@@ -56,9 +60,6 @@ import {
 	SESSION_STORE_UNAVAILABLE,
 	sessionOperation,
 } from "./internal/cookieSession.mjs";
-
-/** An interruption `admitPrimary` or `resumePrimary` answered. */
-export type InterruptAdmission = Extract<PrimaryAdmission, { readonly outcome: "interrupt" }>;
 
 /** Where an interruption's answer failed: the store, and the step. */
 export type InterruptionStep = "regenerate" | "open" | "save";
@@ -96,19 +97,19 @@ export type AnswerInterruptionResult =
  * `503` at each point it can fail, are in this file's header. Sends the
  * response either way and answers what it sent. Rejects with a `RangeError`,
  * before the session is touched, when `admission` is not an interruption
- * `admitPrimary` or `resumePrimary` answered.
+ * `admitPrimary` or `resumePrimary` answered (core's `isInterruptAdmission`:
+ * a copy, or an object shaped like one, is not).
  */
 export async function answerInterruption(
 	admission: InterruptAdmission,
 	{ req, res, csrf, reporter }: AnswerInterruptionDeps,
 ): Promise<AnswerInterruptionResult> {
-	if (
-		typeof admission !== "object" ||
-		admission === null ||
-		admission.outcome !== "interrupt" ||
-		typeof admission.open !== "function"
-	) {
-		throw new RangeError("answerInterruption: the admission must be an interruption");
+	// Core's brand, checked at runtime: a copy of an interruption, or an
+	// object shaped like one, is refused before the session is touched.
+	if (!isInterruptAdmission(admission)) {
+		throw new RangeError(
+			"answerInterruption: the admission must be an interruption admitPrimary or resumePrimary answered",
+		);
 	}
 	const unavailable = (
 		store: string,
