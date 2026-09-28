@@ -670,6 +670,8 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	"max_age",
 	"acr_values",
 	"reauth_ask",
+	// The MFA ADR's D15: one JSON object, read by `checkClaimsParameter`.
+	"claims",
 ] as const;
 
 /**
@@ -976,6 +978,44 @@ const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean => {
 			"request_uri_not_supported",
 			"this authorization server does not accept request_uri",
 		);
+		return false;
+	}
+	return true;
+};
+
+/**
+ * OIDC Core §5.5 `claims` (the MFA ADR's D15): a request that names `acr` in
+ * it — essential or not, for the id_token or for userinfo (§5.5.1.1) — is
+ * refused with `invalid_request`, by #284's rule for a security-relevant
+ * parameter this server does not honour. It vouches for an `acr` only
+ * through `acr_values` and its table; ignoring the request would hand back a
+ * token the RP reads as having honoured it. Every other use of `claims` is
+ * ignored, as it always was, and discovery keeps `claims_parameter_supported`
+ * absent, which reads as `false`.
+ *
+ * A value that is not a JSON object cannot be told not to name `acr`, so it
+ * is malformed, as a malformed `acr_values` is. A repeat never reaches here
+ * (`checkSingleValuedParams`). Runs before the re-authentication decision, so
+ * a refused request never sends the browser through a login first.
+ */
+const checkClaimsParameter = (ctx: AuthorizeContext): boolean => {
+	const raw = ctx.params.claims;
+	if (raw === undefined) return true;
+	let claims: unknown;
+	try {
+		claims = JSON.parse(raw as string);
+	} catch {
+		claims = undefined;
+	}
+	if (typeof claims !== "object" || claims === null || Array.isArray(claims)) {
+		redirectError(ctx, "invalid_request", "claims is not a JSON object");
+		return false;
+	}
+	const namesAcr = (member: unknown): boolean =>
+		typeof member === "object" && member !== null && Object.hasOwn(member, "acr");
+	const { id_token: idToken, userinfo } = claims as Record<string, unknown>;
+	if (namesAcr(idToken) || namesAcr(userinfo)) {
+		redirectError(ctx, "invalid_request", "request acr through acr_values");
 		return false;
 	}
 	return true;
@@ -1568,6 +1608,9 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// evaluation as well as the client-policy gates, so a malformed request
 		// never reaches the repository or the policy hook either.
 		if (!checkSingleValuedParams(ctx)) return;
+		// The MFA ADR's D15: `acr` is asked for through `acr_values` alone —
+		// refused here, before a re-authentication could send the browser away.
+		if (!checkClaimsParameter(ctx)) return;
 		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
 		if (maxAge === null) return;

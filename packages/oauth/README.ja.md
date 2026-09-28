@@ -246,7 +246,9 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **`request` と `request_uri` は無視せず拒否する**（`request_not_supported` / `request_uri_not_supported`）: 署名付きリクエストオブジェクトはパラメーターを改ざん不能にするためにあるので、代わりにクエリ文字列を処理すれば、RP がそれを尊重されたと信じている間に、オブジェクトが防ぐはずだったものを攻撃者に与えることになる。ディスカバリードキュメントが `request_uri_parameter_supported: false` と言うのも同じ理由である — OIDC Discovery はこのフィールドの省略時の既定を **`true`** としているので、省略すること自体が主張になる。
 
-**未実装:** `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
+**`acr` を名指す `claims` パラメーターは拒否する**（`invalid_request`、`request acr through acr_values`）— essential かどうか、id_token 向けか userinfo 向けかを問わない（OIDC Core §5.5.1.1）。JSON オブジェクトでない `claims` や繰り返された `claims` も、`acr` を名指していないと判断できないので拒否する。このサーバーは `acr` を `acr_values` とその表を通してのみ保証する。リクエストを無視すれば、RP はそれが尊重されたと読むトークンを受け取ることになる。この拒否は `prompt=login` や `max_age` がブラウザーをログインへ送るより先に行う。`claims` のそれ以外の使い方は無視する。
+
+**未実装:** その拒否を除く `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
 **`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアもフェイルクローズになるが、それを判定としては扱わない: 対話的なリクエストはこれまでどおりログインページへ送り（ユーザーはそこで行動でき、ログイン経路は自分の障害を自分で報告する）、`prompt=none` のリクエストには `redirect_uri` で `temporarily_unavailable`（"session store unavailable"、RFC 6749 §4.1.2.1）を返す。`login_required` は誰もサインインしていないと RP に告げることになるが、障害にはそれが分からない。どちらの場合も障害は error レベルで 1 行、`authorize_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。
 
