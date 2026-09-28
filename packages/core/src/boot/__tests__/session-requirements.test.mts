@@ -168,6 +168,8 @@ const factor = (kind: string, amrValues: readonly string[], addsMfa: boolean): M
 });
 
 /** A name-keyed collector a host might try to hand in for a built-in kind. */
+const stores = [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule];
+
 const hostCollector = () => ({
 	kind: "name-keyed" as const,
 	register: () => {},
@@ -395,6 +397,70 @@ describe("a requirement that reaches nothing completes an interruption with an e
 		} finally {
 			await handle.dispose();
 		}
+	});
+});
+
+describe("a factor's amrValues are held at registration (D3)", () => {
+	it.each([
+		["absent", undefined],
+		["a string", "otp"],
+		["an empty string", [""]],
+		["a primary's marker", ["pwd"]],
+		["the federated marker", ["fed"]],
+		["mfa itself", ["mfa"]],
+	])(
+		"refuses a factor whose amrValues are %s as the contribution's failure, not a raw TypeError later",
+		async (_label, amrValues) => {
+			const broken = defineModule({
+				name: "test:factors",
+				contributes: {
+					mfaFactors: { totp: () => ({ ...factor("totp", [], true), amrValues }) as never },
+				},
+			});
+			const err = await refusal(
+				boot([broken, ...stores], { sessionRequirements: { expected: [] } }),
+			);
+			expect(err.reason).toBe("contribute-factory-failed");
+			expect(err.details).toMatchObject({
+				module: "test:factors",
+				kind: "mfaFactors",
+				name: "totp",
+			});
+			expect(err.message).toMatch(/amrValues/);
+		},
+	);
+});
+
+describe("the two declaration refusals run the cleanups, and carry what a cleanup threw (D7)", () => {
+	const closing = defineModule({
+		name: "test:closing",
+		provides: { closingSlot: () => 1 },
+		lifecycle: {
+			closingSlot: {
+				eager: true,
+				cleanup: () => {
+					throw new Error("closing failed");
+				},
+			},
+		},
+	} as never);
+
+	it("session-requirements-undeclared carries cleanupErrors", async () => {
+		const err = await refusal(
+			boot([closing, consumer({})], { sessionRequirements: { expected: ["ghost"] } }),
+		);
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.details).toMatchObject({
+			cleanupErrors: [{ module: "test:closing", componentKey: "closingSlot" }],
+		});
+	});
+
+	it("session-requirement-missing carries cleanupErrors", async () => {
+		const err = await refusal(boot([closing], { mfa: { mode: "required" } }));
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({
+			cleanupErrors: [{ module: "test:closing", componentKey: "closingSlot" }],
+		});
 	});
 });
 
@@ -691,7 +757,6 @@ describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
 				},
 			},
 		} as never);
-	const stores = [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule];
 	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
 
 	it("accepts an MFA implementation: the ports required, the reach the factors' union with mfa, mfa.step_up declared", async () => {

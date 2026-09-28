@@ -282,6 +282,37 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		expect(() => resolverForTests("x" as never)).toThrow(RangeError);
 	});
 
+	it("holds a fixture to boot's rules by default — a non-empty reach under any name but mfa, a reserved value, a reach without a page are refused — and lifts the reach rules under allowAnyReach for the merge-table tests", () => {
+		const page = { url: "/x", params: {} };
+		expect(() =>
+			resolverForTests([requirement("x", { reach: new Set(["risk-ok"]), stepUpPage: page })]),
+		).toThrow(/mfa/);
+		expect(() =>
+			resolverForTests([requirement("x", { reach: new Set(["otp"]), stepUpPage: page })]),
+		).toThrow(RangeError);
+		expect(() => resolverForTests([requirement("x", { reach: new Set(["risk-ok"]) })])).toThrow(
+			/where the step-up starts/,
+		);
+		expect(
+			resolverForTests([
+				requirement("mfa", {
+					reach: new Set(["otp", "mfa"]),
+					stepUpPage: page,
+					remediations: ["mfa.step_up"],
+				}),
+			])
+				.get("mfa")
+				?.reach.has("otp"),
+		).toBe(true);
+		const lifted = resolverForTests(
+			[requirement("x", { reach: new Set(["risk-ok"]), stepUpPage: page })],
+			{ allowAnyReach: true },
+		);
+		expect([...(lifted.get("x")?.reach ?? [])]).toEqual(["risk-ok"]);
+		// Still sealed under the opt-out: a snapshot, not the contributor's Set.
+		expect("add" in (lifted.get("x")?.reach as object)).toBe(false);
+	});
+
 	it("holds the page to the issuer given, and to its shape alone when none is", () => {
 		const paged = requirement("x", {
 			reach: new Set(["otp"]),
