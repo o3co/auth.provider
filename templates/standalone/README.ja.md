@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-09-26
+最終更新: 2026-09-28
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -137,6 +137,11 @@ Redis にあり、ユーザーセッションストアのデフォルトは memo
 保存のたびにプロセスを再起動する — 両者が分かれていると、再起動のあとブラウザの
 セッションは既に存在しない `UserSession` を指し、`/authorize` がループする
 （[Docker](#docker) を参照）。
+
+クライアントレジストリ `config/clients.yaml`（`CLIENT_PATH`）も読む。このファイルは
+デプロイごとのもの: scaffold は空のものを作るが、`.gitignore` がそれをプロジェクトの
+リポジトリから外すため、新しい clone には無く、作るまで起動はそのパスを挙げて失敗する
+— `config/clients.yaml.example` から作るか、クライアントの無いレジストリなら空で作る。
 
 下の鍵ペアは Node で生成する。これを動かすマシンには必ず Node がある。
 `openssl genpkey -algorithm ed25519` でもよいが、OpenSSL 1.1.1 以降が必要で、
@@ -372,6 +377,8 @@ federations {
 | `CLIENT_TYPE` | `yaml` | クライアントストアのバックエンド: `yaml` |
 | `CLIENT_PATH` | `./config/clients.yaml` | YAML クライアントレジストリのパス |
 
+レジストリはデプロイごとの設定である: `.gitignore` は `config/clients.yaml` を git から、`.dockerignore` はイメージから外し、本番の compose ファイルがそれをマウントする（[Docker](#docker) を参照）。
+
 ### ユーザーリポジトリ
 
 | 変数 | デフォルト | 説明 |
@@ -572,10 +579,15 @@ openssl genpkey -algorithm ed25519 -out jwt-private.pem
 openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 chmod 600 jwt-private.pem
 
+# クライアントレジストリも必須の入力: scaffold の config/clients.yaml か、
+# config/clients.yaml.example から作ったもの。
+
 docker compose -f docker-compose.production.yml up -d --build
 ```
 
-**コンテナ内の鍵。** pem のペアは compose の **secret** としてコンテナに届き、`/run/secrets/` に read-only でマウントされ、compose ファイルが `OAUTH_JWT_*_KEY_PATH` をそこに向ける。`config/` に置いてはならない: `Dockerfile` はこのディレクトリを `COPY` するため、そこに置いた鍵はイメージレイヤーに焼き込まれ、push のたびに一緒に運ばれる — 保管場所を誤っただけの鍵ではなく、ローテーションしなければならない鍵になる。`.env` も同様である。どちらも git の外に置くこと。
+**コンテナ内の鍵。** pem のペアは compose の **secret** としてコンテナに届き、`/run/secrets/` に read-only でマウントされ、compose ファイルが `OAUTH_JWT_*_KEY_PATH` をそこに向ける。`config/` に置いてはならない: `Dockerfile` はこのディレクトリを `COPY` する。`.dockerignore` は、`.gitignore` が git から外すのと同じく、すべての `*.pem` と `*.key` をビルドコンテキストから外すが、それ以外の名前でそこに置いた鍵はイメージレイヤーに焼き込まれ、push のたびに一緒に運ばれる — 保管場所を誤っただけの鍵ではなく、ローテーションしなければならない鍵になる。`.env` も同様である。どちらも git の外に置くこと。
+
+**コンテナ内のクライアントレジストリ。** `config/clients.yaml` も同じ経路で、compose の secret `client_registry` として届き、`CLIENT_PATH` がそこを指す。これはデプロイごとのもので、クライアントのシークレットを含みうるため、`.dockerignore` がビルドコンテキストから外す: どのイメージもレジストリを持たず、作業コピーからビルドしたイメージと clean checkout からビルドしたイメージは同じになる。ファイルが存在するまで compose は起動を拒否する。別の方法でイメージを動かすなら、自分でマウントして `CLIENT_PATH` を設定する。
 
 production ファイルは `environment:` ブロックで `SESSION_SECURE=true` と `__Host-` の Cookie 名も固定しており、これは `env_file` より優先される。`.env.example` は plain-HTTP の compose 実行（`make dev`）が `__Host-` Cookie の検査に引っかからないよう `SESSION_SECURE=false` を同梱しており、このファイルはその同じ `.env` を要求する — このファイルが前提とする TLS の背後では、非 Secure のセッション Cookie は、平文区間を 1 つでも読める相手にセッションを渡すことに等しい。
 
