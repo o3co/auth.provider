@@ -139,7 +139,7 @@ describe("the totp factor's declaration (D7, D14, D21)", () => {
 		expect(factor.guessable).toBe(true);
 	});
 
-	it("needs no challenge, and every user can enroll one", () => {
+	it("needs no challenge, and declares no enrollable check: it is offered to every account", () => {
 		expect(factor.challenge).toBeUndefined();
 		expect(factor.reusableChallenge).toBeUndefined();
 		expect(factor.enrollable).toBeUndefined();
@@ -345,7 +345,7 @@ describe("enrolling a TOTP factor (F6; core's contract requires it of every fact
 		);
 	});
 
-	it("refuses to label a factor for an account with neither an email nor a username", async () => {
+	it("throws for an account with neither an email nor a username — a User core's type forbids, username being required, so a broken Store answer the coordinator reads as an outage", async () => {
 		await expect(factor.beginEnrollment(enrollmentContext({ id: "u-x" }))).rejects.toThrow(
 			RangeError,
 		);
@@ -392,7 +392,9 @@ describe("enrolling a TOTP factor (F6; core's contract requires it of every fact
 	it("refuses a wrong proof as invalid and one it cannot read as malformed", async () => {
 		const begun = await factor.beginEnrollment(enrollmentContext());
 		const secret = decodeBase32(begun.state.secret as string) as Buffer;
-		const wrong = String((Number(codeAt(T, secret)) + 1) % 1_000_000).padStart(6, "0");
+		// The secret is random: a code checked to be none of the window's.
+		const window = new Set([T - 1, T, T + 1].map((step) => codeAt(step, secret)));
+		const wrong = ["000000", "111111", "222222", "333333"].find((code) => !window.has(code));
 		expect(await factor.completeEnrollment(completionContext(begun.state, wrong))).toEqual({
 			ok: false,
 			reason: "invalid",
