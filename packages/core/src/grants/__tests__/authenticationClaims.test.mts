@@ -90,10 +90,7 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 	});
 
 	it("adds email and not mfa for an email code that does not add it (O7)", () => {
-		expect(composeAmr(["pwd"], { amr: [EMAIL_OTP_AMR], addsMfa: false })).toEqual([
-			"pwd",
-			"email",
-		]);
+		expect(composeAmr(["pwd"], { amr: [EMAIL_OTP_AMR], addsMfa: false })).toEqual(["pwd", "email"]);
 	});
 
 	it("adds recovery and mfa for a recovery code", () => {
@@ -126,9 +123,7 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 		// default — could put it on a session by listing it, and meet
 		// `urn:o3co:acr:mfa` with a mailbox (O7).
 		expect(() => composeAmr(["pwd"], { amr: [MFA_AMR], addsMfa: false })).toThrow(RangeError);
-		expect(() => composeAmr(["pwd"], { amr: ["otp", MFA_AMR], addsMfa: true })).toThrow(
-			RangeError,
-		);
+		expect(() => composeAmr(["pwd"], { amr: ["otp", MFA_AMR], addsMfa: true })).toThrow(RangeError);
 	});
 
 	it.each([

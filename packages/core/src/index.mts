@@ -300,7 +300,16 @@ export {
 	supportsRefresh,
 } from "./federations/types.mjs";
 // The authentication claims a token may carry (#481)
-export { wellFormedAcr, wellFormedAmr } from "./grants/authenticationClaims.mjs";
+export {
+	composeAmr,
+	EMAIL_OTP_AMR,
+	FEDERATED_AMR,
+	MFA_AMR,
+	PASSWORD_AMR,
+	RECOVERY_CODE_AMR,
+	wellFormedAcr,
+	wellFormedAmr,
+} from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
 // The ONE cnf/token-binding comparison matrix (#324) — consumed by the

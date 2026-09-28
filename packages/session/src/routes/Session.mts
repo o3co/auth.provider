@@ -25,6 +25,7 @@ import {
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
+	PASSWORD_AMR,
 	type RateLimiter,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
@@ -461,7 +462,7 @@ export const createRouter = (
 							expiresAt,
 							claims,
 							// #481: a password login (RFC 8176 `pwd`).
-							amr: ["pwd"],
+							amr: [PASSWORD_AMR],
 						});
 					} catch (err) {
 						// Fail-closed: the store's outage, answered as one — never a

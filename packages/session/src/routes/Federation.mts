@@ -22,6 +22,7 @@ import {
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
+	FEDERATED_AMR,
 	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
@@ -93,13 +94,9 @@ const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
 /**
  * #481 — the `amr` a federated login records: whatever the upstream IdP
  * asserted (a provider that surfaces the id_token's `amr` puts it on the
- * profile) plus `fed`, the deployment-defined marker for "authenticated
- * through a federation". RFC 8176 registers no value for that, and OIDC
- * Core leaves `amr` values to the deployment, so the marker is documented
- * rather than borrowed.
+ * profile) plus core's `FEDERATED_AMR` (`fed`), the deployment-defined
+ * marker for "authenticated through a federation".
  */
-export const FEDERATED_AMR = "fed";
-
 const federatedAmr = (profile: Readonly<Record<string, unknown>>): readonly string[] => {
 	const upstream =
 		Array.isArray(profile.amr) && profile.amr.every((v) => typeof v === "string")
