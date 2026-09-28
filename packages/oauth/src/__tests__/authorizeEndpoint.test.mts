@@ -41,6 +41,11 @@ import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import {
+	ACR_VALUE_UNSATISFIABLE,
+	logUnsatisfiableAcrValues,
+	vouchableAcrValues,
+} from "#/acrValues.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -2032,5 +2037,29 @@ describe("/authorize — mfa.mode as the acr table's boot line reads it", () => 
 				logger: createMockLogger(),
 			}),
 		).rejects.toThrow(RangeError);
+	});
+});
+
+describe("the acr drop's boot line for an entry with an empty alternative", () => {
+	it("says the entry has an alternative that requires nothing, so an empty unproducible list is not the whole story", () => {
+		// A table built by hand — `readAcrTable` and the schema never build
+		// one — whose only alternative requires nothing: nothing is missing,
+		// and it is still never met.
+		const logger = createMockLogger();
+		const { dropped } = vouchableAcrValues(
+			{ "urn:example:any": [[]], "urn:example:kba": [["kba"]] },
+			undefined,
+		);
+		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ acr: "urn:example:any", unproducible: [], emptyAlternative: true },
+				ACR_VALUE_UNSATISFIABLE,
+			],
+			[{ acr: "urn:example:kba", unproducible: ["kba"] }, ACR_VALUE_UNSATISFIABLE],
+		]);
+		for (const level of [logger.info, logger.error, logger.debug, logger.trace, logger.fatal]) {
+			expect(level).not.toHaveBeenCalled();
+		}
 	});
 });

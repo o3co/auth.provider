@@ -637,10 +637,20 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 		const { table, dropped } = vouchableAcrTable(configured, nothingInstalled);
 		expect(Object.keys(table)).toEqual([PWD]);
 		expect(dropped).toEqual([
-			{ acr: "urn:example:fed", unproducible: ["fed"], forWantOfSecondFactor: false },
-			{ acr: MFA, unproducible: ["mfa"], forWantOfSecondFactor: true },
-			{ acr: PHR, unproducible: ["hwk", "swk"], forWantOfSecondFactor: true },
-			{ acr: KBA, unproducible: ["kba"], forWantOfSecondFactor: false },
+			{
+				acr: "urn:example:fed",
+				unproducible: ["fed"],
+				forWantOfSecondFactor: false,
+				emptyAlternative: false,
+			},
+			{ acr: MFA, unproducible: ["mfa"], forWantOfSecondFactor: true, emptyAlternative: false },
+			{
+				acr: PHR,
+				unproducible: ["hwk", "swk"],
+				forWantOfSecondFactor: true,
+				emptyAlternative: false,
+			},
+			{ acr: KBA, unproducible: ["kba"], forWantOfSecondFactor: false, emptyAlternative: false },
 		]);
 	});
 
@@ -695,7 +705,12 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 		// The `hwk` alternative lacks only a value a second factor adds: MFA
 		// installed would meet it, which is what decides the boot line's level.
 		expect(dropped).toEqual([
-			{ acr: KBA, unproducible: ["kba", "hwk"], forWantOfSecondFactor: true },
+			{
+				acr: KBA,
+				unproducible: ["kba", "hwk"],
+				forWantOfSecondFactor: true,
+				emptyAlternative: false,
+			},
 		]);
 	});
 
@@ -705,7 +720,12 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 			nothingInstalled,
 		);
 		expect(dropped).toEqual([
-			{ acr: KBA, unproducible: ["kba", "mfa"], forWantOfSecondFactor: false },
+			{
+				acr: KBA,
+				unproducible: ["kba", "mfa"],
+				forWantOfSecondFactor: false,
+				emptyAlternative: false,
+			},
 		]);
 	});
 
@@ -717,8 +737,8 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 		);
 		expect(Object.keys(table)).toEqual([PWD]);
 		expect(dropped).toEqual([
-			{ acr: KBA, unproducible: [], forWantOfSecondFactor: false },
-			{ acr: PHR, unproducible: ["hwk"], forWantOfSecondFactor: true },
+			{ acr: KBA, unproducible: [], forWantOfSecondFactor: false, emptyAlternative: true },
+			{ acr: PHR, unproducible: ["hwk"], forWantOfSecondFactor: true, emptyAlternative: true },
 		]);
 		// Even under a trusted federation, which can produce anything.
 		const trusted = vouchableAcrTable(
