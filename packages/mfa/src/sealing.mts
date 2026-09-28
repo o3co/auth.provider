@@ -31,8 +31,11 @@
  *   write a lone surrogate as U+FFFD's bytes, making two bindings one.
  *   Sealing and digesting refuse such a part; opening answers `unreadable`.
  * - **What is sealed is what opening gives back**: a JSON object of JSON
- *   values — nothing JSON would change, drop or refuse (a Date, a Map, a
- *   `toJSON`, a BigInt, NaN, a cycle) — or a `RangeError` that quotes nothing.
+ *   values — plain objects and real arrays, nothing JSON would change, drop
+ *   or refuse (a Date, a Map, a `toJSON`, a BigInt, NaN, a cycle), and no
+ *   accessor at any depth — or a `RangeError` that quotes nothing. The value
+ *   is read once, into a copy, and the copy is what is serialised: nothing a
+ *   getter answers can differ between the check and the text.
  * - **Opening never throws** on what it is handed: `unreadable` for anything
  *   that is not its envelope or does not open to a JSON object under this
  *   binding — which no key would cure — and `key_unavailable`, naming the
@@ -161,32 +164,62 @@ const bindingRecord = (parts: readonly unknown[]): Buffer | undefined =>
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** What {@link jsonCopy} answers for a value JSON would not give back as it is. */
+const NOT_JSON: unique symbol = Symbol("not JSON");
+
+/** Whether any own property of `value` — enumerable or not, keyed by a string or a symbol — is an accessor. */
+const hasAccessor = (value: object): boolean =>
+	Reflect.ownKeys(value).some((key) => {
+		const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+		return descriptor !== undefined && !("value" in descriptor);
+	});
+
 /**
- * Whether JSON gives `value` back as it is: `null`, a boolean, a finite
- * number, a string, a list of such values, or a plain object whose values
- * are such values or `undefined` (which JSON leaves out). Not a Date, a Map,
- * a class instance, anything with a `toJSON`, a BigInt, a function, NaN or
- * Infinity, a cycle, or a hole or `undefined` in a list — each of which JSON
- * would change, drop or refuse.
+ * A copy of `value` made of what its own data properties hold, each read
+ * once, through its descriptor — or {@link NOT_JSON} when JSON would not give
+ * it back as it is. JSON's: `null`, a boolean, a finite number, a string, a
+ * real array (its prototype `Array.prototype`) of such values with no hole
+ * and no `undefined`, or a plain object (its prototype `Object.prototype` or
+ * none) whose enumerable values are such values or `undefined`, which JSON
+ * leaves out and the copy does too. Refused: an accessor anywhere — a getter
+ * or a setter, on an object or at an index, at any depth — since a getter
+ * could answer this check one thing and the serialisation another; a Date, a
+ * Map, a class instance, an Array subclass, a function (a `toJSON` among
+ * them), a BigInt, NaN or Infinity, a cycle. What is serialised is the copy:
+ * the value that was checked, and nothing read again.
  */
-function isJsonValue(value: unknown, ancestors: Set<object>): boolean {
-	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-	if (typeof value === "number") return Number.isFinite(value);
-	if (typeof value !== "object" || ancestors.has(value)) return false;
-	if (typeof (value as { toJSON?: unknown }).toJSON === "function") return false;
+function jsonCopy(value: unknown, ancestors: Set<object>): unknown {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+	if (typeof value === "number") return Number.isFinite(value) ? value : NOT_JSON;
+	if (typeof value !== "object" || ancestors.has(value) || hasAccessor(value)) return NOT_JSON;
+	const prototype = Object.getPrototypeOf(value);
 	ancestors.add(value);
 	try {
 		if (Array.isArray(value)) {
-			for (let index = 0; index < value.length; index++) {
-				if (!(index in value) || !isJsonValue(value[index], ancestors)) return false;
+			if (prototype !== Array.prototype) return NOT_JSON;
+			// An array's length is an own data property it cannot redefine: read once.
+			const length = Reflect.getOwnPropertyDescriptor(value, "length")?.value as number;
+			const copy: unknown[] = [];
+			for (let index = 0; index < length; index++) {
+				// A hole has no descriptor; `undefined` JSON would write as null.
+				const descriptor = Reflect.getOwnPropertyDescriptor(value, String(index));
+				if (descriptor === undefined || descriptor.value === undefined) return NOT_JSON;
+				const entry = jsonCopy(descriptor.value, ancestors);
+				if (entry === NOT_JSON) return NOT_JSON;
+				copy.push(entry);
 			}
-			return true;
+			return copy;
 		}
-		const prototype = Object.getPrototypeOf(value);
-		if (prototype !== Object.prototype && prototype !== null) return false;
-		return Object.values(value).every(
-			(entry) => entry === undefined || isJsonValue(entry, ancestors),
-		);
+		if (prototype !== Object.prototype && prototype !== null) return NOT_JSON;
+		const copy: Record<string, unknown> = Object.create(null);
+		for (const key of Object.keys(value)) {
+			const entry: unknown = Reflect.getOwnPropertyDescriptor(value, key)?.value;
+			if (entry === undefined) continue;
+			const copied = jsonCopy(entry, ancestors);
+			if (copied === NOT_JSON) return NOT_JSON;
+			copy[key] = copied;
+		}
+		return copy;
 	} finally {
 		ancestors.delete(value);
 	}
@@ -194,15 +227,16 @@ function isJsonValue(value: unknown, ancestors: Set<object>): boolean {
 
 /**
  * `value` as JSON text, when it is a JSON object JSON gives back as it is —
- * which {@link isJsonValue} checks value by value, so parsing the text gives
- * back an equal object — and `undefined` otherwise. Never throws.
+ * the text of the copy {@link jsonCopy} checked, so parsing it gives back an
+ * equal object — and `undefined` otherwise. Never throws.
  */
 function jsonObjectText(value: unknown): string | undefined {
 	if (!isJsonObject(value)) return undefined;
 	try {
-		return isJsonValue(value, new Set()) ? JSON.stringify(value) : undefined;
+		const copy = jsonCopy(value, new Set());
+		return copy === NOT_JSON ? undefined : JSON.stringify(copy);
 	} catch {
-		// A getter that throws, or anything else JSON cannot write.
+		// A Proxy whose traps throw, or anything else that cannot be read.
 		return undefined;
 	}
 }
