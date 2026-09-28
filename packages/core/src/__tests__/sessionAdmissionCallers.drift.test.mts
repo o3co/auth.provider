@@ -378,11 +378,6 @@ const TOKEN_SIDE =
 const ALLOWED: ReadonlyArray<AllowedSites> = [
 	// The oauth consumers, until A3.
 	{
-		file: "packages/oauth/src/routes/consent.mts",
-		sites: { get: 1 },
-		why: `${UNTIL_A3}: refuseUnlessLive's read`,
-	},
-	{
 		file: "packages/oauth/src/grants/session.mts",
 		sites: { get: 1 },
 		why: `${UNTIL_A3}: the session grant's read of the tracked session`,

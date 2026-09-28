@@ -1281,8 +1281,11 @@ export const createOAuthRouter = async (
 				clientRepository,
 				auditSink,
 				logger,
-				// #527 review: the same liveness read `/authorize` performs.
+				// #527 review: the same reading `/authorize` makes, through
+				// admission with the same slots (the session-admission ADR's D8).
 				userSessionStore,
+				subjectRevocation,
+				requirements,
 			}),
 		);
 	}
