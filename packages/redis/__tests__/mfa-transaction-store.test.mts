@@ -303,6 +303,28 @@ describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D2
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
 	});
 
+	it("settles nothing on a subject state it cannot read: the refusal comes before any write", async () => {
+		// Lua's isolation is not a transaction: a script that wrote and then
+		// failed on a corrupt field would leave the reservation half-settled.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const reserved = await store.reserveSubjectAttempt("user-1", t, POLICY, undefined);
+		if (!reserved.ok) throw new Error("expected a reservation");
+		await first().hset(lock, "r:x", "garbage");
+		for (const outcome of ["success", "void", "failure"] as const) {
+			await expect(
+				store.settleSubjectAttempt("user-1", reserved.reservation, outcome),
+				outcome,
+			).rejects.toThrow(/subject state/);
+			expect(await first().hget(lock, `p:${reserved.reservation}`), outcome).not.toBeNull();
+			expect(await first().hget(lock, `r:${reserved.reservation}`), outcome).not.toBeNull();
+			expect(await first().zscore(week, reserved.reservation), outcome).toBe(String(t));
+		}
+	});
+
 	it("refuses to judge an attempt on a subject state it cannot read: an outage, never a pass", async () => {
 		// The lock is what bounds guessing: a state read as empty would lift
 		// every hold. The script refuses, and the store's caller answers 503.
