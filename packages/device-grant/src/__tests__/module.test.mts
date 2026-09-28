@@ -622,7 +622,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				.send({ action, user_code: "BCDF-GHJK" });
 		const approve = await verify("approve");
 		expect(approve.status).toBe(403);
-		expect(approve.body).toMatchObject({ error: "step_up_required", requirement: "fixture" });
+		expect(approve.body).toMatchObject({
+			error: "step_up_required",
+			requirement: "fixture",
+			// Resolved on the issuer the module reads, oauth.jwt.issuer.
+			page: "https://as.example.test/step-up",
+		});
 		expect((await verify("lookup")).status).toBe(404);
 	});
 

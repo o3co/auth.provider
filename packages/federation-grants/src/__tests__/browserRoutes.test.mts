@@ -27,7 +27,6 @@
 import { randomUUID } from "node:crypto";
 import {
 	type AuditEvent,
-	consoleLogger,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
@@ -2465,12 +2464,16 @@ describe("connect — what an outage logs", () => {
 		},
 	);
 
-	it("logs the session store that could not answer once, as admission's line (the session-admission ADR's D10)", async () => {
-		const { w, response } = await connectWith((w) => w.state.faults.set("userSessionStore.get", 0));
+	it("logs the session store that could not answer once, as admission's line (the session-admission ADR's D10), with the grant and the request's id", async () => {
+		const { w, response, grantId } = await connectWith((w) =>
+			w.state.faults.set("userSessionStore.get", 0),
+		);
 		expect(response.status).toBe(503);
 		isPlain(response);
 		expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
 		expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
+			grantId,
+			correlationId: response.headers["x-request-id"],
 			store: "user_session",
 			action: "federation_grants.connect",
 			err: injected("userSessionStore.get"),
@@ -2479,12 +2482,14 @@ describe("connect — what an outage logs", () => {
 
 	it("names the sessions boundary, and a value from it that is not one, in admission's line", async () => {
 		for (const boundary of [new Error("boundary down"), "yesterday"]) {
-			const { w, response } = await connectWith((w) => {
+			const { w, response, grantId } = await connectWith((w) => {
 				w.state.sessionsBoundary = boundary as never;
 			});
 			expect(response.status).toBe(503);
 			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
 			expect(payloadOf(w.lines, "session_admission_unavailable")).toMatchObject({
+				grantId,
+				correlationId: response.headers["x-request-id"],
 				store: "revocation_boundary",
 				action: "federation_grants.connect",
 				err: { name: boundary instanceof Error ? "Error" : "TypeError" },
@@ -2543,7 +2548,7 @@ describe("consent — what an outage logs", () => {
 
 	it("logs the judgement that could not be made, which it used to answer in silence — the session's part as admission's line", async () => {
 		const w = world();
-		const { challenge } = await asked(w);
+		const { challenge, grantId } = await asked(w);
 		w.state.sessionsBoundary = new Error("boundary down");
 		const response = await w.page(challenge, "b-1");
 		expect(response.status).toBe(503);
@@ -2553,6 +2558,8 @@ describe("consent — what an outage logs", () => {
 		});
 		expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
 		expect(payloadOf(w.lines, "session_admission_unavailable")).toMatchObject({
+			grantId,
+			correlationId: response.headers["x-request-id"],
 			store: "revocation_boundary",
 			action: "federation_grants.consent",
 			err: { name: "Error", detail: "boundary down" },
@@ -2743,12 +2750,14 @@ describe("the callback — what an outage logs", () => {
 		"logs the session store that could not answer %s once, as admission's line",
 		async (_label, passes) => {
 			const w = world();
-			const { response } = await unavailable(w, () =>
+			const { response, grantId } = await unavailable(w, () =>
 				w.state.faults.set("userSessionStore.get", passes),
 			);
 			expect(returned(response).get("error")).toBe("temporarily_unavailable");
 			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
 			expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
+				grantId,
+				correlationId: response.headers["x-request-id"],
 				store: "user_session",
 				action: "federation_grants.callback",
 				err: injected("userSessionStore.get"),
@@ -3132,6 +3141,8 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 			"error session_admission_unavailable",
 		]);
 		expect(payloadOf(connecting.lines, "session_admission_unavailable")).toMatchObject({
+			grantId: lodged.grantId,
+			correlationId: connected.headers["x-request-id"],
 			store: "fixture",
 			action: "federation_grants.connect",
 			err: { name: "Error", detail: "risk engine down" },
@@ -3212,22 +3223,28 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 		expect(w.events.filter((e) => e.type === "federation.grant.authorization_failed")).toEqual([]);
 	});
 
-	it("writes admission's outage line to core's console logger when no logger is wired", async () => {
-		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+	it("writes admission's outage line to core's console logger when no logger is wired, the grant bound to it", async () => {
+		// Core's console logger writes through `console`; a child of it too.
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 		try {
 			const w = world({ withoutLogger: true });
-			const { handle } = await w.lodge();
+			const { handle, grantId } = await w.lodge();
 			w.signIn("b-1");
 			w.state.faults.set("userSessionStore.get", 0);
 			expect((await w.connect(handle, "b-1")).status).toBe(503);
 			expect(spy).toHaveBeenCalledTimes(1);
 			expect(spy.mock.calls[0]?.[1]).toBe("session_admission_unavailable");
+			expect(spy.mock.calls[0]?.[0]).toMatchObject({ grantId, store: "user_session" });
 		} finally {
 			spy.mockRestore();
 		}
 	});
 
-	it("refuses to be built without requirements", () => {
+	it("refuses to be built without requirements, or with a resolver the planner did not build", () => {
 		expect(() => createFederationGrantBrowserRouter({} as never)).toThrow(/requirements/);
+		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+		expect(() => createFederationGrantBrowserRouter({ requirements: forged } as never)).toThrow(
+			/sessionRequirementResolver the boot planner built/,
+		);
 	});
 });

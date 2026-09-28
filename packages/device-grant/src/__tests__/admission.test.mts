@@ -44,6 +44,7 @@ import { LIVE_SID, liveCookieSession, liveSessionStore } from "./liveSessions.mj
 
 /** The handler's clock, and the instant each fixed session authenticated at. */
 const NOW = 1_800_000_000_000;
+const ISSUER = "https://as.example.test";
 const USER_CODE = "BCDFGHJK";
 const DEVICE_CODE = "dc-aaaaaaaaaaaaaaaaaaaa";
 
@@ -64,10 +65,11 @@ const ACTIONS = ["lookup", "approve", "deny"] as const;
 const fixture = (
 	answer: (input: RequirementInput) => RequirementVerdict,
 	asked: RequirementInput[] = [],
+	stepUpPage: SessionRequirement["stepUpPage"] = { url: "/step-up", params: {} },
 ): SessionRequirement => ({
 	name: "fixture",
 	reach: new Set<string>(),
-	stepUpPage: { url: "/step-up", params: {} },
+	stepUpPage,
 	remediations: [],
 	hintKeys: [],
 	admit: async (input) => {
@@ -115,7 +117,8 @@ const harness = async (options: HarnessOptions = {}) => {
 			}),
 			failMode: "closed",
 			userSessionStore: options.userSessionStore ?? liveSessionStore(),
-			requirements: resolverForTests(options.requirements ?? []),
+			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
+			issuer: ISSUER,
 			requireEmailVerified: options.requireEmailVerified ?? false,
 			now: () => NOW,
 			logger,
@@ -214,6 +217,9 @@ describe("device verification on session admission (the session-admission ADR's 
 			error: "step_up_required",
 			error_description: "the session must step up before it can do this",
 			requirement: "fixture",
+			// The requirement's page on the issuer (the ADR's D8): a browser-facing
+			// consumer answers where the step-up starts.
+			page: `${ISSUER}/step-up`,
 		});
 		expect(await undecided()).toBe(true);
 		// The lookup the same requirement admits is answered.
@@ -334,6 +340,73 @@ describe("device verification on session admission (the session-admission ADR's 
 		expect((await verify({ action: "approve", user_code: USER_CODE })).status).toBe(200);
 		expect(get).toHaveBeenCalledTimes(1);
 		expect(get).toHaveBeenCalledWith(LIVE_SID);
+	});
+
+	it.each([
+		[
+			"a path, with its params",
+			{ url: "/mfa/step-up", params: { flow: "device", ui: "compact" } },
+			`${ISSUER}/mfa/step-up?flow=device&ui=compact`,
+		],
+		[
+			"an absolute URL on the issuer, its own query kept",
+			{ url: `${ISSUER}/mfa?x=1`, params: { flow: "device" } },
+			`${ISSUER}/mfa?x=1&flow=device`,
+		],
+	] as const)(
+		"answers the step-up page as an absolute URL on the issuer — %s — with no return parameter",
+		async (_label, stepUpPage, page) => {
+			const { verify } = await harness({
+				requirements: [
+					fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }), [], stepUpPage),
+				],
+			});
+			const res = await verify({ action: "approve", user_code: USER_CODE });
+			expect(res.status).toBe(403);
+			expect(res.body.page).toBe(page);
+			expect(new URL(res.body.page as string).searchParams.has("redirect_to")).toBe(false);
+		},
+	);
+
+	it("refuses to be built with a resolver the planner did not build: a forged one is a build error, not a 500 per request", () => {
+		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				rateLimiter: createMemoryRateLimiter({
+					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				}),
+				failMode: "closed",
+				userSessionStore: liveSessionStore(),
+				requirements: forged,
+				issuer: ISSUER,
+				requireEmailVerified: false,
+			} as never),
+		).toThrow(/sessionRequirementResolver the boot planner built/);
+	});
+
+	it("refuses to be built without an issuer to resolve a step-up page on", () => {
+		for (const issuer of [undefined, "", "not a url"]) {
+			expect(
+				() =>
+					createDeviceVerificationHandler({
+						store: createMemoryDeviceCodeStore(),
+						settings,
+						rateLimiter: createMemoryRateLimiter({
+							limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+							defaultLimit: { limit: 60, windowSeconds: 60 },
+						}),
+						failMode: "closed",
+						userSessionStore: liveSessionStore(),
+						requirements: resolverForTests([]),
+						...(issuer === undefined ? {} : { issuer }),
+						requireEmailVerified: false,
+					} as never),
+				String(issuer),
+			).toThrow(/issuer/);
+		}
 	});
 
 	it("refuses to be built without requirements, as it refuses to be built without a store", () => {
