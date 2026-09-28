@@ -62,7 +62,7 @@ import type {
 	NameKeyedCollector,
 	RouteCollector,
 } from "./types.mjs";
-import { validateManifests } from "./validate-manifests.mjs";
+import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
 // Public API — createApp (Per A2-β §6.2 / §6.4)
@@ -84,7 +84,8 @@ import { validateManifests } from "./validate-manifests.mjs";
  * routes, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
  * discoveryMetadata) are seeded by `mergeWithBuiltins`; consumer-supplied
  * kinds overlay on top — except `sessionRequirements` and `mfaFactors`,
- * which stage 1 refuses to see replaced (`session-requirement-kind-guard`).
+ * which `createApp` refuses to see replaced before the merge
+ * (`refuseGuardedHostKinds`, `session-requirement-kind-guarded`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
@@ -95,6 +96,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
 ): Promise<AppHandle> {
 	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = options;
+
+	// The session-admission ADR's D3: a host collector for `sessionRequirements`
+	// or `mfaFactors` is refused before anything is merged or validated.
+	refuseGuardedHostKinds(contributionKinds);
 
 	// Merge consumer kinds on top of built-in defaults. Per A2-β §6.2.
 	const merged = mergeWithBuiltins(contributionKinds);
@@ -107,7 +112,6 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		modules,
 		bootstrapComponents,
 		contributionKinds: merged,
-		hostContributionKinds: contributionKinds,
 		overrideComponents,
 	});
 	const validatedBootstrap = validated.bootstrapComponents;

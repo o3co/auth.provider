@@ -588,13 +588,16 @@ async function checkSessionRequirements(
 		}
 	}
 	const registered = registrations.map((registration) => registration.name);
-	const consumedBy = [...material.plan.depsBlueprint]
-		.filter(([, blueprint]) =>
-			[...blueprint.requires, ...blueprint.optional].includes(
-				"sessionRequirementResolver" as ComponentKey,
-			),
-		)
-		.map(([moduleName]) => moduleName);
+	// Who consults admission: the validated manifests' `requires` and
+	// `optional`, as each module declared them.
+	const consumedBy = material.plan.initOrder.filter((moduleName) => {
+		const normalised = material.plan.validated.byName.get(moduleName)?.normalised;
+		if (normalised === undefined) return false;
+		return [
+			...(normalised.requires as readonly string[]),
+			...(normalised.optional as readonly string[]),
+		].includes("sessionRequirementResolver");
+	});
 	const config = components.config;
 	// Before the declaration: a composition that asks for MFA without the
 	// module is told to install it, not to fix a list.

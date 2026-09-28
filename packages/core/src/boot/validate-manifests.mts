@@ -65,8 +65,6 @@ export interface ValidateManifestsInput {
 	readonly bootstrapComponents: BootstrapMap;
 	/** The merged collectors: core's built-ins under the host's. */
 	readonly contributionKinds?: ContributionKindMap;
-	/** What the host handed `createApp` as `contributionKinds`, before the merge: what the kind guard reads. */
-	readonly hostContributionKinds?: ContributionKindMap;
 	readonly overrideComponents?: Partial<ComponentMap>;
 }
 
@@ -511,16 +509,14 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
 /**
  * A requirement is switched off by not installing it, and nothing may
  * quietly remove one from behind the consumers: a module's
- * `overrides.sessionRequirements` is refused, and so is a host collector for
+ * `overrides.sessionRequirements` is refused here, at stage 1 —
+ * `session-requirement-kind-guarded`. A host collector for
  * `sessionRequirements` — or for `mfaFactors`, whose projection the MFA
- * requirement's reach is recomputed from — since the projection and the boot
- * line read the planner's collector. `session-requirement-kind-guarded`.
+ * requirement's reach is recomputed from — is refused under the same reason
+ * by `refuseGuardedHostKinds`, in `createApp` before the kinds are merged.
  * @internal
  */
-function checkSessionRequirementKindGuard(
-	rawModules: readonly Module[],
-	host: ContributionKindMap | undefined,
-): void {
+function checkSessionRequirementKindGuard(rawModules: readonly Module[]): void {
 	for (const m of rawModules) {
 		if (m.overrides !== undefined && Object.hasOwn(m.overrides, "sessionRequirements")) {
 			throw new BootError({
@@ -538,8 +534,19 @@ function checkSessionRequirementKindGuard(
 			});
 		}
 	}
+}
+
+/**
+ * The host's `contributionKinds` held to the same rule, in `createApp`
+ * before the kinds are merged and before stage 1 (the session-admission
+ * ADR's D3): a collector for `sessionRequirements` or `mfaFactors` the host
+ * supplies would sit behind the `sessionRequirementResolver` projection and
+ * the `session_requirements_registered` boot line, which read the planner's.
+ */
+export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): void {
+	if (host === undefined) return;
 	for (const kind of GUARDED_KINDS) {
-		if (host !== undefined && Object.hasOwn(host, kind)) {
+		if (Object.hasOwn(host, kind)) {
 			throw new BootError({
 				message:
 					`contributionKinds replaces the collector for "${kind}", which nothing may: the ` +
@@ -1587,8 +1594,6 @@ interface StageOneContext {
 	readonly bootstrapComponents: BootstrapMap;
 	readonly overrideComponents: Partial<ComponentMap> | undefined;
 	readonly contributionKinds: ContributionKindMap | undefined;
-	/** What the host handed in as `contributionKinds`, before core's built-ins were merged under it. */
-	readonly hostContributionKinds: ContributionKindMap | undefined;
 	readonly parsedConfig: unknown;
 	/**
 	 * Provides ∪ bootstrapComponents ∪ overrideComponents — the three
@@ -1652,7 +1657,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	{
 		id: "session-requirement-kind-guard",
 		spec: "A2-β §5.1 (after step 3): the session-admission ADR's D3",
-		run: (ctx) => checkSessionRequirementKindGuard(ctx.rawModules, ctx.hostContributionKinds),
+		run: (ctx) => checkSessionRequirementKindGuard(ctx.rawModules),
 	},
 	{
 		id: "requires-closure",
@@ -1785,13 +1790,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * output / same error. Per A2-β §5.1.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
-	const {
-		modules,
-		bootstrapComponents,
-		contributionKinds,
-		hostContributionKinds,
-		overrideComponents,
-	} = input;
+	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = input;
 
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
@@ -1802,7 +1801,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		bootstrapComponents,
 		overrideComponents,
 		contributionKinds,
-		hostContributionKinds,
 		parsedConfig: undefined,
 		plannedKeys: new Set<string>([
 			...normalisedModules.flatMap((m) => m.providesKeys as string[]),

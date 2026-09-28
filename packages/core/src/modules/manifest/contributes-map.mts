@@ -218,8 +218,9 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	/**
 	 * Session requirements (the session-admission ADR's D3), name-keyed:
 	 * projected by the synthetic key `sessionRequirementResolver`, which every
-	 * consumer of admission requires. Neither overridable nor replaceable
-	 * (`session-requirement-kind-guard`).
+	 * consumer of admission requires. Neither overridable (stage 1's
+	 * `session-requirement-kind-guard`) nor replaceable by a host collector
+	 * (`createApp`, before the kinds are merged).
 	 */
 	readonly sessionRequirements?: {
 		readonly [name: string]: SessionRequirementFactory<Deps>;

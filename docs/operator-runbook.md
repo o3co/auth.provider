@@ -639,6 +639,7 @@ stream — its level is fixed at `info`.
 
 | Event | Where | Why it pages |
 | --- | --- | --- |
+| `session_admission_unavailable` (error — `store`, `action` or `phase: "establishment"`, `err`) | `core/src/session-admission/admit.mts` | a consumer of an authenticated session — `/authorize`, consent, the session-bound grants, device verification, the federation-grants browser half, a login — met an outage in the session store, the revocation boundary, or a registered requirement (`store` names which), and answered fail-closed (`503`, or the grant's `temporarily_unavailable`). Never carries the `sid` |
 | `rate_limiter_failed_closed` / `rate_limiter_failed_open` (error) + audit `rate_limit.unavailable` | `core/src/ratelimit/guard.mts` | the limiter backend is erroring; closed means you are shedding login/token traffic, open means brute-force protection is off |
 | `standalone_redis_clients_error` (error) | `templates/standalone/src/modules.mts` | the shared socket's `error` events — fires during reconnects too, so alert on rate or duration, not on one line |
 | `session_store_redis_error` (error) | `session/src/store/factory.mts` | the cookie-session client; same reconnect caveat |
@@ -712,6 +713,8 @@ stream — its level is fixed at `info`.
 
 | Event | Where | Meaning |
 | --- | --- | --- |
+| `session_admission_subject_mismatch` (warn — `action`) + audit `session.admission.subject_mismatch` (`sid`, `carrier`, `claimedSubject`, `recordSubject`) | `core/src/session-admission/admit.mts` | a claim named a subject that is not the live record's — a cookie, a link transaction, a token or a code's second read against a session the record says belongs to someone else. Answered `not_live`; the identifiers are in the audit event alone |
+| `session_admission_no_subject` (warn — `action`) | `core/src/session-admission/admit.mts` | a cookie session says it is authenticated and names no user: not a session this provider wrote. Answered `not_live`, nothing read, nothing audited |
 | audit `device.rate_limited`; log `device_verification_rate_limited` (warn) | `device-grant/src/verificationEndpoint.mts` | an **account** (the key is the authenticated subject) is guessing device codes |
 | audit `device.decision_outcome_unknown` | `device-grant/src/verificationEndpoint.mts` | an approval or a denial met a device-code store outage and was answered `503`, but the store may have recorded it before the reply was lost. It carries the subject who decided and the `action`, but no client: the record could not be read. Read beside `device_verification_store_unavailable`: a device polling afterwards may have received tokens that no `device.approved` accounts for |
 | `jwt_verify_rejected` (warn) by `reason` | `core/src/jwt/verify.mts` | `kid_unknown` = a fabricated key id; `kid_expired` = a token signed with a key whose overlap window closed (see [§6](#6-key-rotation)); `revoked` = a revocation finding, or a fail-closed refusal when the watermark cannot be compared: a denylist hit, a token predating the subject's watermark, or a token with no `iat` while a watermark is in force (#376); `revocation_unavailable` = the denylist or the watermark store was unreachable — an outage, not a finding (#408 / #459); `verification_key_unavailable` = the keystore could not answer the lookup — an outage, answered `503`, never reported as `kid_unknown`; `signature` / `alg` / `iss` / `aud` / `typ` = malformed or foreign tokens |
@@ -729,6 +732,10 @@ stream — its level is fixed at `info`.
 
 | Event | Where | What to do |
 | --- | --- | --- |
+| `session_admission_remediation_undeclared` (warn — `action`; once per process per name) | `core/src/session-admission/admit.mts` | a route presented a `remediation` action that is not the object core issued to a registered requirement (a literal, a copy, or a name no requirement declared); it was treated as `credential_change`, so every requirement was asked. Have the route take `resolver.get(name).actions[route]` |
+| `session_admission_step_up_without_page` (warn — `requirement`; once per process per name) | `core/src/session-admission/admit.mts` | a requirement answered `step_up` while it registered no `stepUpPage`; taken as `unmet`. Register the page, or answer `unmet` |
+| `session_admission_step_up_without_session` (warn — `requirement`; once per process per name) | `core/src/session-admission/admit.mts` | a requirement answered `step_up` over no live session (no store, or a token without a record); taken as `reauthenticate`. A step-up needs a session to add to |
+| `session_requirements_registered` (info — `requirements: [{ name, module, remediations }]`, once at boot) | `core/src/boot/apply-contributions.mts` | not drift: the one boot line saying which session requirements this composition registered, in order. Compare it with `sessionRequirements.expected` when a boot refuses `session-requirements-undeclared` |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `deployment.mode` is unset; set it |
 | `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`) | `dpop/src/verifier.mts` | `oauth.dpop.replay-store-ttl-seconds` is below `2 × iat-window-seconds + 1`: a proof can outlive its replay record and be replayed while still inside its acceptance window. Raise it to `requiredTtlSeconds` or more. It was a sentence, with `reason: "replay_ttl_below_iat_window"` |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
@@ -806,7 +813,8 @@ check this page, so when the two disagree, the constant is right:
 `introspect.family_revoked`, `introspect.session_invalid`,
 `introspect.store_unavailable`,
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
-`rate_limit.unavailable`, `token.issued`, `token.issued.failure`.
+`rate_limit.unavailable`, `session.admission.subject_mismatch`,
+`token.issued`, `token.issued.failure`.
 
 None of the device events carries the user code or the device code
 (`packages/device-grant/README.md`).
