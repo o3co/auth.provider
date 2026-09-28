@@ -48,7 +48,9 @@ import { generateKeyPairSync, randomUUID, sign } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import {
+	type AdmissionDeps,
 	type AppConfig,
+	consoleLogger,
 	createMemoryWebAuthnCredentialStore,
 	defaultChallengeCeremonyModule,
 	defineModule,
@@ -59,8 +61,11 @@ import {
 	memoryDeviceCodeStoreModule,
 	memoryWebAuthnCredentialStoreModule,
 	type PrimaryAuthentication,
+	type PrimaryContinuation,
 	type RequirementInterruption,
+	resumePrimary,
 	type SessionRequirement,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
@@ -73,6 +78,7 @@ import {
 	tokenExchangeModule,
 } from "@o3co/auth-provider-oauth-token-exchange";
 import { redisChallengeStoreModule, redisDeviceCodeStoreModule } from "@o3co/auth-provider-redis";
+import { establishSession } from "@o3co/auth-provider-session";
 import {
 	type ComposeOptions,
 	type Composition,
@@ -85,6 +91,7 @@ import {
 	webauthnModule,
 	webauthnSessionSubjectModule,
 } from "@o3co/auth-provider-webauthn";
+import type { RequestHandler } from "express";
 import {
 	createFakeGithub,
 	type FakeGithub,
@@ -254,61 +261,211 @@ export const FIXTURE_INTERRUPTION = {
 	bare: { status: 403, body: { error: "fixture_bare_required" } },
 } as const;
 
+/** A ceremony a fixture requirement opened, as the full set records it for a test. */
+export interface FixtureCeremony {
+	readonly requirement: (typeof FIXTURE_REQUIREMENTS)[number];
+	/** The express session the ceremony is bound to: the one the interrupted route regenerated. */
+	readonly sessionId: string;
+	/** What core handed the requirement to persist, and what its completion presents to `resumePrimary`. */
+	readonly continuation: PrimaryContinuation;
+}
+
+/** Where each fixture requirement's completion route is mounted: `POST <path>/complete`. */
+export const FIXTURE_COMPLETION = {
+	page: "/fixture/page",
+	bare: "/fixture/bare",
+} as const;
+
+/** One of the express session's callback operations, as a promise of its failure. */
+const sessionOperation = (run: (done: (err: unknown) => void) => unknown): Promise<unknown> =>
+	new Promise((resolve) => {
+		try {
+			run((err) => resolve(err ?? undefined));
+		} catch (err) {
+			resolve(err);
+		}
+	});
+
+const FIXTURE_UNAVAILABLE = {
+	error: "temporarily_unavailable",
+	error_description: "Session store unavailable",
+};
+
 /**
  * Two session requirements a deployment might write, registered under the
  * `sessionRequirements` kind so the full set exercises the kind through the
  * template's boot (the session-admission ADR's D3, D7): one with a page — the
  * shape of a step-up, over an empty reach, since only the MFA requirement
- * adds vouched values in this release — and one bare. Each admits every use and interrupts the login of the subjects in
- * `interrupt` alone, so the full set's own logins run uninterrupted; the
- * step-up and interruption flows are the consumers' and the MFA module's
- * suites, which name a subject here to start one.
+ * adds vouched values in this release — and one bare. Each admits every use
+ * and interrupts the login of the subjects in `interrupt` alone, so the full
+ * set's own logins run uninterrupted.
+ *
+ * Each is also what a requirement's module is at establishment (D5): its
+ * interruption records the ceremony it opens — bound to the regenerated
+ * express session, with the continuation core built — in the requirement's
+ * own record (here, memory), and its completion route, `POST
+ * <FIXTURE_COMPLETION>/complete` on that session, completes it adding
+ * nothing (`amr: []`: the requirement reaches nothing), resumes the login
+ * through `resumePrimary`, and answers what admission answers: another
+ * requirement's interruption, opened on a regenerated session as the login
+ * route opens one, or the session established through the session package's
+ * exported `establishSession`. A requirement that reaches nothing leaves no
+ * trace in `recorded`, so it remembers which logins it completed and answers
+ * `establish` for them when it is asked again. Every ceremony opened is
+ * pushed on `ceremonies`, for a test to read.
  */
-function requirementModules(interrupt: ReadonlySet<string>): Module[] {
-	const interruption =
-		(answer: InterruptionAnswer) =>
-		async (primary: PrimaryAuthentication): Promise<"establish" | RequirementInterruption> =>
-			interrupt.has(primary.subject) ? { open: async () => answer } : "establish";
+function requirementModules(
+	interrupt: ReadonlySet<string>,
+	ceremonies: FixtureCeremony[],
+): Module[] {
 	// Neither reaches anything: in this release only the MFA requirement adds
 	// vouched values to a session, and a page may still stand with an empty
 	// reach (a step-up that adds no value).
 	const noReach: ReadonlySet<string> = new Set();
+	const fixture = (spec: {
+		readonly module: string;
+		readonly name: FixtureCeremony["requirement"];
+		readonly key: keyof typeof FIXTURE_COMPLETION;
+		readonly stepUpPage: SessionRequirement["stepUpPage"];
+		readonly remediations: readonly string[];
+		readonly hintKeys: readonly string[];
+	}): Module => {
+		const answer: InterruptionAnswer = FIXTURE_INTERRUPTION[spec.key];
+		/** The requirement's own record: each open ceremony by the session it is bound to. */
+		const opened = new Map<string, PrimaryContinuation>();
+		/** The logins it completed, by subject and `authTime`. */
+		const completed = new Set<string>();
+		const loginOf = (subject: string, authTimeMs: number): string => `${subject}@${authTimeMs}`;
+		const interruption: RequirementInterruption = {
+			open: async (sessionId, continuation) => {
+				opened.set(sessionId, continuation);
+				ceremonies.push({ requirement: spec.name, sessionId, continuation });
+				return answer;
+			},
+		};
+		return defineModule<
+			"config" | "userSessionStore" | "sessionRequirementResolver",
+			"subjectSessionIndex" | "logger"
+		>({
+			name: spec.module,
+			requires: ["config", "userSessionStore", "sessionRequirementResolver"],
+			optional: ["subjectSessionIndex", "logger"],
+			absencePolicies: { subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY },
+			contributes: {
+				sessionRequirements: {
+					[spec.name]: (): SessionRequirement => ({
+						name: spec.name,
+						get reach() {
+							return noReach;
+						},
+						stepUpPage: spec.stepUpPage,
+						remediations: spec.remediations,
+						hintKeys: spec.hintKeys,
+						admit: async () => ({ outcome: "met" }),
+						admitPrimary: async (primary: PrimaryAuthentication) =>
+							!interrupt.has(primary.subject) ||
+							completed.has(loginOf(primary.subject, primary.authTime.getTime()))
+								? "establish"
+								: interruption,
+					}),
+				},
+				routes: [
+					(deps) => {
+						const config = deps.config as AppConfig;
+						const logger = deps.logger ?? consoleLogger;
+						const admissionDeps: AdmissionDeps = {
+							userSessionStore: deps.userSessionStore,
+							subjectRevocation: undefined,
+							requirements: deps.sessionRequirementResolver,
+							acrTable: {},
+							logger,
+							auditSink: undefined,
+						};
+						// `POST <mountPath>/complete`, and nothing else beneath the path.
+						const complete: RequestHandler = async (req, res, next) => {
+							if (req.method !== "POST" || req.path !== "/complete") {
+								next();
+								return;
+							}
+							// The ceremony bound to the session this browser holds; spent here.
+							const continuation = opened.get(req.sessionID);
+							if (continuation === undefined) {
+								res.status(400).json({ error: "invalid_request" });
+								return;
+							}
+							opened.delete(req.sessionID);
+							completed.add(loginOf(continuation.primary.subject, continuation.primary.authTimeMs));
+							const admission = await resumePrimary(admissionDeps, continuation, {
+								requirement: spec.name,
+								adds: { amr: [] },
+							});
+							if (admission.outcome === "unavailable") {
+								res.status(503).json(FIXTURE_UNAVAILABLE);
+								return;
+							}
+							if (admission.outcome === "interrupt") {
+								// As the login route opens one: regenerate, open, save.
+								if (await sessionOperation((done) => req.session.regenerate(done))) {
+									res.status(503).json(FIXTURE_UNAVAILABLE);
+									return;
+								}
+								const next = await admission.open(req.sessionID);
+								if (await sessionOperation((done) => req.session.save(done))) {
+									res.status(503).json(FIXTURE_UNAVAILABLE);
+									return;
+								}
+								res.status(next.status).json(next.body);
+								return;
+							}
+							const established = await establishSession(admission.establishment, {
+								req,
+								userSessionStore: deps.userSessionStore,
+								...(deps.subjectSessionIndex
+									? { subjectSessionIndex: deps.subjectSessionIndex }
+									: {}),
+								sessionTtlMs: config.session.maxAge,
+								reporter: () => ({
+									storeUnavailable: (store, step, cause) =>
+										logger.error({ store, step, cause }, "fixture_completion_unavailable"),
+									cleanupFailed: (store, step, cause) =>
+										logger.warn({ store, step, cause }, "fixture_completion_cleanup_failed"),
+									subjectIndexWriteFailed: (cause) =>
+										logger.error({ cause }, "subject_session_index_write_failed"),
+								}),
+							});
+							if (established.outcome === "unavailable") {
+								res.status(503).json(FIXTURE_UNAVAILABLE);
+								return;
+							}
+							res.status(200).json({ message: "Logged in successfully" });
+						};
+						return {
+							id: `fixture-${spec.key}-completion`,
+							mountPath: FIXTURE_COMPLETION[spec.key],
+							after: ["session-middleware"],
+							handler: complete,
+						};
+					},
+				],
+			},
+		});
+	};
 	return [
-		defineModule({
-			name: "deployment:requirement-page",
-			contributes: {
-				sessionRequirements: {
-					"fixture-page": (): SessionRequirement => ({
-						name: "fixture-page",
-						get reach() {
-							return noReach;
-						},
-						stepUpPage: { url: "/fixture/step-up", params: { requirement: "fixture-page" } },
-						remediations: ["fixture-page.step_up"],
-						hintKeys: ["fixture_hint"],
-						admit: async () => ({ outcome: "met" }),
-						admitPrimary: interruption(FIXTURE_INTERRUPTION.page),
-					}),
-				},
-			},
+		fixture({
+			module: "deployment:requirement-page",
+			name: "fixture-page",
+			key: "page",
+			stepUpPage: { url: "/fixture/step-up", params: { requirement: "fixture-page" } },
+			remediations: ["fixture-page.step_up"],
+			hintKeys: ["fixture_hint"],
 		}),
-		defineModule({
-			name: "deployment:requirement-bare",
-			contributes: {
-				sessionRequirements: {
-					"fixture-bare": (): SessionRequirement => ({
-						name: "fixture-bare",
-						get reach() {
-							return noReach;
-						},
-						stepUpPage: undefined,
-						remediations: [],
-						hintKeys: [],
-						admit: async () => ({ outcome: "met" }),
-						admitPrimary: interruption(FIXTURE_INTERRUPTION.bare),
-					}),
-				},
-			},
+		fixture({
+			module: "deployment:requirement-bare",
+			name: "fixture-bare",
+			key: "bare",
+			stepUpPage: undefined,
+			remediations: [],
+			hintKeys: [],
 		}),
 	];
 }
@@ -406,6 +563,7 @@ function addedModules(
 	stores: AddedStores,
 	f: Fakes,
 	interrupt: ReadonlySet<string>,
+	ceremonies: FixtureCeremony[],
 ): Module[] {
 	return [
 		deviceGrantModule({ config }),
@@ -424,7 +582,7 @@ function addedModules(
 				]
 			: []),
 		grantPolicyModule,
-		...requirementModules(interrupt),
+		...requirementModules(interrupt, ceremonies),
 		...federationBridges(config, features, f),
 	];
 }
@@ -506,6 +664,8 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	readonly adjust?: (config: AppConfig) => AppConfig;
 	/** The subjects whose login both fixture requirements interrupt; none by default. */
 	readonly interruptLogins?: readonly string[];
+	/** Where the fixture requirements record each ceremony they open; a list of the boot's own by default. */
+	readonly ceremonies?: FixtureCeremony[];
 }
 
 export interface FullSet extends Composition {
@@ -532,9 +692,11 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		credentialStore: _credentialStore,
 		adjust: _adjust,
 		interruptLogins,
+		ceremonies,
 		...compose
 	} = options;
 	const interrupt = new Set(interruptLogins ?? []);
+	const opened = ceremonies ?? [];
 	return {
 		...compose,
 		referenceConfs: REFERENCE_CONFS,
@@ -543,7 +705,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 			const featured = withFeatures(adjusted, features);
 			return options.adjust ? options.adjust(featured) : featured;
 		},
-		extraModules: (config) => addedModules(config, features, added, f, interrupt),
+		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};
