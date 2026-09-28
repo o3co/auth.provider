@@ -360,7 +360,6 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 		for (const [label, over] of [
 			["a primary's marker", { reach: new Set(["pwd"]), stepUpPage: { url: "/x", params: {} } }],
 			["a reach without a page", { reach: new Set(["risk-ok"]) }],
-			["a page without a reach", { stepUpPage: { url: "/x", params: {} } }],
 		] as const) {
 			const err = await refusal(
 				boot([contributing("test:risk", { risk: () => requirement("risk", over) })], {
@@ -371,75 +370,48 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 		}
 	});
 
-	it("reads the reach after the name-keyed pass: a reach that fills as later contributions register is read whole", async () => {
-		let filled = false;
-		// A literal with a real getter: spreading `{ get reach() … }` into
-		// another object would read it once, at factory time.
-		const late = contributing("test:late", {
-			late: () => ({
-				name: "late",
-				get reach() {
-					return new Set(filled ? ["risk-ok"] : ["otp"]);
-				},
-				stepUpPage: { url: "/late", params: {} },
-				remediations: ["late.step_up"],
-				hintKeys: [],
-				admit: async () => ({ outcome: "met" }),
-			}),
-		});
-		const filler = defineModule({
-			name: "test:filler",
-			contributes: {
-				grants: {
-					"test:fill": () => {
-						filled = true;
-						return { handle: async () => ({}) } as never;
-					},
-				},
-			},
-		} as never);
-		// `late` registers before `filler`; a reach read at registration would
-		// still say `otp` and be refused.
-		const handle = await boot([late, filler], { sessionRequirements: { expected: ["late"] } });
-		await handle.dispose();
-	});
-
-	it("reads the reach once and seals it on the registered copy: the resolver answers a frozen snapshot, and a contributor that keeps a mutable Set changes nothing after boot", async () => {
-		let reads = 0;
-		const live = new Set(["risk-ok"]);
-		const risk = contributing("test:risk", {
-			risk: () => ({
-				name: "risk",
-				get reach() {
-					reads++;
-					return live;
-				},
-				stepUpPage: { url: "/risk", params: {} },
-				remediations: [],
-				hintKeys: [],
-				admit: async () => ({ outcome: "met" }),
-			}),
-		});
+	it("registers a page for a requirement that reaches nothing: a step-up that adds no value still starts somewhere", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
-		const handle = await boot([risk, consumer(seen)], {
-			sessionRequirements: { expected: ["risk"] },
-		});
+		const handle = await boot(
+			[
+				contributing("test:consent", {
+					consent: () => requirement("consent", { stepUpPage: { url: "/consent", params: {} } }),
+				}),
+				consumer(seen),
+			],
+			{ sessionRequirements: { expected: ["consent"] } },
+		);
 		try {
-			expect(reads).toBe(1);
-			const registered = seen.resolver?.get("risk");
-			expect([...(registered?.reach ?? [])]).toEqual(["risk-ok"]);
-			live.add("other");
-			live.delete("risk-ok");
-			expect([...(registered?.reach ?? [])]).toEqual(["risk-ok"]);
-			const [entry] = Array.from(seen.resolver?.entries() ?? []);
-			expect([...(entry?.[1].reach ?? [])]).toEqual(["risk-ok"]);
-			expect(reads).toBe(1);
-			const sealed = registered?.reach as Set<string>;
-			expect(Object.isFrozen(sealed)).toBe(true);
-			expect(() => sealed.add("x")).toThrow(TypeError);
+			expect(seen.resolver?.get("consent")?.stepUpPage).toEqual({ url: "/consent", params: {} });
+			expect(seen.resolver?.get("consent")?.reach.size).toBe(0);
 		} finally {
 			await handle.dispose();
 		}
+	});
+
+	it("refuses a requirement reaching anything under any name but mfa: in this release only the MFA requirement adds vouched values to a session", async () => {
+		const err = await refusal(
+			boot(
+				[
+					contributing("test:risk", {
+						risk: () =>
+							requirement("risk", {
+								reach: new Set(["risk-ok"]),
+								stepUpPage: { url: "/risk", params: {} },
+							}),
+					}),
+				],
+				{ sessionRequirements: { expected: ["risk"] } },
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			module: "test:risk",
+			kind: "sessionRequirements",
+			name: "risk",
+		});
+		expect(err.message).toMatch(/reach/);
+		expect(err.message).toMatch(/mfa/);
 	});
 
 	it("refuses a requirement whose remediation is not its own route — a fixture declaring oauth.authorize — as the contribution's failure, naming the module", async () => {
@@ -619,6 +591,51 @@ describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
 		const handle = await boot([factors, ...stores, mfaModule(), consumer(seen)], expected);
 		try {
 			expect([...(seen.resolver?.get("mfa")?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reads the reach once, after the pass, and seals it: the resolver answers a read-only snapshot, and a contributor that keeps a mutable Set changes nothing after boot", async () => {
+		let reads = 0;
+		const live = new Set(["otp", "mfa"]);
+		const keeping = defineModule({
+			name: "test:mfa",
+			requires: ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as never,
+			contributes: {
+				sessionRequirements: {
+					mfa: () => ({
+						name: "mfa",
+						get reach() {
+							reads++;
+							return live;
+						},
+						stepUpPage: { url: "/mfa", params: {} },
+						remediations: ["mfa.step_up"],
+						hintKeys: [],
+						admit: async () => ({ outcome: "met" as const }),
+					}),
+				},
+			},
+		} as never);
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		// The factors register after the requirement: a reach read at
+		// registration would be compared before they did.
+		const handle = await boot([keeping, ...stores, consumer(seen), factors], expected);
+		try {
+			expect(reads).toBe(1);
+			const registered = seen.resolver?.get("mfa");
+			expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+			live.add("hwk");
+			live.delete("otp");
+			expect([...(registered?.reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+			const [entry] = Array.from(seen.resolver?.entries() ?? []);
+			expect([...(entry?.[1].reach ?? [])].sort()).toEqual(["mfa", "otp"]);
+			expect(reads).toBe(1);
+			const sealed = registered?.reach as Set<string>;
+			expect(Object.isFrozen(sealed)).toBe(true);
+			expect("add" in sealed).toBe(false);
+			expect(() => sealed.add("x")).toThrow(TypeError);
 		} finally {
 			await handle.dispose();
 		}

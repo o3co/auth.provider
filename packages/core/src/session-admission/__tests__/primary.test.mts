@@ -36,11 +36,11 @@ import {
 import { continuationOf } from "#/session-admission/primary.mjs";
 import type {
 	AdmissionDeps,
-	Interruption,
 	InterruptionAnswer,
 	PrimaryAdmission,
 	PrimaryAuthentication,
 	PrimaryContinuation,
+	RequirementInterruption,
 	SessionRequirement,
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
@@ -109,7 +109,7 @@ const recordingLogger = (): { readonly logger: Logger; readonly lines: Line[] } 
 /** A requirement that answers `answerWith` at establishment, recording what it was asked about. */
 const asking = (
 	name: string,
-	answerWith: (primary: PrimaryAuthentication) => "establish" | Interruption,
+	answerWith: (primary: PrimaryAuthentication) => "establish" | RequirementInterruption,
 	over: Partial<SessionRequirement> = {},
 ): SessionRequirement & { readonly asked: PrimaryAuthentication[] } => {
 	const asked: PrimaryAuthentication[] = [];
@@ -132,7 +132,9 @@ const asking = (
 	};
 };
 
-const interrupting = (open: Interruption["open"] = async () => answer()): Interruption => ({
+const interrupting = (
+	open: RequirementInterruption["open"] = async () => answer(),
+): RequirementInterruption => ({
 	open,
 });
 
@@ -238,7 +240,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 			fields: { store: "risk", phase: "establishment" },
 		});
 		lines.length = 0;
-		for (const odd of [undefined, "later", { open: "x" }, {}]) {
+		for (const odd of [undefined, null, "later", "Establish", 7, { open: "x" }, {}, []]) {
 			const answering = asking("odd", () => odd as never);
 			expect(
 				await admitPrimary(deps([answering], logger), passwordPrimary(facts())),
@@ -248,7 +250,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 				store: "odd",
 			});
 		}
-		expect(lines).toHaveLength(4);
+		expect(lines).toHaveLength(8);
 	});
 
 	it("refuses, before asking anything, a resolver it does not know and a primary no core builder made", async () => {
@@ -266,7 +268,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 
 describe("the interruption's answer — validated before the route sees it (D5)", () => {
 	const interrupt = async (
-		open: Interruption["open"],
+		open: RequirementInterruption["open"],
 		hintKeys: readonly string[] = ["enrollable", "email_proof"],
 	): Promise<Extract<PrimaryAdmission, { outcome: "interrupt" }>> => {
 		const requirement = asking("mfa", () => interrupting(open), { hintKeys });
@@ -275,14 +277,18 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		return admission;
 	};
 
-	it("opens the requirement's ceremony with the session id and answers a frozen copy of the body", async () => {
+	it("opens the requirement's ceremony with the session id and the continuation core built — what the requirement persists — and answers a frozen copy of the body", async () => {
 		const opened: string[] = [];
-		const admission = await interrupt(async (sessionId) => {
+		let received: unknown;
+		const admission = await interrupt(async (sessionId, continuation) => {
 			opened.push(sessionId);
+			received = continuation;
 			return answer({ hints: { enrollable: ["totp"], email_proof: false } });
 		});
 		const result = await admission.open("express-1");
 		expect(opened).toEqual(["express-1"]);
+		expect(received).toBe(admission.continuation);
+		expect(received).toEqual(continuationOf(primary(), []));
 		expect(result).toEqual({
 			status: 403,
 			body: {
@@ -507,6 +513,31 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		).rejects.toThrow(RangeError);
 		expect(mfa.asked).toEqual([]);
 		expect(risk.asked).toEqual([]);
+	});
+
+	it("hands the next ceremony the updated continuation, the first completion in it", async () => {
+		const mfa = asking("mfa", () => "establish");
+		let received: unknown;
+		const risk = asking("risk", (p) =>
+			p.recorded.amr.includes("risk-ok")
+				? "establish"
+				: interrupting(async (_sessionId, continuation) => {
+						received = continuation;
+						return answer();
+					}),
+		);
+		const second = await resumePrimary(deps([mfa, risk]), continuation(), {
+			requirement: "mfa",
+			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+		});
+		if (second.outcome !== "interrupt") throw new Error("expected an interruption");
+		await second.open("express-2");
+		expect(received).toBe(second.continuation);
+		expect(received).toEqual(
+			continuationOf(primary(), [
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+			]),
+		);
 	});
 
 	it("answers unavailable when a requirement throws on the second ask", async () => {
