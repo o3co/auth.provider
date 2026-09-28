@@ -1,16 +1,17 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-09-26
+Last updated: 2026-09-29
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`.
 
 ## Responsibility
 
-**Role.** Passkeys as a primary login at the authorization server. The package adds three ceremony routes under `/oauth/webauthn/` and the `urn:o3co:oauth:grant-type:webauthn` grant, which `/oauth/token` dispatches like any other grant.
+**Role.** Passkeys as a primary login at the authorization server. The package adds three ceremony routes under `/oauth/webauthn/` and the `urn:o3co:oauth:grant-type:webauthn` grant, which `/oauth/token` dispatches like any other grant, and a module that bridges the browser's session to the registration routes.
 
 **Owns:**
 
 - the ceremonies: generating registration and authentication options, verifying the attestation and persisting the credential, verifying an assertion and its sign count, and minting tokens for it;
+- the bridge from an admitted browser session to `req.webauthnSubject`, `webauthnSessionSubjectModule` — [Registering from a browser session](#registering-from-a-browser-session);
 - the WebAuthn configuration (`webauthnConfigSchema`, the `webauthnConfig` slot) and its defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-webauthn/reference.conf`);
 - the algorithm set offered and accepted (`WEBAUTHN_ALGORITHM_IDS`), and the rate limit on the unauthenticated `authentication/options` route;
 - the boundary with `@simplewebauthn/server`, the WebAuthn library the verification runs on.
@@ -18,7 +19,7 @@ Passkey (WebAuthn) credential registration and an authentication grant for [`aut
 **Does not own:**
 
 - the stores and their contracts — `WebAuthnCredentialStore`, `ChallengeStore` and `ChallengeCeremony` are core's ports (with core's memory implementations); a deployment wires a persistent credential store;
-- who the user is at registration: `req.webauthnSubject` is set by middleware the deployment writes (from its session or a bearer token); no package in this repository sets it;
+- who the user is at registration: the user handle a session maps to is the deployment's `subjectFor`, and whether that session may proceed is core's session admission; a subject taken from a bearer token, or from a cookie session without a user-session store, is set by middleware the deployment writes;
 - scope decisions — the deployment's `grantPolicy`, which this grant requires;
 - signup, account recovery, email: the deployment's own flows, outside the authorization server.
 
@@ -204,13 +205,50 @@ The package ships defaults for `attestationPreference`, `userVerification`, `cha
 
 ## First-credential bootstrap
 
-WebAuthn registration requires an authenticated subject. For greenfield deployments, the usual path is **federation**: users first sign in through a federation package (Google, GitHub, any OpenID Connect IdP — see the [package list](../../README.md#packages)), then enroll a passkey from the authenticated session. The bridge from that session to `req.webauthnSubject` is middleware the deployment writes; this package does not ship one.
+WebAuthn registration requires an authenticated subject. For greenfield deployments, the usual path is **federation**: users first sign in through a federation package (Google, GitHub, any OpenID Connect IdP — see the [package list](../../README.md#packages)), then enroll a passkey from the authenticated session. The bridge from that session to `req.webauthnSubject` is `webauthnSessionSubjectModule` — [Registering from a browser session](#registering-from-a-browser-session).
 
 For consumer-driven account flows (signup forms, magic-link, etc.) establishing trust in the first credential is the consumer's, outside the authorization server.
 
+## Registering from a browser session
+
+The registration routes read `req.webauthnSubject`; they do not read a session. `webauthnSessionSubjectModule` sets it from the browser's cookie session, through core's [session admission](../core/src/session-admission/README.md) — the one reading of a live session every consumer shares ([the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md), D8):
+
+```ts
+import { webauthnModule, webauthnSessionSubjectModule } from "@o3co/auth-provider-webauthn";
+
+const app = await createApp({
+    modules: [
+        webauthnModule,
+        webauthnSessionSubjectModule({
+            // The user handle for the admitted session: opaque, 1–64 bytes, never an
+            // e-mail or a username (SECURITY — `userId` opacity). Synchronous.
+            subjectFor: (session) => ({ userId: session.sub }),
+        }),
+        sessionStoreModule, // the cookie session it reads (`@o3co/auth-provider-session`)
+        // ... the user-session store, the rest of the stack
+    ],
+    // ...
+});
+```
+
+- **What it needs.** It requires `sessionRequirementResolver` and `userSessionStore`: the cookie path it serves is the store-backed one, so an admitted session is always a live record the mapper reads. `subjectRevocation`, `auditSink` and `logger` are taken when they are wired; the first two unwired are declared (`oauth.revocation.subject = "unsupported"`, `audit.sink.type = "none"`), as for every module that takes them. It is a consumer of admission, so the composition declares `sessionRequirements.expected`.
+- **Where it runs.** One route, `webauthn-session-subject` (`WEBAUTHN_SESSION_SUBJECT_ROUTE_ID`), at `/oauth/webauthn/registration`, after `session-middleware` and before both registration routes, on their two `POST`s alone.
+- **What it answers.** It admits the session as `webauthn.register`, graded `credential_change` — a passkey is a new way into the account, so a registered requirement (MFA's recent-authentication rule, when installed) applies:
+
+| Admission | The request |
+| --- | --- |
+| `admitted` | `req.webauthnSubject` is `subjectFor(session)`, copied to `userId`, `userName`, `userDisplayName`; the route runs |
+| `step_up` | `403 {"error":"step_up_required","requirement":"<name>","page":{"url","params"}}` — the requirement's registered page, which the account page sends the user through and then retries |
+| `unavailable` | `503 temporarily_unavailable` "session store unavailable" — the session store, the revocation boundary or a requirement could not answer; logged once by admission as `session_admission_unavailable` (`action: "webauthn.register"`) |
+| anything else — not signed in, not live, past its `expiresAt`, another subject's, revoked, a requirement's `reauthenticate` or `unmet` | no subject; the route answers its `401 unauthorized` |
+
+A `subjectFor` that throws, or answers anything but an object with a non-empty string `userId` (and string `userName` / `userDisplayName` when present), is the composition's fault: `500 server_error`, logged once at error as `webauthn_session_subject_invalid` with `reason` (`threw`, with the error's projection, or `shape`) — never the answer.
+
+**Two bridges stay the deployment's own middleware.** A subject taken from a bearer token is not a session this module reads; and a cookie-only composition without a `userSessionStore` cannot install the module (the store is required), so it writes its own bridge too. Either sets `req.webauthnSubject` before the registration routes (a route contribution with `before: ["webauthn-registration-options", "webauthn-registration-verify"]`) and holds itself to the rules below — the opaque handle, and a session strong enough to enroll a credential.
+
 ## Endpoints
 
-- `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject: `req.webauthnSubject`, set by the deployment's own upstream middleware (session or bearer).
+- `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject: `req.webauthnSubject`, set by `webauthnSessionSubjectModule` from the browser's session, or by the deployment's own middleware (a bearer token, a store-less cookie session).
 - `POST /oauth/webauthn/registration/verify` — verifies the attestation response and persists a `WebAuthnCredential`. Single-use challenge via `ChallengeCeremony`.
 - `POST /oauth/webauthn/authentication/options` — generates `PublicKeyCredentialRequestOptions`. Unauthenticated, rate-limited, and discoverable-credential only: the response never carries an `allowCredentials` list derived from the request. The allow-list flow is available behind `allowCredentialsForKnownUser` — see [SECURITY — `authentication/options` enumeration](#security--authenticationoptions-enumeration).
 - Grant: `urn:o3co:oauth:grant-type:webauthn` — exchanges a verified assertion for an access token, plus a refresh token when the authenticated client is allowed one. A sender-bound request produces sender-bound tokens. See [SECURITY — refresh-token issuance](#security--refresh-token-issuance) and [SECURITY — sender-constrained tokens](#security--sender-constrained-tokens).
@@ -241,7 +279,7 @@ const opaqueUserId = await deriveOpaqueHandle(realUserId);
 await store.registerCredential({ userId: opaqueUserId, /* ... */ });
 ```
 
-The middleware that sets `req.webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
+The `subjectFor` given to `webauthnSessionSubjectModule` — or the deployment's own middleware that sets `req.webauthnSubject` — should therefore expose the opaque handle as `userId`, not the email or username.
 
 The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error — logged once at error level as `webauthn_subject_user_handle_invalid` with the route's `site` and the handle's `byteLength`, never the handle itself. `authentication/options` enforces the same bound on the `userId` a *caller* may supply, but as `400 invalid_request`: there the value is untrusted request data, not your configuration.
 
@@ -305,7 +343,9 @@ Webauthn access tokens are revocable via `POST /oauth/revoke` ONLY when the gran
 
 ## SECURITY — registration authorization strength
 
-The registration endpoints accept any authenticated subject. Deployments SHOULD enforce step-up reauthentication (NIST SP 800-63B): require recent `auth_time` OR MFA OR fresh federation login before allowing registration. The endpoints do not enforce this, and `grantPolicy` does not reach them — it gates the grant at `/oauth/token`, not registration. Gate registration in the upstream middleware that sets `req.webauthnSubject`: set it only for a session strong enough to enroll a credential.
+The registration endpoints accept any authenticated subject. Deployments SHOULD enforce step-up reauthentication (NIST SP 800-63B): require recent `auth_time` OR MFA OR fresh federation login before allowing registration. The endpoints do not enforce this, and `grantPolicy` does not reach them — it gates the grant at `/oauth/token`, not registration.
+
+With `webauthnSessionSubjectModule`, registration is admitted as `webauthn.register`, graded `credential_change`: every registered session requirement is asked, and one that demands recent authentication — the MFA requirement's rule for that grade — answers `403 step_up_required` until the session meets it. With no requirement registered, the module checks that the session is live, is its own subject's, and is not covered by the subject-revocation boundary — nothing about how recent it is. A deployment's own bridge gates registration itself: set the subject only for a session strong enough to enroll a credential.
 
 ## SECURITY — `authentication/options` enumeration
 
@@ -374,6 +414,7 @@ Not implemented:
 - [`src/grant.mts`](src/grant.mts) — the grant: assertion verification, the sign-count update, the policy call, and token minting.
 - `src/routes/` — the three ceremony handlers, one per endpoint.
 - `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), and the one answer to a store outage the grant and the routes share.
+- [`src/sessionSubject.mts`](src/sessionSubject.mts) — `webauthnSessionSubjectModule`: the session bridge on core's admission.
 - [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
 
 The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`) are core's.
