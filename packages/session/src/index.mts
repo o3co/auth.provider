@@ -42,6 +42,18 @@ export {
 	DEFAULT_CSRF_TTL_SECONDS,
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
+// The session-admission ADR's D5 — the tail of a login: the session written
+// from the `Establishment` core's admission built, and nothing beside it. Both
+// login routes call it, and a requirement's completion (the MFA package's,
+// after `resumePrimary`) finishes a login with it.
+export {
+	type EstablishedRecord,
+	type EstablishSessionDeps,
+	type EstablishSessionReporter,
+	type EstablishSessionResult,
+	type EstablishSessionStep,
+	establishSession,
+} from "./establish-session.mjs";
 // #279 — federated claims never outrank local ones; see claim-precedence.mts.
 export type { FederatedClaimsNamespace } from "./federations/claim-precedence.mjs";
 export {
