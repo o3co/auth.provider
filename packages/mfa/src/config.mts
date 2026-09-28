@@ -34,7 +34,14 @@
  *   for either — SHA1, SHA256 or SHA512), the window every verification
  *   allows (0-2, D22), and the issuer an authenticator app shows, defaulting
  *   — for a factor that is on — to the host `oauth.jwt.issuer` names. Read on
- *   its own too, for the factor, which never holds a key.
+ *   its own too, for the factor, which never holds a key and reads none of
+ *   the keys below.
+ * - `mfa.transactionTtlSeconds`, a transaction's life, 60-1800 seconds (the
+ *   step-8 owner decision; the ADR states no bounds), from which every
+ *   `expiresAtMs` is derived and nothing else; `mfa.maxAttemptsPerTransaction`,
+ *   a positive whole number, what the store's `reserveAttempt` takes; and
+ *   `mfa.lockout`, D21's subject lock, held to core's `checkMfaLockoutPolicy`
+ *   under that key — step 3's obligations, refused at boot (D8, D21).
  *
  * No default is written here: they live in `config/reference.conf` (ADR
  * 2026-04-30). A refusal is a `RangeError` whose message starts with the key.
@@ -42,9 +49,11 @@
 
 import { createHmac } from "node:crypto";
 import {
+	checkMfaLockoutPolicy,
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
 	decodeSealingKey,
+	type MfaLockoutPolicy,
 	SEALING_KEY_BYTES,
 	type SealingKeyRing,
 } from "@o3co/auth-provider-core";
@@ -111,12 +120,44 @@ const RING_SHAPE = "must be a list of { id?, key } entries";
 
 const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
 
+/** The shortest and the longest a transaction may live, in seconds (the step-8 owner decision). */
+const MFA_TRANSACTION_TTL_SECONDS = { min: 60, max: 1800 } as const;
+
+const POSITIVE_WHOLE = "must be a positive whole number";
+const positiveWhole = z
+	.number({ error: POSITIVE_WHOLE })
+	.int({ error: POSITIVE_WHOLE })
+	.positive({ error: POSITIVE_WHOLE });
+
 /**
- * The shapes of the `mfa` keys this package reads — the key ring and the
- * factors (D19) — and TOTP's ranges. The ring's refusals (a key that is not
- * 32 bytes, an empty ring, a duplicate id) and the sample key's are not the
- * schema's: `readMfaSettings` makes them, where the keys are decoded and the
- * environment is known, and they are what D20 calls the MFA config schema's.
+ * `mfa.lockout`, D21's subject lock: each field a positive whole number here;
+ * how the fields relate — `threshold` at most `hardLimit`, `hardLimit` at
+ * most NIST's cap, `maxSeconds` at least `baseSeconds`, every duration within
+ * the Date range — is core's `checkMfaLockoutPolicy`, which `readMfaSettings`
+ * applies under the key.
+ */
+const lockoutSchema = z.object(
+	{
+		threshold: positiveWhole,
+		baseSeconds: positiveWhole,
+		maxSeconds: positiveWhole,
+		memorySeconds: positiveWhole,
+		weeklyBudget: positiveWhole,
+		hardLimit: positiveWhole,
+		trustedBrowsers: positiveWhole,
+		trustedBrowserDays: positiveWhole,
+	},
+	{ error: SECTION_MISSING },
+);
+
+/**
+ * The shapes of the `mfa` keys this package reads — the key ring, the
+ * factors, a transaction's life and attempts, and the subject lock (D19) —
+ * with TOTP's ranges and the transaction's. The ring's refusals (a key that
+ * is not 32 bytes, an empty ring, a duplicate id), the sample key's and how
+ * the lock's fields relate are not the schema's: `readMfaSettings` makes
+ * them, where the keys are decoded, the environment is known and core's rule
+ * is applied, and they are what D20 calls the MFA config schema's.
  * `mfa.mode` is core's.
  */
 export const mfaConfigSchema = z.object(
@@ -132,6 +173,13 @@ export const mfaConfigSchema = z.object(
 			{ error: RING_SHAPE },
 		),
 		factors: factorsSchema,
+		transactionTtlSeconds: wholeNumber(
+			MFA_TRANSACTION_TTL_SECONDS.min,
+			MFA_TRANSACTION_TTL_SECONDS.max,
+			" seconds",
+		),
+		maxAttemptsPerTransaction: positiveWhole,
+		lockout: lockoutSchema,
 	},
 	{ error: SECTION_MISSING },
 );
@@ -153,7 +201,19 @@ export type MfaTotpSettings =
 export interface MfaSettings {
 	/** The ring, in order: the first key seals, every key opens. */
 	readonly encryptionKeys: SealingKeyRing;
+	/**
+	 * Whether the ring carries {@link MFA_DEVELOPMENT_SAMPLE_KEY} — accepted,
+	 * since the settings refuse it outside development — so the MFA module can
+	 * say so at boot.
+	 */
+	readonly developmentSampleKeyAccepted: boolean;
 	readonly totp: MfaTotpSettings;
+	/** A transaction's life, in seconds: every `expiresAtMs` is derived from it and nothing else (D8). */
+	readonly transactionTtlSeconds: number;
+	/** The attempts one transaction allows (D21). */
+	readonly maxAttemptsPerTransaction: number;
+	/** D21's subject lock, held to core's rule. */
+	readonly lockout: MfaLockoutPolicy;
 }
 
 /** What a composition root tells the settings that its configuration cannot (#473). */
@@ -242,12 +302,17 @@ export function readMfaTotpSettings(config: unknown): MfaTotpSettings {
  * The sample key's refusal (#473's rule): the environment the configuration
  * was selected by, or `NODE_ENV`, is production or staging, or
  * `deployment.mode` is `"multi"`. Every key opens, so it is refused wherever
- * it sits in the ring.
+ * it sits in the ring. Answers whether the ring carries it — accepted, when
+ * this did not refuse it.
  */
-function refuseSampleKey(ring: SealingKeyRing, config: ConfigShape, options: MfaSettingsOptions) {
+function refuseSampleKey(
+	ring: SealingKeyRing,
+	config: ConfigShape,
+	options: MfaSettingsOptions,
+): boolean {
 	const sample = decodeSealingKey(MFA_DEVELOPMENT_SAMPLE_KEY);
 	const index = ring.findIndex((entry) => sample !== undefined && entry.key.equals(sample));
-	if (index === -1) return;
+	if (index === -1) return false;
 	// Both names are consulted, each whatever its case and the whitespace
 	// around it — "Production" or "production\n" names production as surely —
 	// and the one that matched is the one reported, normalised.
@@ -263,7 +328,7 @@ function refuseSampleKey(ring: SealingKeyRing, config: ConfigShape, options: Mfa
 			'deployment.mode is "multi" (a multi-replica deployment is never a development box)',
 		);
 	}
-	if (reasons.length === 0) return;
+	if (reasons.length === 0) return true;
 	throw new RangeError(
 		`${RING}[${index}].key is the development sample key (MFA_DEVELOPMENT_SAMPLE_KEY), refused because ${reasons.join(" and ")}: set MFA_ENCRYPTION_KEY to a key of your own (openssl rand -base64 32)`,
 	);
@@ -283,12 +348,15 @@ const KEY_ID_LABEL = "o3co:mfa:key-id";
 const keyFingerprint = (key: Buffer): string =>
 	`k${createHmac("sha256", key).update(KEY_ID_LABEL).digest("base64url").slice(0, 16)}`;
 
-/** The ring the entries name, or a `RangeError` naming the entry refused and quoting none. */
+/**
+ * The ring the entries name, and whether it carries the development sample
+ * key, or a `RangeError` naming the entry refused and quoting none.
+ */
 function readKeyRing(
 	entries: z.infer<typeof mfaConfigSchema>["encryptionKeys"],
 	config: ConfigShape,
 	options: MfaSettingsOptions,
-): SealingKeyRing {
+): { readonly ring: SealingKeyRing; readonly developmentSampleKeyAccepted: boolean } {
 	if (entries.length === 0) {
 		throw new RangeError(
 			`${RING} is empty: set MFA_ENCRYPTION_KEY to a key of your own (openssl rand -base64 32)`,
@@ -309,21 +377,32 @@ function readKeyRing(
 		return { id: entry.id ?? keyFingerprint(key), key };
 	});
 	checkSealingKeyRing(ring, RING);
-	refuseSampleKey(ring, config, options);
-	return ring;
+	return { ring, developmentSampleKeyAccepted: refuseSampleKey(ring, config, options) };
 }
 
 /**
- * Everything this package reads from the `mfa` section: the key ring and the
- * TOTP factor's settings. `options.environment` is the name the composition
- * root selected its configuration by (#473). A refusal is a `RangeError` that
- * names the key and quotes no key material.
+ * Everything this package reads from the `mfa` section: the key ring and
+ * whether it carries the development sample key, the TOTP factor's settings,
+ * a transaction's life and attempts, and the subject lock — held to core's
+ * `checkMfaLockoutPolicy` under `mfa.lockout`. `options.environment` is the
+ * name the composition root selected its configuration by (#473). A refusal
+ * is a `RangeError` that names the key and quotes no key material.
  */
 export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {}): MfaSettings {
 	const shape = (config ?? {}) as ConfigShape;
 	const section = parseSection(mfaConfigSchema, shape.mfa, "mfa");
+	const { ring, developmentSampleKeyAccepted } = readKeyRing(
+		section.encryptionKeys,
+		shape,
+		options,
+	);
+	checkMfaLockoutPolicy(section.lockout, "mfa.lockout");
 	return {
-		encryptionKeys: readKeyRing(section.encryptionKeys, shape, options),
+		encryptionKeys: ring,
+		developmentSampleKeyAccepted,
 		totp: totpSettings(section.factors.totp, shape),
+		transactionTtlSeconds: section.transactionTtlSeconds,
+		maxAttemptsPerTransaction: section.maxAttemptsPerTransaction,
+		lockout: { ...section.lockout },
 	};
 }
