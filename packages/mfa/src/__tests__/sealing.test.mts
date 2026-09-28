@@ -226,6 +226,15 @@ describe("a ceremony's state, sealed to its transaction (D11)", () => {
 		).toEqual({ state: "unreadable" });
 	});
 
+	it("seals only a challenge's or a pending enrollment's state", () => {
+		const sealing = sealingOver([K1]);
+		const other = { ...CHALLENGE, use: "other" } as unknown as typeof CHALLENGE;
+		expect(() => sealing.sealState(other, STATE)).toThrow(RangeError);
+		expect(sealing.openState(other, sealing.sealState(CHALLENGE, STATE))).toEqual({
+			state: "unreadable",
+		});
+	});
+
 	it("answers key_unavailable for a dropped key, and unreadable for anything else", () => {
 		const sealed = sealingOver([K1]).sealState(CHALLENGE, STATE);
 		expect(sealingOver([K2]).openState(CHALLENGE, sealed)).toEqual({

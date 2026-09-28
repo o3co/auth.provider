@@ -406,7 +406,12 @@ describe("enrolling a TOTP factor (F6; core's contract requires it of every fact
 	});
 
 	it("throws on a pending state that is not a TOTP enrollment's", async () => {
-		for (const state of [{}, { secret: "AAAA", algorithm: "SHA1", digits: 6 }, { secret: 1 }]) {
+		for (const state of [
+			{},
+			null as unknown as Record<string, unknown>,
+			{ secret: "AAAA", algorithm: "SHA1", digits: 6 },
+			{ secret: 1 },
+		]) {
 			await expect(
 				factor.completeEnrollment(completionContext(state, codeAt(T))),
 				JSON.stringify(state),

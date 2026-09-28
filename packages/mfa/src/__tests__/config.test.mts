@@ -106,6 +106,13 @@ describe("the MFA settings this package reads", () => {
 		});
 	});
 
+	it("refuses a configuration without an mfa section, naming it", () => {
+		for (const config of [undefined, {}]) {
+			expect(refusal(() => readMfaSettings(config))).toMatch(/^mfa /);
+			expect(refusal(() => readMfaTotpSettings(config))).toMatch(/^mfa /);
+		}
+	});
+
 	it("exports the schema of the section it reads", () => {
 		expect(mfaConfigSchema.safeParse(valid().mfa).success).toBe(true);
 		expect(mfaConfigSchema.safeParse({}).success).toBe(false);

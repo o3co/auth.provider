@@ -239,8 +239,10 @@ describe("matching a code against the window (F6, D22)", () => {
 		expect(match(first, { window: 2, nowMs: 0 })).toEqual({ outcome: "matched", step: 0 });
 	});
 
-	it("refuses a window it was not built for", () => {
+	it("refuses a window or a lastUsedStep it was not built for", () => {
 		expect(() => match(codeAt(T), { window: -1 })).toThrow(RangeError);
 		expect(() => match(codeAt(T), { window: 0.5 })).toThrow(RangeError);
+		expect(() => match(codeAt(T), { lastUsedStep: 1.5 })).toThrow(RangeError);
+		expect(() => match(codeAt(T), { lastUsedStep: Number.NaN })).toThrow(RangeError);
 	});
 });
