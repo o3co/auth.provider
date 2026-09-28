@@ -36,6 +36,7 @@ import {
 	InMemoryUserRepository,
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
+	passwordSessionAuthentication,
 	type RateLimiter,
 	type RateLimitFailMode,
 	type UserSession,
@@ -331,7 +332,9 @@ function world(options: WorldOptions = {}) {
 			createdAt: authTime,
 			expiresAt: new Date(state.now.getTime() + DAY),
 			claims: {},
-		} as UserSession);
+			// A password login's record (the MFA ADR's D9).
+			...passwordSessionAuthentication(),
+		});
 		return sid;
 	};
 
@@ -1159,7 +1162,9 @@ describe("rules the first draft of these tests did not reach", () => {
 			createdAt: w.state.now,
 			expiresAt: new Date(w.state.now.getTime() + DAY),
 			claims: {},
-		} as UserSession);
+			// A password login's record (the MFA ADR's D9).
+			...passwordSessionAuthentication(),
+		});
 		expect((await w.page(challenge, "b-1")).status).toBe(400);
 		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(400);
 	});
@@ -1254,7 +1259,9 @@ describe("what the browser-half mutation pass found", () => {
 			createdAt: w.state.now,
 			expiresAt: new Date(w.state.now.getTime() + DAY),
 			claims: {},
-		} as UserSession);
+			// A password login's record (the MFA ADR's D9).
+			...passwordSessionAuthentication(),
+		});
 		expect((await w.connect(handle, "b-1")).status).toBe(403);
 	});
 

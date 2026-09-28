@@ -20,6 +20,7 @@ import {
 	consoleLogger,
 	type Logger,
 	loggableError,
+	type SessionAuthentication,
 	type UserSession,
 	type UserSessionClaims,
 	type UserSessionStore,
@@ -40,6 +41,18 @@ export interface RedisUserSessionStoreOptions {
 	readonly logger?: Logger;
 }
 
+/**
+ * `UserSession.authentication` as the envelope stores it (the MFA ADR's D9):
+ * `mfaAt` as epoch milliseconds, like every other instant here. A field that
+ * holds `undefined` is left out by `JSON.stringify`.
+ */
+interface EnvelopeAuthentication {
+	primary: string;
+	federation: string | undefined;
+	upstreamAmr: string[] | undefined;
+	mfaAtMs: number | undefined;
+}
+
 interface Envelope {
 	sid: string;
 	sub: string;
@@ -53,6 +66,13 @@ interface Envelope {
 	 * the stored bytes are what they were.
 	 */
 	amr: string[] | undefined;
+	/**
+	 * The MFA ADR's D9: how the session was established. Absent in an
+	 * envelope written before the key existed — which an older release also
+	 * writes and reads, its shape check ignoring the key — and read as
+	 * `undefined`, a session `sessionAuthentication` splits as it reads it.
+	 */
+	authentication: EnvelopeAuthentication | undefined;
 }
 
 /**
@@ -79,6 +99,28 @@ const MAX_DATE_MS = 8_640_000_000_000_000;
  */
 const isValidTimestamp = (x: unknown): x is number =>
 	typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= MAX_DATE_MS;
+
+const isStringList = (x: unknown): x is string[] =>
+	Array.isArray(x) && x.every((v) => typeof v === "string");
+
+/**
+ * `authentication` is absent, or well-formed: a string primary, and each
+ * other field absent or of its type. `null` is neither — this store never
+ * writes one — and an envelope holding it is refused rather than read as a
+ * session from before the key, which would split it again and forget a
+ * verified second factor.
+ */
+const isValidEnvelopeAuthentication = (v: unknown): v is EnvelopeAuthentication | undefined => {
+	if (v === undefined) return true;
+	if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+	const a = v as Partial<EnvelopeAuthentication>;
+	return (
+		typeof a.primary === "string" &&
+		(a.federation === undefined || typeof a.federation === "string") &&
+		(a.upstreamAmr === undefined || isStringList(a.upstreamAmr)) &&
+		(a.mfaAtMs === undefined || isValidTimestamp(a.mfaAtMs))
+	);
+};
 
 /**
  * Hand-rolled type predicate for `Envelope`. Lighter than Zod for the
@@ -108,9 +150,25 @@ const isValidEnvelope = (v: unknown): v is Envelope => {
 		typeof e.claims === "object" &&
 		e.claims !== null &&
 		!Array.isArray(e.claims) &&
-		(e.amr === undefined || (Array.isArray(e.amr) && e.amr.every((v) => typeof v === "string")))
+		(e.amr === undefined || isStringList(e.amr)) &&
+		isValidEnvelopeAuthentication(e.authentication)
 	);
 };
+
+const toEnvelopeAuthentication = (a: SessionAuthentication): EnvelopeAuthentication => ({
+	primary: a.primary,
+	federation: a.federation,
+	upstreamAmr: a.upstreamAmr ? [...a.upstreamAmr] : undefined,
+	mfaAtMs: a.mfaAt?.getTime(),
+});
+
+/** Every field named, those holding `undefined` included, as the session's type requires. */
+const fromEnvelopeAuthentication = (a: EnvelopeAuthentication): SessionAuthentication => ({
+	primary: a.primary,
+	federation: a.federation,
+	upstreamAmr: a.upstreamAmr ? [...a.upstreamAmr] : undefined,
+	mfaAt: a.mfaAtMs === undefined ? undefined : new Date(a.mfaAtMs),
+});
 
 const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelope => ({
 	sid: input.sid,
@@ -120,6 +178,7 @@ const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelop
 	expiresAtMs: input.expiresAt.getTime(),
 	claims: { ...input.claims },
 	amr: input.amr ? [...input.amr] : undefined,
+	authentication: input.authentication ? toEnvelopeAuthentication(input.authentication) : undefined,
 });
 
 const fromEnvelope = (e: Envelope): UserSession => ({
@@ -130,6 +189,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	expiresAt: new Date(e.expiresAtMs),
 	claims: { ...e.claims } as UserSessionClaims,
 	amr: e.amr ? [...e.amr] : undefined,
+	authentication: e.authentication ? fromEnvelopeAuthentication(e.authentication) : undefined,
 });
 
 /**
@@ -171,6 +231,14 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
 				throw new RangeError(
 					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
+				);
+			}
+			// Likewise when a second factor was verified: written as JSON `null`
+			// or a negative number, it would read back as corrupt.
+			const mfaAtMs = input.authentication?.mfaAt?.getTime();
+			if (mfaAtMs !== undefined && (!Number.isFinite(mfaAtMs) || mfaAtMs < 0)) {
+				throw new RangeError(
+					`UserSession ${input.sid}: authentication.mfaAt must be a valid date at or after the epoch`,
 				);
 			}
 			const ttlMs = expiresAtMs - Date.now();

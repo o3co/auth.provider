@@ -54,6 +54,7 @@ async function liveStore() {
 		expiresAt: new Date(Date.now() + 60_000),
 		claims: {},
 		amr: undefined,
+		authentication: undefined,
 	});
 	return store;
 }
@@ -157,6 +158,7 @@ describe("session grant authentication and token binding", () => {
 			expiresAt: new Date(Date.now() + 60_000),
 			claims: {},
 			amr: ["hwk"],
+			authentication: undefined,
 		});
 		const result = await mint(await buildApp(store));
 		expect(result.status).toBe(200);
@@ -175,6 +177,7 @@ describe("session grant authentication and token binding", () => {
 			expiresAt: new Date(Date.now() + 60_000),
 			claims: {},
 			amr: ["hwk", ""],
+			authentication: undefined,
 		});
 		const result = await mint(await buildApp(store));
 		expect(result.status).toBe(200);

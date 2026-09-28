@@ -49,6 +49,7 @@ import {
 	createMemoryRateLimiter,
 	defineModule,
 	InMemoryUserRepository,
+	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
@@ -308,7 +309,9 @@ describe("a grant created end to end, and spent", () => {
 				createdAt: new Date(),
 				expiresAt: new Date(Date.now() + 86_400_000),
 				claims: {},
-			} as UserSession);
+				// A password login's record (the MFA ADR's D9).
+				...passwordSessionAuthentication(),
+			});
 			const started = await request(app)
 				.get(`${connect.pathname}${connect.search}`)
 				.set("x-browser", "b-1");
@@ -387,7 +390,9 @@ describe("a grant created end to end, and spent", () => {
 			createdAt: authTime,
 			expiresAt: new Date(Date.now() + 86_400_000),
 			claims: {},
-		} as UserSession);
+			// A password login's record (the MFA ADR's D9).
+			...passwordSessionAuthentication(),
+		});
 	};
 
 	it("asks the Store, through the composed deployment, and refuses an upstream account it places with another user (#611)", async () => {
@@ -578,7 +583,9 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 86_400_000),
 			claims: {},
-		} as UserSession);
+			// A password login's record (the MFA ADR's D9).
+			...passwordSessionAuthentication(),
+		});
 	};
 
 	/** Lodge, sign in, consent, and come back from the upstream: the callback's redirect. */
@@ -855,7 +862,9 @@ describe("#593 AC1: a consented grant survives the initiating session's end and 
 				createdAt: new Date(),
 				expiresAt: new Date(Date.now() + 86_400_000),
 				claims: {},
-			} as UserSession);
+				// A password login's record (the MFA ADR's D9).
+				...passwordSessionAuthentication(),
+			});
 			grantId = await acquire(first.app, "b-ac1");
 
 			// The session ends: the browser's half and the durable half.
@@ -916,7 +925,9 @@ describe("#616: a grant the upstream asked the user for, and one starved of scop
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 86_400_000),
 			claims: {},
-		} as UserSession);
+			// A password login's record (the MFA ADR's D9).
+			...passwordSessionAuthentication(),
+		});
 	};
 
 	/** The browser half of a lodged intent: connect, consent, callback; what came back to the client. */

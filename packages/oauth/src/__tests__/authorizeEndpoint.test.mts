@@ -35,6 +35,8 @@ import {
 	type GrantPolicyHook,
 	type Logger,
 	type PublicClient,
+	type SessionAuthentication,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
@@ -1077,6 +1079,8 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 						createdAt: new Date(),
 						expiresAt: new Date(Date.now() + 3_600_000),
 						claims: {},
+						amr: undefined,
+						authentication: undefined,
 					}
 				: null,
 		);
@@ -1242,11 +1246,17 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 	const session = { isAuthenticated: true, sid: SID, user: { id: "user-1" } };
 	// A `Date`, or a thunk when a test needs the authentication to change
 	// between two requests — which is what a login round trip is (#481).
-	const storeWith = (at: Date | (() => Date), amr?: readonly string[]): UserSessionStore =>
+	// `authentication` absent: a session written before the MFA ADR's D9,
+	// which the readers split as they read it.
+	const storeWith = (
+		at: Date | (() => Date),
+		amr?: readonly string[],
+		authentication?: SessionAuthentication,
+	): UserSessionStore =>
 		({
 			kind: "memory",
 			create: vi.fn(async () => {}),
-			get: vi.fn(async (sid: string) => {
+			get: vi.fn(async (sid: string): Promise<UserSession | null> => {
 				const authTime = typeof at === "function" ? at() : at;
 				return sid === SID
 					? {
@@ -1256,12 +1266,20 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 							createdAt: authTime,
 							expiresAt: new Date(Date.now() + 3_600_000),
 							claims: {},
-							...(amr ? { amr } : {}),
+							amr,
+							authentication,
 						}
 					: null;
 			}),
 			delete: vi.fn(async () => {}),
 		}) as unknown as UserSessionStore;
+	/** A federated session recorded since D9 for a federation that trusts its IdP's `amr`. */
+	const TRUSTED_FEDERATION: SessionAuthentication = {
+		primary: "fed",
+		federation: "google",
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
 	const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 	/**
 	 * A re-authentication, which comes strictly after the ask: the ask is
@@ -1742,7 +1760,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			const { app } = await makeApp({
 				session,
 				oauth: { authorize: { acrValues } },
-				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"], TRUSTED_FEDERATION),
 				createCode,
 				federation: "trusted",
 			});
@@ -1779,7 +1797,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				oauth: {
 					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
 				},
-				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"]),
+				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"], TRUSTED_FEDERATION),
 				createCode,
 				federation: "trusted",
 			});
@@ -1796,7 +1814,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				oauth: {
 					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
 				},
-				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"]),
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"], TRUSTED_FEDERATION),
 				federation: "trusted",
 			});
 			const params = redirectParams(
@@ -1907,6 +1925,7 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
 				amr: ["fed"],
+				authentication: undefined,
 			})),
 			delete: vi.fn(async () => {}),
 		} as unknown as UserSessionStore;
@@ -2057,6 +2076,7 @@ describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => 
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
 				amr: ["pwd"],
+				authentication: undefined,
 			})),
 			delete: vi.fn(async () => {}),
 		} as unknown as UserSessionStore;

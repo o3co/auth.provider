@@ -112,6 +112,8 @@ function makeLiveUserSessionStore(
 				createdAt: new Date(),
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
+				amr: undefined,
+				authentication: undefined,
 			},
 		]),
 	);

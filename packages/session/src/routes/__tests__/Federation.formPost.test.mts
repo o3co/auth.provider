@@ -920,6 +920,8 @@ describe("POST callback — account linking through a form_post federation (#482
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3_600_000),
 			claims: {},
+			amr: undefined,
+			authentication: undefined,
 		});
 
 		const start = await request(harness.app)

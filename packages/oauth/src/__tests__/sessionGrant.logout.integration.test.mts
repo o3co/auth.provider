@@ -111,6 +111,7 @@ function makeUserSessionStore(): UserSessionStore {
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: { email: "bff@example.com", name: "Bff User" },
 				amr: undefined,
+				authentication: undefined,
 			},
 		],
 	]);

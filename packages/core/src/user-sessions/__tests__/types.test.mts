@@ -20,6 +20,7 @@ import type { AdapterFactory } from "../../adapters/AdapterFactory.mjs";
 import type {
 	CreateUserSessionInput,
 	RegisteredRP,
+	SessionAuthentication,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
 	SessionFederationIndex,
@@ -59,6 +60,8 @@ test("CreateUserSessionInput drops federations field (now in SessionFederationIn
 		readonly claims: UserSessionClaims;
 		// #481; a required key since #626
 		readonly amr: readonly string[] | undefined;
+		// The MFA ADR's D9; a required key, as `amr` is
+		readonly authentication: SessionAuthentication | undefined;
 	}>();
 });
 
@@ -72,6 +75,8 @@ test("UserSession value type has no activeRPs/familyIds/federations fields", () 
 		readonly claims: UserSessionClaims;
 		// #481; a required key since #626
 		readonly amr: readonly string[] | undefined;
+		// The MFA ADR's D9; a required key, as `amr` is
+		readonly authentication: SessionAuthentication | undefined;
 	}>();
 });
 

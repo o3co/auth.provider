@@ -235,6 +235,7 @@ const sessionInput = (expiresAt: Date): CreateUserSessionInput => ({
 	expiresAt,
 	claims: {},
 	amr: undefined,
+	authentication: undefined,
 });
 
 describe("the PX an adapter sends is its record's life, rounded up to a whole millisecond", () => {

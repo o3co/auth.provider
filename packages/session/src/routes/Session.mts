@@ -25,7 +25,7 @@ import {
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
-	PASSWORD_AMR,
+	passwordSessionAuthentication,
 	type RateLimiter,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
@@ -461,8 +461,9 @@ export const createRouter = (
 							authTime: now,
 							expiresAt,
 							claims,
-							// #481: a password login (RFC 8176 `pwd`).
-							amr: [PASSWORD_AMR],
+							// #481, the MFA ADR's D9: a password login — `amr` `["pwd"]`
+							// (RFC 8176), primary `pwd`, no second factor verified.
+							...passwordSessionAuthentication(),
 						});
 					} catch (err) {
 						// Fail-closed: the store's outage, answered as one — never a

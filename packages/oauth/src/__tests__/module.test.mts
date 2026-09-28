@@ -777,6 +777,8 @@ describe("oauthModule — federation logout via typed deps", () => {
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3_600_000),
 			claims: {},
+			amr: undefined,
+			authentication: undefined,
 		};
 
 		const sessionStore: UserSessionStore = {

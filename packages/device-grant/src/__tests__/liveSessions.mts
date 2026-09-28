@@ -26,7 +26,11 @@
  * `/session/login` against the bundled memory store instead.
  */
 
-import type { UserSession, UserSessionStore } from "@o3co/auth-provider-core";
+import {
+	passwordSessionAuthentication,
+	type UserSession,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
 
 /** The durable session a fixed cookie session names by default. */
 export const LIVE_SID = "sid-1";
@@ -45,7 +49,8 @@ const sessionRecord = (sid: string, sub: string): UserSession => ({
 	createdAt: new Date(1_800_000_000_000),
 	expiresAt: new Date(1_900_000_000_000),
 	claims: {},
-	amr: ["pwd"],
+	// A password login's record (the MFA ADR's D9).
+	...passwordSessionAuthentication(),
 });
 
 /** `user-1`'s live session and `user-2`'s, held until a test deletes one. */

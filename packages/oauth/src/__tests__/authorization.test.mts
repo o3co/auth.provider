@@ -23,8 +23,10 @@ import {
 	type GrantHandler,
 	InMemoryCodeRepository,
 	type RefreshTokenFamilyRotation,
+	type SessionAuthentication,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
+	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
@@ -1316,11 +1318,13 @@ describe("createAuthorizationGrant", () => {
 				authTime: Date;
 				claims: Record<string, unknown>;
 				amr?: readonly string[];
+				/** The MFA ADR's D9; absent, a session written before the key existed. */
+				authentication?: SessionAuthentication;
 			}) {
 				return {
 					kind: "spy",
 					async create() {},
-					async get(querySid: string) {
+					async get(querySid: string): Promise<UserSession | null> {
 						if (querySid !== session.sid) return null;
 						return {
 							sid: session.sid,
@@ -1329,7 +1333,8 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
 							claims: session.claims,
-							...(session.amr ? { amr: session.amr } : {}),
+							amr: session.amr,
+							authentication: session.authentication,
 						};
 					},
 					async delete() {},
@@ -1860,6 +1865,8 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: sessionExpiresAt,
 							claims: {},
+							amr: undefined,
+							authentication: undefined,
 						};
 					},
 					async delete() {},
@@ -1958,6 +1965,8 @@ describe("createAuthorizationGrant", () => {
 									createdAt: new Date(),
 									expiresAt: new Date(Date.now() + 3600_000),
 									claims: {},
+									amr: undefined,
+									authentication: undefined,
 								};
 							},
 							async delete() {},
@@ -2124,6 +2133,8 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
 							claims: {},
+							amr: undefined,
+							authentication: undefined,
 						};
 					},
 					async delete() {},
@@ -2195,6 +2206,8 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 						createdAt: new Date(),
 						expiresAt: new Date(Date.now() + 3600_000),
 						claims: {},
+						amr: undefined,
+						authentication: undefined,
 					};
 				}
 				return null;
@@ -2277,6 +2290,8 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 						createdAt: new Date(),
 						expiresAt: new Date(Date.now() + 3600_000),
 						claims: {},
+						amr: undefined,
+						authentication: undefined,
 					};
 				}
 				throw new Error("store down on second check");
@@ -2361,6 +2376,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			},
 			async delete() {},
@@ -2458,6 +2475,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			},
 			async delete() {},
@@ -2506,6 +2525,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			},
 			async delete() {},
@@ -2743,6 +2764,8 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		createdAt: new Date(),
 		expiresAt: new Date(Date.now() + 3600_000),
 		claims: {},
+		amr: undefined,
+		authentication: undefined,
 	});
 	const outage = (): Error =>
 		Object.assign(new Error("READONLY You can't write against a read only replica."), {

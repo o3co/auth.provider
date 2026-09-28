@@ -614,6 +614,8 @@ describe("the consent endpoints answer only for a live session (#527 review)", (
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3_600_000),
 							claims: {},
+							amr: undefined,
+							authentication: undefined,
 						}
 					: null,
 			),
@@ -748,6 +750,8 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3_600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			}),
 			delete: vi.fn(async () => {}),
@@ -838,6 +842,8 @@ describe("one challenge, one answer (#552)", () => {
 				createdAt: new Date(),
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
+				amr: undefined,
+				authentication: undefined,
 			};
 		});
 		const store = {

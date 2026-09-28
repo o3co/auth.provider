@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
+import { copySessionAuthentication } from "../authentication.mjs";
 import type {
 	CreateUserSessionInput,
+	SessionAuthentication,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -30,6 +32,8 @@ interface Stored {
 	claims: Record<string, unknown>;
 	/** A required key, as on the session (#626): the copy into a record names it. */
 	amr: readonly string[] | undefined;
+	/** The MFA ADR's D9; a required key, as on the session. Kept as a copy that shares nothing. */
+	authentication: SessionAuthentication | undefined;
 }
 
 /**
@@ -82,6 +86,14 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
 				);
 			}
+			// When a second factor was verified: the baseline's reading, and one
+			// the Redis store could not read back if it were no instant.
+			const mfaAtMs = input.authentication?.mfaAt?.getTime();
+			if (mfaAtMs !== undefined && (!Number.isFinite(mfaAtMs) || mfaAtMs < 0)) {
+				throw new RangeError(
+					`UserSession ${input.sid}: authentication.mfaAt must be a valid date at or after the epoch`,
+				);
+			}
 			if (input.expiresAt.getTime() <= Date.now()) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
@@ -97,6 +109,9 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 				expiresAt: new Date(input.expiresAt.getTime()),
 				claims: cloneClaims(input.claims),
 				amr: input.amr ? [...input.amr] : undefined,
+				authentication: input.authentication
+					? copySessionAuthentication(input.authentication)
+					: undefined,
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {
@@ -110,6 +125,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 				expiresAt: new Date(s.expiresAt.getTime()),
 				claims: cloneClaims(s.claims) as UserSessionClaims,
 				amr: s.amr ? [...s.amr] : undefined,
+				authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
 			};
 		},
 		async delete(sid: string) {

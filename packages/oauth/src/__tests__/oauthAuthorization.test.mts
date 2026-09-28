@@ -620,6 +620,8 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3600_000),
 			claims: {},
+			amr: undefined,
+			authentication: undefined,
 		});
 		const userSessionStore: UserSessionStore = {
 			kind: "spy",

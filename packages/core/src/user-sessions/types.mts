@@ -79,20 +79,33 @@ export interface UserSession {
 	 * without an error — `/authorize` answering a request whose `acr_values`
 	 * needs it `unmet_authentication_requirements`, and the id_token carrying
 	 * no `amr`. On the input, it makes a login path say what it knows.
+	 *
+	 * Since the MFA ADR's D9 it holds only what this provider vouches for —
+	 * the primary, a trusted upstream IdP's values, each verified second
+	 * factor — in a session that says so in `authentication`. A session
+	 * written before that key existed is read through `vouchedAmr`
+	 * (`./authentication.mts`), which splits it.
 	 */
 	readonly amr: readonly string[] | undefined;
+	/**
+	 * The MFA ADR's D9: how the session was established — `undefined` for a
+	 * session written before this key existed, which `sessionAuthentication`
+	 * reads from its `amr`. A required key, as `amr` is (#626): a store's copy
+	 * that forgot it would read every session as a pre-upgrade one, splitting
+	 * a trusted federation's values out and forgetting a verified second
+	 * factor. Read it through `sessionAuthentication`, never directly.
+	 */
+	readonly authentication: SessionAuthentication | undefined;
 }
 
 /**
- * How a session was established (the MFA ADR's D9), as
- * `sessionAuthentication` reads it: the primary authentication, which
- * federation, what an untrusted upstream IdP asserted, and when a second
- * factor was last verified in the session.
- *
- * Not yet a key of the record: the build order's step 5 adds it as
- * `UserSession.authentication`, with the upstream split, in one change — so
- * no release writes it beside an `amr` that still mixes in untrusted values.
- * Until then every session is read from its `amr` (`./authentication.mts`).
+ * How a session was established (the MFA ADR's D9): the primary
+ * authentication, which federation, what an untrusted upstream IdP asserted,
+ * and when a second factor was last verified in the session. The record's
+ * `authentication` key, read through `sessionAuthentication`
+ * (`./authentication.mts`), which answers the same shape for a session
+ * written before the key existed. Every field is a required key, holding
+ * `undefined` where there is nothing to say, so a copy names each one.
  */
 export interface SessionAuthentication {
 	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
@@ -133,6 +146,16 @@ export interface CreateUserSessionInput {
 	 * no `amr`. On the input, it makes a login path say what it knows.
 	 */
 	readonly amr: readonly string[] | undefined;
+	/**
+	 * The MFA ADR's D9: how the session was established. A login path writes
+	 * it (`passwordSessionAuthentication`, `federatedSessionAuthentication` in
+	 * `./authentication.mts` compose it with the `amr` beside it); `undefined`
+	 * writes a session read as one from before the key existed. A required
+	 * key: a login path says what it knows, and a copy cannot drop it.
+	 * `mfaAt`, when present, must be a valid date at or after the epoch — a
+	 * `RangeError` otherwise, and nothing is recorded.
+	 */
+	readonly authentication: SessionAuthentication | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,8 +178,8 @@ export interface UserSessionStore {
 	/**
 	 * Record a new session. Rejects when `sid` already has one, when
 	 * `expiresAt` is already past, and — with a `RangeError`, recording
-	 * nothing — when `expiresAt` is an Invalid Date or `authTime` is an
-	 * Invalid Date or before the epoch.
+	 * nothing — when `expiresAt` is an Invalid Date, or `authTime` or
+	 * `authentication.mfaAt` is an Invalid Date or before the epoch.
 	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
