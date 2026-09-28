@@ -274,14 +274,37 @@ describe("keyed digests (D7, D11)", () => {
 		expect(
 			sealingOver([K2]).digestsFor("recovery_code").matchesDigest(["ABCD1234EFGH5678"], stored),
 		).toBe("key_unavailable");
-		expect(
-			sealingOver([K1])
-				.digestsFor("recovery_code")
-				.matchesDigest(["x"], {
-					keyId: 1 as unknown as string,
-					digest: stored.digest,
-				}),
-		).toBe("key_unavailable");
+	});
+
+	it("throws on a stored digest that is not { keyId, digest }: key_unavailable means a key is missing, and a malformed record is never a wrong code", () => {
+		const digests = sealingOver([K1]).digestsFor("email");
+		const good = digests.digest(["a"]);
+		for (const stored of [
+			null,
+			undefined,
+			{},
+			"k1",
+			{ keyId: 1, digest: good.digest },
+			{ keyId: "has space", digest: good.digest },
+			{ keyId: "k1" },
+			{ keyId: "k1", digest: 1 },
+			{ keyId: "k1", digest: "" },
+			{ keyId: "k1", digest: `${good.digest}=` },
+			{ keyId: "k1", digest: good.digest.slice(1) },
+		]) {
+			let thrown: unknown;
+			try {
+				digests.matchesDigest(["a"], stored as never);
+			} catch (error) {
+				thrown = error;
+			}
+			expect(thrown, JSON.stringify(stored)).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).not.toContain(good.digest);
+		}
+		// Well-formed, under a key the ring does not hold: that key is missing.
+		expect(digests.matchesDigest(["a"], { keyId: "k9", digest: good.digest })).toBe(
+			"key_unavailable",
+		);
 	});
 
 	it("is HMAC-SHA-256, keyed by HKDF-SHA-256 from the ring key (info o3co:mfa:digest), over the kind and the parts length-prefixed, base64url — a format at rest for as long as a recovery code", () => {
@@ -307,6 +330,104 @@ describe("keyed digests (D7, D11)", () => {
 		const digests = sealingOver([K1]).digestsFor("email");
 		expect(() => digests.digest([1 as unknown as string])).toThrow(RangeError);
 		expect(() => sealingOver([K1]).digestsFor("")).toThrow(RangeError);
+	});
+});
+
+describe("text that is not well-formed: a binding or a digest must be one-to-one", () => {
+	// Buffer.from(text, "utf8") writes a lone surrogate as U+FFFD's bytes, so
+	// "\uD800", "\uDC00" and "\uFFFD" would be one binding and one digest.
+	const LONE = ["\uD800", "\uDC00"];
+
+	it("refuses to seal to a binding with a lone surrogate, and never opens for one", () => {
+		const sealing = sealingOver([K1]);
+		for (const field of ["subject", "id", "kind"] as const) {
+			const replaced = { ...RECORD, [field]: `x\uFFFD` };
+			const sealed = sealing.sealFactorData(replaced, DATA);
+			for (const lone of LONE) {
+				const binding = { ...RECORD, [field]: `x${lone}` };
+				expect(() => sealing.sealFactorData(binding, DATA), `${field} ${lone}`).toThrow(RangeError);
+				expect(sealing.openFactorData(binding, sealed), `${field} ${lone}`).toEqual({
+					state: "unreadable",
+				});
+			}
+		}
+		for (const field of ["transactionId", "kind"] as const) {
+			const binding = { transactionId: "tx-1", kind: "webauthn", use: "challenge" } as const;
+			const sealed = sealing.sealState({ ...binding, [field]: "x\uFFFD" }, DATA);
+			for (const lone of LONE) {
+				const bad = { ...binding, [field]: `x${lone}` };
+				expect(() => sealing.sealState(bad, DATA), `${field} ${lone}`).toThrow(RangeError);
+				expect(sealing.openState(bad, sealed), `${field} ${lone}`).toEqual({
+					state: "unreadable",
+				});
+			}
+		}
+	});
+
+	it("refuses a digest over parts, or bound to a kind, that are not well-formed", () => {
+		const digests = sealingOver([K1]).digestsFor("email");
+		const stored = digests.digest(["\uFFFD"]);
+		for (const lone of LONE) {
+			expect(() => digests.digest([lone])).toThrow(RangeError);
+			expect(() => digests.matchesDigest([lone], stored)).toThrow(RangeError);
+			expect(() => sealingOver([K1]).digestsFor(`email${lone}`)).toThrow(RangeError);
+		}
+	});
+});
+
+describe("what is sealed is what opening gives back", () => {
+	const SECRET_TEXT = "S3CR3T-VALUE";
+
+	it("refuses, quoting nothing, a value that is not a JSON object of JSON values", () => {
+		const sealing = sealingOver([K1]);
+		const cycle: Record<string, unknown> = { secret: SECRET_TEXT };
+		cycle.self = cycle;
+		class Secret {
+			readonly secret = SECRET_TEXT;
+		}
+		for (const [label, value] of [
+			["a Date", new Date(0)],
+			["a toJSON that answers a string", { secret: SECRET_TEXT, toJSON: () => SECRET_TEXT }],
+			["a toJSON that answers an object", { toJSON: () => ({ secret: SECRET_TEXT }) }],
+			["a Map", new Map([["secret", SECRET_TEXT]])],
+			["a BigInt inside", { secret: SECRET_TEXT, n: 1n }],
+			["a cycle", cycle],
+			["a class instance", new Secret()],
+			["a Map inside", { secret: SECRET_TEXT, m: new Map([["a", 1]]) }],
+			["a Date inside", { secret: SECRET_TEXT, at: new Date(0) }],
+			["NaN inside", { secret: SECRET_TEXT, n: Number.NaN }],
+			["Infinity inside", { secret: SECRET_TEXT, n: Number.POSITIVE_INFINITY }],
+			["a function inside", { secret: SECRET_TEXT, f: () => SECRET_TEXT }],
+			["undefined in a list", { secret: SECRET_TEXT, list: [1, undefined] }],
+		] as const) {
+			for (const seal of [
+				() => sealing.sealFactorData(RECORD, value as never),
+				() =>
+					sealing.sealState(
+						{ transactionId: "tx-1", kind: "totp", use: "enrollment" },
+						value as never,
+					),
+			]) {
+				let thrown: unknown;
+				try {
+					seal();
+				} catch (error) {
+					thrown = error;
+				}
+				expect(thrown, label).toBeInstanceOf(RangeError);
+				expect((thrown as Error).message, label).not.toContain(SECRET_TEXT);
+			}
+		}
+	});
+
+	it("seals nested JSON, and leaves out a property whose value is undefined, as JSON does", () => {
+		const sealing = sealingOver([K1]);
+		const value = { a: undefined, b: [1, "x", null, { c: true, d: -0.5 }], e: {} };
+		expect(sealing.openFactorData(RECORD, sealing.sealFactorData(RECORD, value))).toEqual({
+			state: "ok",
+			value: { b: [1, "x", null, { c: true, d: -0.5 }], e: {} },
+			keyId: "k1",
+		});
 	});
 });
 
