@@ -35,6 +35,7 @@ const primary = () =>
 	passwordPrimary({
 		subject: "user-1",
 		user: { id: "user-1" },
+		claims: { email: "contract@example.test" },
 		authTime: NOW,
 		redirectTo: undefined,
 		request: {},

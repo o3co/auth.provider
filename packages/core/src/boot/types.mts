@@ -1068,9 +1068,10 @@ export interface ComponentAbsenceUndeclaredDetails {
 }
 
 /**
- * A `sessionRequirements` entry in a module's `overrides`, or a host
- * `contributionKinds` collector for `sessionRequirements` or `mfaFactors`
- * (the session-admission ADR's D3): a requirement is switched off by not
+ * A `sessionRequirements` entry in a module's `overrides` (stage 1), or a
+ * host `contributionKinds` collector for `sessionRequirements` or
+ * `mfaFactors` (`createApp`, before the kinds are merged) — the
+ * session-admission ADR's D3: a requirement is switched off by not
  * installing it, and the collector the projection and the boot line read is
  * the planner's. `module` names the overriding module; a host entry is
  * composition-root data and carries none.

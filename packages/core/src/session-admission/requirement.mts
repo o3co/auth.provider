@@ -39,6 +39,7 @@ import type {
 	SessionAuthentication,
 	SubjectRevocation,
 	UserSession,
+	UserSessionClaims,
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
@@ -617,7 +618,10 @@ export type Admission =
 			readonly acr: string | undefined;
 	  }
 	| { readonly outcome: "unauthenticated" }
-	| { readonly outcome: "not_live"; readonly reason: "no_sid" | "gone" | "subject_mismatch" }
+	| {
+			readonly outcome: "not_live";
+			readonly reason: "no_subject" | "no_sid" | "gone" | "subject_mismatch";
+	  }
 	| { readonly outcome: "revoked" }
 	| {
 			readonly outcome: "reauthenticate";
@@ -649,6 +653,8 @@ export interface PrimaryAuthentication {
 	readonly subject: string;
 	/** What `req.session.user` will hold. */
 	readonly user: Readonly<Record<string, unknown>>;
+	/** What the session record's `claims` will hold: the route's `extractUserClaims(user)` for a password login, the merged envelope for a federated one. */
+	readonly claims: UserSessionClaims;
 	/** The `amr` and `authentication` the session would be created with (#707). */
 	readonly recorded: RecordedAuthentication;
 	readonly authTime: Date;
@@ -673,6 +679,7 @@ export interface CompletedRequirement {
 export interface PrimaryAuthenticationDto {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
+	readonly claims: UserSessionClaims;
 	readonly recorded: RecordedAuthentication;
 	readonly authTimeMs: number;
 	readonly redirectTo: string | undefined;

@@ -59,7 +59,7 @@ import {
 	requirementSession,
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
-import type { UserSession } from "../user-sessions/types.mjs";
+import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import {
 	additionsFromDto,
@@ -428,7 +428,10 @@ export async function admitSession(
 	// Step 1: the claim.
 	if (presented.authenticated !== true) return { outcome: "unauthenticated" };
 	if (presented.carrier === "cookie" && presented.subject === undefined) {
-		return { outcome: "not_live", reason: "subject_mismatch" };
+		// A cookie that says authenticated without a user: not a session this
+		// provider wrote. Said at warn with the action alone; nothing to audit.
+		logger?.warn({ action: label }, "session_admission_no_subject");
+		return { outcome: "not_live", reason: "no_subject" };
 	}
 
 	// Step 2: the live read.
@@ -669,9 +672,9 @@ function merge(
 
 /**
  * The `met` + `step_up` row: the page of the first requirement whose own
- * reach covers everything one alternative of a reachable entry lacks —
- * `undefined` when no single requirement does, since no one trip can finish
- * it.
+ * reach covers everything one alternative of a reachable entry lacks, with
+ * the entries that requirement alone can finish as the hint — `undefined`
+ * when no single requirement covers any, since no one trip can finish it.
  */
 function stepUpThroughOne(
 	reachable: readonly string[],
@@ -681,22 +684,24 @@ function stepUpThroughOne(
 	if (session === null) throw new Error("invariant violated: a step-up over no session");
 	const held = new Set(context.held);
 	for (const [name, requirement] of context.requirements) {
-		const covers = reachable.some((acr) =>
+		// What this requirement's reach alone can finish, beside what is held.
+		const finishes = (acr: string): boolean =>
 			(Object.hasOwn(context.table, acr) ? context.table[acr] : [])?.some(
 				(alternative) =>
 					alternative.length > 0 &&
 					alternative.every((value) => held.has(value) || requirement.reach.has(value)),
-			),
-		);
-		// A requirement whose reach covers the entry registered a page: boot
+			) ?? false;
+		const finishable = reachable.filter(finishes);
+		// A requirement whose reach covers an entry registered a page: boot
 		// holds a non-empty reach to one. Without one nothing could finish it.
-		if (covers && requirement.stepUpPage !== undefined) {
+		if (finishable.length > 0 && requirement.stepUpPage !== undefined) {
 			return {
 				outcome: "step_up",
 				requirement: name,
 				session,
 				page: requirement.stepUpPage,
-				acrValues: reachable,
+				// The hint: the entries this one trip can finish, in the request's order.
+				acrValues: finishable,
 				whenStillUnmet: "unmet",
 			};
 		}
@@ -724,6 +729,8 @@ const knownPrimaries = new WeakSet<object>();
 export interface PasswordLoginFacts {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
+	/** The route's `extractUserClaims(user)`: what the session record's `claims` will hold. */
+	readonly claims: UserSessionClaims;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
 	readonly request: { readonly ip?: string; readonly userAgent?: string };
@@ -741,6 +748,7 @@ export function passwordPrimary(facts: PasswordLoginFacts): PrimaryAuthenticatio
 	const primary = checkPrimaryAuthentication({
 		subject: facts.subject,
 		user: facts.user,
+		claims: facts.claims,
 		recorded: passwordSessionAuthentication(),
 		authTime: facts.authTime,
 		redirectTo: facts.redirectTo,
@@ -1026,6 +1034,8 @@ export async function resumePrimary(
 export interface FederatedLogin {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
+	/** The merged claims envelope the callback composed: what the session record's `claims` will hold. */
+	readonly claims: UserSessionClaims;
 	/** The federation's name (`federations.<name>`). */
 	readonly federation: string;
 	/** The upstream IdP's `amr`, as it surfaced it. */
@@ -1067,6 +1077,7 @@ export function establishWithoutAsking(login: FederatedLogin): Establishment {
 	const primary = checkPrimaryAuthentication({
 		subject: login.subject,
 		user: login.user,
+		claims: login.claims,
 		recorded,
 		authTime: login.authTime,
 		redirectTo: login.redirectTo,

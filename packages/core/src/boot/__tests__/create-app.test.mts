@@ -217,8 +217,9 @@ function makeStubListCollector<V = unknown>() {
 /**
  * Stub ContributionCollectorMap for tests that do not exercise contribution
  * kinds. `mfaFactors` and `sessionRequirements` are left to the built-in
- * collectors: a host collector for either is refused at stage 1
- * (`session-requirement-kind-guard`, the session-admission ADR's D3).
+ * collectors: a host collector for either is refused by `createApp` before
+ * the kinds are merged (`session-requirement-kind-guarded`, the
+ * session-admission ADR's D3).
  */
 function makeStubCollectors(): ContributionCollectorMap {
 	return {

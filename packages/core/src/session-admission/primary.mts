@@ -37,7 +37,7 @@
 
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
-import type { SessionAuthentication } from "../user-sessions/types.mjs";
+import type { SessionAuthentication, UserSessionClaims } from "../user-sessions/types.mjs";
 import { SECOND_FACTOR_AMR } from "./acr.mjs";
 import {
 	type CompletedRequirement,
@@ -76,6 +76,16 @@ function copyUser(
 		return Object.freeze(structuredClone(user));
 	} catch {
 		return refuse("user holds a value that cannot be copied");
+	}
+}
+
+/** A copy of `claims` — the session record's `claims` to be — that shares nothing with it. */
+function copyClaims(claims: unknown, refuse: (what: string) => never): UserSessionClaims {
+	if (!isPlainObject(claims)) return refuse("claims must be an object");
+	try {
+		return Object.freeze(structuredClone(claims)) as UserSessionClaims;
+	} catch {
+		return refuse("claims hold a value that cannot be copied");
 	}
 }
 
@@ -133,6 +143,7 @@ function copyPrimaryFields(
 ): Omit<PrimaryAuthentication, "authTime"> {
 	if (!isNonEmptyString(value.subject)) refuse("subject must be a non-empty string");
 	const user = copyUser(value.user, refuse);
+	const claims = copyClaims(value.claims, refuse);
 	const recorded = copyRecorded(value.recorded, refuse);
 	if (value.redirectTo !== undefined && typeof value.redirectTo !== "string") {
 		refuse("redirectTo must be a string or absent");
@@ -146,6 +157,7 @@ function copyPrimaryFields(
 	return {
 		subject: value.subject as string,
 		user,
+		claims,
 		recorded,
 		redirectTo: value.redirectTo as string | undefined,
 		request: Object.freeze({
@@ -157,7 +169,7 @@ function copyPrimaryFields(
 
 /**
  * `value` as a `PrimaryAuthentication` core's builders make (D5): a
- * non-empty `subject`; a `user` that can be copied; `recorded` with a
+ * non-empty `subject`; a `user` and `claims` that can be copied; `recorded` with a
  * non-empty `amr` and an `authentication` whose `mfaAt` is not set — and no
  * second-factor value beside a password primary; a valid `authTime`; a
  * `redirectTo` that is a string or `undefined`; a `request` object whose
