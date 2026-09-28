@@ -426,9 +426,14 @@ values — they were vouched for when it was written — so tokens minted from i
 keep carrying them, and the refresh tokens minted from it carry them forward
 until their family ends (`oauth.refreshToken.expiresIn` after the login, a day
 by default). To withdraw at once, call core's `revokeAllForSubject` for the
-subjects who signed in through that federation: it ends their sessions and
-every token and refresh family minted from them, and they log in again under
-the new setting. The [operator runbook](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust)
+subjects who signed in through that federation: it ends their sessions, the
+refresh families and codes minted from them, and every access token this
+provider itself verifies (introspection, `/oauth/userinfo`, the
+federation-token route, token exchange, the refresh grant), and they log in
+again under the new setting. An access token a resource server validates
+offline lives until its `exp`. `revokeAllForSubject` needs
+`subjectRevocation` and `subjectSessionIndex` wired, and reports itself
+`incomplete` without them. The [operator runbook](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust)
 has the procedure.
 
 Re-authentication is a *new* session: `POST /session/login` and the federation

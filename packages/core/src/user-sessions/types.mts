@@ -113,7 +113,13 @@ export interface UserSession {
 export interface SessionAuthentication {
 	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
 	readonly primary: string;
-	/** The federation, for `"fed"`. */
+	/**
+	 * The federation, for `"fed"`: the name it is installed under — the key
+	 * its callback resolved it by, whose `trustUpstreamAmr` applied. Equal to
+	 * the adapter's `provider.name` in every bundled composition; the
+	 * federation index, logout and the federation-token store use
+	 * `provider.name`.
+	 */
 	readonly federation: string | undefined;
 	/** What an untrusted upstream IdP asserted (D13): kept for the record, never stamped, never read for `acr`. */
 	readonly upstreamAmr: readonly string[] | undefined;
@@ -227,15 +233,18 @@ export interface SupportsSecondFactorUpdate {
 	 * `authentication` and its primary cannot be told, which no second factor
 	 * fixes: such a session logs in again. Under `mfa.mode = "required"` the
 	 * requirement rule re-authenticates it (D16) before a step-up is asked;
-	 * under `optional` `/authorize` sends it to the login page rather than the
-	 * MFA page (the MFA ADR's step-5 amendment).
+	 * under `optional` it does not, and the MFA ADR's step-5 amendment obliges
+	 * `/authorize` (build-order step 13), when it would ask a step-up of such
+	 * a session, to send it to the login page instead.
 	 *
 	 * An event with no values, an empty value, a primary's marker (`pwd`,
 	 * `fed`), only `mfa`, or a time that is not a valid date at or after the
-	 * epoch or is further ahead of the store's clock than
-	 * `MFA_CLOCK_SKEW_ALLOWANCE_MS`, is a `RangeError` before anything is read,
-	 * and nothing is written: the caller's fault, never an outage
-	 * (`checkSecondFactorEvent`). A store that cannot answer rejects with an
+	 * epoch or is further ahead of the store's clock than the clock skew
+	 * tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`), is a `RangeError`
+	 * before anything is read, and nothing is written: the caller's fault,
+	 * never an outage (`checkSecondFactorEvent`). A time accepted is recorded
+	 * no later than the store's clock, and a stored `mfaAt` ahead of it is
+	 * brought back to it before the later of the two is taken. A store that cannot answer rejects with an
 	 * error of its own, as every store method does: its outage.
 	 */
 	recordSecondFactor(sid: string, event: SecondFactorEvent): Promise<UserSession | null>;

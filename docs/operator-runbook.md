@@ -485,9 +485,8 @@ upstream `amr` (`profile.amr`); a custom adapter may.
   after the login that began it, a day by default — and a code `/authorize`
   issued keeps the `acr` it chose. To withdraw at once, call
   `revokeAllForSubject` for the subjects who signed in through that
-  federation: it stamps their revocation boundary, ends their sessions, and
-  with them every access token, refresh family and code minted from them. The
-  users log in again under the new setting.
+  federation. It stamps their revocation boundary and ends their sessions, and with them the refresh families and codes minted from them and every access token this provider itself verifies — at introspection, `/oauth/userinfo`, the federation-token route, token exchange and the refresh grant. An access token a resource server validates offline lives until its `exp` ([Which logout endpoint invalidates what](#which-logout-endpoint-invalidates-what)). It needs `subjectRevocation` and `subjectSessionIndex` wired; without them it reports itself `incomplete`. The users log in again under the new
+  setting.
 - **A switch in the wrong place** — inside a nested section's sub-section,
   `federations.<name>.<type>.trustUpstreamAmr` — refuses boot, saying it
   belongs beside `enabled`.
@@ -1315,7 +1314,9 @@ before you flip — and a relying party holding the secret can also mint.
    A deployment for which that matters calls `revokeAllForSubject` for the
    subjects who signed in through an untrusted federation (or revokes a known
    token's family) once the fleet is on the new release; the rest waits a
-   family lifetime.
+   family lifetime. What that call reaches, and what it cannot — an access
+   token a resource server validates offline — is in
+   [§3](#trusting-an-upstream-idps-amr-and-withdrawing-that-trust).
 
 4. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:
