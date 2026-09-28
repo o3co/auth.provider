@@ -344,6 +344,12 @@ export interface UnsatisfiableAcrValue {
 	 * `info`, not `warn` (D15).
 	 */
 	readonly forWantOfSecondFactor: boolean;
+	/**
+	 * One of its alternatives requires nothing, and is never met (only a table
+	 * built by hand holds one). When no other alternative is left to name
+	 * values, this is why `unproducible` is empty.
+	 */
+	readonly emptyAlternative: boolean;
 }
 
 /**
@@ -375,6 +381,7 @@ export function vouchableAcrTable(
 			forWantOfSecondFactor: lacking.some((values) =>
 				values.every((value) => SECOND_FACTOR_AMR.has(value)),
 			),
+			emptyAlternative: requirement.some((alternative) => alternative.length === 0),
 		});
 	}
 	return { table, dropped };

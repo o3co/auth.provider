@@ -95,6 +95,9 @@ export const logUnsatisfiableAcrValues = (
 			...(unproducible.length < entry.unproducible.length
 				? { unproducibleCount: entry.unproducible.length }
 				: {}),
+			// An alternative that requires nothing is never met: said, so an entry
+			// with nothing else to name is not logged with an empty list alone.
+			...(entry.emptyAlternative ? { emptyAlternative: true } : {}),
 		};
 		if (mfaOff && entry.forWantOfSecondFactor) logger.info(fields, ACR_VALUE_UNSATISFIABLE);
 		else logger.warn(fields, ACR_VALUE_UNSATISFIABLE);
