@@ -1,0 +1,424 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * sessionAdmissionCallers.drift.test.mts — no shipped source outside
+ * `packages/core/src/session-admission/` reads a session by other means than
+ * admission (the session-admission ADR's D10).
+ *
+ * What it finds, by shape and by following the receiver — a literal grep
+ * would miss `/authorize`'s aliased store (`const store = opts.userSessionStore`)
+ * and the sessions boundary federation grants hand their browser routes
+ * (`sessionsBoundaryFor(revocation: Pick<SubjectRevocation, …>)`):
+ *
+ * - `get(` on a receiver typed `UserSessionStore`: a property named
+ *   `userSessionStore` on anything; a local, destructured name or parameter
+ *   followed to its declaration — a type annotation naming `UserSessionStore`,
+ *   a binding element keyed `userSessionStore`, or an initializer that
+ *   resolves the same way, through `await`, `!`, `as`, `??` and `?:`;
+ * - `revokedBefore(` on a receiver typed `SubjectRevocation`, followed the
+ *   same way (`subjectRevocation`, a type naming `SubjectRevocation`);
+ * - a call of `selectAcr(`;
+ * - a `SessionClaim` literal: an object literal with a `carrier` property
+ *   whose value is one of the four carriers;
+ * - a call of `recordSecondFactor(` — kept to the two bundled stores' own
+ *   files and `packages/mfa` (D3, D10);
+ * - a call of `establishWithoutAsking(` — kept to the federation callback
+ *   (D5).
+ *
+ * Every site outside the home is pinned to its file and count with a
+ * reason, and shrinks as the consumers move (A3–A5); `jwt/verify.mts` and
+ * the token-side reads of D9 stay until that record. A site not listed, a
+ * second one in a listed file, or an entry whose site went away fails.
+ *
+ * What it does not follow is left to review: a receiver reached under a
+ * name declared in another file, a method taken off its object, a store
+ * reached through reflection.
+ */
+
+import { type Dirent, readdirSync, readFileSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+import { describe, expect, it } from "vitest";
+
+const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
+
+/** The one directory that may read a session, select an acr or build a claim. */
+const HOME = "packages/core/src/session-admission/";
+
+type What =
+	| "get"
+	| "revokedBefore"
+	| "selectAcr"
+	| "claim"
+	| "recordSecondFactor"
+	| "establishWithoutAsking";
+
+interface Site {
+	readonly line: number;
+	readonly what: What;
+}
+
+type Receiver = "store" | "revocation";
+
+const CARRIERS: ReadonlySet<string> = new Set(["cookie", "code", "link", "token"]);
+
+/**
+ * The sites in `source`: each `get(` on a store-typed receiver, each
+ * `revokedBefore(` on a revocation-typed one, each `selectAcr(` call, each
+ * claim literal, each `recordSecondFactor(` and `establishWithoutAsking(`
+ * call, with its 1-based line.
+ */
+function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
+	const kind = /\.(?:js|mjs|cjs)$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+	const sites: Site[] = [];
+	const found = (node: ts.Node, what: What): void => {
+		sites.push({ line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, what });
+	};
+	const bare = (node: ts.Expression): ts.Expression =>
+		ts.isParenthesizedExpression(node) ||
+		ts.isAsExpression(node) ||
+		ts.isSatisfiesExpression(node) ||
+		ts.isTypeAssertionExpression(node) ||
+		ts.isNonNullExpression(node) ||
+		ts.isAwaitExpression(node)
+			? bare(node.expression)
+			: node;
+	const byName = (name: string): Receiver | undefined =>
+		name === "userSessionStore" ? "store" : name === "subjectRevocation" ? "revocation" : undefined;
+	const byType = (type: ts.TypeNode | undefined): Receiver | undefined => {
+		if (type === undefined) return undefined;
+		const text = type.getText(file);
+		if (/\bUserSessionStore\b/.test(text)) return "store";
+		if (/\bSubjectRevocation\b/.test(text)) return "revocation";
+		return undefined;
+	};
+	const keyOf = (element: ts.BindingElement): string | undefined => {
+		const key = element.propertyName ?? element.name;
+		return ts.isIdentifier(key) || ts.isStringLiteralLike(key) ? key.text : undefined;
+	};
+	/** The binding element naming `name` in `pattern`, at any depth. */
+	const elementNamed = (pattern: ts.BindingName, name: string): ts.BindingElement | undefined => {
+		if (ts.isIdentifier(pattern)) return undefined;
+		for (const element of pattern.elements) {
+			if (ts.isOmittedExpression(element)) continue;
+			if (ts.isIdentifier(element.name) && element.name.text === name) return element;
+			const inner = elementNamed(element.name, name);
+			if (inner !== undefined) return inner;
+		}
+		return undefined;
+	};
+	/** What the declaration of `name` in scope at `from` says its value is. */
+	const resolveName = (name: string, from: ts.Node, depth: number): Receiver | undefined => {
+		if (depth > 8) return undefined;
+		for (let scope = from.parent; scope !== undefined; scope = scope.parent) {
+			let statements: ts.NodeArray<ts.Statement> | undefined;
+			if (ts.isBlock(scope) || ts.isSourceFile(scope) || ts.isModuleBlock(scope)) {
+				statements = scope.statements;
+			} else if (ts.isCaseClause(scope) || ts.isDefaultClause(scope)) {
+				statements = scope.statements;
+			}
+			if (statements !== undefined) {
+				for (const statement of statements) {
+					if (!ts.isVariableStatement(statement)) continue;
+					for (const declaration of statement.declarationList.declarations) {
+						if (ts.isIdentifier(declaration.name)) {
+							if (declaration.name.text !== name) continue;
+							return (
+								byType(declaration.type) ??
+								(declaration.initializer === undefined
+									? undefined
+									: classify(declaration.initializer, depth + 1))
+							);
+						}
+						const element = elementNamed(declaration.name, name);
+						if (element !== undefined) {
+							const key = keyOf(element);
+							return key === undefined ? undefined : byName(key);
+						}
+					}
+				}
+			}
+			if (ts.isFunctionLike(scope)) {
+				for (const parameter of scope.parameters) {
+					if (ts.isIdentifier(parameter.name)) {
+						if (parameter.name.text === name) return byType(parameter.type);
+						continue;
+					}
+					const element = elementNamed(parameter.name, name);
+					if (element !== undefined) {
+						const key = keyOf(element);
+						return key === undefined ? undefined : byName(key);
+					}
+				}
+			}
+		}
+		return undefined;
+	};
+	/** What `expression`'s value is, by its shape or by its declaration. */
+	const classify = (expression: ts.Expression, depth = 0): Receiver | undefined => {
+		const node = bare(expression);
+		if (ts.isPropertyAccessExpression(node)) return byName(node.name.text);
+		if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
+			return byName(node.argumentExpression.text);
+		}
+		if (ts.isIdentifier(node)) return resolveName(node.text, node, depth);
+		if (ts.isConditionalExpression(node)) {
+			return classify(node.whenTrue, depth + 1) ?? classify(node.whenFalse, depth + 1);
+		}
+		if (ts.isBinaryExpression(node)) {
+			const op = node.operatorToken.kind;
+			if (op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) {
+				return classify(node.left, depth + 1) ?? classify(node.right, depth + 1);
+			}
+			if (op === ts.SyntaxKind.AmpersandAmpersandToken) return classify(node.right, depth + 1);
+		}
+		return undefined;
+	};
+	const calleeName = (callee: ts.Expression): string | undefined =>
+		ts.isIdentifier(callee)
+			? callee.text
+			: ts.isPropertyAccessExpression(callee)
+				? callee.name.text
+				: undefined;
+	const visit = (node: ts.Node): void => {
+		if (ts.isCallExpression(node)) {
+			const callee = node.expression;
+			const name = calleeName(callee);
+			if (name === "get" && ts.isPropertyAccessExpression(callee)) {
+				if (classify(callee.expression) === "store") found(node, "get");
+			} else if (name === "revokedBefore" && ts.isPropertyAccessExpression(callee)) {
+				if (classify(callee.expression) === "revocation") found(node, "revokedBefore");
+			} else if (name === "selectAcr") {
+				found(node, "selectAcr");
+			} else if (name === "recordSecondFactor") {
+				found(node, "recordSecondFactor");
+			} else if (name === "establishWithoutAsking") {
+				found(node, "establishWithoutAsking");
+			}
+		} else if (ts.isObjectLiteralExpression(node)) {
+			for (const property of node.properties) {
+				if (
+					ts.isPropertyAssignment(property) &&
+					(ts.isIdentifier(property.name) || ts.isStringLiteralLike(property.name)) &&
+					property.name.text === "carrier" &&
+					ts.isStringLiteralLike(property.initializer) &&
+					CARRIERS.has(property.initializer.text)
+				) {
+					found(node, "claim");
+				}
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return sites;
+}
+
+/** A shipped source: any TypeScript or JavaScript source, no declaration file, no test. */
+const isShippedSource = (name: string): boolean =>
+	/\.(?:ts|mts|cts|js|mjs|cjs)$/.test(name) &&
+	!/\.d\.(?:ts|mts|cts)$/.test(name) &&
+	!/\.test\.(?:ts|mts|cts|js|mjs|cjs)$/.test(name);
+
+/** Every shipped source of every package and of the standalone template, `/`-separated from the root. */
+function shippedSources(): string[] {
+	const files: string[] = [];
+	const collect = (dir: string): void => {
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (entry.name === "__tests__" || entry.name === "node_modules" || entry.name === "dist") {
+				continue;
+			}
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) collect(path);
+			else if (isShippedSource(entry.name))
+				files.push(relative(repoRoot, path).split(sep).join("/"));
+		}
+	};
+	for (const pkg of readdirSync(join(repoRoot, "packages"), { withFileTypes: true })) {
+		if (pkg.isDirectory()) collect(join(repoRoot, "packages", pkg.name, "src"));
+	}
+	collect(join(repoRoot, "templates", "standalone", "src"));
+	return files.sort();
+}
+
+/** A file outside the home that reads a session, selects an acr or builds a claim: its sites by kind and count, and why they stay. */
+interface AllowedSites {
+	readonly file: string;
+	readonly sites: Partial<Record<What, number>>;
+	readonly why: string;
+}
+
+const UNTIL_A3 = "an oauth consumer, on admission in A3";
+const UNTIL_A4 = "a device-grant or federation-grants consumer, on admission in A4";
+const UNTIL_A5 = "the link flow, on admission in A5";
+const TOKEN_SIDE =
+	"a session read from a token, not a cookie: outside this release, routed through admission by a later record (D9)";
+
+/**
+ * Every site outside the home, pinned to its file, its kind and its exact
+ * count, with why. `recordSecondFactor(` and `establishWithoutAsking(` are
+ * not counted here: their callers are held to files by prefix below.
+ */
+const ALLOWED: ReadonlyArray<AllowedSites> = [];
+
+/** The files whose prefixes may call `recordSecondFactor(`: the two bundled stores, and the MFA package (D3, D10). */
+const RECORD_SECOND_FACTOR_CALLERS: readonly string[] = [
+	"packages/core/src/user-sessions/memory/userSessionStore.mts",
+	"packages/redis/src/userSessionStore.mts",
+	"packages/mfa/src/",
+];
+
+/** The one file that may call `establishWithoutAsking(`: the federation callback (D5). */
+const ESTABLISH_WITHOUT_ASKING_CALLERS: readonly string[] = [
+	"packages/session/src/routes/Federation.mts",
+];
+
+/** `sites`, counted by kind. */
+const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
+	const counts: Partial<Record<What, number>> = {};
+	for (const { what } of sites) counts[what] = (counts[what] ?? 0) + 1;
+	return counts;
+};
+
+describe("session-admission callers (the session-admission ADR's D10)", () => {
+	it("finds a store read whatever the receiver is called: a property, an alias, a destructured name, a typed parameter", () => {
+		for (const source of [
+			"await deps.userSessionStore.get(sid);",
+			"const store = opts.userSessionStore; await store.get(sid);",
+			"const { userSessionStore } = options; await userSessionStore.get(sid);",
+			"const { userSessionStore: sessions } = options; await sessions.get(sid);",
+			"function f(store: UserSessionStore) { return store.get(sid); }",
+			"function f({ userSessionStore }: Options) { return userSessionStore.get(sid); }",
+			"const store = opts.userSessionStore; if (store) { const s = await (store as UserSessionStore).get(sid); }",
+			"const store = a ? opts.userSessionStore : undefined; store?.get(sid);",
+			"let store: UserSessionStore | undefined; store = undefined; store?.get(sid);",
+		]) {
+			expect(
+				sessionAdmissionSites(source).map((s) => s.what),
+				source,
+			).toEqual(["get"]);
+		}
+	});
+
+	it("does not take a map, another store, or the express-session store for one", () => {
+		for (const source of [
+			"const store = new Map<string, Bucket>(); store.get(sid);",
+			"await opts.federationTokenStore.get(sid, name);",
+			"function f(store: SessionStore) { store.get(key(id), cb); }",
+			"const { federationTokenStore: store } = deps; store.get(sid);",
+			"const store = deps.userSessionStore; const other = new Map(); other.get(sid);",
+		]) {
+			expect(sessionAdmissionSites(source), source).toEqual([]);
+		}
+	});
+
+	it("finds a boundary read on a subject revocation: a property, an alias, a typed parameter, a conditional", () => {
+		for (const source of [
+			"await deps.subjectRevocation.revokedBefore(sub);",
+			"const revocation = options.subjectRevocation; await revocation.revokedBefore(subject);",
+			'const sessionsBoundaryFor = (revocation: Pick<SubjectRevocation, "revokedBefore">) => async (s) => revocation.revokedBefore(s);',
+			'const subjectRevocation = revocation === "none" ? undefined : revocation.subjectRevocation; await subjectRevocation.revokedBefore(sub);',
+		]) {
+			expect(
+				sessionAdmissionSites(source).map((s) => s.what),
+				source,
+			).toEqual(["revokedBefore"]);
+		}
+		expect(sessionAdmissionSites("await grants.revokedBefore(sub);")).toEqual([]);
+	});
+
+	it("finds a selectAcr call, a claim literal, and the two guarded calls", () => {
+		expect(sessionAdmissionSites("const s = selectAcr(requested, amr, table, reach);")).toEqual([
+			{ line: 1, what: "selectAcr" },
+		]);
+		expect(
+			sessionAdmissionSites('const c = { authenticated: true, sid, subject, carrier: "cookie" };'),
+		).toEqual([{ line: 1, what: "claim" }]);
+		expect(
+			sessionAdmissionSites('const c = { carrier: kind }; const d = { carrier: "bus" };'),
+		).toEqual([]);
+		expect(sessionAdmissionSites("await store.recordSecondFactor(sid, event);")).toEqual([
+			{ line: 1, what: "recordSecondFactor" },
+		]);
+		expect(sessionAdmissionSites("const e = establishWithoutAsking(login);")).toEqual([
+			{ line: 1, what: "establishWithoutAsking" },
+		]);
+	});
+
+	const sites = new Map<string, Site[]>();
+	for (const file of shippedSources()) {
+		const found = sessionAdmissionSites(readFileSync(join(repoRoot, file), "utf8"), file);
+		if (found.length > 0) sites.set(file, found);
+	}
+
+	it("scans the home, which builds the claims and selects the acr (sanity: the guard is not vacuous)", () => {
+		const home = [...sites].filter(([file]) => file.startsWith(HOME));
+		expect(home.length).toBeGreaterThan(0);
+		const inHome = counted(home.flatMap(([, s]) => s));
+		expect(inHome.claim).toBe(4);
+		expect(inHome.selectAcr).toBe(1);
+		expect(inHome.get).toBe(1);
+		expect(inHome.revokedBefore).toBe(1);
+	});
+
+	it("reads a session, the boundary and the acr, and builds a claim, nowhere outside the home but the sites listed, each at its count", () => {
+		const outside = [...sites]
+			.filter(([file]) => !file.startsWith(HOME))
+			.map(([file, found]) => {
+				const { recordSecondFactor: _r, establishWithoutAsking: _e, ...rest } = counted(found);
+				return [file, rest] as const;
+			})
+			.filter(([, counts]) => Object.keys(counts).length > 0);
+		const actual = Object.fromEntries(outside);
+		const expected = Object.fromEntries(ALLOWED.map(({ file, sites: s }) => [file, s]));
+		expect(
+			actual,
+			"read a session through admitSession with a claim core built (core/src/session-admission/)",
+		).toEqual(expected);
+	});
+
+	it("keeps recordSecondFactor( to the two bundled stores and the MFA package, and establishWithoutAsking( to the federation callback", () => {
+		const offenders = (what: What, allowed: readonly string[]): string[] =>
+			[...sites]
+				.filter(
+					([file, found]) =>
+						!file.startsWith(HOME) &&
+						found.some((s) => s.what === what) &&
+						!allowed.some((prefix) => file === prefix || file.startsWith(prefix)),
+				)
+				.map(([file]) => file);
+		expect(offenders("recordSecondFactor", RECORD_SECOND_FACTOR_CALLERS)).toEqual([]);
+		expect(offenders("establishWithoutAsking", ESTABLISH_WITHOUT_ASKING_CALLERS)).toEqual([]);
+	});
+
+	it("has no stale entry: every listed file is scanned and has the sites it lists", () => {
+		for (const { file, sites: s, why } of ALLOWED) {
+			const found = sites.get(file);
+			expect(found, `${file} — ${why}`).toBeDefined();
+			const { recordSecondFactor: _r, establishWithoutAsking: _e, ...rest } = counted(found ?? []);
+			expect(rest, `${file} — ${why}`).toEqual(s);
+		}
+	});
+});
