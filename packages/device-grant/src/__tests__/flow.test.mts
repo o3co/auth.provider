@@ -459,7 +459,10 @@ describe("verification endpoint", () => {
 		const { app } = makeHarness({ session: { isAuthenticated: false } });
 		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("login_required");
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "an authenticated end-user session is required to approve a device",
+		});
 	});
 
 	it.each([
@@ -1323,7 +1326,10 @@ describe("the session check, further", () => {
 		const started = await startDevice(app);
 		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("login_required");
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "the session is no longer active; sign in again",
+		});
 		const pending = await poll(started.body.device_code as string);
 		expect(pending.result).toMatchObject({ status: 400, error: "authorization_pending" });
 	});

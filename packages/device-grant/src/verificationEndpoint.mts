@@ -79,10 +79,19 @@
  * `device.decision_outcome_unknown`, with the subject, as the decision itself
  * would have been.
  *
- * ### The session behind the cookie is asked, not the cookie
+ * ### The body first, then the session behind the cookie
  *
- * `isAuthenticated` is what the browser's cookie session claims; the
- * `UserSession` record its `sid` names is the fact. A logout, a
+ * Which action the body asks for decides what admission is asked about, so
+ * the body's `action` is read before anything else: an action this endpoint
+ * does not implement is `400 invalid_request` before a signed-out cookie's
+ * `401` and before a store outage's `503` (the session-admission ADR's D8).
+ *
+ * Then the session is admitted — core's `admitSession`, the one reading
+ * every consumer of an authenticated browser session shares — on the
+ * cookie's claim (`cookieClaim`) and the action's own name, one per body
+ * action: `device.lookup`, `device.approve`, `device.deny`, all graded
+ * `use` (`ADMISSION_ACTIONS`, the ADR's D4). `isAuthenticated` is what the
+ * cookie claims; the `UserSession` its `sid` names is the fact. A logout, a
  * `revokeAllForSubject` or a record deleted out of band ends the record and
  * leaves the cookie as it was — and the approval is the one point that can
  * see it: the device token it leads to carries no `sid` and no `family_id`,
@@ -90,35 +99,42 @@
  * stamped before the approval is older than the token's `iat`. (A watermark
  * stamped after the token is minted does reach it, at `verifyJwt`; the
  * window between the approval and the poll is closed at the poll, by the
- * grant — see `grant.mts`.) So every action reads the record first, as
- * `/authorize`, `/oauth/consent` and the session grant read it, with the
- * session grant's rule for what counts: a `sid` the store holds, recording
- * the cookie's own subject. A cookie session with no `sid` is `401
- * login_required` "session identifier (sid) is required" — a login of the
- * deployment's own that set `isAuthenticated` and `user.id` without the
- * `sid` and the `UserSession` behind it is told what is missing; a `sid` the
- * store no longer holds, or one naming another subject (warned once as
- * `device_verification_session_subject_mismatch`, with the `sid`), is `401
- * login_required` "the session is no longer active; sign in again". The
- * module refuses to boot an enabled grant without a store, and this handler
- * refuses to be built without one, so there is no cookie-only mode.
+ * grant — see `grant.mts`.) So admission reads the record: a `sid` the store
+ * holds, recording the cookie's own subject, not past its `expiresAt` on
+ * this handler's clock, and — with `subjectRevocation` wired — authenticated
+ * after the subject's sessions boundary (`revokeAllForSubject` stamps it
+ * before it deletes the sessions, so a cascade that failed for one, or a
+ * session the subject index never learnt of, leaves a record the boundary
+ * has ended). Then it asks the registered session requirements. The module
+ * refuses to boot an enabled grant without a store, and this handler
+ * refuses to be built without one or without the resolver, so there is no
+ * cookie-only mode and no admission the planner did not build.
  *
- * With `subjectRevocation` wired, the subject's sessions boundary is read
- * too, as federation-grants reads it: `revokeAllForSubject` stamps the
- * boundary before it deletes the sessions, so a cascade that failed for
- * one — or a session the subject index never learnt of — leaves a record
- * the boundary has ended. A session that authenticated at or before the
- * boundary (core's `coveredByRevocationBoundary`, with the one-second
- * allowance `verifyJwt` gives it) is `401 login_required` too.
- *
- * A store that cannot answer fails closed, as an outage:
- * `503 temporarily_unavailable` ("session store unavailable", the answer
- * `/oauth/consent` gives), logged once at error as
- * `device_verification_session_liveness_unavailable` with the store
- * (`user_session`, or `revocation_boundary` for the boundary), the step, the
- * `sid` and core's projection of the error — on core's console logger when
- * none is wired — not `login_required`, which would tell the page the user
- * is signed out when the store said nothing.
+ * What each admission is answered with is this endpoint's, a JSON API a page
+ * calls: a new login is the remedy for every session that cannot be used,
+ * so all of them are `401 login_required`, each with the description it had
+ * — a signed-out cookie, or one that names no user, "an authenticated
+ * end-user session is required to approve a device"; a cookie with no `sid`,
+ * "session identifier (sid) is required", so a login of the deployment's own
+ * that set `isAuthenticated` and `user.id` without the `UserSession` is told
+ * what is missing; a record gone, expired, another subject's or covered by
+ * the boundary, "the session is no longer active; sign in again" — and a
+ * requirement's `reauthenticate` or `unmet` "sign in again to continue": the
+ * page has no other remedy to offer a device. A `step_up` is
+ * `403 step_up_required` with the `requirement` that asked, on any of the
+ * three actions: the MFA requirement never steps up `lookup` or `deny` (a
+ * user refuses a phished device request without one, the ADR's D6), but
+ * another requirement may. An outage — the store, the boundary, or a
+ * requirement that throws — fails closed as `503 temporarily_unavailable`
+ * ("session store unavailable", the answer `/oauth/consent` gives), not
+ * `login_required`, which would tell the page the user is signed out when
+ * the store said nothing. Admission writes the lines — one at error for an
+ * outage (`session_admission_unavailable`, with the store and the action,
+ * never the `sid`), one at warn for a record of another subject
+ * (`session_admission_subject_mismatch`, audited as
+ * `session.admission.subject_mismatch` with the `sid`) — through this
+ * handler's logger, core's console logger when none is wired. Every
+ * refusal comes before the budget is spent and before the code is read.
  *
  * ### `oauth.requireEmailVerified` holds an approval as it holds issuance
  *
@@ -167,21 +183,26 @@
  */
 
 import type {
+	Admission,
+	AdmissionAction,
+	AdmissionDeps,
+	Logger,
 	RateLimitContext,
 	RateLimiter,
 	RateLimitFailMode,
 	RateLimitOutageLogger,
+	SessionRequirementResolver,
 	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	ADMISSION_ACTIONS,
+	admitSession,
 	checkWithFailMode,
 	consoleLogger,
-	coveredByRevocationBoundary,
-	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+	cookieClaim,
 	emitAuditEvent,
 	isEmailVerified,
-	loggableError,
 	normaliseUserCode,
 	rateLimiterUnavailableEnvelope,
 } from "@o3co/auth-provider-core";
@@ -193,37 +214,30 @@ type Action = "lookup" | "approve" | "deny";
 
 const ACTIONS: readonly Action[] = ["lookup", "approve", "deny"];
 
+const isAction = (value: unknown): value is Action =>
+	typeof value === "string" && (ACTIONS as readonly string[]).includes(value);
+
+/** Each body action as admission is asked about it: its own name, graded `use` (the session-admission ADR's D4). */
+const ADMITTED_AS: Readonly<Record<Action, AdmissionAction>> = {
+	lookup: ADMISSION_ACTIONS["device.lookup"],
+	approve: ADMISSION_ACTIONS["device.approve"],
+	deny: ADMISSION_ACTIONS["device.deny"],
+};
+
+/** Device verification selects no `acr`: nothing asks for one here. */
+const NO_ACR_TABLE: AdmissionDeps["acrTable"] = Object.freeze({});
+
 const respond = (res: Response, status: number, body: Record<string, unknown>): void => {
 	res.status(status).set("Cache-Control", "no-store").json(body);
 };
 
 /**
- * What the cookie session the deployment's verification page runs inside
- * claims: the end user, the `sid` of the `UserSession` it was issued with,
- * and the user object the email gate reads (as `/authorize` reads it).
- *
- * Returns `null` when there is nobody logged in. That is a 401, not a
- * redirect: this is a JSON API called by a page, and the page owns what to do
- * about a missing session.
+ * The user object the cookie session carries: what the email gate reads, as
+ * `/authorize` reads it. Nobody's subject is taken from it — the subject is
+ * the admitted record's.
  */
-interface SessionClaim {
-	readonly subject: string;
-	readonly sid: string | undefined;
-	readonly user: unknown;
-}
-
-const claimOf = (req: Request): SessionClaim | null => {
-	const session = (
-		req as {
-			session?: { isAuthenticated?: boolean; user?: { id?: unknown }; sid?: unknown };
-		}
-	).session;
-	if (session?.isAuthenticated !== true) return null;
-	const id = session.user?.id;
-	if (typeof id !== "string" || id === "") return null;
-	const sid = typeof session.sid === "string" && session.sid !== "" ? session.sid : undefined;
-	return { subject: id, sid, user: session.user };
-};
+const cookieUserOf = (req: Request): unknown =>
+	(req as { session?: { user?: unknown } | null }).session?.user;
 
 /**
  * The check context: the subject the budget is keyed on, plus the request
@@ -250,6 +264,82 @@ const hasErrorChannel = (
 ): logger is NonNullable<DeviceGrantDependencies["logger"]> & RateLimitOutageLogger =>
 	typeof logger?.error === "function";
 
+/**
+ * The dependency's logger as the `Logger` admission writes through: its
+ * `warn`, and its `error` — core's console logger's when it has none, as the
+ * rate-limit check falls back — or core's console logger outright when none
+ * is wired. Admission writes object-first lines at `warn` and `error`
+ * alone; the other levels go where `error` or nowhere goes.
+ */
+const admissionLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
+	if (logger === undefined) return consoleLogger;
+	const errors = hasErrorChannel(logger) ? logger : consoleLogger;
+	const line =
+		(write: (obj: Record<string, unknown>, msg: string) => void) =>
+		(first: Record<string, unknown> | string, msg?: unknown): void => {
+			if (typeof first === "string") write({}, first);
+			else write(first, typeof msg === "string" ? msg : "");
+		};
+	const ignored = (): void => undefined;
+	const adapted: Logger = {
+		trace: ignored,
+		debug: ignored,
+		info: ignored,
+		warn: line((obj, msg) => logger.warn(obj, msg)),
+		error: line((obj, msg) => errors.error(obj, msg)),
+		fatal: line((obj, msg) => errors.error(obj, msg)),
+		child: () => adapted,
+	};
+	return adapted;
+};
+
+/** The three descriptions `401 login_required` had before admission, and the one it adds. */
+const NO_SESSION = "an authenticated end-user session is required to approve a device";
+const NO_SID = "session identifier (sid) is required";
+const ENDED = "the session is no longer active; sign in again";
+const SIGN_IN_AGAIN = "sign in again to continue";
+
+const loginRequired = (description: string) =>
+	({ status: 401, body: { error: "login_required", error_description: description } }) as const;
+
+/**
+ * What an admission that did not admit a live session is answered with —
+ * see the file header. An `admitted` without a record is one a handler
+ * built with a store is never given, and is refused with the rest.
+ */
+const refusalOf = (
+	admission: Admission,
+): { readonly status: number; readonly body: Record<string, unknown> } => {
+	switch (admission.outcome) {
+		case "unavailable":
+			return {
+				status: 503,
+				body: { error: "temporarily_unavailable", error_description: "session store unavailable" },
+			};
+		case "step_up":
+			return {
+				status: 403,
+				body: {
+					error: "step_up_required",
+					error_description: "the session must step up before it can do this",
+					requirement: admission.requirement,
+				},
+			};
+		case "unauthenticated":
+			return loginRequired(NO_SESSION);
+		case "not_live":
+			if (admission.reason === "no_subject") return loginRequired(NO_SESSION);
+			if (admission.reason === "no_sid") return loginRequired(NO_SID);
+			return loginRequired(ENDED);
+		case "revoked":
+			return loginRequired(ENDED);
+		case "reauthenticate":
+		case "unmet":
+		case "admitted":
+			return loginRequired(SIGN_IN_AGAIN);
+	}
+};
+
 export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencies {
 	/**
 	 * Required. See the file header: the code's entropy budget is calculated
@@ -264,11 +354,18 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 */
 	readonly failMode: RateLimitFailMode;
 	/**
-	 * Required: where the `UserSession` behind the cookie's `sid` is read —
-	 * see the file header. Without it an approval would rest on the cookie's
-	 * word alone, which is the defect the read closes.
+	 * Required: where admission reads the `UserSession` behind the cookie's
+	 * `sid` — see the file header. Without it an approval would rest on the
+	 * cookie's word alone, which is the defect the read closes.
 	 */
 	readonly userSessionStore: UserSessionStore;
+	/**
+	 * Required: the synthetic key `sessionRequirementResolver` the boot
+	 * planner built (`resolverForTests` in a test) — the registered session
+	 * requirements admission asks (the session-admission ADR's D1). Admission
+	 * refuses any other object.
+	 */
+	readonly requirements: SessionRequirementResolver;
 	/**
 	 * `oauth.requireEmailVerified` (#297), resolved. Required rather than
 	 * defaulted, so a composition that mounts this handler by hand states
@@ -276,70 +373,13 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 */
 	readonly requireEmailVerified: boolean;
 	/**
-	 * Where the subject's sessions boundary is read (see the file header).
-	 * Optional as it is at every surface that reads it: a composition that
-	 * declared subject-level revocation absent has no boundary to honour.
+	 * Where admission reads the subject's sessions boundary (see the file
+	 * header). Optional as it is at every surface that reads it: a
+	 * composition that declared subject-level revocation absent has no
+	 * boundary to honour.
 	 */
-	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
+	readonly subjectRevocation?: SubjectRevocation;
 }
-
-const LIVENESS_UNAVAILABLE = "device_verification_session_liveness_unavailable";
-
-/**
- * Whether the `UserSession` behind the claim is live — see the file header.
- * `"live"` only for a record the store holds under the claim's `sid`, that
- * records the claim's subject, and that no sessions boundary covers;
- * `"unavailable"` when a store threw, after the one error line has been
- * written.
- */
-const livenessOf = async (
-	claim: SessionClaim,
-	options: Pick<
-		DeviceVerificationHandlerOptions,
-		"userSessionStore" | "subjectRevocation" | "logger"
-	>,
-): Promise<"live" | "no_sid" | "ended" | "unavailable"> => {
-	const sid = claim.sid;
-	if (sid === undefined) return "no_sid";
-	// The fields `/authorize` and `/oauth/consent` write for the same read.
-	const outage = (store: "user_session" | "revocation_boundary", step: string, err: unknown) => {
-		const logger = hasErrorChannel(options.logger) ? options.logger : consoleLogger;
-		logger.error({ store, step, sid, err: loggableError(err) }, LIVENESS_UNAVAILABLE);
-		return "unavailable" as const;
-	};
-	let record: Awaited<ReturnType<UserSessionStore["get"]>>;
-	try {
-		record = await options.userSessionStore.get(sid);
-	} catch (err) {
-		return outage("user_session", "get", err);
-	}
-	// `== null`: the port answers `null`, and a store of the deployment's own
-	// that answers `undefined` for a missing session is still no session.
-	if (record == null) return "ended";
-	if (record.sub !== claim.subject) {
-		(options.logger ?? consoleLogger).warn({ sid }, "device_verification_session_subject_mismatch");
-		return "ended";
-	}
-	const revocation = options.subjectRevocation;
-	if (revocation === undefined) return "live";
-	try {
-		const boundary = await revocation.revokedBefore(claim.subject);
-		if (boundary !== null && !(boundary instanceof Date)) {
-			throw new TypeError("the sessions boundary is neither a date nor null");
-		}
-		// Throws for a date that cannot be compared: an outage, answered
-		// neither way (see `coveredByRevocationBoundary`).
-		return coveredByRevocationBoundary(
-			record.authTime,
-			boundary,
-			DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
-		)
-			? "ended"
-			: "live";
-	} catch (err) {
-		return outage("revocation_boundary", "read", err);
-	}
-};
 
 export const createDeviceVerificationHandler = (
 	options: DeviceVerificationHandlerOptions,
@@ -353,7 +393,26 @@ export const createDeviceVerificationHandler = (
 				"the live UserSession behind the cookie's sid before it is answered",
 		);
 	}
+	// Likewise the resolver: a handler built without it would answer every
+	// request 500 when admission refused the missing one.
+	if (typeof options.requirements !== "object" || options.requirements === null) {
+		throw new TypeError(
+			"createDeviceVerificationHandler: requirements is required — the " +
+				"sessionRequirementResolver the boot planner built (resolverForTests in a test); " +
+				"every action is admitted through session admission",
+		);
+	}
 	const now = options.now ?? Date.now;
+	// Admission's dependencies: this handler's own slots and clock.
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore: options.userSessionStore,
+		subjectRevocation: options.subjectRevocation,
+		requirements: options.requirements,
+		acrTable: NO_ACR_TABLE,
+		logger: admissionLogger(options.logger),
+		auditSink: options.auditSink,
+		now: () => new Date(now()),
+	};
 	// The guard's check with its outage policy attached — see the file header.
 	const policy = {
 		limiter: options.rateLimiter,
@@ -375,43 +434,10 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 
-		const claim = claimOf(req);
-		if (claim === null) {
-			respond(res, 401, {
-				error: "login_required",
-				error_description: "an authenticated end-user session is required to approve a device",
-			});
-			return;
-		}
-		// The record behind the cookie, before anything else is asked — see
-		// the file header.
-		const liveness = await livenessOf(claim, options);
-		if (liveness === "unavailable") {
-			respond(res, 503, {
-				error: "temporarily_unavailable",
-				error_description: "session store unavailable",
-			});
-			return;
-		}
-		if (liveness === "no_sid") {
-			respond(res, 401, {
-				error: "login_required",
-				error_description: "session identifier (sid) is required",
-			});
-			return;
-		}
-		if (liveness === "ended") {
-			respond(res, 401, {
-				error: "login_required",
-				error_description: "the session is no longer active; sign in again",
-			});
-			return;
-		}
-		const { subject } = claim;
-
+		// The body first — see the file header.
 		const body = (req.body ?? {}) as Record<string, unknown>;
 		const action = body.action;
-		if (typeof action !== "string" || !ACTIONS.includes(action as Action)) {
+		if (!isAction(action)) {
 			respond(res, 400, {
 				error: "invalid_request",
 				error_description: `action must be one of: ${ACTIONS.join(", ")}`,
@@ -419,8 +445,25 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 
+		// Then the session behind the cookie, before anything else is asked.
+		const admission = await admitSession(admissionDeps, {
+			claim: cookieClaim(req),
+			action: ADMITTED_AS[action],
+		});
+		const session = admission.outcome === "admitted" ? admission.session : null;
+		if (session === null) {
+			const refusal = refusalOf(admission);
+			respond(res, refusal.status, refusal.body);
+			return;
+		}
+		const subject = session.sub;
+
 		// #297, before the budget and the code — see the file header.
-		if (action === "approve" && options.requireEmailVerified && !isEmailVerified(claim.user)) {
+		if (
+			action === "approve" &&
+			options.requireEmailVerified &&
+			!isEmailVerified(cookieUserOf(req))
+		) {
 			respond(res, 403, {
 				error: "access_denied",
 				error_description: "email address is not verified",

@@ -45,6 +45,7 @@ import { LIVE_SID, liveCookieSession, liveSessionStore } from "./liveSessions.mj
 /** The handler's clock, and the instant each fixed session authenticated at. */
 const NOW = 1_800_000_000_000;
 const USER_CODE = "BCDFGHJK";
+const DEVICE_CODE = "dc-aaaaaaaaaaaaaaaaaaaa";
 
 const settings = {
 	verificationUri: "https://example.test/device",
@@ -89,7 +90,7 @@ interface HarnessOptions {
 const harness = async (options: HarnessOptions = {}) => {
 	const store = createMemoryDeviceCodeStore();
 	await store.create({
-		deviceCode: "dc-aaaaaaaaaaaaaaaaaaaa",
+		deviceCode: DEVICE_CODE,
 		userCode: USER_CODE,
 		clientId: "tv-app",
 		requestedScope: ["openid"],
@@ -124,7 +125,12 @@ const harness = async (options: HarnessOptions = {}) => {
 		request(app).post("/oauth/device/verification").send(body);
 	/** Whether the seeded code is still undecided. */
 	const undecided = async () => (await store.findPendingByUserCode(USER_CODE, NOW)) !== null;
-	return { verify, undecided, logger };
+	/** Who the seeded code was approved by, if it was. */
+	const approvedBy = async () => {
+		const polled = await store.poll(DEVICE_CODE, NOW);
+		return polled.status === "approved" ? polled.authorization.subject : undefined;
+	};
+	return { verify, undecided, approvedBy, logger };
 };
 
 /** `liveSessionStore()` with `user-1`'s record expiring at `expiresAt`. */
@@ -183,6 +189,14 @@ describe("device verification on session admission (the session-admission ADR's 
 			});
 		},
 	);
+
+	it("approves as the subject of the record admission read", async () => {
+		const { verify, approvedBy } = await harness({
+			session: { isAuthenticated: true, user: { id: "user-2" }, sid: "sid-2" },
+		});
+		expect((await verify({ action: "approve", user_code: USER_CODE })).status).toBe(200);
+		expect(await approvedBy()).toBe("user-2");
+	});
 
 	it("answers a step-up on approve 403 step_up_required, naming the requirement, and decides nothing", async () => {
 		const { verify, undecided } = await harness({
