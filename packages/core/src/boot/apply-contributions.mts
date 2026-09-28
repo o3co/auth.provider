@@ -52,9 +52,9 @@ import type {
 } from "../modules/manifest/synthetic-keys.mjs";
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
-	checkRegisteredReach,
 	MFA_REQUIREMENT_NAME,
 	registeredRequirement,
+	sealRegisteredReach,
 } from "../session-admission/requirement.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import type {
@@ -475,10 +475,12 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  * session requirement, once the name-keyed pass is done and before any
  * list-shaped factory reads a reach —
  *
- * - each `reach`, read once (`checkRegisteredReach`): a Set of non-empty
+ * - each `reach`, read once (`sealRegisteredReach`): a Set of non-empty
  *   strings, no primary's marker, a second-factor value under the name `mfa`
  *   alone, a page exactly when the reach is not empty — `contribute-factory-failed`,
- *   naming the module and the requirement;
+ *   naming the module and the requirement — and sealed on the registered
+ *   copy as a frozen snapshot, which is what the resolver answers from then
+ *   on: the `acr` drop and admission read what was checked here;
  * - the name `mfa`, reserved and bound to core's MFA ports: accepted only
  *   from a module whose `requires` lists `mfaFactorResolver`, `mfaFactorStore`
  *   and `mfaTransactionStore`, whose reach equals what core recomputes from
@@ -535,7 +537,7 @@ async function checkSessionRequirements(
 	for (const registration of registrations) {
 		let reach: ReadonlySet<string>;
 		try {
-			reach = checkRegisteredReach(registration.requirement);
+			reach = sealRegisteredReach(registration.requirement);
 		} catch (cause) {
 			return failed(registration, cause);
 		}

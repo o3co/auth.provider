@@ -286,6 +286,33 @@ export const isHintKey = (key: unknown): key is string =>
 export const isHintToken = (value: unknown): value is string =>
 	typeof value === "string" && HINT_TOKEN.test(value);
 
+/** The copies `registeredRequirement` made: what `sealRegisteredReach` seals. */
+const registeredCopies = new WeakSet<SessionRequirement>();
+
+/** Each registered copy's sealed reach (D3): read once at the end of boot's stage 4, answered afterwards. */
+const sealedReach = new WeakMap<SessionRequirement, ReadonlySet<string>>();
+
+/** A `Set` nothing changes: what a sealed reach is answered as. */
+function frozenSet(values: Iterable<string>): ReadonlySet<string> {
+	const set = new Set(values);
+	const refuse = (): never => {
+		throw new TypeError(
+			"a registered requirement's reach is sealed: it does not change after boot",
+		);
+	};
+	for (const method of ["add", "delete", "clear"] as const) {
+		Object.defineProperty(set, method, { value: refuse, enumerable: false });
+	}
+	return Object.freeze(set);
+}
+
+/** Seals `requirement` on `values` when it is a registered copy, and answers the sealed set. */
+function seal(requirement: SessionRequirement, values: Iterable<string>): ReadonlySet<string> {
+	const sealed = frozenSet(values);
+	if (registeredCopies.has(requirement)) sealedReach.set(requirement, sealed);
+	return sealed;
+}
+
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
  * non-empty `name`, `remediations` and `hintKeys` as lists of names, a
@@ -295,11 +322,14 @@ export const isHintToken = (value: unknown): value is string =>
  * getter is read once here, so what the resolver answers at request time is
  * what was registered. `reach` is NOT read here: a requirement's reach may
  * be a getter over what registers in the same pass (the MFA requirement's,
- * over `mfaFactorResolver`), so the copy reads the value's `reach` live —
- * at request time by admission, at the end of boot's stage 4 by
- * `checkRegisteredReach`, both after the pass. `admit` and `admitPrimary`
- * delegate to the value's. A `RangeError` names what is wrong; the boot
- * planner reports it as the contribution's failure.
+ * over `mfaFactorResolver`). It is read once, after the pass, by
+ * `sealRegisteredReach` at the end of boot's stage 4, and sealed on the
+ * copy as a frozen snapshot: what the copy answers from then on, so the
+ * `acr` drop and admission at request time read what boot checked, and a
+ * contributor's mutable `Set` changes nothing after boot. Until sealed, the
+ * copy answers the value's own. `admit` and `admitPrimary` delegate to the
+ * value's. A `RangeError` names what is wrong; the boot planner reports it
+ * as the contribution's failure.
  */
 export function registeredRequirement(value: unknown, issuer?: string): SessionRequirement {
 	if (!isPlainObject(value)) throw new RangeError("a session requirement must be an object");
@@ -326,10 +356,10 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 	}
 	const source = value as unknown as SessionRequirement;
 	const primaryAsk = source.admitPrimary;
-	return Object.freeze({
+	const copy: SessionRequirement = Object.freeze({
 		name,
 		get reach() {
-			return source.reach;
+			return sealedReach.get(copy) ?? source.reach;
 		},
 		stepUpPage,
 		remediations: Object.freeze([...(value.remediations as readonly string[])]),
@@ -339,6 +369,8 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 			? {}
 			: { admitPrimary: (primary: PrimaryAuthentication) => primaryAsk.call(source, primary) }),
 	});
+	registeredCopies.add(copy);
+	return copy;
 }
 
 /**
@@ -348,10 +380,11 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
  * (`SECOND_FACTOR_AMR`), and a `stepUpPage` exactly when the reach is not
  * empty. The end of boot's stage 4 runs it over every registration
  * (`contribute-factory-failed`, naming the requirement), and the contract
- * suite over a requirement under test. Answers the reach as read, a set of
- * its own.
+ * suite over a requirement under test. Answers the reach as read, a frozen
+ * set of its own — and seals a registered copy on it: the copy answers the
+ * snapshot from then on, whatever the contributor's own `Set` does.
  */
-export function checkRegisteredReach(requirement: SessionRequirement): ReadonlySet<string> {
+export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySet<string> {
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
 	};
@@ -377,7 +410,24 @@ export function checkRegisteredReach(requirement: SessionRequirement): ReadonlyS
 	if (read.size === 0 && requirement.stepUpPage !== undefined) {
 		refuse("a requirement that reaches nothing declares no page");
 	}
-	return read;
+	return seal(requirement, read);
+}
+
+/**
+ * Seals a registered copy's reach as boot does — read once, a frozen
+ * snapshot the copy answers afterwards — without the rule
+ * `sealRegisteredReach` holds it to, which the contract suite and boot do.
+ * For `resolverForTests` alone.
+ * @internal
+ */
+export function snapshotReach(requirement: SessionRequirement): ReadonlySet<string> {
+	const reach: unknown = requirement.reach;
+	if (!(reach instanceof Set)) {
+		throw new RangeError(
+			`session requirement "${requirement.name}": reach must be a Set of amr values`,
+		);
+	}
+	return seal(requirement, reach as Set<string>);
 }
 
 /**
