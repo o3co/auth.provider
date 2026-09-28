@@ -749,13 +749,35 @@ describe("readMfaMode — `mfa.mode` as a consumer reads it", () => {
 		["no config", undefined],
 		["no mfa section", {}],
 		["no mode", { mfa: {} }],
+	])("answers undefined for %s: absent, for the caller to default", (_label, config) => {
+		expect(readMfaMode(config)).toBeUndefined();
+	});
+
+	it.each([
 		["a mode it does not know", { mfa: { mode: "maybe" } }],
+		["a typo", { mfa: { mode: "requried" } }],
 		["a casing slip", { mfa: { mode: "Required" } }],
+		["an empty string", { mfa: { mode: "" } }],
+		["null", { mfa: { mode: null } }],
 		["a non-string", { mfa: { mode: true } }],
 	])(
-		"answers undefined for %s: the schema refuses it at boot, and the caller decides",
+		"refuses %s with a RangeError naming mfa.mode: a given but unusable mode is never read as off",
 		(_label, config) => {
-			expect(readMfaMode(config)).toBeUndefined();
+			// Read as absent, a typo would default to "off" and switch MFA off —
+			// failing open once a consumer enforces the mode.
+			expect(() => readMfaMode(config)).toThrow(RangeError);
+			expect(() => readMfaMode(config)).toThrow(/mfa\.mode/);
 		},
 	);
+
+	it("quotes nothing of the value it refuses", () => {
+		let refusal: unknown;
+		try {
+			readMfaMode({ mfa: { mode: "sentinel-value" } });
+		} catch (err) {
+			refusal = err;
+		}
+		expect(refusal).toBeInstanceOf(RangeError);
+		expect((refusal as RangeError).message).not.toContain("sentinel-value");
+	});
 });

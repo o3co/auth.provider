@@ -2010,3 +2010,27 @@ describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => 
 		expect(harness.records.size).toBe(0);
 	});
 });
+
+describe("/authorize — mfa.mode as the acr table's boot line reads it", () => {
+	it("refuses to compose with an mfa.mode that is given but unusable, rather than read it as off", async () => {
+		// A hand-built configuration: core's schema refuses it at boot too.
+		await expect(
+			createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config: {
+					...makeConfig({ authorize: { acrValues: { "urn:example:mfa": ["mfa"] } } }),
+					mfa: { mode: "requried" },
+				} as unknown as AppConfig,
+				clientRepository: { findById: async () => null, authenticate: async () => null },
+				codeRepository: {
+					createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+					findByCode: async () => null,
+					consumeByCode: async () => null,
+					removeByCode: async () => {},
+				},
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				logger: createMockLogger(),
+			}),
+		).rejects.toThrow(RangeError);
+	});
+});
