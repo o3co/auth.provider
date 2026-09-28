@@ -48,6 +48,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { TotpFactorSettings } from "./totp/factor.mjs";
+import { TOTP_ALGORITHMS } from "./totp/rfc6238.mjs";
 
 /**
  * A published key for development only — canonical base64 of 32 bytes, the
@@ -74,8 +75,8 @@ const ISSUER_RULE =
 export const mfaTotpConfigSchema = z.object(
 	{
 		enabled: coerceBooleanFromEnv,
-		algorithm: z.enum(["SHA1", "SHA256", "SHA512"], {
-			error: 'must be "SHA1", "SHA256" or "SHA512"',
+		algorithm: z.enum(TOTP_ALGORITHMS, {
+			error: `must be one of ${TOTP_ALGORITHMS.map((name) => `"${name}"`).join(", ")}`,
 		}),
 		digits: wholeNumber(6, 8, ""),
 		period: wholeNumber(15, 120, " seconds"),

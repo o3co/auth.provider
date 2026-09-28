@@ -31,15 +31,11 @@
 import { createHmac } from "node:crypto";
 import { constantTimeStringEqual } from "@o3co/auth-provider-core";
 
-/** The HMAC a factor's codes are computed with. */
-export type TotpAlgorithm = "SHA1" | "SHA256" | "SHA512";
+/** The HMACs a factor's codes may be computed with, in the order the ADR names them. */
+export const TOTP_ALGORITHMS = Object.freeze(["SHA1", "SHA256", "SHA512"] as const);
 
-/** Every {@link TotpAlgorithm}, in the order the ADR names them. */
-export const TOTP_ALGORITHMS: readonly TotpAlgorithm[] = Object.freeze([
-	"SHA1",
-	"SHA256",
-	"SHA512",
-]);
+/** The HMAC a factor's codes are computed with. */
+export type TotpAlgorithm = (typeof TOTP_ALGORITHMS)[number];
 
 /**
  * A secret of the algorithm's output length, as RFC 6238's reference seeds
