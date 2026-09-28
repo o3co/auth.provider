@@ -30,7 +30,7 @@
  *   defaults to the host `oauth.jwt.issuer` names.
  */
 
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	MFA_DEVELOPMENT_SAMPLE_KEY,
@@ -182,12 +182,45 @@ describe("the key ring (D11, D20)", () => {
 		expect(badId).not.toContain("has space");
 	});
 
-	it("refuses a ring that is not a list of { id, key }", () => {
+	it("names an entry written without an id by its key's fingerprint: k and 16 characters of HMAC-SHA-256(key, o3co:mfa:key-id), base64url", () => {
+		const fingerprint = (key: string) =>
+			`k${createHmac("sha256", Buffer.from(key, "base64")).update("o3co:mfa:key-id").digest("base64url").slice(0, 16)}`;
+		const ring = readMfaSettings(
+			valid({ encryptionKeys: [{ key: KEY_A }, { id: "named", key: KEY_B }] }),
+		).encryptionKeys;
+		// A written id is honoured; a missing one is the fingerprint.
+		expect(ring.map((entry) => entry.id)).toEqual([fingerprint(KEY_A), "named"]);
+		expect(ring[0]?.id).toMatch(/^k[A-Za-z0-9_-]{16}$/);
+		// The same key is always named the same; another key otherwise.
+		expect(readMfaSettings(valid({ encryptionKeys: [{ key: KEY_A }] })).encryptionKeys[0]?.id).toBe(
+			fingerprint(KEY_A),
+		);
+		expect(fingerprint(KEY_B)).not.toBe(fingerprint(KEY_A));
+	});
+
+	it("refuses a fingerprint that collides with a written id, and the same key listed twice, as duplicates", () => {
+		const derived = readMfaSettings(valid({ encryptionKeys: [{ key: KEY_A }] })).encryptionKeys[0]
+			?.id as string;
+		const collision = refusal(() =>
+			readMfaSettings(
+				valid({
+					encryptionKeys: [{ id: derived, key: KEY_B }, { key: KEY_A }],
+				}),
+			),
+		);
+		expect(collision).toContain("duplicate");
+		expect(collision).toContain("index 1");
+		expect(collision).not.toContain(derived);
+		expect(
+			refusal(() => readMfaSettings(valid({ encryptionKeys: [{ key: KEY_A }, { key: KEY_A }] }))),
+		).toContain("duplicate");
+	});
+
+	it("refuses a ring that is not a list of { id?, key }", () => {
 		for (const encryptionKeys of [
 			undefined,
 			"k1",
 			{ id: "k1", key: KEY_A },
-			[{ key: KEY_A }],
 			[{ id: 1, key: KEY_A }],
 			[{ id: "k1", key: 1 }],
 		]) {

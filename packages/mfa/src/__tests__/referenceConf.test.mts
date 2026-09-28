@@ -30,6 +30,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MFA_DEVELOPMENT_SAMPLE_KEY, readMfaSettings } from "#/config.mjs";
+import { createMfaSealing } from "#/sealing.mjs";
 
 const require = createRequire(import.meta.url);
 const CORE_REFERENCE = require.resolve("@o3co/auth-provider-core/reference.conf");
@@ -72,6 +73,29 @@ describe("the package's reference.conf (D19)", () => {
 			window: 1,
 			issuer: "auth.example",
 		});
+	});
+
+	it("names the key MFA_ENCRYPTION_KEY feeds by its fingerprint, so a key changed in place leaves what the old one sealed key_unavailable, naming it", () => {
+		const record = { subject: "u-alice", id: "f-1", kind: "totp" };
+		const oldKey = randomBytes(32).toString("base64");
+		const before = readMfaSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys;
+		const sealed = createMfaSealing({ ring: before }).sealFactorData(record, { lastUsedStep: 1 });
+		const after = readMfaSettings(
+			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
+		).encryptionKeys;
+		expect(after[0]?.id).not.toBe(before[0]?.id);
+		// Not unreadable, which no key would cure: the operator is told which key to put back.
+		expect(createMfaSealing({ ring: after }).openFactorData(record, sealed)).toEqual({
+			state: "key_unavailable",
+			keyId: before[0]?.id,
+		});
+		expect(
+			createMfaSealing({ ring: [...after, ...before] }).openFactorData(record, sealed),
+		).toMatchObject({ state: "ok" });
+		// Read again, the same key has the same name.
+		expect(readMfaSettings(resolve({ MFA_ENCRYPTION_KEY: oldKey })).encryptionKeys[0]?.id).toBe(
+			before[0]?.id,
+		);
 	});
 
 	it("reads MFA_TOTP_ENABLED and MFA_TOTP_ISSUER", () => {
