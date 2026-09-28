@@ -145,6 +145,28 @@ describe("the in-process MfaTransactionStore", () => {
 		expect(store.subjects).toBe(0);
 	});
 
+	it("forgets a reservation never settled once nothing counts it, so it cannot hold a subject's state forever", async () => {
+		// A verification that reserved an attempt and never settled it (a
+		// crashed request) stays pending. A later success ends the run up to
+		// itself, which takes the reservation out of the run; the week still
+		// counts it until it rolls off, and then nothing does.
+		const store = createMemoryMfaTransactionStore({ now: () => T0 + 3 * WEEK });
+		const abandoned = await store.reserveSubjectAttempt("user-1", T0, POLICY, undefined);
+		if (!abandoned.ok) throw new Error("expected a reservation");
+		const won = await store.reserveSubjectAttempt("user-1", T0 + 1, POLICY, undefined);
+		if (!won.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", won.reservation, "success");
+		expect(store.subjects).toBe(1);
+		// Two weeks on, the week has let it go.
+		const later = await store.reserveSubjectAttempt("user-1", T0 + 2 * WEEK, POLICY, undefined);
+		if (!later.ok) throw new Error("expected a reservation");
+		await store.settleSubjectAttempt("user-1", later.reservation, "void");
+		expect(store.subjects).toBe(0);
+		// Settling the forgotten reservation now changes nothing.
+		await store.settleSubjectAttempt("user-1", abandoned.reservation, "failure");
+		expect(store.subjects).toBe(0);
+	});
+
 	it("sweeps subject state on the latest time a caller passed, never on its own clock", async () => {
 		// The port judges the subject state on the callers' time. A store clock
 		// that runs ahead must not let the week go early.

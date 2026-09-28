@@ -112,7 +112,7 @@ export class MfaTransactionStoreFullError extends Error {
 
 	constructor(maxEntries: number) {
 		super(
-			`memory MfaTransactionStore is at its cap of ${maxEntries} live transactions; refusing a new one rather than evicting one`,
+			`memory MfaTransactionStore is at its cap of ${maxEntries} resident transactions (expired ones not yet swept included); refusing a new one rather than evicting one`,
 		);
 		this.name = "MfaTransactionStoreFullError";
 	}

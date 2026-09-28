@@ -214,6 +214,16 @@ export function runMfaTransactionStoreContract(
 				],
 				["lastSentAtMs NaN", { lastSentAtMs: Number.NaN }],
 				["lastSentAtMs text", { lastSentAtMs: "5" }],
+				["id not a string", { id: 7 }],
+				["sessionId not a string", { sessionId: null }],
+				["subject not a string", { subject: {} }],
+				["sid not a string", { sid: 7 }],
+				["redirectTo not a string", { redirectTo: ["/"] }],
+				["primary not an object", { primary: "pwd" }],
+				["primary method not a string", { primary: { method: 1, authTimeMs: 1 } }],
+				["primary authTimeMs NaN", { primary: { method: "pwd", authTimeMs: Number.NaN } }],
+				["acrValues not a list", { acrValues: "urn:x" }],
+				["acrValues not strings", { acrValues: [1] }],
 			];
 			for (const [name, overrides] of bad) {
 				await expect(store.create(TX(overrides as Partial<MfaTransaction>)), name).rejects.toThrow(
@@ -359,6 +369,12 @@ export function runMfaTransactionStoreContract(
 			];
 			for (const [name, patch] of bad) {
 				await expect(store.update("tx-1", 1, patch as never), name).rejects.toThrow(RangeError);
+			}
+			// A patch that is no object at all is refused the same way.
+			for (const patch of [null, "sends", 3]) {
+				await expect(store.update("tx-1", 1, patch as never), String(patch)).rejects.toThrow(
+					RangeError,
+				);
 			}
 			expect(await store.get("tx-1")).toStrictEqual(tx);
 		});
@@ -1247,6 +1263,10 @@ export function runMfaTransactionStoreContract(
 				{ trustedBrowsers: 0 },
 				{ trustedBrowserDays: 0 },
 				{ maxSeconds: 1e17 },
+				// Safe integers whose duration runs past the Date range once in ms.
+				{ maxSeconds: 9e12 },
+				{ memorySeconds: 9e12 },
+				{ trustedBrowserDays: 2e8 },
 				// The backoff would never engage before the hard hold.
 				{ threshold: 10, hardLimit: 6 },
 				// NIST SP 800-63B-4 caps consecutive failures at 100, as D21 cites.
