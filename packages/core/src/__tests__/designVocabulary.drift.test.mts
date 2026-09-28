@@ -372,7 +372,84 @@ const policyEvaluateCalls = (source: string): number =>
 			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
 	).length;
 
+/** The requirement rule's home: the one file that may call it without `requirementSession`. */
+const REQUIREMENT_RULE_HOME = "packages/core/src/mfa/requirement.mts";
+
+/**
+ * The argument text of every call to the requirement rule — `decideMfaRequirement(`
+ * or `selectAcr(` — in `source`, comments removed so a mention is not a call.
+ * The arguments run to the matching `)`; a parenthesis inside a string literal
+ * would miscount, and no call site passes one.
+ */
+const requirementRuleCalls = (source: string): string[] => {
+	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+	const calls: string[] = [];
+	for (const match of code.matchAll(/\b(?:decideMfaRequirement|selectAcr)\s*\(/g)) {
+		const start = (match.index ?? 0) + match[0].length;
+		let depth = 1;
+		let end = start;
+		while (end < code.length && depth > 0) {
+			if (code[end] === "(") depth++;
+			else if (code[end] === ")") depth--;
+			end++;
+		}
+		calls.push(code.slice(start, end - 1));
+	}
+	return calls;
+};
+
+/**
+ * A call to the requirement rule that does not build its session input with
+ * `requirementSession(` inside its own arguments. The rule reads a session
+ * only as the D9 reading makes it (the MFA ADR's step-4 amendment): an input
+ * built from the record's own `amr` would, after the upstream split, let an
+ * untrusted upstream value meet an `acr`. Building it inline is what makes
+ * that checkable here; a value built elsewhere and passed by name is flagged
+ * too, so a reviewer sees it.
+ */
+const withoutRequirementSession = (source: string): string[] =>
+	requirementRuleCalls(source).filter((args) => !/\brequirementSession\s*\(/.test(args));
+
 describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
+	it("reads the requirement rule's calls, and flags one whose session input bypasses requirementSession", () => {
+		const sample = [
+			"// selectAcr(requested, session.amr, table, reach) — a comment, not a call",
+			"const a = selectAcr(requested, requirementSession(session)?.amr ?? [], table, reach);",
+			"const b = selectAcr(requested, session?.amr ?? [], table, stepUpReach(undefined));",
+			"const c = decideMfaRequirement({ session: requirementSession(s), acrValues, mode, table, secondFactorMethods });",
+			"const d = decideMfaRequirement({ session: { authentication: undefined, amr: s.amr }, acrValues, mode, table, secondFactorMethods });",
+		].join("\n");
+		expect(requirementRuleCalls(sample)).toHaveLength(4);
+		expect(withoutRequirementSession(sample)).toEqual([
+			"requested, session?.amr ?? [], table, stepUpReach(undefined)",
+			"{ session: { authentication: undefined, amr: s.amr }, acrValues, mode, table, secondFactorMethods }",
+		]);
+	});
+
+	it("builds the requirement rule's session input with requirementSession at every call site", () => {
+		// Outside the rule's own file (where decideMfaRequirement calls
+		// selectAcr on an input already built) and tests.
+		const home = join(repoRoot, REQUIREMENT_RULE_HOME);
+		const calls = listShippedSources()
+			.filter((file) => file !== home)
+			.map(
+				(file) =>
+					[relative(repoRoot, file).split(sep).join("/"), readFileSync(file, "utf8")] as const,
+			)
+			.filter(([, source]) => requirementRuleCalls(source).length > 0);
+		// Not vacuous: /authorize selects its acr through the rule.
+		expect(calls.map(([rel]) => rel)).toContain("packages/oauth/src/routes/authorize.mts");
+		const offenders = Object.fromEntries(
+			calls
+				.map(([rel, source]) => [rel, withoutRequirementSession(source)] as const)
+				.filter(([, bad]) => bad.length > 0),
+		);
+		expect(
+			offenders,
+			"build the requirement rule's input with requirementSession(session) (core/src/user-sessions/authentication.mts)",
+		).toEqual({});
+	});
+
 	it("consults the grant policy through the home, or says why not", () => {
 		// An exemption is a count, not a whole file: a second inline call added
 		// to an exempt file is the drift this exists to catch.
