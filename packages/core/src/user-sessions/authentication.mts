@@ -327,9 +327,13 @@ export function requirementSession(session: UserSession | null): MfaRequirementS
  * Whether federation `name`'s upstream IdP's `amr` counts (the MFA ADR's
  * D13): `federations.<name>.trustUpstreamAmr`, beside `enabled` in both of a
  * section's shapes — the switch written inside the nested shape's
- * sub-section is a `RangeError` saying so. `true` records what the IdP asserted in the session's
- * `amr` beside `fed`, where tokens carry it and `acr` is matched against it;
- * absent or `false` keeps it apart, for the record only. A value that is
+ * sub-section is a `RangeError` saying so. `true`, on a section whose own
+ * `enabled` is `true`, records what the IdP asserted in the session's `amr`
+ * beside `fed`, where tokens carry it and `acr` is matched against it; absent
+ * or `false` keeps it apart, for the record only, and so does any switch on a
+ * section that is not enabled — nothing signs a user in through it. The
+ * refusals come first, so a disabled section's unusable switch still refuses
+ * the composition rather than waiting for the federation to be enabled. A value that is
  * given but is neither is a `RangeError` naming the key and quoting nothing
  * of the value — read as either answer, a typo would decide what this
  * provider vouches for. Core's schema coerces the spellings an environment
@@ -364,7 +368,10 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
 	const trust = Object.hasOwn(section, "trustUpstreamAmr")
 		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
 		: undefined;
-	if (trust === undefined) return false;
-	if (typeof trust === "boolean") return trust;
-	throw new RangeError(`federations.${name}.trustUpstreamAmr must be true or false`);
+	if (trust !== undefined && typeof trust !== "boolean") {
+		throw new RangeError(`federations.${name}.trustUpstreamAmr must be true or false`);
+	}
+	const enabled =
+		Object.hasOwn(section, "enabled") && (section as { enabled?: unknown }).enabled === true;
+	return enabled && trust === true;
 }
