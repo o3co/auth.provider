@@ -26,7 +26,7 @@ another's body limit, or a memory store booting under `deployment.mode =
   itself (config bridges, a grant policy, a session-to-WebAuthn-subject
   bridge, and two session requirements — each with the completion route a
   requirement's module contributes, built on the session package's exported
-  `establishSession`). The composition, the body and outage helpers and the outage runner
+  `establishSession` and `answerInterruption`). The composition, the body and outage helpers and the outage runner
   are not copied: they are the template suite's, exported by its fixture,
   [`all-modules-composition.fixture.mts`](../../templates/standalone/src/__tests__/all-modules-composition.fixture.mts).
   Upstream identity providers are fakes; nothing reaches the network.

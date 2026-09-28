@@ -353,17 +353,33 @@ in two phases because the express session is regenerated between them:
 
 No `UserSession` is written. The requirement's completion route establishes
 the session later: it resumes the login through core's `resumePrimary`, which
-asks every requirement again, and calls [`establishSession`](#establishing-the-session)
-with the establishment it answers — or, when another requirement interrupts,
-answers that one's `403` the same way. A regeneration, an `open` that throws
-or answers a body core refuses, or a save that fails is
-`503 temporarily_unavailable` with the request's cookie session dropped and
-nothing established, logged once as `login_store_unavailable`
-(`store: "cookie_session"` with `step` `regenerate` or `save`, or the
-requirement's name with `step: "open"`); after a failed save the
-requirement's record is left to its own expiry, bound to a session id no
-browser holds. That the `403` tells whoever holds the password it was right
-is accepted (the MFA ADR's D23).
+asks, in order, every requirement not already done in this login — a
+requirement that completed is not asked again — and calls
+[`establishSession`](#establishing-the-session) with the establishment it
+answers, or, when another requirement interrupts, answers that one exactly as
+the login does. A regeneration, an `open` that throws or answers a body core
+refuses, or a save that fails is `503 temporarily_unavailable` with the
+request's cookie session dropped and nothing established, logged once as
+`login_store_unavailable` (`store: "cookie_session"` with `step` `regenerate`
+or `save`, or the requirement's name with `step: "open"`); after a failed
+save the requirement's record is left to its own expiry, bound to a session
+id no browser holds. That the `403` tells whoever holds the password it was
+right is accepted (the MFA ADR's D23).
+
+The sequence and its failure answers are one function the package exports,
+`answerInterruption(admission, { req, res, csrf, reporter })`
+([`src/answer-interruption.mts`](src/answer-interruption.mts)): the login
+route calls it, and so does a requirement's completion route when
+`resumePrimary` answers another interruption. It sends the response — the
+`403` with a fresh token from the `CsrfProtection` it is handed, or the `503`
+— tells the caller's reporter of a failure once (`store` and `step`, as
+above), so each caller logs in its own vocabulary, and answers what it sent
+(`answered`, or `unavailable` with the store and the step). Anything that is
+not an interruption `admitPrimary` or `resumePrimary` answered is a
+`RangeError` before the session is touched. A completion route builds its
+`CsrfProtection` with `createCsrfProtectionFromConfig(config.session)`: the
+token is signed, not stored, so it and the login router's accept each
+other's.
 
 ### Establishing the session
 
@@ -1143,7 +1159,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
-| [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration |
+| [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |
 | [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, and the record is what core composes |

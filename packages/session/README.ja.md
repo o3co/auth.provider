@@ -128,7 +128,9 @@ const handle = await createApp({
 2. 再生成したセッションの id に束縛して requirement のセレモニーを開く。requirement は core が組み立てた continuation — ルートが組み立てたままの primary（`redirect_to` を含む）と、先の requirement が加えたもの — を自分のレコードに保存する。
 3. セッションを保存し、requirement の `403` をその本文 — requirement が宣言したものに照らして core が検証した閉じた形（`error`、任意で `transaction`、`expires_in`、`hints`。`User`、subject、アドレスは決して含まない）— と新しい CSRF cookie とともに返す。
 
-`UserSession` は書かれない。セッションは後で requirement の完了ルートが確立する: core の `resumePrimary` でログインを再開し（すべての requirement に改めて問い合わせる）、それが答える establishment で [`establishSession`](#セッションの確立) を呼ぶ — 別の requirement が中断すれば、その `403` を同じように返す。再生成、例外を投げるか core が拒否する本文を返す `open`、失敗した保存は、いずれもリクエストの cookie セッションを手放し何も確立しない `503 temporarily_unavailable` で、`login_store_unavailable`（`store: "cookie_session"` と `step` `regenerate` か `save`、または requirement の名前と `step: "open"`）として一度だけログに出る。保存に失敗したあとは、requirement のレコードは、どのブラウザも持たないセッション id に束縛されたまま、自身の有効期限に任される。`403` がパスワードを持つ者にパスワードが正しかったことを伝えるのは受け入れている（MFA の ADR の D23）。
+`UserSession` は書かれない。セッションは後で requirement の完了ルートが確立する: core の `resumePrimary` でログインを再開し（このログインでまだ済んでいない requirement に順に問い合わせる — 完了した requirement には二度と問い合わせない）、それが答える establishment で [`establishSession`](#セッションの確立) を呼ぶ — 別の requirement が中断すれば、それをログインとまったく同じように返す。再生成、例外を投げるか core が拒否する本文を返す `open`、失敗した保存は、いずれもリクエストの cookie セッションを手放し何も確立しない `503 temporarily_unavailable` で、`login_store_unavailable`（`store: "cookie_session"` と `step` `regenerate` か `save`、または requirement の名前と `step: "open"`）として一度だけログに出る。保存に失敗したあとは、requirement のレコードは、どのブラウザも持たないセッション id に束縛されたまま、自身の有効期限に任される。`403` がパスワードを持つ者にパスワードが正しかったことを伝えるのは受け入れている（MFA の ADR の D23）。
+
+この手順と失敗時の応答は、パッケージが export する一つの関数 `answerInterruption(admission, { req, res, csrf, reporter })`（[`src/answer-interruption.mts`](src/answer-interruption.mts)）である。ログインのルートがこれを呼び、`resumePrimary` が別の中断を答えたときは requirement の完了ルートも呼ぶ。応答 — 渡された `CsrfProtection` による新しいトークンを伴う `403`、または `503` — を送り、失敗は呼び出し側の reporter に一度だけ（上と同じ `store` と `step` で）伝えるので、各呼び出し側は自分の語彙でログを出す。送ったもの（`answered`、またはストアとステップを伴う `unavailable`）を答える。`admitPrimary` か `resumePrimary` が答えた中断でないものは、セッションに触れる前に `RangeError` になる。完了ルートは `CsrfProtection` を `createCsrfProtectionFromConfig(config.session)` で作る: トークンは保存されず署名されるので、これとログインのルーターのものは互いのトークンを受け入れる。
 
 ### セッションの確立
 
@@ -478,7 +480,7 @@ export const exampleFederationModule = defineModule({
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | 署名付きトークン、オリジン検査、ガードの受理規則 |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | ログインの末尾: 書くもの（establishment の primary だけ、そして偽の establishment の拒否）、その手順、各書き込みに渡すもの、失敗しうるあらゆる点でのロールバック |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、障害時の応答とそのログ 1 行、ログインのレート制限ガード |
-| [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | セッションアドミッション上のパスワードログイン: requirement に問われること、各 outcome への応答、中断の二段階と再生成以降の各失敗への応答 |
+| [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | セッションアドミッション上のパスワードログイン: requirement に問われること、各 outcome への応答、中断の二段階と再生成以降の各失敗への応答。単独の `answerInterruption` — その応答、各失敗での reporter と答え、拒否するもの |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | 開始とコールバックのレグ、アカウントリンク、ストアへの書き込みとそのロールバック、障害時の応答とそのログ、`amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | セッションアドミッション上のリンクの開始とコールバック: 各 outcome への応答、`sid` と並べて記録される subject、requirement に問われること、アップグレード前のトランザクション |
 | [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | 問い合わせずに確立されるコールバックのログイン: パスワードログインを中断する requirement もこれは中断せず、レコードは core が組み立てたものであること |
