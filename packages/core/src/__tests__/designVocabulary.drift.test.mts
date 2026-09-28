@@ -627,16 +627,10 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "what the upstream IdP asserted on the profile, handed to federatedSessionAuthentication",
 	},
 	{
-		file: "packages/session/src/routes/Federation.mts",
-		read: "...federatedSessionAuthentication()",
+		file: "packages/session/src/establish-session.mts",
+		read: "...recorded",
 		count: 1,
-		why: "the amr and authentication core composes for a federated login, spread into create",
-	},
-	{
-		file: "packages/session/src/routes/Session.mts",
-		read: "...passwordSessionAuthentication()",
-		count: 1,
-		why: "the amr and authentication core composes for a password login, spread into create",
+		why: "the amr and authentication core composes for a login (passwordSessionAuthentication in routes/Session.mts, federatedSessionAuthentication in routes/Federation.mts), handed whole to the login tail both routes share and spread into create there",
 	},
 	{
 		file: "packages/session/src/modules/sessionStoreModule.mts",
