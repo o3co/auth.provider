@@ -78,7 +78,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { requireRequirements } from "../admission.mjs";
+import { requireRequirements, unavailableDescription } from "../admission.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
 
 /** How long a parked `/authorize` request waits for the consent page. */
@@ -249,7 +249,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		});
 		switch (admission.outcome) {
 			case "unavailable":
-				jsonError(res, 503, "temporarily_unavailable", "session store unavailable");
+				jsonError(res, 503, "temporarily_unavailable", unavailableDescription(admission.store));
 				return null;
 			case "admitted": {
 				// The record's subject when one was read — admission made it the
