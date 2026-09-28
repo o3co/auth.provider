@@ -14,9 +14,16 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import type { CreateUserSessionInput, UserSessionStore } from "../types.mjs";
+import type {
+	CreateUserSessionInput,
+	SupportsSecondFactorUpdate,
+	UserSessionStore,
+} from "../types.mjs";
 
-export type UserSessionStoreContractFactory = () => Promise<UserSessionStore>;
+/** A bundled store: both implement the step-up capability (the MFA ADR's D9). */
+export type UserSessionStoreContractFactory = () => Promise<
+	UserSessionStore & SupportsSecondFactorUpdate
+>;
 
 const FUTURE = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
@@ -297,6 +304,194 @@ export function runUserSessionStoreContract(
 			const again = await store.get("auth-iso");
 			expect(again?.authentication?.upstreamAmr).toEqual(["hwk"]);
 			expect(again?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+		});
+
+		describe("recordSecondFactor — a second factor verified in a live session (the MFA ADR's D9)", () => {
+			const at = (msAgo: number) => new Date(Date.now() - msAgo);
+
+			it("adds the factor's values to amr, in insertion order, sets mfaAt, and changes nothing else", async () => {
+				const store = await factory();
+				const input = INPUT({
+					sid: "sf-1",
+					authTime: at(60_000),
+					claims: { email: "user@example.com", groups: ["alpha"] },
+					amr: ["pwd"],
+					authentication: PASSWORD_LOGIN,
+				});
+				await store.create(input);
+				const before = await store.get("sf-1");
+				const verifiedAt = at(1_000);
+				const recorded = await store.recordSecondFactor("sf-1", {
+					amr: ["otp", "mfa"],
+					at: verifiedAt,
+				});
+				const expected = {
+					...before,
+					amr: ["pwd", "otp", "mfa"],
+					authentication: { ...PASSWORD_LOGIN, mfaAt: verifiedAt },
+				};
+				// What it answers is what is stored, and the session is otherwise
+				// the one that was there: sid, sub, authTime (a step-up never moves
+				// it, D18), createdAt, expiresAt and claims.
+				expect(recorded).toStrictEqual(expected);
+				expect(await store.get("sf-1")).toStrictEqual(expected);
+			});
+
+			it("is monotonic: amr never loses a value, mfa is never repeated, and mfaAt only moves forward", async () => {
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-mono", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+				const first = at(10_000);
+				await store.recordSecondFactor("sf-mono", { amr: ["otp", "mfa"], at: first });
+				// A step-up appends (D14); an earlier time does not move mfaAt back.
+				const stale = await store.recordSecondFactor("sf-mono", {
+					amr: ["hwk", "mfa"],
+					at: at(20_000),
+				});
+				expect(stale?.amr).toEqual(["pwd", "otp", "mfa", "hwk"]);
+				expect(stale?.authentication?.mfaAt?.getTime()).toBe(first.getTime());
+				const later = at(1_000);
+				const again = await store.recordSecondFactor("sf-mono", { amr: ["otp"], at: later });
+				expect(again?.amr).toEqual(["pwd", "otp", "mfa", "hwk"]);
+				expect(again?.authentication?.mfaAt?.getTime()).toBe(later.getTime());
+				expect((await store.get("sf-mono"))?.authentication?.mfaAt?.getTime()).toBe(
+					later.getTime(),
+				);
+			});
+
+			it('splits a pre-upgrade session first: ["hwk", "fed"] plus TOTP is amr ["fed", "otp", "mfa"], upstreamAmr ["hwk"]', async () => {
+				// Never ["hwk", "fed", "otp", "mfa"], whose `hwk` — an untrusted
+				// IdP's word — would meet `phr`.
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-split", amr: ["hwk", "fed"] }));
+				const verifiedAt = at(1_000);
+				const recorded = await store.recordSecondFactor("sf-split", {
+					amr: ["otp", "mfa"],
+					at: verifiedAt,
+				});
+				const split = {
+					amr: ["fed", "otp", "mfa"],
+					authentication: {
+						primary: "fed",
+						federation: undefined,
+						upstreamAmr: ["hwk"],
+						mfaAt: verifiedAt,
+					},
+				};
+				expect(recorded).toMatchObject(split);
+				expect(await store.get("sf-split")).toMatchObject(split);
+				expect((await store.get("sf-split"))?.authentication).toStrictEqual(split.authentication);
+			});
+
+			it("splits a pre-upgrade password session as the password login it was", async () => {
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-split-pwd", amr: ["pwd"] }));
+				const verifiedAt = at(1_000);
+				const recorded = await store.recordSecondFactor("sf-split-pwd", {
+					amr: ["otp", "mfa"],
+					at: verifiedAt,
+				});
+				expect(recorded?.amr).toEqual(["pwd", "otp", "mfa"]);
+				expect(recorded?.authentication).toStrictEqual({ ...PASSWORD_LOGIN, mfaAt: verifiedAt });
+			});
+
+			it("answers null for a pre-upgrade session whose primary cannot be told, and changes nothing", async () => {
+				// Such a session is re-authenticated (D16); a second factor added to
+				// it would be recorded against a primary nobody can name.
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-unknown", amr: ["hwk"] }));
+				expect(
+					await store.recordSecondFactor("sf-unknown", { amr: ["otp", "mfa"], at: at(1_000) }),
+				).toBeNull();
+				const unchanged = await store.get("sf-unknown");
+				expect(unchanged?.amr).toEqual(["hwk"]);
+				expect(unchanged).toHaveProperty("authentication", undefined);
+			});
+
+			it("answers null for a session that is gone, and writes nothing", async () => {
+				const store = await factory();
+				expect(
+					await store.recordSecondFactor("ghost", { amr: ["otp", "mfa"], at: at(1_000) }),
+				).toBeNull();
+				expect(await store.get("ghost")).toBeNull();
+				await store.create(
+					INPUT({ sid: "sf-deleted", amr: ["pwd"], authentication: PASSWORD_LOGIN }),
+				);
+				await store.delete("sf-deleted");
+				expect(
+					await store.recordSecondFactor("sf-deleted", { amr: ["otp", "mfa"], at: at(1_000) }),
+				).toBeNull();
+				expect(await store.get("sf-deleted")).toBeNull();
+			});
+
+			it("keeps the session's lifetime: it ends when it would have, and then records nothing", async () => {
+				const store = await factory();
+				const expiresAt = await aheadOf(expiry);
+				await store.create(
+					INPUT({ sid: "sf-ttl", expiresAt, amr: ["pwd"], authentication: PASSWORD_LOGIN }),
+				);
+				const recorded = await store.recordSecondFactor("sf-ttl", {
+					amr: ["otp", "mfa"],
+					at: at(0),
+				});
+				expect(recorded?.expiresAt.getTime()).toBe(expiresAt.getTime());
+				await expiry.passed(expiresAt);
+				expect(await store.get("sf-ttl")).toBeNull();
+				expect(
+					await store.recordSecondFactor("sf-ttl", { amr: ["hwk", "mfa"], at: at(0) }),
+				).toBeNull();
+			});
+
+			it.each([
+				["no values", { amr: [], at: new Date() }],
+				["an empty value", { amr: ["otp", ""], at: new Date() }],
+				["a primary's marker, pwd", { amr: ["pwd"], at: new Date() }],
+				["a primary's marker, fed", { amr: ["otp", "fed"], at: new Date() }],
+				["an invalid date", { amr: ["otp", "mfa"], at: new Date(Number.NaN) }],
+				["a time before 1970", { amr: ["otp", "mfa"], at: new Date(-1) }],
+			])("refuses an event with %s — a RangeError, and nothing recorded", async (_label, event) => {
+				// A second factor adds its own values; it never changes the primary
+				// the baseline is decided on, and a time that is no instant is not
+				// when it was verified.
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-bad", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+				await expect(store.recordSecondFactor("sf-bad", event)).rejects.toThrow(RangeError);
+				const unchanged = await store.get("sf-bad");
+				expect(unchanged?.amr).toEqual(["pwd"]);
+				expect(unchanged?.authentication).toStrictEqual(PASSWORD_LOGIN);
+			});
+
+			it("keeps its own copy: neither the event nor what it answers changes what is stored", async () => {
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-iso", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+				const verifiedAt = at(1_000);
+				const event = { amr: ["otp", "mfa"], at: new Date(verifiedAt.getTime()) };
+				const recorded = await store.recordSecondFactor("sf-iso", event);
+				event.amr.push("hwk");
+				event.at.setTime(0);
+				(recorded?.amr as string[] | undefined)?.push("phr");
+				recorded?.authentication?.mfaAt?.setTime(0);
+				const stored = await store.get("sf-iso");
+				expect(stored?.amr).toEqual(["pwd", "otp", "mfa"]);
+				expect(stored?.authentication?.mfaAt?.getTime()).toBe(verifiedAt.getTime());
+			});
+
+			it("records two second factors verified at once: neither is lost", async () => {
+				// Two step-ups in flight on one session: a store that read, merged
+				// and wrote without noticing the other write would drop one.
+				const store = await factory();
+				await store.create(INPUT({ sid: "sf-race", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+				const earlier = at(2_000);
+				const later = at(1_000);
+				await Promise.all([
+					store.recordSecondFactor("sf-race", { amr: ["otp", "mfa"], at: earlier }),
+					store.recordSecondFactor("sf-race", { amr: ["hwk", "mfa"], at: later }),
+				]);
+				const stored = await store.get("sf-race");
+				expect(new Set(stored?.amr)).toEqual(new Set(["pwd", "otp", "hwk", "mfa"]));
+				expect(stored?.amr?.[0]).toBe("pwd");
+				expect(stored?.amr?.filter((value) => value === "mfa")).toHaveLength(1);
+				expect(stored?.authentication?.mfaAt?.getTime()).toBe(later.getTime());
+			});
 		});
 
 		it("readonly kind field present", async () => {

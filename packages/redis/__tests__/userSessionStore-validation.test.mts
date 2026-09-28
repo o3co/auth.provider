@@ -22,6 +22,7 @@ import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
 // surface: only `get` is exercised by these tests.
 const makeMockClient = (): UserSessionStoreClient & {
 	seed: (key: string, raw: string) => void;
+	read: (key: string) => string | undefined;
 } => {
 	const store = new Map<string, string>();
 	const set = ((..._args: unknown[]) => Promise.resolve("OK" as const)) as never;
@@ -29,7 +30,13 @@ const makeMockClient = (): UserSessionStoreClient & {
 		set,
 		get: async (k: string) => store.get(k) ?? null,
 		del: async (k: string) => (store.delete(k) ? 1 : 0),
+		replaceIfUnchanged: async (k: string, expected: string, next: string) => {
+			if (store.get(k) !== expected) return false;
+			store.set(k, next);
+			return true;
+		},
 		seed: (key, raw) => store.set(key, raw),
+		read: (key) => store.get(key),
 	};
 };
 
@@ -208,5 +215,73 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		} finally {
 			warn.mockRestore();
 		}
+	});
+});
+
+describe("RedisUserSessionStore.recordSecondFactor — what it reads and how often it tries (the MFA ADR's D9)", () => {
+	const keyPrefix = "sess:";
+	const passwordEnvelope = {
+		...validEnvelope,
+		amr: ["pwd"],
+		authentication: { primary: "pwd" },
+	};
+
+	it("reads a corrupt envelope as gone, as get does: null, one warn, nothing written", async () => {
+		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, authentication: null }));
+		expect(
+			await store.recordSecondFactor("sid-1", { amr: ["otp", "mfa"], at: new Date() }),
+		).toBeNull();
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ sid: "sid-1", reason: "shape_invalid" },
+			"user_session_corrupt_envelope",
+		);
+		expect(client.read(`${keyPrefix}sid-1`)).toBe(
+			JSON.stringify({ ...validEnvelope, authentication: null }),
+		);
+	});
+
+	it("re-reads and retries when another write moved the session, and lands on what that write left", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify(passwordEnvelope));
+		const replace = client.replaceIfUnchanged;
+		let interfered = false;
+		client.replaceIfUnchanged = async (k, expected, next) => {
+			if (!interfered) {
+				// Another step-up lands between this one's read and its write.
+				interfered = true;
+				client.seed(k, JSON.stringify({ ...passwordEnvelope, amr: ["pwd", "hwk", "mfa"] }));
+			}
+			return replace(k, expected, next);
+		};
+		const recorded = await store.recordSecondFactor("sid-1", {
+			amr: ["otp", "mfa"],
+			at: new Date(),
+		});
+		expect(recorded?.amr).toEqual(["pwd", "hwk", "mfa", "otp"]);
+		expect(JSON.parse(client.read(`${keyPrefix}sid-1`) as string).amr).toEqual([
+			"pwd",
+			"hwk",
+			"mfa",
+			"otp",
+		]);
+	});
+
+	it("gives up after a bounded number of lost compare-and-sets, with an error and nothing written", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify(passwordEnvelope));
+		const lost = vi.fn(async () => false);
+		client.replaceIfUnchanged = lost;
+		await expect(
+			store.recordSecondFactor("sid-1", { amr: ["otp", "mfa"], at: new Date() }),
+		).rejects.toThrow(/recordSecondFactor/);
+		expect(lost.mock.calls.length).toBeGreaterThan(1);
+		expect(lost.mock.calls.length).toBeLessThanOrEqual(10);
+		expect(client.read(`${keyPrefix}sid-1`)).toBe(JSON.stringify(passwordEnvelope));
 	});
 });

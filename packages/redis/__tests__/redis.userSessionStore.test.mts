@@ -88,3 +88,73 @@ describe("a session Redis holds from before the MFA ADR's D9", () => {
 		expect(vouchedAmr(session)).toEqual(["fed"]);
 	});
 });
+
+describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
+	const store = (prefix: string) =>
+		createRedisUserSessionStore({
+			client: makeIoredisClients(raw).userSessionStoreClient,
+			keyPrefix: prefix,
+		});
+
+	it("keeps the key's TTL: the write sets no new lifetime", async () => {
+		const sessions = store("t14:sf-ttl:");
+		await sessions.create({
+			sid: "sid-ttl",
+			sub: "user-1",
+			authTime: new Date(),
+			expiresAt: new Date(Date.now() + 60_000),
+			claims: {},
+			amr: ["pwd"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+		});
+		const before = await raw.pttl("t14:sf-ttl:sid-ttl");
+		expect(before).toBeGreaterThan(0);
+		await sessions.recordSecondFactor("sid-ttl", { amr: ["otp", "mfa"], at: new Date() });
+		const after = await raw.pttl("t14:sf-ttl:sid-ttl");
+		// A plain SET would have dropped it (-1); a new PX would have raised it.
+		expect(after).toBeGreaterThan(0);
+		expect(after).toBeLessThanOrEqual(before);
+	});
+
+	it("splits a session Redis holds from before the upgrade, keeping its TTL, and an older reader still reads it", async () => {
+		const sessions = store("t14:sf-pre:");
+		const envelope = {
+			sid: "sid-old",
+			sub: "user-1",
+			authTimeMs: Date.now() - 60_000,
+			createdAtMs: Date.now() - 60_000,
+			expiresAtMs: Date.now() + 60_000,
+			claims: { email: "user@example.com" },
+			amr: ["hwk", "fed"],
+		};
+		await raw.set("t14:sf-pre:sid-old", JSON.stringify(envelope), "PX", 60_000);
+		const verifiedAt = new Date();
+		const recorded = await sessions.recordSecondFactor("sid-old", {
+			amr: ["otp", "mfa"],
+			at: verifiedAt,
+		});
+		expect(recorded?.amr).toEqual(["fed", "otp", "mfa"]);
+		expect(recorded?.authentication).toStrictEqual({
+			primary: "fed",
+			federation: undefined,
+			upstreamAmr: ["hwk"],
+			mfaAt: verifiedAt,
+		});
+		expect(await raw.pttl("t14:sf-pre:sid-old")).toBeGreaterThan(0);
+		// What a release before `authentication` reads: every field it knows,
+		// as it wrote them, and the split `amr` — `authentication` beside it is
+		// a key it ignores (the ADR's "Rolling back").
+		const stored = JSON.parse((await raw.get("t14:sf-pre:sid-old")) as string);
+		expect(stored).toMatchObject({ ...envelope, amr: ["fed", "otp", "mfa"] });
+		expect(stored.authentication).toEqual({
+			primary: "fed",
+			upstreamAmr: ["hwk"],
+			mfaAtMs: verifiedAt.getTime(),
+		});
+	});
+});
