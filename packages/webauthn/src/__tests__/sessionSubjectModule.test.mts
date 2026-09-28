@@ -124,6 +124,8 @@ interface Setup {
 	readonly logger?: ReturnType<typeof spyLogger>;
 	/** Leave the store out of the deps, as no composition can (the module requires it). */
 	readonly noStore?: boolean;
+	/** A subject an earlier middleware set — the deployment's bearer-token bridge, say. */
+	readonly preset?: WebAuthnSubject;
 }
 
 interface Contribution {
@@ -170,6 +172,7 @@ function setup(options: Setup = {}) {
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: unknown }).session = { ...(options.session ?? SIGNED_IN) };
+		if (options.preset !== undefined) req.webauthnSubject = options.preset;
 		next();
 	});
 	app.use(contribution.mountPath, contribution.handler);
@@ -307,6 +310,36 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 		},
 	);
 
+	it.each([
+		["a session that is gone", { record: null }],
+		["a cookie without user.id", { session: { sid: SID, isAuthenticated: true } }],
+		["a session the revocation boundary covers", { subjectRevocation: revocation(new Date()) }],
+		[
+			"a requirement's reauthenticate",
+			{ requirement: fixtureRequirement({ outcome: "reauthenticate" }).requirement },
+		],
+		[
+			"a requirement's unmet",
+			{ requirement: fixtureRequirement({ outcome: "unmet" }).requirement },
+		],
+	] satisfies ReadonlyArray<readonly [string, Setup]>)(
+		"clears a subject an earlier middleware set for %s: a dead cookie session registers nothing",
+		async (_label, options) => {
+			const { app } = setup({ ...options, preset: { userId: "earlier" } });
+			const res = await register(app);
+			expect(res.status).toBe(200);
+			expect(res.body.subject).toBeNull();
+		},
+	);
+
+	it("leaves a subject an earlier middleware set when the browser is not signed in: the bearer bridge keeps working", async () => {
+		const { app, get } = setup({ session: {}, preset: { userId: "bearer-user" } });
+		const res = await register(app);
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toEqual({ userId: "bearer-user" });
+		expect(get).not.toHaveBeenCalled();
+	});
+
 	it("sets the subject for a session established after the revocation boundary", async () => {
 		const { app } = setup({ subjectRevocation: revocation(new Date(T0 - 3_600_000)) });
 		expect((await register(app)).body.subject).toEqual({ userId: SUBJECT });
@@ -424,6 +457,30 @@ describe("webauthnSessionSubjectModule — the deployment's mapper is held to th
 			expect(logger.error.mock.calls[0]?.[0]).toEqual({ reason: "shape" });
 		},
 	);
+
+	it("answers 500 server_error for an answer whose field throws when it is read, logged once as a throw", async () => {
+		const logger = spyLogger();
+		const { app } = setup({
+			subjectFor: () =>
+				({
+					get userId(): string {
+						throw new Error("no handle");
+					},
+				}) as WebAuthnSubject,
+			logger,
+		});
+		const res = await register(app);
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({
+			error: "server_error",
+			error_description: "subjectFor did not answer a WebAuthn subject",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe("webauthn_session_subject_invalid");
+		expect(context.reason).toBe("threw");
+		expect(context.err).not.toBeInstanceOf(Error);
+	});
 
 	it("answers 500 server_error for a mapper that throws, logged once with the error's projection", async () => {
 		const logger = spyLogger();

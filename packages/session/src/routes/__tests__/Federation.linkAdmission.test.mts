@@ -243,6 +243,31 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		expect(harness.userSessionStore.get).toHaveBeenCalledWith(SID);
 	});
 
+	it("records the sid the record was read by — the cookie's — whatever the record says, and the link completes", async () => {
+		// A store's record without its own `sid` (the port's field, which a
+		// deployment's store may leave out) is still the record of the session
+		// the cookie names: the key it was read by is what the callback binds to.
+		const { sid: _omitted, ...withoutSid } = live();
+		const harness = setup({ record: withoutSid as unknown as UserSession });
+		plant(harness, SIGNED_IN);
+		expect((await start(harness)).status).toBe(302);
+		expect(recordedLink(harness)).toEqual({ sid: SID, subject: SUBJECT });
+		const { state } = (harness.store.get("browser")?.data.federation ?? {}) as { state?: string };
+		const res = await request(harness.app)
+			.get(`/oauth/federation/test/callback?state=${state}&code=c-1`)
+			.set("Cookie", "sid=browser");
+		expect(res.status).toBe(302);
+		expect(harness.repo.linkFederatedIdentity).toHaveBeenCalledWith(
+			SUBJECT,
+			expect.objectContaining({ provider: "test" }),
+		);
+		expect(harness.sessionFederationIndex.addFederation).toHaveBeenCalledWith(
+			SID,
+			"test",
+			live().expiresAt,
+		);
+	});
+
 	it("records the subject in a form_post transaction too", async () => {
 		const harness = setup();
 		plant(harness, SIGNED_IN);
@@ -413,18 +438,27 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		},
 	);
 
-	it("still refuses a Store that cannot link, once the session is admitted", async () => {
-		const harness = setup({
-			repo: {
-				authenticate: vi.fn(async () => null),
-				authenticateByToken: vi.fn(async () => null),
-			} as unknown as LinkableRepo,
-		});
-		plant(harness, SIGNED_IN);
-		const res = await start(harness);
-		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("link_unsupported");
-	});
+	it.each([
+		["a signed-in browser whose session store is down", SIGNED_IN, new Error("session store down")],
+		["a browser that is not signed in", {}, undefined],
+	] satisfies ReadonlyArray<readonly [string, Record<string, unknown>, Error | undefined]>)(
+		"answers link_unsupported before reading the session — a static fault is 400 before 401 or 503: %s",
+		async (_label, cookie, down) => {
+			const harness = setup({
+				repo: {
+					authenticate: vi.fn(async () => null),
+					authenticateByToken: vi.fn(async () => null),
+				} as unknown as LinkableRepo,
+				...(down ? { record: down } : {}),
+			});
+			plant(harness, cookie);
+			const res = await start(harness);
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("link_unsupported");
+			expect(harness.userSessionStore.get).not.toHaveBeenCalled();
+			expect(recordedLink(harness)).toBeUndefined();
+		},
+	);
 
 	it("reads no session for an ordinary login start", async () => {
 		const harness = setup();
