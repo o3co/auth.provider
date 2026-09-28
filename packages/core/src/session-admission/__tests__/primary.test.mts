@@ -358,6 +358,16 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		expect(await admission.open("s")).toEqual({ status: 403, body: { error: "mfa_required" } });
 	});
 
+	it("refuses an own __proto__ key in the body like every other key the shape does not admit", async () => {
+		// A key named "__proto__" assigned into a plain object sets its
+		// prototype instead of an own key, so a copy-then-list check misses it.
+		const body = JSON.parse('{"error":"mfa_required","__proto__":{"user":"user-1"}}');
+		const admission = await interrupt(async () => ({ status: 403, body }) as never);
+		await expect(admission.open("s")).rejects.toThrow(
+			/whose body carries "__proto__", which the body's shape does not admit/,
+		);
+	});
+
 	it("refuses an answer that is not an object, naming the requirement", async () => {
 		for (const value of ["403", null, 7]) {
 			const admission = await interrupt(async () => value as never);
