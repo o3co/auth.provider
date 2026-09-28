@@ -22,7 +22,10 @@
 
 import { describe, expect, it } from "vitest";
 import { passwordPrimary } from "#/session-admission/admit.mjs";
-import type { Interruption, SessionRequirement } from "#/session-admission/requirement.mjs";
+import type {
+	RequirementInterruption,
+	SessionRequirement,
+} from "#/session-admission/requirement.mjs";
 import {
 	type RequirementContractInput,
 	sessionRequirementContract,
@@ -47,7 +50,7 @@ const interruption = (
 		transaction: "dHgtMQ",
 		expires_in: 60,
 	},
-): Interruption => ({ open: async () => ({ status: 403, body }) as never });
+): RequirementInterruption => ({ open: async () => ({ status: 403, body }) as never });
 
 /** A fixture that keeps the contract: reaches nothing (only mfa does), admits, interrupts a login, throws on an outage. */
 const fixture = (over: Partial<SessionRequirement> = {}, down = false): SessionRequirement => ({

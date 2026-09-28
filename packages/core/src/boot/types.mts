@@ -1119,7 +1119,10 @@ export interface SessionRequirementMissingDetails {
  * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
  * (federation-stores-incomplete), the OIDC discovery aggregator
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
-\g<1>29\g<2>
+ * (component-absence-undeclared), module-factory-not-called and the
+ * session-admission ADR's three (session-requirement-kind-guarded,
+ * session-requirements-undeclared, session-requirement-missing) — one member
+ * per `BootErrorReason`, 29 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails

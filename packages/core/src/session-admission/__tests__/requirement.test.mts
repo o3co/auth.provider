@@ -37,6 +37,7 @@ import {
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { RecordedAuthentication } from "#/user-sessions/authentication.mjs";
+import type { UserSessionClaims } from "#/user-sessions/types.mjs";
 
 const ISSUER = "https://auth.test";
 
@@ -456,6 +457,7 @@ describe("the shapes the contract names", () => {
 		expectTypeOf<PrimaryAuthentication>().toEqualTypeOf<{
 			readonly subject: string;
 			readonly user: Readonly<Record<string, unknown>>;
+			readonly claims: UserSessionClaims;
 			readonly recorded: RecordedAuthentication;
 			readonly authTime: Date;
 			readonly redirectTo: string | undefined;
