@@ -55,6 +55,7 @@ import { loggableError } from "../logging/loggableError.mjs";
 import {
 	copySessionAuthentication,
 	federatedSessionAuthentication,
+	passwordSessionAuthentication,
 	requirementSession,
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
@@ -65,26 +66,28 @@ import {
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
 } from "./primary.mjs";
-import type {
-	Admission,
-	AdmissionAction,
-	AdmissionDeps,
-	AdmissionGrade,
-	AdmissionRequest,
-	CompletedRequirement,
-	Establishment,
-	Interruption,
-	InterruptionAnswer,
-	PrimaryAdmission,
-	PrimaryAuthentication,
-	PrimaryContinuation,
-	RequirementInput,
-	RequirementVerdict,
-	SessionClaim,
-	SessionRequirement,
-	SessionRequirementResolver,
-	SessionView,
-	StepUpPage,
+import {
+	type Admission,
+	type AdmissionAction,
+	type AdmissionDeps,
+	type AdmissionGrade,
+	type AdmissionRequest,
+	type CompletedRequirement,
+	type Establishment,
+	type Interruption,
+	type InterruptionAnswer,
+	isHintKey,
+	isHintToken,
+	type PrimaryAdmission,
+	type PrimaryAuthentication,
+	type PrimaryContinuation,
+	type RequirementInput,
+	type RequirementVerdict,
+	type SessionClaim,
+	type SessionRequirement,
+	type SessionRequirementResolver,
+	type SessionView,
+	type StepUpPage,
 } from "./requirement.mjs";
 
 // ---------------------------------------------------------------------------
@@ -393,7 +396,9 @@ type RequirementOutcome =
  *    skipped for a token carrier, whose boundary `verifyJwt` reads (D9);
  * 5. the requirements — for `use` and `credential_change`, each `admit` in
  *    registration order, the first verdict that is not `met` taken; none for
- *    a declared `remediation`; a throw → `unavailable`; a `step_up` answers
+ *    a declared `remediation`; a token carrier's `authentication` is built
+ *    from the token's own `amr`, record or not (D9); a throw →
+ *    `unavailable`; a `step_up` answers
  *    the requirement's registered page, and one from a requirement that
  *    registered none — nothing could finish the trip — is `unmet` by its
  *    name, said once per process (`session_admission_step_up_without_page`);
@@ -492,12 +497,12 @@ export async function admitSession(
 	// first (D4): only a declared remediation keeps its grade and skips them.
 	const requirements = [...deps.requirements.entries()];
 	const effective = effectiveAction(requirements, request.action, deps);
+	// A token carrier's authentication is the token's own, whether or not a
+	// record was read (D9): the record is only the view.
 	const authentication =
-		session !== null
-			? requirementSession(session)
-			: presented.carrier === "token"
-				? requirementSessionFromAmr(presented.tokenAmr)
-				: null;
+		presented.carrier === "token"
+			? requirementSessionFromAmr(presented.tokenAmr)
+			: requirementSession(session);
 	let verdict: RequirementOutcome = { outcome: "met" };
 	if (effective.grade !== "remediation") {
 		const input: RequirementInput = Object.freeze({
@@ -694,6 +699,45 @@ function stepUpThroughOne(
 /** The establishments `admitPrimary`, `resumePrimary` and `establishWithoutAsking` built. */
 const knownEstablishments = new WeakSet<object>();
 
+/**
+ * The primaries core's builders made (`passwordPrimary`, and
+ * `establishWithoutAsking`'s own): what `admitPrimary` accepts. A
+ * continuation a requirement persisted and presents back is plain data a
+ * store round-tripped, which no set can mark, so `resumePrimary` reads it
+ * through `checkPrimaryContinuation` instead.
+ */
+const knownPrimaries = new WeakSet<object>();
+
+/** What a password login produces (D5): the facts, never a `recorded`. */
+export interface PasswordLoginFacts {
+	readonly subject: string;
+	readonly user: Readonly<Record<string, unknown>>;
+	readonly authTime: Date;
+	readonly redirectTo: string | undefined;
+	readonly request: { readonly ip?: string; readonly userAgent?: string };
+}
+
+/**
+ * The one builder a password login has (D5): `recorded` is
+ * `passwordSessionAuthentication()` — `amr` `["pwd"]`, primary `pwd`, no
+ * second factor — so a route cannot hand in an `amr` or an `mfaAt`. A
+ * frozen copy of the facts, checked (`checkPrimaryAuthentication`), which
+ * `admitPrimary` alone accepts.
+ */
+export function passwordPrimary(facts: PasswordLoginFacts): PrimaryAuthentication {
+	if (!isObject(facts)) throw new RangeError("passwordPrimary: the facts must be an object");
+	const primary = checkPrimaryAuthentication({
+		subject: facts.subject,
+		user: facts.user,
+		recorded: passwordSessionAuthentication(),
+		authTime: facts.authTime,
+		redirectTo: facts.redirectTo,
+		request: facts.request,
+	});
+	knownPrimaries.add(primary);
+	return primary;
+}
+
 /** Whether `value` is an `Establishment` one of the three built: a copy, or an object shaped like one, is not. */
 export function isEstablishment(value: unknown): value is Establishment {
 	return typeof value === "object" && value !== null && knownEstablishments.has(value);
@@ -711,21 +755,18 @@ const isInterruption = (value: unknown): value is Interruption =>
 /** The keys an interruption's body may carry (D5): closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
 const ANSWER_KEYS: ReadonlySet<string> = new Set(["error", "transaction", "expires_in", "hints"]);
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
-/** Printable ASCII, at most 64 characters, no `@`: a hint is a name or a mask, never an address. */
-const HINT_TEXT = /^[\x20-\x3F\x41-\x7E]{0,64}$/;
-
-const isHintText = (value: unknown): value is string =>
-	typeof value === "string" && HINT_TEXT.test(value);
 
 /**
  * `value` as the closed body of D5, held to what the requirement named
  * `name` declared: `status` 403; `error` in the RFC 6749 error-text class;
  * `transaction` base64url when present; `expires_in` a positive integer
- * when present; `hints` an object whose every key is one of `hintKeys` and
- * every value a boolean, a finite number, or a string (or list of strings)
- * of at most 64 printable ASCII characters holding no `@`; no other key. A
- * frozen copy; a body that fails is the requirement's fault, a
- * `RangeError` the route answers as an `open` failure.
+ * when present; `hints` an object whose every key is one of `hintKeys` — a
+ * hint name by core's grammar and not a reserved one (`isHintKey`, held at
+ * registration and here) — and every value a boolean, a finite number, or
+ * an enum-like token (`isHintToken`, or a list of such); no other key. A
+ * snapshot, a URL, an address or a name cannot pass. A frozen copy; a body
+ * that fails is the requirement's fault, a `RangeError` the route answers
+ * as an `open` failure.
  */
 function checkInterruptionAnswer(
 	value: unknown,
@@ -762,16 +803,18 @@ function checkInterruptionAnswer(
 		}
 		hints = {};
 		for (const [key, hint] of Object.entries(body.hints)) {
-			if (!hintKeys.includes(key)) refuse(`with a hint "${key}" it did not declare`);
+			if (!hintKeys.includes(key) || !isHintKey(key)) {
+				refuse(`with a hint "${key}" it did not declare, or that is not a hint name`);
+			}
 			if (typeof hint === "boolean" || (typeof hint === "number" && Number.isFinite(hint))) {
 				hints[key] = hint;
-			} else if (isHintText(hint)) {
+			} else if (isHintToken(hint)) {
 				hints[key] = hint;
-			} else if (Array.isArray(hint) && hint.every(isHintText)) {
+			} else if (Array.isArray(hint) && hint.every(isHintToken)) {
 				hints[key] = Object.freeze([...hint]);
 			} else {
 				refuse(
-					`with a hint "${key}" that is not a boolean, a finite number, or short printable text holding no address`,
+					`with a hint "${key}" that is not a boolean, a finite number, or an enum-like token`,
 				);
 			}
 		}
@@ -852,9 +895,9 @@ async function askEvery(
 
 /**
  * `admitPrimary` (D5): what `POST /session/login` calls once the user is
- * verified and nothing is written. The primary is checked and copied
- * (`checkPrimaryAuthentication`: a caller's fault is a `RangeError` before
- * any requirement is asked), then every requirement with `admitPrimary` is
+ * verified and nothing is written. The primary must be one a core builder
+ * made (`passwordPrimary`; a caller's fault is a `RangeError` before any
+ * requirement is asked), then every requirement with `admitPrimary` is
  * asked in order over it; the first interruption wins, with a continuation
  * holding the primary and nothing done yet; only when every one answered
  * `establish` is an `Establishment` answered.
@@ -865,8 +908,10 @@ export async function admitPrimary(
 ): Promise<PrimaryAdmission> {
 	if (!isObject(deps)) throw new RangeError("admitPrimary: deps must be an object");
 	checkResolver(deps.requirements);
-	const checked = checkPrimaryAuthentication(primary);
-	return askEvery(deps, checked, Object.freeze({ primary: checked, done: Object.freeze([]) }));
+	if (!isObject(primary) || !knownPrimaries.has(primary)) {
+		throw new RangeError("admitPrimary: the primary must be one passwordPrimary built");
+	}
+	return askEvery(deps, primary, Object.freeze({ primary, done: Object.freeze([]) }));
 }
 
 /**
@@ -991,14 +1036,14 @@ export function establishWithoutAsking(login: FederatedLogin): Establishment {
 		upstreamAmr: login.upstreamAmr,
 		trusted: login.trusted,
 	});
-	return establish(
-		checkPrimaryAuthentication({
-			subject: login.subject,
-			user: login.user,
-			recorded,
-			authTime: login.authTime,
-			redirectTo: login.redirectTo,
-			request: login.request,
-		}),
-	);
+	const primary = checkPrimaryAuthentication({
+		subject: login.subject,
+		user: login.user,
+		recorded,
+		authTime: login.authTime,
+		redirectTo: login.redirectTo,
+		request: login.request,
+	});
+	knownPrimaries.add(primary);
+	return establish(primary);
 }

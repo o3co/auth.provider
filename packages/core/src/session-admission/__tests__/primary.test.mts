@@ -30,6 +30,7 @@ import {
 	admitPrimary,
 	establishWithoutAsking,
 	isEstablishment,
+	passwordPrimary,
 	resumePrimary,
 } from "#/session-admission/admit.mjs";
 import type {
@@ -45,9 +46,18 @@ import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 
-const primary = (over: Partial<PrimaryAuthentication> = {}): PrimaryAuthentication => ({
+/** The facts a password login produces. */
+const facts = () => ({
 	subject: "user-1",
 	user: { id: "user-1", groups: ["staff"] },
+	authTime: NOW,
+	redirectTo: "/after",
+	request: { ip: "198.51.100.7", userAgent: "test" },
+});
+
+/** The primary as `passwordPrimary` builds it from the facts. */
+const primary = (over: Partial<PrimaryAuthentication> = {}): PrimaryAuthentication => ({
+	...facts(),
 	recorded: {
 		amr: ["pwd"],
 		authentication: {
@@ -57,9 +67,6 @@ const primary = (over: Partial<PrimaryAuthentication> = {}): PrimaryAuthenticati
 			mfaAt: undefined,
 		},
 	},
-	authTime: NOW,
-	redirectTo: "/after",
-	request: { ip: "198.51.100.7", userAgent: "test" },
 	...over,
 });
 
@@ -136,17 +143,34 @@ const deps = (requirements: SessionRequirement[], logger?: Logger): AdmissionDep
 });
 
 describe("admitPrimary — the login asks before anything is written (D5)", () => {
-	it("establishes when no requirement interrupts, with a copy of the primary the route built, branded", async () => {
-		const source = primary();
-		const admission = await admitPrimary(deps([]), source);
+	it("establishes when no requirement interrupts, over the primary passwordPrimary built from the route's facts, branded", async () => {
+		const source = facts();
+		const built = passwordPrimary(source);
+		expect(built).toEqual(primary());
+		expect(Object.isFrozen(built)).toBe(true);
+		(source.user as Record<string, unknown>).id = "someone-else";
+		expect(built.user.id).toBe("user-1");
+		const admission = await admitPrimary(deps([]), built);
 		expect(admission.outcome).toBe("establish");
 		if (admission.outcome !== "establish") throw new Error("unreachable");
 		expect(isEstablishment(admission.establishment)).toBe(true);
 		expect(Object.isFrozen(admission.establishment)).toBe(true);
-		expect(admission.establishment.primary).toEqual(source);
-		expect(admission.establishment.primary).not.toBe(source);
-		(source.user as Record<string, unknown>).id = "someone-else";
-		expect(admission.establishment.primary.user.id).toBe("user-1");
+		expect(admission.establishment.primary).toBe(built);
+	});
+
+	it("passwordPrimary records pwd alone: a route cannot hand in an amr or an mfaAt, and its facts are checked", () => {
+		expect(
+			passwordPrimary({ ...facts(), recorded: { amr: ["pwd", "otp", "mfa"] } } as never).recorded,
+		).toEqual(primary().recorded);
+		for (const bad of [
+			undefined,
+			{ ...facts(), subject: "" },
+			{ ...facts(), user: "alice" },
+			{ ...facts(), authTime: "now" },
+			{ ...facts(), request: undefined },
+		]) {
+			expect(() => passwordPrimary(bad as never), JSON.stringify(bad)).toThrow(RangeError);
+		}
 	});
 
 	it("asks each requirement with admitPrimary in registration order, skipping those without, and the first interruption wins", async () => {
@@ -171,7 +195,10 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 			asked.push("third");
 			return interrupting();
 		});
-		const admission = await admitPrimary(deps([first, silent, second, third]), primary());
+		const admission = await admitPrimary(
+			deps([first, silent, second, third]),
+			passwordPrimary(facts()),
+		);
 		expect(asked).toEqual(["first", "second"]);
 		expect(admission).toMatchObject({
 			outcome: "interrupt",
@@ -181,12 +208,14 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		expect(first.asked[0]).toEqual(primary());
 	});
 
-	it("hands each requirement a copy of the primary, never the route's object", async () => {
+	it("hands each requirement the frozen primary core built, which shares nothing with the route's facts", async () => {
 		const watching = asking("watch", () => "establish");
-		const source = primary();
-		await admitPrimary(deps([watching]), source);
-		expect(watching.asked[0]).not.toBe(source);
+		const source = facts();
+		const built = passwordPrimary(source);
+		await admitPrimary(deps([watching]), built);
+		expect(watching.asked[0]).toBe(built);
 		expect(Object.isFrozen(watching.asked[0])).toBe(true);
+		expect(watching.asked[0]?.user).not.toBe(source.user);
 	});
 
 	it("answers unavailable, logged once, when a requirement throws or answers something that is not establish or an interruption", async () => {
@@ -194,7 +223,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		const failing = asking("risk", () => {
 			throw new Error("scorer down");
 		});
-		expect(await admitPrimary(deps([failing], logger), primary())).toEqual({
+		expect(await admitPrimary(deps([failing], logger), passwordPrimary(facts()))).toEqual({
 			outcome: "unavailable",
 			store: "risk",
 		});
@@ -207,7 +236,10 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		lines.length = 0;
 		for (const odd of [undefined, "later", { open: "x" }, {}]) {
 			const answering = asking("odd", () => odd as never);
-			expect(await admitPrimary(deps([answering], logger), primary()), String(odd)).toEqual({
+			expect(
+				await admitPrimary(deps([answering], logger), passwordPrimary(facts())),
+				String(odd),
+			).toEqual({
 				outcome: "unavailable",
 				store: "odd",
 			});
@@ -215,39 +247,13 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		expect(lines).toHaveLength(4);
 	});
 
-	it("refuses, before asking anything, a resolver it does not know and a primary a route could not have built", async () => {
+	it("refuses, before asking anything, a resolver it does not know and a primary no core builder made", async () => {
 		const watching = asking("watch", () => "establish");
 		await expect(
-			admitPrimary({ ...deps([watching]), requirements: {} as never }, primary()),
+			admitPrimary({ ...deps([watching]), requirements: {} as never }, passwordPrimary(facts())),
 		).rejects.toThrow(RangeError);
-		for (const bad of [
-			undefined,
-			{ ...primary(), subject: "" },
-			{
-				...primary(),
-				recorded: {
-					amr: ["pwd"],
-					authentication: {
-						primary: "pwd",
-						federation: undefined,
-						upstreamAmr: undefined,
-						mfaAt: NOW,
-					},
-				},
-			},
-			{
-				...primary(),
-				recorded: {
-					amr: ["pwd", "otp", "mfa"],
-					authentication: {
-						primary: "pwd",
-						federation: undefined,
-						upstreamAmr: undefined,
-						mfaAt: undefined,
-					},
-				},
-			},
-		]) {
+		// Shaped like one, even equal to one, is not one core built.
+		for (const bad of [undefined, primary(), { ...passwordPrimary(facts()) }]) {
 			await expect(admitPrimary(deps([watching]), bad as never)).rejects.toThrow(RangeError);
 		}
 		expect(watching.asked).toEqual([]);
@@ -260,7 +266,7 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		hintKeys: readonly string[] = ["enrollable", "email_proof"],
 	): Promise<Extract<PrimaryAdmission, { outcome: "interrupt" }>> => {
 		const requirement = asking("mfa", () => interrupting(open), { hintKeys });
-		const admission = await admitPrimary(deps([requirement]), primary());
+		const admission = await admitPrimary(deps([requirement]), passwordPrimary(facts()));
 		if (admission.outcome !== "interrupt") throw new Error("expected an interruption");
 		return admission;
 	};
@@ -321,8 +327,11 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		["a hint key the requirement did not declare", answer({ hints: { user_email: "x" } })],
 		["a hint value carrying an address", answer({ hints: { enrollable: "alice@example.com" } })],
 		["a hint list carrying an address", answer({ hints: { enrollable: ["totp", "a@b.c"] } })],
-		["a hint string over 64 characters", answer({ hints: { enrollable: "x".repeat(65) } })],
-		["a hint string with a control character", answer({ hints: { enrollable: "a\nb" } })],
+		["a hint value over 64 characters", answer({ hints: { enrollable: `x${"y".repeat(64)}` } })],
+		["a hint value with a space", answer({ hints: { enrollable: "totp or email" } })],
+		["a hint value with a capital", answer({ hints: { enrollable: "Totp" } })],
+		["a hint value that is a URL", answer({ hints: { enrollable: "https://x.test/mfa" } })],
+		["a hint value with a control character", answer({ hints: { enrollable: "a\nb" } })],
 		["a hint that is not a finite number", answer({ hints: { email_proof: Number.NaN } })],
 		["a hint that is an object", answer({ hints: { email_proof: { masked: true } } })],
 		["hints that are not an object", answer({ hints: ["totp"] as never })],
@@ -331,17 +340,26 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		await expect(admission.open("express-1")).rejects.toThrow(RangeError);
 	});
 
-	it("admits every value shape a hint may take: a boolean, a finite number, a string, a list of strings", async () => {
+	it("admits every value shape a hint may take: a boolean, a finite number, an enum-like token, a list of tokens", async () => {
 		const admission = await interrupt(
-			async () => answer({ hints: { a: true, b: 3, c: "printable ASCII only", d: ["x", "y"] } }),
+			async () => answer({ hints: { a: true, b: 3, c: "totp_or-email", d: ["x", "y"] } }),
 			["a", "b", "c", "d"],
 		);
 		expect((await admission.open("express-1")).body.hints).toEqual({
 			a: true,
 			b: 3,
-			c: "printable ASCII only",
+			c: "totp_or-email",
 			d: ["x", "y"],
 		});
+	});
+
+	it("holds a declared key to the grammar too: a reserved name, or one that is not an identifier, cannot be declared", () => {
+		for (const key of ["user", "email", "Enrollable", "1st", "x".repeat(33), "a-b"]) {
+			expect(
+				() => resolverForTests([asking("r", () => "establish", { hintKeys: [key] })]),
+				key,
+			).toThrow(RangeError);
+		}
 	});
 });
 
@@ -544,7 +562,7 @@ describe("establishWithoutAsking — a federated login's establishment, from the
 
 describe("isEstablishment — the capability to establish", () => {
 	it("knows only what admitPrimary, resumePrimary and establishWithoutAsking built: a copy forges nothing", async () => {
-		const admission = await admitPrimary(deps([]), primary());
+		const admission = await admitPrimary(deps([]), passwordPrimary(facts()));
 		if (admission.outcome !== "establish") throw new Error("unreachable");
 		expect(isEstablishment(admission.establishment)).toBe(true);
 		expect(isEstablishment({ ...admission.establishment })).toBe(false);

@@ -751,20 +751,22 @@ describe("step 5 — the requirements", () => {
 			{ authentication: undefined, amr: ["otp"] },
 			{ authentication: undefined, amr: [] },
 		]);
-		// With a record, the record's reading wins over the token's amr.
+		// With a record, the token's own amr is still what the requirements are
+		// asked about (D9); the record is only the view.
 		await admitSession(
 			deps({ requirements: resolverForTests([watching]) }),
 			request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["hwk", "fed"] }) }),
 		);
 		expect(seen.at(-1)?.authentication).toEqual({
 			authentication: {
-				primary: "pwd",
+				primary: "fed",
 				federation: undefined,
 				upstreamAmr: undefined,
 				mfaAt: undefined,
 			},
-			amr: ["pwd"],
+			amr: ["hwk", "fed"],
 		});
+		expect(seen.at(-1)?.session).toMatchObject({ sid: "sid-1", sub: "user-1" });
 	});
 
 	it("asks every requirement for use and credential_change, in registration order", async () => {

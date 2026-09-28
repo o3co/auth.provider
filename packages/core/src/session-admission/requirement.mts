@@ -256,12 +256,42 @@ const isNonEmptyString = (value: unknown): value is string =>
 const isNameList = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) && value.every(isNonEmptyString);
 
+/** A hint's key (D5): a short lower-case identifier. */
+const HINT_KEY = /^[a-z][a-z0-9_]{0,31}$/;
+/** A hint's value (D5): an enum-like token. A snapshot, a URL, an address or a name cannot take this form. */
+const HINT_TOKEN = /^[a-z][a-z0-9_-]{0,63}$/;
+/** The hint keys core reserves (D5): what a page must never be told under any name. */
+const RESERVED_HINT_KEYS: ReadonlySet<string> = new Set([
+	"user",
+	"sub",
+	"sid",
+	"subject",
+	"email",
+	"mail",
+	"address",
+	"phone",
+	"name",
+	"token",
+	"secret",
+	"password",
+	"claims",
+	"profile",
+]);
+
+/** Whether `key` may name a hint (D5): the identifier form, and not a reserved name. */
+export const isHintKey = (key: unknown): key is string =>
+	typeof key === "string" && HINT_KEY.test(key) && !RESERVED_HINT_KEYS.has(key);
+
+/** Whether `value` may be one hint's text (D5): an enum-like token. */
+export const isHintToken = (value: unknown): value is string =>
+	typeof value === "string" && HINT_TOKEN.test(value);
+
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
  * non-empty `name`, `remediations` and `hintKeys` as lists of names, a
  * `stepUpPage` that is a page when present (`checkStepUpPage`, on `issuer`'s
- * origin when one is given), `admit` a function, `admitPrimary` one or
- * absent — and copied: the lists and the page are the copy's own, and a
+ * origin when one is given), `hintKeys` each a hint name (`isHintKey`),
+ * `admit` a function, `admitPrimary` one or absent — and copied: the lists and the page are the copy's own, and a
  * getter is read once here, so what the resolver answers at request time is
  * what was registered. `reach` is NOT read here: a requirement's reach may
  * be a getter over what registers in the same pass (the MFA requirement's,
@@ -285,7 +315,11 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 	const page = value.stepUpPage;
 	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
 	if (!isNameList(value.remediations)) refuse("remediations must be a list of names");
-	if (!isNameList(value.hintKeys)) refuse("hintKeys must be a list of names");
+	if (!isNameList(value.hintKeys) || !value.hintKeys.every(isHintKey)) {
+		refuse(
+			"hintKeys must be a list of hint names: lower-case identifiers of at most 32 characters, none a name core reserves",
+		);
+	}
 	if (typeof value.admit !== "function") refuse("admit must be a function");
 	if (value.admitPrimary !== undefined && typeof value.admitPrimary !== "function") {
 		refuse("admitPrimary must be a function or absent");

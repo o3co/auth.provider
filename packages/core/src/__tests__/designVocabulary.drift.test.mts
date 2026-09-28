@@ -176,6 +176,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+establishWithoutAsking\b/,
 	},
 	{
+		concept:
+			"session admission — the one builder a password login has (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+passwordPrimary\b/,
+	},
+	{
 		concept: "session admission — the cookie's claim (the session-admission ADR's D2)",
 		home: "packages/core/src/session-admission/admit.mts",
 		definition: /(?:function|const)\s+cookieClaim\b/,
