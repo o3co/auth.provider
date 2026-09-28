@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -78,8 +78,8 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   builds run their indivisible operations as scripts: the rate limiter's
   increment-with-TTL, the federation-token lock release, the subject session
   index and revocation watermarks, and the indivisible operations of the
-  device-code, consent, pending-consent, federation-grant and
-  federation-grant intent stores. Lua is enabled by default on Redis
+  device-code, consent, pending-consent, federation-grant,
+  federation-grant intent and MFA stores. Lua is enabled by default on Redis
   standalone and Sentinel. **Redis Cluster with Lua scripting disabled is not
   supported by the bundled clients** — enable scripting, or implement the
   per-purpose client interfaces ([Backing-client contract](#backing-client-contract))
@@ -106,6 +106,14 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   `private_key_jwt` and WebAuthn. A Redis at `maxmemory` refuses every
   consumer alike — keep the seen-set's instance sized for the flood, or on
   one of its own.
+- **For the MFA stores, a server that keeps what it is written** (the MFA
+  ADR's D12). An enrolled second factor lost to an eviction or a restart
+  reads as "never enrolled", and whoever holds the password can then bind
+  their own; the email proof an operator reset requires is lost the same way.
+  Give them a `maxmemory-policy` that cannot evict their keys — `noeviction`,
+  or a `volatile-*` policy, since those keys carry no TTL — and AOF
+  (`appendfsync everysec`), preferably on a database or instance of their own.
+  Both modules check at boot (see [MFA stores](#mfa-stores)).
 
 ## Adapters
 
@@ -165,6 +173,11 @@ Each one implements a port core declares; the slot name is in parentheses.
   heard of the code — so core refuses it under `deployment.mode = "multi"`
   (#433). See [Device authorizations share one slot](#device-authorizations-share-one-slot)
   before choosing it.
+- `MfaFactorStore` (`mfaFactorStore`) and `MfaTransactionStore`
+  (`mfaTransactionStore`) — enrolled second factors, and the MFA ceremonies,
+  subject lock and email-proof requirement beside them (the MFA ADR's D7, D8,
+  D21, D25). The in-process alternatives fork per replica; core refuses them
+  under `deployment.mode = "multi"`. See [MFA stores](#mfa-stores).
 - `ConsentStore` / `PendingConsentStore` (`consentStore`, `pendingConsentStore`)
   — the consent step for clients that are not first-party: what a user agreed
   a client may obtain, and the `/authorize` request parked while the consent
@@ -176,7 +189,7 @@ Each one implements a port core declares; the slot name is in parentheses.
 | Import | What it holds | Why it is separate |
 | --- | --- | --- |
 | `@o3co/auth-provider-redis` | The adapters, their modules and builders, and the backing-client interfaces | Imports no driver: a consumer that writes its own clients never has `ioredis` in its type closure |
-| `@o3co/auth-provider-redis/ioredis` | `makeIoredisClients` and the federation-grant client wrappers | The only entry that needs `ioredis` (an optional peer) installed |
+| `@o3co/auth-provider-redis/ioredis` | `makeIoredisClients`, the federation-grant client wrappers and the MFA stores' (`makeIoredisMfaFactorStoreClient`, `makeIoredisMfaTransactionStoreClient`) | The only entry that needs `ioredis` (an optional peer) installed |
 
 The exports are listed in [`src/index.mts`](src/index.mts) and
 [`src/ioredis.mts`](src/ioredis.mts).
@@ -260,7 +273,10 @@ The federation-grant clients are built separately,
 `makeIoredisFederationGrantStoreClient(io)` and
 `makeIoredisFederationGrantIntentStoreClient(io)`, so that a Cluster deployment
 can give the grants a connection of their own; they may equally be the same
-`io`.
+`io`. The MFA stores' clients are in `makeIoredisClients` too, and can also be
+built on their own — `makeIoredisMfaFactorStoreClient(io)`,
+`makeIoredisMfaTransactionStoreClient(io)` — for the database or instance of
+their own that D12 prefers.
 
 For mixed-backend deployments (another backend for `ChallengeStore`, Redis for
 `FederationTokenStore`), wire each per-purpose slot individually instead of
@@ -351,11 +367,14 @@ Each adapter ships in up to two forms:
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
 | `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redisConsentStore` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
+| `redisMfaFactorStoreModule` | `mfaFactorStoreClient` | `mfaFactorStore` | `redisMfaFactorStore` (`keyPrefix`, default `mfaf:`) | — |
+| `redisMfaTransactionStoreModule` | `mfaTransactionStoreClient` | `mfaTransactionStore` | `redisMfaTransactionStore` (`keyPrefix`, default `mfat:`) | — |
 
 Every module also requires `config`. Every module whose stores log also reads
 the optional `logger` slot: the two sealing-store modules, for the plaintext
 guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
-stored record they cannot read. The `*Client` column is the slot
+stored record they cannot read; the two MFA store modules, for their boot
+durability check's warning. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
@@ -395,6 +414,7 @@ give the same answers:
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
+| `MfaTransactionStore.create` | an `expiresAtMs` outside the Date range, or not after this process's clock | `PEXPIREAT` = the expiry rounded up, set once; no later write moves it. The subject lock's keys carry no TTL while a run is counted, and otherwise expire a day after the last failure or trust stops counting (see [MFA stores](#mfa-stores)) |
 | `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `assertUsableRateLimitSpecs` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped: the adapter used to serve its default in its place, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
@@ -601,6 +621,66 @@ behind the writer's by less than that still finds a record it holds to be live.
 A consent recorded until revoked — what `POST /oauth/consent` writes — has no TTL
 at all, including when an earlier grant for the pair had one.
 
+## MFA stores
+
+`redisMfaFactorStoreModule` and `redisMfaTransactionStoreModule` (the MFA
+ADR's D7, D8, D10, D12, D21, D25) are two modules, each with its own client
+slot and prefix, so a deployment can put the factors on a Redis of their own.
+
+| Key | Type | Holds |
+| --- | --- | --- |
+| `mfaf:{<subject>}` | hash | one field per enrolled factor (its id): `<version>\n<fixed JSON>\n<mutable JSON>` |
+| `mfat:tx:{<id>}` | hash | one MFA transaction, expiring at its `expiresAtMs` |
+| `mfat:lock:{<subject>}` | hash | D21's consecutive run, the reservations in flight, the trusted browsers' digests |
+| `mfat:week:{<subject>}` | sorted set | the weekly window: one member per failure, scored by its time |
+| `mfat:proof:{<subject>}` | string | the email proof an operator reset requires at the next first binding |
+
+Subjects and ids are base64url of their JSON, as the federation grant store
+spells its ids, so no brace moves a hash tag and no two values share a key.
+Neither prefix may contain a brace. A subject's factors are one key; a
+subject's lock hash and week share the subject's tag, so each of D21's
+operations is one script on one Cluster slot.
+
+**The factors.** `create` is `HSETNX`; `update` is one script that compares
+the version as text and carries the fixed part over byte for byte — it never
+decodes the JSON, since `cjson` writes an empty array back as `{}`. No key
+carries a TTL. A stored record the adapter cannot read back refuses the
+subject's whole list: never "no factor", which would open a first binding.
+
+**The transactions.** Every operation the port calls atomic is one script:
+insert-only `create`; `update`, a compare-and-set on the version and on the
+incarnation `create` wrote, after core's own checks of the patch; and
+`reserveAttempt`, `takeChallenge` and `consume`. A record is kept as core's
+`newMfaTransactionRecord` answers it and read back through the same function,
+so it has the in-process store's shape; one that does not read back is
+answered as absent, and the ceremony starts again.
+
+**The subject lock.** `reserveSubjectAttempt`, `settleSubjectAttempt` and
+`noteExemptSuccess` are one script each that applies the port's rules exactly
+as core's in-process store does — the same replay of the run for the backoff,
+the same count of the week, the same trust ends — judged on the time the
+caller passes; [`mfa-transaction-store.test.mts`](__tests__/mfa-transaction-store.test.mts)
+holds the two stores to the same answers over random walks of the
+operations. What a script forgets, and what Redis reclaims, is judged no
+later than the server's clock less a day. While a run is counted the keys
+carry no TTL — only a success, an exempt success or `clearSubjectState` ends
+one — and once none is they expire a day after the last failure or trust
+stops counting. A state a script cannot read refuses the attempt; it is never
+read as a state that holds nothing. The email-proof requirement is a key of
+its own with no TTL: `clearSubjectState` leaves it, and consuming it is one
+`DEL`.
+
+**Durability at boot (D12).** Before providing its store each module asks the
+server, through its client's `durability()` — `CONFIG GET maxmemory-policy`
+and `save`, and `INFO persistence`: an `allkeys-*` policy refuses the boot
+(`mfa-factor-store-evictable`, `mfa-transaction-store-evictable`); RDB
+snapshots without AOF (`mfa_factor_store_lossy`,
+`mfa_transaction_store_lossy`) and no persistence (`…_volatile`) are each one
+warning; a server that refuses `CONFIG`, as many managed services do, is one
+warning that the check could not run (`…_durability_unchecked`), and the boot
+goes on. The transaction store runs the check because of the email-proof
+requirement (D12's step-3 amendment).
+
 ## Contract tests
 
 Each adapter whose port has a core conformance suite is run through that
@@ -639,7 +719,7 @@ its port. Two directories hold what several of them share:
   federation grant store's purpose label over core's `v2` key-ring envelope,
   which lives in core's `sealing/` leaf), the plaintext guard both sealing
   stores share (one escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for
-  both), the federation-grant codecs and lock, and the three sid-keyed
-  structures (HASH, ZSET, SET) the session and federation adapters are built
-  from — same `${keyPrefix}${sid}` layout and TTL contract, different Redis
-  type.
+  both), the federation-grant codecs and lock, the MFA stores' key spelling and
+  their boot durability check, and the three sid-keyed structures (HASH, ZSET,
+  SET) the session and federation adapters are built from — same
+  `${keyPrefix}${sid}` layout and TTL contract, different Redis type.

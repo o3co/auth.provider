@@ -249,6 +249,20 @@ Module-level messages that arrive wrapped in a factory failure:
   dropping the key that sealed a grant makes it read `key_unavailable` until
   it is put back; the rotation procedure below says when a key may leave.
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs `federation_store_plaintext_override` (error) on every boot (`packages/redis/src/internal/encryption-mode.mts`). That refusal, and `federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)` for a `redisFederationTokenStore.encryptionKey` that is missing, the wrong length or not canonical base64, are the store's own and arrive as a `RangeError` `cause`, as does the same guard's refusal for federation grants; a mode outside the schema's two is `config-validation-failed`.
+- MFA stores on Redis (the MFA ADR's D12): `redisMfaFactorStoreModule` and
+  `redisMfaTransactionStoreModule` read the server's `maxmemory-policy` and
+  persistence before they provide their stores — the enrolled factors, and the
+  email proof an operator reset requires, must survive. An `allkeys-*` policy
+  is refused with a `RedisMfaStoreEvictableError` `cause` whose `reason` is
+  `mfa-factor-store-evictable` or `mfa-transaction-store-evictable` and whose
+  message names the policy: set `maxmemory-policy` to `noeviction` (or a
+  `volatile-*` policy — neither store's durable keys carry a TTL), or give the
+  stores a Redis of their own. A server that cannot be asked at all fails the
+  boot with the connection's error as the `cause`; one that refuses `CONFIG` is
+  a warning instead (§4). A `redisMfaFactorStore.keyPrefix` or
+  `redisMfaTransactionStore.keyPrefix` that contains a brace is a `RangeError`
+  `cause` (`packages/redis/src/internal/mfa-durability.mts`,
+  `internal/mfa-keys.mts`).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
 - DPoP with no seen-set: `dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component`, in every `deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
 - Device grant: the seven refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, a usable `oauth.deviceAuthorization.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `oauth.deviceAuthorization.store = "unsupported"` does not stand in for (#626), and a `userSessionStore` component (`enabled = true requires a userSessionStore component`: the verification route approves only from the live `UserSession` behind the cookie; install `memorySessionStoresModule` on one replica or `redisSessionStoresModule`); and an eighth, `built from a config with the grant on, but the config createApp validated has oauth.deviceAuthorization.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the same config as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint.
@@ -759,6 +773,9 @@ stream — its level is fixed at `info`.
 | `config_key_deprecated` (warn, `key`, `env`, `replacement`, `replacementEnv`) | `templates/standalone/src/buildModules.mts` | `key = "repositories.code.type"`: move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`). `key = "oauth.accessToken.expiresIn"`: the deprecated key decides the access-token default; move the value to `oauth.accessToken.defaultExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`). Both were `[buildModules] … is deprecated` console lines |
 | `adapter_builder_deprecated` (warn, `builder`, `replacement`) | `redis/src/code-repository.mts` | a composition registers `redisCodeRepositoryBuilder`; wire `redisCodeRepositoryModule` instead |
 | `acr_value_unsatisfiable` (warn, or info — `acr`, `unproducible`, `unproducibleCount` when the list was cut, and `emptyAlternative: true` when an alternative requires nothing — a hand-built table only — which is never met) | `oauth/src/acrValues.mts` | an `oauth.authorize.acrValues` entry nothing this composition installs can satisfy was dropped: it is not advertised in `acr_values_supported`, and `/authorize` answers it `unmet_authentication_requirements`. `unproducible` names the values nothing records — `fed` without a federation installed, a second factor's values (`otp`, `hwk`, `swk`, `email`, `recovery`, `mfa`) while no registered session requirement reaches them, anything else always. `info` when only a second factor is missing and no requirement reaches one (the composition's choice: installing MFA would meet it — `mfa.mode` does not enter into it); `warn` otherwise. Remove the entry, or install what produces its values (a federation, or MFA). An installed federation adds `fed` alone unless `federations.<name>.trustUpstreamAmr = true`, which counts whatever its IdP asserts (the MFA ADR's D13): an entry that only an upstream IdP's `mfa` or `hwk` met before that switch existed is dropped until one trusted federation is installed. One line per dropped entry per process |
+| `mfa_factor_store_lossy`, `mfa_transaction_store_lossy` (warn, `store`, `adapter: "redis"`, once at boot) | `redis/src/internal/mfa-durability.mts` | the MFA store's Redis takes RDB snapshots and has no AOF: a crash loses what was written since the last snapshot — enrollments, whose accounts then read as never enrolled, or an operator reset's email-proof requirement (D12). Turn AOF on (`appendonly yes`, `appendfsync everysec`) |
+| `mfa_factor_store_volatile`, `mfa_transaction_store_volatile` (warn, `store`, `adapter: "redis"`, once at boot) | same | the MFA store's Redis has no persistence at all: a restart empties it. Turn AOF on |
+| `mfa_factor_store_durability_unchecked`, `mfa_transaction_store_durability_unchecked` (warn, `store`, `adapter: "redis"`, `err` — the refusal's projection, once at boot) | same | the server refused `CONFIG` — renamed, disabled, or not permitted to the connection's user, as on many managed services — so its eviction policy and persistence could not be checked, and the store booted. Confirm them where the server is configured (`noeviction` or a `volatile-*` policy, AOF on), or let the user run `CONFIG GET` |
 | `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; nothing installs it while `mfa.mode` is `"off"` |
 
 ### Data corruption — a stored record could not be read
@@ -780,6 +797,14 @@ stores' lines now reach the deployment's logger (they were written only by a
 store built with one, which the module never did).
 A federation-token envelope that fails to decrypt is **deleted** and the user is
 sent to re-authenticate (`packages/redis/src/federation-tokens.mts` `get`).
+An enrolled MFA factor the Redis store cannot read back refuses its subject's
+whole list with an error that quotes nothing it read — never "no factor",
+which would open a first binding (D12); an MFA transaction it cannot read back
+is answered as absent, and the user starts the ceremony again; a subject's
+lock state a script cannot read refuses the attempt (`MFA subject state: …`)
+rather than let it through (`packages/redis/src/mfa-factor-store.mts`,
+`mfa-transaction-store.mts`). None writes a line of its own: its caller
+answers it as an outage.
 A watermark that is not a number throws rather than reading as "not revoked"
 (`packages/redis/src/subjectRevocation.mts`). A cookie-session record the
 store holds but cannot read — not JSON, or not a session record — is read as
@@ -887,7 +912,8 @@ Prefixes are the shipped defaults; every one is overridable so two deployments
 can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX`, `CLIENT_CODE_KEY_PREFIX`,
 `REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX`, `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX`,
-`REDIS_CONSENT_STORE_KEY_PREFIX`; `packages/core/config/reference.conf`).
+`REDIS_CONSENT_STORE_KEY_PREFIX`, `REDIS_MFA_FACTOR_STORE_KEY_PREFIX`,
+`REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX`; `packages/core/config/reference.conf`).
 
 | Key | Type / value | TTL comes from | Source |
 | --- | --- | --- | --- |
@@ -907,6 +933,10 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `consent:rec:<len>:<sub>\|<len>:<clientId>` | hash `{scopes (JSON array), grantedAt, expiresAt?}` | **none** for a consent recorded until revoked — which is what `POST /oauth/consent` writes; for a record carrying `expiresAt`, that expiry plus 5 minutes' slack (`CONSENT_EXPIRY_SLACK_MS`). Expiry is judged by `expiresAt` on the reading replica's clock; the TTL only reclaims records nobody reads again | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_CONSENT_GRANT`) |
 | `consent:{pending}:ch:<challenge>` | hash `{record (JSON), sessionId, expiresAt}` | the parked request's `expiresAt` (10 minutes, `PENDING_CONSENT_TTL_MS`) plus the same slack; consumed with its index entry in one script | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_PENDING_CONSENT_*`) |
 | `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
+| `mfaf:{<subject>}` | hash — one field per enrolled second factor (its id), value `<version>\n<fixed JSON>\n<mutable JSON>`; the factor's `data` sealed by the MFA package before it arrives (D11). `<subject>` and the id are base64url of their JSON | **none**: an enrolled factor does not expire, and losing one lets whoever holds the password bind their own (D12). Keep it where nothing evicts it and a restart keeps it — `noeviction` (or `volatile-*`), AOF on, preferably a database or instance of its own; the module refuses an `allkeys-*` policy at boot and warns without AOF | `packages/redis/src/mfa-factor-store.mts`, `ioredis.mts` (`LUA_MFA_FACTOR_UPDATE`) |
+| `mfat:tx:{<id>}` | hash — one MFA ceremony: `version`, `attempts`, `sends`, `enrollment`, `emailProof`, `challenge`, `pendingEnrollment` and `lastSentAtMs` when set, `record` (the rest as JSON, the login's continuation among it) and `incarnation` | its `expiresAtMs` (`mfa.transactionTtlSeconds`, 600 s), rounded up, set when it is created and moved by nothing; consumed by one verification | `packages/redis/src/mfa-transaction-store.mts`, `ioredis.mts` (`LUA_MFA_TX_*`) |
+| `mfat:lock:{<subject>}`, `mfat:week:{<subject>}` | hash (the consecutive run of guessable-proof failures, the reservations in flight, the trusted browsers' digests) and sorted set (the weekly window, one member per failure, scored by its time), under one hash tag | **none** while a run is counted — a run ends only at a success, an exempt success, a password change or an operator reset, and D21's hard limit counts it across weeks; otherwise a day past the last failure or trust to stop counting, on the server's clock. A `volatile-*` policy may evict them then, which lifts a weekly hold early | same (`LUA_MFA_SUBJECT_*`) |
+| `mfat:proof:{<subject>}` | string `"1"` — an operator reset's `requireEmailProof: true` (D25) | **none**, until the subject's next first binding consumes it; a password change and the reset's own clearing of the lock leave it. As durable as `mfaf:` (D12's step-3 amendment): the transaction store's module runs the same boot check | same |
 
 ### Sizing
 
@@ -934,6 +964,13 @@ lifetime) per family:
   small and wrong.
 - **Federation tokens** — one encrypted envelope per (session, federation)
   for 24 h plus one index set per session, only when federation is enabled.
+- **MFA** — only with the MFA stores on Redis. Per enrolled subject, one
+  `mfaf:` hash, kept for good. Per second-factor ceremony, one `mfat:tx:` hash
+  carrying the login's user snapshot, for at most `mfa.transactionTtlSeconds`.
+  Per subject with guessable-proof failures or a trusted browser, one
+  `mfat:lock:` / `mfat:week:` pair; a subject whose run of failures was never
+  ended keeps its pair until one is — where the Store lets anyone sign up,
+  anyone can mint such subjects (`packages/core/src/mfa/transactionStore.mts`).
 - **Consent** — one small hash per (subject, client that is not first-party)
   the user has consented to, until revoked; one parked request per consent
   page shown, for at most 15 minutes (10 plus the slack), 16 per session at
