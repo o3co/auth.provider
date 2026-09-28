@@ -1,0 +1,55 @@
+{
+	"name": "@o3co/auth-provider-mfa",
+	"description": "Multi-factor authentication for @o3co/auth-provider — a second factor after a password login. Private until the standalone template wires it.",
+	"version": "0.0.0",
+	"private": true,
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		},
+		"./reference.conf": "./config/reference.conf"
+	},
+	"files": [
+		"dist",
+		"config",
+		"README.md"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/mfa"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"zod": "^4.6.2"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:^"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/ts.hocon": "^1.13.0",
+		"@types/node": "^26.5.1",
+		"@vitest/coverage-v8": "^5.0.0",
+		"typescript": "^6.0.3",
+		"vitest": "^5.0.0"
+	}
+}
