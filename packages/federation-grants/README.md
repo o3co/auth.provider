@@ -144,8 +144,10 @@ say what each one means and what to do.
   `session_admission_unavailable` at error, with `store` (`user_session`,
   `revocation_boundary`, or the requirement's name), `action`
   (`federation_grants.connect`, `.consent` or `.callback`), the flow's
-  `grantId` and the request's `correlationId` — bound, sanitised and capped,
-  to the logger the routes hand admission — and the error's projection. A durable session recorded for another subject than the
+  `grantId`, the request's `correlationId` and, at the consent, its
+  `method` — bound, sanitised and capped, to the logger the routes hand
+  admission — and the error's projection. Admission's audit event is
+  registered with the shutdown drain, as the routes' own are. A durable session recorded for another subject than the
   cookie's is admission's warn, `session_admission_subject_mismatch`, and
   its audit event, `session.admission.subject_mismatch`.
 - **A client registry that cannot answer** is core's
