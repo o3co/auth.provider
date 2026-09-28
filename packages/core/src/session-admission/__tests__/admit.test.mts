@@ -272,21 +272,47 @@ describe("what admitSession refuses before it reads anything (a caller's fault i
 		).rejects.toThrow(RangeError);
 	});
 
-	it("refuses an action that is not a name with a grade", async () => {
+	it("refuses an action that is not a name with one of the three grades — before a store is read or a requirement asked, never as a skipped requirement", async () => {
+		let asked = 0;
+		let read = 0;
+		const record = session();
+		const counting = met("counting", {
+			admit: async () => {
+				asked++;
+				return { outcome: "met" };
+			},
+		});
+		const store = holding(record);
+		const with_ = deps({
+			userSessionStore: {
+				...store,
+				get: async (sid) => {
+					read++;
+					return store.get(sid);
+				},
+			},
+			requirements: resolverForTests([counting]),
+		});
 		for (const action of [
 			undefined,
 			null,
 			"oauth.authorize",
 			{ name: "", grade: "use" },
 			{ name: "x", grade: "strict" },
+			{ name: "x", grade: "admin" },
+			{ name: "x", grade: "" },
+			{ name: "x", grade: undefined },
+			{ name: "x" },
 			{ name: 7, grade: "use" },
 			{ grade: "use" },
 		]) {
 			await expect(
-				admitSession(deps(), request({ action: action as never })),
+				admitSession(with_, request({ action: action as never })),
 				JSON.stringify(action),
 			).rejects.toThrow(RangeError);
 		}
+		expect(read).toBe(0);
+		expect(asked).toBe(0);
 	});
 
 	it("refuses asks that are not a list of acr values, and a table that is not one", async () => {
@@ -966,9 +992,9 @@ describe("step 5 — the requirements", () => {
 		]);
 	});
 
-	it("reads a requirement's reach live, at request time: a reach that fills after registration counts", async () => {
+	it("reads the reach the resolver sealed, not the contributor's: a reach that fills after the resolver was built does not count until one is built over it again", async () => {
 		const record = session();
-		let reach = new Set<string>();
+		const reach = new Set<string>();
 		const late: SessionRequirement = {
 			name: "late",
 			get reach() {
@@ -979,15 +1005,20 @@ describe("step 5 — the requirements", () => {
 			hintKeys: [],
 			admit: async () => ({ outcome: "met" }),
 		};
-		const with_ = deps({
-			userSessionStore: holding(record),
-			requirements: resolverForTests([late]),
-			acrTable: readAcrTable({ "urn:o3co:acr:mfa": ["mfa"] }),
+		const acrTable = readAcrTable({ "urn:o3co:acr:mfa": ["mfa"] });
+		const ask = (requirements: SessionRequirementResolver) =>
+			admitSession(
+				deps({ userSessionStore: holding(record), requirements, acrTable }),
+				request({ asks: { acrValues: ["urn:o3co:acr:mfa"] } }),
+			);
+		const sealedEmpty = resolverForTests([late]);
+		expect(await ask(sealedEmpty)).toMatchObject({ outcome: "unmet", requirement: "acr" });
+		reach.add("mfa");
+		expect(await ask(sealedEmpty)).toMatchObject({ outcome: "unmet", requirement: "acr" });
+		expect(await ask(resolverForTests([late]))).toMatchObject({
+			outcome: "step_up",
+			requirement: "late",
 		});
-		const ask = () => admitSession(with_, request({ asks: { acrValues: ["urn:o3co:acr:mfa"] } }));
-		expect(await ask()).toMatchObject({ outcome: "unmet", requirement: "acr" });
-		reach = new Set(["mfa"]);
-		expect(await ask()).toMatchObject({ outcome: "step_up", requirement: "late" });
 	});
 
 	it("carries the live session on reauthenticate, step_up and unmet: /authorize decides freshness on it first", async () => {

@@ -93,6 +93,7 @@ import {
 	composeFullSet,
 	DPOP_JWK,
 	dpopProof,
+	FIXTURE_REQUIREMENTS,
 	type FullSet,
 	type FullSetOptions,
 	GATEWAY,
@@ -151,9 +152,6 @@ const DEPLOYMENT_MODULES = [
 	"deployment:requirement-page",
 	"deployment:requirement-bare",
 ];
-
-/** The fixture's two session requirements, in registration order, as the declaration names them. */
-const FIXTURE_REQUIREMENTS = ["fixture-page", "fixture-bare"];
 
 describe("what the full set covers", () => {
 	it("depends on every workspace package, so each can be booted here", () => {
