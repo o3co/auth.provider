@@ -78,14 +78,17 @@ const LOOPBACK = "127.0.0.1";
 const PATCHED = Symbol.for("o3co.auth.provider.supertest-loopback");
 const PENDING = Symbol("o3co.auth.provider.supertest-loopback.pending");
 
-/** A server this file bound, from its `listen` until the last request on it settles. */
+/**
+ * A server this file bound, from its `listen` until the last request on it
+ * settles. It is the server's current bind for as long as `bound` maps the
+ * server to it; a request built on one that no longer is — closed by its last
+ * request, or failed — binds again when it is sent.
+ */
 type Bound = {
 	/** Settles on `listening`, rejects on a listen `error`. */
 	readonly ready: Promise<unknown>;
 	/** The requests sent over it that have not settled. */
 	pending: number;
-	/** Set once the last of them has closed it. */
-	closed: boolean;
 };
 
 type Pending = {
@@ -169,13 +172,22 @@ function share(server: Server): Bound {
 	// Subscribed now, not in `end`: a listen error emitted before the test
 	// sends the request must still reach it, not crash the worker as an
 	// unhandled 'error' event.
-	const fresh: Bound = { ready: once(server, "listening"), pending: 0, closed: false };
+	const fresh: Bound = { ready: once(server, "listening"), pending: 0 };
 	bound.set(server, fresh);
 	// Once it has failed, the bind is left to the requests already waiting on
-	// it, each of which fails with its error; the next request binds again.
-	fresh.ready.catch(() => {
+	// it, each of which fails with its error, and is no longer the server's:
+	// the next request sent binds again, one built on the failed bind included.
+	// Forgotten on the error event itself, and not on the rejection it becomes
+	// — that settles a few microtasks later, and a request built in between
+	// would join the failed bind.
+	const failed = (): void => {
 		if (bound.get(server) === fresh) bound.delete(server);
-	});
+	};
+	server.once("error", failed);
+	fresh.ready.then(
+		() => server.removeListener("error", failed),
+		() => {},
+	);
 	return fresh;
 }
 
@@ -214,8 +226,10 @@ function patch(proto: TestPrototype): void {
 		this[PENDING] = undefined;
 
 		const { server, protocol, path } = pending;
-		// Built before the last request on its server closed it: bind it again.
-		const shared = pending.bound.closed ? share(server) : pending.bound;
+		// Built on a bind that is no longer the server's — closed by its last
+		// request, or failed — and sent now: bind it again, or join the bind
+		// another request has made since.
+		const shared = bound.get(server) === pending.bound ? pending.bound : share(server);
 		shared.pending += 1;
 		let called = false;
 		const callback = (err: unknown, res?: unknown) => {
@@ -225,7 +239,6 @@ function patch(proto: TestPrototype): void {
 			shared.pending -= 1;
 			if (shared.pending === 0 && bound.get(server) === shared) {
 				bound.delete(server);
-				shared.closed = true;
 				if (server.listening) {
 					server.close(() => fn?.(err, res));
 					return;

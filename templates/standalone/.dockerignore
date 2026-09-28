@@ -12,7 +12,7 @@ Makefile
 # anchored at the context root. Keep the two in step; scaffold-assets.test.mts
 # checks that they are.
 **/.env*
-!.env.example
+!**/.env.example
 **/*.pem
 **/*.key
 config/clients.yaml

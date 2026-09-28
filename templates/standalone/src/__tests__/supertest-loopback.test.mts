@@ -181,6 +181,8 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		const closes = recordCloses(server, held);
 		const agent = request.agent(server);
 
+		// A Test is sent when it is first awaited or `then`ed; the identity
+		// `then` sends each one here, before the test waits for its arrival.
 		const first = agent.get("/hold/first").then((res) => res);
 		await held.arrived("first");
 		const late = agent.get("/hold/late").then((res) => res);
@@ -203,6 +205,40 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect((await first).status).toBe(200);
 		expect((await second).status).toBe(200);
 	});
+
+	it("serves a request built on a bind that failed, once another request has bound the server again (#703)", async () => {
+		// The first `listen` lands on a port another socket holds; the bind
+		// fails, and the request built on it is not sent until a later request
+		// has bound the server on a free port. It joins that bind rather than
+		// failing with the error of the one it was built on.
+		const held: net.Socket[] = [];
+		const squatter = net.createServer((socket) => {
+			held.push(socket);
+		});
+		await new Promise<void>((resolve) => squatter.listen(0, "127.0.0.1", resolve));
+		const { port } = squatter.address() as AddressInfo;
+
+		const server = http.createServer(helloApp());
+		const listen = server.listen.bind(server) as (...args: unknown[]) => net.Server;
+		let steered = false;
+		(server as { listen: (...args: unknown[]) => net.Server }).listen = (requested, ...rest) => {
+			if (steered) return listen(requested, ...rest);
+			steered = true;
+			return listen(port, ...rest);
+		};
+
+		try {
+			const failed = new Promise<void>((resolve) => server.once("error", () => resolve()));
+			const builtOnTheFailedBind = request(server).get("/hello");
+			await failed;
+			expect((await request(server).get("/hello")).status).toBe(200);
+			expect((await builtOnTheFailedBind).status).toBe(200);
+			expect(server.listening).toBe(false);
+		} finally {
+			for (const socket of held) socket.destroy();
+			squatter.close();
+		}
+	}, 5_000);
 
 	it("fails the request, instead of hanging on another socket, when 127.0.0.1:P is taken", async () => {
 		// The collision the kernel produces by chance, produced on purpose: a

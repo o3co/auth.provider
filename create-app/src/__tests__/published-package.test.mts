@@ -94,6 +94,16 @@ describe("published-package install context (e2e)", () => {
 		// `.env.example` is the documentation and must survive the `.env.*` rule.
 		expect(gitignore).toMatch(/^!\.env\.example$/m);
 
+		// #705: what `.gitignore` keeps out of git, `.dockerignore` keeps out of
+		// the image — the client registry above all, which may hold client
+		// secrets. npm does not drop this name, but a `files` list or an
+		// `.npmignore` could, and the scaffold would then bake the registry
+		// into every image it builds. Asserted from the packed tarball for the
+		// same reason as `.gitignore` above.
+		const dockerignorePath = join(targetDir, ".dockerignore");
+		expect(existsSync(dockerignorePath)).toBe(true);
+		expect(readFileSync(dockerignorePath, "utf-8")).toMatch(/^config\/clients\.yaml$/m);
+
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
 		expect(pkg.name).toBe("my-test-project");
 		for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {

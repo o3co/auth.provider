@@ -204,9 +204,13 @@ describe("#705 — what .gitignore keeps out of git stays out of the image, and 
 		"config/*.local.conf": ["config/production.local.conf"],
 	};
 
-	/** The committed files beside them, which the image does need. */
+	/**
+	 * The committed files beside them, which the image does need. `.env.example`
+	 * is what `.gitignore` re-includes, at any depth: the same here.
+	 */
 	const COMMITTED = [
 		".env.example",
+		"config/.env.example",
 		"config/application.conf",
 		"config/development.conf",
 		"config/production.conf",
@@ -521,7 +525,9 @@ function dockerignoreExcludes(dockerignore: string, file: string): boolean {
 		const line = raw.trim();
 		if (line === "" || line.startsWith("#")) continue;
 		const negated = line.startsWith("!");
-		const pattern = (negated ? line.slice(1) : line).replace(/^\//, "");
+		// Cleaned as Docker cleans a pattern (`filepath.Clean`): a leading `/`
+		// or `./` and a trailing `/` say nothing about what it matches.
+		const pattern = (negated ? line.slice(1) : line).replace(/^(\.?\/)+/, "").replace(/\/+$/, "");
 		let source = "";
 		for (let i = 0; i < pattern.length; ) {
 			if (pattern.startsWith("**/", i)) {

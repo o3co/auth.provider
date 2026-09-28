@@ -565,6 +565,13 @@ jobs:
           # published packages under node_modules, project root not at
           # templates/standalone. Green here means green after
           # `create-auth-provider` (#512).
+          #
+          # And in the state a fresh clone of a scaffolded project is in (#704):
+          # the scaffold's `.gitignore` keeps `config/clients.yaml` out of that
+          # project's repository, so its CI, its second developer and its `test`
+          # image never have one. The workspace copy carries it; a suite green
+          # only with it is red for every consumer.
+          rm -f config/clients.yaml
           npm run test
           popd >/dev/null
           echo "OK: templates/standalone builds and tests against packed tarballs"
