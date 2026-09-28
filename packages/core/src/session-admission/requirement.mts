@@ -291,7 +291,7 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 		refuse("admitPrimary must be a function or absent");
 	}
 	const source = value as unknown as SessionRequirement;
-	const admitPrimary = source.admitPrimary;
+	const primaryAsk = source.admitPrimary;
 	return Object.freeze({
 		name,
 		get reach() {
@@ -301,9 +301,9 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 		remediations: Object.freeze([...(value.remediations as readonly string[])]),
 		hintKeys: Object.freeze([...(value.hintKeys as readonly string[])]),
 		admit: (input: RequirementInput) => source.admit(input),
-		...(admitPrimary === undefined
+		...(primaryAsk === undefined
 			? {}
-			: { admitPrimary: (primary: PrimaryAuthentication) => admitPrimary.call(source, primary) }),
+			: { admitPrimary: (primary: PrimaryAuthentication) => primaryAsk.call(source, primary) }),
 	});
 }
 

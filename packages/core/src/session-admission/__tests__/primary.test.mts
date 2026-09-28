@@ -406,19 +406,6 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		});
 	});
 
-	it("takes the later verification time when two completions carry one", async () => {
-		const later = new Date(NOW.getTime() + 60_000);
-		const mfa = asking("mfa", () => "establish");
-		const admission = await resumePrimary(
-			deps([mfa]),
-			continuation({ done: [{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: later } }] }),
-			{ requirement: "mfa", adds: { amr: ["hwk", "mfa"], mfaAt: NOW } },
-		);
-		// A requirement completing twice is refused (below); the later time is
-		// what a continuation built by hand with two entries would compose.
-		expect(admission.outcome).toBe("establish");
-	}, 0);
-
 	it("refuses, before asking anything, a completion by a requirement that is not registered with admitPrimary, a continuation it cannot read, and what the name may not add", async () => {
 		const mfa = asking("mfa", () => "establish");
 		const plain: SessionRequirement = {

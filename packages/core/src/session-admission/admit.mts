@@ -15,14 +15,22 @@
  */
 
 /**
- * Session admission (the session-admission ADR's D1, D2, D4, D10): the one
- * decision point every consumer of an authenticated browser session calls.
+ * Session admission (the session-admission ADR's D1, D2, D4, D5, D10): the
+ * one decision point every consumer of an authenticated browser session
+ * calls, and the one the login route calls before a session is written.
  * `admitSession` reads the session — the claim, the live record, the
  * subject, the subject-revocation boundary — asks the registered
  * requirements by the action's grade, selects the `acr`, and merges the two
  * verdicts by D2's table. The claim builders (`cookieClaim`, `codeClaim`,
- * `linkClaim`) are the one reading of each carrier; `ADMISSION_ACTIONS`
- * names the bundled actions with their grades.
+ * `linkClaim`, `tokenClaim`) are the one reading of each carrier;
+ * `ADMISSION_ACTIONS` names the bundled actions with their grades.
+ * `admitPrimary` asks the requirements that interrupt a login and answers
+ * the `Establishment` `establishSession` requires; `resumePrimary` composes
+ * what every completed requirement added and asks them all again;
+ * `establishWithoutAsking` builds a federated login's establishment from
+ * the federation's own facts; an interruption's `open` is wrapped, so its
+ * answer is validated against the requirement's declared `hintKeys` before
+ * the route sees it.
  *
  * Every step fails closed: a store that throws is `unavailable`, logged once
  * at error as `session_admission_unavailable` with the store, the action and
@@ -39,19 +47,37 @@
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
+import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
-import { wellFormedAmr } from "../grants/authenticationClaims.mjs";
+import { composeAmr, MFA_AMR, wellFormedAmr } from "../grants/authenticationClaims.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
-import { requirementSession, requirementSessionFromAmr } from "../user-sessions/authentication.mjs";
+import {
+	copySessionAuthentication,
+	federatedSessionAuthentication,
+	requirementSession,
+	requirementSessionFromAmr,
+} from "../user-sessions/authentication.mjs";
 import type { UserSession } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
+import {
+	checkPrimaryAdditions,
+	checkPrimaryAuthentication,
+	checkPrimaryContinuation,
+} from "./primary.mjs";
 import type {
 	Admission,
 	AdmissionAction,
 	AdmissionDeps,
 	AdmissionGrade,
 	AdmissionRequest,
+	CompletedRequirement,
+	Establishment,
+	Interruption,
+	InterruptionAnswer,
+	PrimaryAdmission,
+	PrimaryAuthentication,
+	PrimaryContinuation,
 	RequirementInput,
 	RequirementVerdict,
 	SessionClaim,
@@ -659,4 +685,320 @@ function stepUpThroughOne(
 		}
 	}
 	return undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Establishment (D5)
+// ---------------------------------------------------------------------------
+
+/** The establishments `admitPrimary`, `resumePrimary` and `establishWithoutAsking` built. */
+const knownEstablishments = new WeakSet<object>();
+
+/** Whether `value` is an `Establishment` one of the three built: a copy, or an object shaped like one, is not. */
+export function isEstablishment(value: unknown): value is Establishment {
+	return typeof value === "object" && value !== null && knownEstablishments.has(value);
+}
+
+const establish = (primary: PrimaryAuthentication): Establishment => {
+	const built = Object.freeze({ primary });
+	knownEstablishments.add(built);
+	return built as unknown as Establishment;
+};
+
+const isInterruption = (value: unknown): value is Interruption =>
+	isObject(value) && typeof value.open === "function";
+
+/** The keys an interruption's body may carry (D5): closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
+const ANSWER_KEYS: ReadonlySet<string> = new Set(["error", "transaction", "expires_in", "hints"]);
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+/** Printable ASCII, at most 64 characters, no `@`: a hint is a name or a mask, never an address. */
+const HINT_TEXT = /^[\x20-\x3F\x41-\x7E]{0,64}$/;
+
+const isHintText = (value: unknown): value is string =>
+	typeof value === "string" && HINT_TEXT.test(value);
+
+/**
+ * `value` as the closed body of D5, held to what the requirement named
+ * `name` declared: `status` 403; `error` in the RFC 6749 error-text class;
+ * `transaction` base64url when present; `expires_in` a positive integer
+ * when present; `hints` an object whose every key is one of `hintKeys` and
+ * every value a boolean, a finite number, or a string (or list of strings)
+ * of at most 64 printable ASCII characters holding no `@`; no other key. A
+ * frozen copy; a body that fails is the requirement's fault, a
+ * `RangeError` the route answers as an `open` failure.
+ */
+function checkInterruptionAnswer(
+	value: unknown,
+	name: string,
+	hintKeys: readonly string[],
+): InterruptionAnswer {
+	const refuse = (what: string): never => {
+		throw new RangeError(`requirement "${name}" answered an interruption ${what}`);
+	};
+	if (!isObject(value)) return refuse("that is not an object");
+	if (value.status !== 403) refuse("whose status is not 403");
+	const body = value.body;
+	if (!isObject(body) || Array.isArray(body)) return refuse("without a body");
+	for (const key of Object.keys(body)) {
+		if (!ANSWER_KEYS.has(key)) {
+			refuse(`whose body carries "${key}", which the body's shape does not admit`);
+		}
+	}
+	if (!isWellFormedErrorCode(body.error)) refuse("whose error is not a well-formed error code");
+	if (body.transaction !== undefined) {
+		if (typeof body.transaction !== "string" || !BASE64URL.test(body.transaction)) {
+			refuse("whose transaction is not a base64url string");
+		}
+	}
+	if (body.expires_in !== undefined) {
+		if (!Number.isSafeInteger(body.expires_in) || (body.expires_in as number) <= 0) {
+			refuse("whose expires_in is not a positive integer");
+		}
+	}
+	let hints: Record<string, string | number | boolean | readonly string[]> | undefined;
+	if (body.hints !== undefined) {
+		if (!isObject(body.hints) || Array.isArray(body.hints)) {
+			return refuse("whose hints are not an object");
+		}
+		hints = {};
+		for (const [key, hint] of Object.entries(body.hints)) {
+			if (!hintKeys.includes(key)) refuse(`with a hint "${key}" it did not declare`);
+			if (typeof hint === "boolean" || (typeof hint === "number" && Number.isFinite(hint))) {
+				hints[key] = hint;
+			} else if (isHintText(hint)) {
+				hints[key] = hint;
+			} else if (Array.isArray(hint) && hint.every(isHintText)) {
+				hints[key] = Object.freeze([...hint]);
+			} else {
+				refuse(
+					`with a hint "${key}" that is not a boolean, a finite number, or short printable text holding no address`,
+				);
+			}
+		}
+	}
+	return Object.freeze({
+		status: 403,
+		body: Object.freeze({
+			error: body.error as string,
+			...(body.transaction === undefined ? {} : { transaction: body.transaction as string }),
+			...(body.expires_in === undefined ? {} : { expires_in: body.expires_in as number }),
+			...(hints === undefined ? {} : { hints: Object.freeze(hints) }),
+		}),
+	});
+}
+
+/** An outage at establishment: logged once, at error, object-first, with the requirement's name and the projection. */
+const unavailableAtEstablishment = (
+	deps: AdmissionDeps,
+	store: string,
+	err: unknown,
+): PrimaryAdmission => {
+	deps.logger?.error(
+		{ store, phase: "establishment", err: loggableError(err) },
+		"session_admission_unavailable",
+	);
+	return { outcome: "unavailable", store };
+};
+
+/**
+ * Asks every requirement with `admitPrimary`, in registration order, about
+ * `composed`: the first interruption wins, carrying `continuation` and an
+ * `open` that validates the answer; a throw, or an answer that is neither
+ * `establish` nor an interruption, is `unavailable`; when every one answered
+ * `establish`, the establishment over `composed`.
+ */
+async function askEvery(
+	deps: AdmissionDeps,
+	composed: PrimaryAuthentication,
+	continuation: PrimaryContinuation,
+): Promise<PrimaryAdmission> {
+	for (const [name, requirement] of deps.requirements.entries()) {
+		if (requirement.admitPrimary === undefined) continue;
+		let answer: unknown;
+		try {
+			answer = await requirement.admitPrimary(composed);
+		} catch (err) {
+			return unavailableAtEstablishment(deps, name, err);
+		}
+		if (answer === "establish") continue;
+		if (isInterruption(answer)) {
+			const interruption = answer;
+			return {
+				outcome: "interrupt",
+				requirement: name,
+				continuation,
+				open: async (sessionId: string) => {
+					if (nonEmptyString(sessionId) === undefined) {
+						throw new RangeError("open: the session id must be a non-empty string");
+					}
+					return checkInterruptionAnswer(
+						await interruption.open(sessionId),
+						name,
+						requirement.hintKeys,
+					);
+				},
+			};
+		}
+		return unavailableAtEstablishment(
+			deps,
+			name,
+			new TypeError(
+				"a requirement answered something that is neither establish nor an interruption",
+			),
+		);
+	}
+	return { outcome: "establish", establishment: establish(composed) };
+}
+
+/**
+ * `admitPrimary` (D5): what `POST /session/login` calls once the user is
+ * verified and nothing is written. The primary is checked and copied
+ * (`checkPrimaryAuthentication`: a caller's fault is a `RangeError` before
+ * any requirement is asked), then every requirement with `admitPrimary` is
+ * asked in order over it; the first interruption wins, with a continuation
+ * holding the primary and nothing done yet; only when every one answered
+ * `establish` is an `Establishment` answered.
+ */
+export async function admitPrimary(
+	deps: AdmissionDeps,
+	primary: PrimaryAuthentication,
+): Promise<PrimaryAdmission> {
+	if (!isObject(deps)) throw new RangeError("admitPrimary: deps must be an object");
+	checkResolver(deps.requirements);
+	const checked = checkPrimaryAuthentication(primary);
+	return askEvery(deps, checked, Object.freeze({ primary: checked, done: Object.freeze([]) }));
+}
+
+/**
+ * The session's `recorded` composed from the primary the route built and
+ * what every completed requirement added, in order (`composeAmr`, the MFA
+ * ADR's D14: a requirement's `mfa` comes through `addsMfa`); `mfaAt` what
+ * the one completion that may carry one — the requirement named `mfa`,
+ * which completes once — verified at.
+ */
+function composeRecorded(
+	primary: PrimaryAuthentication,
+	done: readonly CompletedRequirement[],
+): PrimaryAuthentication {
+	let amr = primary.recorded.amr;
+	let mfaAt: Date | undefined;
+	for (const entry of done) {
+		const added = entry.adds.amr;
+		amr = composeAmr(amr, {
+			amr: added.filter((value) => value !== MFA_AMR),
+			addsMfa: added.includes(MFA_AMR),
+		});
+		if (entry.adds.mfaAt !== undefined) mfaAt = new Date(entry.adds.mfaAt.getTime());
+	}
+	return Object.freeze({
+		...primary,
+		recorded: Object.freeze({
+			amr: Object.freeze([...amr]),
+			authentication: Object.freeze({
+				...copySessionAuthentication(primary.recorded.authentication),
+				mfaAt,
+			}),
+		}),
+	});
+}
+
+/**
+ * `resumePrimary` (D5): after a requirement's ceremony completes. Refuses,
+ * before asking anything, a continuation it cannot read
+ * (`checkPrimaryContinuation`), a completion by a name that is not a
+ * registered requirement with `admitPrimary` — or one already in `done` —
+ * and what the name may not add (`checkPrimaryAdditions`); then appends the
+ * completion, composes the session's `recorded` from the primary and every
+ * completed requirement's additions, and asks every requirement with
+ * `admitPrimary` again, in order, over the composed result: a requirement
+ * that already completed sees its own additions and answers `establish`;
+ * one that has not may interrupt, with the updated continuation.
+ */
+export async function resumePrimary(
+	deps: AdmissionDeps,
+	continuation: PrimaryContinuation,
+	completed: CompletedRequirement,
+): Promise<PrimaryAdmission> {
+	if (!isObject(deps)) throw new RangeError("resumePrimary: deps must be an object");
+	checkResolver(deps.requirements);
+	const read = checkPrimaryContinuation(continuation);
+	if (!isObject(completed) || nonEmptyString(completed.requirement) === undefined) {
+		throw new RangeError("resumePrimary: the completion must name a requirement");
+	}
+	const registeredWithAdmitPrimary = (name: string): boolean =>
+		deps.requirements.get(name)?.admitPrimary !== undefined;
+	for (const entry of [...read.done.map((d) => d.requirement), completed.requirement]) {
+		if (!registeredWithAdmitPrimary(entry)) {
+			throw new RangeError(
+				`resumePrimary: "${entry}" is not a registered requirement that interrupts a login`,
+			);
+		}
+	}
+	if (read.done.some((entry) => entry.requirement === completed.requirement)) {
+		throw new RangeError(`resumePrimary: "${completed.requirement}" already completed`);
+	}
+	const adds = checkPrimaryAdditions(completed.requirement, completed.adds);
+	const done = Object.freeze([
+		...read.done,
+		Object.freeze({ requirement: completed.requirement, adds }),
+	]);
+	return askEvery(
+		deps,
+		composeRecorded(read.primary, done),
+		Object.freeze({ primary: read.primary, done }),
+	);
+}
+
+/** What a federated login legitimately produces (D5): the federation's own facts, never a `recorded`. */
+export interface FederatedLogin {
+	readonly subject: string;
+	readonly user: Readonly<Record<string, unknown>>;
+	/** The federation's name (`federations.<name>`). */
+	readonly federation: string;
+	/** The upstream IdP's `amr`, as it surfaced it. */
+	readonly upstreamAmr: readonly string[];
+	/** Whether that federation's upstream `amr` counts (`federationTrustsUpstreamAmr`, D13). */
+	readonly trusted: boolean;
+	readonly authTime: Date;
+	readonly redirectTo: string | undefined;
+	readonly request: { readonly ip?: string; readonly userAgent?: string };
+}
+
+/**
+ * `establishWithoutAsking` (D5): the federation callback's establishment,
+ * built from the federation's own facts and no requirement asked — the
+ * callback consults admission in a later record. `recorded` is composed
+ * here through `federatedSessionAuthentication` (#707), so a caller cannot
+ * mark an arbitrary `amr` or an `mfaAt` as a federated primary; the seam
+ * accepts only what a federation produces. A drift guard pins its callers
+ * to the callback.
+ */
+export function establishWithoutAsking(login: FederatedLogin): Establishment {
+	if (!isObject(login)) throw new RangeError("establishWithoutAsking: the login must be an object");
+	if (nonEmptyString(login.federation) === undefined) {
+		throw new RangeError(
+			"establishWithoutAsking: the federation's name must be a non-empty string",
+		);
+	}
+	if (!Array.isArray(login.upstreamAmr) || !login.upstreamAmr.every((v) => typeof v === "string")) {
+		throw new RangeError("establishWithoutAsking: upstreamAmr must be a list of strings");
+	}
+	if (typeof login.trusted !== "boolean") {
+		throw new RangeError("establishWithoutAsking: trusted must be true or false");
+	}
+	const recorded = federatedSessionAuthentication({
+		federation: login.federation,
+		upstreamAmr: login.upstreamAmr,
+		trusted: login.trusted,
+	});
+	return establish(
+		checkPrimaryAuthentication({
+			subject: login.subject,
+			user: login.user,
+			recorded,
+			authTime: login.authTime,
+			redirectTo: login.redirectTo,
+			request: login.request,
+		}),
+	);
 }

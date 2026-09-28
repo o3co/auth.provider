@@ -160,6 +160,22 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+admitSession\b/,
 	},
 	{
+		concept: "session admission — the establishment decision (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+admitPrimary\b/,
+	},
+	{
+		concept: "session admission — resuming an interrupted login (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+resumePrimary\b/,
+	},
+	{
+		concept:
+			"session admission — establishing a federated login without asking (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+establishWithoutAsking\b/,
+	},
+	{
 		concept: "session admission — the cookie's claim (the session-admission ADR's D2)",
 		home: "packages/core/src/session-admission/admit.mts",
 		definition: /(?:function|const)\s+cookieClaim\b/,
@@ -571,6 +587,30 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		read: "requirementSession(session)?.amr",
 		count: 2,
 		why: "the amr of the acr selection's input, built by requirementSession: once handed to selectAcr, once held by the merge to find the requirement whose reach covers a reachable entry",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "primary.recorded.amr",
+		count: 1,
+		why: "composeRecorded starts from the amr the login route recorded for the primary — what a route hands in, never a session record",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "amr=primary.recorded.amr",
+		count: 1,
+		why: "the same amr, the base composeAmr composes every completed requirement's additions onto",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "entry.adds.amr",
+		count: 1,
+		why: "what a completed requirement added, composed onto the primary's amr by composeAmr",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "primary.recorded.authentication",
+		count: 1,
+		why: "the authentication the login route recorded for the primary, copied with the composed mfaAt — never a session record",
 	},
 	{
 		file: "packages/core/src/session-admission/primary.mts",

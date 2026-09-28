@@ -845,13 +845,18 @@ export {
 export {
 	ADMISSION_ACTIONS,
 	type AdmissionActionName,
+	admitPrimary,
 	admitSession,
 	type CodeCarrier,
 	type CookieCarrier,
 	codeClaim,
 	cookieClaim,
+	establishWithoutAsking,
+	type FederatedLogin,
+	isEstablishment,
 	type LinkCarrier,
 	linkClaim,
+	resumePrimary,
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
