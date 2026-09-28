@@ -15,17 +15,27 @@
  */
 
 /**
- * `establishSession` — the tail of a login both routes share: its sequence,
- * what it hands each write, and the rollback ladder at every point it can
- * fail, driven by stores and steps that fail where a test says.
+ * `establishSession` — the tail of a login both routes share, and the MFA
+ * package's completion after them: what it writes, from the `Establishment`
+ * core built and nothing beside it (the session-admission ADR's D5), its
+ * sequence, what it hands each write, and the rollback ladder at every point
+ * it can fail, driven by stores and steps that fail where a test says.
  */
 
 import {
+	type AdmissionDeps,
+	admitPrimary,
+	type Establishment,
+	establishWithoutAsking,
+	passwordPrimary,
 	passwordSessionAuthentication,
+	resumePrimary,
+	type SessionRequirement,
 	type SubjectSessionIndex,
 	type User,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import type { Request } from "express";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -38,6 +48,26 @@ const TTL_MS = 3_600_000;
 const user: User = { id: "u-1", username: "alice", email: "alice@example.com" };
 const authTime = new Date("2026-09-28T09:00:00.000Z");
 const claims = { email: "alice@example.com" };
+
+/** What admission is handed: the resolver over `requirements`, nothing else read. */
+const admissionDeps = (requirements: readonly SessionRequirement[] = []): AdmissionDeps => ({
+	userSessionStore: undefined,
+	subjectRevocation: undefined,
+	requirements: resolverForTests(requirements),
+	acrTable: {},
+	logger: undefined,
+	auditSink: undefined,
+});
+
+/** The password login of `user`, as admission establishes it with no requirement registered. */
+async function passwordEstablishment(redirectTo?: string): Promise<Establishment> {
+	const admission = await admitPrimary(
+		admissionDeps(),
+		passwordPrimary({ subject: user.id, user, claims, authTime, redirectTo, request: {} }),
+	);
+	if (admission.outcome !== "establish") throw new Error(`admission answered ${admission.outcome}`);
+	return admission.establishment;
+}
 
 type Failures = {
 	readonly create?: Error;
@@ -151,27 +181,22 @@ function harness(
 		return reporter;
 	});
 
-	const run = () =>
-		establishSession(
-			{
-				user,
-				claims,
-				authTime,
-				recorded: passwordSessionAuthentication(),
-				...(shape.redirectTo === undefined ? {} : { redirectTo: shape.redirectTo }),
-			},
-			{
-				req: req as unknown as Request,
-				...(shape.userSessionStore === false ? {} : { userSessionStore }),
-				...(shape.subjectSessionIndex === false ? {} : { subjectSessionIndex }),
-				sessionTtlMs: TTL_MS,
-				...(shape.steps === false ? {} : { beforeRegenerate: [before], afterRegenerate: [after] }),
-				reporter: reporterFactory,
-			},
-		);
+	/** Establishes `establishment`, as the harness's stores and steps write it. */
+	const establish = (establishment: Establishment) =>
+		establishSession(establishment, {
+			req: req as unknown as Request,
+			...(shape.userSessionStore === false ? {} : { userSessionStore }),
+			...(shape.subjectSessionIndex === false ? {} : { subjectSessionIndex }),
+			sessionTtlMs: TTL_MS,
+			...(shape.steps === false ? {} : { beforeRegenerate: [before], afterRegenerate: [after] }),
+			reporter: reporterFactory,
+		});
+	/** Establishes the password login of `user`, with the shape's `redirectTo`. */
+	const run = async () => establish(await passwordEstablishment(shape.redirectTo));
 
 	return {
 		run,
+		establish,
 		trace,
 		req,
 		userSessionStore,
@@ -188,6 +213,139 @@ const createdSid = (h: ReturnType<typeof harness>): string =>
 	(h.userSessionStore.create.mock.calls[0][0] as { sid: string }).sid;
 
 describe("establishSession", () => {
+	describe("what it writes: the establishment's primary, and nothing beside it (D5)", () => {
+		it("writes the record and the session from the primary — its subject, user, claims, authTime, recorded and redirectTo — whatever the caller hands beside it", async () => {
+			const h = harness();
+			const fedAuthTime = new Date("2026-09-28T08:00:00.000Z");
+			const establishment = establishWithoutAsking({
+				subject: "u-9",
+				user: { id: "u-9", username: "fed-user" },
+				claims: { email: "fed-user@example.com", federated: { idp: { sub: "ext-1" } } },
+				federation: "idp",
+				upstreamAmr: ["otp"],
+				trusted: true,
+				authTime: fedAuthTime,
+				redirectTo: "https://app.example.com/federated",
+				request: {},
+			});
+			// What a caller might try to hand in beside it: nothing reads it.
+			const beside = {
+				user: { id: "someone-else" },
+				claims: { email: "forged@example.com" },
+				recorded: {
+					amr: ["pwd", "otp", "mfa"],
+					authentication: { primary: "pwd", mfaAt: new Date() },
+				},
+				authTime: new Date(0),
+				redirectTo: "https://evil.example.com/",
+			};
+
+			const result = await establishSession(establishment, {
+				...beside,
+				req: h.req as unknown as Request,
+				userSessionStore: h.userSessionStore,
+				subjectSessionIndex: h.subjectSessionIndex,
+				sessionTtlMs: TTL_MS,
+				reporter: h.reporterFactory,
+			} as never);
+
+			const sid = createdSid(h);
+			const expiresAt = new Date(fedAuthTime.getTime() + TTL_MS);
+			expect(result).toEqual({ outcome: "established", sid });
+			expect(h.userSessionStore.create).toHaveBeenCalledWith({
+				sid,
+				sub: "u-9",
+				authTime: fedAuthTime,
+				expiresAt,
+				claims: { email: "fed-user@example.com", federated: { idp: { sub: "ext-1" } } },
+				amr: ["otp", "fed"],
+				authentication: {
+					primary: "fed",
+					federation: "idp",
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			});
+			expect(h.subjectSessionIndex.addSid).toHaveBeenCalledWith("u-9", sid, expiresAt);
+			expect(h.reporterFactory).toHaveBeenCalledWith({ sid, sub: "u-9" });
+			expect(h.req.session).toMatchObject({
+				id: "fresh",
+				isAuthenticated: true,
+				user: { id: "u-9", username: "fed-user" },
+				sid,
+				redirectTo: "https://app.example.com/federated",
+			});
+		});
+
+		it("writes a resumed establishment's composed recorded: the second factor's values and when it was verified", async () => {
+			const h = harness({}, { steps: false });
+			const mfaAt = new Date("2026-09-28T09:01:00.000Z");
+			const mfa: SessionRequirement = {
+				name: "mfa",
+				reach: new Set(["otp", "mfa"]),
+				stepUpPage: { url: "/mfa", params: {} },
+				remediations: ["mfa.step_up"],
+				hintKeys: [],
+				admit: async () => ({ outcome: "met" }),
+				admitPrimary: async (primary) =>
+					primary.recorded.authentication.mfaAt === undefined
+						? { open: async () => ({ status: 403, body: { error: "mfa_required" } }) }
+						: "establish",
+			};
+			const deps = admissionDeps([mfa]);
+			const interrupted = await admitPrimary(
+				deps,
+				passwordPrimary({
+					subject: user.id,
+					user,
+					claims,
+					authTime,
+					redirectTo: undefined,
+					request: {},
+				}),
+			);
+			if (interrupted.outcome !== "interrupt") throw new Error("expected an interruption");
+			const resumed = await resumePrimary(deps, interrupted.continuation, {
+				requirement: "mfa",
+				adds: { amr: ["otp", "mfa"], mfaAt },
+			});
+			if (resumed.outcome !== "establish") throw new Error("expected an establishment");
+
+			await h.establish(resumed.establishment);
+
+			expect(h.userSessionStore.create).toHaveBeenCalledWith(
+				expect.objectContaining({
+					sub: "u-1",
+					authTime,
+					amr: ["pwd", "otp", "mfa"],
+					authentication: {
+						primary: "pwd",
+						federation: undefined,
+						upstreamAmr: undefined,
+						mfaAt,
+					},
+				}),
+			);
+		});
+
+		it("refuses what is not an Establishment core built — an object shaped like one, a copy of one — with a RangeError, before anything is written", async () => {
+			const genuine = await passwordEstablishment();
+			for (const forged of [
+				{ primary: genuine.primary },
+				{ ...genuine },
+				Object.freeze({ primary: genuine.primary }),
+				undefined,
+			]) {
+				const h = harness();
+				await expect(h.establish(forged as unknown as Establishment)).rejects.toThrow(RangeError);
+				expect(h.trace).toEqual([]);
+				expect(h.userSessionStore.create).not.toHaveBeenCalled();
+				expect(h.req.session).toMatchObject({ id: "stale" });
+				expect(h.req.session).not.toHaveProperty("isAuthenticated");
+			}
+		});
+	});
+
 	describe("the sequence", () => {
 		it("creates the record, indexes it, runs the caller's step, regenerates, runs the other step, writes the flags and saves — in that order", async () => {
 			const h = harness();
@@ -565,17 +723,14 @@ describe("establishSession", () => {
 				}),
 			};
 
-			const result = await establishSession(
-				{ user, claims, authTime, recorded: passwordSessionAuthentication() },
-				{
-					req: h.req as unknown as Request,
-					userSessionStore: h.userSessionStore,
-					subjectSessionIndex: h.subjectSessionIndex,
-					sessionTtlMs: TTL_MS,
-					beforeRegenerate: [stepWithoutUndo],
-					reporter: h.reporterFactory,
-				},
-			);
+			const result = await establishSession(await passwordEstablishment(), {
+				req: h.req as unknown as Request,
+				userSessionStore: h.userSessionStore,
+				subjectSessionIndex: h.subjectSessionIndex,
+				sessionTtlMs: TTL_MS,
+				beforeRegenerate: [stepWithoutUndo],
+				reporter: h.reporterFactory,
+			});
 
 			expect(result).toEqual({
 				outcome: "unavailable",

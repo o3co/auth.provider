@@ -588,6 +588,12 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		expect(offenders("continuationOf", RESUME_PRIMARY_CALLERS)).toEqual([]);
 	});
 
+	it("has the federation callback build its login's establishment through establishWithoutAsking, once — the password login asks, through admitPrimary (D5)", () => {
+		const [callback] = ESTABLISH_WITHOUT_ASKING_CALLERS;
+		const found = (sites.get(callback) ?? []).filter((s) => s.what === "establishWithoutAsking");
+		expect(found, `${callback} — the callback's login path`).toHaveLength(1);
+	});
+
 	it("has no stale entry: every listed file is scanned and has the sites it lists", () => {
 		for (const { file, sites: s, why } of ALLOWED) {
 			const found = sites.get(file);

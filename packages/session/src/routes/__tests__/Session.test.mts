@@ -23,6 +23,7 @@ import type {
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -230,6 +231,7 @@ function buildApp(
 	const router = createRouter(express, {
 		userRepository,
 		config,
+		requirements: resolverForTests([]),
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(subjectSessionIndex !== undefined ? { subjectSessionIndex } : {}),
 		...(federationTokenStore !== undefined ? { federationTokenStore } : {}),

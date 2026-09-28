@@ -1,6 +1,6 @@
 # composition — every workspace package, booted together
 
-Last updated: 2026-09-25
+Last updated: 2026-09-29
 
 The contracts that exist only when all of this repository's modules are
 composed: the standalone template's composition with every package it does not
@@ -24,14 +24,24 @@ another's body limit, or a memory store booting under `deployment.mode =
   manifest — the device grant, DPoP, mTLS, token exchange, WebAuthn, and the
   Apple and GitHub federations — plus the small modules a deployment writes
   itself (config bridges, a grant policy, a session-to-WebAuthn-subject
-  bridge). The composition, the body and outage helpers and the outage runner
+  bridge, and two session requirements — each with the completion route a
+  requirement's module contributes, built on the session package's exported
+  `establishSession` and `answerInterruption`). The composition, the body and outage helpers and the outage runner
   are not copied: they are the template suite's, exported by its fixture,
   [`all-modules-composition.fixture.mts`](../../templates/standalone/src/__tests__/all-modules-composition.fixture.mts).
   Upstream identity providers are fakes; nothing reaches the network.
 - **What it checks, on one replica with every store in memory.** What the
   added modules contribute: their boot, discovery and each added feature's
   switch, their flows, their body limits in both mount orders, and one outage
-  per added store under the #685 rule.
+  per added store under the #685 rule. The two session requirements are
+  registered, declared and said at boot, refused when the declaration
+  disagrees, and a password login both interrupt is resumed through each
+  one's completion route and established once (the session-admission ADR's
+  acceptance criterion 2). The fixtures' completion routes are a sketch, not
+  a route to copy: the real one (the MFA package's) sits behind the session's
+  CSRF guard, projects every error it logs, and answers a `RangeError` from
+  `resumePrimary` — a continuation naming a requirement a deploy removed,
+  say — as "log in again".
 - **What it checks on real Redis, under `deployment.mode = "multi"`.** That
   nothing in the full set declares replica-unsafe state, that each added
   memory store is refused at boot by name, and that two replicas on one

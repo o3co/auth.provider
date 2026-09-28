@@ -50,6 +50,7 @@ export const MFA_REQUIREMENT_NAME = "mfa";
 declare const claimBrand: unique symbol;
 declare const resolverBrand: unique symbol;
 declare const establishmentBrand: unique symbol;
+declare const interruptionBrand: unique symbol;
 
 // ---------------------------------------------------------------------------
 // The claim and the action (D2, D4)
@@ -290,7 +291,12 @@ export interface SessionRequirement {
 	readonly hintKeys: readonly string[];
 	/** Use-time: a view of the session, read once by admission, and the action. Throws only on an outage. */
 	admit(input: RequirementInput): Promise<RequirementVerdict>;
-	/** Establishment-time (D5); absent when the requirement never interrupts a login. */
+	/**
+	 * Establishment-time (D5); absent when the requirement never interrupts a
+	 * login. Never asked again in a login once its own interruption completes;
+	 * a requirement that answered `establish` is asked again on each
+	 * resumption.
+	 */
 	admitPrimary?(primary: PrimaryAuthentication): Promise<"establish" | RequirementInterruption>;
 }
 
@@ -836,13 +842,24 @@ export type Establishment = {
 	readonly primary: PrimaryAuthentication;
 };
 
+/**
+ * A requirement interrupted the login: built by `admitPrimary` and
+ * `resumePrimary` alone, frozen, and checked at runtime through a
+ * module-private set (`isInterruptAdmission`), like an `Establishment` — a
+ * copy, or an object shaped like one, is not one. The session package's
+ * `answerInterruption` answers only this.
+ */
+export type InterruptAdmission = {
+	readonly [interruptionBrand]: true;
+	readonly outcome: "interrupt";
+	readonly requirement: string;
+	/** What the requirement persists in its own record and presents to `resumePrimary` when its ceremony completes. */
+	readonly continuation: PrimaryContinuation;
+	/** Opens the requirement's ceremony bound to `sessionId`, over `continuation`; the answer is validated against the closed body. */
+	open(sessionId: string): Promise<InterruptionAnswer>;
+};
+
 export type PrimaryAdmission =
 	| { readonly outcome: "establish"; readonly establishment: Establishment }
-	| {
-			readonly outcome: "interrupt";
-			readonly requirement: string;
-			/** What the requirement persists in its own record and presents to `resumePrimary` when its ceremony completes. */
-			readonly continuation: PrimaryContinuation;
-			open(sessionId: string): Promise<InterruptionAnswer>;
-	  }
+	| InterruptAdmission
 	| { readonly outcome: "unavailable"; readonly store: string };

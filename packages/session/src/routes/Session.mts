@@ -18,16 +18,24 @@
  * The `/session` routes for a browser's own login and logout — `GET /csrf`,
  * `POST /login`, `POST /logout` — with the CSRF guard and the login rate limit
  * in front of them. A password login verifies the credentials against
- * `UserRepository`, establishes the session through `establishSession`
- * (`../establish-session.mts`), the tail it shares with the federation
- * callback, and answers with a fresh CSRF token; a logout invalidates the
- * records the session owns before destroying the cookie session. The package
- * README says what each route answers and what a logout reaches.
+ * `UserRepository`, then asks core's session admission before anything is
+ * written (`admitPrimary`, the session-admission ADR's D5): when every
+ * registered requirement answers `establish`, it establishes the session
+ * through `establishSession` (`../establish-session.mts`), the tail it shares
+ * with the federation callback, and answers with a fresh CSRF token; when a
+ * requirement interrupts, it regenerates the express session, leaves it
+ * unauthenticated, opens the requirement's ceremony bound to the regenerated
+ * session, saves it, and answers the requirement's `403`. A logout
+ * invalidates the records the session owns before destroying the cookie
+ * session. The package README says what each route answers and what a logout
+ * reaches.
  */
 
 import {
+	type AdmissionDeps,
 	type AppConfig,
 	type AuditSink,
+	admitPrimary,
 	BootError,
 	consoleLogger,
 	createMemoryRateLimiter,
@@ -35,15 +43,17 @@ import {
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
-	passwordSessionAuthentication,
+	passwordPrimary,
 	type RateLimiter,
 	type SessionFederationIndex,
+	type SessionRequirementResolver,
 	type SubjectSessionIndex,
 	type User,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
+import { answerInterruption } from "../answer-interruption.mjs";
 import {
 	type CsrfProtection,
 	createCsrfGuard,
@@ -57,10 +67,17 @@ import {
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
+
+/** A registered session requirement's name: the `store` an interruption's `open` failure is logged under. */
+type RequirementName = string;
+
+/** The login asks admission for no `acr_values`: the table it would select against is empty. */
+const NO_ACR_TABLE = Object.freeze({});
 
 export const createRouter = (
 	express: {
@@ -80,6 +97,7 @@ export const createRouter = (
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
 		csrf,
+		requirements,
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
@@ -145,9 +163,35 @@ export const createRouter = (
 		 * composition root can also *issue* tokens from its own pages.
 		 */
 		csrf?: CsrfProtection;
+		/**
+		 * The registered session requirements (the session-admission ADR's D1,
+		 * D5): the synthetic key `sessionRequirementResolver`, which
+		 * `sessionModule` passes, or `resolverForTests` in a test. Required: a
+		 * password login asks them through `admitPrimary` before anything is
+		 * written, and admission refuses any resolver the boot planner did not
+		 * build.
+		 */
+		requirements: SessionRequirementResolver;
 	},
 ): Router => {
+	if (!requirements) throw new Error("session routes require requirements");
 	const router = express.Router();
+
+	/**
+	 * What the login hands `admitPrimary`: the resolver, and the logger its
+	 * outage is logged on. `admitPrimary` reads nothing else — the session
+	 * store and the revocation boundary are the consumers' of a session that
+	 * already exists — and the vouchable table is empty, as nothing is
+	 * selected.
+	 */
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore,
+		subjectRevocation: undefined,
+		requirements,
+		acrTable: NO_ACR_TABLE,
+		logger,
+		auditSink,
+	};
 
 	// #272: the previous guard read `Origin`, and called `next()` when it was
 	// absent. `sameSite=lax` covers session-riding, but login CSRF — forcing a
@@ -364,7 +408,8 @@ export const createRouter = (
 	/**
 	 * A store `/session/login` cannot do without could not answer — the user
 	 * directory, the `UserSession` record, the cookie session's regeneration
-	 * or save:
+	 * or save, or an interrupting requirement's `open` (its own record, under
+	 * the requirement's name, step `open`):
 	 * the server's outage, never a verdict on the credentials. One line at
 	 * error level, `login_store_unavailable`, `store` naming which and `step`
 	 * the operation, with the error's projection — never the error, which can
@@ -372,8 +417,8 @@ export const createRouter = (
 	 * answers `503 temporarily_unavailable`.
 	 */
 	const loginStoreUnavailable = (
-		store: "user_repository" | "user_session" | "cookie_session",
-		step: "authenticate" | "create" | "regenerate" | "save",
+		store: "user_repository" | "user_session" | "cookie_session" | RequirementName,
+		step: "authenticate" | "create" | "regenerate" | "save" | "open",
 		cause: unknown,
 		context: { readonly sid?: string; readonly sub?: string } = {},
 	): void => {
@@ -445,57 +490,88 @@ export const createRouter = (
 
 				const redirectTo = req.body.redirect_to as string | undefined;
 
-				// The tail of the login — the `UserSession` record, its subject-index
-				// entry, the express session's regeneration, its authenticated state
-				// and its save — is `establishSession`'s (`../establish-session.mts`),
-				// shared with the federation callback. What this route adds is its own
-				// log vocabulary: a store that could not answer is one error line,
-				// `login_store_unavailable`, and a rollback step that failed one warn,
-				// `login_cleanup_failed`. The login answers `503`, with everything
-				// written rolled back and the request's cookie session dropped.
-				const established = await establishSession(
-					{
+				// The session-admission ADR's D5: the user is verified and nothing is
+				// written — the point every registered requirement is asked, over the
+				// primary core builds from this login's facts (`recorded` is the
+				// password kind's; a route cannot hand one in). An outage is logged
+				// once, by admission, and answered as one; an interruption is the
+				// requirement's ceremony.
+				const admission = await admitPrimary(
+					admissionDeps,
+					passwordPrimary({
+						subject: user.id,
 						user,
 						claims: extractUserClaims(user),
 						authTime: new Date(),
-						// #481, the MFA ADR's D9: a password login — `amr` `["pwd"]`
-						// (RFC 8176), primary `pwd`, no second factor verified.
-						recorded: passwordSessionAuthentication(),
-						...(redirectTo ? { redirectTo } : {}),
-					},
-					{
-						req,
-						...(userSessionStore === undefined ? {} : { userSessionStore }),
-						...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
-						sessionTtlMs,
-						reporter: ({ sid, sub }) => {
-							// Every line names the sid where there is one; the record's
-							// create and the index removal name the subject beside it.
-							const named = sid === undefined ? {} : { sid };
-							return {
-								storeUnavailable: (store, step, cause) =>
-									loginStoreUnavailable(
-										store,
-										step,
-										cause,
-										step === "create" ? { ...named, sub } : named,
-									),
-								cleanupFailed: (store, step, cause) =>
-									loginCleanupFailed(
-										store,
-										step,
-										cause,
-										step === "remove_sid" ? { ...named, sub } : named,
-									),
-								subjectIndexWriteFailed: (cause) =>
-									logger.error(
-										{ err: loggableError(cause), sub, ...named },
-										"subject_session_index_write_failed",
-									),
-							};
-						},
-					},
+						redirectTo: redirectTo || undefined,
+						request: loginRequestFacts(req),
+					}),
 				);
+				if (admission.outcome === "unavailable") {
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				}
+				if (admission.outcome === "interrupt") {
+					// A requirement interrupted the login: regenerate, open its
+					// ceremony bound to the regenerated session, save, and answer its
+					// `403` with a fresh CSRF token — or `503`, the cookie session
+					// dropped, logged once as `login_store_unavailable`
+					// (`../answer-interruption.mts`, which a requirement's completion
+					// calls too). No `UserSession` is written here.
+					await answerInterruption(admission, {
+						req,
+						res,
+						csrf: csrfProtection,
+						reporter: {
+							storeUnavailable: (store, step, cause) => loginStoreUnavailable(store, step, cause),
+						},
+					});
+					return;
+				}
+
+				// Every requirement answered `establish`. The tail of the login — the
+				// `UserSession` record, its subject-index entry, the express session's
+				// regeneration, its authenticated state and its save — is
+				// `establishSession`'s (`../establish-session.mts`), shared with the
+				// federation callback, and it writes the establishment's primary: for
+				// a password login (#481, the MFA ADR's D9) `amr` `["pwd"]` (RFC 8176),
+				// primary `pwd`, no second factor verified — composed by core, never
+				// here. What this route adds is its own log vocabulary: a store that
+				// could not answer is one error line, `login_store_unavailable`, and a
+				// rollback step that failed one warn, `login_cleanup_failed`. The login
+				// answers `503`, with everything written rolled back and the request's
+				// cookie session dropped.
+				const established = await establishSession(admission.establishment, {
+					req,
+					...(userSessionStore === undefined ? {} : { userSessionStore }),
+					...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+					sessionTtlMs,
+					reporter: ({ sid, sub }) => {
+						// Every line names the sid where there is one; the record's
+						// create and the index removal name the subject beside it.
+						const named = sid === undefined ? {} : { sid };
+						return {
+							storeUnavailable: (store, step, cause) =>
+								loginStoreUnavailable(
+									store,
+									step,
+									cause,
+									step === "create" ? { ...named, sub } : named,
+								),
+							cleanupFailed: (store, step, cause) =>
+								loginCleanupFailed(
+									store,
+									step,
+									cause,
+									step === "remove_sid" ? { ...named, sub } : named,
+								),
+							subjectIndexWriteFailed: (cause) =>
+								logger.error(
+									{ err: loggableError(cause), sub, ...named },
+									"subject_session_index_write_failed",
+								),
+						};
+					},
+				});
 				if (established.outcome === "unavailable") {
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}

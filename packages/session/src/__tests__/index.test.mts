@@ -61,6 +61,11 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((sessionModule as { name: string }).name).toBe("session");
 	});
 
+	it("exports establishSession, so a requirement's completion finishes a login as the two login routes do (the session-admission ADR's D5)", async () => {
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		expect(typeof mod.establishSession).toBe("function");
+	});
+
 	it("exports extractFederationSection as a runtime helper", async () => {
 		const mod = await import("#/index.mjs");
 		expect(typeof (mod as { extractFederationSection?: unknown }).extractFederationSection).toBe(

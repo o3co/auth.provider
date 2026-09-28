@@ -215,6 +215,7 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 					id: "test-session",
 					mountPath: "/session",
 					handler: createSessionRouter(express, {
+						requirements: resolverForTests([]),
 						userRepository: {
 							authenticate: vi.fn(async () => alice),
 							authenticateByToken: vi.fn(async () => alice),

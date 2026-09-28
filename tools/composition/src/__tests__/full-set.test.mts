@@ -36,9 +36,11 @@
  * The two session requirements a deployment writes (`deployment:requirement-page`,
  * `deployment:requirement-bare`, in the fixture) are registered, declared and
  * said at boot here, and refused when the declaration disagrees — the
- * session-admission ADR's D7 through the template's boot. The step-up and
- * interruption flows they could start are the consumers' and the MFA
- * module's suites, not this one.
+ * session-admission ADR's D7 through the template's boot — and a password
+ * login both interrupt is resumed through each requirement's completion
+ * route and established once (D5, its acceptance criterion 2). The step-up
+ * flows they could start are the consumers' and the MFA module's suites, not
+ * this one.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins
@@ -48,7 +50,12 @@
 
 import { createHash, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
-import { BootError } from "@o3co/auth-provider-core";
+import {
+	BootError,
+	passwordSessionAuthentication,
+	type SubjectSessionIndex,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
 import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
 import {
 	ACCESS_TOKEN_TYPE,
@@ -85,7 +92,7 @@ import {
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	APPLE_LANDING,
 	BINDER,
@@ -93,7 +100,10 @@ import {
 	composeFullSet,
 	DPOP_JWK,
 	dpopProof,
+	FIXTURE_COMPLETION,
+	FIXTURE_INTERRUPTION,
 	FIXTURE_REQUIREMENTS,
+	type FixtureCeremony,
 	type FullSet,
 	type FullSetOptions,
 	GATEWAY,
@@ -332,6 +342,108 @@ describe("the session requirements a deployment writes", () => {
 			mode: "required",
 			requirement: "mfa",
 		});
+	});
+});
+
+describe("a password login both requirements interrupt, resumed through each (the session-admission ADR's D5, acceptance criterion 2)", () => {
+	it("is interrupted by the first, resumed into the second with the first's completion done, and established once — as a password login, through the exported establishSession", async () => {
+		const ceremonies: FixtureCeremony[] = [];
+		const { app, handle, config } = await boot({ interruptLogins: [ALICE.sub], ceremonies });
+		const { userSessionStore, subjectSessionIndex } = handle.components as unknown as {
+			userSessionStore: UserSessionStore;
+			subjectSessionIndex: SubjectSessionIndex;
+		};
+		const create = vi.spyOn(userSessionStore, "create");
+
+		// The password login: the first requirement interrupts; nothing is written.
+		const csrf = await request(app).get("/session/csrf");
+		const login = await request(app)
+			.post("/session/login")
+			.set("Cookie", cookiesOf(csrf))
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: ALICE.username, password: ALICE.password });
+		expect(login.status).toBe(403);
+		expect(login.body).toEqual(FIXTURE_INTERRUPTION.page.body);
+		expect(ceremonies.map((c) => c.requirement)).toEqual(["fixture-page"]);
+		const [atLogin] = ceremonies;
+		expect(atLogin?.continuation).toMatchObject({
+			interruptedBy: "fixture-page",
+			done: [],
+			primary: { subject: ALICE.sub, recorded: { amr: ["pwd"] } },
+		});
+		expect(create).not.toHaveBeenCalled();
+
+		// The first requirement's completion resumes the login; the second
+		// interrupts it, the first's completion carried in `done`.
+		const first = await request(app)
+			.post(`${FIXTURE_COMPLETION.page}/complete`)
+			.set("Cookie", cookiesOf(login));
+		expect(first.status).toBe(403);
+		expect(first.body).toEqual(FIXTURE_INTERRUPTION.bare.body);
+		// Answered as the login answers an interruption (the session package's
+		// answerInterruption): a fresh CSRF token beside the 403.
+		expect(cookiesOf(first).some((c) => c.startsWith(`${config.session.name}.csrf=`))).toBe(true);
+		expect(ceremonies.map((c) => c.requirement)).toEqual(["fixture-page", "fixture-bare"]);
+		const atFirst = ceremonies[1];
+		expect(atFirst?.continuation).toMatchObject({
+			interruptedBy: "fixture-bare",
+			done: [{ requirement: "fixture-page", adds: { amr: [] } }],
+		});
+		expect(atFirst?.continuation.primary).toEqual(atLogin?.continuation.primary);
+		// Each ceremony is bound to the session the interrupting route regenerated.
+		expect(atFirst?.sessionId).not.toBe(atLogin?.sessionId);
+		expect(create).not.toHaveBeenCalled();
+
+		// The second's completion resumes it with both done: established.
+		const second = await request(app)
+			.post(`${FIXTURE_COMPLETION.bare}/complete`)
+			.set("Cookie", cookiesOf(first));
+		expect(second.status).toBe(200);
+		expect(ceremonies).toHaveLength(2);
+
+		// Written once, as a password login's primary composes it: `pwd`, no
+		// second factor — neither fixture adds anything, and neither is `mfa`.
+		expect(create).toHaveBeenCalledTimes(1);
+		const sids = await subjectSessionIndex.listSids(ALICE.sub);
+		expect(sids).toHaveLength(1);
+		const record = await userSessionStore.get(sids[0] as string);
+		expect({ amr: record?.amr, authentication: record?.authentication }).toEqual(
+			passwordSessionAuthentication(),
+		);
+		expect(record?.authTime.getTime()).toBe(atLogin?.continuation.primary.authTimeMs);
+
+		// The session the last completion established is the browser's.
+		const authorized = await authorize(app, cookiesOf(second));
+		expect(authorized.headers.location).toMatch(/\?code=/);
+	});
+
+	it("refuses a completion on a session no ceremony is bound to, and a ceremony presented twice on the live session it is bound to — spent even when its resumption failed", async () => {
+		const { app } = await boot({ interruptLogins: [ALICE.sub], failAskOnce: "fixture-bare" });
+		const csrf = await request(app).get("/session/csrf");
+		const login = await request(app)
+			.post("/session/login")
+			.set("Cookie", cookiesOf(csrf))
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: ALICE.username, password: ALICE.password });
+		expect(login.status).toBe(403);
+		const bare = await request(app)
+			.post(`${FIXTURE_COMPLETION.bare}/complete`)
+			.set("Cookie", cookiesOf(login));
+		expect(bare.status).toBe(400);
+		// The first requirement's completion: the resumption meets the second
+		// requirement's outage, so nothing is regenerated and the session the
+		// ceremony is bound to stays live.
+		const first = await request(app)
+			.post(`${FIXTURE_COMPLETION.page}/complete`)
+			.set("Cookie", cookiesOf(login));
+		expect(first.status).toBe(503);
+		// Presented again on that live session, with the outage over: spent.
+		const again = await request(app)
+			.post(`${FIXTURE_COMPLETION.page}/complete`)
+			.set("Cookie", cookiesOf(login));
+		expect(again.status).toBe(400);
 	});
 });
 
