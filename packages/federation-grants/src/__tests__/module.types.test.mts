@@ -22,7 +22,13 @@ import { type FederationGrantsModuleDeps, federationGrantsModule } from "#/modul
 // declares, and an optional slot is used only behind a presence check.
 // Compile-time facts: they fire under vitest's typecheck mode only.
 
-const REQUIRES = ["config", "federationGrantBackground", "clientRepository"] as const;
+const REQUIRES = [
+	"config",
+	"federationGrantBackground",
+	"clientRepository",
+	// The session-admission ADR's D1: every consumer of admission requires it.
+	"sessionRequirementResolver",
+] as const;
 const OPTIONAL = [
 	"federationGrantStore",
 	"rateLimiter",
