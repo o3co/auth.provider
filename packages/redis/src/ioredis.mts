@@ -3030,18 +3030,20 @@ return {'ok'}
  * `ARGV`: the reservation, the outcome. `void` removes the attempt; `success`
  * ends the run up to and including it, and takes it out of the week;
  * `failure` leaves it standing. A reservation not in flight changes nothing.
+ * The whole state is read and validated before anything is written.
  */
 const LUA_MFA_SUBJECT_SETTLE = `${LUA_MFA_SUBJECT_PRELUDE}
 local id, outcome = ARGV[1], ARGV[2]
-local pending = redis.call('HGET', KEYS[1], 'p:' .. id)
-if not pending then return 0 end
-local seq = num(pending)
+-- Read and validate the whole state before anything is written: a corrupt
+-- field is the refusal, with nothing half-settled.
+local run, pending = load()
+local seq = pending[id]
+if seq == nil then return 0 end
 redis.call('HDEL', KEYS[1], 'p:' .. id)
 if outcome == 'void' then
   redis.call('HDEL', KEYS[1], 'r:' .. id)
   redis.call('ZREM', KEYS[2], id)
 elseif outcome == 'success' then
-  local run = load()
   for _, a in ipairs(run) do
     if a.seq <= seq then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
   end
