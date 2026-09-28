@@ -129,6 +129,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		["authentication an array", { ...validEnvelope, authentication: [] }],
 		["authentication without primary", { ...validEnvelope, authentication: {} }],
 		["authentication.primary a number", { ...validEnvelope, authentication: { primary: 1 } }],
+		["authentication.primary empty", { ...validEnvelope, authentication: { primary: "" } }],
 		[
 			"authentication.federation a number",
 			{ ...validEnvelope, authentication: { primary: "fed", federation: 1 } },
