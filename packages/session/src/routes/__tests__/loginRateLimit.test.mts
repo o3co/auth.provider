@@ -34,6 +34,7 @@ import type {
 	RateLimiter,
 	UserRepository,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -107,6 +108,7 @@ const makeApp = (
 		"/session",
 		createRouter(express, {
 			userRepository,
+			requirements: resolverForTests([]),
 			config: opts.config ?? stubConfig,
 			...(opts.rateLimiter ? { rateLimiter: opts.rateLimiter } : {}),
 			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
@@ -245,6 +247,7 @@ describe("/session/login rate limiting — fallback (#270)", () => {
 		});
 		createRouter(express, {
 			userRepository,
+			requirements: resolverForTests([]),
 			config: stubConfig,
 			logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
 		});
@@ -276,6 +279,7 @@ describe("/session/login rate limiting — fallback under deployment.mode (#474)
 		const router = () =>
 			createRouter(express, {
 				userRepository,
+				requirements: resolverForTests([]),
 				config,
 				...(rateLimiter ? { rateLimiter } : {}),
 				logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,

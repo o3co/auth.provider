@@ -88,7 +88,7 @@ import type { Request } from "express";
 // so a consumer compiling under `skipLibCheck: false` reads the augmentation
 // as one and not as a stray ambient module.
 import type {} from "express-session";
-import { abandonCookieSession } from "./internal/cookieSession.mjs";
+import { abandonCookieSession, sessionOperation } from "./internal/cookieSession.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -202,27 +202,6 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 			readonly store: "user_session" | "cookie_session" | S;
 			readonly step: "create" | "regenerate" | "save" | T;
 	  };
-
-/**
- * Run one of the express session's callback operations — `regenerate`,
- * `save` — as a promise of its failure. An error handed to the callback is
- * the store's failure; so is one thrown synchronously, before the callback
- * is ever called: a store serialises the record in the call itself
- * (`MemoryStore`'s `JSON.stringify`), so a record it cannot serialise — a
- * `User` carrying a `BigInt` or a cycle — throws there, not through the
- * callback, and must roll the login back exactly as a callback error does
- * rather than escape the route as a `500` with the session still saved.
- */
-const sessionOperation = (
-	run: (done: (err: unknown) => void) => unknown,
-): Promise<{ readonly failed: false } | { readonly failed: true; readonly cause: unknown }> =>
-	new Promise((resolve) => {
-		try {
-			run((err) => resolve(err ? { failed: true, cause: err } : { failed: false }));
-		} catch (cause) {
-			resolve({ failed: true, cause });
-		}
-	});
 
 /**
  * Establish the session a login verified: the `UserSession` record, its

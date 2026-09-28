@@ -16,11 +16,12 @@
 
 /**
  * The cookie session's store failing: how the express-session middleware this
- * package mounts answers it, how a route that met it keeps express-session
- * from trying again, and the bodies this package answers an outage with — one
- * for every session-side store, one for the user directory. Internal to the
- * package; `modules/sessionStoreModule.mts` and the two routers are its
- * callers.
+ * package mounts answers it, how a route runs one of the session's callback
+ * operations as a promise of its failure, how a route that met it keeps
+ * express-session from trying again, and the bodies this package answers an
+ * outage with — one for every session-side store, one for the user
+ * directory. Internal to the package; `modules/sessionStoreModule.mts`,
+ * `establish-session.mts` and the two routers are its callers.
  */
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
@@ -91,6 +92,27 @@ export function guardCookieSession(
 		});
 	};
 }
+
+/**
+ * Run one of the express session's callback operations — `regenerate`,
+ * `save` — as a promise of its failure. An error handed to the callback is
+ * the store's failure; so is one thrown synchronously, before the callback
+ * is ever called: a store serialises the record in the call itself
+ * (`MemoryStore`'s `JSON.stringify`), so a record it cannot serialise — a
+ * `User` carrying a `BigInt` or a cycle — throws there, not through the
+ * callback, and must be answered exactly as a callback error is rather than
+ * escape the route as a `500` with the session still saved.
+ */
+export const sessionOperation = (
+	run: (done: (err: unknown) => void) => unknown,
+): Promise<{ readonly failed: false } | { readonly failed: true; readonly cause: unknown }> =>
+	new Promise((resolve) => {
+		try {
+			run((err) => resolve(err ? { failed: true, cause: err } : { failed: false }));
+		} catch (cause) {
+			resolve({ failed: true, cause });
+		}
+	});
 
 /**
  * Drop the request's cookie session after a route met its store failing and

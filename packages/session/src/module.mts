@@ -89,8 +89,10 @@ function deriveProviderCallbackUrls(
  * `requires` (Amendment 5):
  *   - "config", "userRepository" — bootstrap / DI
  *   - "sessionRequirementResolver" — synthetic (the session-admission ADR's
- *     D1): the federation link routes read their session through admission,
- *     and every consumer of admission takes the resolver.
+ *     D1): the password login asks the requirements through `admitPrimary`
+ *     before anything is written (D5), the federation link routes read their
+ *     session through admission, and every consumer of admission takes the
+ *     resolver.
  *   - "userSessionStore", "federationTokenStore", "sessionFederationIndex" —
  *     three sibling stores actually consumed by these routes (NOT the four-store
  *     superset; `sessionRPRegistry` and `sessionFamilyIndex` are the oauth
@@ -182,6 +184,10 @@ export const sessionModule = defineModule<
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						sessionTtlMs: config.session.maxAge,
 						logger: deps.logger ?? consoleLogger,
+						// The session-admission ADR's D5: a password login asks the
+						// registered requirements through admitPrimary before
+						// anything is written — the resolver, read at request time.
+						requirements: deps.sessionRequirementResolver,
 					}),
 				};
 			},

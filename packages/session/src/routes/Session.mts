@@ -18,26 +18,37 @@
  * The `/session` routes for a browser's own login and logout — `GET /csrf`,
  * `POST /login`, `POST /logout` — with the CSRF guard and the login rate limit
  * in front of them. A password login verifies the credentials against
- * `UserRepository`, establishes the session through `establishSession`
- * (`../establish-session.mts`), the tail it shares with the federation
- * callback, and answers with a fresh CSRF token; a logout invalidates the
- * records the session owns before destroying the cookie session. The package
- * README says what each route answers and what a logout reaches.
+ * `UserRepository`, then asks core's session admission before anything is
+ * written (`admitPrimary`, the session-admission ADR's D5): when every
+ * registered requirement answers `establish`, it establishes the session
+ * through `establishSession` (`../establish-session.mts`), the tail it shares
+ * with the federation callback, and answers with a fresh CSRF token; when a
+ * requirement interrupts, it regenerates the express session, leaves it
+ * unauthenticated, opens the requirement's ceremony bound to the regenerated
+ * session, saves it, and answers the requirement's `403`. A logout
+ * invalidates the records the session owns before destroying the cookie
+ * session. The package README says what each route answers and what a logout
+ * reaches.
  */
 
 import {
+	type AdmissionDeps,
 	type AppConfig,
 	type AuditSink,
+	admitPrimary,
 	BootError,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
 	type FederationTokenStore,
+	type InterruptionAnswer,
 	type Logger,
 	loggableError,
-	passwordSessionAuthentication,
+	type PrimaryAdmission,
+	passwordPrimary,
 	type RateLimiter,
 	type SessionFederationIndex,
+	type SessionRequirementResolver,
 	type SubjectSessionIndex,
 	type User,
 	type UserRepository,
@@ -53,14 +64,23 @@ import {
 } from "../csrf.mjs";
 import { establishSession } from "../establish-session.mjs";
 import {
+	abandonCookieSession,
 	SESSION_STORE_UNAVAILABLE,
+	sessionOperation,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
+
+/** A registered session requirement's name: the `store` an interruption's `open` failure is logged under. */
+type RequirementName = string;
+
+/** The login asks admission for no `acr_values`: the table it would select against is empty. */
+const NO_ACR_TABLE = Object.freeze({});
 
 export const createRouter = (
 	express: {
@@ -80,6 +100,7 @@ export const createRouter = (
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
 		csrf,
+		requirements,
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
@@ -145,9 +166,35 @@ export const createRouter = (
 		 * composition root can also *issue* tokens from its own pages.
 		 */
 		csrf?: CsrfProtection;
+		/**
+		 * The registered session requirements (the session-admission ADR's D1,
+		 * D5): the synthetic key `sessionRequirementResolver`, which
+		 * `sessionModule` passes, or `resolverForTests` in a test. Required: a
+		 * password login asks them through `admitPrimary` before anything is
+		 * written, and admission refuses any resolver the boot planner did not
+		 * build.
+		 */
+		requirements: SessionRequirementResolver;
 	},
 ): Router => {
+	if (!requirements) throw new Error("session routes require requirements");
 	const router = express.Router();
+
+	/**
+	 * What the login hands `admitPrimary`: the resolver, and the logger its
+	 * outage is logged on. `admitPrimary` reads nothing else — the session
+	 * store and the revocation boundary are the consumers' of a session that
+	 * already exists — and the vouchable table is empty, as nothing is
+	 * selected.
+	 */
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore,
+		subjectRevocation: undefined,
+		requirements,
+		acrTable: NO_ACR_TABLE,
+		logger,
+		auditSink,
+	};
 
 	// #272: the previous guard read `Origin`, and called `next()` when it was
 	// absent. `sameSite=lax` covers session-riding, but login CSRF — forcing a
@@ -364,7 +411,8 @@ export const createRouter = (
 	/**
 	 * A store `/session/login` cannot do without could not answer — the user
 	 * directory, the `UserSession` record, the cookie session's regeneration
-	 * or save:
+	 * or save, or an interrupting requirement's `open` (its own record, under
+	 * the requirement's name, step `open`):
 	 * the server's outage, never a verdict on the credentials. One line at
 	 * error level, `login_store_unavailable`, `store` naming which and `step`
 	 * the operation, with the error's projection — never the error, which can
@@ -372,8 +420,8 @@ export const createRouter = (
 	 * answers `503 temporarily_unavailable`.
 	 */
 	const loginStoreUnavailable = (
-		store: "user_repository" | "user_session" | "cookie_session",
-		step: "authenticate" | "create" | "regenerate" | "save",
+		store: "user_repository" | "user_session" | "cookie_session" | RequirementName,
+		step: "authenticate" | "create" | "regenerate" | "save" | "open",
 		cause: unknown,
 		context: { readonly sid?: string; readonly sub?: string } = {},
 	): void => {
@@ -394,6 +442,55 @@ export const createRouter = (
 		context: { readonly sid?: string; readonly sub?: string },
 	): void => {
 		logger.warn({ ...context, store, step, err: loggableError(cause) }, "login_cleanup_failed");
+	};
+
+	/**
+	 * A requirement interrupted the login (the session-admission ADR's D5):
+	 * the two phases, because the express session is regenerated between
+	 * them. Regenerate — a fresh session id, unauthenticated: no
+	 * `isAuthenticated`, `user`, `sid` or `redirectTo` is written — then open
+	 * the requirement's ceremony bound to that id, which persists the
+	 * continuation core built, then save, then answer the requirement's `403`
+	 * with the closed body core validated, and a fresh CSRF token as a
+	 * successful login gets one (the MFA ADR's D27). No `UserSession` is
+	 * written and `establishSession` is never reached: the requirement's
+	 * completion establishes the session, through `resumePrimary`.
+	 *
+	 * From the regeneration on, a failure drops the request's cookie session
+	 * (`abandonCookieSession`) and answers `503`: the regeneration's own
+	 * store; `open` throwing — the requirement's outage, or an answer core
+	 * refused, which is the requirement's fault and answered the same way —
+	 * logged under the requirement's name; the save, after which the
+	 * requirement's record is left to its own expiry, bound to a session id
+	 * no browser holds.
+	 */
+	const answerInterruption = async (
+		req: Request,
+		res: Response,
+		admission: Extract<PrimaryAdmission, { outcome: "interrupt" }>,
+	) => {
+		const regenerated = await sessionOperation((done) => req.session.regenerate(done));
+		if (regenerated.failed) {
+			loginStoreUnavailable("cookie_session", "regenerate", regenerated.cause);
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+		}
+		let answer: InterruptionAnswer;
+		try {
+			answer = await admission.open(req.sessionID);
+		} catch (err) {
+			loginStoreUnavailable(admission.requirement, "open", err);
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+		}
+		const saved = await sessionOperation((done) => req.session.save(done));
+		if (saved.failed) {
+			loginStoreUnavailable("cookie_session", "save", saved.cause);
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+		}
+		csrfProtection.issue(res);
+		return res.status(answer.status).json(answer.body);
 	};
 
 	router
@@ -445,6 +542,31 @@ export const createRouter = (
 
 				const redirectTo = req.body.redirect_to as string | undefined;
 
+				// The session-admission ADR's D5: the user is verified and nothing is
+				// written — the point every registered requirement is asked, over the
+				// primary core builds from this login's facts (`recorded` is the
+				// password kind's; a route cannot hand one in). An outage is logged
+				// once, by admission, and answered as one; an interruption is the
+				// requirement's ceremony.
+				const admission = await admitPrimary(
+					admissionDeps,
+					passwordPrimary({
+						subject: user.id,
+						user,
+						claims: extractUserClaims(user),
+						authTime: new Date(),
+						redirectTo: redirectTo ? redirectTo : undefined,
+						request: loginRequestFacts(req),
+					}),
+				);
+				if (admission.outcome === "unavailable") {
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				}
+				if (admission.outcome === "interrupt") {
+					return answerInterruption(req, res, admission);
+				}
+				const { primary } = admission.establishment;
+
 				// The tail of the login — the `UserSession` record, its subject-index
 				// entry, the express session's regeneration, its authenticated state
 				// and its save — is `establishSession`'s (`../establish-session.mts`),
@@ -456,12 +578,12 @@ export const createRouter = (
 				const established = await establishSession(
 					{
 						user,
-						claims: extractUserClaims(user),
-						authTime: new Date(),
+						claims: primary.claims,
+						authTime: primary.authTime,
 						// #481, the MFA ADR's D9: a password login — `amr` `["pwd"]`
 						// (RFC 8176), primary `pwd`, no second factor verified.
-						recorded: passwordSessionAuthentication(),
-						...(redirectTo ? { redirectTo } : {}),
+						recorded: primary.recorded,
+						...(primary.redirectTo ? { redirectTo: primary.redirectTo } : {}),
 					},
 					{
 						req,
