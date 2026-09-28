@@ -665,7 +665,7 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 			[
 				"a second-factor value the mfa requirement's reach does not name",
 				continuation(),
-				{ requirement: "mfa", adds: { amr: ["swk", "mfa"] } },
+				{ requirement: "mfa", adds: { amr: ["swk", "mfa"], mfaAt: NOW } },
 			],
 			[
 				"an earlier completion, read back, outside its requirement's reach",
@@ -730,6 +730,33 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 				"risk",
 			),
 		);
+	});
+
+	it("refuses, before asking anything, an mfa completion that is not a verified second factor — nothing added, no mfaAt, no mfa beside a factor that adds it — presented or read back from done", async () => {
+		const mfa = asking("mfa", () => interrupting());
+		const risk = asking("risk", () => interrupting());
+		const all = deps([mfa, risk]);
+		for (const adds of [{ amr: [] }, { amr: ["otp", "mfa"] }, { amr: ["otp"], mfaAt: NOW }]) {
+			await expect(
+				resumePrimary(all, continuation(), { requirement: "mfa", adds }),
+				JSON.stringify(adds),
+			).rejects.toThrow(RangeError);
+			await expect(
+				resumePrimary(all, continuationOf(primary(), [{ requirement: "mfa", adds }], "risk"), {
+					requirement: "risk",
+					adds: { amr: ["risk-ok"] },
+				}),
+				`done: ${JSON.stringify(adds)}`,
+			).rejects.toThrow(RangeError);
+		}
+		expect(mfa.asked).toEqual([]);
+		expect(risk.asked).toEqual([]);
+		const verified = await resumePrimary(all, continuation(), {
+			requirement: "mfa",
+			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+		});
+		expect(verified.outcome).toBe("interrupt");
+		expect(risk.asked).toHaveLength(1);
 	});
 
 	it("refuses deps that are not an object, a completion without a requirement's name, and a done entry naming a requirement that is not registered", async () => {

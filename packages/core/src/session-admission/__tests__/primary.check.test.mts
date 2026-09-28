@@ -188,15 +188,79 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 	});
 });
 
+/** A primary as a continuation carries it: `authTime` as epoch milliseconds. */
+const dto = () => {
+	const { authTime, ...fields } = primary();
+	return { ...fields, authTimeMs: authTime.getTime() };
+};
+
 describe("checkPrimaryAdditions — what a completing requirement may add", () => {
-	it("accepts a completion that adds nothing — amr [] — which is all a requirement reaching nothing can add, and refuses an mfaAt beside it", () => {
+	it("accepts a completion that adds nothing — amr [] — which is all a requirement reaching nothing can add, under any name but mfa", () => {
 		expect(checkPrimaryAdditions("consent", { amr: [] })).toEqual({ amr: [] });
 		expect(Object.isFrozen(checkPrimaryAdditions("consent", { amr: [] }).amr)).toBe(true);
-		expect(checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: [] })).toEqual({ amr: [] });
 		expect(() => checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: [], mfaAt: NOW })).toThrow(
 			RangeError,
 		);
 	});
+
+	// The fail-closed guarantee the mfa requirement's own re-ask gave before
+	// resumePrimary stopped asking a requirement already done: a completion
+	// under mfa is a verified second factor — a factor's value, `mfa` beside
+	// it (unless the factor is the email code, whose `addsMfa` is off by
+	// default: the MFA ADR's D14, O7), and when it was verified.
+	it.each([
+		["nothing", { amr: [] }],
+		["a factor and mfa without mfaAt", { amr: ["otp", "mfa"] }],
+		["a factor that adds mfa, without mfa", { amr: ["otp"], mfaAt: NOW }],
+		["a recovery code without mfa", { amr: ["recovery"], mfaAt: NOW }],
+		[
+			"the email code beside a factor that adds mfa, without mfa",
+			{ amr: ["email", "otp"], mfaAt: NOW },
+		],
+		["mfa and no second factor's value", { amr: ["mfa", "kba"], mfaAt: NOW }],
+		["the email code without mfaAt", { amr: ["email"] }],
+	])("refuses, under mfa, a completion that adds %s", (_label, adds) => {
+		expect(() => checkPrimaryAdditions(MFA_REQUIREMENT_NAME, adds)).toThrow(RangeError);
+		const { mfaAt, ...rest } = adds as { amr: string[]; mfaAt?: Date };
+		expect(() =>
+			checkPrimaryContinuation({
+				primary: dto(),
+				done: [
+					{
+						requirement: MFA_REQUIREMENT_NAME,
+						adds: { ...rest, ...(mfaAt === undefined ? {} : { mfaAtMs: mfaAt.getTime() }) },
+					},
+				],
+				interruptedBy: "hold",
+			}),
+		).toThrow(RangeError);
+	});
+
+	it.each([
+		["a factor and mfa", { amr: ["otp", "mfa"], mfaAt: NOW }],
+		["a recovery code and mfa", { amr: ["recovery", "mfa"], mfaAt: NOW }],
+		["a synced passkey and mfa", { amr: ["swk", "mfa"], mfaAt: NOW }],
+		["the email code alone (O7)", { amr: ["email"], mfaAt: NOW }],
+		["the email code and mfa (addsMfa configured)", { amr: ["email", "mfa"], mfaAt: NOW }],
+	])(
+		"accepts, under mfa, a completion that adds %s — and reads it back from a continuation",
+		(_label, adds) => {
+			expect(checkPrimaryAdditions(MFA_REQUIREMENT_NAME, adds)).toEqual(adds);
+			const read = checkPrimaryContinuation({
+				primary: dto(),
+				done: [
+					{
+						requirement: MFA_REQUIREMENT_NAME,
+						adds: { amr: adds.amr, mfaAtMs: adds.mfaAt.getTime() },
+					},
+				],
+				interruptedBy: "hold",
+			});
+			expect(read.done).toEqual([
+				{ requirement: MFA_REQUIREMENT_NAME, adds: { amr: adds.amr, mfaAtMs: NOW.getTime() } },
+			]);
+		},
+	);
 
 	it("copies what the requirement named mfa adds, mfaAt included", () => {
 		const adds = checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: ["otp", "mfa"], mfaAt: NOW });
@@ -239,11 +303,6 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 });
 
 describe("the continuation — what a requirement persists and presents back, as a serialisable DTO", () => {
-	const dto = () => {
-		const { authTime, ...fields } = primary();
-		return { ...fields, authTimeMs: authTime.getTime() };
-	};
-
 	it("requires interruptedBy: the requirement whose ceremony the continuation waits on", () => {
 		for (const interruptedBy of [undefined, "", 7, null]) {
 			expect(
@@ -336,8 +395,11 @@ describe("the continuation — what a requirement persists and presents back, as
 			checkPrimaryContinuation({
 				primary: dto(),
 				done: [
-					{ requirement: "mfa", adds: { amr: ["otp"], interruptedBy: "mfa" } },
-					{ requirement: "mfa", adds: { amr: ["hwk"] } },
+					{
+						requirement: "mfa",
+						adds: { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime(), interruptedBy: "mfa" },
+					},
+					{ requirement: "mfa", adds: { amr: ["hwk", "mfa"], mfaAtMs: NOW.getTime() } },
 				],
 			}),
 		).toThrow(/twice/);
