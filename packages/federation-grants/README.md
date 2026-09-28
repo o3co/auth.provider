@@ -143,8 +143,9 @@ say what each one means and what to do.
   same `503` or redirect, and its one line is session admission's:
   `session_admission_unavailable` at error, with `store` (`user_session`,
   `revocation_boundary`, or the requirement's name), `action`
-  (`federation_grants.connect`, `.consent` or `.callback`) and the error's
-  projection. A durable session recorded for another subject than the
+  (`federation_grants.connect`, `.consent` or `.callback`), the flow's
+  `grantId` and the request's `correlationId` — bound, sanitised and capped,
+  to the logger the routes hand admission — and the error's projection. A durable session recorded for another subject than the
   cookie's is admission's warn, `session_admission_subject_mismatch`, and
   its audit event, `session.admission.subject_mismatch`.
 - **A client registry that cannot answer** is core's
@@ -515,7 +516,8 @@ the remedy for, and gets the answer a dead session gets below — including a
 requirement's step-up, in this release: whether these routes send the
 browser on a step-up trip instead is the MFA ADR's step 14 to decide. The
 module requires `sessionRequirementResolver`, so a composition that installs
-it declares `sessionRequirements.expected`.
+it declares `sessionRequirements.expected`; the router refuses to be built
+with any resolver the planner did not build (core's `checkResolver`).
 
 ### `GET /session/federation-grants/connect?request=<handle>`
 

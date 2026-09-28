@@ -21,8 +21,8 @@
  *
  * What it finds, by shape and by following the receiver — a literal grep
  * would miss `/authorize`'s aliased store (`const store = opts.userSessionStore`)
- * and the sessions boundary federation grants hand their browser routes
- * (`sessionsBoundaryFor(revocation: Pick<SubjectRevocation, …>)`):
+ * and the device_code grant's boundary read at the poll
+ * (`const revocation = options.subjectRevocation; revocation.revokedBefore(…)`):
  *
  * - `get(` on a receiver typed `UserSessionStore`: a property named
  *   `userSessionStore` on anything; a local, destructured name or parameter
