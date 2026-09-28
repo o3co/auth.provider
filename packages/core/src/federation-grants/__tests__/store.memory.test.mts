@@ -241,6 +241,47 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 		expect((await lodge(store, "g-1", at(10 * MIN))).ok).toBe(true);
 	});
 
+	it("refuses a refresh once its own clock has reclaimed the credential, whatever the caller's clock says (#631)", async () => {
+		// What a store with key TTLs does: the credential's key is gone on the
+		// server's clock, and a refresh that arrives with an earlier `now` finds
+		// nothing to replace. The contract pins the same in real time; here the
+		// clock is stepped, so the refusal is exact.
+		const store = createMemoryFederationGrantStore();
+		await lodge(store, "g-1");
+		await activate(store, "g-1");
+
+		vi.setSystemTime(at(30 * DAY));
+		expect(
+			await store.replaceCredentials({
+				grantId: "g-1",
+				expectedVersion: 2,
+				credentials: { refreshToken: "rt-2", accessToken: undefined },
+				ineligible: null,
+				now: at(DAY),
+			}),
+		).toEqual({ ok: false });
+		expect(store.holdsCredential("g-1")).toBe(false);
+		expect(await store.find("g-1", at(DAY))).toMatchObject({ status: "active", version: 2 });
+	});
+
+	it("measures the lock's wait on a clock the system's cannot move: a Date step during the wait is not a wait (#631)", async () => {
+		// `Date.now()` steps when the host's clock is set; the wait would then be
+		// reported as negative, or as hours, and core would refuse the lease of a
+		// lock that was in fact taken at once. The same case pins the Redis lock
+		// in `packages/redis/__tests__/internal/federation-grant-lock.test.mts`.
+		const store = createMemoryFederationGrantStore();
+		const first = await store.acquireRefreshLock("g-1", { ttlMs: 120_000, waitForMs: 0 });
+		if (!first.acquired) throw new Error("fixture: the first acquire failed");
+		const waiting = store.acquireRefreshLock("g-1", { ttlMs: 120_000, waitForMs: 5_000 });
+		vi.setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+		await first.release();
+		const second = await waiting;
+		expect(second.acquired).toBe(true);
+		expect(second.acquired && second.waitedMs).toBeGreaterThanOrEqual(0);
+		expect(second.acquired && second.waitedMs).toBeLessThan(1_000);
+		if (second.acquired) await second.release();
+	});
+
 	it("refuses a retention that is not a non-negative finite number ending within the Date range", () => {
 		// The Redis store refuses the same: past the Date range a tombstone's
 		// horizon is no deadline a key can carry. The two adapters give one

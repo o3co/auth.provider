@@ -17,6 +17,7 @@
 import {
 	type AuthorizedFederationGrant,
 	checkSealingKeyRing,
+	constantTimeStringEqual,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
 	decodeSealingKey,
 	defineModule,
@@ -114,6 +115,18 @@ const instant = (value: Date, name: string): number => {
 
 const isDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
+
+/**
+ * Whether the credentials are ones this store can keep: the access token's
+ * date is a date, and its issued lifetime a finite number. Sealed, a lifetime
+ * of NaN or infinity reads back as an unreadable credential, and every refresh
+ * after it is refused; refused at the write instead, as every adapter refuses
+ * it (#631).
+ */
+const storableCredentials = (credentials: FederationGrantCredentials): boolean =>
+	credentials.accessToken === undefined ||
+	(isDate(credentials.accessToken.obtainedAt) &&
+		Number.isFinite(credentials.accessToken.issuedLifetime));
 
 /**
  * A key segment that cannot be confused with another value's, and cannot
@@ -582,9 +595,11 @@ export function createRedisFederationGrantStore(
 			) {
 				return false;
 			}
+			// In constant time, as the reference adapter and the scripts' `fg_same`
+			// compare it: the handle is a capability the browser carries (#631).
 			return (
 				decoded.intent !== undefined &&
-				decoded.intent.handle === handle &&
+				constantTimeStringEqual(decoded.intent.handle, handle) &&
 				nowMs < decoded.intent.expiresAtMs
 			);
 		},
@@ -680,8 +695,7 @@ export function createRedisFederationGrantStore(
 			if (!(authorization.consent.at.getTime() <= nowMs)) return { ok: false };
 			if (!(authorization.authorizedAt.getTime() <= nowMs)) return { ok: false };
 			if (!isDate(authorization.expiresAt)) return { ok: false };
-			const access = input.credentials.accessToken;
-			if (access !== undefined && !isDate(access.obtainedAt)) return { ok: false };
+			if (!storableCredentials(input.credentials)) return { ok: false };
 
 			// Preparation, not authority: the subject names the index, and the
 			// record is what the credential is sealed against. The script checks
@@ -728,9 +742,17 @@ export function createRedisFederationGrantStore(
 
 		async replaceCredentials(input) {
 			const nowMs = instant(input.now, "now");
-			const access = input.credentials.accessToken;
-			if (access !== undefined && !isDate(access.obtainedAt)) return { ok: false };
+			// A version that is not a whole number is not one a caller read. The
+			// client writes a number out as an integer and the script compares
+			// numbers, so a fractional version would round into a match (#631).
+			if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
+			if (!storableCredentials(input.credentials)) return { ok: false };
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return { ok: false };
+			// Read back, a marker judged against a maximum that is not finite is no
+			// marker at all: refused here, as every adapter refuses it (#631).
+			if (input.ineligible !== null && !Number.isFinite(input.ineligible.judgedAgainst)) {
+				return { ok: false };
+			}
 			const snapshot = await client.snapshot(grantKey(input.grantId), credKey(input.grantId));
 			if (snapshot === null) return { ok: false };
 			const current = decode(snapshot.fields, input.grantId);
@@ -763,9 +785,12 @@ export function createRedisFederationGrantStore(
 		},
 
 		async requireReauthorization(input) {
+			const nowMs = instant(input.now, "now");
+			// As in `replaceCredentials`: a fractional version would round into a match.
+			if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
 			return written(
 				await client.requireReauthorization(grantKey(input.grantId), credKey(input.grantId), {
-					nowMs: instant(input.now, "now"),
+					nowMs,
 					expectedVersion: input.expectedVersion,
 				}),
 				input.grantId,
@@ -800,14 +825,24 @@ export function createRedisFederationGrantStore(
 
 		async noteRefreshFailure(input) {
 			const nowMs = instant(input.now, "now");
+			// As in `replaceCredentials`: a fractional version would round into a match.
+			if (!Number.isSafeInteger(input.expectedVersion)) return { ok: false };
 			if (!isDate(input.failure.at)) return { ok: false };
+			// Read back, a backoff that is not finite is none: refused here, as
+			// every adapter refuses it (#631).
+			const retryAfter = input.failure.retryAfterSeconds;
+			if (retryAfter !== undefined && !Number.isFinite(retryAfter)) return { ok: false };
 			return written(
 				await client.noteRefreshFailure(grantKey(input.grantId), {
 					nowMs,
 					expectedVersion: input.expectedVersion,
 					atMs: input.failure.at.getTime(),
 					kind: input.failure.kind,
-					rowMs: input.rowMs,
+					// In whole milliseconds, as the instants it is compared with are.
+					// The client writes a number out as an integer, and a window
+					// rounded UP would count as a row two stamps further apart than
+					// it (#631).
+					rowMs: Math.floor(input.rowMs),
 					retryAfterSeconds: input.failure.retryAfterSeconds,
 					upstreamCode: input.failure.upstreamCode,
 				}),

@@ -209,7 +209,8 @@ const HELD = { ttlMs: 120_000, waitForMs: 0 };
  *
  * Time is passed in, never faked: the port takes it from its caller. The lock
  * is the exception — its TTL is real time in any adapter — and its tests use
- * real, short waits.
+ * real, short waits; so does the one case that waits for the store's own
+ * clock to reclaim a credential, which is real time in any adapter too.
  */
 export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 	name: string,
@@ -891,6 +892,33 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await resident("g-1")).toBe(false);
 			});
 
+			it("refuses an access token whose issued lifetime is not a finite number, and leaves the grant pending", async () => {
+				// The rule a refresh is held to, at the first write of a credential:
+				// a lifetime no store can keep is refused where it arrives, and not
+				// kept by one adapter and read back as unreadable by another.
+				await store.createPending(pendingInput());
+				const token = credentials("1").accessToken;
+				if (token === undefined) throw new Error("fixture");
+				for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+					expect(
+						await store.activate({
+							grantId: "g-1",
+							intentHandle: "h-1",
+							authorization: authorization(),
+							credentials: {
+								refreshToken: "rt-1",
+								accessToken: { ...token, issuedLifetime: value },
+							},
+							now: at(2 * MIN),
+						}),
+						String(value),
+					).toEqual({ ok: false });
+				}
+				expect((await store.find("g-1", at(2 * MIN)))?.status).toBe("pending");
+				expect(await resident("g-1")).toBe(false);
+				expect(await store.isCurrentIntent("g-1", "h-1", at(2 * MIN))).toBe(true);
+			});
+
 			describe("as a reauthorization", () => {
 				it("keeps the grant's ID and createdAt, and replaces the authorization as a whole", async () => {
 					await store.createPending(pendingInput());
@@ -1138,6 +1166,136 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					grant,
 					credentials: { state: "ok", value: credentials("1") },
 				});
+			});
+
+			it("refuses a version that is not a whole number, in every version-guarded write: no caller ever read one", async () => {
+				// The stored version is an integer, so a fractional one is not "the
+				// one the caller read", whatever it rounds to: refused, and never
+				// rounded into a match.
+				const grant = await activated();
+				for (const version of [
+					grant.version + 0.4,
+					grant.version - 0.4,
+					grant.version - 0.5,
+					Number.NaN,
+				]) {
+					expect(
+						await store.replaceCredentials({
+							grantId: "g-1",
+							expectedVersion: version,
+							credentials: credentials("2"),
+							ineligible: null,
+							now: at(DAY),
+						}),
+						`replaceCredentials ${version}`,
+					).toEqual({ ok: false });
+					expect(
+						await store.requireReauthorization({
+							grantId: "g-1",
+							expectedVersion: version,
+							now: at(DAY),
+						}),
+						`requireReauthorization ${version}`,
+					).toEqual({ ok: false });
+					expect(
+						await store.noteRefreshFailure({
+							grantId: "g-1",
+							expectedVersion: version,
+							failure: { at: at(DAY), kind: "unavailable" },
+							rowMs: 300_000,
+							now: at(DAY),
+						}),
+						`noteRefreshFailure ${version}`,
+					).toEqual({ ok: false });
+				}
+				expect(await store.open("g-1", at(DAY))).toStrictEqual({
+					grant,
+					credentials: { state: "ok", value: credentials("1") },
+				});
+			});
+
+			it("refuses a number that is not a finite one, wherever it is, and changes nothing", async () => {
+				// A lifetime or a maximum that is NaN or infinite is not a number a
+				// store can keep: one adapter would keep it and another drop it on
+				// the way back, and a marker that came back without its maximum, or
+				// a credential that came back unreadable, would be that adapter's
+				// answer to a write the other accepted. Refused at the write, in
+				// every adapter.
+				const grant = await activated();
+				const token = credentials("2").accessToken;
+				if (token === undefined) throw new Error("fixture");
+				for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+					const attempts = [
+						{
+							credentials: {
+								refreshToken: "rt-2",
+								accessToken: { ...token, issuedLifetime: value },
+							},
+						},
+						{ ineligible: { ...marker(), judgedAgainst: value } },
+					];
+					for (const attempt of attempts) {
+						expect(
+							await store.replaceCredentials({
+								grantId: "g-1",
+								expectedVersion: grant.version,
+								credentials: credentials("2"),
+								ineligible: null,
+								now: at(DAY),
+								...attempt,
+							}),
+							`${Object.keys(attempt)[0]} ${value}`,
+						).toEqual({ ok: false });
+					}
+				}
+				expect(await store.open("g-1", at(DAY))).toStrictEqual({
+					grant,
+					credentials: { state: "ok", value: credentials("1") },
+				});
+			});
+
+			it("refuses a refresh once the store's own clock has reclaimed the credential, whatever the caller's clock says", async () => {
+				// Two clocks (the port's docblock): what a caller is told is judged on
+				// the `now` it passes, and what the store reclaims on its own. A
+				// credential whose expiry the store's clock has passed is gone — a
+				// key TTL does that without being asked — and a refresh that arrives
+				// with a `now` still before that expiry must not write a new one
+				// back beside a record the same caller reads as `absent` a call
+				// later. Real time, on purpose: the reclaim is the store's own.
+				await store.createPending(pendingInput("g-short", "h-g-short"));
+				const expiresAt = at(1_000);
+				const activation = await store.activate({
+					grantId: "g-short",
+					intentHandle: "h-g-short",
+					authorization: authorization({
+						consent: { at: T0(), sid: "sid-1", scopes: [...SCOPES] },
+						authorizedAt: T0(),
+						expiresAt,
+					}),
+					credentials: credentials("1"),
+					now: T0(),
+				});
+				if (!activation.ok) throw new Error("fixture: the activation did not succeed");
+				const deadline = expiresAt.getTime() + 5_000;
+				for (;;) {
+					const inspected = await store.inspect("g-short", T0());
+					if (inspected === null) throw new Error("fixture: the record itself was reclaimed");
+					if (inspected.credentials === "absent") break;
+					if (Date.now() > deadline) throw new Error("the store never reclaimed the credential");
+					await sleep(20);
+				}
+				expect(
+					await store.replaceCredentials({
+						grantId: "g-short",
+						expectedVersion: activation.grant.version,
+						credentials: credentials("2"),
+						ineligible: null,
+						now: T0(),
+					}),
+				).toEqual({ ok: false });
+				expect(await store.find("g-short", T0())).toStrictEqual(activation.grant);
+				expect(await openedCredentials("g-short", T0())).toEqual({ state: "absent" });
+				expect(await resident("g-short")).toBe(false);
 			});
 
 			it("fails for every grant that is not active, and writes no credential beside it", async () => {
@@ -1631,6 +1789,44 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(
 					fieldOf(await store.find("g-revoked", at(DAY)), "refreshFailure", "was-authorized"),
 				).toBeUndefined();
+			});
+
+			it("refuses a retryAfterSeconds that is not a finite number, and changes nothing", async () => {
+				// A backoff of NaN or infinity is not one the classifier bounded: one
+				// adapter would keep it and another drop it on the way back, and a
+				// caller would read a different stamp from each for the same write.
+				const grant = await activated();
+				const before = await store.find("g-1", at(DAY));
+				for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+					expect(
+						await note(grant.version, { kind: "rate_limited", retryAfterSeconds: value }),
+						String(value),
+					).toEqual({ ok: false });
+				}
+				expect(await store.find("g-1", at(DAY))).toStrictEqual(before);
+			});
+
+			it("measures the row in whole milliseconds, as instants are: a window of 999.5 ms does not make 1000 ms a row", async () => {
+				// The window is compared, never rounded into a match: two stamps a
+				// second apart are further than 999.5 ms, and no further than 1000.5.
+				const grant = await activated();
+				const stamp = (ms: number, rowMs: number) =>
+					store.noteRefreshFailure({
+						grantId: "g-1",
+						expectedVersion: grant.version,
+						failure: failure({ at: at(ms) }),
+						rowMs,
+						now: at(ms),
+					});
+				await stamp(DAY, 999.5);
+				expect(await stamp(DAY + 1_000, 999.5)).toMatchObject({
+					ok: true,
+					grant: { refreshFailure: { count: 1 } },
+				});
+				expect(await stamp(DAY + 2_000, 1_000.5)).toMatchObject({
+					ok: true,
+					grant: { refreshFailure: { count: 2 } },
+				});
 			});
 
 			it("is cleared by whatever replaces or ends the credentials: a refresh that wrote, a renewal, a mark, a revocation", async () => {

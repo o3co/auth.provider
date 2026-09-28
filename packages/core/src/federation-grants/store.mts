@@ -48,9 +48,15 @@ import type {
  * reclaims is judged on the adapter's own clock, as a key TTL is: a TTL is a
  * safety net, never the rule, and a `now` that is wrong for one call must not
  * cost a record: no operation, read or write, deletes anything because of the
- * time its caller passed. A time that is not a date is refused with a
+ * time its caller passed. What the adapter's clock HAS reclaimed is gone for
+ * every caller, though: a credential past its expiry on that clock is not
+ * written back by a refresh whose `now` is still before it, as a key TTL that
+ * has fired is not. A time that is not a date is refused with a
  * `RangeError`, and not compared — every comparison with NaN is false, and the
- * record would read as lapsed.
+ * record would read as lapsed. A number that is not a finite one, and a
+ * version that is not a whole one, refuse the write they arrive in
+ * (`{ ok: false }`): no adapter can keep the first, and no caller ever read
+ * the second.
  *
  * **What is not here.** The intent records — the redirect URI, the scopes, the
  * consent challenge — the connect transactions, and the bound on live intents
@@ -112,9 +118,10 @@ export interface FederationGrantStore {
 	 * Asking spends nothing: it may be asked any number of times.
 	 *
 	 * The handle is never part of {@link FederationGrant}: what the reads return
-	 * goes into responses. It is opaque to the store, which compares it and does
-	 * nothing else with it; core may hand over a digest in place of the value
-	 * the browser carries.
+	 * goes into responses. It is opaque to the store, which compares it — in
+	 * constant time, here as in every write that takes one: it is a capability
+	 * the browser carries — and does nothing else with it; core may hand over a
+	 * digest in place of the value the browser carries.
 	 */
 	isCurrentIntent(grantId: string, handle: string, now: Date): Promise<boolean>;
 
@@ -140,7 +147,10 @@ export interface FederationGrantStore {
 	 * The record, or `null`. A `pending` grant whose intent has lapsed reads as
 	 * absent. An authorized grant past its `expiresAt` is still returned, for as
 	 * long as the adapter retains it, so that the status route can answer
-	 * `expired` and not `grant_not_found`.
+	 * `expired` and not `grant_not_found`. How long that is — the tombstone
+	 * retention — is fixed when the record is created and kept with it: a store
+	 * reopened under another setting retains the records it already holds as it
+	 * wrote them, and applies the new setting to the ones it creates from then.
 	 */
 	find(grantId: string, now: Date): Promise<FederationGrant | null>;
 
@@ -182,7 +192,8 @@ export interface FederationGrantStore {
 	 *   clocks; any added here would come on top of it, and a consent dated
 	 *   thirty seconds ahead would slip past a revocation stamped ten seconds
 	 *   later — for good, since neither instant ever changes;
-	 * - every date in the authorization and the credentials is a date;
+	 * - every date in the authorization and the credentials is a date, and the
+	 *   access token's issued lifetime, when there is one, a finite number;
 	 * - unless the grant is `pending`, the authorization names the same upstream
 	 *   account and the same identity revision as the stored one. A renewal
 	 *   never re-points a grant (D4, D7): the connect callback checks the account
@@ -213,7 +224,11 @@ export interface FederationGrantStore {
 	 * in the same write. `version` is bumped, and the current intent is left
 	 * alone: a refresh in the background must not cost the user the
 	 * reauthorization they are in the middle of. A date that is not one refuses
-	 * the write.
+	 * the write; so do a version that is not a whole number, an issued lifetime
+	 * or a marker's `judgedAgainst` that is not finite, and a credential the
+	 * store's own clock has already reclaimed — the refresh that carried it
+	 * would otherwise write beside a record its caller reads as `absent` a call
+	 * later.
 	 */
 	replaceCredentials(input: {
 		readonly grantId: string;
@@ -253,7 +268,8 @@ export interface FederationGrantStore {
 	 * A refresh failed (D12). The grant must be `active`, its `version` the one
 	 * the caller read — a failure of a refresh token the grant no longer has
 	 * says nothing about the one it has now — and `now` before `expiresAt`. A
-	 * date that is not one refuses the write.
+	 * date that is not one refuses the write; so do a version that is not a
+	 * whole number and a `retryAfterSeconds` that is not finite.
 	 *
 	 * Effect: `refreshFailure` set, with `count` one more than the stamp it
 	 * replaces when that one is no older than `rowMs` before `failure.at`, and
@@ -276,7 +292,11 @@ export interface FederationGrantStore {
 		readonly grantId: string;
 		readonly expectedVersion: number;
 		readonly failure: FederationGrantRefreshFailureInput;
-		/** How far apart two failures may be and still count as a row. */
+		/**
+		 * How far apart two failures may be and still count as a row, compared in
+		 * whole milliseconds as the instants are: a fraction is a bound, never
+		 * rounded into a match.
+		 */
 		readonly rowMs: number;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;
@@ -354,8 +374,10 @@ export type FederationGrantLockResult =
 			/**
 			 * How long the store waited for the lock before it TOOK it, in
 			 * milliseconds: `0` for one taken at once. A duration, not an instant,
-			 * so that it means the same on the caller's clock as on the store's.
-			 * The holder counts every deadline from when it asked plus this (D12),
+			 * so that it means the same on the caller's clock as on the store's —
+			 * and measured on a monotonic clock, never on the system's, which steps
+			 * when the host's clock is set and would report a wait as negative, or
+			 * as hours. The holder counts every deadline from when it asked plus this (D12),
 			 * never from when the acquisition was acknowledged — an acknowledgement
 			 * that took a second would otherwise overstate what is left of the lock
 			 * by that second, and a slow enough one lets a second holder in while
