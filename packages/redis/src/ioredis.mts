@@ -1391,7 +1391,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
 }
 
 /**
- * Wrap a single ioredis connection into the 16 typed client wrappers
+ * Wrap a single ioredis connection into the 18 typed client wrappers
  * needed by `@o3co/auth-provider-redis` adapters. Production consumers
  * use this factory in their composition root and spread the result into
  * `bootstrapComponents`.
@@ -1400,7 +1400,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
  * in — this factory opens nothing of its own (the sole exception is
  * `refreshTokenFamilyClient.duplicate()`, which is per rotation, not per
  * purpose). Connection-level ioredis options are therefore shared by all
- * sixteen purposes, so a composition root that needs different failure timing
+ * eighteen purposes, so a composition root that needs different failure timing
  * for one of them — `enableOfflineQueue: false` on the rate limiter, say —
  * has to build that purpose off a second connection deliberately (#286).
  *
@@ -2720,8 +2720,8 @@ return 1
  * `KEYS[1]` = the transaction; `ARGV[1]` = the expected version, `ARGV[2]` =
  * the incarnation, `ARGV[3]` = how many fields to write (n), then n field,
  * value pairs, then the fields to remove. Returns every field as written, or
- * nil. `HINCRBY` moves the version, so it stays exact past 2^47 where a Lua
- * number's text would not.
+ * nil. `HINCRBY` moves the version: Redis's integer arithmetic stays exact
+ * where a Lua number's text (14 significant digits) would not.
  */
 const LUA_MFA_TX_UPDATE = `
 local held = redis.call('HMGET', KEYS[1], 'version', 'incarnation')
