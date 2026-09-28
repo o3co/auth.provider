@@ -48,12 +48,12 @@ import type {
 	GrantHandler,
 	GrantPolicyHookContribution,
 	MfaFactor,
-	SessionRequirement,
 } from "../modules/manifest/contributes-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { HttpMethod, RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import type { PathResolver } from "../modules/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
+import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots (per A2-β §6.2 DefaultBootstrapMap contract)
@@ -457,7 +457,7 @@ export interface ContributionCollectorMap {
 	 * ADR's D3): the registered copy of each requirement, never `null`, which
 	 * `sessionRequirementResolver` projects in registration order.
 	 */
-	readonly sessionRequirements?: NameKeyedCollector<SessionRequirement>;
+	readonly sessionRequirements?: NameKeyedCollector<RegisteredRequirement>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;

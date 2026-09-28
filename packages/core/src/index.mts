@@ -893,6 +893,7 @@ export {
 	type PrimaryAuthentication,
 	type PrimaryAuthenticationDto,
 	type PrimaryContinuation,
+	type RegisteredRequirement,
 	type RequirementInput,
 	type RequirementSession,
 	type RequirementVerdict,

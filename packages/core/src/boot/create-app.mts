@@ -42,9 +42,9 @@ import type {
 	GrantHandler,
 	GrantPolicyHookContribution,
 	MfaFactor,
-	SessionRequirement,
 } from "../modules/manifest/contributes-map.mjs";
 import { createReadinessRegistrar } from "../readiness/registrar.mjs";
+import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
@@ -212,7 +212,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		federations: makeMapNameKeyedCollector<FederationProvider>(),
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
 		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
-		sessionRequirements: makeMapNameKeyedCollector<SessionRequirement>(),
+		sessionRequirements: makeMapNameKeyedCollector<RegisteredRequirement>(),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),

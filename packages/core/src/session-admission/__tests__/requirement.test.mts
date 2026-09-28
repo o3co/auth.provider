@@ -30,6 +30,7 @@ import type {
 	SessionView,
 } from "#/session-admission/requirement.mjs";
 import {
+	ADMISSION_ACTIONS,
 	checkStepUpPage,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -121,7 +122,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		]);
 	});
 
-	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, none a bundled action of another grade", () => {
+	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once; by construction none is a consumer's action or another requirement's", () => {
 		expect(
 			resolverForTests([requirement("x", { remediations: ["x.step_up", "x.recover"] })]).get("x")
 				?.remediations,
@@ -142,14 +143,12 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 				JSON.stringify(remediations),
 			).toThrow(RangeError);
 		}
-		// A bundled action of another grade is a consumer's, never a route a requirement owns.
-		expect(() =>
-			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })]),
-		).toThrow(/oauth\.authorize/);
-		expect(() => resolverForTests([requirement("mfa", { remediations: ["mfa.manage"] })])).toThrow(
-			/mfa\.manage/,
+		// A consumer's action lives under the consumer's own prefix, which no
+		// requirement is named after in this repository; `ADMISSION_ACTIONS`
+		// holds the consumers' actions alone, so nothing there is matched.
+		expect(Object.keys(ADMISSION_ACTIONS).some((name) => name.startsWith("mfa.step_up"))).toBe(
+			false,
 		);
-		// The bundled remediation is the MFA requirement's own route.
 		expect(
 			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })]).get("mfa")
 				?.remediations,

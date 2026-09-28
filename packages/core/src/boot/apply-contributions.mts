@@ -44,7 +44,7 @@ import type { Logger } from "../logging/Logger.mjs";
 import { readMfaMode } from "../mfa/mode.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
-import type { MfaFactor, SessionRequirement } from "../modules/manifest/contributes-map.mjs";
+import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
@@ -53,6 +53,7 @@ import type {
 import { sessionRequirementResolverOver } from "../session-admission/admit.mjs";
 import {
 	MFA_REQUIREMENT_NAME,
+	type RegisteredRequirement,
 	registeredRequirement,
 	sealRegisteredReach,
 } from "../session-admission/requirement.mjs";
@@ -449,7 +450,7 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 interface RequirementRegistration {
 	readonly name: string;
 	readonly module: string;
-	readonly requirement: SessionRequirement;
+	readonly requirement: RegisteredRequirement;
 }
 
 /** The three ports an MFA implementation is wired to (the session-admission ADR's D3). */
@@ -502,7 +503,7 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
 async function checkSessionRequirements(
 	material: ComponentWorld,
 	components: Record<string, unknown>,
-	collector: NameKeyedCollector<SessionRequirement> | undefined,
+	collector: NameKeyedCollector<RegisteredRequirement> | undefined,
 ): Promise<void> {
 	if (collector === undefined) return;
 	const registrations: RequirementRegistration[] = [];

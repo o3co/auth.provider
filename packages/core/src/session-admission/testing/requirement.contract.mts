@@ -217,16 +217,26 @@ export function sessionRequirementContract(
 				const requirement = counting(build());
 				const [remediation] = requirement.remediations;
 				if (remediation === undefined) return;
+				const requirements = resolverForTests(
+					[requirement],
+					issuer === undefined ? {} : { issuer },
+				);
+				// The action core issued for the route (D4): a literal would be
+				// normalised to credential_change and asked of the requirement.
+				const issued = requirements.get(requirement.name)?.actions[
+					remediation.slice(requirement.name.length + 1)
+				];
+				assert.ok(issued !== undefined, `core issued no action for "${remediation}"`);
 				const admission = await admitSession(
 					{
 						userSessionStore: storeAnswering(liveSession()),
 						subjectRevocation: undefined,
-						requirements: resolverForTests([requirement], issuer === undefined ? {} : { issuer }),
+						requirements,
 						acrTable: readAcrTable({}),
 						logger: undefined,
 						auditSink: undefined,
 					},
-					{ claim: claim(), action: { name: remediation, grade: "remediation" } },
+					{ claim: claim(), action: issued },
 				);
 				assert.equal(admission.outcome, "admitted");
 				assert.equal(
