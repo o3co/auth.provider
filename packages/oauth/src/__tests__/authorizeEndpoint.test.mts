@@ -1800,6 +1800,53 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		]);
 	});
 
+	it("warns for an entry needing fed while no federation is installed, whatever the mode", async () => {
+		// `fed` is no second factor: MFA installed would not meet the entry, so
+		// the line is a warning even under `mfa.mode = "off"`.
+		const logger = createMockLogger();
+		await makeApp({
+			oauth: { authorize: { acrValues: { "urn:example:fed": ["fed"] } } },
+			logger,
+		});
+		expect(linesFor(logger.warn)).toEqual([
+			[{ acr: "urn:example:fed", unproducible: ["fed"] }, EVENT],
+		]);
+		expect(linesFor(logger.info)).toEqual([]);
+	});
+
+	it("answers an entry needing fed unmet while no federation is installed", async () => {
+		const createCode = vi.fn(async () => ({
+			code: "code-x",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+		}));
+		const store = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async () => ({
+				sid: "sid-1",
+				sub: "user-1",
+				authTime: new Date(Date.now() - 60_000),
+				createdAt: new Date(Date.now() - 60_000),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["fed"],
+			})),
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		const { app } = await makeApp({
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
+			oauth: { authorize: { acrValues: { "urn:example:fed": ["fed"] } } },
+			userSessionStore: store,
+			createCode,
+		});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, acr_values: "urn:example:fed" }),
+		);
+		expect(params.get("error")).toBe("unmet_authentication_requirements");
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
 	it("says nothing when a federation is installed: every entry can be met", async () => {
 		const logger = createMockLogger();
 		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: true });

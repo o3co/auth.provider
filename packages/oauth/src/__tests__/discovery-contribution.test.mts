@@ -333,9 +333,25 @@ describe("acr_values_supported (#481)", () => {
 	it("advertises the keys of the configured acr table that something installed can satisfy", async () => {
 		const meta = await discoveryContribution(
 			{},
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:pwd-any": [["pwd"], ["hwk"]] }),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:pwd-any"]);
+	});
+
+	it("withholds an entry needing fed while no federation is installed: nothing records fed", async () => {
+		const meta = await discoveryContribution(
+			{},
 			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:fed": [["fed"]] }),
 		);
-		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:fed"]);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
+	});
+
+	it("withholds an entry needing fed when the federations map is empty", async () => {
+		const meta = await discoveryContribution(
+			{ federationProviders: new Map() },
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:fed": [["fed"]] }),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
 	it("withholds an entry nothing installed can satisfy (the MFA ADR's D15)", async () => {
