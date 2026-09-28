@@ -499,7 +499,7 @@ describe("a password login both requirements interrupt, resumed through each (th
 
 describe("a password login the mfa requirement interrupts (the MFA ADR's F1 step 2, through the template's boot)", () => {
 	it("answers a subject who holds a factor 403 mfa_required with the closed body, a transaction bound to the regenerated session, and no UserSession written", async () => {
-		const { app, handle } = await boot();
+		const { app, handle, config } = await boot();
 		const { mfaFactorStore, mfaTransactionStore, userSessionStore } =
 			handle.components as unknown as {
 				mfaFactorStore: MfaFactorStore;
@@ -532,8 +532,13 @@ describe("a password login the mfa requirement interrupts (the MFA ADR's F1 step
 			expires_in: 600,
 		});
 		const transaction = await mfaTransactionStore.get(login.body.transaction as string);
+		// The session the browser now holds: express-session signs it `s:<id>.<signature>`.
+		const cookie = cookiesOf(login).find((c) => c.startsWith(`${config.session.name}=`));
+		const signed = decodeURIComponent((cookie ?? "").split(";")[0]?.split("=")[1] ?? "");
+		expect(signed.startsWith("s:")).toBe(true);
 		expect(transaction).toMatchObject({
 			purpose: "login",
+			sessionId: signed.slice(2, signed.lastIndexOf(".")),
 			subject: ALICE.sub,
 			continuation: { interruptedBy: "mfa", primary: { subject: ALICE.sub } },
 		});
