@@ -41,6 +41,7 @@
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
@@ -426,9 +427,9 @@ const withoutRequirementSession = (source: string): string[] =>
 	requirementRuleCalls(source).filter((args) => !/\brequirementSession\s*\(/.test(args));
 
 /**
- * Where a session's own `amr` and `authentication` may be read (the MFA ADR's
- * D9): the readers themselves, the requirement rule (whose input they build),
- * and the two bundled stores, which copy the record.
+ * Where a session's own `amr` and `authentication` may be read, whole files
+ * (the MFA ADR's D9): the readers themselves, the requirement rule (whose
+ * input they build), and the two bundled stores, which copy the record.
  */
 const SESSION_RECORD_READERS: ReadonlySet<string> = new Set([
 	"packages/core/src/user-sessions/authentication.mts",
@@ -438,40 +439,104 @@ const SESSION_RECORD_READERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Reads of a session's `amr` or `authentication` off the record —
- * `session.amr`, `userSession?.authentication`, `tracked.amr` — in `source`,
- * comments removed. By the name the code gives the session, so it catches the
- * shape every consumer has used; a reader that names its session otherwise
- * is for review to catch. A consumer reads them through `sessionAuthentication`
- * / `vouchedAmr` (`core/src/user-sessions/authentication.mts`): the record's
- * own `amr` still holds an untrusted IdP's values in a session written before
- * the upstream split.
+ * The other reads of a field named `amr` or `authentication` that stay, each
+ * file's count exact, with why: none of them is a session record's. The
+ * matcher cannot tell a session from anything else with the field, so every
+ * read outside the readers is either here, counted, or a failure — a second
+ * read added to a listed file is the drift this exists to catch, and an entry
+ * whose reads went away fails as stale.
  */
-const sessionRecordReads = (source: string): string[] => {
-	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-	return [...code.matchAll(/\b(?:\w*[sS]ession|tracked)\??\.(?:amr|authentication)\b/g)].map(
-		(match) => match[0],
-	);
-};
+const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<{
+	readonly file: string;
+	readonly reads: number;
+	readonly why: string;
+}> = [
+	{
+		file: "packages/core/src/grants/authenticationClaims.mts",
+		reads: 2,
+		why: "composeAmr reads the verified factor's own values (verified.amr), not a session's",
+	},
+	{
+		file: "packages/core/src/grants/idToken.mts",
+		reads: 1,
+		why: "generateIdToken reads its caller's option (opts.amr), which a grant fills with vouchedAmr",
+	},
+	{
+		file: "packages/oauth/src/grants/refreshToken.mts",
+		reads: 1,
+		why: "the refresh grant carries the amr its presented refresh token carries (claims.amr), minted from vouchedAmr",
+	},
+	{
+		file: "packages/oauth/src/routes/authorize.mts",
+		reads: 1,
+		why: "the amr of the requirement rule's input, built by requirementSession (requirementSession(session)?.amr)",
+	},
+	{
+		file: "packages/session/src/routes/Federation.mts",
+		reads: 3,
+		why: "what the upstream IdP asserted on the profile (profile.amr), handed to federatedSessionAuthentication",
+	},
+];
+
+/** The names a session record's reading is kept to. */
+const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authentication"]);
+
+/**
+ * The 1-based lines of `source` that read a field named `amr` or
+ * `authentication`: a property access (`x.amr`, `x?.authentication`, on any
+ * receiver — a name, a call, an awaited read), an element access by the
+ * literal name (`x["amr"]`, `x?.["authentication"]`), or a destructuring
+ * binding, renamed or not, a parameter's included. Read with TypeScript's
+ * parser, so a comment or a string that names the field is not a read, and
+ * neither is an object literal written for a store, a type or an interface
+ * member. By shape, never by what the receiver is called: a consumer reads a
+ * session through `sessionAuthentication` / `vouchedAmr`
+ * (`core/src/user-sessions/authentication.mts`), because the record's own
+ * `amr` still holds an untrusted IdP's values in a session written before the
+ * upstream split.
+ */
+function sessionRecordReads(source: string): number[] {
+	const file = ts.createSourceFile("scan.mts", source, ts.ScriptTarget.Latest, true);
+	const lines: number[] = [];
+	const named = (node: ts.Node | undefined): boolean =>
+		node !== undefined &&
+		(ts.isIdentifier(node) || ts.isStringLiteralLike(node)) &&
+		SESSION_RECORD_FIELDS.has(node.text);
+	const visit = (node: ts.Node): void => {
+		const reads =
+			(ts.isPropertyAccessExpression(node) && SESSION_RECORD_FIELDS.has(node.name.text)) ||
+			(ts.isElementAccessExpression(node) && named(node.argumentExpression)) ||
+			(ts.isBindingElement(node) &&
+				(node.propertyName !== undefined ? named(node.propertyName) : named(node.name)));
+		if (reads) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return lines;
+}
+
+/**
+ * The product sources the session-read guard scans: every package's shipped
+ * sources and the standalone template's, `/`-separated from the root.
+ */
+function sessionReadScope(): string[] {
+	const files = listShippedSources();
+	walk(join(repoRoot, "templates", "standalone", "src"), files);
+	return files.map((file) => relative(repoRoot, file).split(sep).join("/")).sort();
+}
+
+/** Each scanned file outside the readers, with the lines it reads the fields on. */
+function sessionRecordReadSites(): Map<string, number[]> {
+	const sites = new Map<string, number[]>();
+	for (const rel of sessionReadScope()) {
+		if (SESSION_RECORD_READERS.has(rel)) continue;
+		const lines = sessionRecordReads(readFileSync(join(repoRoot, rel), "utf8"));
+		if (lines.length > 0) sites.set(rel, lines);
+	}
+	return sites;
+}
 
 describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
-	it("reads a session's amr and authentication off the record, and ignores a comment and what the readers answer", () => {
-		const sample = [
-			"// wellFormedAmr(userSession?.amr) — a comment, not a read",
-			"const a = wellFormedAmr(userSession?.amr);",
-			"const b = wellFormedAmr(tracked.amr);",
-			"const c = session.authentication?.mfaAt;",
-			"const d = wellFormedAmr(vouchedAmr(userSession));",
-			"const e = requirementSession(session)?.amr ?? [];",
-			"const f = wellFormedAmr(claims.amr);",
-		].join("\n");
-		expect(sessionRecordReads(sample)).toEqual([
-			"userSession?.amr",
-			"tracked.amr",
-			"session.authentication",
-		]);
-	});
-
 	it("flags a session's amr or authentication read off the record whatever the session is named, and by every shape", () => {
 		// Each of these reads the record's own field, which in a session written
 		// before the upstream split still holds an untrusted IdP's values.
@@ -507,20 +572,33 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 	});
 
 	it("reads a session's amr and authentication only through the D9 readers", () => {
-		const offenders = Object.fromEntries(
-			listShippedSources()
-				.map(
-					(file) =>
-						[relative(repoRoot, file).split(sep).join("/"), readFileSync(file, "utf8")] as const,
-				)
-				.filter(([rel]) => !SESSION_RECORD_READERS.has(rel))
-				.map(([rel, source]) => [rel, sessionRecordReads(source)] as const)
-				.filter(([, reads]) => reads.length > 0),
-		);
+		const unexpected: string[] = [];
+		for (const [file, lines] of sessionRecordReadSites()) {
+			const allowed = SESSION_RECORD_READS_ALLOWED.find((entry) => entry.file === file)?.reads ?? 0;
+			if (lines.length > allowed) unexpected.push(`${file}:${lines.join(",")}`);
+		}
 		expect(
-			offenders,
+			unexpected,
 			"read a session through sessionAuthentication / vouchedAmr (core/src/user-sessions/authentication.mts)",
-		).toEqual({});
+		).toEqual([]);
+	});
+
+	it("has no stale entry in SESSION_RECORD_READS_ALLOWED, and scans the readers, the packages and the template", () => {
+		const sites = sessionRecordReadSites();
+		for (const { file, reads, why } of SESSION_RECORD_READS_ALLOWED) {
+			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(reads);
+		}
+		const scope = sessionReadScope();
+		for (const reader of SESSION_RECORD_READERS) {
+			expect(scope, reader).toContain(reader);
+			// Not vacuous: each reader reads the fields it is allowed to.
+			expect(
+				sessionRecordReads(readFileSync(join(repoRoot, reader), "utf8")).length,
+				reader,
+			).toBeGreaterThan(0);
+		}
+		expect(scope).toContain("templates/standalone/src/buildModules.mts");
+		expect(scope.filter((file) => /(^|\/)__tests__\//.test(file))).toEqual([]);
 	});
 
 	it("reads the requirement rule's calls, and flags one whose session input bypasses requirementSession", () => {
