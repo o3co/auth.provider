@@ -30,6 +30,7 @@ import {
 	admitPrimary,
 	establishWithoutAsking,
 	isEstablishment,
+	isInterruptAdmission,
 	passwordPrimary,
 	resumePrimary,
 } from "#/session-admission/admit.mjs";
@@ -871,5 +872,36 @@ describe("isEstablishment — the capability to establish", () => {
 		expect(isEstablishment({ primary: primary() })).toBe(false);
 		expect(isEstablishment(undefined)).toBe(false);
 		expect(isEstablishment(null)).toBe(false);
+	});
+});
+
+describe("isInterruptAdmission — an interruption is core's, as an establishment is", () => {
+	it("knows only the interruptions admitPrimary and resumePrimary answered: a copy, or an object shaped like one, forges nothing", async () => {
+		const mfa = asking("mfa", () => interrupting());
+		const risk = asking("risk", () => interrupting());
+		const all = deps([mfa, risk]);
+		const atLogin = await admitPrimary(all, passwordPrimary(facts()));
+		if (atLogin.outcome !== "interrupt") throw new Error("expected an interruption");
+		expect(isInterruptAdmission(atLogin)).toBe(true);
+		const resumed = await resumePrimary(all, atLogin.continuation, {
+			requirement: "mfa",
+			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+		});
+		if (resumed.outcome !== "interrupt") throw new Error("expected the second to interrupt");
+		expect(isInterruptAdmission(resumed)).toBe(true);
+		expect(Object.isFrozen(resumed)).toBe(true);
+		expect(isInterruptAdmission({ ...atLogin })).toBe(false);
+		expect(
+			isInterruptAdmission({
+				outcome: "interrupt",
+				requirement: "mfa",
+				continuation: atLogin.continuation,
+				open: atLogin.open,
+			}),
+		).toBe(false);
+		const established = await admitPrimary(deps([]), passwordPrimary(facts()));
+		expect(isInterruptAdmission(established)).toBe(false);
+		expect(isInterruptAdmission(undefined)).toBe(false);
+		expect(isInterruptAdmission(null)).toBe(false);
 	});
 });

@@ -769,3 +769,64 @@ describe("answerInterruption — the login's interruption answer, exported (the 
 		expect(opened).toBe(0);
 	});
 });
+
+describe("answerInterruption — an interruption core did not build", () => {
+	it("refuses a copy of a genuine interruption, and an object shaped like one, with a RangeError, before the session is touched and without opening", async () => {
+		const { requirement, trace, opened } = fixture(() => "interrupt");
+		const cookieStore = tracedCookieStore(trace, {});
+		const deps: AdmissionDeps = {
+			userSessionStore: undefined,
+			subjectRevocation: undefined,
+			requirements: resolverForTests([requirement]),
+			acrTable: {},
+			logger: undefined,
+			auditSink: undefined,
+		};
+		const app = express();
+		app.use(cookieSession(cookieStore));
+		const thrown: unknown[] = [];
+		app.post("/complete", async (req, res) => {
+			const genuine = await admitPrimary(
+				deps,
+				passwordPrimary({
+					subject: ALICE.id,
+					user: ALICE,
+					claims: {},
+					authTime: new Date(),
+					redirectTo: undefined,
+					request: {},
+				}),
+			);
+			if (genuine.outcome !== "interrupt") throw new Error("expected an interruption");
+			for (const forged of [
+				{ ...genuine },
+				{
+					outcome: "interrupt",
+					requirement: genuine.requirement,
+					continuation: genuine.continuation,
+					open: genuine.open,
+				},
+			]) {
+				try {
+					await answerInterruption(forged as never, {
+						req,
+						res,
+						csrf,
+						reporter: { storeUnavailable: () => {} },
+					});
+				} catch (err) {
+					thrown.push(err);
+				}
+			}
+			res.status(204).end();
+		});
+
+		const res = await request(app).post("/complete");
+
+		expect(res.status).toBe(204);
+		expect(thrown).toHaveLength(2);
+		for (const err of thrown) expect(err).toBeInstanceOf(RangeError);
+		expect(trace).toEqual([]);
+		expect(opened).toEqual([]);
+	});
+});
