@@ -439,6 +439,18 @@ describe("step 2 — the live read", () => {
 		expect(seen[0]).toMatchObject({ session: null, carrier: "token" });
 	});
 
+	it("answers not_live (gone) for a record whose authTime is not a valid Date, as for one without a sub — never a throw from the view", async () => {
+		for (const authTime of [undefined, "2026-09-29", new Date(Number.NaN), 0]) {
+			expect(
+				await admitSession(
+					deps({ userSessionStore: holding(session({ authTime: authTime as never })) }),
+					request(),
+				),
+				String(authTime),
+			).toEqual({ outcome: "not_live", reason: "gone" });
+		}
+	});
+
 	it("reads the record for a token with a sid, and compares its sub", async () => {
 		expect(
 			await admitSession(deps(), request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1" }) })),
@@ -755,6 +767,7 @@ describe("step 4 — the revocation boundary", () => {
 
 describe("step 5 — the requirements", () => {
 	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt — never the record, with the D9 reading, the action, the asks and now", async () => {
+		const asked = { acrValues: ["urn:x"] };
 		const seen: RequirementInput[] = [];
 		const record = session({ amr: ["hwk", "fed"], authentication: undefined });
 		await admitSession(
@@ -769,7 +782,7 @@ describe("step 5 — the requirements", () => {
 					}),
 				]),
 			}),
-			request({ asks: { acrValues: ["urn:x"] } }),
+			request({ asks: asked }),
 		);
 		expect(seen).toHaveLength(1);
 		const input = seen[0] as RequirementInput;
@@ -796,6 +809,12 @@ describe("step 5 — the requirements", () => {
 		expect(input.subject).toBe("user-1");
 		expect(input.action).toEqual({ name: "oauth.authorize", grade: "use" });
 		expect(input.asks).toEqual({ acrValues: ["urn:x"] });
+		// The asks are core's copy, frozen: a requirement cannot drop the acr
+		// request for the ones asked after it, nor reach the caller's object.
+		expect(Object.isFrozen(input.asks)).toBe(true);
+		expect(Object.isFrozen(input.asks?.acrValues)).toBe(true);
+		expect(input.asks).not.toBe(asked);
+		expect(input.asks?.acrValues).not.toBe(asked.acrValues);
 		expect(input.now).toEqual(NOW);
 	});
 

@@ -180,6 +180,25 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 		).toContain(remediations);
 	});
 
+	it("a primary handed in that the fixture's admitPrimary establishes for — the interruption case must not pass vacuously", async () => {
+		expect(
+			await failing({ build: () => fixture({ admitPrimary: async () => "establish" }) }),
+		).toContain(
+			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
+		);
+	});
+
+	it("a remediation that is a consumer's action, under the requirement's own namespace", async () => {
+		expect(
+			await failing({
+				key: "oauth",
+				build: () => fixture({ name: "oauth", remediations: ["oauth.authorize"] }),
+			}),
+		).toContain(
+			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
+		);
+	});
+
 	it("a hint key that is reserved", async () => {
 		expect(await failing({ build: () => fixture({ hintKeys: ["email"] }) })).toContain(
 			"hintKeys are hint names",
