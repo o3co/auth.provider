@@ -472,6 +472,40 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		]);
 	});
 
+	it("flags a session's amr or authentication read off the record whatever the session is named, and by every shape", () => {
+		// Each of these reads the record's own field, which in a session written
+		// before the upstream split still holds an untrusted IdP's values.
+		for (const read of [
+			"const a = wellFormedAmr(record.amr);",
+			'if (durable?.amr?.includes("hwk")) grant();',
+			"const a = (await store.get(sid))?.amr;",
+			"const a = live.amr;",
+			'const a = userSession["amr"];',
+			'const a = userSession?.["authentication"];',
+			"const { amr } = userSession;",
+			"const { amr: recorded } = tracked;",
+			"const { authentication } = s;",
+			"const stamp = ({ amr }: UserSession) => amr;",
+			"const mfaAt = row.authentication?.mfaAt;",
+		]) {
+			expect(sessionRecordReads(read), read).toHaveLength(1);
+		}
+		// Naming the field is not reading it: a comment, a string, an object
+		// literal written for a store, a type, and what the readers answer.
+		for (const notARead of [
+			"// wellFormedAmr(record.amr) — a comment",
+			"/* durable?.amr */",
+			'const message = "session.amr is not read here";',
+			"const input = { sid, amr, authentication };",
+			'const input = { sid, amr: ["pwd"], authentication: undefined };',
+			'type A = UserSession["amr"];',
+			"interface R { readonly amr: readonly string[] | undefined }",
+			"const a = wellFormedAmr(vouchedAmr(record));",
+		]) {
+			expect(sessionRecordReads(notARead), notARead).toHaveLength(0);
+		}
+	});
+
 	it("reads a session's amr and authentication only through the D9 readers", () => {
 		const offenders = Object.fromEntries(
 			listShippedSources()
