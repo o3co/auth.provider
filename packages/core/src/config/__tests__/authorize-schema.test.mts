@@ -8,6 +8,7 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
+import { parseString } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 import { CoreConfigSchema } from "../application.schema.mjs";
 
@@ -76,5 +77,37 @@ describe("oauth.authorize.acrValues (#481)", () => {
 		expect(authorizeSchema.safeParse({ acrValues: { "urn:x": [] } }).success).toBe(false);
 		expect(authorizeSchema.safeParse({ acrValues: { "urn:x": [1] } }).success).toBe(false);
 		expect(authorizeSchema.safeParse({ acrValues: "urn:x" }).success).toBe(false);
+	});
+});
+
+describe("oauth.authorize.acrValues — any-of entries (the MFA ADR's D15)", () => {
+	it("accepts a list of lists: any one list met satisfies the acr", () => {
+		const parsed = authorizeSchema.parse({
+			acrValues: { "urn:o3co:acr:phr": [["hwk"], ["swk"]], "urn:o3co:acr:mfa": ["mfa"] },
+		}) as { acrValues?: Record<string, unknown> };
+		expect(parsed.acrValues).toEqual({
+			"urn:o3co:acr:phr": [["hwk"], ["swk"]],
+			"urn:o3co:acr:mfa": ["mfa"],
+		});
+	});
+
+	it("reads the HOCON the template ships for it", () => {
+		const raw: unknown = parseString(
+			'acrValues { "urn:o3co:acr:phr" = [["hwk"], ["swk"]] }',
+		).toObject();
+		expect(authorizeSchema.parse(raw)).toEqual({
+			acrValues: { "urn:o3co:acr:phr": [["hwk"], ["swk"]] },
+		});
+	});
+
+	it.each([
+		["an alternative that requires nothing", [["hwk"], []]],
+		["only an alternative that requires nothing", [[]]],
+		["an empty value in an alternative", [["hwk", ""]]],
+		["a list mixing values and alternatives", ["pwd", ["hwk"]]],
+		["lists nested deeper", [[["hwk"]]]],
+	])("refuses %s", (_label, entry) => {
+		// Each would vouch for every session, or name nothing a session can carry.
+		expect(authorizeSchema.safeParse({ acrValues: { "urn:x": entry } }).success).toBe(false);
 	});
 });
