@@ -75,8 +75,11 @@ export interface TotpFactorSettings {
 	readonly issuer: string;
 }
 
-/** RFC 4226 §4, R6: a shared secret of at least 128 bits. */
-const MIN_SECRET_BYTES = 16;
+/**
+ * RFC 4226 §4, R6: an HOTP shared secret of at least 128 bits. Not core's
+ * entropy floor for a configured secret: a floor of this algorithm's own.
+ */
+const HOTP_SHARED_SECRET_MIN_BYTES = 16;
 
 /** A factor's parameters, read: the secret decoded beside the spelling it is kept in. */
 interface TotpParameters {
@@ -99,7 +102,8 @@ function readParameters(value: unknown, what: string): TotpParameters {
 	>;
 	const { secret, algorithm, digits, period } = record;
 	const key = typeof secret === "string" ? decodeBase32(secret) : undefined;
-	if (key === undefined || key.length < MIN_SECRET_BYTES) throw unreadable(what, "secret");
+	if (key === undefined || key.length < HOTP_SHARED_SECRET_MIN_BYTES)
+		throw unreadable(what, "secret");
 	if (!TOTP_ALGORITHMS.includes(algorithm as TotpAlgorithm)) throw unreadable(what, "algorithm");
 	if (
 		typeof digits !== "number" ||
