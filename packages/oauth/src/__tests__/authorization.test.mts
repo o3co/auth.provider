@@ -1455,6 +1455,79 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it.each([
+				[
+					"a federated session from before the upstream split: fed alone, its upstream IdP's values left off",
+					["hwk", "fed"],
+					undefined,
+					["fed"],
+				],
+				[
+					"a trusted federation's session: its IdP's values beside fed",
+					["hwk", "fed"],
+					{ primary: "fed", federation: "google", upstreamAmr: undefined, mfaAt: undefined },
+					["hwk", "fed"],
+				],
+				[
+					"an untrusted federation's session: fed, never what was kept apart",
+					["fed"],
+					{ primary: "fed", federation: "google", upstreamAmr: ["hwk"], mfaAt: undefined },
+					["fed"],
+				],
+			] as const)(
+				"stamps what the session vouches for (the MFA ADR's D9, D13) — %s",
+				async (_label, amr, authentication, stamped) => {
+					// `/token` reads `amr` through `vouchedAmr`, never off the record: a
+					// value an untrusted IdP asserted is on no token.
+					const userSessionStore = makeUserSessionStore({
+						sid: "sid-1",
+						sub: "u-1",
+						authTime: new Date("2026-04-21T00:00:00Z"),
+						claims: {},
+						amr,
+						...(authentication ? { authentication } : {}),
+					});
+					const deps = {
+						...makeDepsWithIssuer(
+							vi.fn().mockResolvedValue({
+								code: "c1",
+								client_id: "client1",
+								redirect_uri: RP_URI,
+								code_challenge: S256_CHALLENGE,
+								code_challenge_method: "S256",
+								sid: "sid-1",
+								grantedScope: ["openid"],
+							}),
+						),
+						userSessionStore,
+						sessionFamilyIndex: makeSessionFamilyIndex(),
+						sessionRPRegistry: makeSessionRPRegistry(),
+					};
+					const handler = createAuthorizationGrant(deps);
+					const { result } = await handler.handle({
+						body: {
+							code: "c1",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_verifier: CODE_VERIFIER,
+						},
+						session: { code: "c1", code_client_id: "client1" },
+						issuer: "https://auth.example.com",
+						metadata: { ip: "127.0.0.1" },
+						authenticatedClient: DEFAULT_AUTH_CLIENT,
+					});
+					expect(result.status).toBe(200);
+					if (!("tokens" in result)) throw new Error("expected tokens");
+					for (const token of [
+						result.tokens.id_token,
+						result.tokens.access_token,
+						result.tokens.refresh_token,
+					]) {
+						expect((decodeJwt(token as string) as Record<string, unknown>).amr).toEqual(stamped);
+					}
+				},
+			);
+
+			it.each([
 				["an empty amr", []],
 				["an amr with an empty element", ["pwd", ""]],
 			])("stamps no amr on any token for a session recording %s", async (_label, amr) => {
