@@ -366,7 +366,6 @@ interface AllowedSites {
 	readonly why: string;
 }
 
-const UNTIL_A3 = "an oauth consumer, on admission in A3";
 const TOKEN_SIDE =
 	"a session read from a token, not a cookie: outside this release, routed through admission by a later record (D9)";
 
@@ -376,12 +375,6 @@ const TOKEN_SIDE =
  * not counted here: their callers are held to files by prefix below.
  */
 const ALLOWED: ReadonlyArray<AllowedSites> = [
-	// The oauth consumers, until A3.
-	{
-		file: "packages/oauth/src/grants/refreshToken.mts",
-		sites: { get: 1 },
-		why: `${UNTIL_A3}: the refresh grant's read by the token's sid (D9: it moves with A3, on tokenClaim)`,
-	},
 	// The token side of D9: not through admission in this release.
 	{
 		file: "packages/oauth/src/routes.mts",

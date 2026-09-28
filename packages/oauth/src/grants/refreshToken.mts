@@ -16,12 +16,17 @@
 
 import { randomUUID } from "node:crypto";
 import {
+	type Admission,
+	type AdmissionAction,
+	type AdmissionDeps,
+	admitSession,
 	boundPolicyAudience,
 	deriveAudienceFromResources,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantError,
 	type GrantHandler,
 	type GrantHandlerResult,
 	generateToken,
@@ -35,6 +40,7 @@ import {
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	tokenClaim,
 	unrepresentedResources,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,
@@ -42,7 +48,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
-import { requireRequirements } from "../admission.mjs";
+import { requireRequirements, stepUpRefusal, unavailableDescription } from "../admission.mjs";
 
 /**
  * Taken off the family ceiling a rotation reports before the refresh token's
@@ -75,9 +81,63 @@ export type RefreshTokenGrantDeps = Pick<
 > &
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
+/**
+ * The refresh grant's action (the session-admission ADR's D9), graded `use`.
+ * Core's closed `ADMISSION_ACTIONS` names no action for this consumer, so
+ * the grant states its own, as D4 lets a route do: a requirement decides by
+ * the grade, and on a token carrier by what the token carries.
+ */
+const REFRESH_ACTION: AdmissionAction = Object.freeze({ name: "oauth.refresh", grade: "use" });
+
+/**
+ * The token endpoint's answer to an admission that does not refresh (D9,
+ * the brief's addendum), or `undefined` for `admitted`: a session gone, past
+ * its expiry or not the token's subject is `400 invalid_grant`
+ * `session_invalid`, as a dead `sid` always was; `unmet` and
+ * `reauthenticate` are `400 invalid_grant` naming the requirement — the
+ * client re-authenticates the user; a `step_up` is the same with
+ * `step_up: "<requirement>"` beside it, as the `session` grant answers — a
+ * token has no browser to send anywhere; an outage is `503`, logged once by
+ * admission.
+ */
+const refusalFor = (admission: Admission): GrantError | undefined => {
+	switch (admission.outcome) {
+		case "admitted":
+			return undefined;
+		case "unauthenticated":
+		case "not_live":
+		case "revoked":
+			return { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
+		case "unmet":
+		case "reauthenticate":
+			return {
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: `the refresh token does not meet the ${admission.requirement} requirement`,
+			};
+		case "step_up":
+			return stepUpRefusal(admission.requirement);
+		case "unavailable":
+			return {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: unavailableDescription(admission.store),
+			};
+	}
+};
+
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { config, keyStore, logger, subjectRevocation } = deps;
-	requireRequirements("createRefreshTokenGrant", deps.sessionRequirementResolver);
+	// What admission reads for the token's session (D1, D9): the module's own
+	// slots as wired, and no acr table — a refresh asks for no acr.
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore: deps.userSessionStore,
+		subjectRevocation,
+		requirements: requireRequirements("createRefreshTokenGrant", deps.sessionRequirementResolver),
+		acrTable: {},
+		logger,
+		auditSink: deps.auditSink,
+	};
 	// The lifetimes it mints with, read once, when the grant is built. A
 	// configuration built by hand that the resolvers refuse is a composition
 	// fault: refused here, it never reaches a request — read per request, it
@@ -503,34 +563,22 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				typeof tokenPayloadClaims.jti === "string" ? tokenPayloadClaims.jti : null;
 			const newFamilyId = familyId ?? randomUUID();
 
-			// Fail-closed session check — only when both sid + store are present.
-			if (sid && deps.userSessionStore) {
-				let session: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
-				try {
-					session = await deps.userSessionStore.get(sid);
-				} catch (err) {
-					logger?.error(
-						{ store: "user_session", err: loggableError(err) },
-						"refresh_token_store_unavailable",
-					);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "session store unavailable",
-						},
-					};
-				}
-				if (!session) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "session_invalid",
-						},
-					};
-				}
-			}
+			// The token's session, through admission (the session-admission ADR's
+			// D9): the verified token's claim — its `sid` (optional: without one,
+			// or without a store, the read is skipped, as it always was), its
+			// `sub` and its `amr` — read before the rotation spends the presented
+			// token. Admission reads the live session by `sid` fail-closed, and
+			// asks the registered requirements about the token's own `amr` (the
+			// MFA ADR's O3: a token is judged on what it was issued with). The
+			// subject-revocation boundary is verifyJwt's, applied above; admission
+			// skips it for a token carrier, so the two readings do not double up.
+			const admission = await admitSession(admissionDeps, {
+				// `subjectStr` was refused above when the token carries no `sub`.
+				claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
+				action: REFRESH_ACTION,
+			});
+			const refusal = refusalFor(admission);
+			if (refusal !== undefined) return { result: refusal };
 
 			// SF-6 / Phase G / M6: when rotation is wired, refresh
 			// tokens MUST carry both jti AND family_id. Fail-fast BEFORE
