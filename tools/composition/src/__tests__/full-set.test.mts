@@ -418,8 +418,8 @@ describe("a password login both requirements interrupt, resumed through each (th
 		expect(authorized.headers.location).toMatch(/\?code=/);
 	});
 
-	it("refuses a completion on a session no ceremony is bound to, and a ceremony completed twice", async () => {
-		const { app } = await boot({ interruptLogins: [ALICE.sub] });
+	it("refuses a completion on a session no ceremony is bound to, and a ceremony presented twice on the live session it is bound to — spent even when its resumption failed", async () => {
+		const { app } = await boot({ interruptLogins: [ALICE.sub], failAskOnce: "fixture-bare" });
 		const csrf = await request(app).get("/session/csrf");
 		const login = await request(app)
 			.post("/session/login")
@@ -432,10 +432,14 @@ describe("a password login both requirements interrupt, resumed through each (th
 			.post(`${FIXTURE_COMPLETION.bare}/complete`)
 			.set("Cookie", cookiesOf(login));
 		expect(bare.status).toBe(400);
+		// The first requirement's completion: the resumption meets the second
+		// requirement's outage, so nothing is regenerated and the session the
+		// ceremony is bound to stays live.
 		const first = await request(app)
 			.post(`${FIXTURE_COMPLETION.page}/complete`)
 			.set("Cookie", cookiesOf(login));
-		expect(first.status).toBe(403);
+		expect(first.status).toBe(503);
+		// Presented again on that live session, with the outage over: spent.
 		const again = await request(app)
 			.post(`${FIXTURE_COMPLETION.page}/complete`)
 			.set("Cookie", cookiesOf(login));

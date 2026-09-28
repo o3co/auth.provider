@@ -56,6 +56,7 @@ import {
 	defineModule,
 	type GrantPolicyHook,
 	type InterruptionAnswer,
+	loggableError,
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
@@ -306,11 +307,19 @@ const FIXTURE_UNAVAILABLE = {
  * and answers what admission answers, through the session package's
  * exports: another requirement's interruption, as the login answers one
  * (`answerInterruption`), or the session established (`establishSession`).
- * Every ceremony opened is pushed on `ceremonies`, for a test to read.
+ * Every ceremony opened is pushed on `ceremonies`, for a test to read, and
+ * `failAskOnce` makes one requirement's next ask an outage. A ceremony is
+ * spent when its completion is presented, whatever the resumption answers.
+ *
+ * A sketch of a completion route, not one to copy: the real one (the MFA
+ * package's) sits behind the session's CSRF guard, projects every error it
+ * logs, and answers a `RangeError` from `resumePrimary` — a continuation
+ * naming a requirement a deploy removed, say — as "log in again".
  */
 function requirementModules(
 	interrupt: ReadonlySet<string>,
 	ceremonies: FixtureCeremony[],
+	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
 	// Neither reaches anything: in this release only the MFA requirement adds
 	// vouched values to a session, and a page may still stand with an empty
@@ -353,8 +362,15 @@ function requirementModules(
 						remediations: spec.remediations,
 						hintKeys: spec.hintKeys,
 						admit: async () => ({ outcome: "met" }),
-						admitPrimary: async (primary: PrimaryAuthentication) =>
-							interrupt.has(primary.subject) ? interruption : "establish",
+						admitPrimary: async (primary: PrimaryAuthentication) => {
+							// The outage a test asks for, once: the requirement's own
+							// store cannot answer (admission answers `unavailable`).
+							if (outage.once === spec.name) {
+								outage.once = undefined;
+								throw new Error(`${spec.name}: the requirement's store is down`);
+							}
+							return interrupt.has(primary.subject) ? interruption : "establish";
+						},
 					}),
 				},
 				routes: [
@@ -404,7 +420,10 @@ function requirementModules(
 									csrf,
 									reporter: {
 										storeUnavailable: (store, step, cause) =>
-											logger.error({ store, step, cause }, "fixture_completion_unavailable"),
+											logger.error(
+												{ store, step, err: loggableError(cause) },
+												"fixture_completion_unavailable",
+											),
 									},
 								});
 								return;
@@ -418,11 +437,20 @@ function requirementModules(
 								sessionTtlMs: config.session.maxAge,
 								reporter: () => ({
 									storeUnavailable: (store, step, cause) =>
-										logger.error({ store, step, cause }, "fixture_completion_unavailable"),
+										logger.error(
+											{ store, step, err: loggableError(cause) },
+											"fixture_completion_unavailable",
+										),
 									cleanupFailed: (store, step, cause) =>
-										logger.warn({ store, step, cause }, "fixture_completion_cleanup_failed"),
+										logger.warn(
+											{ store, step, err: loggableError(cause) },
+											"fixture_completion_cleanup_failed",
+										),
 									subjectIndexWriteFailed: (cause) =>
-										logger.error({ cause }, "subject_session_index_write_failed"),
+										logger.error(
+											{ err: loggableError(cause) },
+											"subject_session_index_write_failed",
+										),
 								}),
 							});
 							if (established.outcome === "unavailable") {
@@ -556,6 +584,7 @@ function addedModules(
 	f: Fakes,
 	interrupt: ReadonlySet<string>,
 	ceremonies: FixtureCeremony[],
+	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
 	return [
 		deviceGrantModule({ config }),
@@ -574,7 +603,7 @@ function addedModules(
 				]
 			: []),
 		grantPolicyModule,
-		...requirementModules(interrupt, ceremonies),
+		...requirementModules(interrupt, ceremonies, outage),
 		...federationBridges(config, features, f),
 	];
 }
@@ -658,6 +687,8 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	readonly interruptLogins?: readonly string[];
 	/** Where the fixture requirements record each ceremony they open; a list of the boot's own by default. */
 	readonly ceremonies?: FixtureCeremony[];
+	/** A fixture requirement whose next `admitPrimary` throws, once: an outage of its own store. */
+	readonly failAskOnce?: FixtureCeremony["requirement"];
 }
 
 export interface FullSet extends Composition {
@@ -685,10 +716,12 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		adjust: _adjust,
 		interruptLogins,
 		ceremonies,
+		failAskOnce,
 		...compose
 	} = options;
 	const interrupt = new Set(interruptLogins ?? []);
 	const opened = ceremonies ?? [];
+	const outage = { once: failAskOnce };
 	return {
 		...compose,
 		referenceConfs: REFERENCE_CONFS,
@@ -697,7 +730,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 			const featured = withFeatures(adjusted, features);
 			return options.adjust ? options.adjust(featured) : featured;
 		},
-		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened),
+		extraModules: (config) => addedModules(config, features, added, f, interrupt, opened, outage),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};
