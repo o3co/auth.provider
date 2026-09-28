@@ -1859,6 +1859,23 @@ export const fullSectionsSchema = z.object({
 			memory: z.object({ maxEntries: z.unknown().optional() }).optional(),
 		})
 		.optional(),
+	// The MFA ADR's D19: module-internal config for the Redis package's
+	// `redisMfaFactorStoreModule` and `redisMfaTransactionStoreModule`.
+	// Presence-only, for the reason every `redis*` section here is: without a
+	// top-level entry `AppConfigSchema.parse(...)` strips the key before the
+	// module's own `configSchema` sees it. The defaults (`mfaf:`, `mfat:`) live
+	// in `reference.conf` and in the modules, which refuse a prefix with a
+	// brace.
+	redisMfaFactorStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+		})
+		.optional(),
+	redisMfaTransactionStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+		})
+		.optional(),
 	// #593, D16: this adapter's own layout, beside the other stores' prefixes.
 	// What a grant may BE is `federationGrants` above; this is where its keys
 	// live and how far past a horizon the subject index keeps a member.

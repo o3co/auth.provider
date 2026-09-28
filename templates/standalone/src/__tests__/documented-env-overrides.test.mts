@@ -198,6 +198,10 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	MFA_MODE: "off",
 	MFA_FACTOR_STORE_ADAPTER: "redis",
 	MFA_TRANSACTION_STORE_ADAPTER: "redis",
+	// …and the Redis stores' key namespaces, which the Redis package's two MFA
+	// modules read.
+	REDIS_MFA_FACTOR_STORE_KEY_PREFIX: "tenant-a:mfaf:",
+	REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX: "tenant-a:mfat:",
 
 	// --- federation ---------------------------------------------------
 	FEDERATIONS_GOOGLE_ENABLED: "true",
@@ -397,6 +401,8 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("redis");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
+		expect(config.redisMfaFactorStore?.keyPrefix).toBe("tenant-a:mfaf:");
+		expect(config.redisMfaTransactionStore?.keyPrefix).toBe("tenant-a:mfat:");
 		// #500: a comma-separated string becomes a list of origins, trimmed.
 		expect(config.cors?.allowedOrigins).toEqual([
 			"https://app.example.com",
