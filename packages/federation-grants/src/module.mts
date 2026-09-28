@@ -63,7 +63,6 @@ import {
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantRetrievalLimits,
-	type SubjectRevocation,
 	type SupportsSessionsOnlyRevocation,
 	supportsDelegatedAuthorization,
 	type UserSessionStore,
@@ -103,7 +102,15 @@ export const federationGrantsConfigSchema = z.object({
 	federationGrants: fullSectionsSchema.shape.federationGrants,
 });
 
-const REQUIRES = ["config", "federationGrantBackground", "clientRepository"] as const;
+const REQUIRES = [
+	"config",
+	"federationGrantBackground",
+	"clientRepository",
+	// The synthetic key every consumer of session admission takes (the
+	// session-admission ADR's D1): the browser half admits the browser's
+	// session through it at every step. Always present — the planner fills it.
+	"sessionRequirementResolver",
+] as const;
 const OPTIONAL = [
 	"federationGrantStore",
 	"rateLimiter",
@@ -277,7 +284,8 @@ const authorizerFor =
 
 /**
  * Slice 6: the connect flow re-reads the durable session behind the cookie at
- * every step (D7), so a deployment that creates grants needs the store it
+ * every step (D7) — through session admission, which reads the store the
+ * module hands it — so a deployment that creates grants needs the store it
  * lives in. Every deployment that enables a federation already has one — the
  * federation guard asks for it — and this says why this feature needs it too.
  */
@@ -316,27 +324,6 @@ const refresherFor =
  * not get here. What stays is the answer's own validation, because boot cannot
  * establish what a backend will say about a subject that does not exist yet.
  */
-/**
- * The subject's SESSIONS boundary (D13, D7): `revokedBefore`, which every
- * subject revocation moves. The connect flow refuses a session that
- * authenticated at or before it, so that a session a revocation has not yet
- * reached cannot mint a consent dated after it. Refuses an answer that is not
- * a date or `null`, as the grants reader does.
- */
-const sessionsBoundaryFor =
-	(
-		revocation: Pick<SubjectRevocation, "revokedBefore">,
-	): ((subject: string) => Promise<Date | null>) =>
-	async (subject) => {
-		const watermark = await revocation.revokedBefore(subject);
-		if (watermark === null) return null;
-		if (watermark instanceof Date && !Number.isNaN(watermark.getTime())) return watermark;
-		throw new Error(
-			"federationGrantsModule: the subjectRevocation adapter answered something that is neither " +
-				"a date nor null for the subject's sessions boundary. Fails closed (D13).",
-		);
-	};
-
 const boundaryFor =
 	(revocation: SupportsSessionsOnlyRevocation): ((subject: string) => Promise<Date | null>) =>
 	async (subject) => {
@@ -500,9 +487,12 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						grantStore: store,
 						clientRepository: deps.clientRepository,
 						userSessionStore: requireUserSessionStore(deps),
-						// The SESSIONS boundary: what a session must have authenticated
-						// after (D7). Not the grants one, which the callback reads.
-						sessionsBoundary: sessionsBoundaryFor(revocation),
+						// Where session admission reads the SESSIONS boundary — what a
+						// session must have authenticated after (D7) — and the
+						// requirements it asks. Not the grants boundary, which the
+						// callback reads through `grantsBoundary`.
+						subjectRevocation: revocation,
+						requirements: deps.sessionRequirementResolver,
 						revocationSkewMs: limits.revocationSkewMs,
 						connections: acquisition.connections,
 						authorizerFor: authorizerFor(deps),

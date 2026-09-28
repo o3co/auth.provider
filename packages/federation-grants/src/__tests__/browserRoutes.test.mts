@@ -27,6 +27,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	type AuditEvent,
+	consoleLogger,
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
@@ -47,7 +48,7 @@ import {
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
@@ -125,6 +126,8 @@ interface WorldOptions {
 	readonly userRepository?: FederationGrantBrowserRouterOptions["userRepository"];
 	/** Replaces the drain registry: a composition's own, which may fail. */
 	readonly background?: FederationGrantBackground;
+	/** Wires no logger: what the router and admission write goes to core's console logger. */
+	readonly withoutLogger?: boolean;
 	/** The session requirements admission asks (the session-admission ADR's D3); none by default. */
 	readonly requirements?: readonly SessionRequirement[];
 }
@@ -178,6 +181,8 @@ function world(options: WorldOptions = {}) {
 		/** Ids the router draws, in order, before it falls back to random ones. */
 		ids: [] as string[],
 		auditFails: false,
+		/** Browsers whose requests carry their cookie session without the express session's id. */
+		withoutSessionId: new Set<string>(),
 		authorizerMissing: false,
 		configurationThrows: false,
 	};
@@ -216,7 +221,9 @@ function world(options: WorldOptions = {}) {
 	app.use((req, _res, next) => {
 		const id = req.get("x-browser");
 		if (id !== undefined && browsers.has(id)) {
-			(req as unknown as { sessionID: string }).sessionID = id;
+			if (!state.withoutSessionId.has(id)) {
+				(req as unknown as { sessionID: string }).sessionID = id;
+			}
 			(req as unknown as { session: Browser }).session = browsers.get(id) as Browser;
 		}
 		next();
@@ -239,10 +246,6 @@ function world(options: WorldOptions = {}) {
 					return durable.get(sid) ?? null;
 				},
 			} as never,
-			sessionsBoundary: async () => {
-				if (state.sessionsBoundary instanceof Error) throw state.sessionsBoundary;
-				return state.sessionsBoundary;
-			},
 			// The subject's sessions boundary, as admission reads it (the
 			// session-admission ADR's D2, step 4).
 			subjectRevocation: {
@@ -294,7 +297,7 @@ function world(options: WorldOptions = {}) {
 				"userRepository" in options
 					? options.userRepository
 					: new Directory(state.owners, state.lookups, intercept),
-			logger: spy.logger,
+			...(options.withoutLogger === true ? {} : { logger: spy.logger }),
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
 				options.rateLimiter ??
@@ -3161,6 +3164,66 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 			const durable = w.durable.get(sid) as UserSession;
 			w.durable.set(sid, { ...durable, expiresAt: new Date(w.state.now.getTime() + offset) });
 			expect((await w.connect(handle, browser)).status, browser).toBe(status);
+		}
+	});
+
+	it("tells a browser signed out since — its user gone with it — to sign in again at the callback, not that it is another account", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.browsers.set("b-1", { isAuthenticated: false });
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"reauthentication_required",
+		);
+	});
+
+	it("binds the browser by both halves around admission: the express session's id at connect, the durable sid at the callback", async () => {
+		// Admission reads the session the cookie names; which browser the flow
+		// is bound to stays the routes' own question.
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.withoutSessionId.add("b-1");
+		const unbound = await w.connect(handle, "b-1");
+		expect(unbound.status).toBe(403);
+		expect(unbound.text).toBe("Sign in again to continue.");
+		w.state.withoutSessionId.clear();
+
+		// A new login in the same browser since the consent: a live session
+		// of the same subject, and not the one the flow was bound to.
+		const a = await approved(w, "b-2");
+		w.signIn("b-2-relogin");
+		w.browsers.set("b-2", w.browsers.get("b-2-relogin") as Browser);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-2")).get("error")).toBe(
+			"reauthentication_required",
+		);
+		expect(w.state.exchanged).toEqual([]);
+	});
+
+	it("reads another user's cookie on the bound browser as no challenge at all: 400, and nothing audited", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		const challenge = await w.challengeFor(handle, "b-1");
+		w.browsers.set("b-1", { isAuthenticated: true, user: { id: "mallory" }, sid: "sid-b-1" });
+		const read = await w.page(challenge, "b-1");
+		expect(read.status).toBe(400);
+		expect(read.body).toEqual(noPending);
+		await w.background.drain();
+		expect(w.events.filter((e) => e.type === "federation.grant.authorization_failed")).toEqual([]);
+	});
+
+	it("writes admission's outage line to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			const w = world({ withoutLogger: true });
+			const { handle } = await w.lodge();
+			w.signIn("b-1");
+			w.state.faults.set("userSessionStore.get", 0);
+			expect((await w.connect(handle, "b-1")).status).toBe(503);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1]).toBe("session_admission_unavailable");
+		} finally {
+			spy.mockRestore();
 		}
 	});
 
