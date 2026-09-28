@@ -586,6 +586,85 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		}
 	});
 
+	it("flags the shapes a read can also take: an assignment destructuring, a computed literal key, Reflect.get", () => {
+		for (const read of [
+			"({ amr } = s);",
+			"({ amr: recorded } = s);",
+			"[{ authentication }] = list;",
+			"for ({ amr } of sessions) {}",
+			'const { ["amr"]: a } = s;',
+			'({ ["authentication"]: a } = s);',
+			'const a = Reflect.get(s, "amr");',
+			"const a = Reflect.get(s, `authentication`);",
+		]) {
+			expect(sessionRecordReads(read), read).toHaveLength(1);
+		}
+		for (const notARead of [
+			'const input = { ["amr"]: value };',
+			"x = { amr };",
+			'const a = Reflect.get(s, "sub");',
+		]) {
+			expect(sessionRecordReads(notARead), notARead).toHaveLength(0);
+		}
+	});
+
+	it("flags a spread into an object handed to a function that takes an amr, unless it spreads only literals", () => {
+		// `{ ...session }` handed to a token minter, a store's create or the
+		// amr composer copies the record's own amr without naming it.
+		for (const spread of [
+			"generateToken({ ...session }, options);",
+			"generateIdToken({ ...claims, sub });",
+			"await store.create({ ...previous, sid });",
+			"composeAmr(held, { ...factor });",
+			"generateToken({ family_id, ...extra.payload }, options);",
+			"await sessions.recordSecondFactor(sid, { ...event });",
+		]) {
+			expect(sessionRecordReads(spread), spread).toHaveLength(1);
+		}
+		for (const notASpread of [
+			"generateToken({ ...(amr ? { amr } : {}) }, options);",
+			"generateToken({ ...(sid && { sid }) }, options);",
+			"generateIdToken({ ...{ sub } });",
+			"unrelated({ ...session });",
+		]) {
+			expect(sessionRecordReads(notASpread), notASpread).toHaveLength(0);
+		}
+	});
+
+	it("pins an allowed read to its file, its receiver and its count: a swap or a second one fails", () => {
+		const allowed = [{ file: "f.mts", read: "claims.amr", count: 1, why: "a test's" }];
+		expect(
+			readsBeyondAllowance("f.mts", sessionRecordReads("const a = claims.amr;"), allowed),
+		).toEqual([]);
+		for (const [file, source] of [
+			["f.mts", "const a = session.amr;"],
+			["f.mts", "const a = claims.amr; const b = claims.amr;"],
+			["g.mts", "const a = claims.amr;"],
+		] as const) {
+			expect(readsBeyondAllowance(file, sessionRecordReads(source), allowed), source).toHaveLength(
+				1,
+			);
+		}
+	});
+
+	it("scans every TypeScript and JavaScript source extension, and no declaration file or test", () => {
+		for (const name of ["a.ts", "a.mts", "a.cts", "a.js", "a.mjs", "a.cjs"]) {
+			expect(isSessionReadSource(name), name).toBe(true);
+		}
+		for (const name of [
+			"a.d.ts",
+			"a.d.mts",
+			"a.d.cts",
+			"a.test.mts",
+			"a.test.ts",
+			"a.json",
+			"a.md",
+		]) {
+			expect(isSessionReadSource(name), name).toBe(false);
+		}
+		expect(sessionRecordReads("const a = record.amr;", "x.cjs")).toHaveLength(1);
+	});
+
 	it("reads a session's amr and authentication only through the D9 readers", () => {
 		const unexpected: string[] = [];
 		for (const [file, lines] of sessionRecordReadSites()) {
