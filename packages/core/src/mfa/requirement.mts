@@ -25,10 +25,19 @@
  * It reads a session only through `sessionAuthentication` and `vouchedAmr`
  * (`../user-sessions/authentication.mts`), so what the provider vouches for
  * is decided in one place, and it holds `acr_values` to the configured table
- * alone: `acr` is vouched for only as the table defines it.
+ * alone: `acr` is vouched for only as the table defines it — less the entries
+ * nothing installed can satisfy, which are dropped at boot
+ * (`vouchableAcrTable`), so no deployment advertises an `acr` it can never
+ * meet.
  */
 
-import { MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
+import {
+	EMAIL_OTP_AMR,
+	FEDERATED_AMR,
+	MFA_AMR,
+	PASSWORD_AMR,
+	RECOVERY_CODE_AMR,
+} from "../grants/authenticationClaims.mjs";
 import type { SessionAuthentication } from "../user-sessions/types.mjs";
 
 /**
@@ -213,4 +222,90 @@ export function decideMfaRequirement(input: MfaRequirementInput): MfaRequirement
 	return input.secondFactorMethods === undefined
 		? { outcome: "unmet", requirement: "baseline" }
 		: { outcome: "step_up", requirement: "baseline", acrValues: [] };
+}
+
+/**
+ * The `amr` values D14 assigns to second factors: an entry that lacks only
+ * these would be met with MFA installed. Under `mfa.mode = "off"` dropping it
+ * is what the operator chose, and the boot line says so at `info`.
+ */
+const SECOND_FACTOR_AMR: ReadonlySet<string> = new Set([
+	"otp",
+	"hwk",
+	"swk",
+	EMAIL_OTP_AMR,
+	RECOVERY_CODE_AMR,
+	MFA_AMR,
+]);
+
+/** What something installed can put in a session's `amr` (D15). */
+export interface ProducibleAmr {
+	/**
+	 * A federation whose upstream IdP's `amr` counts is installed: the IdP may
+	 * assert any value, recorded beside `fed` (D13), so every entry can be met.
+	 */
+	readonly anything: boolean;
+	/** Otherwise: `pwd` and `fed`, the installed factors' values and, with a coordinator, `mfa`. */
+	readonly values: ReadonlySet<string>;
+}
+
+/**
+ * What the composition can produce (D15). `trustedFederation`: a federation
+ * whose upstream `amr` counts is installed — every federation, until the
+ * build order's step 5 gives each a `trustUpstreamAmr` switch.
+ */
+export function producibleAmr(installed: {
+	readonly secondFactorMethods: ReadonlySet<string> | undefined;
+	readonly trustedFederation: boolean;
+}): ProducibleAmr {
+	return {
+		anything: installed.trustedFederation,
+		values: new Set([PASSWORD_AMR, FEDERATED_AMR, ...stepUpReach(installed.secondFactorMethods)]),
+	};
+}
+
+/** An entry `vouchableAcrTable` dropped, and why. */
+export interface UnsatisfiableAcrValue {
+	readonly acr: string;
+	/** The values its alternatives need that nothing installed produces, each once, in the entry's order. */
+	readonly unproducible: readonly string[];
+	/**
+	 * One alternative lacks only values a second factor adds (D14): MFA
+	 * installed would meet it. Under `mfa.mode = "off"` its boot line is
+	 * `info`, not `warn` (D15).
+	 */
+	readonly forWantOfSecondFactor: boolean;
+}
+
+/**
+ * The table `/authorize` answers `acr_values` from and discovery advertises
+ * (D15): the configured one, less every entry no alternative of which
+ * `producible` can meet. A dropped entry is answered like one never
+ * configured — `unmet_authentication_requirements` — and is reported, so the
+ * caller can say so once at boot. An entry that stays is kept whole. The
+ * table built is new and has no prototype; the configured one is not touched.
+ */
+export function vouchableAcrTable(
+	configured: AcrTable,
+	producible: ProducibleAmr,
+): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } {
+	const table: Record<string, AcrRequirement> = Object.create(null);
+	const dropped: UnsatisfiableAcrValue[] = [];
+	const missing = (alternative: readonly string[]): readonly string[] =>
+		producible.anything ? [] : alternative.filter((value) => !producible.values.has(value));
+	for (const [acr, requirement] of Object.entries(configured)) {
+		const lacking = requirement.map(missing);
+		if (lacking.some((values) => values.length === 0)) {
+			table[acr] = requirement;
+			continue;
+		}
+		dropped.push({
+			acr,
+			unproducible: [...new Set(lacking.flat())],
+			forWantOfSecondFactor: lacking.some((values) =>
+				values.every((value) => SECOND_FACTOR_AMR.has(value)),
+			),
+		});
+	}
+	return { table, dropped };
 }

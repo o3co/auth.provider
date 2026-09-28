@@ -556,9 +556,13 @@ export {
 	type MfaRequirementDecision,
 	type MfaRequirementInput,
 	type MfaRequirementSession,
+	type ProducibleAmr,
+	producibleAmr,
 	readAcrTable,
 	selectAcr,
 	stepUpReach,
+	type UnsatisfiableAcrValue,
+	vouchableAcrTable,
 } from "./mfa/requirement.mjs";
 export {
 	checkMfaLockoutPolicy,
