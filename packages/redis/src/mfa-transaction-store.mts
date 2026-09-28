@@ -48,9 +48,11 @@
  * absent: the ceremony fails closed — the user starts again — where an outage
  * would answer 503 for the rest of its ten minutes.
  *
- * **Two clocks.** A transaction expires on the server's clock, at its
- * `expiresAtMs` rounded up to a whole millisecond (`PEXPIREAT`), and `create`
- * refuses one already past on this process's. D21's answers are judged on the
+ * **Two clocks.** A transaction's key expires on the server's clock, at its
+ * `expiresAtMs` rounded up to a whole millisecond (`PEXPIREAT`); on this
+ * side's clock (`now`) `create` refuses one already past, and a read answers
+ * one at or past its `expiresAtMs` as absent, so a server running behind
+ * cannot let a ceremony complete past its deadline. D21's answers are judged on the
  * time the caller passes; what the scripts forget and what Redis reclaims is
  * judged no later than the server's clock, less a day
  * (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). While a run is counted the subject's keys
@@ -89,6 +91,13 @@ export interface RedisMfaTransactionStoreOptions {
 	readonly client: MfaTransactionStoreClient;
 	/** Outer namespace; each key's family and hash tag follow it. Without a brace. Default `mfat:`. */
 	readonly keyPrefix?: string;
+	/**
+	 * The clock a transaction expires by on this side, in epoch milliseconds:
+	 * `create` refuses an expiry at or before it, and a read answers a
+	 * transaction at or past its `expiresAtMs` on it as absent, whatever the
+	 * server's clock says. Default `Date.now`.
+	 */
+	readonly now?: () => number;
 }
 
 /** How each patch field is written into the hash. */
@@ -146,11 +155,14 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
  * The transaction `fields` hold, rebuilt through `newMfaTransactionRecord` as
  * the in-process store keeps it — every field named, sub-objects to their
  * known fields, plain data — or `null` when they hold nothing, hold another
- * id's, or hold what that function refuses.
+ * id's, hold what that function refuses, or hold a transaction at or past its
+ * `expiresAtMs` at `nowMs`: a server whose clock runs behind still holds the
+ * key, and must not let a ceremony complete past its deadline.
  */
 function transactionOf(
 	fields: Readonly<Record<string, string>>,
 	id: string,
+	nowMs: number,
 ): MfaTransaction | null {
 	if (fields.id !== id) return null;
 	try {
@@ -158,6 +170,7 @@ function transactionOf(
 		const attempts = countOf(fields.attempts);
 		if (!isObject(fixed) || !Number.isSafeInteger(attempts)) return null;
 		if (typeof fixed.expiresAtMs !== "number" || !Number.isFinite(fixed.expiresAtMs)) return null;
+		if (fixed.expiresAtMs <= nowMs) return null;
 		const record = newMfaTransactionRecord({
 			id,
 			purpose: fixed.purpose,
@@ -217,6 +230,7 @@ export function createRedisMfaTransactionStore(
 	options: RedisMfaTransactionStoreOptions,
 ): MfaTransactionStore {
 	const { client } = options;
+	const clock = options.now ?? Date.now;
 	const keyPrefix = checkMfaKeyPrefix(
 		options.keyPrefix ?? DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX,
 		"MfaTransactionStore (redis)",
@@ -233,7 +247,7 @@ export function createRedisMfaTransactionStore(
 
 		async create(tx) {
 			const record = newMfaTransactionRecord(tx);
-			if (!isStorableExpiry(record.expiresAtMs) || record.expiresAtMs <= Date.now()) {
+			if (!isStorableExpiry(record.expiresAtMs) || record.expiresAtMs <= clock()) {
 				throw new RangeError(
 					"MfaTransactionStore.create: expiresAtMs must be a future instant within the Date range",
 				);
@@ -248,14 +262,14 @@ export function createRedisMfaTransactionStore(
 		},
 
 		async get(id) {
-			return transactionOf(await client.read(txKey(id)), id);
+			return transactionOf(await client.read(txKey(id)), id, clock());
 		},
 
 		async update(id, expectedVersion, patch) {
 			const writes = mfaTransactionPatchWrites(patch);
 			const key = txKey(id);
 			const fields = await client.read(key);
-			const current = transactionOf(fields, id);
+			const current = transactionOf(fields, id, clock());
 			if (current === null || current.version !== expectedVersion) return null;
 			checkMfaTransactionTransitions(current, writes);
 			const set: Record<string, string> = {};
@@ -270,7 +284,7 @@ export function createRedisMfaTransactionStore(
 				set,
 				clear,
 			});
-			return written === null ? null : transactionOf(written, id);
+			return written === null ? null : transactionOf(written, id, clock());
 		},
 
 		async reserveAttempt(id, max) {
@@ -290,7 +304,7 @@ export function createRedisMfaTransactionStore(
 		async consume(id, expectedVersion) {
 			if (!isWholeVersion(expectedVersion)) return null;
 			const fields = await client.consume(txKey(id), String(expectedVersion));
-			return fields === null ? null : transactionOf(fields, id);
+			return fields === null ? null : transactionOf(fields, id, clock());
 		},
 
 		async reserveSubjectAttempt(subject, nowMs, policy, browser) {
