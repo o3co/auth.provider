@@ -391,11 +391,12 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect(() => sealRegisteredReach(requirement("risk", reach))).toThrow(RangeError);
 	});
 
-	it("holds a page to a non-empty reach, and no page to an empty one", () => {
+	it("requires a page of a non-empty reach, and lets a requirement that reaches nothing register one: a step-up that adds no value — a re-consent — still has somewhere to start", () => {
 		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"]), "none"))).toThrow(
 			/where the step-up starts/,
 		);
-		expect(() => sealRegisteredReach(requirement("risk", new Set()))).toThrow(/reaches nothing/);
+		expect(sealRegisteredReach(requirement("risk", new Set())).size).toBe(0);
+		expect(sealRegisteredReach(requirement("plain", new Set(), "none")).size).toBe(0);
 	});
 });
 

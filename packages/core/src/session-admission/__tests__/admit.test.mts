@@ -27,7 +27,8 @@ import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
 	admitSession,
-	codeClaim,
+	codeClaimFirstRead,
+	codeClaimRevalidation,
 	cookieClaim,
 	linkClaim,
 	tokenClaim,
@@ -184,18 +185,27 @@ describe("the claim builders — one reading of each carrier (D2)", () => {
 		expect(cookieClaim({})).toMatchObject({ authenticated: false });
 	});
 
-	it("reads a code record: authenticated, the code's sid, and no subject unless the first read's is handed in", () => {
-		expect(codeClaim({ sid: "sid-1" })).toMatchObject({
+	it("reads a code record twice, by two builders: the first read without a subject, the revalidation with the first read's — required, so the comparison cannot be left out", () => {
+		expect(codeClaimFirstRead({ sid: "sid-1" })).toMatchObject({
 			authenticated: true,
 			sid: "sid-1",
 			subject: undefined,
 			carrier: "code",
 		});
-		expect(codeClaim({ sid: "sid-1" }, { subject: "user-1" })).toMatchObject({
+		expect(codeClaimRevalidation({ sid: "sid-1" }, "user-1")).toMatchObject({
+			authenticated: true,
+			sid: "sid-1",
 			subject: "user-1",
+			carrier: "code",
 		});
-		expect(codeClaim({}).sid).toBeUndefined();
-		expect(codeClaim({ sid: "" }).sid).toBeUndefined();
+		expect(codeClaimFirstRead({}).sid).toBeUndefined();
+		expect(codeClaimFirstRead({ sid: "" }).sid).toBeUndefined();
+		for (const subject of [undefined, "", 7, null, ["user-1"]]) {
+			expect(
+				() => codeClaimRevalidation({ sid: "sid-1" }, subject as never),
+				JSON.stringify(subject),
+			).toThrow(RangeError);
+		}
 	});
 
 	it("reads a link transaction: authenticated, its sid and the subject recorded at the start", () => {
@@ -232,19 +242,18 @@ describe("the claim builders — one reading of each carrier (D2)", () => {
 	it("refuses, before anything is read, what is not a carrier: a caller's fault is a RangeError", () => {
 		for (const bad of [undefined, null, "cookie", 7]) {
 			expect(() => cookieClaim(bad as never), String(bad)).toThrow(RangeError);
-			expect(() => codeClaim(bad as never), String(bad)).toThrow(RangeError);
+			expect(() => codeClaimFirstRead(bad as never), String(bad)).toThrow(RangeError);
+			expect(() => codeClaimRevalidation(bad as never, "user-1"), String(bad)).toThrow(RangeError);
 			expect(() => linkClaim(bad as never), String(bad)).toThrow(RangeError);
 			expect(() => tokenClaim(bad as never), String(bad)).toThrow(RangeError);
 		}
-		expect(() => codeClaim({ sid: "sid-1" }, { subject: "" })).toThrow(RangeError);
-		expect(() => codeClaim({ sid: "sid-1" }, { subject: 7 as never })).toThrow(RangeError);
 		expect(() => linkClaim({ sid: "", subject: "user-1" })).toThrow(RangeError);
 		expect(() => linkClaim({ sid: "sid-1", subject: "" })).toThrow(RangeError);
 	});
 
 	it("answers a frozen claim", () => {
 		expect(Object.isFrozen(cookie())).toBe(true);
-		expect(Object.isFrozen(codeClaim({ sid: "sid-1" }))).toBe(true);
+		expect(Object.isFrozen(codeClaimFirstRead({ sid: "sid-1" }))).toBe(true);
 		expect(Object.isFrozen(linkClaim({ sid: "sid-1", subject: "user-1" }))).toBe(true);
 	});
 });
@@ -368,7 +377,7 @@ describe("step 1 — the claim", () => {
 
 	it("does not ask a subject of a code claim's first read, which has none", async () => {
 		expect(
-			await admitSession(deps(), request({ claim: codeClaim({ sid: "sid-1" }) })),
+			await admitSession(deps(), request({ claim: codeClaimFirstRead({ sid: "sid-1" }) })),
 		).toMatchObject({ outcome: "admitted" });
 	});
 });
@@ -430,7 +439,7 @@ describe("step 2 — the live read", () => {
 			expect(
 				await admitSession(
 					deps({ userSessionStore: holding(session({ sub: sub as never })) }),
-					request({ claim: codeClaim({ sid: "sid-1" }) }),
+					request({ claim: codeClaimFirstRead({ sid: "sid-1" }) }),
 				),
 				String(sub),
 			).toEqual({ outcome: "not_live", reason: "gone" });
@@ -543,13 +552,13 @@ describe("step 3 — the subject", () => {
 		expect(
 			await admitSession(
 				deps(),
-				request({ claim: codeClaim({ sid: "sid-1" }, { subject: "user-2" }) }),
+				request({ claim: codeClaimRevalidation({ sid: "sid-1" }, "user-2") }),
 			),
 		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
 		expect(
 			await admitSession(
 				deps(),
-				request({ claim: codeClaim({ sid: "sid-1" }, { subject: "user-1" }) }),
+				request({ claim: codeClaimRevalidation({ sid: "sid-1" }, "user-1") }),
 			),
 		).toMatchObject({ outcome: "admitted" });
 	});
@@ -738,6 +747,7 @@ describe("step 5 — the requirements", () => {
 			amr: ["fed"],
 		});
 		expect(input.carrier).toBe("cookie");
+		expect(input.subject).toBe("user-1");
 		expect(input.action).toEqual({ name: "oauth.authorize", grade: "use" });
 		expect(input.asks).toEqual({ acrValues: ["urn:x"] });
 		expect(input.now).toEqual(NOW);
@@ -1071,6 +1081,25 @@ describe("step 5 — the requirements", () => {
 		});
 	});
 
+	it("answers a step_up from a requirement that reaches nothing but registered a page — a re-consent — with that page", async () => {
+		const record = session();
+		const consent = met("consent", {
+			stepUpPage: { url: "/consent", params: { reason: "terms" } },
+			admit: async () => ({ outcome: "step_up", whenStillUnmet: "unmet" }),
+		});
+		expect(
+			await admitSession(
+				deps({ userSessionStore: holding(record), requirements: resolverForTests([consent]) }),
+				request(),
+			),
+		).toMatchObject({
+			outcome: "step_up",
+			requirement: "consent",
+			page: { url: "/consent", params: { reason: "terms" } },
+			session: record,
+		});
+	});
+
 	it("carries the live session on reauthenticate, step_up and unmet: /authorize decides freshness on it first", async () => {
 		const record = session();
 		for (const verdict of [
@@ -1094,6 +1123,98 @@ describe("step 5 — the requirements", () => {
 				verdict.outcome,
 			).toMatchObject({ outcome: verdict.outcome, requirement: "r", session: record });
 		}
+	});
+});
+
+describe("step 5 — what a requirement answers is validated at the boundary", () => {
+	it("answers unavailable, logged once at error, for anything that is not a verdict: null, a string, an unknown outcome, a step_up without whenStillUnmet — exactly as a throw", async () => {
+		const record = session();
+		for (const garbage of [
+			null,
+			undefined,
+			"met",
+			7,
+			{},
+			[],
+			{ outcome: "admin" },
+			{ outcome: "step_up" },
+			{ outcome: "step_up", whenStillUnmet: "later" },
+		]) {
+			const { logger, lines } = recordingLogger();
+			let askedOther = 0;
+			const odd = met("odd", { admit: async () => garbage as never });
+			const other = met("other", {
+				admit: async () => {
+					askedOther++;
+					return { outcome: "met" };
+				},
+			});
+			expect(
+				await admitSession(
+					deps({
+						userSessionStore: holding(record),
+						requirements: resolverForTests([odd, other]),
+						logger,
+					}),
+					request(),
+				),
+				JSON.stringify(garbage),
+			).toEqual({ outcome: "unavailable", store: "odd" });
+			expect(askedOther, JSON.stringify(garbage)).toBe(0);
+			expect(lines, JSON.stringify(garbage)).toHaveLength(1);
+			expect(lines[0]).toMatchObject({
+				level: "error",
+				message: "session_admission_unavailable",
+				fields: { store: "odd", action: "oauth.authorize" },
+			});
+		}
+	});
+
+	it("hands the requirement the subject: the record's sub when one was read, else the claim's — undefined only on the code record's first read", async () => {
+		const seen: (string | undefined)[] = [];
+		const watching = met("watch", {
+			admit: async ({ subject }) => {
+				seen.push(subject);
+				return { outcome: "met" };
+			},
+		});
+		const record = session();
+		const cases: [string, AdmissionDeps, SessionClaim][] = [
+			["a cookie with a record", deps({ userSessionStore: holding(record) }), cookie()],
+			["a cookie without a store", deps(), cookie()],
+			[
+				"a code's first read with a record",
+				deps({ userSessionStore: holding(record) }),
+				codeClaimFirstRead({ sid: "sid-1" }),
+			],
+			["a code's first read without a store", deps(), codeClaimFirstRead({ sid: "sid-1" })],
+			[
+				"a code's revalidation without a store",
+				deps(),
+				codeClaimRevalidation({ sid: "sid-1" }, "user-1"),
+			],
+			["a token without a sid", deps(), tokenClaim({ sub: "user-1", amr: ["pwd"] })],
+		];
+		for (const [label, with_, claim] of cases) {
+			seen.length = 0;
+			await admitSession(
+				{ ...with_, requirements: resolverForTests([watching]) },
+				request({ claim }),
+			);
+			expect(seen, label).toHaveLength(1);
+		}
+		expect(
+			await Promise.all(
+				cases.map(async ([, with_, claim]) => {
+					seen.length = 0;
+					await admitSession(
+						{ ...with_, requirements: resolverForTests([watching]) },
+						request({ claim }),
+					);
+					return seen[0];
+				}),
+			),
+		).toEqual(["user-1", "user-1", "user-1", undefined, "user-1", "user-1"]);
 	});
 });
 

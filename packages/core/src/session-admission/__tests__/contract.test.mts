@@ -48,18 +48,16 @@ const interruption = (
 	},
 ): Interruption => ({ open: async () => ({ status: 403, body }) as never });
 
-/** A fixture that keeps the contract: reaches something, steps up to its page, interrupts a login, throws on an outage. */
+/** A fixture that keeps the contract: reaches nothing (only mfa does), admits, interrupts a login, throws on an outage. */
 const fixture = (over: Partial<SessionRequirement> = {}, down = false): SessionRequirement => ({
 	name: "fixture-a",
-	reach: new Set(["fixture-ok"]),
-	stepUpPage: { url: "/fixture-a", params: {} },
+	reach: new Set(),
+	stepUpPage: undefined,
 	remediations: ["fixture-a.step_up"],
 	hintKeys: ["level"],
-	admit: async ({ authentication }) => {
+	admit: async () => {
 		if (down) throw new Error("fixture store down");
-		return authentication?.amr.includes("fixture-ok")
-			? { outcome: "met" }
-			: { outcome: "step_up", whenStillUnmet: "unmet" };
+		return { outcome: "met" };
 	},
 	admitPrimary: async () => interruption(),
 	...over,
@@ -94,7 +92,8 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 	it("names every case of D3", () => {
 		expect(cases.map((c) => c.name)).toEqual([
 			"name equals its key, and a fixture is never named mfa",
-			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set exactly when reach is not empty, and is valid",
+			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
+			"reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
 			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
 			"hintKeys are hint names",
 			"admit is never called with a dead session",
@@ -122,20 +121,42 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 
 	it("a reach with a reserved value under another name, a primary's marker, or a page missing", async () => {
 		const reach =
-			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set exactly when reach is not empty, and is valid";
+			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set";
 		expect(await failing({ build: () => fixture({ reach: new Set(["otp"]) }) })).toContain(reach);
 		expect(await failing({ build: () => fixture({ reach: new Set(["pwd"]) }) })).toContain(reach);
-		expect(await failing({ build: () => fixture({ stepUpPage: undefined }) })).toContain(reach);
+		expect(await failing({ build: () => fixture({ reach: new Set(["fixture-ok"]) }) })).toContain(
+			reach,
+		);
 		expect(
 			await failing({
-				build: () => fixture({ stepUpPage: { url: "https://evil.test/x", params: {} } }),
+				build: () =>
+					fixture({
+						reach: new Set(["fixture-ok"]),
+						stepUpPage: { url: "https://evil.test/x", params: {} },
+					}),
 			}),
 		).toContain(reach);
+		// A page with an empty reach is allowed: a step-up that adds no value.
 		expect(
 			await failing({
-				build: () => fixture({ reach: new Set(), stepUpPage: { url: "/x", params: {} } }),
+				build: () => fixture({ stepUpPage: { url: "/x", params: {} } }),
 			}),
-		).toContain(reach);
+		).not.toContain(reach);
+	});
+
+	it("a reach under any name but mfa: only the MFA requirement adds vouched values in this release", async () => {
+		const only =
+			"reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session";
+		expect(
+			await failing({
+				build: () =>
+					fixture({
+						reach: new Set(["fixture-ok"]),
+						stepUpPage: { url: "/fixture-a", params: {} },
+					}),
+			}),
+		).toContain(only);
+		expect(await failing({ build: () => fixture() })).not.toContain(only);
 	});
 
 	it("remediations that are not names, are not the requirement's own routes, or repeat", async () => {
