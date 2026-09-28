@@ -650,6 +650,56 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: "an adapter factory's create, handed its configuration slice: no session record",
 	},
+	// The declarations a pinned spread, or a local handed whole to what takes
+	// an amr, is followed to.
+	{
+		file: "packages/core/src/grants/token.mts",
+		read: "...(dataasRecord<string,unknown>)",
+		count: 1,
+		why: "generateToken's own payload, spread into the claims the signer takes: what each caller passes, which is checked at every call",
+	},
+	{
+		file: "packages/core/src/grants/idToken.mts",
+		read: "...filterClaimsByScope()",
+		count: 1,
+		why: "the user's claims filtered to the granted scopes: filterClaimsByScope keeps name, picture, email, email_verified and groups, never amr",
+	},
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "nowMs=Date.now()",
+		count: 1,
+		why: "the store's clock, a number, handed to sessionAfterSecondFactor",
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "nowMs=Date.now()",
+		count: 1,
+		why: "the store's clock, a number, handed to sessionAfterSecondFactor",
+	},
+	{
+		file: "packages/oauth/src/routes/authorize.mts",
+		read: "table=ctx.opts.oauth.acrValues",
+		count: 1,
+		why: "the configured acr table, handed to selectAcr: configuration, not a session",
+	},
+	{
+		file: "packages/session/src/modules/sessionStoreModule.mts",
+		read: "storageSlice=config.session.storageas{type:string}&Record<string,unknown>",
+		count: 1,
+		why: "the cookie-session storage settings, the base of a pinned spread into a store factory's create",
+	},
+	{
+		file: "templates/standalone/src/modules.mts",
+		read: "slice=flattenAdapterConfig((configasAppConfig).repositories.clientas{type:string}&Record<string,unknown>)",
+		count: 1,
+		why: "the client repository's adapter settings, handed whole to its factory's create",
+	},
+	{
+		file: "templates/standalone/src/modules.mts",
+		read: "slice=flattenAdapterConfig((configasAppConfig).repositories.codeas{type:string}&Record<string,unknown>)",
+		count: 1,
+		why: "the code repository's adapter settings, the base of a pinned spread into its factory's create",
+	},
 ];
 
 /** The names a session record's reading is kept to. */
@@ -658,8 +708,9 @@ const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authenticati
 /**
  * The functions that take an `amr` — as an option, an argument or a token
  * claim — matched by the name they are called by: a token minter
- * (`generateToken`, whose payload is the token's claims, and the id_token's
- * `generateIdToken`), the amr composer, a store's `create` and the step-up
+ * (`generateToken`, whose payload is the token's claims, the id_token's
+ * `generateIdToken`, and the key store's `sign`, which takes the claims
+ * both build — see {@link CLAIMS_ONLY_TAKERS}), the amr composer, a store's `create` and the step-up
  * (`recordSecondFactor`, `sessionAfterSecondFactor`, `checkSecondFactorEvent`),
  * the coordinator's primary (`decideAfterPrimary`, `openLoginTransaction`) and
  * the requirement rule (`decideMfaRequirement`, `selectAcr`). A spread into an
@@ -667,6 +718,7 @@ const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authenticati
  * `create` is also other factories' name: their spreads are pinned like reads.
  */
 const AMR_TAKERS: ReadonlySet<string> = new Set([
+	"sign",
 	"generateToken",
 	"generateIdToken",
 	"composeAmr",
@@ -679,6 +731,15 @@ const AMR_TAKERS: ReadonlySet<string> = new Set([
 	"decideMfaRequirement",
 	"selectAcr",
 ]);
+
+/**
+ * The takers whose `amr` rides inside a property of an object argument —
+ * the key store's `sign({ claims })` — rather than in the argument itself.
+ * Their object arguments are checked, and the locals named in them followed;
+ * a local handed whole is not, because `sign` is also the name of every
+ * key-taking signer (jose's, `node:crypto`'s).
+ */
+const CLAIMS_ONLY_TAKERS: ReadonlySet<string> = new Set(["sign"]);
 
 /** Whether `name` is a source file the session-read guard scans: any TypeScript or JavaScript source, no declaration file, no test. */
 function isSessionReadSource(name: string): boolean {
@@ -711,19 +772,41 @@ interface SessionRecordRead {
  *   ({@link AMR_TAKERS}), unless it spreads only literals or a choice
  *   between them, written as `...` and what is spread (a call as its callee).
  *
+ * A spread of a local, and a local handed whole to such a function, is
+ * followed to the declaration the language resolves it to, in the same file:
+ * a spread of anything but literals in its initializer is reported (and
+ * followed in turn), and — for a local used whole — so is an initializer that
+ * is not an object literal (`o=initializer`), so re-initialising a pinned
+ * local from a session fails. The key store's `sign` is checked through its
+ * object argument and the locals named in it (`sign({ claims })`).
+ *
  * Read with TypeScript's parser, so a comment or a string that names the
  * field is not a read, and neither is an object literal written for a store,
  * a type or an interface member. By shape, never by what the receiver is
- * called: a consumer reads a session through `sessionAuthentication` /
- * `vouchedAmr` (`core/src/user-sessions/authentication.mts`), because the
- * record's own `amr` still holds an untrusted IdP's values in a session
- * written before the upstream split.
+ * called.
+ *
+ * What it does not follow is left to review, and to a branded type for a
+ * vouched `amr` planned for a later change: a local it cannot resolve here (a
+ * parameter, a loop variable, an import, a value built in another function
+ * or file); a callee reached under another name (an alias, a method taken
+ * off its object); a copy that is not a spread (`Object.assign`,
+ * `structuredClone`); a cast that relabels a record; and reflection with a
+ * key that is not a literal. A consumer reads a session through
+ * `sessionAuthentication` / `vouchedAmr`
+ * (`core/src/user-sessions/authentication.mts`), because the record's own
+ * `amr` still holds an untrusted IdP's values in a session written before the
+ * upstream split.
  */
 function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecordRead[] {
 	const kind = /\.(?:js|mjs|cjs)$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
 	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
 	const reads: SessionRecordRead[] = [];
-	const text = (node: ts.Node): string => node.getText(file).replace(/\s+/g, "");
+	// Whitespace and a trailing comma are formatting: neither moves a pin.
+	const text = (node: ts.Node): string =>
+		node
+			.getText(file)
+			.replace(/\s+/g, "")
+			.replace(/,(?=[)\]}])/g, "");
 	const found = (node: ts.Node, read: string): void => {
 		reads.push({ line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, read });
 	};
@@ -823,31 +906,147 @@ function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecor
 			: ts.isPropertyAccessExpression(node)
 				? node.name.text
 				: undefined;
-	const spreadsInto = (node: ts.Expression): void => {
-		if (
-			ts.isParenthesizedExpression(node) ||
-			ts.isAsExpression(node) ||
-			ts.isSatisfiesExpression(node) ||
-			ts.isTypeAssertionExpression(node) ||
-			ts.isNonNullExpression(node)
-		) {
-			spreadsInto(node.expression);
+	/** An expression with its parentheses, type assertions and non-null assertions taken off. */
+	const bare = (node: ts.Expression): ts.Expression =>
+		ts.isParenthesizedExpression(node) ||
+		ts.isAsExpression(node) ||
+		ts.isSatisfiesExpression(node) ||
+		ts.isTypeAssertionExpression(node) ||
+		ts.isNonNullExpression(node)
+			? bare(node.expression)
+			: node;
+	/**
+	 * The locals an expression's value comes from: an identifier, the base of
+	 * a property or element access, either side of `??` / `||`, the right of
+	 * `&&`, either branch of a choice. A call, a literal or anything else is
+	 * none.
+	 */
+	const rootsOf = (node: ts.Expression): string[] => {
+		const expression = bare(node);
+		if (ts.isIdentifier(expression)) return [expression.text];
+		if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+			return rootsOf(expression.expression);
+		}
+		if (ts.isConditionalExpression(expression)) {
+			return [...rootsOf(expression.whenTrue), ...rootsOf(expression.whenFalse)];
+		}
+		if (ts.isBinaryExpression(expression)) {
+			const op = expression.operatorToken.kind;
+			if (op === ts.SyntaxKind.AmpersandAmpersandToken) return rootsOf(expression.right);
+			if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) {
+				return [...rootsOf(expression.left), ...rootsOf(expression.right)];
+			}
+		}
+		return [];
+	};
+	/** The declaration of `name` among `statements`, if one of them declares it. */
+	const declaredIn = (
+		statements: ts.NodeArray<ts.Statement>,
+		name: string,
+	): ts.VariableDeclaration | undefined => {
+		for (const statement of statements) {
+			if (!ts.isVariableStatement(statement)) continue;
+			for (const declaration of statement.declarationList.declarations) {
+				if (ts.isIdentifier(declaration.name) && declaration.name.text === name) return declaration;
+			}
+		}
+		return undefined;
+	};
+	/**
+	 * The initializer of the declaration `name` means at `from`, found as the
+	 * language finds it: the nearest enclosing block, loop head or function
+	 * that declares it. `undefined` for a parameter, a loop variable, an
+	 * import or a name declared nowhere in the file.
+	 */
+	const resolve = (name: string, from: ts.Node): ts.Expression | undefined => {
+		for (let scope = from.parent; scope !== undefined; scope = scope.parent) {
+			if (
+				ts.isBlock(scope) ||
+				ts.isSourceFile(scope) ||
+				ts.isModuleBlock(scope) ||
+				ts.isCaseClause(scope) ||
+				ts.isDefaultClause(scope)
+			) {
+				const declaration = declaredIn(scope.statements, name);
+				if (declaration !== undefined) return declaration.initializer;
+			}
+			if (
+				(ts.isForStatement(scope) || ts.isForOfStatement(scope) || ts.isForInStatement(scope)) &&
+				scope.initializer !== undefined &&
+				ts.isVariableDeclarationList(scope.initializer) &&
+				scope.initializer.declarations.some(
+					(declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === name,
+				)
+			) {
+				return undefined;
+			}
+			if (
+				ts.isFunctionLike(scope) &&
+				scope.parameters.some(
+					(parameter) => ts.isIdentifier(parameter.name) && parameter.name.text === name,
+				)
+			) {
+				return undefined;
+			}
+		}
+		return undefined;
+	};
+	/** The spreads already reported, so one reached twice is counted once. */
+	const reported = new Set<ts.Node>();
+	/** The declarations already followed, as a whole value or for their spreads. */
+	const followed = new Set<string>();
+	/**
+	 * Follow a local to its declarations in this file. Its initializer is held
+	 * to the rule a taker's argument is: a spread of anything but literals is
+	 * reported (and followed in turn). When the local is used whole — spread,
+	 * or handed to a taker as an argument — an initializer that is not an
+	 * object literal (the session itself, a store's read) is reported too, as
+	 * `name=initializer`. A parameter, a loop variable or an import has no
+	 * initializer here, and is left to review.
+	 */
+	const follow = (name: string, whole: boolean, from: ts.Node): void => {
+		const initializer = resolve(name, from);
+		if (initializer === undefined) return;
+		const key = `${initializer.pos}:${whole}`;
+		if (followed.has(key)) return;
+		followed.add(key);
+		const value = bare(initializer);
+		if (ts.isObjectLiteralExpression(value) || ts.isConditionalExpression(value)) {
+			spreadsInto(value, false);
+		} else if (whole) {
+			found(initializer, `${name}=${text(initializer)}`);
+		}
+	};
+	/**
+	 * Report each spread of anything but literals in an object handed to a
+	 * taker, and follow its locals. With `properties`, a local named as a
+	 * property's value (`sign({ claims })`) is followed for its spreads too.
+	 */
+	const spreadsInto = (node: ts.Expression, properties: boolean): void => {
+		const expression = bare(node);
+		if (ts.isConditionalExpression(expression)) {
+			spreadsInto(expression.whenTrue, properties);
+			spreadsInto(expression.whenFalse, properties);
 			return;
 		}
-		if (ts.isConditionalExpression(node)) {
-			spreadsInto(node.whenTrue);
-			spreadsInto(node.whenFalse);
-			return;
-		}
-		if (!ts.isObjectLiteralExpression(node)) return;
-		for (const property of node.properties) {
-			if (ts.isPropertyAssignment(property)) spreadsInto(property.initializer);
-			else if (ts.isSpreadAssignment(property) && !literalOnly(property.expression)) {
-				const spread = property.expression;
-				found(
-					property,
-					`...${ts.isCallExpression(spread) ? `${text(spread.expression)}()` : text(spread)}`,
-				);
+		if (!ts.isObjectLiteralExpression(expression)) return;
+		for (const property of expression.properties) {
+			if (ts.isPropertyAssignment(property)) {
+				spreadsInto(property.initializer, properties);
+				const value = bare(property.initializer);
+				if (properties && ts.isIdentifier(value)) follow(value.text, false, property);
+			} else if (ts.isShorthandPropertyAssignment(property)) {
+				if (properties) follow(property.name.text, false, property);
+			} else if (ts.isSpreadAssignment(property) && !literalOnly(property.expression)) {
+				const spread = bare(property.expression);
+				if (!reported.has(property)) {
+					reported.add(property);
+					found(
+						property,
+						`...${ts.isCallExpression(spread) ? `${text(spread.expression)}()` : text(property.expression)}`,
+					);
+				}
+				for (const root of rootsOf(property.expression)) follow(root, true, property);
 			}
 		}
 	};
@@ -886,7 +1085,16 @@ function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecor
 			}
 			const name = calleeName(callee);
 			if (name !== undefined && AMR_TAKERS.has(name)) {
-				for (const argument of node.arguments) spreadsInto(argument);
+				for (const argument of node.arguments) {
+					spreadsInto(argument, true);
+					// A local handed whole: `generateIdToken(options)`. Not for the
+					// signer, whose amr rides inside its `claims`, and whose name
+					// other libraries' key-taking `sign(key)` share.
+					const value = bare(argument);
+					if (ts.isIdentifier(value) && !CLAIMS_ONLY_TAKERS.has(name)) {
+						follow(value.text, true, argument);
+					}
+				}
 			}
 		}
 		ts.forEachChild(node, visit);
