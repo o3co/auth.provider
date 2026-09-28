@@ -66,24 +66,32 @@ const isStringList = (value: unknown): value is readonly string[] =>
 const isEpochMs = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-/** A copy of `user` that shares nothing with it; a value that cannot be copied is refused. */
+/** Freezes `value` and every plain object or array it holds, in place; answers it. */
+function deepFreeze<T>(value: T): T {
+	if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+	Object.freeze(value);
+	for (const entry of Object.values(value as Record<string, unknown>)) deepFreeze(entry);
+	return value;
+}
+
+/** A deep copy of `user` that shares nothing with it, frozen at every depth; a value that cannot be copied is refused. */
 function copyUser(
 	user: unknown,
 	refuse: (what: string) => never,
 ): Readonly<Record<string, unknown>> {
 	if (!isPlainObject(user)) return refuse("user must be an object");
 	try {
-		return Object.freeze(structuredClone(user));
+		return deepFreeze(structuredClone(user));
 	} catch {
 		return refuse("user holds a value that cannot be copied");
 	}
 }
 
-/** A copy of `claims` — the session record's `claims` to be — that shares nothing with it. */
+/** A deep copy of `claims` — the session record's `claims` to be — that shares nothing with it, frozen at every depth. */
 function copyClaims(claims: unknown, refuse: (what: string) => never): UserSessionClaims {
 	if (!isPlainObject(claims)) return refuse("claims must be an object");
 	try {
-		return Object.freeze(structuredClone(claims)) as UserSessionClaims;
+		return deepFreeze(structuredClone(claims)) as UserSessionClaims;
 	} catch {
 		return refuse("claims hold a value that cannot be copied");
 	}
@@ -325,7 +333,15 @@ export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const done = value.done.map((entry) => copyCompleted(entry, refuse));
 	const names = new Set(done.map((entry) => entry.requirement));
 	if (names.size !== done.length) refuse("done names a requirement twice");
-	return Object.freeze({ primary, done: Object.freeze(done) });
+	const interruptedBy = value.interruptedBy;
+	if (!isNonEmptyString(interruptedBy)) {
+		refuse("interruptedBy must name the requirement whose ceremony it waits on");
+	}
+	return Object.freeze({
+		primary,
+		done: Object.freeze(done),
+		interruptedBy: interruptedBy as string,
+	});
 }
 
 /**
@@ -337,9 +353,11 @@ export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 export function continuationOf(
 	primary: PrimaryAuthentication,
 	done: readonly CompletedRequirement[],
+	interruptedBy: string,
 ): PrimaryContinuation {
 	const { authTime, ...fields } = primary;
 	return Object.freeze({
+		interruptedBy,
 		primary: Object.freeze({ ...fields, authTimeMs: authTime.getTime() }),
 		done: Object.freeze(
 			done.map((entry) =>

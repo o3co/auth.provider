@@ -516,9 +516,11 @@ const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
  * by `refuseGuardedHostKinds`, in `createApp` before the kinds are merged.
  * @internal
  */
-function checkSessionRequirementKindGuard(rawModules: readonly Module[]): void {
-	for (const m of rawModules) {
-		if (m.overrides !== undefined && Object.hasOwn(m.overrides, "sessionRequirements")) {
+function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]): void {
+	// Read off the normalised entries — what the pass applies — not the raw
+	// manifest, whose `overrides` a getter could answer differently twice.
+	for (const m of modules) {
+		if (m.overridesEntries.some((entry) => entry.kind === "sessionRequirements")) {
 			throw new BootError({
 				message:
 					`Module "${m.name}" overrides a sessionRequirements entry, which nothing may: a session ` +
@@ -1657,7 +1659,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	{
 		id: "session-requirement-kind-guard",
 		spec: "A2-β §5.1 (after step 3): the session-admission ADR's D3",
-		run: (ctx) => checkSessionRequirementKindGuard(ctx.rawModules),
+		run: (ctx) => checkSessionRequirementKindGuard(ctx.modules),
 	},
 	{
 		id: "requires-closure",

@@ -37,16 +37,27 @@
  * - a call of `recordSecondFactor(` — kept to the two bundled stores' own
  *   files and `packages/mfa` (D3, D10);
  * - a call of `establishWithoutAsking(` — kept to the federation callback
- *   (D5).
+ *   (D5);
+ * - a call of `resumePrimary(` or `continuationOf(` — kept to the MFA
+ *   package (D5).
+ *
+ * A guarded function is found under an import alias (`import { selectAcr as
+ * pick }`), as a string element access (`store["get"]`), and as a reference
+ * that is not a call — `.bind`, `.call`, a method taken off its object, a
+ * value passed on.
  *
  * Every site outside the home is pinned to its file and count with a
  * reason, and shrinks as the consumers move (A3–A5); `jwt/verify.mts` and
  * the token-side reads of D9 stay until that record. A site not listed, a
  * second one in a listed file, or an entry whose site went away fails.
  *
- * What it does not follow is left to review: a receiver reached under a
- * name declared in another file, a method taken off its object, a store
- * reached through reflection.
+ * What it does not follow is left to review, as the #707 guard lists its
+ * own holes: a receiver reached under a name declared in another file; a
+ * namespace import (`core.selectAcr`) or a computed key (`store[key]`); a
+ * local alias of a guarded function (`const f = selectAcr` is a site,
+ * `f(…)` is not a second one); a store reached through reflection
+ * (`Reflect.get`, `Object.values`); a receiver whose type only a
+ * `ts.Program` knows, which this guard does not build.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -66,7 +77,18 @@ type What =
 	| "selectAcr"
 	| "claim"
 	| "recordSecondFactor"
-	| "establishWithoutAsking";
+	| "establishWithoutAsking"
+	| "resumePrimary"
+	| "continuationOf";
+
+/** The guarded functions: a call, a reference (`.bind`, `.call`, a value passed on) or an aliased import of any is a site. */
+const GUARDED_FUNCTIONS: ReadonlySet<string> = new Set([
+	"selectAcr",
+	"recordSecondFactor",
+	"establishWithoutAsking",
+	"resumePrimary",
+	"continuationOf",
+]);
 
 interface Site {
 	readonly line: number;
@@ -74,6 +96,12 @@ interface Site {
 }
 
 type Receiver = "store" | "revocation";
+
+/** The guarded methods, by their receiver's kind. */
+const GUARDED_METHODS: ReadonlyMap<string, Receiver> = new Map([
+	["get", "store"],
+	["revokedBefore", "revocation"],
+]);
 
 const CARRIERS: ReadonlySet<string> = new Set(["cookie", "code", "link", "token"]);
 
@@ -190,27 +218,95 @@ function sessionAdmissionSites(source: string, fileName = "scan.mts"): Site[] {
 		}
 		return undefined;
 	};
-	const calleeName = (callee: ts.Expression): string | undefined =>
-		ts.isIdentifier(callee)
-			? callee.text
-			: ts.isPropertyAccessExpression(callee)
-				? callee.name.text
+	// An import alias: `import { selectAcr as pick }` makes `pick` the guarded name.
+	const aliases = new Map<string, string>();
+	for (const statement of file.statements) {
+		if (!ts.isImportDeclaration(statement)) continue;
+		const bindings = statement.importClause?.namedBindings;
+		if (bindings === undefined || !ts.isNamedImports(bindings)) continue;
+		for (const element of bindings.elements) {
+			const original = element.propertyName?.text ?? element.name.text;
+			if (GUARDED_FUNCTIONS.has(original)) aliases.set(element.name.text, original);
+		}
+	}
+	const guardedFunction = (name: string): string | undefined =>
+		GUARDED_FUNCTIONS.has(name) ? name : aliases.get(name);
+	/** A member access — `x.get` or `x["get"]` — as its receiver and member name. */
+	const member = (
+		node: ts.Node,
+	): { readonly receiver: ts.Expression; readonly name: string } | undefined =>
+		ts.isPropertyAccessExpression(node)
+			? { receiver: node.expression, name: node.name.text }
+			: ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
+				? { receiver: node.expression, name: node.argumentExpression.text }
 				: undefined;
+	/** Whether `node` is the callee of the call that is its parent. */
+	const isCallee = (node: ts.Node): boolean =>
+		ts.isCallExpression(node.parent) && node.parent.expression === node;
+	/** Whether an identifier names a declaration, an import, a property or a type — not a reference to a value. */
+	const isDeclarationName = (node: ts.Identifier): boolean => {
+		const parent = node.parent;
+		return (
+			(ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+			ts.isImportSpecifier(parent) ||
+			ts.isImportClause(parent) ||
+			ts.isExportSpecifier(parent) ||
+			(ts.isPropertyAssignment(parent) && parent.name === node) ||
+			(ts.isVariableDeclaration(parent) && parent.name === node) ||
+			(ts.isFunctionDeclaration(parent) && parent.name === node) ||
+			(ts.isParameter(parent) && parent.name === node) ||
+			(ts.isBindingElement(parent) && (parent.name === node || parent.propertyName === node)) ||
+			(ts.isPropertySignature(parent) && parent.name === node) ||
+			(ts.isMethodSignature(parent) && parent.name === node) ||
+			(ts.isMethodDeclaration(parent) && parent.name === node) ||
+			(ts.isPropertyDeclaration(parent) && parent.name === node) ||
+			ts.isTypeReferenceNode(parent) ||
+			ts.isTypeQueryNode(parent) ||
+			ts.isQualifiedName(parent)
+		);
+	};
+	/** A guarded method on a receiver of its kind: the site's kind, else `undefined`. */
+	const guardedMember = (node: ts.Node): What | undefined => {
+		const access = member(node);
+		if (access === undefined) return undefined;
+		const receiver = GUARDED_METHODS.get(access.name);
+		return receiver !== undefined && classify(access.receiver) === receiver
+			? (access.name as What)
+			: undefined;
+	};
 	const visit = (node: ts.Node): void => {
 		if (ts.isCallExpression(node)) {
 			const callee = node.expression;
-			const name = calleeName(callee);
-			if (name === "get" && ts.isPropertyAccessExpression(callee)) {
-				if (classify(callee.expression) === "store") found(node, "get");
-			} else if (name === "revokedBefore" && ts.isPropertyAccessExpression(callee)) {
-				if (classify(callee.expression) === "revocation") found(node, "revokedBefore");
-			} else if (name === "selectAcr") {
-				found(node, "selectAcr");
-			} else if (name === "recordSecondFactor") {
-				found(node, "recordSecondFactor");
-			} else if (name === "establishWithoutAsking") {
-				found(node, "establishWithoutAsking");
+			const method = guardedMember(callee);
+			if (method !== undefined) {
+				found(node, method);
+			} else if (ts.isIdentifier(callee)) {
+				const name = guardedFunction(callee.text);
+				if (name !== undefined) found(node, name as What);
+			} else {
+				// A string element access to a guarded function: `x["recordSecondFactor"](…)`.
+				const access = member(callee);
+				if (access !== undefined && GUARDED_FUNCTIONS.has(access.name)) {
+					found(node, access.name as What);
+				} else if (
+					ts.isPropertyAccessExpression(callee) &&
+					GUARDED_FUNCTIONS.has(callee.name.text)
+				) {
+					found(node, callee.name.text as What);
+				}
 			}
+		} else if (ts.isIdentifier(node) && !isCallee(node) && !isDeclarationName(node)) {
+			// A reference that is not a call: `.bind`, `.call`, a value passed on.
+			const name = guardedFunction(node.text);
+			if (name !== undefined) found(node, name as What);
+		} else if (
+			(ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+			!isCallee(node)
+		) {
+			// A method taken off its object without being called there — not a
+			// `typeof` check of it, which reads nothing.
+			const method = ts.isTypeOfExpression(node.parent) ? undefined : guardedMember(node);
+			if (method !== undefined) found(node, method);
 		} else if (ts.isObjectLiteralExpression(node)) {
 			for (const property of node.properties) {
 				if (
@@ -509,7 +605,13 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		const outside = [...sites]
 			.filter(([file]) => !file.startsWith(HOME))
 			.map(([file, found]) => {
-				const { recordSecondFactor: _r, establishWithoutAsking: _e, ...rest } = counted(found);
+				const {
+					recordSecondFactor: _r,
+					establishWithoutAsking: _e,
+					resumePrimary: _p,
+					continuationOf: _c,
+					...rest
+				} = counted(found);
 				return [file, rest] as const;
 			})
 			.filter(([, counts]) => Object.keys(counts).length > 0);
@@ -541,7 +643,13 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		for (const { file, sites: s, why } of ALLOWED) {
 			const found = sites.get(file);
 			expect(found, `${file} — ${why}`).toBeDefined();
-			const { recordSecondFactor: _r, establishWithoutAsking: _e, ...rest } = counted(found ?? []);
+			const {
+				recordSecondFactor: _r,
+				establishWithoutAsking: _e,
+				resumePrimary: _p,
+				continuationOf: _c,
+				...rest
+			} = counted(found ?? []);
 			expect(rest, `${file} — ${why}`).toEqual(s);
 		}
 	});

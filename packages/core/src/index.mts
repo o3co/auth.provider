@@ -884,6 +884,7 @@ export {
 	type InterruptionAnswer,
 	isHintKey,
 	isHintToken,
+	issuedRemediationActions,
 	MFA_REQUIREMENT_NAME,
 	type PrimaryAdditions,
 	type PrimaryAdditionsDto,

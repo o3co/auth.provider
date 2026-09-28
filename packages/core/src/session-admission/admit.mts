@@ -47,10 +47,17 @@
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
+import type { AuditSink } from "../audit/types.mjs";
 import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { coveredByRevocationBoundary } from "../federation-grants/effective-status.mjs";
-import { composeAmr, MFA_AMR, wellFormedAmr } from "../grants/authenticationClaims.mjs";
+import {
+	composeAmr,
+	MFA_AMR,
+	PASSWORD_AMR,
+	wellFormedAmr,
+} from "../grants/authenticationClaims.mjs";
 import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import {
 	copySessionAuthentication,
@@ -59,8 +66,13 @@ import {
 	requirementSession,
 	requirementSessionFromAmr,
 } from "../user-sessions/authentication.mjs";
-import type { UserSession, UserSessionClaims } from "../user-sessions/types.mjs";
-import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
+import type {
+	SubjectRevocation,
+	UserSession,
+	UserSessionClaims,
+	UserSessionStore,
+} from "../user-sessions/types.mjs";
+import { type AcrSelection, type AcrTable, selectAcr, stepUpReach } from "./acr.mjs";
 import {
 	additionsFromDto,
 	checkPrimaryAdditions,
@@ -83,6 +95,7 @@ import {
 	isHintKey,
 	isHintToken,
 	isIssuedAction,
+	issuedActionsOf,
 	type PrimaryAdmission,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
@@ -298,8 +311,10 @@ const GRADES: ReadonlySet<string> = new Set<AdmissionGrade>([
 const actionLabel = (action: AdmissionAction): string =>
 	Object.hasOwn(ADMISSION_ACTIONS, action.name) || isIssuedAction(action) ? action.name : "custom";
 
-/** The `remediation` names already said to be undeclared, once per process each (D4). */
+/** The `remediation` names already said to be undeclared, once per process each (D4), up to the cap; past it, once for all. */
 const undeclaredRemediations = new Set<string>();
+const UNDECLARED_REMEDIATION_CAP = 256;
+let undeclaredRemediationsOverflowed = false;
 
 /** The requirements already said to have stepped up without a page, once per process each (D2, step 5). */
 const pagelessStepUps = new Set<string>();
@@ -314,42 +329,103 @@ const sessionlessStepUps = new Set<string>();
 const isStringList = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0);
 
-/** What `checkRequest` answers: the caller's `asks`, copied and frozen — a requirement cannot reach the caller's object, nor change what the ones after it are asked. */
+/**
+ * What `checkRequest` answers: every untrusted input read once and copied —
+ * the claim's fields, the action (the bundled entry or the issued object
+ * itself, else a plain copy of name and grade), the caller's `asks`, and
+ * each dependency read once off `deps` — so a getter answering one thing to
+ * the check and another to the steps changes nothing, and a requirement
+ * cannot reach the caller's objects.
+ */
 interface CheckedRequest {
+	readonly claim: SessionClaim;
+	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;
+	readonly requirements: SessionRequirementResolver;
+	readonly userSessionStore: UserSessionStore | undefined;
+	readonly subjectRevocation: SubjectRevocation | undefined;
+	readonly acrTable: AcrTable;
+	readonly logger: Logger | undefined;
+	readonly auditSink: AuditSink | undefined;
+	readonly now: Date;
 }
 
-/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read. */
+/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read, each input read once. */
 function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
-	checkResolver(deps.requirements);
-	if (!isObject(deps.acrTable)) throw new RangeError("admitSession: acrTable must be an object");
+	const requirements = checkResolver(deps.requirements);
+	const acrTable = deps.acrTable;
+	if (!isObject(acrTable)) throw new RangeError("admitSession: acrTable must be an object");
+	const userSessionStore = deps.userSessionStore;
+	const subjectRevocation = deps.subjectRevocation;
+	const logger = deps.logger;
+	const auditSink = deps.auditSink;
+	const clock = deps.now;
+	const now = clock === undefined ? new Date() : clock();
 	if (!isObject(request)) throw new RangeError("admitSession: the request must be an object");
-	if (!isObject(request.claim) || !knownClaims.has(request.claim)) {
+	const presented = request.claim;
+	if (!isObject(presented) || !knownClaims.has(presented)) {
 		throw new RangeError(
 			"admitSession: the claim must be one a claim builder made — cookieClaim, codeClaimFirstRead, codeClaimRevalidation, linkClaim or tokenClaim",
 		);
 	}
-	const { action: asked } = request;
-	if (
-		!isObject(asked) ||
-		nonEmptyString(asked.name) === undefined ||
-		typeof asked.grade !== "string" ||
-		!GRADES.has(asked.grade)
-	) {
+	// A branded claim is frozen and core's own; the copy is still taken, so
+	// nothing downstream reads the caller's object twice.
+	const claim = Object.freeze({
+		authenticated: presented.authenticated === true,
+		sid: nonEmptyString(presented.sid),
+		subject: nonEmptyString(presented.subject),
+		carrier: presented.carrier,
+		...(Array.isArray(presented.tokenAmr)
+			? { tokenAmr: Object.freeze([...(presented.tokenAmr as readonly string[])]) }
+			: {}),
+	}) as SessionClaim;
+	const asked = request.action;
+	if (!isObject(asked))
+		throw new RangeError("admitSession: the action must be a name with a grade");
+	const name = asked.name;
+	const grade = asked.grade;
+	if (nonEmptyString(name) === undefined || typeof grade !== "string" || !GRADES.has(grade)) {
 		throw new RangeError("admitSession: the action must be a name with a grade");
 	}
-	const asks = request.asks;
-	if (asks === undefined) return { asks: undefined };
-	if (!isObject(asks)) throw new RangeError("admitSession: asks must be an object");
-	const acrValues = asks.acrValues;
-	if (acrValues !== undefined && !isStringList(acrValues)) {
-		throw new RangeError("admitSession: asks.acrValues must be a list of non-empty strings");
+	// A bundled name is accepted as the bundled entry itself alone: the grade
+	// is not the caller's to restate (D4).
+	if (Object.hasOwn(ADMISSION_ACTIONS, name)) {
+		if (asked !== (ADMISSION_ACTIONS as Record<string, AdmissionAction>)[name]) {
+			throw new RangeError(
+				`admitSession: "${name}" is a bundled action: pass ADMISSION_ACTIONS["${name}"] itself, not a copy or a literal`,
+			);
+		}
+	}
+	// The issued object keeps its identity — that is what step 5 checks — and
+	// so does the bundled entry; anything else is copied.
+	const action: AdmissionAction =
+		isIssuedAction(asked) || Object.hasOwn(ADMISSION_ACTIONS, name)
+			? (asked as AdmissionAction)
+			: Object.freeze({ name, grade: grade as AdmissionGrade });
+	const asksRead = request.asks;
+	let asks: AdmissionAsks | undefined;
+	if (asksRead !== undefined) {
+		if (!isObject(asksRead)) throw new RangeError("admitSession: asks must be an object");
+		const acrValues = asksRead.acrValues;
+		if (acrValues !== undefined && !isStringList(acrValues)) {
+			throw new RangeError("admitSession: asks.acrValues must be a list of non-empty strings");
+		}
+		asks = Object.freeze({
+			...(acrValues === undefined ? {} : { acrValues: Object.freeze([...acrValues]) }),
+		});
 	}
 	return {
-		asks: Object.freeze({
-			...(acrValues === undefined ? {} : { acrValues: Object.freeze([...acrValues]) }),
-		}),
+		claim,
+		action,
+		asks,
+		requirements,
+		userSessionStore,
+		subjectRevocation,
+		acrTable,
+		logger,
+		auditSink,
+		now,
 	};
 }
 
@@ -366,6 +442,10 @@ const viewOf = (session: UserSession): SessionView =>
 	});
 
 const VERDICTS: ReadonlySet<string> = new Set(["met", "reauthenticate", "step_up", "unmet"]);
+
+/** A requirement's answer read once — `outcome` and `whenStillUnmet` — into a plain object; anything that is not an object as it is. */
+const copyVerdict = (answer: unknown): unknown =>
+	isObject(answer) ? { outcome: answer.outcome, whenStillUnmet: answer.whenStillUnmet } : answer;
 
 /** Whether `value` is one of the four verdicts, its `step_up` with a `whenStillUnmet` (and no page: the registered one answers). */
 const isVerdict = (value: unknown): value is RequirementVerdict =>
@@ -424,11 +504,17 @@ export async function admitSession(
 	deps: AdmissionDeps,
 	request: AdmissionRequest,
 ): Promise<Admission> {
-	const { asks } = checkRequest(deps, request);
-	const { claim: presented } = request;
-	const now = deps.now === undefined ? new Date() : deps.now();
-	const label = actionLabel(request.action);
-	const logger = deps.logger;
+	const checked = checkRequest(deps, request);
+	const {
+		claim: presented,
+		asks,
+		requirements: resolver,
+		userSessionStore,
+		subjectRevocation,
+		now,
+		logger,
+	} = checked;
+	const label = actionLabel(checked.action);
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
 			{ store, action: label, err: loggableError(err) },
@@ -448,12 +534,12 @@ export async function admitSession(
 
 	// Step 2: the live read.
 	let session: UserSession | null = null;
-	if (deps.userSessionStore !== undefined && presented.sid === undefined) {
+	if (userSessionStore !== undefined && presented.sid === undefined) {
 		if (presented.carrier !== "token") return { outcome: "not_live", reason: "no_sid" };
-	} else if (deps.userSessionStore !== undefined && presented.sid !== undefined) {
+	} else if (userSessionStore !== undefined && presented.sid !== undefined) {
 		let record: UserSession | null | undefined;
 		try {
-			record = await deps.userSessionStore.get(presented.sid);
+			record = await userSessionStore.get(presented.sid);
 		} catch (err) {
 			return unavailable("user_session", err);
 		}
@@ -474,7 +560,7 @@ export async function admitSession(
 	// Step 3: the subject.
 	if (session !== null && presented.subject !== undefined && presented.subject !== session.sub) {
 		logger?.warn({ action: label }, "session_admission_subject_mismatch");
-		void emitAuditEvent(deps.auditSink, {
+		void emitAuditEvent(checked.auditSink, {
 			timestamp: now,
 			type: "session.admission.subject_mismatch",
 			subject: session.sub,
@@ -491,9 +577,9 @@ export async function admitSession(
 
 	// Step 4: the revocation boundary, against a live record; a token's is
 	// verifyJwt's, so the two readings do not double up.
-	if (session !== null && deps.subjectRevocation !== undefined && presented.carrier !== "token") {
+	if (session !== null && subjectRevocation !== undefined && presented.carrier !== "token") {
 		try {
-			const boundary = await deps.subjectRevocation.revokedBefore(session.sub);
+			const boundary = await subjectRevocation.revokedBefore(session.sub);
 			if (boundary !== null && !isValidDate(boundary)) {
 				throw new TypeError("the sessions boundary is neither a date nor null");
 			}
@@ -509,8 +595,8 @@ export async function admitSession(
 
 	// Step 5: the requirements, by the action's effective grade — normalised
 	// first (D4): only the issued remediation keeps its grade and skips them.
-	const requirements = [...deps.requirements.entries()];
-	const effective = effectiveAction(requirements, request.action, deps);
+	const requirements = [...resolver.entries()];
+	const effective = effectiveAction(requirements, checked.action, logger);
 	// A token carrier's authentication is the token's own, whether or not a
 	// record was read (D9): the record is only the view.
 	const authentication =
@@ -536,6 +622,9 @@ export async function admitSession(
 			} catch (err) {
 				return unavailable(name, err);
 			}
+			// Copied before it is checked: a getter cannot answer one outcome
+			// to the check and another to the merge.
+			answer = copyVerdict(answer);
 			if (!isVerdict(answer)) {
 				return unavailable(
 					name,
@@ -557,9 +646,9 @@ export async function admitSession(
 	const selection: AcrSelection | undefined =
 		requested.length === 0
 			? undefined
-			: selectAcr(requested, requirementSession(session)?.amr ?? [], deps.acrTable, reach);
+			: selectAcr(requested, requirementSession(session)?.amr ?? [], checked.acrTable, reach);
 	const noneConfigured =
-		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(deps.acrTable, acr));
+		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(checked.acrTable, acr));
 
 	// Step 7: the merge.
 	return merge(verdict, selection, {
@@ -567,7 +656,7 @@ export async function admitSession(
 		noneConfigured,
 		requirements,
 		held: requirementSession(session)?.amr ?? [],
-		table: deps.acrTable,
+		table: checked.acrTable,
 	});
 }
 
@@ -615,18 +704,25 @@ function stepUpVerdict(
 function effectiveAction(
 	requirements: readonly (readonly [string, RegisteredRequirement])[],
 	asked: AdmissionAction,
-	deps: AdmissionDeps,
+	logger: Logger | undefined,
 ): AdmissionAction {
 	if (asked.grade !== "remediation") return { name: asked.name, grade: asked.grade };
 	if (
 		isIssuedAction(asked) &&
-		requirements.some(([, r]) => Object.values(r.actions).includes(asked))
+		requirements.some(([, r]) => Object.values(issuedActionsOf(r) ?? {}).includes(asked))
 	) {
 		return asked;
 	}
-	if (!undeclaredRemediations.has(asked.name)) {
-		undeclaredRemediations.add(asked.name);
-		deps.logger?.warn({ action: asked.name }, "session_admission_remediation_undeclared");
+	// The name is the consumer's own, so the line says `custom`; once per
+	// name, and once for all past the cap, so a route cannot fill the log.
+	if (undeclaredRemediations.size < UNDECLARED_REMEDIATION_CAP) {
+		if (!undeclaredRemediations.has(asked.name)) {
+			undeclaredRemediations.add(asked.name);
+			logger?.warn({ action: "custom" }, "session_admission_remediation_undeclared");
+		}
+	} else if (!undeclaredRemediations.has(asked.name) && !undeclaredRemediationsOverflowed) {
+		undeclaredRemediationsOverflowed = true;
+		logger?.warn({ action: "custom", overflow: true }, "session_admission_remediation_undeclared");
 	}
 	return { name: asked.name, grade: "credential_change" };
 }
@@ -667,12 +763,18 @@ function merge(
 				throw new Error("invariant violated: a step-up over no session");
 			}
 			if (A?.outcome === "unmet") return unmetAcr();
+			// The hint: what the stepping requirement's own trip can finish, as
+			// in the met + step_up row — never an entry only another reaches.
+			const own = context.requirements.find(([name]) => name === R.requirement)?.[1];
 			return {
 				outcome: "step_up",
 				requirement: R.requirement,
 				session,
 				page: R.page,
-				acrValues: A?.outcome === "step_up" ? A.acrValues : [],
+				acrValues:
+					A?.outcome === "step_up" && own !== undefined
+						? A.acrValues.filter((acr: string) => finishes(context, own, acr))
+						: [],
 				whenStillUnmet: A?.outcome === "step_up" ? "unmet" : R.whenStillUnmet,
 			};
 		}
@@ -682,6 +784,18 @@ function merge(
 				: { outcome: "unmet", requirement: R.requirement, session };
 	}
 }
+
+/** Whether `requirement`'s reach, beside what is held, covers one alternative of the entry `acr`. */
+const finishes = (
+	context: MergeContext,
+	requirement: RegisteredRequirement,
+	acr: string,
+): boolean =>
+	(Object.hasOwn(context.table, acr) ? context.table[acr] : [])?.some(
+		(alternative) =>
+			alternative.length > 0 &&
+			alternative.every((value) => context.held.includes(value) || requirement.reach.has(value)),
+	) ?? false;
 
 /**
  * The `met` + `step_up` row: the page of the first requirement whose own
@@ -695,16 +809,9 @@ function stepUpThroughOne(
 ): Admission | undefined {
 	const { session } = context;
 	if (session === null) throw new Error("invariant violated: a step-up over no session");
-	const held = new Set(context.held);
 	for (const [name, requirement] of context.requirements) {
 		// What this requirement's reach alone can finish, beside what is held.
-		const finishes = (acr: string): boolean =>
-			(Object.hasOwn(context.table, acr) ? context.table[acr] : [])?.some(
-				(alternative) =>
-					alternative.length > 0 &&
-					alternative.every((value) => held.has(value) || requirement.reach.has(value)),
-			) ?? false;
-		const finishable = reachable.filter(finishes);
+		const finishable = reachable.filter((acr: string) => finishes(context, requirement, acr));
 		// A requirement whose reach covers an entry registered a page: boot
 		// holds a non-empty reach to one. Without one nothing could finish it.
 		if (finishable.length > 0 && requirement.stepUpPage !== undefined) {
@@ -782,12 +889,13 @@ const establish = (primary: PrimaryAuthentication): Establishment => {
 	return built as unknown as Establishment;
 };
 
-const isInterruption = (value: unknown): value is RequirementInterruption =>
-	isObject(value) && typeof value.open === "function";
-
 /** The keys an interruption's body may carry (D5): closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
 const ANSWER_KEYS: ReadonlySet<string> = new Set(["error", "transaction", "expires_in", "hints"]);
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
+/** The hint grammar's caps (D5): an integer's range, a list's length, a transaction's length. */
+const HINT_NUMBER_MAX = 86_400;
+const HINT_LIST_MAX = 16;
+const TRANSACTION_MAX_LENGTH = 128;
 
 /**
  * `value` as the closed body of D5, held to what the requirement named
@@ -811,53 +919,72 @@ function checkInterruptionAnswer(
 	};
 	if (!isObject(value)) return refuse("that is not an object");
 	if (value.status !== 403) refuse("whose status is not 403");
-	const body = value.body;
-	if (!isObject(body) || Array.isArray(body)) return refuse("without a body");
+	// The body: read once, its own keys copied into a plain object that is
+	// what gets validated and answered.
+	const bodyRead = value.body;
+	if (!isObject(bodyRead) || Array.isArray(bodyRead)) return refuse("without a body");
+	const body: Record<string, unknown> = {};
+	for (const key of Object.keys(bodyRead)) body[key] = bodyRead[key];
 	for (const key of Object.keys(body)) {
 		if (!ANSWER_KEYS.has(key)) {
 			refuse(`whose body carries "${key}", which the body's shape does not admit`);
 		}
 	}
-	if (!isWellFormedErrorCode(body.error)) refuse("whose error is not a well-formed error code");
-	if (body.transaction !== undefined) {
-		if (typeof body.transaction !== "string" || !BASE64URL.test(body.transaction)) {
-			refuse("whose transaction is not a base64url string");
+	const error = body.error;
+	if (!isWellFormedErrorCode(error)) refuse("whose error is not a well-formed error code");
+	const transaction = body.transaction;
+	if (transaction !== undefined) {
+		if (
+			typeof transaction !== "string" ||
+			transaction.length > TRANSACTION_MAX_LENGTH ||
+			!BASE64URL.test(transaction)
+		) {
+			refuse(`whose transaction is not a base64url string of at most ${TRANSACTION_MAX_LENGTH}`);
 		}
 	}
-	if (body.expires_in !== undefined) {
-		if (!Number.isSafeInteger(body.expires_in) || (body.expires_in as number) <= 0) {
+	const expiresIn = body.expires_in;
+	if (expiresIn !== undefined) {
+		if (!Number.isSafeInteger(expiresIn) || (expiresIn as number) <= 0) {
 			refuse("whose expires_in is not a positive integer");
 		}
 	}
 	let hints: Record<string, string | number | boolean | readonly string[]> | undefined;
-	if (body.hints !== undefined) {
-		if (!isObject(body.hints) || Array.isArray(body.hints)) {
+	const hintsRead = body.hints;
+	if (hintsRead !== undefined) {
+		if (!isObject(hintsRead) || Array.isArray(hintsRead)) {
 			return refuse("whose hints are not an object");
 		}
 		hints = {};
-		for (const [key, hint] of Object.entries(body.hints)) {
+		for (const key of Object.keys(hintsRead)) {
+			const hint = hintsRead[key];
 			if (!hintKeys.includes(key) || !isHintKey(key)) {
 				refuse(`with a hint "${key}" it did not declare, or that is not a hint name`);
 			}
-			if (typeof hint === "boolean" || (typeof hint === "number" && Number.isFinite(hint))) {
+			if (typeof hint === "boolean") {
+				hints[key] = hint;
+			} else if (typeof hint === "number") {
+				if (!Number.isSafeInteger(hint) || hint < 0 || hint > HINT_NUMBER_MAX) {
+					refuse(`with a hint "${key}" that is not an integer in [0, ${HINT_NUMBER_MAX}]`);
+				}
 				hints[key] = hint;
 			} else if (isHintToken(hint)) {
 				hints[key] = hint;
 			} else if (Array.isArray(hint) && hint.every(isHintToken)) {
+				if (hint.length > HINT_LIST_MAX) {
+					refuse(`with a hint "${key}" that lists more than ${HINT_LIST_MAX} tokens`);
+				}
 				hints[key] = Object.freeze([...hint]);
 			} else {
-				refuse(
-					`with a hint "${key}" that is not a boolean, a finite number, or an enum-like token`,
-				);
+				refuse(`with a hint "${key}" that is not a boolean, an integer, or an enum-like token`);
 			}
 		}
 	}
 	return Object.freeze({
 		status: 403,
 		body: Object.freeze({
-			error: body.error as string,
-			...(body.transaction === undefined ? {} : { transaction: body.transaction as string }),
-			...(body.expires_in === undefined ? {} : { expires_in: body.expires_in as number }),
+			error: error as string,
+			...(transaction === undefined ? {} : { transaction: transaction as string }),
+			...(expiresIn === undefined ? {} : { expires_in: expiresIn as number }),
 			...(hints === undefined ? {} : { hints: Object.freeze(hints) }),
 		}),
 	});
@@ -885,20 +1012,27 @@ const unavailableAtEstablishment = (
  */
 async function askEvery(
 	deps: AdmissionDeps,
+	requirements: SessionRequirementResolver,
 	composed: PrimaryAuthentication,
-	continuation: PrimaryContinuation,
+	primary: PrimaryAuthentication,
+	done: readonly CompletedRequirement[],
 ): Promise<PrimaryAdmission> {
-	for (const [name, requirement] of deps.requirements.entries()) {
-		if (requirement.admitPrimary === undefined) continue;
+	for (const [name, requirement] of requirements.entries()) {
+		const ask = requirement.admitPrimary;
+		if (ask === undefined) continue;
 		let answer: unknown;
 		try {
-			answer = await requirement.admitPrimary(composed);
+			answer = await ask.call(requirement, composed);
 		} catch (err) {
 			return unavailableAtEstablishment(deps, name, err);
 		}
 		if (answer === "establish") continue;
-		if (isInterruption(answer)) {
-			const interruption = answer;
+		// The answer's `open` is read once, here.
+		const open = isObject(answer) ? answer.open : undefined;
+		if (typeof open === "function") {
+			// The continuation names who interrupted: `resumePrimary` accepts
+			// that requirement's completion alone (D5).
+			const continuation = continuationOf(primary, done, name);
 			return {
 				outcome: "interrupt",
 				requirement: name,
@@ -909,7 +1043,7 @@ async function askEvery(
 					}
 					// The requirement persists what core built (D5).
 					return checkInterruptionAnswer(
-						await interruption.open(sessionId, continuation),
+						await (open as RequirementInterruption["open"]).call(answer, sessionId, continuation),
 						name,
 						requirement.hintKeys,
 					);
@@ -941,13 +1075,13 @@ export async function admitPrimary(
 	primary: PrimaryAuthentication,
 ): Promise<PrimaryAdmission> {
 	if (!isObject(deps)) throw new RangeError("admitPrimary: deps must be an object");
-	checkResolver(deps.requirements);
+	const requirements = checkResolver(deps.requirements);
 	if (!isObject(primary) || !knownPrimaries.has(primary)) {
 		throw new RangeError(
 			"admitPrimary: the primary must be one passwordPrimary or establishWithoutAsking built",
 		);
 	}
-	return askEvery(deps, primary, continuationOf(primary, []));
+	return askEvery(deps, requirements, primary, primary, []);
 }
 
 /**
@@ -1003,13 +1137,28 @@ export async function resumePrimary(
 	completed: CompletedRequirement,
 ): Promise<PrimaryAdmission> {
 	if (!isObject(deps)) throw new RangeError("resumePrimary: deps must be an object");
-	checkResolver(deps.requirements);
+	const requirements = checkResolver(deps.requirements);
 	const read = checkPrimaryContinuation(continuation);
 	if (!isObject(completed) || nonEmptyString(completed.requirement) === undefined) {
 		throw new RangeError("resumePrimary: the completion must name a requirement");
 	}
+	// The continuation waits on one requirement's ceremony: its completion,
+	// no other's (D5).
+	if (completed.requirement !== read.interruptedBy) {
+		throw new RangeError(
+			`resumePrimary: the continuation waits on "${read.interruptedBy}", not "${completed.requirement}"`,
+		);
+	}
+	// This release interrupts a password login alone: `recorded` is recomposed
+	// from that kind, never taken from the persisted DTO.
+	const kind = read.primary.recorded.authentication.primary;
+	if (kind !== PASSWORD_AMR) {
+		throw new RangeError(
+			`resumePrimary: a continuation's primary is a password login in this release, not "${kind}"`,
+		);
+	}
 	const registeredWithAdmitPrimary = (name: string): boolean =>
-		deps.requirements.get(name)?.admitPrimary !== undefined;
+		requirements.get(name)?.admitPrimary !== undefined;
 	for (const entry of [...read.done.map((d) => d.requirement), completed.requirement]) {
 		if (!registeredWithAdmitPrimary(entry)) {
 			throw new RangeError(
@@ -1021,8 +1170,12 @@ export async function resumePrimary(
 		throw new RangeError(`resumePrimary: "${completed.requirement}" already completed`);
 	}
 	const adds = checkPrimaryAdditions(completed.requirement, completed.adds);
-	// Rehydrated: the continuation carries epoch milliseconds.
-	const primary = primaryFromDto(read.primary);
+	// Rehydrated: the continuation carries epoch milliseconds; `recorded` is
+	// the password kind's, not the DTO's.
+	const primary: PrimaryAuthentication = Object.freeze({
+		...primaryFromDto(read.primary),
+		recorded: passwordSessionAuthentication(),
+	});
 	const done: readonly CompletedRequirement[] = Object.freeze([
 		...read.done.map((entry) =>
 			Object.freeze({ requirement: entry.requirement, adds: additionsFromDto(entry.adds) }),
@@ -1034,7 +1187,7 @@ export async function resumePrimary(
 	// requirement said it could, and a record from before a reach shrank is
 	// refused rather than composed.
 	for (const entry of done) {
-		const reach = deps.requirements.get(entry.requirement)?.reach;
+		const reach = requirements.get(entry.requirement)?.reach;
 		const outside = entry.adds.amr.filter((value) => !reach?.has(value));
 		if (outside.length > 0) {
 			throw new RangeError(
@@ -1042,7 +1195,7 @@ export async function resumePrimary(
 			);
 		}
 	}
-	return askEvery(deps, composeRecorded(primary, done), continuationOf(primary, done));
+	return askEvery(deps, requirements, composeRecorded(primary, done), primary, done);
 }
 
 /** What a federated login legitimately produces (D5): the federation's own facts, never a `recorded`. */

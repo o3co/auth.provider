@@ -228,7 +228,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		expect(admission).toMatchObject({
 			outcome: "interrupt",
 			requirement: "second",
-			continuation: continuationOf(primary(), [], "mfa"),
+			continuation: continuationOf(primary(), [], "second"),
 		});
 		expect(first.asked[0]).toEqual(primary());
 	});
