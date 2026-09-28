@@ -378,11 +378,6 @@ const TOKEN_SIDE =
 const ALLOWED: ReadonlyArray<AllowedSites> = [
 	// The oauth consumers, until A3.
 	{
-		file: "packages/oauth/src/grants/authorization.mts",
-		sites: { get: 2 },
-		why: `${UNTIL_A3}: the authorization_code grant's two reads, before signing and before linking`,
-	},
-	{
 		file: "packages/oauth/src/grants/refreshToken.mts",
 		sites: { get: 1 },
 		why: `${UNTIL_A3}: the refresh grant's read by the token's sid (D9: it moves with A3, on tokenClaim)`,

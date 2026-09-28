@@ -16,11 +16,18 @@
 import crypto from "node:crypto";
 
 import {
+	ADMISSION_ACTIONS,
+	type Admission,
+	type AdmissionDeps,
+	admitSession,
 	auditErrorText,
+	codeClaimFirstRead,
+	codeClaimRevalidation,
 	constantTimeStringEqual,
 	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantError,
 	type GrantHandler,
 	type GrantHandlerResult,
 	generateIdToken,
@@ -39,7 +46,7 @@ import {
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-import { requireRequirements } from "../admission.mjs";
+import { requireRequirements, stepUpRefusal, unavailableDescription } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -67,21 +74,63 @@ export type AuthorizationGrantDeps = Pick<
 	// Required: a factory built by hand without one is refused.
 	ProviderDeps<"codeRepository" | "clientRepository" | "sessionRequirementResolver", "auditSink">;
 
+/**
+ * A requirement's verdict or an outage, as the token endpoint answers it
+ * (the session-admission ADR's D8): `step_up` is `invalid_grant` with
+ * `step_up: "<requirement>"` beside it (the MFA ADR's D16 row), `unmet` and
+ * `reauthenticate` are `invalid_grant` naming the requirement, and
+ * `unavailable` is `503`, logged once by admission.
+ */
+const requirementOrOutageRefusal = (
+	admission: Extract<
+		Admission,
+		{ outcome: "step_up" | "unmet" | "reauthenticate" | "unavailable" }
+	>,
+): GrantError => {
+	switch (admission.outcome) {
+		case "step_up":
+			return stepUpRefusal(admission.requirement);
+		case "unmet":
+		case "reauthenticate":
+			return {
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: `the session does not meet the ${admission.requirement} requirement`,
+			};
+		case "unavailable":
+			return {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: unavailableDescription(admission.store),
+			};
+	}
+};
+
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
-	requireRequirements("createAuthorizationGrant", deps.sessionRequirementResolver);
-	// Every store this grant reads or writes that cannot answer is `503`,
-	// logged once at error level as `authorization_grant_store_unavailable`,
+	// What admission reads for this grant's two session reads (the
+	// session-admission ADR's D1): the module's own slots as wired, and no acr
+	// table — the acr was chosen at /authorize and travels on the code.
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore: deps.userSessionStore,
+		subjectRevocation: deps.subjectRevocation,
+		requirements: requireRequirements("createAuthorizationGrant", deps.sessionRequirementResolver),
+		acrTable: {},
+		logger,
+		auditSink: deps.auditSink,
+	};
+	// Every store this grant reads or writes itself that cannot answer is
+	// `503`, logged once at error level as `authorization_grant_store_unavailable`,
 	// `store` naming which and `step` the operation, with the error's
 	// projection — never the error, which can carry what the store was sent.
+	// The session store is read through admission, which logs its own outage.
 	const storeUnavailable = (
 		store:
 			| "authorization_code"
-			| "user_session"
 			| "refresh_token_family"
 			| "session_family_index"
 			| "session_rp_registry",
-		step: "consume" | "get" | "revalidate" | "register" | "add",
+		step: "consume" | "register" | "add",
 		clientId: string,
 		err: unknown,
 	): void => {
@@ -89,6 +138,65 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			{ store, step, clientId: auditErrorText(clientId), err: loggableError(err) },
 			"authorization_grant_store_unavailable",
 		);
+	};
+
+	/**
+	 * The first read's answer when it does not admit (D8): a code with no
+	 * `sid` while a store is wired is refused as it always was, naming the
+	 * login wiring; a record gone, past its expiry or without a subject, and
+	 * a session established before the subject's sessions were revoked
+	 * (change 4), are `session_invalid`; a requirement's verdict is
+	 * `invalid_grant` naming it, with `step_up` beside it for a step-up; an
+	 * outage is `503`, logged once by admission.
+	 */
+	const firstReadRefusal = (admission: Exclude<Admission, { outcome: "admitted" }>): GrantError => {
+		switch (admission.outcome) {
+			case "not_live":
+				return admission.reason === "no_sid"
+					? {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription:
+								"code record is missing session identifier (sid); ensure login wiring records sid at authorize time",
+						}
+					: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
+			case "unauthenticated":
+			case "revoked":
+				return { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
+			default:
+				return requirementOrOutageRefusal(admission);
+		}
+	};
+
+	/**
+	 * The second read's answer when it does not admit (D8): a session that
+	 * went away, expired, was revoked or changed its subject since the first
+	 * read is `session_invalidated`, and the grant says which of the two it
+	 * saw at warn — Codex Delta 3: a security-relevant rejection SIEMs
+	 * correlate against `cascadeLogout`'s audit events, with the `sid` and the
+	 * client, and never a code identifier (`CodeData` carries no stable jti,
+	 * and the raw `code` is secret material). A requirement's verdict or an
+	 * outage is answered as on the first read.
+	 */
+	const revalidationRefusal = (
+		admission: Admission,
+		at: { readonly sid: string; readonly clientId: string },
+	): GrantError => {
+		switch (admission.outcome) {
+			case "not_live":
+			case "revoked":
+			case "unauthenticated":
+			case "admitted":
+				logger?.warn(
+					at,
+					admission.outcome === "not_live" && admission.reason === "subject_mismatch"
+						? "authorization_grant_rejected_session_subject_changed_during_token_issuance"
+						: "authorization_grant_rejected_session_invalidated_during_token_issuance",
+				);
+				return { status: 400, error: "invalid_grant", errorDescription: "session_invalidated" };
+			default:
+				return requirementOrOutageRefusal(admission);
+		}
 	};
 
 	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
@@ -405,16 +513,6 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// TODO-F-4: nonce from the code record — written at /authorize time and
 			// must be reflected verbatim in the id_token per OIDC Core §2.
 			const nonce = codeData.nonce;
-			if (deps.userSessionStore && !sid) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							"code record is missing session identifier (sid); ensure login wiring records sid at authorize time",
-					},
-				};
-			}
 
 			// The subject of every token issued here is the user the *code* was
 			// bound to, resolved through `sid` — not whoever owns the session that
@@ -426,55 +524,36 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// where `/token` does carry cookies, the two could name different
 			// users if the session changed between `/authorize` and `/token`.
 			//
-			// Resolving the session here rather than in the linking block below
-			// also means a session deleted between `/authorize` and `/token` is
-			// rejected before any token is signed.
-			let userSession: UserSession | null = null;
-			if (deps.userSessionStore && sid) {
-				try {
-					userSession = await deps.userSessionStore.get(sid);
-				} catch (err) {
-					storeUnavailable("user_session", "get", authenticatedClientId, err);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "session store unavailable",
-						},
-					};
-				}
-				if (!userSession) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "session_invalid",
-						},
-					};
-				}
+			// Read here, through admission (the session-admission ADR's D8), rather
+			// than in the linking block below, so a session deleted, expired or
+			// revoked between `/authorize` and `/token` is rejected before any
+			// token is signed. The code's claim names no subject — `CodeData`
+			// carries none — so this first read's record supplies it, and the
+			// second read is compared against it.
+			const firstRead = await admitSession(admissionDeps, {
+				claim: codeClaimFirstRead(codeData),
+				action: ADMISSION_ACTIONS["oauth.code_exchange"],
+			});
+			if (firstRead.outcome !== "admitted") {
+				return { result: firstReadRefusal(firstRead) };
 			}
+			let userSession: UserSession | null = firstRead.session;
 
-			// The fallback is gated on the *store* being absent, not on `sub` being
-			// nullish. `userSession?.sub ?? sessionUserId` would look equivalent,
-			// but it silently reverts to the cookie-derived identity whenever a
-			// store returns a record with no usable `sub` — reintroducing exactly
-			// the cross-user mismatch this fix removes, in the one topology
-			// (same-origin/BFF) where `/token` does carry cookies. `UserSession.sub`
-			// is typed `string`, but the store boundary is not enforced at runtime
-			// and custom implementations exist.
+			// With a store, admission read a record — a non-empty `sub`, live —
+			// and that is the subject. The fallback is gated on the *store* being
+			// absent, never on the record: reverting to the cookie-derived
+			// identity whenever a record lacks a usable `sub` would reintroduce
+			// exactly the cross-user mismatch this removes, in the one topology
+			// (same-origin/BFF) where `/token` does carry cookies.
 			let subject: string | null;
 			if (deps.userSessionStore) {
-				const sub = userSession?.sub;
-				if (typeof sub !== "string" || sub.length === 0) {
+				if (userSession === null) {
+					// Unreachable: admission admits no store-backed claim without a record.
 					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "session_invalid",
-						},
+						result: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" },
 					};
 				}
-				subject = sub;
+				subject = userSession.sub;
 			} else {
 				// No store wired means no sid to resolve, so the token-request
 				// session is the only available subject.
@@ -732,77 +811,44 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// slot keeps Codex M2's "no raw body for identity" invariant.
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
-					// CR-4: re-validate session liveness immediately before mutating the
-					// family index. The first `get` now happens before token generation,
-					// so the span between the two reads also covers both `generateToken`
-					// signings and `refreshTokenFamilyRotation.register` in addition to
-					// the `findById` awaited just above — a `cascadeLogout` in that window
-					// would leave the just-issued tokens orphaned from logout orchestration.
-					// Per Codex Delta 1, this REDUCES the window for the common case
-					// (logout fully completes before the second check). It does NOT close
-					// the sub-millisecond window between this check and `addFamilyId`;
-					// Phase F's atomic `addFamilyIdIfSessionActive` Lua EVAL closes that.
+					// CR-4: re-validate the session immediately before mutating the
+					// family index — the second read, through admission again (the
+					// session-admission ADR's D8). The first read happens before token
+					// generation, so the span between the two also covers both
+					// `generateToken` signings and `refreshTokenFamilyRotation.register`
+					// in addition to the `findById` awaited just above — a
+					// `cascadeLogout` in that window would leave the just-issued tokens
+					// orphaned from logout orchestration. Per Codex Delta 1, this
+					// REDUCES the window for the common case (logout fully completes
+					// before the second check). It does NOT close the sub-millisecond
+					// window between this check and `addFamilyId`; Phase F's atomic
+					// `addFamilyIdIfSessionActive` Lua EVAL closes that.
 					//
-					// The store-availability path is handled by its OWN try/catch (mirrors
-					// the first-get pattern before token generation) so a Redis blip emits the same
-					// `"session store unavailable"` errorDescription as the first-get path,
-					// rather than being misattributed to the outer "session linking
-					// unavailable" catch (which spans findById + addFamilyId + registerRP).
-					let revalidatedSession: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
-					try {
-						revalidatedSession = await deps.userSessionStore.get(sid);
-					} catch (err) {
-						storeUnavailable("user_session", "revalidate", authenticatedClientId, err);
+					// The claim carries the first read's `sub`, which
+					// `codeClaimRevalidation` requires: the access and refresh tokens
+					// were signed from it, and the id_token below is minted from this
+					// read, so a store that answered a different subject for the same
+					// `sid` between the two reads would hand back tokens that disagree
+					// about who the user is. A `sub` change under a fixed `sid` is a
+					// store invariant violation, not a race worth tolerating — admission
+					// refuses it (`subject_mismatch`, audited), and so does this grant.
+					const revalidation = await admitSession(admissionDeps, {
+						// With a store wired and admitted, the subject is the record's
+						// non-empty `sub` (above).
+						claim: codeClaimRevalidation(codeData, subject as string),
+						action: ADMISSION_ACTIONS["oauth.code_exchange"],
+					});
+					if (revalidation.outcome !== "admitted" || revalidation.session === null) {
 						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: "session store unavailable",
-							},
-						};
-					}
-					if (!revalidatedSession) {
-						// Codex Delta 3: log security-relevant rejection so SIEMs can
-						// correlate against cascadeLogout audit events. The audit payload
-						// intentionally omits a code identifier — the `Code` / `CodeData`
-						// type does not carry a stable jti, and logging the raw `code`
-						// string would leak secret material.
-						logger?.warn(
-							{ sid, clientId: authenticatedClientId },
-							"authorization_grant_rejected_session_invalidated_during_token_issuance",
-						);
-						return {
-							result: {
-								status: 400,
-								error: "invalid_grant",
-								errorDescription: "session_invalidated",
-							},
-						};
-					}
-					// The access and refresh tokens were signed from the FIRST read's
-					// `sub`; the id_token below is minted from this one. A store that
-					// returned a different subject for the same `sid` between the two
-					// reads would hand back tokens that disagree about who the user is
-					// — the exact confusion this grant's subject handling exists to
-					// prevent. A `sub` change under a fixed `sid` is a store invariant
-					// violation, not a race worth tolerating, so refuse rather than
-					// reconcile.
-					if (revalidatedSession.sub !== subject) {
-						logger?.warn(
-							{ sid, clientId: authenticatedClientId },
-							"authorization_grant_rejected_session_subject_changed_during_token_issuance",
-						);
-						return {
-							result: {
-								status: 400,
-								error: "invalid_grant",
-								errorDescription: "session_invalidated",
-							},
+							result: revalidationRefusal(revalidation, {
+								sid,
+								clientId: authenticatedClientId,
+							}),
 						};
 					}
 					// Use the revalidated session for downstream TTL bookkeeping. Subsequent
 					// id_token generation reads `userSession`, so refresh the outer binding.
-					userSession = revalidatedSession;
+					userSession = revalidation.session;
 
 					// Composition-root invariant (A4 §3.4/§8): the bundled session-stores
 					// module wires all 4 sibling stores together. When deps.userSessionStore is
