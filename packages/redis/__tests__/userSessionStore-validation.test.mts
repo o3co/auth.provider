@@ -110,6 +110,42 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		["expiresAtMs negative", { ...validEnvelope, expiresAtMs: -1 as unknown as number }],
 		["authTimeMs unsafe-integer", { ...validEnvelope, authTimeMs: (2 ** 60) as unknown as number }],
 		["createdAtMs fractional", { ...validEnvelope, createdAtMs: 1.5 as unknown as number }],
+		// The MFA ADR's D9: `authentication` is absent (written before it
+		// existed) or well-formed. Anything else is not read as either — a
+		// session whose record of a second factor cannot be read is refused,
+		// never taken for a pre-upgrade one to be split again.
+		["authentication null", { ...validEnvelope, authentication: null }],
+		["authentication an array", { ...validEnvelope, authentication: [] }],
+		["authentication without primary", { ...validEnvelope, authentication: {} }],
+		["authentication.primary a number", { ...validEnvelope, authentication: { primary: 1 } }],
+		[
+			"authentication.federation a number",
+			{ ...validEnvelope, authentication: { primary: "fed", federation: 1 } },
+		],
+		[
+			"authentication.federation null",
+			{ ...validEnvelope, authentication: { primary: "fed", federation: null } },
+		],
+		[
+			"authentication.upstreamAmr not an array",
+			{ ...validEnvelope, authentication: { primary: "fed", upstreamAmr: "hwk" } },
+		],
+		[
+			"authentication.upstreamAmr holding a number",
+			{ ...validEnvelope, authentication: { primary: "fed", upstreamAmr: ["hwk", 1] } },
+		],
+		[
+			"authentication.mfaAtMs negative",
+			{ ...validEnvelope, authentication: { primary: "pwd", mfaAtMs: -1 } },
+		],
+		[
+			"authentication.mfaAtMs fractional",
+			{ ...validEnvelope, authentication: { primary: "pwd", mfaAtMs: 1.5 } },
+		],
+		[
+			"authentication.mfaAtMs a string",
+			{ ...validEnvelope, authentication: { primary: "pwd", mfaAtMs: "1" } },
+		],
 	])("returns null and logs shape_invalid warn for %s", async (_label, corrupt) => {
 		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 		const client = makeMockClient();
@@ -124,6 +160,37 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 			expect.objectContaining({ sid: "sid-corrupt", reason: "shape_invalid" }),
 			"user_session_corrupt_envelope",
 		);
+	});
+
+	it("reads an envelope written before authentication existed as a session with authentication undefined (the MFA ADR's D9)", async () => {
+		// The bytes a release before the key wrote: nothing to split here —
+		// `sessionAuthentication` / `vouchedAmr` split it as it is read.
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, amr: ["hwk", "fed"] }));
+		const result = await store.get("sid-1");
+		expect(result).toHaveProperty("authentication", undefined);
+		expect(result?.amr).toEqual(["hwk", "fed"]);
+	});
+
+	it("reads authentication from the envelope, every field named", async () => {
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		const mfaAtMs = Date.now() - 1_000;
+		client.seed(
+			`${keyPrefix}sid-1`,
+			JSON.stringify({
+				...validEnvelope,
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { primary: "pwd", mfaAtMs },
+			}),
+		);
+		expect((await store.get("sid-1"))?.authentication).toStrictEqual({
+			primary: "pwd",
+			federation: undefined,
+			upstreamAmr: undefined,
+			mfaAt: new Date(mfaAtMs),
+		});
 	});
 
 	it("returns null and writes through consoleLogger when no logger is injected", async () => {

@@ -63,7 +63,16 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	expiresAt: overrides.expiresAt ?? FUTURE(),
 	claims: overrides.claims ?? { email: "user@example.com" },
 	amr: overrides.amr,
+	authentication: overrides.authentication,
 });
+
+/** How a password login records itself (the MFA ADR's D9), every field named. */
+const PASSWORD_LOGIN = {
+	primary: "pwd",
+	federation: undefined,
+	upstreamAmr: undefined,
+	mfaAt: undefined,
+} as const;
 
 export function runUserSessionStoreContract(
 	factory: UserSessionStoreContractFactory,
@@ -92,6 +101,28 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-plain")).toHaveProperty("amr", undefined);
 		});
 
+		it("round-trips authentication, and names it undefined when none was recorded (the MFA ADR's D9)", async () => {
+			const store = await factory();
+			const federated = {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: ["hwk", "mfa"],
+				mfaAt: new Date(Date.now() - 5_000),
+			};
+			await store.create(INPUT({ sid: "sid-auth", amr: ["fed"], authentication: federated }));
+			expect((await store.get("sid-auth"))?.authentication).toStrictEqual(federated);
+			await store.create(
+				INPUT({ sid: "sid-auth-pwd", amr: ["pwd"], authentication: PASSWORD_LOGIN }),
+			);
+			// Every field named, those holding `undefined` included: a copy that
+			// dropped one is what the required keys make a compile error.
+			expect((await store.get("sid-auth-pwd"))?.authentication).toStrictEqual(PASSWORD_LOGIN);
+			// A session written before the design: named, holding `undefined`,
+			// which is how `sessionAuthentication` knows to read it from its `amr`.
+			await store.create(INPUT({ sid: "sid-auth-none", amr: ["hwk", "fed"] }));
+			expect(await store.get("sid-auth-none")).toHaveProperty("authentication", undefined);
+		});
+
 		it("returns the session whole, as plain data: what was written, and when it was created (#626)", async () => {
 			// Strictly: a key too many, one left out, or a class instance in place
 			// of plain data fails here, where the field-by-field checks above pass.
@@ -100,7 +131,8 @@ export function runUserSessionStoreContract(
 				sid: "sid-whole",
 				authTime: new Date(Date.now() - 1_000),
 				claims: { email: "user@example.com", groups: ["alpha"] },
-				amr: ["pwd"],
+				amr: ["pwd", "otp", "mfa"],
+				authentication: { ...PASSWORD_LOGIN, mfaAt: new Date(Date.now() - 500) },
 			});
 			await store.create(input);
 			expect(await store.get("sid-whole")).toStrictEqual({ ...input, createdAt: expect.any(Date) });
@@ -153,6 +185,18 @@ export function runUserSessionStoreContract(
 			// The epoch itself is a valid instant, and round-trips.
 			await store.create(INPUT({ sid: "sid-bad-auth", authTime: new Date(0) }));
 			expect((await store.get("sid-bad-auth"))?.authTime.getTime()).toBe(0);
+		});
+
+		it("create refuses an authentication.mfaAt that is not a valid date, or is before 1970, and records nothing", async () => {
+			// When a second factor was verified is what the baseline reads; an
+			// Invalid Date is no time, and the Redis store could not read one back.
+			const store = await factory();
+			for (const mfaAt of [new Date(Number.NaN), new Date(-1)]) {
+				await expect(
+					store.create(INPUT({ sid: "sid-bad-mfa", authentication: { ...PASSWORD_LOGIN, mfaAt } })),
+				).rejects.toThrow(RangeError);
+				expect(await store.get("sid-bad-mfa")).toBeNull();
+			}
 		});
 
 		it("get returns null for unknown sid", async () => {
@@ -228,6 +272,31 @@ export function runUserSessionStoreContract(
 			expect(read?.amr).toEqual(["pwd"]);
 			(read?.amr as string[] | undefined)?.push("hwk");
 			expect((await store.get("amr-iso"))?.amr).toEqual(["pwd"]);
+		});
+
+		it("keeps its own copy of authentication: neither what was written nor what was read changes what is stored (the MFA ADR's D9)", async () => {
+			// `mfaAt` is what the baseline and recent MFA are judged on, and
+			// `upstreamAmr` what an untrusted IdP said; a store that shared either
+			// with a caller would let a later write change a verified session.
+			const store = await factory();
+			const mfaAtMs = Date.now() - 1_000;
+			const written = {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: ["hwk"],
+				mfaAt: new Date(mfaAtMs),
+			};
+			await store.create(INPUT({ sid: "auth-iso", amr: ["fed"], authentication: written }));
+			written.upstreamAmr.push("mfa");
+			written.mfaAt.setTime(0);
+			const read = await store.get("auth-iso");
+			expect(read?.authentication?.upstreamAmr).toEqual(["hwk"]);
+			expect(read?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
+			(read?.authentication?.upstreamAmr as string[] | undefined)?.push("phr");
+			read?.authentication?.mfaAt?.setTime(0);
+			const again = await store.get("auth-iso");
+			expect(again?.authentication?.upstreamAmr).toEqual(["hwk"]);
+			expect(again?.authentication?.mfaAt?.getTime()).toBe(mfaAtMs);
 		});
 
 		it("readonly kind field present", async () => {

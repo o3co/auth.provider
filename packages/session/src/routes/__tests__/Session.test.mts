@@ -317,6 +317,15 @@ describe("Session routes — POST /session/login", () => {
 			expect(saved.expiresAt).toBeTruthy();
 			// #481: a password login records how the user authenticated (RFC 8176).
 			expect((saved as { amr?: unknown }).amr).toEqual(["pwd"]);
+			// The MFA ADR's D9: and that its primary was a password, with no
+			// second factor verified — every field named.
+			expect(saved).toHaveProperty("authentication");
+			expect((saved as { authentication?: unknown }).authentication).toStrictEqual({
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			});
 
 			// req.session.sid must equal the store's sid after regenerate completes
 			expect(capturedSession.current).not.toBeNull();

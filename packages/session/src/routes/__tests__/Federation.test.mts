@@ -2998,38 +2998,86 @@ describe("federation login: subject session index (#296)", () => {
 	});
 });
 
-describe("amr on federated sessions (#481)", () => {
-	it("records the upstream amr plus the deployment marker fed, or fed alone", async () => {
-		const cases: ReadonlyArray<readonly [readonly string[] | undefined, readonly string[]]> = [
-			[["hwk"], ["hwk", "fed"]],
-			[undefined, ["fed"]],
-		];
-		for (const [upstream, expected] of cases) {
-			const provider = makeFakeProvider({
-				exchangeCode: vi.fn(async () => ({
-					issuer: "https://idp.example.com",
-					sub: "external-42",
-					accessToken: "at",
-					expiresAt: null,
-					...(upstream ? { amr: upstream } : {}),
-				})),
+describe("amr on federated sessions (#481, the MFA ADR's D9 and D13)", () => {
+	/** One federated login through the callback: what it handed `UserSessionStore.create`. */
+	const loginWith = async (
+		upstream: readonly string[] | undefined,
+		config: Record<string, unknown> = {},
+	): Promise<{ amr?: unknown; authentication?: unknown }> => {
+		const provider = makeFakeProvider({
+			exchangeCode: vi.fn(async () => ({
+				issuer: "https://idp.example.com",
+				sub: "external-42",
+				accessToken: "at",
+				expiresAt: null,
+				...(upstream ? { amr: upstream } : {}),
+			})),
+		});
+		const uss = makeUserSessionStore();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+			userSessionStore: uss,
+			config,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(302);
+		return (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			amr?: unknown;
+			authentication?: unknown;
+		};
+	};
+
+	it("keeps an untrusted IdP's amr apart by default: amr is fed alone, and the IdP's values are kept for the record", async () => {
+		const created = await loginWith(["hwk", "mfa"]);
+		expect(created.amr).toEqual(["fed"]);
+		expect(created.authentication).toStrictEqual({
+			primary: "fed",
+			federation: "test",
+			upstreamAmr: ["hwk", "mfa"],
+			mfaAt: undefined,
+		});
+	});
+
+	it("records a trusted IdP's amr beside fed, where it counts (federations.<name>.trustUpstreamAmr)", async () => {
+		const created = await loginWith(["hwk", "mfa"], {
+			federations: { test: { enabled: true, trustUpstreamAmr: true } },
+		});
+		expect(created.amr).toEqual(["hwk", "mfa", "fed"]);
+		expect(created.authentication).toStrictEqual({
+			primary: "fed",
+			federation: "test",
+			upstreamAmr: undefined,
+			mfaAt: undefined,
+		});
+	});
+
+	it("records fed alone when the IdP asserted nothing, trusted or not", async () => {
+		for (const trustUpstreamAmr of [true, false]) {
+			const created = await loginWith(undefined, {
+				federations: { test: { enabled: true, trustUpstreamAmr } },
 			});
-			const uss = makeUserSessionStore();
-			const { app } = buildCallbackApp({
-				providers: new Map([["test", provider]]),
-				federation: { name: "test", state: "s1", codeVerifier: "v1" },
-				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
-				userSessionStore: uss,
+			expect(created.amr).toEqual(["fed"]);
+			expect(created.authentication).toStrictEqual({
+				primary: "fed",
+				federation: "test",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
 			});
-			const res = await (await plantAndGetAgent(app)).get(
-				"/oauth/federation/test/callback?state=s1&code=c1",
-			);
-			expect(res.status).toBe(302);
-			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
-				amr?: unknown;
-			};
-			expect(createArg.amr).toEqual(expected);
 		}
+	});
+
+	it("refuses to build the routes when a federation's trustUpstreamAmr is given but unusable", () => {
+		expect(() =>
+			buildCallbackApp({
+				providers: new Map([["test", makeFakeProvider()]]),
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				config: { federations: { test: { enabled: true, trustUpstreamAmr: "yes" } } },
+			}),
+		).toThrow(new RangeError("federations.test.trustUpstreamAmr must be true or false"));
 	});
 });
 

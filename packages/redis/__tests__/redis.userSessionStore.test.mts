@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
+import { sessionAuthentication, vouchedAmr } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { afterAll, beforeAll } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
@@ -50,3 +51,40 @@ runUserSessionStoreContract(
 		),
 	},
 );
+
+describe("a session Redis holds from before the MFA ADR's D9", () => {
+	// The envelope a release before `authentication` wrote, byte for byte in
+	// shape. A live one survives the upgrade and must read no more trusted
+	// than it was: a federated session's upstream values are split out as it
+	// is read, never vouched for.
+	const envelope = (sid: string) => ({
+		sid,
+		sub: "user-1",
+		authTimeMs: Date.now() - 60_000,
+		createdAtMs: Date.now() - 60_000,
+		expiresAtMs: Date.now() + 60_000,
+		claims: { email: "user@example.com" },
+		amr: ["hwk", "fed"],
+	});
+
+	it("reads with authentication undefined, and splits as it is read", async () => {
+		const { userSessionStoreClient } = makeIoredisClients(raw);
+		const store = createRedisUserSessionStore({
+			client: userSessionStoreClient,
+			keyPrefix: "t14:pre-upgrade:",
+		});
+		await raw.set("t14:pre-upgrade:sid-old", JSON.stringify(envelope("sid-old")), "PX", 60_000);
+		const session = await store.get("sid-old");
+		expect(session).not.toBeNull();
+		if (session === null) return;
+		expect(session).toHaveProperty("authentication", undefined);
+		expect(session.amr).toEqual(["hwk", "fed"]);
+		expect(sessionAuthentication(session)).toStrictEqual({
+			primary: "fed",
+			federation: undefined,
+			upstreamAmr: ["hwk"],
+			mfaAt: undefined,
+		});
+		expect(vouchedAmr(session)).toEqual(["fed"]);
+	});
+});

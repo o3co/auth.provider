@@ -17,21 +17,27 @@
 /**
  * How a session was established and what this provider vouches for, read the
  * one way every consumer reads them (the MFA ADR's D9): `sessionAuthentication`
- * and `vouchedAmr`. Until the build order's step 5 gives the record its
- * `authentication` key and splits untrusted upstream values out of `amr`,
- * every session is read from its `amr`, and every federation is trusted — the
- * behaviour #481 shipped.
+ * and `vouchedAmr`. A session written since step 5 of the build order says so
+ * in its `authentication` key, and its `amr` holds only what this provider
+ * vouches for. One written before carries no such key and is split as it is
+ * read: `fed` makes it federated, and every other value beside `fed` is what
+ * an upstream IdP asserted — never vouched for, whether or not that federation
+ * is trusted now, since the session does not say which federation it was.
+ * And how each login path records itself.
  */
 
 import { describe, expect, it } from "vitest";
 import {
+	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
+	passwordSessionAuthentication,
 	requirementSession,
 	sessionAuthentication,
 	vouchedAmr,
 } from "#/user-sessions/authentication.mjs";
-import type { UserSession } from "#/user-sessions/types.mjs";
+import type { SessionAuthentication, UserSession } from "#/user-sessions/types.mjs";
 
+/** A session written before the MFA ADR's D9: no `authentication` key's value. */
 const session = (amr: readonly string[] | undefined): UserSession => ({
 	sid: "sid-1",
 	sub: "user-1",
@@ -40,11 +46,54 @@ const session = (amr: readonly string[] | undefined): UserSession => ({
 	expiresAt: new Date("2026-09-28T01:00:00Z"),
 	claims: {},
 	amr,
+	authentication: undefined,
 });
 
-describe("sessionAuthentication — how a session was established (D9)", () => {
+/** A session written since: it says how it was established. */
+const recorded = (
+	amr: readonly string[] | undefined,
+	authentication: SessionAuthentication,
+): UserSession => ({ ...session(amr), authentication });
+
+const FEDERATED: SessionAuthentication = {
+	primary: "fed",
+	federation: "google",
+	upstreamAmr: ["hwk", "mfa"],
+	mfaAt: undefined,
+};
+
+describe("sessionAuthentication — a session that says how it was established (D9)", () => {
+	it("is what the session recorded, whatever its amr says", () => {
+		// The record is the answer: an `amr` holding `pwd` does not make a
+		// federated session a password one, and `mfa` in it sets no `mfaAt`.
+		const mfaAt = new Date("2026-09-28T00:10:00Z");
+		expect(
+			sessionAuthentication(
+				recorded(["pwd", "otp", "mfa"], { ...FEDERATED, upstreamAmr: undefined, mfaAt }),
+			),
+		).toStrictEqual({ primary: "fed", federation: "google", upstreamAmr: undefined, mfaAt });
+		expect(sessionAuthentication(recorded(["pwd", "fed"], FEDERATED))).toStrictEqual(FEDERATED);
+	});
+
+	it("keeps a recorded primary it does not know as it is: the rule re-authenticates it", () => {
+		const custom = { ...FEDERATED, primary: "kba", federation: undefined };
+		expect(sessionAuthentication(recorded(["kba"], custom))?.primary).toBe("kba");
+	});
+
+	it("answers a copy: nothing done to it reaches the session", () => {
+		const mfaAt = new Date("2026-09-28T00:10:00Z");
+		const stored = recorded(["fed"], { ...FEDERATED, mfaAt });
+		const read = sessionAuthentication(stored);
+		(read?.upstreamAmr as string[] | undefined)?.push("phr");
+		read?.mfaAt?.setTime(0);
+		expect(stored.authentication?.upstreamAmr).toEqual(["hwk", "mfa"]);
+		expect(stored.authentication?.mfaAt?.getTime()).toBe(mfaAt.getTime());
+	});
+});
+
+describe("sessionAuthentication — a session written before the design, split as it is read (D9)", () => {
 	it("reads a password login as primary pwd, with no second factor on record", () => {
-		expect(sessionAuthentication(session(["pwd"]))).toEqual({
+		expect(sessionAuthentication(session(["pwd"]))).toStrictEqual({
 			primary: "pwd",
 			federation: undefined,
 			upstreamAmr: undefined,
@@ -52,11 +101,21 @@ describe("sessionAuthentication — how a session was established (D9)", () => {
 		});
 	});
 
-	it("reads a session carrying fed as federated, whatever else it carries", () => {
+	it("reads a session carrying fed as federated, and every other value as what its upstream IdP asserted", () => {
 		// `fed` is the marker only a federation callback records; the values
-		// beside it are what the upstream IdP asserted, `pwd` among them.
-		expect(sessionAuthentication(session(["pwd", "mfa", "fed"]))?.primary).toBe("fed");
-		expect(sessionAuthentication(session(["hwk", "fed"]))?.primary).toBe("fed");
+		// beside it were the upstream IdP's, `pwd` among them. Which federation
+		// wrote it the session does not say.
+		expect(sessionAuthentication(session(["hwk", "fed"]))).toStrictEqual({
+			primary: "fed",
+			federation: undefined,
+			upstreamAmr: ["hwk"],
+			mfaAt: undefined,
+		});
+		expect(sessionAuthentication(session(["pwd", "mfa", "fed"]))?.upstreamAmr).toEqual([
+			"pwd",
+			"mfa",
+		]);
+		expect(sessionAuthentication(session(["fed"]))?.upstreamAmr).toBeUndefined();
 	});
 
 	it.each([
@@ -78,36 +137,53 @@ describe("sessionAuthentication — how a session was established (D9)", () => {
 });
 
 describe("vouchedAmr — the amr this provider vouches for (D9, D13)", () => {
-	it("is the session's amr, copied", () => {
-		const recorded = session(["pwd"]);
-		const vouched = vouchedAmr(recorded);
-		expect(vouched).toEqual(["pwd"]);
-		expect(vouched).not.toBe(recorded.amr);
+	it("is a recorded session's amr, copied: the federation callback already split it", () => {
+		const federated = recorded(["hwk", "fed"], { ...FEDERATED, upstreamAmr: undefined });
+		const vouched = vouchedAmr(federated);
+		// A trusted federation's values sit beside `fed`, and count.
+		expect(vouched).toEqual(["hwk", "fed"]);
+		expect(vouched).not.toBe(federated.amr);
 	});
 
-	it("keeps the values beside fed while every federation is trusted, as #481 shipped", () => {
-		expect(vouchedAmr(session(["hwk", "fed"]))).toEqual(["hwk", "fed"]);
+	it("is a pre-upgrade password session's amr, copied", () => {
+		const password = session(["pwd"]);
+		expect(vouchedAmr(password)).toEqual(["pwd"]);
+		expect(vouchedAmr(password)).not.toBe(password.amr);
+	});
+
+	it("is fed alone for a pre-upgrade federated session: what its upstream IdP asserted is not vouched for", () => {
+		// The split D9 prescribes: a pre-upgrade `["hwk", "fed"]` must never
+		// meet an `acr` that needs `hwk`, nor stamp it on a token.
+		expect(vouchedAmr(session(["hwk", "fed"]))).toEqual(["fed"]);
+		expect(vouchedAmr(session(["pwd", "mfa", "fed"]))).toEqual(["fed"]);
 	});
 
 	it("is empty for a session that recorded no amr", () => {
 		expect(vouchedAmr(session(undefined))).toEqual([]);
+		expect(vouchedAmr(recorded(undefined, FEDERATED))).toEqual([]);
 	});
 });
 
 describe("requirementSession — the requirement rule's input, built only through the D9 reading", () => {
 	it("is sessionAuthentication and vouchedAmr of the session", () => {
-		const recorded = session(["pwd", "otp"]);
-		expect(requirementSession(recorded)).toEqual({
-			authentication: sessionAuthentication(recorded),
-			amr: vouchedAmr(recorded),
-		});
+		for (const s of [
+			session(["pwd", "otp"]),
+			session(["hwk", "fed"]),
+			recorded(["fed"], FEDERATED),
+		]) {
+			expect(requirementSession(s)).toEqual({
+				authentication: sessionAuthentication(s),
+				amr: vouchedAmr(s),
+			});
+		}
 	});
 
 	it("carries the vouched amr, never the record's own array", () => {
-		const recorded = session(["hwk", "fed"]);
-		const input = requirementSession(recorded);
+		const federated = recorded(["hwk", "fed"], { ...FEDERATED, upstreamAmr: undefined });
+		const input = requirementSession(federated);
 		expect(input?.amr).toEqual(["hwk", "fed"]);
-		expect(input?.amr).not.toBe(recorded.amr);
+		expect(input?.amr).not.toBe(federated.amr);
+		expect(requirementSession(session(["hwk", "fed"]))?.amr).toEqual(["fed"]);
 	});
 
 	it("keeps an unknown primary unknown", () => {
@@ -119,6 +195,85 @@ describe("requirementSession — the requirement rule's input, built only throug
 
 	it("is null for no session: no sid, or no store", () => {
 		expect(requirementSession(null)).toBeNull();
+	});
+});
+
+describe("passwordSessionAuthentication — what POST /session/login records (D9)", () => {
+	it("is amr pwd, primary pwd, every other field named and empty", () => {
+		expect(passwordSessionAuthentication()).toStrictEqual({
+			amr: ["pwd"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+		});
+	});
+});
+
+describe("federatedSessionAuthentication — what a federation callback records (D9, D13)", () => {
+	it("keeps an untrusted IdP's amr apart: amr is fed alone, and its values are kept for the record", () => {
+		expect(
+			federatedSessionAuthentication({
+				federation: "google",
+				upstreamAmr: ["hwk", "mfa"],
+				trusted: false,
+			}),
+		).toStrictEqual({
+			amr: ["fed"],
+			authentication: {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: ["hwk", "mfa"],
+				mfaAt: undefined,
+			},
+		});
+	});
+
+	it("records a trusted IdP's amr beside fed, where it counts, and keeps nothing apart", () => {
+		expect(
+			federatedSessionAuthentication({
+				federation: "google",
+				upstreamAmr: ["hwk", "mfa", "fed"],
+				trusted: true,
+			}),
+		).toStrictEqual({
+			amr: ["hwk", "mfa", "fed"],
+			authentication: {
+				primary: "fed",
+				federation: "google",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+		});
+	});
+
+	it("records fed alone, and nothing apart, when the IdP asserted nothing", () => {
+		for (const trusted of [true, false]) {
+			expect(
+				federatedSessionAuthentication({ federation: "google", upstreamAmr: [], trusted }),
+			).toStrictEqual({
+				amr: ["fed"],
+				authentication: {
+					primary: "fed",
+					federation: "google",
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			});
+		}
+	});
+
+	it("copies what it is handed", () => {
+		const upstreamAmr = ["hwk"];
+		const untrusted = federatedSessionAuthentication({
+			federation: "google",
+			upstreamAmr,
+			trusted: false,
+		});
+		upstreamAmr.push("mfa");
+		expect(untrusted.authentication.upstreamAmr).toEqual(["hwk"]);
 	});
 });
 
