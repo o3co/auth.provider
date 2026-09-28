@@ -228,7 +228,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		expect(admission).toMatchObject({
 			outcome: "interrupt",
 			requirement: "second",
-			continuation: continuationOf(primary(), []),
+			continuation: continuationOf(primary(), [], "mfa"),
 		});
 		expect(first.asked[0]).toEqual(primary());
 	});
@@ -307,7 +307,7 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		const result = await admission.open("express-1");
 		expect(opened).toEqual(["express-1"]);
 		expect(received).toBe(admission.continuation);
-		expect(received).toEqual(continuationOf(primary(), []));
+		expect(received).toEqual(continuationOf(primary(), [], "mfa"));
 		expect(result).toEqual({
 			status: 403,
 			body: {
@@ -319,6 +319,43 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		});
 		expect(Object.isFrozen(result)).toBe(true);
 		expect(Object.isFrozen(result.body)).toBe(true);
+	});
+
+	it("caps the hint grammar: a number is an integer in [0, 86400], a list holds at most 16 tokens, a transaction at most 128 base64url characters", async () => {
+		const sixteen = Array.from({ length: 16 }, (_, i) => `f${i}`);
+		const ok = await interrupt(async () =>
+			answer({ transaction: "a".repeat(128), hints: { email_proof: 86400, enrollable: sixteen } }),
+		);
+		expect((await ok.open("s")).body.hints).toEqual({ email_proof: 86400, enrollable: sixteen });
+		const zero = await interrupt(async () => answer({ hints: { email_proof: 0 } }));
+		expect((await zero.open("s")).body.hints).toEqual({ email_proof: 0 });
+		for (const [label, body] of [
+			["a number above 86400", answer({ hints: { email_proof: 86401 } })],
+			["a negative number", answer({ hints: { email_proof: -1 } })],
+			["a fraction", answer({ hints: { email_proof: 1.5 } })],
+			["a list of 17", answer({ hints: { enrollable: [...sixteen, "f16"] } })],
+			["a transaction of 129", answer({ transaction: "a".repeat(129) })],
+		] as const) {
+			const admission = await interrupt(async () => body);
+			await expect(admission.open("s"), label).rejects.toThrow(RangeError);
+		}
+	});
+
+	it("reads the answer's body once: a getter answering a valid body to the check and another afterwards changes nothing", async () => {
+		let reads = 0;
+		const admission = await interrupt(
+			async () =>
+				({
+					status: 403,
+					get body() {
+						reads++;
+						return reads === 1
+							? { error: "mfa_required" }
+							: { error: "mfa_required", user: { id: "user-1" } };
+					},
+				}) as never,
+		);
+		expect(await admission.open("s")).toEqual({ status: 403, body: { error: "mfa_required" } });
 	});
 
 	it("refuses a session id that is not a non-empty string, before opening", async () => {
@@ -394,8 +431,78 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 
 describe("resumePrimary — after a ceremony completes (D5)", () => {
 	const continuation = (over: Partial<PrimaryContinuation> = {}): PrimaryContinuation => ({
-		...continuationOf(primary(), []),
+		...continuationOf(primary(), [], "mfa"),
 		...over,
+	});
+
+	it("records who interrupted in the continuation, and resumes only by that requirement's completion", async () => {
+		const mfa = asking("mfa", () => interrupting());
+		const risk = asking("risk", () => "establish");
+		const first = await admitPrimary(deps([mfa, risk]), passwordPrimary(facts()));
+		if (first.outcome !== "interrupt") throw new Error("expected an interruption");
+		expect(first.continuation.interruptedBy).toBe("mfa");
+		await expect(
+			resumePrimary(deps([mfa, risk]), first.continuation, {
+				requirement: "risk",
+				adds: { amr: ["risk-ok"] },
+			}),
+		).rejects.toThrow(RangeError);
+		for (const interruptedBy of [undefined, "", 7, "other"]) {
+			await expect(
+				resumePrimary(deps([mfa, risk]), { ...first.continuation, interruptedBy } as never, {
+					requirement: "mfa",
+					adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+				}),
+				JSON.stringify(interruptedBy),
+			).rejects.toThrow(RangeError);
+		}
+	});
+
+	it("recomposes recorded from the primary's kind — a password login, the only one interrupted in this release — never from the persisted DTO, and refuses any other kind", async () => {
+		const mfa = asking("mfa", () => "establish");
+		const tampered = {
+			...continuation(),
+			primary: {
+				...continuation().primary,
+				recorded: {
+					amr: ["pwd", "kba"],
+					authentication: {
+						primary: "pwd",
+						federation: undefined,
+						upstreamAmr: undefined,
+						mfaAt: undefined,
+					},
+				},
+			},
+		};
+		const admission = await resumePrimary(deps([mfa]), tampered, {
+			requirement: "mfa",
+			adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+		});
+		expect(admission.outcome).toBe("establish");
+		if (admission.outcome !== "establish") throw new Error("unreachable");
+		expect(admission.establishment.primary.recorded.amr).toEqual(["pwd", "otp", "mfa"]);
+		const federated = {
+			...continuation(),
+			primary: {
+				...continuation().primary,
+				recorded: {
+					amr: ["fed"],
+					authentication: {
+						primary: "fed",
+						federation: "google",
+						upstreamAmr: undefined,
+						mfaAt: undefined,
+					},
+				},
+			},
+		};
+		await expect(
+			resumePrimary(deps([mfa]), federated, {
+				requirement: "mfa",
+				adds: { amr: ["otp", "mfa"], mfaAt: NOW },
+			}),
+		).rejects.toThrow(RangeError);
 	});
 
 	it("composes the session's recorded from the primary and every completed requirement's additions, and asks every requirement again over it", async () => {
@@ -434,9 +541,11 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		expect(first).toMatchObject({
 			outcome: "interrupt",
 			requirement: "risk",
-			continuation: continuationOf(primary(), [
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
-			]),
+			continuation: continuationOf(
+				primary(),
+				[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+				"risk",
+			),
 		});
 		if (first.outcome !== "interrupt") throw new Error("unreachable");
 		// A persisted continuation is plain data: a JSON round trip resumes it,
@@ -503,14 +612,16 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 			],
 			[
 				"an earlier completion, read back, outside its requirement's reach",
-				continuationOf(primary(), [{ requirement: "risk", adds: { amr: ["risk-other"] } }]),
+				continuationOf(primary(), [{ requirement: "risk", adds: { amr: ["risk-other"] } }], "mfa"),
 				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
 			],
 			[
 				"a name completing twice",
-				continuationOf(primary(), [
-					{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
-				]),
+				continuationOf(
+					primary(),
+					[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+					"mfa",
+				),
 				{ requirement: "mfa", adds: { amr: ["hwk", "mfa"], mfaAt: NOW } },
 			],
 			[
@@ -556,9 +667,11 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		await second.open("express-2");
 		expect(received).toBe(second.continuation);
 		expect(received).toEqual(
-			continuationOf(primary(), [
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
-			]),
+			continuationOf(
+				primary(),
+				[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+				"risk",
+			),
 		);
 	});
 

@@ -42,7 +42,7 @@ import type {
 	SessionRequirement,
 	SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";
-import { ADMISSION_ACTIONS } from "#/session-admission/requirement.mjs";
+import { ADMISSION_ACTIONS, issuedRemediationActions } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 
@@ -905,7 +905,7 @@ describe("step 5 — the requirements", () => {
 			},
 		});
 		const requirements = resolverForTests([owner, met("other")]);
-		const issued = requirements.get("mfa")?.actions.step_up;
+		const issued = issuedRemediationActions(owner)?.step_up;
 		expect(issued).toEqual({ name: "mfa.step_up", grade: "remediation" });
 		expect(
 			await admitSession(deps({ requirements }), request({ action: issued as AdmissionAction })),
@@ -930,7 +930,7 @@ describe("step 5 — the requirements", () => {
 			},
 		});
 		const requirements = resolverForTests([owner, other]);
-		const issued = requirements.get("mfa")?.actions.step_up as AdmissionAction;
+		const issued = issuedRemediationActions(owner)?.step_up as AdmissionAction;
 		const with_ = deps({ requirements, logger });
 		for (const action of [
 			{ name: "mfa.step_up", grade: "remediation" } as const,
@@ -947,11 +947,12 @@ describe("step 5 — the requirements", () => {
 				"other:mfa.step_up:credential_change",
 			]).flat(),
 		);
+		// The name is the consumer's own: logged as `custom`, once per name.
 		expect(lines).toEqual([
 			{
 				level: "warn",
 				message: "session_admission_remediation_undeclared",
-				fields: { action: "mfa.step_up" },
+				fields: { action: "custom" },
 			},
 		]);
 		// The issued object itself: the route's own, no requirement asked.
@@ -987,7 +988,7 @@ describe("step 5 — the requirements", () => {
 			{
 				level: "warn",
 				message: "session_admission_remediation_undeclared",
-				fields: { action: "deployment.mislabelled" },
+				fields: { action: "custom" },
 			},
 		]);
 	});
@@ -1286,6 +1287,137 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 	});
 });
 
+describe("every untrusted input is read once, into a copy — a getter or a swap after the check changes nothing", () => {
+	it("a claim: the request's claim is read once, so a getter cannot answer a branded claim to the check and a forged one to the steps", async () => {
+		let reads = 0;
+		const branded = cookieClaim({ session: { isAuthenticated: false } });
+		const forged = { authenticated: true, sid: "sid-1", subject: "user-1", carrier: "cookie" };
+		const request = {
+			get claim() {
+				reads++;
+				return reads <= 2 ? branded : forged;
+			},
+			action: ADMISSION_ACTIONS["oauth.authorize"],
+		};
+		expect(await admitSession(deps(), request as never)).toEqual({ outcome: "unauthenticated" });
+	});
+
+	it("the resolver: deps.requirements is read once, so a getter cannot answer the planner's to the check and a home-made one to the steps", async () => {
+		let reads = 0;
+		const real = resolverForTests([
+			met("hold", { admit: async () => ({ outcome: "reauthenticate" }) }),
+		]);
+		const fake = { get: () => undefined, entries: () => new Map().entries() };
+		const with_ = {
+			...deps(),
+			get requirements() {
+				reads++;
+				return reads === 1 ? real : fake;
+			},
+		};
+		expect(await admitSession(with_ as never, request())).toMatchObject({
+			outcome: "reauthenticate",
+			requirement: "hold",
+		});
+	});
+
+	it("the action: name and grade are read once, so a grade that changes between reads reaches the requirements as it was checked", async () => {
+		let reads = 0;
+		let seen: string | undefined;
+		const watching = met("watch", {
+			admit: async ({ action }) => {
+				seen = action.grade;
+				return { outcome: "met" };
+			},
+		});
+		const action = {
+			name: "deployment.export",
+			get grade() {
+				reads++;
+				return reads <= 3 ? "use" : "garbage";
+			},
+		};
+		await admitSession(
+			deps({ requirements: resolverForTests([watching]) }),
+			request({ action: action as never }),
+		);
+		expect(seen).toBe("use");
+	});
+
+	it("a verdict: outcome and whenStillUnmet are copied before they are checked, so a getter cannot pass the check as unmet and read as met", async () => {
+		let reads = 0;
+		let secondAsked = false;
+		const tricky = met("a", {
+			admit: async () =>
+				({
+					get outcome() {
+						reads++;
+						return reads <= 5 ? "unmet" : "met";
+					},
+				}) as never,
+		});
+		const strict = met("b", {
+			admit: async () => {
+				secondAsked = true;
+				return { outcome: "reauthenticate" };
+			},
+		});
+		expect(
+			await admitSession(deps({ requirements: resolverForTests([tricky, strict]) }), request()),
+		).toMatchObject({ outcome: "unmet", requirement: "a" });
+		expect(secondAsked).toBe(false);
+		let garbage = 0;
+		const turning = met("c", {
+			admit: async () =>
+				({
+					get outcome() {
+						garbage++;
+						return garbage <= 5 ? "unmet" : "garbage";
+					},
+				}) as never,
+		});
+		expect(
+			await admitSession(deps({ requirements: resolverForTests([turning]) }), request()),
+		).toMatchObject({ outcome: "unmet", requirement: "c" });
+	});
+});
+
+describe("a bundled action is the bundled entry itself (D4)", () => {
+	it("accepts the frozen entry, and refuses a literal or a copy carrying a bundled name: the grade is not the caller's to restate", async () => {
+		expect(
+			await admitSession(deps(), request({ action: ADMISSION_ACTIONS["oauth.authorize"] })),
+		).toMatchObject({ outcome: "admitted" });
+		for (const action of [
+			{ name: "oauth.authorize", grade: "use" },
+			{ ...ADMISSION_ACTIONS["oauth.authorize"] },
+			{ name: "mfa.manage", grade: "use" },
+			Object.freeze({ name: "session.link", grade: "credential_change" }),
+		]) {
+			await expect(
+				admitSession(deps(), request({ action: action as never })),
+				JSON.stringify(action),
+			).rejects.toThrow(RangeError);
+		}
+	});
+});
+
+describe("the undeclared-remediation line is capped (D4, D10)", () => {
+	it("says custom once per name up to 256 names, then once for all", async () => {
+		const { logger, lines } = recordingLogger();
+		const with_ = deps({ logger });
+		for (let i = 0; i < 300; i++) {
+			await admitSession(
+				with_,
+				request({ action: { name: `deployment.route_${i}`, grade: "remediation" } }),
+			);
+		}
+		expect(lines.length).toBeLessThanOrEqual(257);
+		expect(lines.every((line) => line.fields.action === "custom")).toBe(true);
+		expect(lines.filter((line) => line.fields.overflow === true)).toHaveLength(1);
+		expect(lines[lines.length - 1]?.fields.overflow).toBe(true);
+	});
+});
+
 describe("step 6 — acr_values, with the reach of what is registered", () => {
 	const table = readAcrTable({ "urn:o3co:acr:mfa": ["mfa"], "urn:example:pwd": ["pwd"] });
 
@@ -1372,10 +1504,11 @@ describe("the actions (D4)", () => {
 			deps({ userSessionStore: down, logger }),
 			request({ action: { name: "deployment.export", grade: "use" } }),
 		);
-		const requirements = resolverForTests([met("mfa", { remediations: ["mfa.step_up"] })]);
+		const owner = met("mfa", { remediations: ["mfa.step_up"] });
+		const requirements = resolverForTests([owner]);
 		await admitSession(
 			deps({ userSessionStore: down, logger, requirements }),
-			request({ action: requirements.get("mfa")?.actions.step_up as AdmissionAction }),
+			request({ action: issuedRemediationActions(owner)?.step_up as AdmissionAction }),
 		);
 		await admitSession(
 			deps({ userSessionStore: down, logger }),

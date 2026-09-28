@@ -44,10 +44,11 @@ import {
 	passwordPrimary,
 	resumePrimary,
 } from "#/session-admission/admit.mjs";
-import type {
-	PrimaryContinuation,
-	SessionRequirement,
-	SessionRequirementResolver,
+import {
+	issuedRemediationActions,
+	type PrimaryContinuation,
+	type SessionRequirement,
+	type SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
@@ -169,6 +170,37 @@ const factor = (kind: string, amrValues: readonly string[], addsMfa: boolean): M
 
 /** A name-keyed collector a host might try to hand in for a built-in kind. */
 const stores = [memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule];
+
+/** An MFA implementation: requires the three ports, reaches what the factors reach, declares mfa.step_up. */
+const mfaModule = (over: Partial<SessionRequirement> = {}, requires?: readonly string[]) =>
+	defineModule({
+		name: "test:mfa",
+		requires: (requires ?? ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"]) as never,
+		contributes: {
+			sessionRequirements: {
+				mfa: (deps: {
+					mfaFactorResolver?: { entries(): Iterable<readonly [string, MfaFactor]> };
+				}) => ({
+					name: "mfa",
+					// A real getter over the resolver, read after the pass: a
+					// spread would read it at factory time, before the factors.
+					get reach() {
+						const reach = new Set<string>();
+						for (const [, f] of deps.mfaFactorResolver?.entries() ?? []) {
+							for (const value of f.amrValues) reach.add(value);
+							if (f.addsMfa) reach.add("mfa");
+						}
+						return reach;
+					},
+					stepUpPage: { url: "/mfa", params: {} },
+					remediations: ["mfa.step_up"],
+					hintKeys: [],
+					admit: async () => ({ outcome: "met" as const }),
+					...over,
+				}),
+			},
+		},
+	} as never);
 
 const hostCollector = () => ({
 	kind: "name-keyed" as const,
@@ -465,26 +497,82 @@ describe("the two declaration refusals run the cleanups, and carry what a cleanu
 });
 
 describe("the remediation actions core issues (D4)", () => {
-	it("hands each registered copy one branded action per declared route, which the resolver projects", async () => {
+	it("issues one branded action per declared route to the module that holds the requirement object it contributed — never through the resolver", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
-		const handle = await boot(
-			[
-				contributing("test:first", {
-					a: () => requirement("a", { remediations: ["a.step_up", "a.recover"] }),
-				}),
-				consumer(seen),
-			],
-			{ sessionRequirements: { expected: ["a"] } },
-		);
+		const original = requirement("a", { remediations: ["a.step_up", "a.recover"] });
+		const handle = await boot([contributing("test:first", { a: () => original }), consumer(seen)], {
+			sessionRequirements: { expected: ["a"] },
+		});
 		try {
-			expect(seen.resolver?.get("a")?.actions).toEqual({
+			expect(issuedRemediationActions(original)).toEqual({
 				step_up: { name: "a.step_up", grade: "remediation" },
 				recover: { name: "a.recover", grade: "remediation" },
 			});
-			expect(Object.isFrozen(seen.resolver?.get("a")?.actions)).toBe(true);
+			expect(Object.isFrozen(issuedRemediationActions(original))).toBe(true);
+			const projected = seen.resolver?.get("a") as object;
+			expect("actions" in projected).toBe(false);
+			expect(issuedRemediationActions(projected as SessionRequirement)).toBeUndefined();
 		} finally {
 			await handle.dispose();
 		}
+	});
+});
+
+describe("the overrides guard reads what the pass reads (D3)", () => {
+	it("refuses an overrides getter that answers a sessionRequirements entry to the normaliser and nothing to a second read", async () => {
+		let reads = 0;
+		const evil = {
+			name: "test:evil",
+			get overrides() {
+				reads++;
+				return reads === 1 ? { sessionRequirements: { a: () => requirement("a") } } : undefined;
+			},
+		};
+		const err = await refusal(
+			boot([contributing("test:first", { a: () => requirement("a") }), evil as never], {
+				sessionRequirements: { expected: ["a"] },
+			}),
+		);
+		expect(err.reason).toBe("session-requirement-kind-guarded");
+		expect(err.details).toMatchObject({ channel: "overrides", module: "test:evil" });
+	});
+});
+
+describe("a raw throw at the end of stage 4 is a BootError with the cleanups run (D3, D7)", () => {
+	it("a factor whose amrValues throw on the second read — the recomputation's — fails as the mfa contribution, not as a raw TypeError", async () => {
+		let reads = 0;
+		const flaky = defineModule({
+			name: "test:factors",
+			contributes: {
+				mfaFactors: {
+					totp: () =>
+						({
+							...factor("totp", ["otp"], true),
+							get amrValues() {
+								reads++;
+								if (reads > 1) throw new Error("second read");
+								return ["otp"];
+							},
+						}) as never,
+				},
+			},
+		});
+		const err = await refusal(
+			boot([flaky, ...stores, mfaModule()], {
+				sessionRequirements: { expected: ["mfa"] },
+				mfa: { mode: "required" },
+			}),
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
+	});
+
+	it("an mfa.mode that readMfaMode refuses fails as config-validation-failed at mfa.mode, not as a raw RangeError", async () => {
+		const err = await refusal(boot([], { mfa: { mode: 7 } }));
+		expect(err).toBeInstanceOf(BootError);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.details).toMatchObject({ issues: [{ path: ["mfa", "mode"] }] });
 	});
 });
 
@@ -723,40 +811,6 @@ describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
 		name: "test:factors",
 		contributes: { mfaFactors: { totp: () => totp } },
 	});
-	/** An MFA implementation: requires the three ports, reaches what the factors reach, declares mfa.step_up. */
-	const mfaModule = (over: Partial<SessionRequirement> = {}, requires?: readonly string[]) =>
-		defineModule({
-			name: "test:mfa",
-			requires: (requires ?? [
-				"mfaFactorResolver",
-				"mfaFactorStore",
-				"mfaTransactionStore",
-			]) as never,
-			contributes: {
-				sessionRequirements: {
-					mfa: (deps: {
-						mfaFactorResolver?: { entries(): Iterable<readonly [string, MfaFactor]> };
-					}) => ({
-						name: "mfa",
-						// A real getter over the resolver, read after the pass: a
-						// spread would read it at factory time, before the factors.
-						get reach() {
-							const reach = new Set<string>();
-							for (const [, f] of deps.mfaFactorResolver?.entries() ?? []) {
-								for (const value of f.amrValues) reach.add(value);
-								if (f.addsMfa) reach.add("mfa");
-							}
-							return reach;
-						},
-						stepUpPage: { url: "/mfa", params: {} },
-						remediations: ["mfa.step_up"],
-						hintKeys: [],
-						admit: async () => ({ outcome: "met" as const }),
-						...over,
-					}),
-				},
-			},
-		} as never);
 	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
 
 	it("accepts an MFA implementation: the ports required, the reach the factors' union with mfa, mfa.step_up declared", async () => {

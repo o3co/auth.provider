@@ -59,6 +59,23 @@ const primary = (over: Record<string, unknown> = {}): PrimaryAuthentication =>
 	}) as PrimaryAuthentication;
 
 describe("checkPrimaryAuthentication — a primary as the login route builds it", () => {
+	it("freezes user and claims deeply: a nested object or list in the copy cannot be changed either", () => {
+		const checked = checkPrimaryAuthentication(
+			primary({
+				user: { id: "user-1", profile: { roles: ["staff"], address: { city: "x" } } },
+				claims: { email: "u@example.test", groups: ["staff"], custom: { nested: [1] } },
+			}),
+		);
+		const user = checked.user as { profile: { roles: string[]; address: object } };
+		expect(Object.isFrozen(user.profile)).toBe(true);
+		expect(Object.isFrozen(user.profile.roles)).toBe(true);
+		expect(Object.isFrozen(user.profile.address)).toBe(true);
+		const claims = checked.claims as { groups: string[]; custom: { nested: number[] } };
+		expect(Object.isFrozen(claims.groups)).toBe(true);
+		expect(Object.isFrozen(claims.custom)).toBe(true);
+		expect(Object.isFrozen(claims.custom.nested)).toBe(true);
+	});
+
 	it("answers a frozen deep copy that shares nothing with the caller's object", () => {
 		const source = primary();
 		const checked = checkPrimaryAuthentication(source);
@@ -227,10 +244,22 @@ describe("the continuation — what a requirement persists and presents back, as
 		return { ...fields, authTimeMs: authTime.getTime() };
 	};
 
+	it("requires interruptedBy: the requirement whose ceremony the continuation waits on", () => {
+		for (const interruptedBy of [undefined, "", 7, null]) {
+			expect(
+				() => checkPrimaryContinuation({ primary: dto(), done: [], interruptedBy }),
+				JSON.stringify(interruptedBy),
+			).toThrow(RangeError);
+		}
+		expect(
+			checkPrimaryContinuation({ primary: dto(), done: [], interruptedBy: "mfa" }).interruptedBy,
+		).toBe("mfa");
+	});
+
 	it("reads back a completion that added nothing, and refuses an mfaAtMs beside an empty amr", () => {
 		const read = checkPrimaryContinuation({
 			primary: dto(),
-			done: [{ requirement: "consent", adds: { amr: [] } }],
+			done: [{ requirement: "consent", adds: { amr: [], interruptedBy: "mfa" } }],
 		});
 		expect(read.done).toEqual([{ requirement: "consent", adds: { amr: [] } }]);
 		expect(() =>
@@ -296,7 +325,7 @@ describe("the continuation — what a requirement persists and presents back, as
 			checkPrimaryContinuation({
 				primary: dto(),
 				done: [
-					{ requirement: "mfa", adds: { amr: ["otp"] } },
+					{ requirement: "mfa", adds: { amr: ["otp"], interruptedBy: "mfa" } },
 					{ requirement: "mfa", adds: { amr: ["hwk"] } },
 				],
 			}),
@@ -304,7 +333,7 @@ describe("the continuation — what a requirement persists and presents back, as
 		expect(() =>
 			checkPrimaryContinuation({
 				primary: dto(),
-				done: [{ requirement: "risk", adds: { amr: ["otp"] } }],
+				done: [{ requirement: "risk", adds: { amr: ["otp"], interruptedBy: "mfa" } }],
 			}),
 		).toThrow(RangeError);
 		expect(() =>
@@ -321,13 +350,20 @@ describe("the continuation — what a requirement persists and presents back, as
 				}),
 			).toThrow(RangeError);
 			expect(() =>
-				checkPrimaryContinuation({ primary: { ...dto(), authTimeMs: bad }, done: [] }),
+				checkPrimaryContinuation({
+					primary: { ...dto(), authTimeMs: bad },
+					done: [],
+					interruptedBy: "mfa",
+				}),
 			).toThrow(RangeError);
 		}
 		expect(() => checkPrimaryContinuation({ primary: primary(), done: [] })).toThrow(RangeError);
 		expect(() => checkPrimaryContinuation({ primary: dto(), done: {} })).toThrow(RangeError);
 		expect(() =>
-			checkPrimaryContinuation({ primary: dto(), done: [{ adds: { amr: ["x"] } }] }),
+			checkPrimaryContinuation({
+				primary: dto(),
+				done: [{ adds: { amr: ["x"], interruptedBy: "mfa" } }],
+			}),
 		).toThrow(RangeError);
 		expect(() => checkPrimaryContinuation(undefined)).toThrow(RangeError);
 		expect(() => checkPrimaryContinuation({ done: [] })).toThrow(RangeError);

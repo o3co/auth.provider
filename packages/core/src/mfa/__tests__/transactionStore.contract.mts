@@ -102,6 +102,7 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 				request: { ip: "198.51.100.7", userAgent: "contract" },
 			},
 			done: [],
+			interruptedBy: "mfa",
 		},
 		redirectTo: "https://app.example/after",
 		enrollment: "none",
@@ -139,6 +140,15 @@ export function runMfaTransactionStoreContract(
 	const expiry = options.expiry ?? hostExpiry;
 
 	describe("MfaTransactionStore contract: the transaction", () => {
+		it("refuses a login transaction whose subject or redirectTo is not the continuation's primary's: one record, one login", async () => {
+			const store = await factory();
+			await expect(store.create(TX({ subject: "user-2" }))).rejects.toThrow(RangeError);
+			await expect(store.create(TX({ redirectTo: undefined }))).rejects.toThrow(RangeError);
+			await expect(store.create(TX({ redirectTo: "https://evil.example/" }))).rejects.toThrow(
+				RangeError,
+			);
+		});
+
 		it("returns a created transaction whole, as plain data, its undefined fields named", async () => {
 			const store = await factory();
 			const login = TX();

@@ -72,6 +72,7 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 			request: {},
 		},
 		done: [],
+		interruptedBy: "mfa",
 	},
 	redirectTo: undefined,
 	enrollment: "none",

@@ -381,6 +381,9 @@ const ESTABLISH_WITHOUT_ASKING_CALLERS: readonly string[] = [
 	"packages/session/src/routes/Federation.mts",
 ];
 
+/** The files whose prefixes may call `resumePrimary(` or build a continuation: the MFA package (D5); the full-set fixture under `tools/` is not scanned. */
+const RESUME_PRIMARY_CALLERS: readonly string[] = ["packages/mfa/src/"];
+
 /** `sites`, counted by kind. */
 const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
 	const counts: Partial<Record<What, number>> = {};
@@ -451,6 +454,38 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		expect(sessionAdmissionSites("const e = establishWithoutAsking(login);")).toEqual([
 			{ line: 1, what: "establishWithoutAsking" },
 		]);
+		expect(sessionAdmissionSites("const a = await resumePrimary(deps, c, done);")).toEqual([
+			{ line: 1, what: "resumePrimary" },
+		]);
+		expect(sessionAdmissionSites("const c = continuationOf(primary, [], name);")).toEqual([
+			{ line: 1, what: "continuationOf" },
+		]);
+	});
+
+	it("follows an import alias, a string element access, and a reference that is not a call — bind, call, a value passed on", () => {
+		for (const [source, what] of [
+			[
+				'import { selectAcr as pick } from "@o3co/auth-provider-core"; pick(a, b, t, r);',
+				"selectAcr",
+			],
+			[
+				'import { resumePrimary as go } from "@o3co/auth-provider-core"; await go(d, c, x);',
+				"resumePrimary",
+			],
+			['function f(store: UserSessionStore) { return store["get"](sid); }', "get"],
+			['await store["recordSecondFactor"](sid, event);', "recordSecondFactor"],
+			["function f(store: UserSessionStore) { const read = store.get; return read(sid); }", "get"],
+			["function f(store: UserSessionStore) { return store.get.bind(store); }", "get"],
+			["function f(store: UserSessionStore) { return store.get.call(store, sid); }", "get"],
+			["function f(store: UserSessionStore) { return use(store.get); }", "get"],
+			["const f = selectAcr; f(a, b, t, r);", "selectAcr"],
+			["run(establishWithoutAsking);", "establishWithoutAsking"],
+		] as const) {
+			expect(
+				sessionAdmissionSites(source).map((s) => s.what),
+				source,
+			).toEqual([what]);
+		}
 	});
 
 	const sites = new Map<string, Site[]>();
@@ -498,6 +533,8 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 				.map(([file]) => file);
 		expect(offenders("recordSecondFactor", RECORD_SECOND_FACTOR_CALLERS)).toEqual([]);
 		expect(offenders("establishWithoutAsking", ESTABLISH_WITHOUT_ASKING_CALLERS)).toEqual([]);
+		expect(offenders("resumePrimary", RESUME_PRIMARY_CALLERS)).toEqual([]);
+		expect(offenders("continuationOf", RESUME_PRIMARY_CALLERS)).toEqual([]);
 	});
 
 	it("has no stale entry: every listed file is scanned and has the sites it lists", () => {
