@@ -33,14 +33,19 @@
  * request must receive. `full-set.redis.test.mts` boots the same set on real
  * Redis under `deployment.mode = "multi"`.
  *
- * The two session requirements a deployment writes (`deployment:requirement-page`,
- * `deployment:requirement-bare`, in the fixture) are registered, declared and
- * said at boot here, and refused when the declaration disagrees — the
- * session-admission ADR's D7 through the template's boot — and a password
- * login both interrupt is resumed through each requirement's completion
- * route and established once (D5, its acceptance criterion 2). The step-up
- * flows they could start are the consumers' and the MFA module's suites, not
- * this one.
+ * The MFA package is installed as a deployment installs it — `mfaModules`
+ * over core's memory MFA stores (Redis in `full-set.redis.test.mts`),
+ * `mfa.mode = "optional"`, a key of the deployment's own — so the `mfa`
+ * requirement registers beside the two a deployment writes
+ * (`deployment:requirement-page`, `deployment:requirement-bare`, in the
+ * fixture). All three are registered, declared and said at boot here, and
+ * refused when the declaration disagrees — the session-admission ADR's D7
+ * through the template's boot; a password login both fixtures interrupt is
+ * resumed through each requirement's completion route and established once
+ * (D5, its acceptance criterion 2), the `mfa` requirement establishing for a
+ * subject with no factor under `optional`; and a subject who holds one is
+ * interrupted by it. The step-up flows they could start are the consumers'
+ * and the MFA package's suites, not this one.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins
@@ -52,6 +57,8 @@ import { createHash, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import {
 	BootError,
+	type MfaFactorStore,
+	type MfaTransactionStore,
 	passwordSessionAuthentication,
 	type SubjectSessionIndex,
 	type UserSessionStore,
@@ -143,8 +150,13 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-federation-apple": ["federation:apple"],
 	"@o3co/auth-provider-federation-github": ["federation:github"],
 	// Private until the template wires it (the MFA ADR's build-order step
-	// 20); the TOTP factor alone until its MFA module lands.
-	"@o3co/auth-provider-mfa": ["mfa-totp-factor"],
+	// 20): mfaModules, over core's memory MFA stores.
+	"@o3co/auth-provider-mfa": [
+		"mfa-totp-factor",
+		"mfa",
+		"core-mfa-factor-store-memory",
+		"core-mfa-transaction-store-memory",
+	],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	"@o3co/auth-provider-webauthn": [
@@ -241,13 +253,18 @@ describe("the full set boots together", () => {
 		expect([...discovery.body.grant_types_supported].sort()).toEqual(ALL_GRANTS);
 	});
 
-	it("contributes the MFA package's TOTP factor from its reference.conf, and no requirement named mfa: the MFA module is not installed", async () => {
+	it("installs the MFA package: the TOTP factor from its reference.conf, and the requirement named mfa under mfa.mode = optional, reaching what the factor reaches", async () => {
 		const { handle, config } = await boot();
 		expect(handle.components.mfaFactorResolver?.get("totp")?.amrValues).toEqual(["otp"]);
 		expect(
-			[...(handle.components.sessionRequirementResolver?.entries() ?? [])].map(([name]) => name),
-		).toEqual(FIXTURE_REQUIREMENTS);
-		expect(config.mfa.mode).toBe("off");
+			[...(handle.components.sessionRequirementResolver?.entries() ?? [])]
+				.map(([name]) => name)
+				.sort(),
+		).toEqual([...FIXTURE_REQUIREMENTS, "mfa"].sort());
+		expect(
+			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+		).toEqual(["mfa", "otp"]);
+		expect(config.mfa.mode).toBe("optional");
 	});
 
 	it("hands the deployment's logger to every added module that answers a request or binds a token", async () => {
@@ -265,6 +282,7 @@ describe("the full set boots together", () => {
 			[
 				"device-grant",
 				"dpop",
+				"mfa",
 				"mtls",
 				"oauth-token-exchange",
 				"webauthn",
@@ -294,27 +312,38 @@ async function refused(options: FullSetOptions): Promise<BootError> {
 	throw new Error("the full set booted");
 }
 
-describe("the session requirements a deployment writes", () => {
+/** The requirements the full set registers: the MFA package's and the two a deployment writes. */
+const REGISTERED = ["mfa", ...FIXTURE_REQUIREMENTS];
+
+describe("the session requirements: the MFA package's, and the two a deployment writes", () => {
 	it("are said at boot, once: each registered requirement with its module and its remediations, in registration order", async () => {
 		const { logger } = await boot();
 		const said = logger.lines.filter((line) => line.args[1] === "session_requirements_registered");
 		expect(said).toHaveLength(1);
 		expect(said[0]?.level).toBe("info");
-		expect(said[0]?.args[0]).toEqual({
-			requirements: [
-				{
-					name: "fixture-page",
-					module: "deployment:requirement-page",
-					remediations: ["fixture-page.step_up"],
-				},
-				{ name: "fixture-bare", module: "deployment:requirement-bare", remediations: [] },
-			],
-		});
+		const { requirements } = (said[0]?.args[0] ?? { requirements: [] }) as {
+			requirements: { name: string; module: string; remediations: string[] }[];
+		};
+		expect([...requirements].sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+			{ name: "fixture-bare", module: "deployment:requirement-bare", remediations: [] },
+			{
+				name: "fixture-page",
+				module: "deployment:requirement-page",
+				remediations: ["fixture-page.step_up"],
+			},
+			{ name: "mfa", module: "mfa", remediations: ["mfa.step_up"] },
+		]);
+		// The fixtures in the order the deployment listed them.
+		expect(requirements.map((r) => r.name).filter((name) => name !== "mfa")).toEqual(
+			FIXTURE_REQUIREMENTS,
+		);
 	});
 
-	it("are declared: the composition's sessionRequirements.expected names exactly them, beside what the template derived from mfa.mode", async () => {
+	it("are declared: the composition's sessionRequirements.expected names exactly them — mfa, as the template derives it from mfa.mode, and the deployment's own", async () => {
 		const { config } = await boot();
-		expect(config.sessionRequirements?.expected).toEqual(FIXTURE_REQUIREMENTS);
+		expect([...(config.sessionRequirements?.expected ?? [])].sort()).toEqual(
+			[...REGISTERED].sort(),
+		);
 	});
 
 	it("refuse the boot when the declaration is the template's own — nothing expected — naming what registered and who consults admission", async () => {
@@ -325,8 +354,8 @@ describe("the session requirements a deployment writes", () => {
 		expect(err.details).toMatchObject({
 			configKey: "sessionRequirements.expected",
 			declared: [],
-			registered: FIXTURE_REQUIREMENTS,
-			consumedBy: expect.arrayContaining(["oauth"]),
+			registered: expect.arrayContaining(REGISTERED),
+			consumedBy: expect.arrayContaining(["oauth", "mfa"]),
 		});
 	});
 
@@ -334,18 +363,27 @@ describe("the session requirements a deployment writes", () => {
 		const err = await refused({
 			adjust: (config) => ({
 				...config,
-				sessionRequirements: { expected: [...FIXTURE_REQUIREMENTS, "mfa"] },
+				sessionRequirements: { expected: [...REGISTERED, "risk"] },
 			}),
 		});
 		expect(err.reason).toBe("session-requirements-undeclared");
 		expect(err.details).toMatchObject({
-			declared: [...FIXTURE_REQUIREMENTS, "mfa"],
-			registered: FIXTURE_REQUIREMENTS,
+			declared: [...REGISTERED, "risk"],
+			registered: expect.arrayContaining(REGISTERED),
 		});
+	});
+
+	it('refuse the boot under mfa.mode = "off" with the MFA module installed: remove the module, or set mfa.mode', async () => {
+		const err = await refused({
+			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "off" } }),
+		});
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ module: "mfa", kind: "sessionRequirements" });
 	});
 
 	it("refuse the boot under mfa.mode other than off while no requirement named mfa is registered, before the declaration is compared", async () => {
 		const err = await refused({
+			features: { mfa: false },
 			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
 		});
 		expect(err.reason).toBe("session-requirement-missing");
@@ -459,6 +497,50 @@ describe("a password login both requirements interrupt, resumed through each (th
 	});
 });
 
+describe("a password login the mfa requirement interrupts (the MFA ADR's F1 step 2, through the template's boot)", () => {
+	it("answers a subject who holds a factor 403 mfa_required with the closed body, a transaction bound to the regenerated session, and no UserSession written", async () => {
+		const { app, handle } = await boot();
+		const { mfaFactorStore, mfaTransactionStore, userSessionStore } =
+			handle.components as unknown as {
+				mfaFactorStore: MfaFactorStore;
+				mfaTransactionStore: MfaTransactionStore;
+				userSessionStore: UserSessionStore;
+			};
+		await mfaFactorStore.create({
+			id: "f-alice",
+			subject: ALICE.sub,
+			kind: "totp",
+			label: undefined,
+			binding: "password",
+			createdAt: new Date(),
+			lastUsedAt: undefined,
+			version: 0,
+			data: "sealed",
+		});
+		const create = vi.spyOn(userSessionStore, "create");
+		const csrf = await request(app).get("/session/csrf");
+		const login = await request(app)
+			.post("/session/login")
+			.set("Cookie", cookiesOf(csrf))
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: ALICE.username, password: ALICE.password });
+		expect(login.status).toBe(403);
+		expect(login.body).toEqual({
+			error: "mfa_required",
+			transaction: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+			expires_in: 600,
+		});
+		const transaction = await mfaTransactionStore.get(login.body.transaction as string);
+		expect(transaction).toMatchObject({
+			purpose: "login",
+			subject: ALICE.sub,
+			continuation: { interruptedBy: "mfa", primary: { subject: ALICE.sub } },
+		});
+		expect(create).not.toHaveBeenCalled();
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Discovery
 // ---------------------------------------------------------------------------
@@ -518,6 +600,8 @@ describe("discovery with every package on", () => {
 		],
 		["apple", { route: ["get", "/session/oauth/federation/apple"] }],
 		["github", { route: ["get", "/session/oauth/federation/github"] }],
+		// MFA contributes nothing to discovery: its reach meets no acr entry the template ships.
+		["mfa", {}],
 	];
 
 	it.each(TOGGLES)(
