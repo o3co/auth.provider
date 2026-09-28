@@ -31,6 +31,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type FederationProvider,
 	type GrantPolicyHook,
 	type Logger,
 	type PublicClient,
@@ -95,6 +96,8 @@ const makeApp = async (opts: {
 	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
 	userSessionStore?: UserSessionStore;
 	logger?: Logger;
+	/** Install one federation, as a federation module's contribution would. */
+	federation?: true;
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -138,6 +141,12 @@ const makeApp = async (opts: {
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
+		...(opts.federation
+			? {
+					getFederationProviders: () =>
+						new Map([["google", { name: "google" } as unknown as FederationProvider]]),
+				}
+			: {}),
 	});
 
 	const app = express();
@@ -1648,6 +1657,78 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
+		it("answers an entry nothing installed can satisfy unmet, even for a session that carries it", async () => {
+			// The MFA ADR's D15: no login this composition can perform records
+			// `mfa`, so the entry is dropped at boot — withheld from discovery and
+			// answered as one never configured. A session that carries the value
+			// anyway (a custom login path) does not revive it.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa"]),
+				createCode,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+			expect(params.get("error_description")).toMatch(/urn:example:mfa/);
+			expect(createCode).not.toHaveBeenCalled();
+		});
+
+		it("keeps an entry only an upstream IdP can meet while a federation is installed", async () => {
+			// Every federation's upstream `amr` is recorded beside `fed` until
+			// the upstream split (the MFA ADR's build order, step 5), so such a
+			// composition can meet any entry — as #481 shipped.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
+				createCode,
+				federation: true,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+			);
+			expect(params.get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:mfa" }));
+		});
+
+		it("meets an any-of entry through any one of its alternatives", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: {
+					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
+				},
+				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"]),
+				createCode,
+				federation: true,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
+			);
+			expect(params.get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:phr" }));
+		});
+
+		it("answers an any-of entry none of whose alternatives the session holds unmet", async () => {
+			const { app } = await makeApp({
+				session,
+				oauth: {
+					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
+				},
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"]),
+				federation: true,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+		});
+
 		it("records no acr when none was requested", async () => {
 			const createCode = mintingCode();
 			const { app } = await makeApp({
@@ -1661,5 +1742,78 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			// rather than leaving the field out.
 			expect(createCode.mock.calls[0]?.[0]).toHaveProperty("acr", undefined);
 		});
+	});
+});
+
+describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
+	const EVENT = "acr_value_unsatisfiable";
+	const acrValues = {
+		"urn:example:pwd": ["pwd"],
+		"urn:example:mfa": ["pwd", "mfa"],
+		"urn:example:phr": [["hwk"], ["swk"]],
+		"urn:example:kba": ["kba"],
+	};
+	const linesFor = (fn: ReturnType<typeof vi.fn>) =>
+		fn.mock.calls.filter((call) => call[1] === EVENT);
+
+	it("says once, object-first, which entries it dropped: info when only a second factor is missing under mfa.mode off", async () => {
+		const logger = createMockLogger();
+		await makeApp({ oauth: { authorize: { acrValues } }, logger });
+		expect(linesFor(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, EVENT],
+			[{ acr: "urn:example:phr", unproducible: ["hwk", "swk"] }, EVENT],
+		]);
+		expect(linesFor(logger.warn)).toEqual([
+			[{ acr: "urn:example:kba", unproducible: ["kba"] }, EVENT],
+		]);
+		for (const level of [logger.trace, logger.debug, logger.error, logger.fatal]) {
+			expect(linesFor(level)).toEqual([]);
+		}
+	});
+
+	it("warns for every dropped entry once MFA is not off", async () => {
+		// A hand-built configuration: core's schema admits only `off` until a
+		// module honours another mode, but the level is decided on the mode.
+		const logger = createMockLogger();
+		const { router } = await createOAuthRouter(express, {
+			registry: new GrantRegistry(),
+			config: {
+				...makeConfig({ authorize: { acrValues } }),
+				mfa: { mode: "optional" },
+			} as unknown as AppConfig,
+			clientRepository: { findById: async () => null, authenticate: async () => null },
+			codeRepository: {
+				createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+				findByCode: async () => null,
+				consumeByCode: async () => null,
+				removeByCode: async () => {},
+			},
+			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+			logger,
+		});
+		expect(router).toBeDefined();
+		expect(linesFor(logger.info)).toEqual([]);
+		expect(linesFor(logger.warn).map((call) => (call[0] as { acr: string }).acr)).toEqual([
+			"urn:example:mfa",
+			"urn:example:phr",
+			"urn:example:kba",
+		]);
+	});
+
+	it("says nothing when a federation is installed: every entry can be met", async () => {
+		const logger = createMockLogger();
+		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: true });
+		for (const level of [logger.info, logger.warn, logger.error]) {
+			expect(linesFor(level)).toEqual([]);
+		}
+	});
+
+	it("bounds what it logs of an entry", async () => {
+		const logger = createMockLogger();
+		const acr = `urn:example:${"x".repeat(300)}`;
+		await makeApp({ oauth: { authorize: { acrValues: { [acr]: ["kba\nforged"] } } }, logger });
+		const [fields] = linesFor(logger.warn)[0] as [{ acr: string; unproducible: string[] }];
+		expect(fields.acr.length).toBeLessThanOrEqual(200);
+		expect(fields.unproducible[0]).not.toContain("\n");
 	});
 });

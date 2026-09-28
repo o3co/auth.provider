@@ -322,7 +322,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 });
 
 describe("acr_values_supported (#481)", () => {
-	const withAcr = (acrValues: Record<string, string[]> | undefined): AppConfig => {
+	const withAcr = (acrValues: Record<string, unknown> | undefined): AppConfig => {
 		const base = configWithRevocation();
 		return {
 			...base,
@@ -330,12 +330,39 @@ describe("acr_values_supported (#481)", () => {
 		} as unknown as AppConfig;
 	};
 
-	it("advertises the keys of the configured acr table", async () => {
+	it("advertises the keys of the configured acr table that something installed can satisfy", async () => {
 		const meta = await discoveryContribution(
 			{},
-			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] }),
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:fed": [["fed"]] }),
 		);
-		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:fed"]);
+	});
+
+	it("withholds an entry nothing installed can satisfy (the MFA ADR's D15)", async () => {
+		// No login this composition can perform records `mfa` or `hwk`: an RP
+		// told it may ask for them would be answered unmet every time.
+		const meta = await discoveryContribution(
+			{},
+			withAcr({
+				"urn:example:pwd": ["pwd"],
+				"urn:example:mfa": ["pwd", "mfa"],
+				"urn:example:phr": [["hwk"], ["swk"]],
+			}),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
+	});
+
+	it("says nothing when every entry is withheld", async () => {
+		const meta = await discoveryContribution({}, withAcr({ "urn:example:mfa": ["pwd", "mfa"] }));
+		expect(meta.metadata).not.toHaveProperty("acr_values_supported");
+	});
+
+	it("advertises every entry while a federation is installed: an upstream IdP may assert any value", async () => {
+		const meta = await discoveryContribution(
+			{ federationProviders: new Map([["google", {}]]) },
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:phr"]);
 	});
 
 	it("says nothing when there is no table — an acr_values request is then unmet", async () => {

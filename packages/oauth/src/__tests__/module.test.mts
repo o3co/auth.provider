@@ -45,6 +45,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -347,6 +348,80 @@ describe("oauthModule — createTestApp route inspection", () => {
 // (both endpoints resolve the path via the shared `resolveJwksPath`, so
 // they cannot drift).
 // ---------------------------------------------------------------------------
+
+describe("oauthModule — the acr table in the served discovery document (the MFA ADR's D15)", () => {
+	const acrValues = {
+		"urn:example:pwd": ["pwd"],
+		"urn:example:mfa": ["pwd", "mfa"],
+	};
+	const acrConfig = () => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
+				authorize: { acrValues },
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+	};
+	/** A federation, contributed as a federation package's module contributes one. */
+	const googleFederationModule = defineModule({
+		name: "test:google-federation-acr",
+		contributes: {
+			federations: { google: () => federationBase("google") },
+			federationRedirectPolicies: {
+				google: () => ({
+					validateRedirect: () => ({ ok: true as const, value: undefined }),
+					resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
+				}),
+			},
+		} as never,
+	});
+	const boot = async (
+		extraModules: readonly Parameters<typeof createTestApp>[0]["modules"][number][],
+	) => {
+		const config = acrConfig();
+		const logger = createMockLogger();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				asymmetricKeyStoreModule,
+				...extraModules,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+		});
+		const app = express();
+		app.use(handle.router);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		await handle.dispose();
+		const lines = (level: ReturnType<typeof vi.fn>) =>
+			level.mock.calls.filter((call) => call[1] === "acr_value_unsatisfiable");
+		return { body, logger, lines };
+	};
+
+	it("advertises only what a login this composition performs can meet, and says once at boot what it dropped", async () => {
+		const { body, logger, lines } = await boot([]);
+		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
+		// `mfa.mode` is "off" (core's default): an entry that only a second
+		// factor would meet is not a misconfiguration, so the line is info.
+		expect(lines(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
+		]);
+		expect(lines(logger.warn)).toEqual([]);
+	});
+
+	it("advertises every entry, and drops none, while a federation is installed", async () => {
+		const { body, logger, lines } = await boot([googleFederationModule]);
+		expect(body.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
+		expect(lines(logger.info)).toEqual([]);
+		expect(lines(logger.warn)).toEqual([]);
+	});
+});
 
 describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 	function issuerConfig(extraJwt: Record<string, unknown> = {}) {
