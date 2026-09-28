@@ -45,7 +45,7 @@ import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import { type MfaModuleOptions, mfaModules } from "#/module.mjs";
 
 export const ISSUER = "https://auth.example";
@@ -62,7 +62,18 @@ export const ALICE = {
 } as const;
 
 /** A logger whose every level is a spy; `child` answers the same logger. */
-export function spyLogger() {
+export interface SpyLogger {
+	readonly trace: Mock;
+	readonly debug: Mock;
+	readonly info: Mock;
+	readonly warn: Mock;
+	readonly error: Mock;
+	readonly fatal: Mock;
+	readonly child: Mock;
+}
+
+/** A {@link SpyLogger}. */
+export function spyLogger(): SpyLogger {
 	const logger = {
 		trace: vi.fn(),
 		debug: vi.fn(),
@@ -75,8 +86,6 @@ export function spyLogger() {
 	logger.child.mockReturnValue(logger);
 	return logger;
 }
-
-export type SpyLogger = ReturnType<typeof spyLogger>;
 
 /** The lines logged at `level`, by event name. */
 export const events = (logger: SpyLogger, level: "info" | "warn" | "error"): string[] =>
