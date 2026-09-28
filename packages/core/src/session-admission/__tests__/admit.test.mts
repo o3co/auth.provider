@@ -1596,3 +1596,34 @@ describe("the clock", () => {
 		expect(await admitSession(withoutClock, request())).toMatchObject({ outcome: "admitted" });
 	});
 });
+
+describe("the caller's faults admitSession names, each driven", () => {
+	it("refuses deps, a request and asks that are not objects, naming each", async () => {
+		await expect(admitSession("deps" as never, request())).rejects.toThrow(
+			/deps must be an object/,
+		);
+		await expect(admitSession(deps(), "request" as never)).rejects.toThrow(
+			/the request must be an object/,
+		);
+		await expect(admitSession(deps(), request({ asks: "acr" as never }))).rejects.toThrow(
+			/asks must be an object/,
+		);
+	});
+
+	it("takes an action another resolver's requirement was issued as credential_change: an issued action is its own requirement's", async () => {
+		const owner = met("mfa", { remediations: ["mfa.step_up"] });
+		resolverForTests([owner]);
+		const seen: string[] = [];
+		const other = met("other", {
+			admit: async ({ action }) => {
+				seen.push(action.grade);
+				return { outcome: "met" };
+			},
+		});
+		await admitSession(
+			deps({ requirements: resolverForTests([other]) }),
+			request({ action: issuedRemediationActions(owner)?.step_up as AdmissionAction }),
+		);
+		expect(seen).toEqual(["credential_change"]);
+	});
+});

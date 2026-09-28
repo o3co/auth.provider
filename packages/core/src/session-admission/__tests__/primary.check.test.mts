@@ -380,3 +380,57 @@ describe("the continuation — what a requirement persists and presents back, as
 		expect(() => checkPrimaryContinuation({ done: [] })).toThrow(RangeError);
 	});
 });
+
+describe("the refusals each field names", () => {
+	const authentication = {
+		primary: "pwd",
+		federation: undefined,
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
+
+	it.each([
+		[
+			"claims that cannot be copied",
+			{ claims: { hook: () => 1 } },
+			/claims hold a value that cannot be copied/,
+		],
+		[
+			"an authentication that is not an object",
+			{ recorded: { amr: ["pwd"], authentication: "pwd" } },
+			/recorded\.authentication must be an object/,
+		],
+		[
+			"a federation that is not a string",
+			{ recorded: { amr: ["pwd"], authentication: { ...authentication, federation: 7 } } },
+			/recorded\.authentication\.federation must be a string or absent/,
+		],
+		[
+			"an upstreamAmr that is not a list of strings",
+			{ recorded: { amr: ["pwd"], authentication: { ...authentication, upstreamAmr: "hwk" } } },
+			/recorded\.authentication\.upstreamAmr must be a list of strings or absent/,
+		],
+		[
+			"a userAgent that is not a string",
+			{ request: { ip: "198.51.100.7", userAgent: 7 } },
+			/request\.userAgent must be a string or absent/,
+		],
+	] as const)("checkPrimaryAuthentication refuses %s, naming it", (_label, over, message) => {
+		expect(() => checkPrimaryAuthentication(primary(over as never))).toThrow(message);
+	});
+
+	it("checkPrimaryContinuation refuses a done entry that is not an object, and additions that are not one", () => {
+		const { authTime, ...fields } = primary();
+		const dto = { ...fields, authTimeMs: authTime.getTime() };
+		expect(() =>
+			checkPrimaryContinuation({ primary: dto, done: ["mfa"], interruptedBy: "mfa" }),
+		).toThrow(/done holds an entry that is not an object/);
+		expect(() =>
+			checkPrimaryContinuation({
+				primary: dto,
+				done: [{ requirement: "risk", adds: "risk-ok" }],
+				interruptedBy: "mfa",
+			}),
+		).toThrow(/adds something that is not an object/);
+	});
+});

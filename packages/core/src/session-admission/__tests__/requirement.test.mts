@@ -579,3 +579,51 @@ describe("the shapes the contract names", () => {
 		expect(true).toBe(true);
 	});
 });
+
+describe("the refusals and the read-only view, each driven", () => {
+	const mfa = {
+		name: "mfa",
+		reach: new Set(["otp", "mfa"]),
+		stepUpPage: { url: "/mfa", params: {} },
+		remediations: ["mfa.step_up"],
+		hintKeys: [],
+		admit: async () => ({ outcome: "met" as const }),
+	} satisfies SessionRequirement;
+
+	it("a sealed reach answers the set algebra over a copy of its own — never the private set — and names itself", () => {
+		const reach = resolverForTests([mfa]).get("mfa")?.reach as ReadonlySet<string>;
+		expect(Object.prototype.toString.call(reach)).toBe("[object SealedReach]");
+		const other = new Set(["hwk", "otp"]);
+		const union = reach.union(other);
+		expect([...union].sort()).toEqual(["hwk", "mfa", "otp"]);
+		union.add("x");
+		expect(reach.has("x")).toBe(false);
+		expect([...reach.intersection(other)]).toEqual(["otp"]);
+		expect([...reach.difference(other)]).toEqual(["mfa"]);
+		expect([...reach.symmetricDifference(other)].sort()).toEqual(["hwk", "mfa"]);
+		expect(reach.isSubsetOf(new Set(["otp", "mfa", "hwk"]))).toBe(true);
+		expect(reach.isSubsetOf(other)).toBe(false);
+		expect(reach.isSupersetOf(new Set(["otp"]))).toBe(true);
+		expect(reach.isSupersetOf(other)).toBe(false);
+		expect(reach.isDisjointFrom(new Set(["hwk"]))).toBe(true);
+		expect(reach.isDisjointFrom(other)).toBe(false);
+	});
+
+	it("allowAnyReach still refuses a reach that is not a Set or another iterable", () => {
+		for (const reach of [7, "otp", null, undefined, { otp: true }]) {
+			expect(
+				() =>
+					resolverForTests([{ ...mfa, name: "x", remediations: [], reach } as never], {
+						allowAnyReach: true,
+					}),
+				JSON.stringify(reach),
+			).toThrow(/reach must be a Set of amr values/);
+		}
+	});
+
+	it("issuedRemediationActions answers nothing for what is not an object", () => {
+		for (const value of [undefined, null, "mfa", 7]) {
+			expect(issuedRemediationActions(value as never), String(value)).toBeUndefined();
+		}
+	});
+});

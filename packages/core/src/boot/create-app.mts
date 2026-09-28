@@ -205,7 +205,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  *
  * @internal
  */
-function mergeWithBuiltins(consumer: ContributionKindMap | undefined): ContributionCollectorMap {
+/** @internal Exported for its test; `createApp` is its one caller. */
+export function mergeWithBuiltins(
+	consumer: ContributionKindMap | undefined,
+): ContributionCollectorMap {
 	// AS-M1 (PR6): explicit type arguments are required for the four kinds
 	// whose contributes-map placeholders were narrowed from `unknown` to
 	// concrete same-package types in v0.5.1. The factories themselves are

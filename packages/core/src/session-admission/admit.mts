@@ -104,7 +104,6 @@ import {
 	type RequirementInterruption,
 	type RequirementVerdict,
 	type SessionClaim,
-	type SessionRequirement,
 	type SessionRequirementResolver,
 	type SessionView,
 	type StepUpPage,
@@ -456,18 +455,24 @@ const isVerdict = (value: unknown): value is RequirementVerdict =>
 		value.whenStillUnmet === "reauthenticate" ||
 		value.whenStillUnmet === "unmet");
 
-/** Step 5's verdict, with the requirement that gave it. */
+/**
+ * Step 5's verdict, with the requirement that gave it. An outage never gets
+ * here — step 5 answers `unavailable` itself — and a `step_up` carries the
+ * live session it was taken over and the requirement whose reach bounds its
+ * hint: `stepUpVerdict` makes one over no session `reauthenticate`.
+ */
 type RequirementOutcome =
 	| { readonly outcome: "met" }
 	| { readonly outcome: "reauthenticate"; readonly requirement: string }
 	| {
 			readonly outcome: "step_up";
 			readonly requirement: string;
+			readonly stepping: RegisteredRequirement;
+			readonly session: UserSession;
 			readonly page: StepUpPage;
 			readonly whenStillUnmet: "reauthenticate" | "unmet";
 	  }
-	| { readonly outcome: "unmet"; readonly requirement: string }
-	| { readonly outcome: "unavailable"; readonly store: string };
+	| { readonly outcome: "unmet"; readonly requirement: string };
 
 /**
  * `admitSession`: whether the session `request.claim` names may proceed with
@@ -682,7 +687,7 @@ export async function admitSession(
  */
 function stepUpVerdict(
 	name: string,
-	requirement: SessionRequirement,
+	requirement: RegisteredRequirement,
 	whenStillUnmet: "reauthenticate" | "unmet",
 	session: UserSession | null,
 	deps: AdmissionDeps,
@@ -702,7 +707,14 @@ function stepUpVerdict(
 		}
 		return { outcome: "unmet", requirement: name };
 	}
-	return { outcome: "step_up", requirement: name, page, whenStillUnmet };
+	return {
+		outcome: "step_up",
+		requirement: name,
+		stepping: requirement,
+		session,
+		page,
+		whenStillUnmet,
+	};
 }
 
 /**
@@ -720,7 +732,8 @@ function effectiveAction(
 	if (asked.grade !== "remediation") return { name: asked.name, grade: asked.grade };
 	if (
 		isIssuedAction(asked) &&
-		requirements.some(([, r]) => Object.values(issuedActionsOf(r) ?? {}).includes(asked))
+		// Every registered copy was issued its actions ({} when it declared none).
+		requirements.some(([, r]) => Object.values(issuedActionsOf(r) as object).includes(asked))
 	) {
 		return asked;
 	}
@@ -757,34 +770,30 @@ function merge(
 	const { session } = context;
 	const unmetAcr = (): Admission => ({ outcome: "unmet", requirement: "acr", session });
 	switch (R.outcome) {
-		case "unavailable":
-			return { outcome: "unavailable", store: R.store };
 		case "met":
 			if (A === undefined || A.outcome === "met") {
 				return { outcome: "admitted", session, acr: A?.acr };
 			}
-			if (A.outcome === "unmet") return unmetAcr();
-			return stepUpThroughOne(A.acrValues, context) ?? unmetAcr();
+			// A selection steps up only over a live session: step 6 hands it an
+			// empty reach otherwise.
+			if (A.outcome === "unmet" || session === null) return unmetAcr();
+			return stepUpThroughOne(A.acrValues, context, session) ?? unmetAcr();
 		case "reauthenticate":
 			return context.noneConfigured
 				? unmetAcr()
 				: { outcome: "reauthenticate", requirement: R.requirement, session };
 		case "step_up": {
-			if (session === null) {
-				throw new Error("invariant violated: a step-up over no session");
-			}
 			if (A?.outcome === "unmet") return unmetAcr();
 			// The hint: what the stepping requirement's own trip can finish, as
 			// in the met + step_up row — never an entry only another reaches.
-			const own = context.requirements.find(([name]) => name === R.requirement)?.[1];
 			return {
 				outcome: "step_up",
 				requirement: R.requirement,
-				session,
+				session: R.session,
 				page: R.page,
 				acrValues:
-					A?.outcome === "step_up" && own !== undefined
-						? A.acrValues.filter((acr: string) => finishes(context, own, acr))
+					A?.outcome === "step_up"
+						? A.acrValues.filter((acr: string) => finishes(context, R.stepping, acr))
 						: [],
 				whenStillUnmet: A?.outcome === "step_up" ? "unmet" : R.whenStillUnmet,
 			};
@@ -802,11 +811,12 @@ const finishes = (
 	requirement: RegisteredRequirement,
 	acr: string,
 ): boolean =>
-	(Object.hasOwn(context.table, acr) ? context.table[acr] : [])?.some(
+	// `acr` is one the selection answered reachable: a key of the table.
+	(context.table[acr] as readonly (readonly string[])[]).some(
 		(alternative) =>
 			alternative.length > 0 &&
 			alternative.every((value) => context.held.includes(value) || requirement.reach.has(value)),
-	) ?? false;
+	);
 
 /**
  * The `met` + `step_up` row: the page of the first requirement whose own
@@ -817,9 +827,8 @@ const finishes = (
 function stepUpThroughOne(
 	reachable: readonly string[],
 	context: MergeContext,
+	session: UserSession,
 ): Admission | undefined {
-	const { session } = context;
-	if (session === null) throw new Error("invariant violated: a step-up over no session");
 	for (const [name, requirement] of context.requirements) {
 		// What this requirement's reach alone can finish, beside what is held.
 		const finishable = reachable.filter((acr: string) => finishes(context, requirement, acr));

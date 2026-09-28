@@ -164,11 +164,9 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 	let resolved: URL;
 	if (url.startsWith("/")) {
 		const base = new URL(issuer ?? PATH_ORIGIN);
-		try {
-			resolved = new URL(url, base);
-		} catch {
-			throw new RangeError("stepUpPage.url must be a path or an absolute URL");
-		}
+		// A path free of backslashes and control characters always resolves
+		// against a base; what it may do is leave the base's origin.
+		resolved = new URL(url, base);
 		if (resolved.origin !== base.origin) {
 			throw new RangeError(
 				"stepUpPage.url must stay on the issuer's origin once resolved: a path, not a scheme-relative URL",

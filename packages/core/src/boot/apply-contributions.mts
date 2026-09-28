@@ -499,16 +499,16 @@ const factorSnapshots = new WeakMap<
 /**
  * The reach core recomputes from the enabled factors — each one's
  * `amrValues`, and `mfa` when one adds it — read from the snapshots taken at
- * registration alone, never from the factor again. A factor that did not
- * register through the name-keyed pass has none, and is refused.
+ * registration alone, never from the factor again. Every factor the resolver
+ * answers registered through the name-keyed pass (both of its paths run
+ * `checkNameKeyedValue`, and a host collector for the kind is refused), so
+ * every one has a snapshot.
  */
-function reachOfFactors(resolver: MfaFactorResolver | undefined): ReadonlySet<string> {
+function reachOfFactors(resolver: MfaFactorResolver): ReadonlySet<string> {
 	const reach = new Set<string>();
-	for (const [kind, factor] of resolver?.entries() ?? []) {
-		const snapshot = factorSnapshots.get(factor as object);
-		if (snapshot === undefined) {
-			throw new RangeError(`mfaFactors "${kind}": a factor core did not register at registration`);
-		}
+	for (const [, factor] of resolver.entries()) {
+		// biome-ignore lint/style/noNonNullAssertion: every registered factor was snapshotted at registration
+		const snapshot = factorSnapshots.get(factor as object)!;
 		for (const value of snapshot.amrValues) reach.add(value);
 		if (snapshot.addsMfa) reach.add(MFA_REQUIREMENT_NAME);
 	}
@@ -555,35 +555,16 @@ async function checkSessionRequirements(
 ): Promise<void> {
 	if (collector === undefined) return;
 	const registrations: RequirementRegistration[] = [];
+	// An override of the kind never reaches here: stage 1's guard refuses it
+	// off the same normalised entries this pass reads.
 	for (const moduleName of material.plan.initOrder) {
-		const validatedModule = material.plan.validated.byName.get(moduleName);
-		if (!validatedModule) continue;
-		// Defence in depth behind stage 1's guard: an override of the kind is
-		// refused here too, off the same normalised entries.
-		if (
-			validatedModule.normalised.overridesEntries.some(
-				(entry) => entry.kind === "sessionRequirements",
-			)
-		) {
-			await runCleanupsReverse(material.cleanups);
-			throw new BootError({
-				message: `Module "${moduleName}" overrides a sessionRequirements entry, which nothing may.`,
-				reason: "session-requirement-kind-guarded",
-				stage: "applyContributions",
-				details: {
-					reason: "session-requirement-kind-guarded",
-					kind: "sessionRequirements",
-					channel: "overrides",
-					module: moduleName,
-				},
-			});
-		}
+		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
+		const validatedModule = material.plan.validated.byName.get(moduleName)!;
 		for (const entry of validatedModule.normalised.contributesEntries) {
 			if (entry.kind !== "sessionRequirements" || typeof entry.key !== "string") continue;
-			const requirement = collector.get(entry.key);
-			if (requirement !== undefined) {
-				registrations.push({ name: entry.key, module: moduleName, requirement });
-			}
+			// biome-ignore lint/style/noNonNullAssertion: the name-keyed pass registered every contributed entry, a null refused
+			const requirement = collector.get(entry.key)!;
+			registrations.push({ name: entry.key, module: moduleName, requirement });
 		}
 	}
 	const failed = async (registration: RequirementRegistration, cause: unknown): Promise<never> => {
@@ -623,8 +604,9 @@ async function checkSessionRequirements(
 			}
 			continue;
 		}
-		const blueprint = material.plan.depsBlueprint.get(registration.module);
-		const requires = (blueprint?.requires ?? []) as readonly string[];
+		// biome-ignore lint/style/noNonNullAssertion: the plan has a blueprint for every module it planned
+		const blueprint = material.plan.depsBlueprint.get(registration.module)!;
+		const requires = blueprint.requires as readonly string[];
 		const missing = MFA_PORTS.filter((port) => !requires.includes(port));
 		if (missing.length > 0) {
 			return failed(
@@ -634,13 +616,10 @@ async function checkSessionRequirements(
 				),
 			);
 		}
-		let recomputed: ReadonlySet<string>;
-		try {
-			recomputed = reachOfFactors(components.mfaFactorResolver as MfaFactorResolver | undefined);
-		} catch (cause) {
-			// A factor's getter that throws on this read is the contribution's failure, cleanups run.
-			return failed(registration, cause);
-		}
+		// Read from the registration snapshots alone: nothing here reads a
+		// factor again, so nothing here can throw. The resolver is present —
+		// the module requires it, and the planner satisfied the requirement.
+		const recomputed = reachOfFactors(components.mfaFactorResolver as MfaFactorResolver);
 		if (!sameSet(reach, recomputed)) {
 			return failed(
 				registration,
@@ -662,8 +641,8 @@ async function checkSessionRequirements(
 	// Who consults admission: the validated manifests' `requires` and
 	// `optional`, as each module declared them.
 	const consumedBy = material.plan.initOrder.filter((moduleName) => {
-		const normalised = material.plan.validated.byName.get(moduleName)?.normalised;
-		if (normalised === undefined) return false;
+		// biome-ignore lint/style/noNonNullAssertion: every module in the init order was validated under its name
+		const normalised = material.plan.validated.byName.get(moduleName)!.normalised;
 		return [
 			...(normalised.requires as readonly string[]),
 			...(normalised.optional as readonly string[]),
@@ -671,32 +650,10 @@ async function checkSessionRequirements(
 	});
 	const config = components.config;
 	// Before the declaration: a composition that asks for MFA without the
-	// module is told to install it, not to fix a list. A mode the reader
-	// refuses is the configuration's failure, cleanups run — never a raw throw.
-	let mode: ReturnType<typeof readMfaMode>;
-	try {
-		mode = readMfaMode(config);
-	} catch (cause) {
-		const cleanupErrors = await runCleanupsReverse(material.cleanups);
-		throw new BootError({
-			message: "mfa.mode is not a value core reads: set it to off, optional or required.",
-			reason: "config-validation-failed",
-			stage: "applyContributions",
-			details: {
-				reason: "config-validation-failed",
-				issues: [
-					{
-						code: "custom",
-						path: ["mfa", "mode"],
-						message: "mfa.mode is not a value core reads",
-					},
-				],
-				modules: [],
-				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-			} as never,
-			cause,
-		});
-	}
+	// module is told to install it, not to fix a list. The mode is the parsed
+	// configuration's — stage 1's schema admits off, optional and required
+	// alone — so the reader answers, never throws, here.
+	const mode = readMfaMode(config);
 	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({

@@ -263,3 +263,26 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 		);
 	});
 });
+
+describe("sessionRequirementContract — the paths a fixture's shape takes", () => {
+	it("passes every case for a fixture with no remediation and no admitPrimary, and no issuer", async () => {
+		const cases = sessionRequirementContract({
+			key: "fixture-b",
+			fixture: true,
+			build: () => fixture({ name: "fixture-b", remediations: [], admitPrimary: undefined }),
+		});
+		for (const { name, run } of cases) await expect(run(), name).resolves.toBeUndefined();
+	});
+
+	it("passes every case with no issuer given, the page held to its shape alone", async () => {
+		for (const { name, run } of sessionRequirementContract(input({ issuer: undefined }))) {
+			await expect(run(), name).resolves.toBeUndefined();
+		}
+	});
+
+	it("fails the interruption case, rather than passing it, when a primary is handed to a fixture that never interrupts", async () => {
+		expect(await failing({ build: () => fixture({ admitPrimary: undefined }) })).toContain(
+			"an interruption's body carries none of the reserved keys, and no hint value carries an address",
+		);
+	});
+});

@@ -1036,3 +1036,70 @@ describe("the boot line (D3)", () => {
 		expect(lines.filter((line) => line.message === "session_requirements_registered")).toEqual([]);
 	});
 });
+
+describe("the stage-4 paths each driven (D3, D7)", () => {
+	it("recomputes the mfa reach without mfa when no factor adds it", async () => {
+		const plain = defineModule({
+			name: "test:factors",
+			contributes: { mfaFactors: { totp: () => factor("totp", ["otp"], false) } },
+		});
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot([plain, ...stores, mfaModule(), consumer(seen)], {
+			sessionRequirements: { expected: ["mfa"] },
+			mfa: { mode: "required" },
+		});
+		try {
+			expect([...(seen.resolver?.get("mfa")?.reach ?? [])]).toEqual(["otp"]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("a requirement's refusal at the end of stage 4 runs the cleanups and carries what one threw", async () => {
+		const closing = defineModule({
+			name: "test:closing",
+			provides: { closingSlot: () => 1 },
+			lifecycle: {
+				closingSlot: {
+					eager: true,
+					cleanup: () => {
+						throw new Error("closing failed");
+					},
+				},
+			},
+		} as never);
+		const err = await refusal(
+			boot(
+				[
+					closing,
+					contributing("test:risk", {
+						risk: () =>
+							requirement("risk", {
+								reach: new Set(["risk-ok"]),
+								stepUpPage: { url: "/risk", params: {} },
+							}),
+					}),
+				],
+				{ sessionRequirements: { expected: ["risk"] } },
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			module: "test:risk",
+			name: "risk",
+			cleanupErrors: [{ module: "test:closing", componentKey: "closingSlot" }],
+		});
+	});
+
+	it("names every consumer when more than one consults admission and the declaration disagrees", async () => {
+		const other = defineModule({
+			name: "test:consumer-2",
+			requires: ["sessionRequirementResolver"] as never,
+		} as never);
+		const err = await refusal(
+			boot([consumer({}), other], { sessionRequirements: { expected: ["ghost"] } }),
+		);
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.message).toMatch(/modules \[test:consumer, test:consumer-2\]/);
+	});
+});

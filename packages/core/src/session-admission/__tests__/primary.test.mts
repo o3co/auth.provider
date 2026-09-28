@@ -358,6 +358,15 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		expect(await admission.open("s")).toEqual({ status: 403, body: { error: "mfa_required" } });
 	});
 
+	it("refuses an answer that is not an object, naming the requirement", async () => {
+		for (const value of ["403", null, 7]) {
+			const admission = await interrupt(async () => value as never);
+			await expect(admission.open("s"), String(value)).rejects.toThrow(
+				/requirement "mfa" answered an interruption that is not an object/,
+			);
+		}
+	});
+
 	it("refuses a session id that is not a non-empty string, before opening", async () => {
 		let opened = 0;
 		const admission = await interrupt(async () => {
@@ -673,6 +682,30 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 				"risk",
 			),
 		);
+	});
+
+	it("refuses deps that are not an object, a completion without a requirement's name, and a done entry naming a requirement that is not registered", async () => {
+		const mfa = asking("mfa", () => "establish");
+		await expect(admitPrimary("deps" as never, passwordPrimary(facts()))).rejects.toThrow(
+			/admitPrimary: deps must be an object/,
+		);
+		await expect(
+			resumePrimary("deps" as never, continuation(), { requirement: "mfa", adds: { amr: [] } }),
+		).rejects.toThrow(/resumePrimary: deps must be an object/);
+		for (const completed of [null, "mfa", { requirement: "" }, { adds: { amr: [] } }]) {
+			await expect(
+				resumePrimary(deps([mfa]), continuation(), completed as never),
+				JSON.stringify(completed),
+			).rejects.toThrow(/the completion must name a requirement/);
+		}
+		await expect(
+			resumePrimary(
+				deps([mfa]),
+				continuationOf(primary(), [{ requirement: "gone", adds: { amr: [] } }], "mfa"),
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+			),
+		).rejects.toThrow(/"gone" is not a registered requirement that interrupts a login/);
+		expect(mfa.asked).toEqual([]);
 	});
 
 	it("answers unavailable when a requirement throws on the second ask", async () => {

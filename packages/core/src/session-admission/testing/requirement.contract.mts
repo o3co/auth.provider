@@ -230,6 +230,19 @@ export function sessionRequirementContract(
 				);
 				assert.equal(admission.outcome, "not_live");
 				assert.equal(requirement.calls(), 0, "admit was called about a session that is not live");
+				// Not vacuous: the same requirement is asked about a live one.
+				await admitSession(
+					{
+						userSessionStore: storeAnswering(liveSession()),
+						subjectRevocation: undefined,
+						requirements: resolverForTests([requirement], issuer === undefined ? {} : { issuer }),
+						acrTable: readAcrTable({}),
+						logger: undefined,
+						auditSink: undefined,
+					},
+					{ claim: claim(), action: { name: "contract.action", grade: "use" } },
+				);
+				assert.equal(requirement.calls(), 1, "admit was not asked about a live session");
 			},
 		},
 		{
@@ -314,7 +327,12 @@ export function sessionRequirementContract(
 			name: "an interruption's body carries none of the reserved keys, and no hint value carries an address",
 			run: async () => {
 				const requirement = build();
-				if (requirement.admitPrimary === undefined) return;
+				// A primary handed to a fixture that never interrupts makes this
+				// case vacuous: said so, rather than passed.
+				assert.ok(
+					requirement.admitPrimary !== undefined,
+					"a primary was handed in, but the fixture has no admitPrimary: leave `primary` out for a requirement that never interrupts a login",
+				);
 				const admission = await admitPrimary(
 					{
 						userSessionStore: undefined,
@@ -328,12 +346,10 @@ export function sessionRequirementContract(
 				);
 				// A primary the fixture establishes for makes this case vacuous:
 				// said so, rather than passed.
-				assert.equal(
-					admission.outcome,
-					"interrupt",
+				assert.ok(
+					admission.outcome === "interrupt",
 					`the fixture's admitPrimary answered ${admission.outcome} for the primary given, so its interruption cannot be checked: hand in a primary it interrupts, or leave \`primary\` out`,
 				);
-				if (admission.outcome !== "interrupt") return;
 				// Core's validation of the answer is what holds the body to its
 				// closed shape and the hints to the grammar: a body that fails is
 				// refused here.
