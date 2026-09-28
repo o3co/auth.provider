@@ -84,6 +84,38 @@ const instantOf = (value: Date, name: string): number => {
 const optionalInstantOf = (value: Date | undefined, name: string): number | null =>
 	value === undefined ? null : instantOf(value, name);
 
+const BINDINGS: ReadonlySet<unknown> = new Set(["password", "email_proof", "mfa"]);
+
+/**
+ * Refuses, with a `RangeError`, a mutable part {@link recordOf} would refuse
+ * to read: `data` not a string, `label` neither a string nor absent.
+ */
+function checkMutable(next: MfaFactorRecordUpdate): void {
+	if (typeof next.data !== "string") throw RANGE("data must be a string");
+	if (next.label !== undefined && typeof next.label !== "string") {
+		throw RANGE("label must be a string or absent");
+	}
+}
+
+/**
+ * Refuses, with a `RangeError`, a record {@link recordOf} would refuse to
+ * read: a read refuses the subject's whole list over one such record, so a
+ * write of one would make every factor of the subject unreadable. The dates
+ * are checked where they are written.
+ */
+function checkRecord(record: MfaFactorRecord): void {
+	if (typeof record.id !== "string") throw RANGE("id must be a string");
+	if (typeof record.subject !== "string") throw RANGE("subject must be a string");
+	if (typeof record.kind !== "string") throw RANGE("kind must be a string");
+	if (record.binding !== undefined && !BINDINGS.has(record.binding)) {
+		throw RANGE('binding must be "password", "email_proof", "mfa" or absent');
+	}
+	if (!isWholeVersion(record.version)) {
+		throw RANGE("version must be a safe non-negative integer");
+	}
+	checkMutable(record);
+}
+
 const fixedPart = (record: MfaFactorRecord): string =>
 	JSON.stringify({
 		id: record.id,
@@ -105,8 +137,6 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 
 const isInstant = (value: unknown): value is number =>
 	typeof value === "number" && Number.isFinite(value);
-
-const BINDINGS: ReadonlySet<unknown> = new Set(["password", "email_proof", "mfa"]);
 
 /**
  * The record `value` holds, as plain data with every field named — or the
@@ -173,11 +203,8 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		},
 
 		async create(record) {
-			// Refused before anything is written: a record whose version no
-			// compare-and-set can match, or whose dates do not read back.
-			if (!isWholeVersion(record.version)) {
-				throw RANGE("version must be a safe non-negative integer");
-			}
+			// Refused before anything is written: whatever a read would refuse.
+			checkRecord(record);
 			const value = `${record.version}\n${fixedPart(record)}\n${mutablePart(record)}`;
 			if (!(await client.create(keyOf(record.subject), mfaKeyPart(record.id), value))) {
 				throw new Error("an MFA factor record with this id already exists for the subject");
@@ -185,6 +212,7 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		},
 
 		async update(subject, id, expectedVersion, next) {
+			checkMutable(next);
 			const mutable = mutablePart(next);
 			// No stored record is at a version that is not a whole number.
 			if (!isWholeVersion(expectedVersion)) return null;
