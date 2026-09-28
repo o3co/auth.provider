@@ -369,7 +369,7 @@ The MFA requirement, in `packages/mfa`: `name: "mfa"`; `reach` = the coordinator
 | any | credential_change | recent MFA | `met` |
 | `optional` | use | any | `met` |
 
-`admitPrimary` = `decideAfterPrimary` and `openLoginTransaction` behind one `Interruption`, answering `establish` outright when the composed `recorded.authentication.mfaAt` is already set (a resumption after its own completion); the transaction persists the continuation, and the verified factor's completion calls `resumePrimary` with it and then `establishSession` (D5). `/authorize`'s D17 ask handling — the trips, the accumulating record, `prompt=none` → `interaction_required` — stays in `oauth`, driven by `Admission` instead of by `decideMfaRequirement`.
+`admitPrimary` = `decideAfterPrimary` and `openLoginTransaction` behind one `Interruption`, asked once per login — `resumePrimary` does not ask it again after its own completion (D5); the transaction persists the continuation, and the verified factor's completion calls `resumePrimary` with it and then `establishSession` (D5). `/authorize`'s D17 ask handling — the trips, the accumulating record, `prompt=none` → `interaction_required` — stays in `oauth`, driven by `Admission` instead of by `decideMfaRequirement`.
 
 ### D7 — A requirement installed is a requirement on; what a composition expects is declared; asking for one that is not installed is refused (re-decides the MFA ADR's O2)
 
