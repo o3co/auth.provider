@@ -39,7 +39,7 @@
 
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { MfaRequirementSession } from "../mfa/requirement.mjs";
-import type { SessionAuthentication, UserSession } from "./types.mjs";
+import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
 /** A copy of `authentication` that shares nothing with it: its list and its date are new. */
 export function copySessionAuthentication(
@@ -151,6 +151,66 @@ export function federatedSessionAuthentication(login: {
 			upstreamAmr: !login.trusted && upstream.length > 0 ? upstream : undefined,
 			mfaAt: undefined,
 		},
+	};
+}
+
+/**
+ * Refuse, with a `RangeError`, an event that is not a second factor's (D9):
+ * no values, one that is not a non-empty string, a primary's marker (`pwd`,
+ * `fed` — a second factor must not change the primary the baseline is decided
+ * on, as `composeAmr` holds a factor to), or a time that is not a valid date
+ * at or after the epoch. What `recordSecondFactor` checks before it reads
+ * anything, in every bundled store.
+ */
+export function checkSecondFactorEvent(event: SecondFactorEvent): void {
+	const amr: unknown = event?.amr;
+	if (!Array.isArray(amr) || amr.length === 0) {
+		throw new RangeError("recordSecondFactor: a second factor adds at least one amr value");
+	}
+	for (const value of amr) {
+		if (typeof value !== "string" || value.length === 0) {
+			throw new RangeError("recordSecondFactor: amr values must be non-empty strings");
+		}
+		if (value === PASSWORD_AMR || value === FEDERATED_AMR) {
+			throw new RangeError(
+				`recordSecondFactor: "${value}" marks a primary authentication, never a second factor's amr`,
+			);
+		}
+	}
+	const atMs = event.at instanceof Date ? event.at.getTime() : Number.NaN;
+	if (!Number.isFinite(atMs) || atMs < 0) {
+		throw new RangeError("recordSecondFactor: at must be a valid date at or after the epoch");
+	}
+}
+
+/**
+ * What a session records once a second factor was verified in it (D9) — the
+ * computation both bundled stores' `recordSecondFactor` write, so they cannot
+ * differ. `amr`: what the session vouches for (`vouchedAmr`), then the
+ * event's values, each once, in insertion order. `authentication`: the
+ * session's (`sessionAuthentication`) with `mfaAt` the later of the two.
+ *
+ * A session written before `authentication` existed is split here, first: a
+ * pre-upgrade `["hwk", "fed"]` plus TOTP becomes `amr` `["fed", "otp", "mfa"]`
+ * and `upstreamAmr` `["hwk"]` — never `["hwk", "fed", "otp", "mfa"]`, whose
+ * `hwk`, an untrusted IdP's word, would meet `phr`. `null` for one whose
+ * primary cannot be told. The event is checked (`checkSecondFactorEvent`).
+ */
+export function sessionAfterSecondFactor(
+	session: UserSession,
+	event: SecondFactorEvent,
+): RecordedAuthentication | null {
+	checkSecondFactorEvent(event);
+	const authentication = sessionAuthentication(session);
+	if (authentication === undefined) return null;
+	const atMs = event.at.getTime();
+	const mfaAt =
+		authentication.mfaAt !== undefined && authentication.mfaAt.getTime() >= atMs
+			? authentication.mfaAt
+			: new Date(atMs);
+	return {
+		amr: [...new Set([...vouchedAmr(session), ...event.amr])],
+		authentication: { ...authentication, mfaAt },
 	};
 }
 

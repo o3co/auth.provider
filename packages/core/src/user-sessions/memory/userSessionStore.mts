@@ -14,10 +14,15 @@
  * limitations under the License.
  */
 
-import { copySessionAuthentication } from "../authentication.mjs";
+import {
+	checkSecondFactorEvent,
+	copySessionAuthentication,
+	sessionAfterSecondFactor,
+} from "../authentication.mjs";
 import type {
 	CreateUserSessionInput,
 	SessionAuthentication,
+	SupportsSecondFactorUpdate,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -50,13 +55,28 @@ const cloneClaims = (c: UserSessionClaims | Record<string, unknown>): Record<str
 	return out;
 };
 
+/** The session a record holds, as a copy that shares nothing with it. */
+const toSession = (s: Stored): UserSession => ({
+	sid: s.sid,
+	sub: s.sub,
+	authTime: new Date(s.authTime.getTime()),
+	createdAt: new Date(s.createdAt.getTime()),
+	expiresAt: new Date(s.expiresAt.getTime()),
+	claims: cloneClaims(s.claims) as UserSessionClaims,
+	amr: s.amr ? [...s.amr] : undefined,
+	authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
+});
+
 /**
- * In-memory UserSessionStore. Single-process only. Atomicity comes from
- * Node's single event loop — `Map.get/set/delete` are synchronous.
+ * In-memory UserSessionStore, with the step-up capability (the MFA ADR's D9).
+ * Single-process only. Atomicity comes from Node's single event loop —
+ * `Map.get/set/delete` are synchronous, and `recordSecondFactor` reads,
+ * computes and writes with no `await` between, so two recorded at once apply
+ * one after the other.
  *
  * Per A4 §5.1 + §7.1 (lines 469-505).
  */
-export function createInMemoryUserSessionStore(): UserSessionStore {
+export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSecondFactorUpdate {
 	const sessions = new Map<string, Stored>();
 
 	const readLive = (sid: string): Stored | null => {
@@ -117,16 +137,19 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 		async get(sid: string): Promise<UserSession | null> {
 			const s = readLive(sid);
 			if (!s) return null;
-			return {
-				sid: s.sid,
-				sub: s.sub,
-				authTime: new Date(s.authTime.getTime()),
-				createdAt: new Date(s.createdAt.getTime()),
-				expiresAt: new Date(s.expiresAt.getTime()),
-				claims: cloneClaims(s.claims) as UserSessionClaims,
-				amr: s.amr ? [...s.amr] : undefined,
-				authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
-			};
+			return toSession(s);
+		},
+		async recordSecondFactor(sid, event) {
+			// A bad event is refused before anything is read, gone session or not.
+			checkSecondFactorEvent(event);
+			const s = readLive(sid);
+			if (!s) return null;
+			const next = sessionAfterSecondFactor(toSession(s), event);
+			if (next === null) return null;
+			// A field write: `expiresAt`, and everything else, stay as they were.
+			s.amr = [...next.amr];
+			s.authentication = copySessionAuthentication(next.authentication);
+			return toSession(s);
 		},
 		async delete(sid: string) {
 			sessions.delete(sid);

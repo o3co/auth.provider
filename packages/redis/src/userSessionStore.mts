@@ -17,10 +17,13 @@
 import {
 	type AdapterBuilder,
 	type CreateUserSessionInput,
+	checkSecondFactorEvent,
 	consoleLogger,
 	type Logger,
 	loggableError,
 	type SessionAuthentication,
+	type SupportsSecondFactorUpdate,
+	sessionAfterSecondFactor,
 	type UserSession,
 	type UserSessionClaims,
 	type UserSessionStore,
@@ -193,14 +196,22 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 });
 
 /**
- * Redis-backed UserSessionStore. Per A4 §5.1 + §7.2.
+ * How many times `recordSecondFactor` re-reads after losing its
+ * compare-and-set before it gives up. A loss means another write moved this
+ * one session in between — another step-up in flight on it — so a handful
+ * covers every real race; past it the caller sees an error, as for an outage.
+ */
+const RECORD_SECOND_FACTOR_ATTEMPTS = 5;
+
+/**
+ * Redis-backed UserSessionStore, with the step-up capability (the MFA ADR's
+ * D9). Per A4 §5.1 + §7.2.
  *
  * Storage shape: each session is a single Redis string key
  * `${keyPrefix}${sid}` whose value is a JSON-encoded envelope, with TTL
  * applied via SET PX. The v0.4.x lost-update window is **structurally
- * absent**: this adapter exposes only `create` (atomic SET NX),
- * `get`, `delete`. No GET → mutate → SET path exists at the v0.5.0
- * `UserSessionStore` interface level; claims update is deferred post-publish.
+ * absent**: the one write after `create` is `recordSecondFactor`, and it
+ * replaces the envelope only while it still holds what was read.
  *
  * Atomicity:
  *  - `create` uses SET NX PX — atomic insert-only, same primitive as A1
@@ -209,11 +220,58 @@ const fromEnvelope = (e: Envelope): UserSession => ({
  *  - `get` is a read-only GET (no PTTL round-trip needed; expiresAtMs is
  *    embedded in the JSON envelope and the SET PX TTL eventually deletes
  *    the key).
+ *  - `recordSecondFactor` reads, computes the next envelope in JavaScript
+ *    (core's `sessionAfterSecondFactor`, which splits a pre-upgrade session
+ *    first) and writes it with the client's `replaceIfUnchanged` — `KEEPTTL`,
+ *    only if the stored bytes are still the ones read — re-reading on a loss,
+ *    at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times: the refresh-token
+ *    family's compare-and-set pattern. The rest of the envelope is written
+ *    back as it was read, a key a newer release added included.
  *  - `delete` is single-key DEL.
  */
-export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions): UserSessionStore {
+export function createRedisUserSessionStore(
+	opts: RedisUserSessionStoreOptions,
+): UserSessionStore & SupportsSecondFactorUpdate {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
 	const logger = opts.logger ?? consoleLogger;
+
+	/**
+	 * The envelope in `raw`, or `null` — with one `user_session_corrupt_envelope`
+	 * warn — when it does not parse or has the wrong shape. Expiry is the
+	 * caller's to judge.
+	 */
+	const readEnvelope = (sid: string, raw: string): Envelope | null => {
+		// TS-3 (Wave 5j): the previous `JSON.parse(raw) as Envelope` was a
+		// compile-time cast only. A corrupt envelope with `expiresAtMs:
+		// undefined` made `expiresAtMs <= Date.now()` evaluate to `false`
+		// (NaN comparison), bypassing the expiry filter and returning a
+		// session with `Invalid Date` fields. Treat any parse / shape
+		// failure as fail-closed (return null) and emit a structured
+		// warn for operator observability.
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch (cause) {
+			// Object-first call shape per the D-4 Logger interface — keeps
+			// `sid` / `reason` reliably emitted as structured fields across
+			// `Logger` implementations (pino, console, custom). Per Copilot
+			// review on PR #123. The cause is projected: a SyntaxError's
+			// message quotes the envelope — the session's claims — around
+			// the point the parse failed.
+			logger.warn(
+				{ sid, reason: "json_parse", err: loggableError(cause) },
+				"user_session_corrupt_envelope",
+			);
+			return null;
+		}
+
+		if (!isValidEnvelope(parsed)) {
+			logger.warn({ sid, reason: "shape_invalid" }, "user_session_corrupt_envelope");
+			return null;
+		}
+		return parsed;
+	};
+
 	return {
 		kind: "redis",
 		async create(input) {
@@ -260,38 +318,33 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 		async get(sid) {
 			const raw = await opts.client.get(k(sid));
 			if (raw === null) return null;
-
-			// TS-3 (Wave 5j): the previous `JSON.parse(raw) as Envelope` was a
-			// compile-time cast only. A corrupt envelope with `expiresAtMs:
-			// undefined` made `expiresAtMs <= Date.now()` evaluate to `false`
-			// (NaN comparison), bypassing the expiry filter and returning a
-			// session with `Invalid Date` fields. Treat any parse / shape
-			// failure as fail-closed (return null) and emit a structured
-			// warn for operator observability.
-			let parsed: unknown;
-			try {
-				parsed = JSON.parse(raw);
-			} catch (cause) {
-				// Object-first call shape per the D-4 Logger interface — keeps
-				// `sid` / `reason` reliably emitted as structured fields across
-				// `Logger` implementations (pino, console, custom). Per Copilot
-				// review on PR #123. The cause is projected: a SyntaxError's
-				// message quotes the envelope — the session's claims — around
-				// the point the parse failed.
-				logger.warn(
-					{ sid, reason: "json_parse", err: loggableError(cause) },
-					"user_session_corrupt_envelope",
-				);
-				return null;
+			const stored = readEnvelope(sid, raw);
+			if (stored === null || stored.expiresAtMs <= Date.now()) return null;
+			return fromEnvelope(stored);
+		},
+		async recordSecondFactor(sid, event) {
+			// A bad event is refused before Redis is asked, gone session or not.
+			checkSecondFactorEvent(event);
+			for (let attempt = 0; attempt < RECORD_SECOND_FACTOR_ATTEMPTS; attempt++) {
+				const raw = await opts.client.get(k(sid));
+				if (raw === null) return null;
+				// Read as `get` reads: a corrupt envelope is a session that is gone.
+				const stored = readEnvelope(sid, raw);
+				if (stored === null || stored.expiresAtMs <= Date.now()) return null;
+				const next = sessionAfterSecondFactor(fromEnvelope(stored), event);
+				if (next === null) return null;
+				const written: Envelope = {
+					...stored,
+					amr: [...next.amr],
+					authentication: toEnvelopeAuthentication(next.authentication),
+				};
+				if (await opts.client.replaceIfUnchanged(k(sid), raw, JSON.stringify(written))) {
+					return fromEnvelope(written);
+				}
 			}
-
-			if (!isValidEnvelope(parsed)) {
-				logger.warn({ sid, reason: "shape_invalid" }, "user_session_corrupt_envelope");
-				return null;
-			}
-
-			if (parsed.expiresAtMs <= Date.now()) return null;
-			return fromEnvelope(parsed);
+			throw new Error(
+				`UserSession ${sid}: recordSecondFactor lost ${RECORD_SECOND_FACTOR_ATTEMPTS} compare-and-sets in a row`,
+			);
 		},
 		async delete(sid) {
 			await opts.client.del(k(sid));

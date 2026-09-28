@@ -49,7 +49,10 @@ export interface RegisteredRP {
 
 /**
  * Authenticated user session aggregate. Post-create immutable at v0.5.0
- * (claims update deferred post-publish). Per A4 §5.1.
+ * (claims update deferred post-publish), except for what a second factor
+ * verified in it adds — `amr` and `authentication`, through the optional
+ * step-up capability ({@link SupportsSecondFactorUpdate}, the MFA ADR's D9).
+ * Per A4 §5.1.
  *
  * Expiry encoding: `expiresAt: Date` (not `expiresAtMs: number`) is intentional
  * for A4 aggregates. Per A3 §5.1: low-level storage primitives (A3:
@@ -164,7 +167,9 @@ export interface CreateUserSessionInput {
 
 /**
  * Sid-keyed store for the authenticated user session. Post-create immutable
- * at v0.5.0 (claims update deferred post-publish). Per A4 §5.1.
+ * at v0.5.0 (claims update deferred post-publish); a store may add the
+ * step-up capability ({@link SupportsSecondFactorUpdate}), which writes a
+ * verified second factor into a live session and nothing else. Per A4 §5.1.
  *
  * Cascade semantics: `delete(sid)` is the global session-invalidation
  * primitive. Sibling reverse-index stores hold orphan entries naturally
@@ -184,6 +189,60 @@ export interface UserSessionStore {
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
 	delete(sid: string): Promise<void>;
+}
+
+/**
+ * A second factor verified in a session (the MFA ADR's D9, D14): the `amr`
+ * the verification adds — the factor's values, and `mfa` when the factor adds
+ * it (`composeAmr` of nothing held gives exactly that) — and when it was
+ * verified.
+ */
+export interface SecondFactorEvent {
+	readonly amr: readonly string[];
+	readonly at: Date;
+}
+
+/**
+ * The step-up capability (the MFA ADR's D9): a store that can record a second
+ * factor verified in a live session, which a step-up needs. Detected by
+ * method presence ({@link supportsSecondFactorUpdate}), like
+ * {@link SupportsSessionsOnlyRevocation}: a custom store written without it
+ * keeps working, and a step-up asks for a re-authentication instead. Both
+ * bundled stores have it.
+ */
+export interface SupportsSecondFactorUpdate {
+	/**
+	 * Record that a second factor was verified in the live session `sid`, and
+	 * answer the session as it is now stored.
+	 *
+	 * Monotonic: `amr` becomes what the session vouches for followed by
+	 * `event.amr`, in insertion order, each value once; `mfaAt` becomes the
+	 * later of the two; nothing else changes — `authTime` (a step-up never
+	 * moves it, D18) and the session's lifetime included. A session written
+	 * before `authentication` existed is split first
+	 * (`sessionAfterSecondFactor`), so a value an untrusted upstream IdP
+	 * asserted never becomes a vouched one.
+	 *
+	 * `null`, and nothing written, when the session is gone — or predates
+	 * `authentication` and its primary cannot be told, which no second factor
+	 * fixes: the requirement rule re-authenticates such a session (D16). An
+	 * event with no values, an empty value, a primary's marker (`pwd`, `fed`)
+	 * or a time that is not a valid date at or after the epoch is a
+	 * `RangeError`, and nothing is written. A store that cannot answer rejects,
+	 * as every store method does.
+	 */
+	recordSecondFactor(sid: string, event: SecondFactorEvent): Promise<UserSession | null>;
+}
+
+/**
+ * Whether `value` has the step-up capability. `false` for `null` and
+ * `undefined`, so an optional slot's value can be passed straight in.
+ */
+export function supportsSecondFactorUpdate(
+	value: UserSessionStore | null | undefined,
+): value is UserSessionStore & SupportsSecondFactorUpdate {
+	const candidate = value as Partial<SupportsSecondFactorUpdate> | null | undefined;
+	return typeof candidate?.recordSecondFactor === "function";
 }
 
 /**

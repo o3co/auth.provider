@@ -116,6 +116,7 @@ const noopUserSessionStoreClient: UserSessionStoreClient = {
 	set: (async () => "OK") as UserSessionStoreClient["set"],
 	get: async () => null,
 	del: async () => 0,
+	replaceIfUnchanged: async () => false,
 };
 
 describe("AS-9: redisSessionFamilyIndexBuilder — client guard", () => {

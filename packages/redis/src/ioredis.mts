@@ -69,6 +69,23 @@ return {count, redis.call('PTTL', KEYS[1])}
 `.trim();
 
 /**
+ * Lua compare-and-replace script for a session record — the step-up
+ * capability's write (the MFA ADR's D9). `KEYS[1]` = the session key;
+ * `ARGV[1]` = the value the caller read; `ARGV[2]` = the value it computed
+ * from it. Replaces only while the key still holds exactly what was read, and
+ * keeps the key's TTL (`KEEPTTL`, Redis 6.0+): a second factor never changes
+ * how long a session lives. Returns 1 when it replaced, 0 otherwise — another
+ * write moved the session, or it is gone.
+ */
+const LUA_REPLACE_IF_UNCHANGED = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  redis.call("SET", KEYS[1], ARGV[2], "KEEPTTL")
+  return 1
+end
+return 0
+`.trim();
+
+/**
  * Lua compare-and-delete script — atomic alternative to GET+DEL.
  * Returns 1 when the key was deleted (caller's token matched), 0 otherwise.
  * `KEYS[1]` = the lock key; `ARGV[1]` = the caller's acquire token.
@@ -741,6 +758,7 @@ const defineScript = (source: string): CachedScript => ({
 	cached: false,
 });
 
+const REPLACE_IF_UNCHANGED = defineScript(LUA_REPLACE_IF_UNCHANGED);
 const DEVICE_CODE_CREATE = defineScript(LUA_DEVICE_CODE_CREATE);
 const DEVICE_CODE_FIND_PENDING = defineScript(LUA_DEVICE_CODE_FIND_PENDING);
 const DEVICE_CODE_DECIDE = defineScript(LUA_DEVICE_CODE_DECIDE);
@@ -1492,6 +1510,8 @@ export function makeIoredisClients(
 				: io.set(k, v, "PX", ttl)) as UserSessionStoreClient["set"],
 		get: (k) => io.get(k),
 		del: (k) => io.del(k),
+		replaceIfUnchanged: async (k, expected, next) =>
+			(await runScript(io, REPLACE_IF_UNCHANGED, [k], [expected, next])) === 1,
 	};
 
 	// `pExpireGT` is implemented as `PEXPIREAT NX` followed by `PEXPIREAT GT`

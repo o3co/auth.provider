@@ -859,11 +859,13 @@ export type {
 // The MFA ADR's D9: how a session was established and what this provider
 // vouches for, read one way by every consumer of a session.
 export {
+	checkSecondFactorEvent,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	type RecordedAuthentication,
 	requirementSession,
+	sessionAfterSecondFactor,
 	sessionAuthentication,
 	vouchedAmr,
 } from "./user-sessions/authentication.mjs";
@@ -908,6 +910,7 @@ export {
 export type {
 	CreateUserSessionInput,
 	RegisteredRP,
+	SecondFactorEvent,
 	SessionAuthentication,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
@@ -919,12 +922,16 @@ export type {
 	SubjectRevocationFactory,
 	SubjectSessionIndex,
 	SubjectSessionIndexFactory,
+	SupportsSecondFactorUpdate,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
-export { SUBJECT_REVOCATION_ABSENCE_POLICY } from "./user-sessions/types.mjs";
+export {
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	supportsSecondFactorUpdate,
+} from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------
 // A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5)
