@@ -785,3 +785,75 @@ describe("/authorize on admission — the step-up trip (the MFA ADR's D17, amend
 		expect(params.get("error")).toBe("temporarily_unavailable");
 	});
 });
+
+describe("/authorize on admission — a POST's parameters survive every trip", () => {
+	// OIDC Core §3.1.2.1: a POST carries the authorization request in its form
+	// body. Every page the browser is sent to must return it to the same
+	// request, written as a GET URL, or it comes back to `400 client_id is
+	// required`.
+	const authorizePost = (app: express.Express, body: Record<string, string>) =>
+		request(app).post("/oauth/authorize").type("form").send(body);
+
+	const steppingUp = () => {
+		const state = { met: false };
+		const requirement = fixture("fixture", () =>
+			state.met ? { outcome: "met" } : { outcome: "step_up", whenStillUnmet: "reauthenticate" },
+		);
+		return { requirement, state };
+	};
+
+	it("the step-up trip: POST, the page, back with its parameters, and a code", async () => {
+		const { requirement, state } = steppingUp();
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [requirement],
+		});
+		const first = await authorizePost(harness.app, baseQuery);
+		expect(first.status).toBe(302);
+		const page = new URL(first.headers.location as string);
+		expect(page.pathname).toBe("/step-up");
+		const back = new URL(page.searchParams.get("redirect_to") as string);
+		expect(back.origin + back.pathname).toBe(`${ISSUER}/oauth/authorize`);
+		expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
+		expect(back.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
+		expect(back.searchParams.get("code_challenge")).toBe(baseQuery.code_challenge);
+		expect(back.searchParams.get("reauth_ask")).toBeTruthy();
+
+		state.met = true;
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+	});
+
+	it("the login trip for a stale max_age: POST, the login page, back with its parameters, and a code", async () => {
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+		});
+		const back = loginRedirectTo(await authorizePost(harness.app, { ...baseQuery, max_age: "60" }));
+		expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
+		expect(back.searchParams.get("max_age")).toBe("60");
+		expect(back.searchParams.get("reauth_ask")).toBeTruthy();
+
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		clock.authTime = new Date();
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+	});
+
+	it("the login page for an unauthenticated POST carries the request's parameters back", async () => {
+		const harness = await makeApp({ session: { isAuthenticated: false } });
+		const back = loginRedirectTo(await authorizePost(harness.app, baseQuery));
+		expect(back.origin + back.pathname).toBe(`${ISSUER}/oauth/authorize`);
+		expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
+		expect(back.searchParams.get("state")).toBe("xyz");
+	});
+
+	it("the login page after a dead session is refused carries a POST's parameters back", async () => {
+		const harness = await makeApp({ userSessionStore: storeWith(null) });
+		const back = loginRedirectTo(await authorizePost(harness.app, baseQuery));
+		expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
+		expect(back.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
+	});
+});
