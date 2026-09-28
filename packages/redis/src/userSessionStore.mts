@@ -226,13 +226,24 @@ const RECORD_SECOND_FACTOR_ATTEMPTS = 5;
  *    first) and writes it with the client's `replaceIfUnchanged` — `KEEPTTL`,
  *    only if the stored bytes are still the ones read — re-reading on a loss,
  *    at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times: the refresh-token
- *    family's compare-and-set pattern. The rest of the envelope is written
- *    back as it was read, a key a newer release added included.
+ *    family's compare-and-set pattern. Only `amr` and the fields of
+ *    `authentication` this release knows are rewritten; everything else is
+ *    written back as it was read — a key a newer release added beside the
+ *    session's fields, or inside `authentication`, included — so a step-up
+ *    on a replica not yet upgraded loses nothing a newer one recorded.
  *  - `delete` is single-key DEL.
+ *
+ * The client must have `replaceIfUnchanged`: a client without it is refused
+ * here, naming the method, rather than failing the first step-up.
  */
 export function createRedisUserSessionStore(
 	opts: RedisUserSessionStoreOptions,
 ): UserSessionStore & SupportsSecondFactorUpdate {
+	if (typeof (opts.client as Partial<UserSessionStoreClient>)?.replaceIfUnchanged !== "function") {
+		throw new TypeError(
+			"createRedisUserSessionStore: the client has no replaceIfUnchanged, which recordSecondFactor writes through (UserSessionStoreClient)",
+		);
+	}
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
 	const logger = opts.logger ?? consoleLogger;
 
@@ -334,10 +345,15 @@ export function createRedisUserSessionStore(
 				if (stored === null || stored.expiresAtMs <= Date.now()) return null;
 				const next = sessionAfterSecondFactor(fromEnvelope(stored), event, nowMs);
 				if (next === null) return null;
+				// The known fields are rewritten; what a newer release added beside
+				// them, in the envelope or inside `authentication`, is kept.
 				const written: Envelope = {
 					...stored,
 					amr: [...next.amr],
-					authentication: toEnvelopeAuthentication(next.authentication),
+					authentication: {
+						...stored.authentication,
+						...toEnvelopeAuthentication(next.authentication),
+					},
 				};
 				if (await opts.client.replaceIfUnchanged(k(sid), raw, JSON.stringify(written))) {
 					return fromEnvelope(written);
