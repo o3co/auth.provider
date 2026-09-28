@@ -142,6 +142,8 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-dpop": ["dpop"],
 	"@o3co/auth-provider-federation-apple": ["federation:apple"],
 	"@o3co/auth-provider-federation-github": ["federation:github"],
+	// Private, and with no module yet (the MFA ADR's build-order step 8).
+	"@o3co/auth-provider-mfa": [],
 	"@o3co/auth-provider-mtls": ["mtls"],
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	"@o3co/auth-provider-webauthn": [
