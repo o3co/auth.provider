@@ -225,11 +225,18 @@ export interface SupportsSecondFactorUpdate {
 	 *
 	 * `null`, and nothing written, when the session is gone — or predates
 	 * `authentication` and its primary cannot be told, which no second factor
-	 * fixes: the requirement rule re-authenticates such a session (D16). An
-	 * event with no values, an empty value, a primary's marker (`pwd`, `fed`)
-	 * or a time that is not a valid date at or after the epoch is a
-	 * `RangeError`, and nothing is written. A store that cannot answer rejects,
-	 * as every store method does.
+	 * fixes: such a session logs in again. Under `mfa.mode = "required"` the
+	 * requirement rule re-authenticates it (D16) before a step-up is asked;
+	 * under `optional` `/authorize` sends it to the login page rather than the
+	 * MFA page (the MFA ADR's step-5 amendment).
+	 *
+	 * An event with no values, an empty value, a primary's marker (`pwd`,
+	 * `fed`), only `mfa`, or a time that is not a valid date at or after the
+	 * epoch or is further ahead of the store's clock than
+	 * `MFA_CLOCK_SKEW_ALLOWANCE_MS`, is a `RangeError` before anything is read,
+	 * and nothing is written: the caller's fault, never an outage
+	 * (`checkSecondFactorEvent`). A store that cannot answer rejects with an
+	 * error of its own, as every store method does: its outage.
 	 */
 	recordSecondFactor(sid: string, event: SecondFactorEvent): Promise<UserSession | null>;
 }

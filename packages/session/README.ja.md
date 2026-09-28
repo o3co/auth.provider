@@ -164,7 +164,9 @@ const handle = await createApp({
 | フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として |
 | アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない | 変わらない |
 
-**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
+**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。各フェデレーションのスイッチはインストールされた名前ごとに保持され、ログインはそのコールバックが来た名前のスイッチを取る。`authentication.federation` が名指すのもその名前である。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
+
+**信頼の取り消し。** `trustUpstreamAmr` を `true` から `false` にしても、既にそのもとで記録されたセッションには届かない: その `amr` は IdP の値を持ち続ける — 書かれたときには保証されていた — ので、そこから発行されたトークンはそれを運び続け、そこから発行されたリフレッシュトークンはファミリーが終わるまで（ログインから `oauth.refreshToken.expiresIn`、既定 1 日）それを引き継ぐ。すぐに取り消すには、そのフェデレーション経由でサインインした subject について core の `revokeAllForSubject` を呼ぶ: そのセッションと、そこから発行されたすべてのトークンとリフレッシュファミリーを終わらせ、利用者は新しい設定のもとで再びログインする。手順は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。
 
 再認証は *新しい* セッションである: `POST /session/login` とフェデレーションのコールバックは常に新しい `authTime` でセッションを作り、`max_age` と `prompt=login` が測るのはそれである。既に認証済みのブラウザをそのまま `/authorize` に送り返すログインページは、そこで `login_required` を返され、ループしない。
 
@@ -352,7 +354,7 @@ federations {
 起動時の規則:
 
 - 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
-- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。何を決めるかは [上](#セッションが認証について記録するもの) にある。
+- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。ネストした形のサブセクションの中（`federations.okta.oidc.trustUpstreamAmr`）に書いても起動に失敗し、`enabled` の横に置くよう告げる — さもなければ無視されてしまう。これに対応する環境変数は配線されていない。何を決めるかは [上](#セッションが認証について記録するもの) にある。
 - すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。
 - `sessionModule` は設定と contribution を突き合わせない。設定で有効だがどのモジュールも contribute していないフェデレーションは起動し、そのルートは `404` を返す。有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。どちらかで起動を失敗させたい組み立ては自分で検査を加える。
 

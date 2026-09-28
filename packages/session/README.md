@@ -413,9 +413,23 @@ once, when they are built, through core's `federationTrustsUpstreamAmr` — the
 reading `@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session
 records and what `/authorize` advertises agree; a switch that is neither
 `true` nor `false` refuses the composition (`RangeError`), and the schema
-coerces the spellings an environment variable delivers. The decision is
-written into the session when it is created: changing the switch applies to
-sessions established afterwards.
+coerces the spellings an environment variable delivers. Each federation's
+switch is kept by the name it is installed under, and a login takes the switch
+of the name its callback came in on, which is also the federation
+`authentication.federation` names. The decision is written into the session
+when it is created: changing the switch applies to sessions established
+afterwards.
+
+**Withdrawing trust.** Turning `trustUpstreamAmr` from `true` to `false`
+does not reach a session already recorded under it: its `amr` keeps the IdP's
+values — they were vouched for when it was written — so tokens minted from it
+keep carrying them, and the refresh tokens minted from it carry them forward
+until their family ends (`oauth.refreshToken.expiresIn` after the login, a day
+by default). To withdraw at once, call core's `revokeAllForSubject` for the
+subjects who signed in through that federation: it ends their sessions and
+every token and refresh family minted from them, and they log in again under
+the new setting. The [operator runbook](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust)
+has the procedure.
 
 Re-authentication is a *new* session: `POST /session/login` and the federation
 callback always create one with a fresh `authTime`, which is what `max_age` and
@@ -820,7 +834,10 @@ Boot rules:
   The federation router hands exactly that value to the adapter as `redirect_uri`.
 - `trustUpstreamAmr` sits at a section's top level, beside `enabled`, in every
   shape; it is `false` when absent, and anything but a boolean (after the
-  schema's coercion) fails boot. What it decides is
+  schema's coercion) fails boot. Written inside a nested section's
+  sub-section (`federations.okta.oidc.trustUpstreamAmr`) it fails boot too,
+  saying it belongs beside `enabled` — it would otherwise be ignored. No
+  environment variable is wired for it. What it decides is
   [above](#what-a-session-records-about-the-authentication).
 - Every `federations.<name>` contribution must be paired with a
   `federationRedirectPolicies.<name>` one and vice versa, or boot fails with

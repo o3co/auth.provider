@@ -464,6 +464,34 @@ The rules a Store must apply before it links — never on an unverified or
 relay address, never by e-mail alone, `sub` verbatim — are in
 [`packages/session/README.md`](../packages/session/README.md#account-linking-across-federations-482).
 
+### Trusting an upstream IdP's `amr`, and withdrawing that trust
+
+What an upstream IdP says about its own login — `mfa`, `hwk`, … on the
+profile it hands the federation callback — counts only for a federation
+configured with `federations.<name>.trustUpstreamAmr = true`, beside its
+`enabled` (the MFA ADR's D13). Otherwise the session records `amr` `["fed"]`
+and keeps the IdP's values in `authentication.upstreamAmr`, where no token and
+no `acr_values` entry sees them. None of the bundled adapters surfaces an
+upstream `amr` (`profile.amr`); a custom adapter may.
+
+- **Switching it on** applies to logins from then on. Entries of
+  `oauth.authorize.acrValues` that only the IdP's values meet come back into
+  `acr_values_supported` at the next boot (`acr_value_unsatisfiable` stops
+  naming them).
+- **Switching it off** also applies to logins from then on, and does not reach
+  what was already written: a session recorded while it was on keeps the
+  IdP's values in its `amr` and goes on stamping them; its refresh tokens
+  carry them forward until their family ends — `oauth.refreshToken.expiresIn`
+  after the login that began it, a day by default — and a code `/authorize`
+  issued keeps the `acr` it chose. To withdraw at once, call
+  `revokeAllForSubject` for the subjects who signed in through that
+  federation: it stamps their revocation boundary, ends their sessions, and
+  with them every access token, refresh family and code minted from them. The
+  users log in again under the new setting.
+- **A switch in the wrong place** — inside a nested section's sub-section,
+  `federations.<name>.<type>.trustUpstreamAmr` — refuses boot, saying it
+  belongs beside `enabled`.
+
 ### Federation grants — what each answer means (#593)
 
 `POST /oauth/federation-grants/:grantId/token` hands a client an **upstream**
@@ -1265,7 +1293,31 @@ before you flip — and a relying party holding the secret can also mint.
    one also turns on `private_key_jwt` wherever client authentication runs
    ([§1](#1-deployment-shapes)).
 
-3. Note the migration windows that are **still open** at `v0.11.0`, each of
+3. **The upstream `amr` split (the MFA ADR's D13).** From this release an
+   upstream IdP's `amr` counts only for a federation with
+   `federations.<name>.trustUpstreamAmr = true`; decide it per federation
+   before you upgrade ([§3](#trusting-an-upstream-idps-amr-and-withdrawing-that-trust)).
+   A session written by an older release that carries `fed` is read as
+   vouching for `fed` alone, whatever the switch. What sessions already
+   minted is not re-read:
+
+   - an authorization code issued before the upgrade — or by a replica still
+     on the older release during a rolling one — keeps the `acr` its
+     `/authorize` chose, possibly met by an IdP's value this release would
+     not count, and `/token` stamps it as it is;
+   - a refresh token issued before the upgrade, or by an older replica, keeps
+     its `amr` and `acr` — upstream values included — and the refresh grant
+     carries them forward at every refresh until the token's family ends:
+     `oauth.refreshToken.expiresIn` after the login that began it (a day by
+     default). Under `oauth.refreshToken.unknownFamilyPolicy = "accept"` a
+     token with no family record has no such bound.
+
+   A deployment for which that matters calls `revokeAllForSubject` for the
+   subjects who signed in through an untrusted federation (or revokes a known
+   token's family) once the fleet is on the new release; the rest waits a
+   family lifetime.
+
+4. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:
    `redisFederationTokenStore.scanFallback` ([§5](#operational-notes)),
    `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and

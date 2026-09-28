@@ -88,9 +88,13 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 			).enabled,
 	},
 	{
-		// The MFA ADR's D13: whether a federation's upstream `amr` counts.
+		// The MFA ADR's D13: whether a federation's upstream `amr` counts. No
+		// environment variable is wired for it — no bundled adapter surfaces
+		// an upstream `amr`, and it is set in config beside `enabled` — but it
+		// is coerced as every boolean here is, so a `${?VAR}` an operator adds
+		// reads the same way.
 		key: "federations.<name>.trustUpstreamAmr",
-		envVar: "FEDERATIONS_GOOGLE_TRUST_UPSTREAM_AMR",
+		envVar: "no variable wired; set in config",
 		set: (config: Record<string, unknown>, value: unknown) => {
 			config.federations = { google: { enabled: true, trustUpstreamAmr: value } };
 		},

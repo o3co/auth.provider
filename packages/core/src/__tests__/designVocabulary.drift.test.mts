@@ -215,6 +215,21 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+sessionAfterSecondFactor\b/,
 	},
 	{
+		concept: "what a password login records (the MFA ADR's D9)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+passwordSessionAuthentication\b/,
+	},
+	{
+		concept: "the event a second factor's record is refused for (the MFA ADR's D9, D14)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+checkSecondFactorEvent\b/,
+	},
+	{
+		concept: "the authentication a session store may record (the MFA ADR's D9)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+checkSessionAuthentication\b/,
+	},
+	{
 		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,

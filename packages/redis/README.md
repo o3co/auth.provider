@@ -143,8 +143,12 @@ Each one implements a port core declares; the slot name is in parentheses.
   an envelope written before it reads as `authentication: undefined` (a
   pre-upgrade session, split as core reads it), a malformed one is refused as
   corrupt, and a release before this one reads the envelope and ignores the
-  key. A custom `UserSessionStoreClient` implements `replaceIfUnchanged`
-  (`makeIoredisClients` does).
+  key. The step-up write rewrites only `amr` and the fields of
+  `authentication` this release knows, so what a newer release added beside
+  or inside them survives a step-up on a replica not yet upgraded. A custom
+  `UserSessionStoreClient` implements `replaceIfUnchanged`
+  (`makeIoredisClients` does); `createRedisUserSessionStore` refuses a client
+  without it when the store is built, naming the method.
 - `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
   held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
 - `FederationGrantStore` (`federationGrantStore`) and
