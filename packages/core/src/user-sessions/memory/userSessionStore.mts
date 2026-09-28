@@ -16,8 +16,8 @@
 
 import {
 	checkSecondFactorEvent,
-	checkSessionAuthentication,
 	copySessionAuthentication,
+	recordableSessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
 import type {
@@ -107,10 +107,12 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
 				);
 			}
-			// How the session was established: only what `SessionAuthentication`
-			// admits, its `mfaAt` judged on this store's clock — the check the
-			// Redis store makes, so the two refuse the same values.
-			const authentication = checkSessionAuthentication(
+			// How the session was established: what core's
+			// `recordableSessionAuthentication` answers — only what
+			// `SessionAuthentication` admits, its `mfaAt` no later than this
+			// store's clock — recorded as answered, never `input.authentication`.
+			// The Redis store records the same, so the two refuse the same values.
+			const authentication = recordableSessionAuthentication(
 				input.sid,
 				input.authentication,
 				Date.now(),

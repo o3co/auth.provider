@@ -212,8 +212,9 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 }
 
 /**
- * Check an `authentication` a store is asked to record, and answer what to
- * record (D9). Refused, with a `RangeError`, is what `SessionAuthentication`
+ * What a store records as a session's `authentication` (D9): the value it was
+ * given, checked, answered as a copy — and a store records what this answers,
+ * never its own input. Refused, with a `RangeError`, is what `SessionAuthentication`
  * does not admit — so the two bundled stores refuse the same values, rather
  * than one copying a string's characters as a list and the other writing an
  * envelope it then reads as corrupt. `undefined` is a session written as one
@@ -228,7 +229,7 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
  * little ahead is a clock, but recorded as it came it would count as recent
  * for longer than it is. What every bundled store's `create` records.
  */
-export function checkSessionAuthentication(
+export function recordableSessionAuthentication(
 	sid: string,
 	authentication: unknown,
 	nowMs: number,

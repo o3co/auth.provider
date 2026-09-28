@@ -18,10 +18,10 @@ import {
 	type AdapterBuilder,
 	type CreateUserSessionInput,
 	checkSecondFactorEvent,
-	checkSessionAuthentication,
 	consoleLogger,
 	type Logger,
 	loggableError,
+	recordableSessionAuthentication,
 	type SessionAuthentication,
 	type SupportsSecondFactorUpdate,
 	sessionAfterSecondFactor,
@@ -306,9 +306,10 @@ export function createRedisUserSessionStore(
 			// Likewise how the session was established: only what
 			// `SessionAuthentication` admits, `mfaAt` judged on the host's clock
 			// (the one a write is checked against) — anything else would be
-			// written as an envelope that reads back as corrupt. Core's check, so
-			// the memory store refuses the same values.
-			const authentication = checkSessionAuthentication(
+			// written as an envelope that reads back as corrupt. What core's
+			// `recordableSessionAuthentication` answers is what is recorded, never
+			// `input.authentication`, as the memory store records it.
+			const authentication = recordableSessionAuthentication(
 				input.sid,
 				input.authentication,
 				Date.now(),

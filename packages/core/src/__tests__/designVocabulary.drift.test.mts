@@ -227,7 +227,7 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept: "the authentication a session store may record (the MFA ADR's D9)",
 		home: "packages/core/src/user-sessions/authentication.mts",
-		definition: /(?:function|const)\s+checkSessionAuthentication\b/,
+		definition: /(?:function|const)\s+recordableSessionAuthentication\b/,
 	},
 	{
 		concept: "secret entropy floor — measuring a secret (#282)",

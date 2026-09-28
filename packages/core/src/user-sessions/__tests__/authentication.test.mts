@@ -30,10 +30,10 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import {
 	checkSecondFactorEvent,
-	checkSessionAuthentication,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
+	recordableSessionAuthentication,
 	requirementSession,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
@@ -424,7 +424,7 @@ describe("checkSecondFactorEvent — what a verified second factor may add, and 
 	});
 });
 
-describe("checkSessionAuthentication — what a session may record as authentication (D9)", () => {
+describe("recordableSessionAuthentication — what a session may record as authentication (D9)", () => {
 	const NOW = Date.parse("2026-09-28T12:00:00Z");
 	const PASSWORD = {
 		primary: "pwd",
@@ -441,7 +441,7 @@ describe("checkSessionAuthentication — what a session may record as authentica
 			{ primary: "fed", federation: "google", upstreamAmr: ["hwk"], mfaAt: undefined },
 			{ primary: "fed", federation: "google", upstreamAmr: [], mfaAt: undefined },
 		]) {
-			expect(() => checkSessionAuthentication("sid-1", authentication, NOW)).not.toThrow();
+			expect(() => recordableSessionAuthentication("sid-1", authentication, NOW)).not.toThrow();
 		}
 	});
 
@@ -475,7 +475,7 @@ describe("checkSessionAuthentication — what a session may record as authentica
 		(_label, authentication, field) => {
 			let thrown: unknown;
 			try {
-				checkSessionAuthentication("sid-1", authentication, NOW);
+				recordableSessionAuthentication("sid-1", authentication, NOW);
 			} catch (err) {
 				thrown = err;
 			}
@@ -499,14 +499,14 @@ describe("never a verification time ahead of the store's clock (D9)", () => {
 		authentication: { ...PASSWORD, mfaAt },
 	});
 
-	it("checkSessionAuthentication answers what to record: a copy, its mfaAt no later than the store's clock", () => {
+	it("recordableSessionAuthentication answers what to record: a copy, its mfaAt no later than the store's clock", () => {
 		const given = { ...PASSWORD, mfaAt: new Date(NOW + 60_000) };
-		const toRecord = checkSessionAuthentication("sid-1", given, NOW);
+		const toRecord = recordableSessionAuthentication("sid-1", given, NOW);
 		expect(toRecord).toStrictEqual({ ...PASSWORD, mfaAt: new Date(NOW) });
 		expect(toRecord).not.toBe(given);
 		const past = { ...PASSWORD, mfaAt: new Date(NOW - 60_000) };
-		expect(checkSessionAuthentication("sid-1", past, NOW)).toStrictEqual(past);
-		expect(checkSessionAuthentication("sid-1", undefined, NOW)).toBeUndefined();
+		expect(recordableSessionAuthentication("sid-1", past, NOW)).toStrictEqual(past);
+		expect(recordableSessionAuthentication("sid-1", undefined, NOW)).toBeUndefined();
 	});
 
 	it("sessionAfterSecondFactor records a factor's time a little ahead as the store's now", () => {
