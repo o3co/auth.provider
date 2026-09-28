@@ -21,7 +21,8 @@
  * read here.
  *
  * - `mfa.encryptionKeys`, the key ring every factor's data is sealed under:
- *   each key canonical base64 of 32 bytes, the ring checked by core's sealing
+ *   each key canonical base64 of 32 bytes, named by its id or — an entry
+ *   written without one — by its fingerprint, the ring checked by core's sealing
  *   rule under the key it was read from (no empty ring, no duplicate id, every
  *   id within the rule), every refusal naming the entry by index and quoting
  *   neither a key nor an id. The published development sample key is refused
@@ -39,6 +40,7 @@
  * 2026-04-30). A refusal is a `RangeError` whose message starts with the key.
  */
 
+import { createHmac } from "node:crypto";
 import {
 	checkSealingKeyRing,
 	coerceBooleanFromEnv,
@@ -103,7 +105,7 @@ export const mfaTotpConfigSchema = z.object(
 	{ error: SECTION_MISSING },
 );
 
-const RING_SHAPE = "must be a list of { id, key } entries";
+const RING_SHAPE = "must be a list of { id?, key } entries";
 
 const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
 
@@ -113,7 +115,7 @@ export const mfaConfigSchema = z.object(
 		encryptionKeys: z.array(
 			z.object(
 				{
-					id: z.string({ error: "must be a string" }),
+					id: z.string({ error: "must be a string, or left out" }).optional(),
 					key: z.string({ error: "must be canonical base64 of 32 bytes" }).optional(),
 				},
 				{ error: RING_SHAPE },
@@ -258,6 +260,20 @@ function refuseSampleKey(ring: SealingKeyRing, config: ConfigShape, options: Mfa
 	);
 }
 
+/** What an entry's fingerprint is derived under. */
+const KEY_ID_LABEL = "o3co:mfa:key-id";
+
+/**
+ * The id of an entry written without one: `k` and the first 16 characters of
+ * base64url(HMAC-SHA-256(key, `o3co:mfa:key-id`)). The same key is always
+ * named the same and another key otherwise, so a key changed in place leaves
+ * what the old one sealed `key_unavailable`, naming it, rather than
+ * `unreadable` under an id both keys share. A PRF's output: it tells nothing
+ * of the key, and may be logged.
+ */
+const keyFingerprint = (key: Buffer): string =>
+	`k${createHmac("sha256", key).update(KEY_ID_LABEL).digest("base64url").slice(0, 16)}`;
+
 /** The ring the entries name, or a `RangeError` naming the entry refused and quoting none. */
 function readKeyRing(
 	entries: z.infer<typeof mfaConfigSchema>["encryptionKeys"],
@@ -281,7 +297,7 @@ function readKeyRing(
 				`${RING}[${index}].key must be canonical base64 of ${SEALING_KEY_BYTES} bytes`,
 			);
 		}
-		return { id: entry.id, key };
+		return { id: entry.id ?? keyFingerprint(key), key };
 	});
 	checkSealingKeyRing(ring, RING);
 	refuseSampleKey(ring, config, options);
