@@ -297,8 +297,8 @@ describe("the session requirements a deployment writes", () => {
 			configKey: "sessionRequirements.expected",
 			declared: [],
 			registered: FIXTURE_REQUIREMENTS,
+			consumedBy: expect.arrayContaining(["oauth"]),
 		});
-		expect((err.details as { consumedBy: string[] }).consumedBy).toContain("oauth");
 	});
 
 	it("refuse the boot when a name is declared that nothing registers", async () => {
