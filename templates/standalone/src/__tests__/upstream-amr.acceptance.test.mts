@@ -53,7 +53,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildModules } from "#/buildModules.mjs";
+import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -92,11 +92,13 @@ const ENV: Readonly<Record<string, string>> = {
 /** The shipped configuration, with the partner federation and an acr table beside it. */
 function resolveConfig(trustUpstreamAmr: boolean | undefined): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const shipped = validate(
-		parseFile(envConfPath, { env: ENV })
-			.withFallback(parseFile(applicationConfPath, { env: ENV }))
-			.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env: ENV })),
-		AppConfigSchema,
+	const shipped = withSessionRequirements(
+		validate(
+			parseFile(envConfPath, { env: ENV })
+				.withFallback(parseFile(applicationConfPath, { env: ENV }))
+				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env: ENV })),
+			AppConfigSchema,
+		),
 	) as AppConfig;
 	return AppConfigSchema.parse({
 		...shipped,

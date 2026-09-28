@@ -19,7 +19,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import helmet from "helmet";
-import { buildModules } from "./buildModules.mjs";
+import { buildModules, withSessionRequirements } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
 import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
@@ -39,11 +39,16 @@ const configDir = new URL("../config/", import.meta.url);
 const configDirPath = fileURLToPath(configDir);
 const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, env);
 const libraryReferencePath = resolveLibraryReferenceConfPath();
-const config: AppConfig = validate(
-	parseFile(envConfPath)
-		.withFallback(parseFile(applicationConfPath))
-		.withFallback(parseFile(libraryReferencePath)),
-	AppConfigSchema,
+// The session-admission ADR's D7: what this composition expects of session
+// admission is derived from the parsed `mfa.mode`, in TypeScript, and
+// written into the configuration boot compares with what registers.
+const config: AppConfig = withSessionRequirements(
+	validate(
+		parseFile(envConfPath)
+			.withFallback(parseFile(applicationConfPath))
+			.withFallback(parseFile(libraryReferencePath)),
+		AppConfigSchema,
+	),
 );
 
 // The logger is built from config so its level is operator-controlled, and it

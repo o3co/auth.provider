@@ -16,12 +16,13 @@
 
 /**
  * The acr table `/authorize` answers `acr_values` from and discovery
- * advertises as `acr_values_supported` (the MFA ADR's D15): the configured
- * `oauth.authorize.acrValues`, less every entry nothing this composition
- * installs can satisfy — core's `vouchableAcrTable` over what the composition
- * can produce. The router and the discovery contribution compute it from the
- * same inputs, so they cannot disagree; the router alone says at boot what it
- * dropped.
+ * advertises as `acr_values_supported` (the MFA ADR's D15; the
+ * session-admission ADR's D6): the configured `oauth.authorize.acrValues`,
+ * less every entry nothing this composition installs can satisfy — core's
+ * `vouchableAcrTable` over what the composition can produce, the registered
+ * session requirements' reach among it. The router and the discovery
+ * contribution compute it from the same inputs, so they cannot disagree; the
+ * router alone says at boot what it dropped.
  */
 
 import {
@@ -31,8 +32,7 @@ import {
 	federationTrustsUpstreamAmr,
 	type Logger,
 	producibleAmr,
-	readMfaMode,
-	stepUpReach,
+	SECOND_FACTOR_AMR,
 	type UnsatisfiableAcrValue,
 	vouchableAcrTable,
 } from "@o3co/auth-provider-core";
@@ -45,9 +45,10 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  *
  * - `pwd` can always be produced; `fed` once a federation is installed, since
  *   only a federation callback records it.
- * - No second factor can: `/authorize` consults no `mfaCoordinator` before
- *   D17's single decision (the MFA ADR's build order, step 13), which adds
- *   the coordinator's `secondFactorMethods` here.
+ * - `reach` — the union of every registered session requirement's reach
+ *   (core's `stepUpReach` over `sessionRequirementResolver`) — is what a
+ *   step-up can add: the second-factor values once the MFA requirement is
+ *   registered, `mfa` among them when an enabled factor adds it.
  * - An installed federation whose section is enabled and trusts its
  *   upstream IdP's `amr` (`federations.<name>.trustUpstreamAmr`, D13, read by
  *   core's `federationTrustsUpstreamAmr`, which answers `false` for a
@@ -55,16 +56,18 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  *   beside `fed`, where it counts. One that does not adds `fed` alone — the
  *   callback keeps its IdP's values apart, and they meet no `acr`.
  *
- * `federations` is the map a composition installed, read when this runs: at
- * composition, after every federation's contribution has registered. Each
- * one's switch is read from `config` by the reading the federation callback
- * writes the session by, so the two cannot disagree; a switch that is given
- * but unusable is a `RangeError`, which refuses the composition.
+ * `federations` is the map a composition installed, and `reach` what its
+ * requirements reach, both read when this runs: at composition, after every
+ * name-keyed contribution has registered. Each federation's switch is read
+ * from `config` by the reading the federation callback writes the session
+ * by, so the two cannot disagree; a switch that is given but unusable is a
+ * `RangeError`, which refuses the composition.
  */
 export const vouchableAcrValues = (
 	configured: AcrTable,
 	federations: ReadonlyMap<string, unknown> | undefined,
 	config: unknown,
+	reach: ReadonlySet<string>,
 ): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } => {
 	const installed = [...(federations?.keys() ?? [])];
 	// Every installed federation's switch is read, not only up to the first
@@ -76,7 +79,7 @@ export const vouchableAcrValues = (
 	return vouchableAcrTable(
 		configured,
 		producibleAmr({
-			reach: stepUpReach([]),
+			reach,
 			federationInstalled: installed.length > 0,
 			trustedFederation: trusted.includes(true),
 		}),
@@ -85,22 +88,21 @@ export const vouchableAcrValues = (
 
 /**
  * One line per dropped entry, once, at composition: `warn` — the operator
- * configured an `acr` this deployment can never meet — except under
- * `mfa.mode = "off"` for an entry only a second factor would meet, which is
- * the operator's choice and is said at `info`, so an MFA-off deployment that
- * keeps the template's MFA entries is not warned at every boot. An absent
- * mode is `"off"`; one that is given but unusable is a `RangeError`
- * (`readMfaMode`), which refuses the composition. The entry is the operator's
+ * configured an `acr` this deployment can never meet — except for an entry
+ * that lacks only a second factor while no registered requirement reaches
+ * one (D6): without MFA installed that is the operator's choice, said at
+ * `info`, so an MFA-off deployment that keeps the template's MFA entries is
+ * not warned at every boot. Once a requirement reaches a second factor, an
+ * entry still unmet is a factor the operator expects and did not enable:
+ * `warn`. `mfa.mode` is read nowhere here. The entry is the operator's
  * text, bounded as a log line bounds text all the same.
  */
 export const logUnsatisfiableAcrValues = (
 	dropped: readonly UnsatisfiableAcrValue[],
-	config: unknown,
+	reach: ReadonlySet<string>,
 	logger: Logger,
 ): void => {
-	// Only an absent mode reads as core's default until the flip, `"off"` (D19);
-	// a given but unusable one is a RangeError, which refuses the composition.
-	const mfaOff = (readMfaMode(config) ?? "off") === "off";
+	const secondFactorReachable = [...reach].some((value) => SECOND_FACTOR_AMR.has(value));
 	for (const entry of dropped) {
 		const unproducible = auditErrorList(entry.unproducible);
 		const fields = {
@@ -113,7 +115,10 @@ export const logUnsatisfiableAcrValues = (
 			// with nothing else to name is not logged with an empty list alone.
 			...(entry.emptyAlternative ? { emptyAlternative: true } : {}),
 		};
-		if (mfaOff && entry.forWantOfSecondFactor) logger.info(fields, ACR_VALUE_UNSATISFIABLE);
-		else logger.warn(fields, ACR_VALUE_UNSATISFIABLE);
+		if (entry.forWantOfSecondFactor && !secondFactorReachable) {
+			logger.info(fields, ACR_VALUE_UNSATISFIABLE);
+		} else {
+			logger.warn(fields, ACR_VALUE_UNSATISFIABLE);
+		}
 	}
 };

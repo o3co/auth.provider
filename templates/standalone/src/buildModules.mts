@@ -27,6 +27,7 @@ import {
 	memoryFederationGrantStoreModule,
 	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
+	readMfaMode,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
@@ -125,6 +126,23 @@ export interface BuildModulesOverrides {
  * by `access-token-lifetime-alias.test.mts`.
  */
 const SHIPPED_ACCESS_TOKEN_EXPIRES_IN = 3600;
+
+/**
+ * The session requirements this composition expects, derived from the PARSED
+ * `mfa.mode` and written into the configuration `createApp` is handed (the
+ * session-admission ADR's D7): `[]` under `off`, `["mfa"]` under `optional`
+ * or `required` — the MFA package, once it exists, is what `buildModules`
+ * installs for those modes and what registers the requirement; until then a
+ * mode other than `off` is refused at boot (`session-requirement-missing`).
+ * Never from the raw `MFA_MODE`, which would let a variable the schema
+ * refused boot with a posture the config does not carry; a mode that is
+ * none of the three is a `RangeError` naming the key (`readMfaMode`). HOCON
+ * has no conditional, so the list is written here.
+ */
+export function withSessionRequirements(config: AppConfig): AppConfig {
+	const mode = readMfaMode(config) ?? "off";
+	return { ...config, sessionRequirements: { expected: mode === "off" ? [] : ["mfa"] } };
+}
 
 /**
  * Compose the standalone v0.5.0 module list from `config`. Splitting this

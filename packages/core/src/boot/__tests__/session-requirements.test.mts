@@ -477,6 +477,16 @@ describe("mfa.mode asks for a requirement that is not installed (D7)", () => {
 		const handle = await boot([], { mfa: { mode: "off" } });
 		await handle.dispose();
 	});
+
+	it("is checked before the declaration: a composition that asks for MFA without the module is told to install it, not to fix the list", async () => {
+		const err = await refusal(
+			boot([consumer({})], {
+				mfa: { mode: "required" },
+				sessionRequirements: { expected: ["mfa"] },
+			}),
+		);
+		expect(err.reason).toBe("session-requirement-missing");
+	});
 });
 
 describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {

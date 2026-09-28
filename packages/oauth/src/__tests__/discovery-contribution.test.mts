@@ -169,7 +169,11 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		} as unknown as AppConfig;
 		const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
 		if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
-		const meta = await factory({ config, grantHandlerResolver: grantResolver() } as never);
+		const meta = await factory({
+			config,
+			grantHandlerResolver: grantResolver(),
+			sessionRequirementResolver: resolverForTests([]),
+		} as never);
 		expect(meta.metadata?.code_challenge_methods_supported).toEqual(["S256"]);
 	});
 
