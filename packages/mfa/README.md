@@ -8,19 +8,21 @@ Multi-factor authentication for [`auth.provider`](../../README.md): a second fac
 
 ## Responsibility
 
-**Role.** The MFA coordinator and everything it needs that is not a shared port: the `mfa` session requirement it contributes to core's session admission, the browser API under `/session/mfa/*`, the factors that are not another package's, the key ring and what is sealed under it, lockout and audit. Core holds the ports the factors and the stores share; a factor from another package (WebAuthn's) reaches the coordinator as an `mfaFactors` contribution.
+**Role.** Everything MFA needs that is not a shared port: the `mfa` session requirement it contributes to core's session admission — what the MFA ADR called the coordinator — the browser API under `/session/mfa/*`, the factors that are not another package's, the key ring and what is sealed under it, lockout and audit. Core holds the ports the factors and the stores share; a factor from another package (WebAuthn's) reaches the requirement as an `mfaFactors` contribution.
 
-**Owns, as of the build-order step 8's first part:**
+**Owns, as of the build-order step 8's first two parts:**
 
+- the `mfa` session requirement — what MFA is to every consumer of a session, through core's admission — and `mfaModule`, which registers it as `sessionRequirements.mfa` and refuses the compositions that could not honour it;
+- the login's MFA transaction: opened when the requirement interrupts a password login, and the `403` the login is answered with;
 - the TOTP factor (RFC 6238 on `node:crypto`), contributed as `mfaFactors.totp` by `mfaTotpFactorModule`;
-- the `mfa` keys this package reads — the key ring and `mfa.factors.totp` — their defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mfa/reference.conf`) and their refusals, the development sample key among them;
-- sealing a factor's data and a ceremony's state under the key ring, and keyed digests for codes that are compared and never recovered — the coordinator's, so that no factor holds a key.
+- the `mfa` keys this package reads — the key ring, `mfa.factors.totp`, a transaction's life and attempts, and the subject lock — their defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-mfa/reference.conf`) and their refusals, the development sample key among them;
+- sealing a factor's data and a ceremony's state under the key ring, and keyed digests for codes that are compared and never recovered — so that no factor holds a key.
 
-**Not yet here** — the rest of step 8: `mfaModule` and the `mfa` requirement it registers, MFA transactions, the routes, verification and completing a login, audit. Until they land, installing this package's module adds a factor that nothing asks for: `mfa.mode` other than `off` is still refused at boot (`session-requirement-missing`).
+**Not yet here:** the routes under `/session/mfa` — reading a transaction, a challenge, a verification — completing a login, and audit (step 8's third part): until they land, a login the requirement interrupts cannot be finished, and `mfa_required` ends there; enrollment and the first binding (step 9); the lock and recovery codes (step 10); the step-up route, `POST /session/mfa/step-up`, which the MFA page calls to meet a step-up and which answers `404` until step 11; management, the operator reset and the enrollment witness (step 12).
 
 **Does not own:**
 
-- `mfa.mode` — core's key, which the MFA requirement will read through core's `readMfaMode`;
+- `mfa.mode` — core's key, which only the MFA requirement reads, through core's `readMfaMode`;
 - the `MfaFactor` contract, the `MfaFactorStore` and `MfaTransactionStore` ports and their adapters, the `mfaFactors` kind and `mfaFactorResolver` — core's (`packages/core/src/mfa/`), with Redis adapters in `@o3co/auth-provider-redis`;
 - the WebAuthn factor — `@o3co/auth-provider-webauthn`'s (the ADR's D4);
 - the pages: the login page's second step, the MFA page and the account page are the deployment's (D6).
@@ -50,7 +52,46 @@ A key your `application.conf` sets shadows the substitution `reference.conf` mak
 
 **Refused**, each a `RangeError` whose message starts with the key and quotes no key or id: an empty ring or one without `MFA_ENCRYPTION_KEY`; a key that is not canonical base64 of 32 bytes; a duplicate id — a fingerprint that equals a written id, or one key listed twice, among them — or one outside `A-Za-z0-9_-` (1 to 64 characters); a TOTP parameter out of its range, or an issuer outside its rule; a transaction's life outside 60 to 1800 seconds, its attempts not a positive whole number, or a lock core's rule refuses; for a factor that is on and has no issuer written, an `oauth.jwt.issuer` with no host to default it to (naming `MFA_TOTP_ISSUER`); a section missing because `reference.conf` is not layered. `mfaConfigSchema` holds the shapes and TOTP's ranges; the ring's refusals and the sample key's are made when the settings are read, where the keys are decoded and the environment is known.
 
-**The development sample key.** [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) is a published key a development configuration may put in the ring in place of a key of its own. Everyone holds it, so it is refused — wherever it sits in the ring — when the environment the configuration was selected by is `production` or `staging`, when `NODE_ENV` is either (each read whatever its case and the whitespace around it), and under `deployment.mode = "multi"`: #473's rule, as for the Redis federation stores' plaintext mode. The environment reaches the refusal from the composition root (the standalone passes `CONFIG_ENV || NODE_ENV`), through the MFA module's options once that module lands.
+**The development sample key.** [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) is a published key a development configuration may put in the ring in place of a key of its own. Everyone holds it, so it is refused — wherever it sits in the ring — when the environment the configuration was selected by is `production` or `staging`, when `NODE_ENV` is either (each read whatever its case and the whitespace around it), and under `deployment.mode = "multi"`: #473's rule, as for the Redis federation stores' plaintext mode. The environment reaches the refusal from the composition root (the standalone passes `CONFIG_ENV || NODE_ENV`) as `mfaModule({ environment })`. Where it is accepted, the module says so once at boot: `mfa_development_sample_key_in_use` (warn).
+
+## Installing
+
+Installed is on (the session-admission ADR's D7): a composition that wants no MFA installs none of this package and leaves core's `mfa.mode` at `off`. One that wants it lists `mfaModules({ environment })` — the TOTP factor's module and `mfaModule` — with an `MfaFactorStore` and an `MfaTransactionStore` (core's memory modules on one replica, `@o3co/auth-provider-redis`'s on several), the session package's login and its user-session store; sets `mfa.mode` to `optional` or `required`; and declares `"mfa"` in `sessionRequirements.expected`.
+
+`mfaModule` requires `config`, `mfaFactorResolver`, `mfaFactorStore`, `mfaTransactionStore`, `userSessionStore` and `sessionRequirementResolver`, and reads `auditSink` — its absence declared with `audit.sink.type = "none"` — and `logger`. It mounts `mfa-routes` (`MFA_ROUTES_ID`) at `/session/mfa`, after the session middleware; nothing answers there before step 8's third part. The boot is refused:
+
+- `mfa.mode = "off"`, or unset, with the module installed: remove the module, or set the mode;
+- `mfa.mode = "required"` with no counting factor enabled — nobody could meet it: the `cause` is an `MfaNoCountingFactorError` whose `reason` is `mfa-no-counting-factor`, checked once every factor has registered;
+- without a `userSessionStore`, at the requires-closure, naming the slot;
+- for a key ring, a transaction life, attempts or a lock the settings refuse (above), and without `endpoints.mfa.url`, the page a step-up starts on (`ENDPOINTS_MFA_URL`; core's `reference.conf` ships `/mfa`);
+- by core, when the requirement's reach is not what the enabled factors reach, or `mfa` is not declared in `sessionRequirements.expected`.
+
+## The `mfa` requirement
+
+Registered as `sessionRequirements.mfa` ([`src/requirement.mts`](src/requirement.mts); the session-admission ADR's D6):
+
+- **Reach** — what a step-up can add to a session: each enabled factor's `amrValues`, and `mfa` when one of them adds it (TOTP: `otp` and `mfa`). The page a step-up starts on is `endpoints.mfa.url`; the one remediation the requirement declares is `mfa.step_up`, the step-up route's.
+- **At each use** (`admit`), under `optional` every session is met. Under `required`: a session a cookie, a code or a link carries is met when its primary is a federation, or when a second factor was verified in it (`mfaAt`); a password session without one is stepped up to the MFA page — or unmet, when no factor is enabled — and a session whose primary cannot be told, or no live session, is sent to log in again. `device.lookup` and `device.deny` are met on any live session: a user refuses a phished device request without a step-up. A refresh token is judged on what it was issued with, its own `amr`: a federation's, or one with a second-factor value, is met; a password alone is unmet; none at all — a token issued before #481 — is sent to log in again. An action that adds a way into the account (`credential_change`) is held to the same rule until the recent-MFA rule arrives (steps 12 and 14).
+- **At a password login** (`admitPrimary`), the subject's factor records are listed — a store that cannot answer is `503`, with nothing written. Any record at all interrupts the login for a second factor; a record this deployment cannot use (a retired kind, recovery codes alone) is never read as none. With no record, `optional` establishes the session as before, and `required` interrupts it for a first binding. No enrollment witness is read before step 12. A federated login is not asked (the federation callback does not consult admission in this release).
+
+## The login's interruption
+
+A password login the requirement interrupts is answered `403` once the express session is regenerated — left unauthenticated — and the login's MFA transaction opened, bound to the regenerated session's id; no session is written until the ceremony completes. The body is the closed shape core validates, and the page reads nothing else:
+
+```json
+{ "error": "mfa_required", "transaction": "<id>", "expires_in": 600 }
+```
+
+```json
+{ "error": "mfa_enrollment_required", "transaction": "<id>", "expires_in": 600,
+  "hints": { "enrollable": ["totp"], "email_proof": false } }
+```
+
+- `transaction` is 32 random bytes, base64url. It is not a bearer: every use compares the session it is bound to with the browser's, so the page keeps the cookie the `403` set. It travels only in request bodies and the `MFA-Transaction` request header, which the MFA routes will read (step 8's third part) — never in a URL.
+- `expires_in` is `mfa.transactionTtlSeconds`; the transaction expires then, and the user starts again from the password.
+- `mfa_required`: the subject holds a factor; the page asks for it.
+- `mfa_enrollment_required` (`required`, no factor on record): `hints.enrollable` lists the counting factors this user may enroll, in registration order; `hints.email_proof` says whether an account-email proof comes first — `false` until step 9 wires mail.
+- The `403` carries a fresh CSRF token, as a successful login does.
 
 ## The TOTP factor
 
@@ -65,6 +106,10 @@ A key your `application.conf` sets shadows the substitution `reference.conf` mak
 
 | Export | What it is |
 | --- | --- |
+| [`mfaModules`](src/module.mts) | What a composition lists: the TOTP factor's module and `mfaModule` |
+| [`mfaModule`](src/module.mts) | The module registering the `mfa` requirement and mounting the MFA routes |
+| [`MfaModuleOptions`](src/module.mts) | `{ environment? }`: the name the configuration was selected by, for the sample key's refusal |
+| [`MFA_ROUTES_ID`](src/module.mts) | The id of the MFA routes' contribution, `mfa-routes` |
 | [`mfaTotpFactorModule`](src/totp/module.mts) | The module contributing `mfaFactors.totp` |
 | [`mfaConfigSchema`](src/config.mts) | The shapes of the `mfa` keys this package reads, and TOTP's ranges — not the ring's or the sample key's refusals, which reading the settings makes |
 | [`MFA_DEVELOPMENT_SAMPLE_KEY`](src/config.mts) | The published development key, refused outside development |
