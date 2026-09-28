@@ -15,6 +15,8 @@ import type {
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	GrantConsentInput,
+	MfaFactorStoreClient,
+	MfaTransactionStoreClient,
 	PendingConsentStoreClient,
 	RateLimiterClient,
 	RefreshTokenFamilyClient,
@@ -122,6 +124,16 @@ describe("makeIoredisClients return shape", () => {
 			IoredisClientsReturn["pendingConsentStoreClient"]
 		>().toMatchTypeOf<PendingConsentStoreClient>();
 	});
+
+	// The MFA ADR's D7, D8: the two MFA stores' clients, off the shared socket.
+	it("mfaFactorStoreClient and mfaTransactionStoreClient satisfy their interfaces", () => {
+		expectTypeOf<
+			IoredisClientsReturn["mfaFactorStoreClient"]
+		>().toMatchTypeOf<MfaFactorStoreClient>();
+		expectTypeOf<
+			IoredisClientsReturn["mfaTransactionStoreClient"]
+		>().toMatchTypeOf<MfaTransactionStoreClient>();
+	});
 });
 
 describe("ComponentMap declaration-merge — per-purpose client slots", () => {
@@ -191,6 +203,15 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 		>();
 		expectTypeOf<ComponentMap["pendingConsentStoreClient"]>().toEqualTypeOf<
 			PendingConsentStoreClient | undefined
+		>();
+	});
+
+	it("the MFA store client slots are optional and of their client types (the MFA ADR's D7, D8)", () => {
+		expectTypeOf<ComponentMap["mfaFactorStoreClient"]>().toEqualTypeOf<
+			MfaFactorStoreClient | undefined
+		>();
+		expectTypeOf<ComponentMap["mfaTransactionStoreClient"]>().toEqualTypeOf<
+			MfaTransactionStoreClient | undefined
 		>();
 	});
 });

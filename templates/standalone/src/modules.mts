@@ -576,6 +576,25 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.federationTokenStoreClient;
 		},
+		// The MFA ADR's D7, D8, D10: the two MFA stores' clients, off the same
+		// shared socket. `redisMfaFactorStoreModule` and
+		// `redisMfaTransactionStoreModule` require them. This template installs
+		// neither while `mfa.mode` is `off`; the slots are provided anyway, for
+		// the reason the device-code slot above gives (#439). Each module checks
+		// the server's eviction policy and persistence when it boots (D12).
+		mfaFactorStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.mfaFactorStoreClient;
+		},
+		mfaTransactionStoreClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.mfaTransactionStoreClient;
+		},
 	},
 });
 

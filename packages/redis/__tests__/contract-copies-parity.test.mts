@@ -68,6 +68,16 @@ const COPIES: ReadonlyArray<{
 		runners: [["runDeviceCodeStoreContract", "device-code-store.test.mts"]],
 	},
 	{
+		core: "mfa/__tests__/factorStore.contract.mts",
+		copy: "adapters.mfa-factor-store.contract.mts",
+		runners: [["runMfaFactorStoreContract", "mfa-factor-store.test.mts"]],
+	},
+	{
+		core: "mfa/__tests__/transactionStore.contract.mts",
+		copy: "adapters.mfa-transaction-store.contract.mts",
+		runners: [["runMfaTransactionStoreContract", "mfa-transaction-store.test.mts"]],
+	},
+	{
 		core: "refresh-token-family/__tests__/adapters.contract.mts",
 		copy: "adapters.refresh-token-family.contract.mts",
 		runners: [["runRefreshTokenFamilyStoreContract", "refresh-token-family.test.mts"]],

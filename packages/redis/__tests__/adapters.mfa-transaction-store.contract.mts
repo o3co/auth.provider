@@ -13,14 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it } from "vitest";
+
 import {
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
 	type MfaTransaction,
 	type MfaTransactionStore,
-} from "#/mfa/transactionStore.mjs";
+} from "@o3co/auth-provider-core";
+import { describe, expect, it } from "vitest";
 
 /**
  * The `MfaTransactionStore` contract (the MFA ADR's D8 and D21), for every

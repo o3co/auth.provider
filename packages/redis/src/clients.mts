@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+import type {
+	MfaLockoutPolicy,
+	MfaSubjectAttemptOutcome,
+	MfaSubjectHold,
+} from "@o3co/auth-provider-core";
+
 // ---------------------------------------------------------------------------
 // Backing client contracts for Redis adapters in this package.
 //
@@ -1359,6 +1365,220 @@ export interface FederationGrantIntentStoreClient {
 	finishIntent(prefix: string, handle: string, nowMs: number): Promise<void>;
 }
 
+// --- MfaFactorStoreClient (the MFA ADR's D7) --------------------------------
+
+/**
+ * What a Redis server says about keeping what it is written — read at boot
+ * by the two MFA store modules (the MFA ADR's D12). Each part is `undefined`
+ * when it could not be read: the server refused the question (`refusal`), or
+ * answered without the value.
+ */
+export interface RedisDurability {
+	/** `INFO memory`'s `maxmemory_policy`, or `CONFIG GET maxmemory-policy` where INFO does not say. */
+	readonly maxmemoryPolicy: string | undefined;
+	/** `INFO persistence`'s `aof_enabled`. */
+	readonly appendOnly: boolean | undefined;
+	/** `CONFIG GET save` is not empty: RDB snapshots are taken. Asked only when AOF is off. */
+	readonly snapshots: boolean | undefined;
+	/** The first reply that refused a question — an unknown or renamed command, `NOPERM`, a disabled command — as the driver raised it. Logged by its projection only. */
+	readonly refusal: unknown;
+}
+
+/**
+ * What an update writes over a factor record's version and its mutable part,
+ * each as the text the record keeps.
+ */
+export interface MfaFactorRecordUpdateInput {
+	/** The version the record must still be at, as decimal text. */
+	readonly expectedVersion: string;
+	/** The version it is at afterwards, as decimal text. */
+	readonly nextVersion: string;
+	/** The new mutable part: one line of JSON. */
+	readonly mutable: string;
+}
+
+/**
+ * Backing client for the `MfaFactorStore` adapter (the MFA ADR's D7): one
+ * hash per subject, a field per factor.
+ *
+ * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
+ * `<version>` is decimal text and `<fixed>` and `<mutable>` are one line of
+ * JSON each (`JSON.stringify` never writes a raw line feed). The split is what
+ * lets `update` be one indivisible step that never decodes the JSON: it
+ * compares the version as text, keeps the fixed part byte for byte, and
+ * writes the new version and mutable part beside it. A script that decoded
+ * and re-encoded the record would change it — `cjson` writes an empty array
+ * as `{}` — so none does.
+ *
+ * Every operation touches the one key it is handed, so this client needs no
+ * hash tag to run on Cluster.
+ */
+export interface MfaFactorStoreClient {
+	/** Every field of the hash at `key` and its value (`HGETALL`); `{}` when there is none. */
+	list(key: string): Promise<Readonly<Record<string, string>>>;
+	/** Write `value` under `field` only while the field is absent (`HSETNX`). Resolves whether it wrote. */
+	create(key: string, field: string, value: string): Promise<boolean>;
+	/**
+	 * Atomically: while the value under `field` is at `input.expectedVersion`,
+	 * replace its version and mutable part, keep its fixed part, and resolve
+	 * the value as written; `null` when the field is absent, at another
+	 * version, or not three lines.
+	 */
+	update(key: string, field: string, input: MfaFactorRecordUpdateInput): Promise<string | null>;
+	/** Remove `field` (`HDEL`). Idempotent. */
+	remove(key: string, field: string): Promise<void>;
+	/** Remove the whole hash (`DEL`). Idempotent. */
+	removeAll(key: string): Promise<void>;
+	/**
+	 * What the server says about keeping what it is written (D12). A reply
+	 * that refuses a question leaves that part unread; any other reply error,
+	 * and a server that cannot be asked at all, rejects.
+	 */
+	durability(): Promise<RedisDurability>;
+}
+
+// --- MfaTransactionStoreClient (the MFA ADR's D8, D21, D25) -----------------
+
+/** What an update writes, as the transaction's hash keeps it. */
+export interface MfaTransactionUpdateInput {
+	/** The version the transaction must still be at, as decimal text. */
+	readonly expectedVersion: string;
+	/**
+	 * The value its `incarnation` field must still hold: the random value
+	 * `create` wrote, so a transaction consumed and created again under the
+	 * same id, at the same version, is never written with a patch that was
+	 * checked against the one before it.
+	 */
+	readonly incarnation: string;
+	/** Fields to write, and the text each is written as. */
+	readonly set: Readonly<Record<string, string>>;
+	/** Fields to remove. */
+	readonly clear: readonly string[];
+}
+
+/**
+ * A subject's lock-state keys (D21). Both carry the subject's hash tag: every
+ * operation on the state is one script over the two.
+ */
+export interface MfaSubjectKeys {
+	/**
+	 * HASH: `seq`, the order counter; `r:<id>` → `<seq>|<atMs>` for each
+	 * attempt in the consecutive run; `p:<id>` → `<seq>` for each reservation
+	 * not yet settled; `t:<digest>` →
+	 * `<createdAtMs>|<trustedUntilMs>|<windowUntilMs or empty>|<order>` for each
+	 * trusted browser.
+	 */
+	readonly lock: string;
+	/** ZSET: the attempts the rolling week counts, each scored by its time. */
+	readonly week: string;
+}
+
+export interface ReserveMfaSubjectAttemptInput {
+	/** The caller's time, which every hold is judged on. */
+	readonly nowMs: number;
+	readonly policy: MfaLockoutPolicy;
+	/** The SHA-256 of the browser value presented, base64url; `undefined` when none was. */
+	readonly browserDigest: string | undefined;
+	/** The id the attempt is recorded under when it is let through. */
+	readonly reservation: string;
+}
+
+export type ReserveMfaSubjectAttemptReply =
+	| { readonly ok: true }
+	| {
+			readonly ok: false;
+			readonly hold: MfaSubjectHold;
+			/** Milliseconds from `nowMs` until an attempt may be reserved; `null` for the hard hold. */
+			readonly retryAfterMs: number | null;
+	  };
+
+export interface NoteMfaExemptSuccessInput {
+	readonly nowMs: number;
+	readonly policy: MfaLockoutPolicy;
+	/** The SHA-256 of the browser value presented, whose trust is renewed rather than added to; `undefined` when none was. */
+	readonly presentedDigest: string | undefined;
+	/** The SHA-256 of the new browser value, the one trusted from now on. */
+	readonly digest: string;
+}
+
+/**
+ * Backing client for the `MfaTransactionStore` adapter (the MFA ADR's D8,
+ * D21, D25).
+ *
+ * Semantic operations, for the reason the other stores' clients give: every
+ * one the port calls atomic is a read, a decision and a write, which Redis
+ * makes one step only as a script (see `makeIoredisClients`). A transaction's
+ * hash is written and read by the adapter; the operations here read its
+ * `version`, `incarnation`, `attempts` and `challenge` fields by name.
+ *
+ * The subject state's decisions — D21's backoff, weekly budget, hard limit
+ * and trusted browsers — are the port's rules, judged on the caller's
+ * `nowMs`; what is reclaimed is judged on the server's clock, never later
+ * than a day after it stops counting (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). A
+ * stored value an operation cannot read is refused with an error, never read
+ * as a state that holds nothing.
+ */
+export interface MfaTransactionStoreClient {
+	/**
+	 * Write the transaction's `fields` into the hash at `key`, and its deadline
+	 * (`PEXPIREAT deadlineMs`), only while no live one is there. Resolves
+	 * whether it wrote.
+	 */
+	create(
+		key: string,
+		fields: Readonly<Record<string, string>>,
+		deadlineMs: number,
+	): Promise<boolean>;
+	/** Every field of the hash at `key` (`HGETALL`); `{}` when there is none. */
+	read(key: string): Promise<Readonly<Record<string, string>>>;
+	/**
+	 * Atomically: while the transaction is at `expectedVersion` and its
+	 * incarnation, write `set`, remove `clear`, add one to `version`, and
+	 * resolve every field as written; `null` otherwise. The deadline stays.
+	 */
+	update(
+		key: string,
+		input: MfaTransactionUpdateInput,
+	): Promise<Readonly<Record<string, string>> | null>;
+	/**
+	 * Atomically: `attempts` + 1 while that is within `max`; past it — or on
+	 * a count that is not a number — the transaction is deleted and the
+	 * attempts it had are answered with `ok: false`. No transaction:
+	 * `{ ok: false, attempts: 0 }`.
+	 */
+	reserveAttempt(
+		key: string,
+		max: number,
+	): Promise<{ readonly ok: boolean; readonly attempts: number }>;
+	/** Atomically: the `challenge` field, removed, while the version is `expectedVersion`; `null` otherwise. */
+	takeChallenge(key: string, expectedVersion: string): Promise<string | null>;
+	/** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
+	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
+	/** D21's `reserveSubjectAttempt`, one script over both keys. */
+	reserveSubjectAttempt(
+		keys: MfaSubjectKeys,
+		input: ReserveMfaSubjectAttemptInput,
+	): Promise<ReserveMfaSubjectAttemptReply>;
+	/** D21's `settleSubjectAttempt`, one script over both keys; a reservation not in flight changes nothing. */
+	settleSubjectAttempt(
+		keys: MfaSubjectKeys,
+		reservation: string,
+		outcome: MfaSubjectAttemptOutcome,
+	): Promise<void>;
+	/** D21's `noteExemptSuccess`, one script over both keys. */
+	noteExemptSuccess(keys: MfaSubjectKeys, input: NoteMfaExemptSuccessInput): Promise<void>;
+	/** Remove both keys. */
+	clearSubjectState(keys: MfaSubjectKeys): Promise<void>;
+	/** Record the email-proof requirement (D25) at `key`, with no TTL. Idempotent. */
+	requireEmailProof(key: string): Promise<void>;
+	/** Whether the requirement is recorded at `key`. */
+	emailProofRequired(key: string): Promise<boolean>;
+	/** Remove the requirement at `key` (`DEL`); resolves whether this call removed it. */
+	consumeEmailProof(key: string): Promise<boolean>;
+	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are (D12). */
+	durability(): Promise<RedisDurability>;
+}
+
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStoreClient?: ChallengeStoreClient;
@@ -1379,5 +1599,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly pendingConsentStoreClient?: PendingConsentStoreClient;
 		readonly federationGrantStoreClient?: FederationGrantStoreClient;
 		readonly federationGrantIntentStoreClient?: FederationGrantIntentStoreClient;
+		readonly mfaFactorStoreClient?: MfaFactorStoreClient;
+		readonly mfaTransactionStoreClient?: MfaTransactionStoreClient;
 	}
 }

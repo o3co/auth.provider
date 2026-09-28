@@ -4,9 +4,13 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+	createRedisMfaFactorStore,
+	createRedisMfaTransactionStore,
 	redisChallengeStoreModule,
 	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
+	redisMfaFactorStoreModule,
+	redisMfaTransactionStoreModule,
 	redisReplaySeenSetModule,
 } from "../src/index.mjs";
 
@@ -87,5 +91,40 @@ describe("redisConsentStoreModule (#561)", () => {
 			redisConsentStore?: { keyPrefix?: string };
 		};
 		expect(parsed?.redisConsentStore?.keyPrefix).toBe("consent:");
+	});
+});
+
+describe("the MFA store modules and adapters, from the package's entry (the MFA ADR's D7, D8)", () => {
+	it.each([
+		[
+			redisMfaFactorStoreModule,
+			"redis-mfa-factor-store",
+			"mfaFactorStoreClient",
+			"redisMfaFactorStore",
+			"mfaf:",
+		],
+		[
+			redisMfaTransactionStoreModule,
+			"redis-mfa-transaction-store",
+			"mfaTransactionStoreClient",
+			"redisMfaTransactionStore",
+			"mfat:",
+		],
+	] as const)(
+		"%s.name is exported with its client slot and its namespaced prefix",
+		(module, name, client, key, prefix) => {
+			expect(module.name).toBe(name);
+			expect(new Set(module.requires ?? [])).toEqual(new Set([client, "config"]));
+			const parsed = (module.configSchema?.parse({}) ?? {}) as Record<
+				string,
+				{ keyPrefix?: string }
+			>;
+			expect(parsed[key]?.keyPrefix).toBe(prefix);
+		},
+	);
+
+	it("exports both adapters' builders", () => {
+		expect(typeof createRedisMfaFactorStore).toBe("function");
+		expect(typeof createRedisMfaTransactionStore).toBe("function");
 	});
 });

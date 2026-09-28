@@ -16,8 +16,9 @@
 
 /**
  * The MFA configuration core owns (the MFA ADR's D19): `mfa.mode`, the
- * deployment's step-up page at `endpoints.mfa.url`, and the two store
- * switches a composition root installs MFA's stores from.
+ * deployment's step-up page at `endpoints.mfa.url`, the two store switches a
+ * composition root installs MFA's stores from, and the Redis stores' key
+ * prefixes, which the Redis package's modules read.
  *
  * `mfa.mode` is `"off"` by reference default and admits its three values
  * (the session-admission ADR's D7 lifted the step-3 lock): whether a mode
@@ -139,6 +140,28 @@ describe("the MFA configuration core owns (D19)", () => {
 			mfa: { mode: "off", transactionTtlSeconds: 600 },
 		}) as { mfa?: Record<string, unknown> };
 		expect(parsed.mfa).toEqual({ mode: "off", transactionTtlSeconds: 600 });
+	});
+
+	it("resolves the Redis stores' key prefixes from reference.conf, and from their environment variables", () => {
+		const defaults = fromReference();
+		expect(defaults.redisMfaFactorStore?.keyPrefix).toBe("mfaf:");
+		expect(defaults.redisMfaTransactionStore?.keyPrefix).toBe("mfat:");
+		const overridden = fromReference({
+			REDIS_MFA_FACTOR_STORE_KEY_PREFIX: "tenant-a:mfaf:",
+			REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX: "tenant-a:mfat:",
+		});
+		expect(overridden.redisMfaFactorStore?.keyPrefix).toBe("tenant-a:mfaf:");
+		expect(overridden.redisMfaTransactionStore?.keyPrefix).toBe("tenant-a:mfat:");
+	});
+
+	it("keeps the Redis stores' key prefixes through the strip-mode schema, for the modules that read them", () => {
+		const parsed = AppConfigSchema.parse({
+			...makeValidAppConfig(),
+			redisMfaFactorStore: { keyPrefix: "t:mfaf:" },
+			redisMfaTransactionStore: { keyPrefix: "t:mfat:" },
+		});
+		expect(parsed.redisMfaFactorStore).toEqual({ keyPrefix: "t:mfaf:" });
+		expect(parsed.redisMfaTransactionStore).toEqual({ keyPrefix: "t:mfat:" });
 	});
 
 	it("accepts the factor store's three adapters and the transaction store's two, and nothing else", () => {

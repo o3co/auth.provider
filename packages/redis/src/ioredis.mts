@@ -20,9 +20,12 @@ import type {
 	FederationGrantIntentStoreClient,
 	FederationGrantStoreClient,
 	FederationTokenStoreClient,
+	MfaFactorStoreClient,
+	MfaTransactionStoreClient,
 	PendingConsentStoreClient,
 	RateLimiterClient,
 	RateLimitIncrement,
+	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
@@ -1327,15 +1330,23 @@ async function runScript(
 	return reply;
 }
 
-/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
-function deviceCodeRecordOf(flat: unknown): DeviceCodeRecordFields {
+/**
+ * `HGETALL`'s flat `[field, value, …]` reply — as a script returns it — as
+ * the hash's fields. Anything but a list is no fields. The one reading of
+ * that reply, shared by every store here that has a script answer a hash.
+ */
+const hashFields = (flat: unknown): Record<string, string> => {
 	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
 	const fields: Record<string, string> = {};
 	for (let i = 0; i + 1 < pairs.length; i += 2) {
 		fields[pairs[i] as string] = pairs[i + 1] as string;
 	}
-	return fields as unknown as DeviceCodeRecordFields;
-}
+	return fields;
+};
+
+/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
+const deviceCodeRecordOf = (flat: unknown): DeviceCodeRecordFields =>
+	hashFields(flat) as unknown as DeviceCodeRecordFields;
 
 /**
  * Module-level flag tracking whether the script is currently expected to be
@@ -1388,7 +1399,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
 }
 
 /**
- * Wrap a single ioredis connection into the 16 typed client wrappers
+ * Wrap a single ioredis connection into the 18 typed client wrappers
  * needed by `@o3co/auth-provider-redis` adapters. Production consumers
  * use this factory in their composition root and spread the result into
  * `bootstrapComponents`.
@@ -1397,7 +1408,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
  * in — this factory opens nothing of its own (the sole exception is
  * `refreshTokenFamilyClient.duplicate()`, which is per rotation, not per
  * purpose). Connection-level ioredis options are therefore shared by all
- * sixteen purposes, so a composition root that needs different failure timing
+ * eighteen purposes, so a composition root that needs different failure timing
  * for one of them — `enableOfflineQueue: false` on the rate limiter, say —
  * has to build that purpose off a second connection deliberately (#286).
  *
@@ -1456,6 +1467,8 @@ export function makeIoredisClients(
 	deviceCodeStoreClient: DeviceCodeStoreClient;
 	consentStoreClient: ConsentStoreClient;
 	pendingConsentStoreClient: PendingConsentStoreClient;
+	mfaFactorStoreClient: MfaFactorStoreClient;
+	mfaTransactionStoreClient: MfaTransactionStoreClient;
 } {
 	const logger = options.logger ?? consoleLogger;
 
@@ -2018,6 +2031,8 @@ export function makeIoredisClients(
 		deviceCodeStoreClient,
 		consentStoreClient,
 		pendingConsentStoreClient,
+		mfaFactorStoreClient: makeIoredisMfaFactorStoreClient(io),
+		mfaTransactionStoreClient: makeIoredisMfaTransactionStoreClient(io),
 	};
 }
 
@@ -2047,14 +2062,8 @@ const fgNumber = (value: number): string =>
 	Number.isFinite(value) ? value.toFixed(0) : String(value);
 
 /** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
-const fgFields = (flat: unknown): FederationGrantHashFields => {
-	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
-	const fields: Record<string, string> = {};
-	for (let i = 0; i + 1 < pairs.length; i += 2) {
-		fields[pairs[i] as string] = pairs[i + 1] as string;
-	}
-	return fields as unknown as FederationGrantHashFields;
-};
+const fgFields = (flat: unknown): FederationGrantHashFields =>
+	hashFields(flat) as unknown as FederationGrantHashFields;
 
 /**
  * A write's reply: `[1, fields]` when it happened, `[0]` when it was refused.
@@ -2580,5 +2589,646 @@ export function makeIoredisFederationGrantIntentStoreClient(
 		async finishIntent(prefix, handle, _nowMs) {
 			await runScript(connection, FGI_FINISH, [`${prefix}i:${handle}`], [prefix, handle]);
 		},
+	};
+}
+
+// --- MFA stores (the MFA ADR's D7, D8, D12) ---------------------------------
+
+/**
+ * `MfaFactorStoreClient.update` — the version compare-and-set.
+ *
+ * `KEYS[1]` = the subject's hash; `ARGV[1]` = the factor's field, `ARGV[2]` =
+ * the expected version, `ARGV[3]` = the next version, `ARGV[4]` = the new
+ * mutable part. Returns the value as written, or nil.
+ *
+ * The value is `<version>\n<fixed>\n<mutable>` (see `MfaFactorStoreClient`).
+ * The version is compared as text and the fixed part is carried over byte
+ * for byte: nothing here decodes the JSON, because `cjson` would write an
+ * empty array back as `{}` (the MFA ADR's D7).
+ */
+const LUA_MFA_FACTOR_UPDATE = `
+local current = redis.call('HGET', KEYS[1], ARGV[1])
+if not current then return false end
+local version, fixed = string.match(current, '^([^\\n]*)\\n([^\\n]*)\\n')
+if version ~= ARGV[2] or fixed == nil then return false end
+local written = ARGV[3] .. '\\n' .. fixed .. '\\n' .. ARGV[4]
+redis.call('HSET', KEYS[1], ARGV[1], written)
+return written
+`.trim();
+
+const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
+
+/**
+ * A reply that refuses the question — an unknown or renamed command, an
+ * unknown subcommand, `NOPERM`, a command a managed service disabled — rather
+ * than one that says the server cannot answer now (`BUSY`, `LOADING`,
+ * `NOAUTH`, `READONLY`, anything else), which fails the boot as any store
+ * outage at boot does.
+ */
+const REFUSED_QUESTION =
+	/^(?:NOPERM\b|ERR unknown command\b|ERR unknown subcommand\b|ERR\b.*\b(?:disabled|not allowed|not permitted|not supported|not available)\b)/i;
+
+const isRefusal = (err: unknown): boolean =>
+	err instanceof Error && err.name === "ReplyError" && REFUSED_QUESTION.test(err.message);
+
+/** `CONFIG GET <name>`'s value: the reply is `[name, value]`, or empty for a name the server does not know. */
+const configValue = (reply: unknown, name: string): string | undefined =>
+	Array.isArray(reply) && reply[0] === name && typeof reply[1] === "string" ? reply[1] : undefined;
+
+/** An `INFO` section's `<name>:<value>` line's value. */
+const infoValue = (section: unknown, name: string): string | undefined =>
+	typeof section === "string"
+		? new RegExp(`^${name}:([^\\r\\n]*)`, "m").exec(section)?.[1]
+		: undefined;
+
+/**
+ * What `io`'s server says about keeping what it is written (the MFA ADR's
+ * D12). The policy from `INFO memory` — `CONFIG GET maxmemory-policy` only
+ * where INFO does not say, so a managed server that blocks `CONFIG` still
+ * reports it; AOF from `INFO persistence`; `CONFIG GET save` only when AOF is
+ * off, to tell RDB snapshots from none. A refused question leaves its part
+ * unread; any other failure is the caller's.
+ */
+async function redisDurability(io: Redis): Promise<RedisDurability> {
+	let refusal: unknown;
+	const ask = async (question: () => Promise<unknown>): Promise<unknown> => {
+		try {
+			return await question();
+		} catch (err) {
+			if (!isRefusal(err)) throw err;
+			refusal ??= err;
+			return undefined;
+		}
+	};
+	const maxmemoryPolicy =
+		infoValue(await ask(() => io.info("memory")), "maxmemory_policy") ??
+		configValue(await ask(() => io.config("GET", "maxmemory-policy")), "maxmemory-policy");
+	const aof = infoValue(await ask(() => io.info("persistence")), "aof_enabled");
+	const appendOnly = aof === "1" ? true : aof === "0" ? false : undefined;
+	let snapshots: boolean | undefined;
+	if (appendOnly === false) {
+		const save = configValue(await ask(() => io.config("GET", "save")), "save");
+		snapshots = save === undefined ? undefined : save.trim() !== "";
+	}
+	return { maxmemoryPolicy, appendOnly, snapshots, refusal };
+}
+
+/**
+ * The `MfaFactorStore`'s client over one ioredis connection (the MFA ADR's
+ * D7). Also part of {@link makeIoredisClients}; built on its own so a
+ * deployment can keep enrolled factors on a dedicated database or instance,
+ * as D12's durability requirements prefer.
+ */
+export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient {
+	return {
+		async list(key) {
+			return await io.hgetall(key);
+		},
+		async create(key, field, value) {
+			return (await io.hsetnx(key, field, value)) === 1;
+		},
+		async update(key, field, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_UPDATE,
+				[key],
+				[field, input.expectedVersion, input.nextVersion, input.mutable],
+			);
+			return typeof reply === "string" ? reply : null;
+		},
+		async remove(key, field) {
+			await io.hdel(key, field);
+		},
+		async removeAll(key) {
+			await io.del(key);
+		},
+		durability: () => redisDurability(io),
+	};
+}
+
+// A transaction is one hash (the MFA ADR's D8). Its deadline is set once, by
+// `create`, and nothing moves it: an update, an attempt, a taken challenge
+// each write fields and leave the key's expiry where it was.
+
+/**
+ * `MfaTransactionStoreClient.create` — insert-only.
+ *
+ * `KEYS[1]` = the transaction; `ARGV[1]` = its deadline (epoch ms, whole),
+ * then field, value, field, value, … Returns 1 when it wrote, 0 when a live
+ * transaction holds the id. A deadline already past on the server's clock
+ * removes the key as it is written: the transaction has expired on the
+ * store's clock.
+ */
+const LUA_MFA_TX_CREATE = `
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+redis.call('HSET', KEYS[1], unpack(ARGV, 2))
+redis.call('PEXPIREAT', KEYS[1], ARGV[1])
+return 1
+`.trim();
+
+/**
+ * `MfaTransactionStoreClient.update` — the version compare-and-set.
+ *
+ * `KEYS[1]` = the transaction; `ARGV[1]` = the expected version, `ARGV[2]` =
+ * the incarnation, `ARGV[3]` = how many fields to write (n), then n field,
+ * value pairs, then the fields to remove. Returns every field as written, or
+ * nil. `HINCRBY` moves the version: Redis's integer arithmetic stays exact
+ * where a Lua number's text (14 significant digits) would not.
+ */
+const LUA_MFA_TX_UPDATE = `
+local held = redis.call('HMGET', KEYS[1], 'version', 'incarnation')
+if held[1] ~= ARGV[1] or held[2] ~= ARGV[2] then return false end
+local n = tonumber(ARGV[3])
+local set = {}
+for i = 1, n * 2 do set[i] = ARGV[3 + i] end
+if n > 0 then redis.call('HSET', KEYS[1], unpack(set)) end
+for i = 4 + n * 2, #ARGV do redis.call('HDEL', KEYS[1], ARGV[i]) end
+redis.call('HINCRBY', KEYS[1], 'version', 1)
+return redis.call('HGETALL', KEYS[1])
+`.trim();
+
+/**
+ * `MfaTransactionStoreClient.reserveAttempt`.
+ *
+ * `KEYS[1]` = the transaction; `ARGV[1]` = max. Returns `{ok, attempts}`:
+ * `{1, n}` for the nth attempt within max; `{0, n}` — and the transaction
+ * gone — for the one past it, n being what it had; `{0, 0}` for no
+ * transaction, or for a count that is not a number (fails closed: deleted).
+ */
+const LUA_MFA_TX_RESERVE_ATTEMPT = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {0, 0} end
+local attempts = tonumber(redis.call('HGET', KEYS[1], 'attempts'))
+if attempts == nil then
+  redis.call('DEL', KEYS[1])
+  return {0, 0}
+end
+if not (attempts + 1 <= tonumber(ARGV[1])) then
+  redis.call('DEL', KEYS[1])
+  return {0, attempts}
+end
+return {1, redis.call('HINCRBY', KEYS[1], 'attempts', 1)}
+`.trim();
+
+/** `MfaTransactionStoreClient.takeChallenge`. `KEYS[1]` = the transaction; `ARGV[1]` = the expected version. */
+const LUA_MFA_TX_TAKE_CHALLENGE = `
+if redis.call('HGET', KEYS[1], 'version') ~= ARGV[1] then return false end
+local challenge = redis.call('HGET', KEYS[1], 'challenge')
+if not challenge then return false end
+redis.call('HDEL', KEYS[1], 'challenge')
+return challenge
+`.trim();
+
+/** `MfaTransactionStoreClient.consume`. `KEYS[1]` = the transaction; `ARGV[1]` = the expected version. */
+const LUA_MFA_TX_CONSUME = `
+if redis.call('HGET', KEYS[1], 'version') ~= ARGV[1] then return false end
+local fields = redis.call('HGETALL', KEYS[1])
+redis.call('DEL', KEYS[1])
+return fields
+`.trim();
+
+// D21's subject state: `KEYS[1]` the lock hash, `KEYS[2]` the week's sorted
+// set (see `MfaSubjectKeys`), under one hash tag. The rules are the port's,
+// read exactly as core's in-process store applies them
+// (`core/src/mfa/memoryTransactionStore.mts`): the same replay of the run for
+// the backoff, the same count of the week, the same trust ends, in the same
+// floating-point operations on the same numbers — every instant is carried as
+// the caller's own text, or as `%.17g`, which reads back as the same double.
+//
+// Each answer is judged on the caller's `now`. What a script forgets is judged
+// no later than the server's clock, less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS):
+// a caller far ahead erases nothing. What Redis reclaims is judged by Redis:
+// while a run is counted the keys have no TTL (a run ends only at a success,
+// an exempt success or a clear); once none is, they expire a day after the
+// last failure or trust stops counting. A stored value a script cannot read
+// is refused with an error — an outage, never a state that holds nothing.
+
+const LUA_MFA_SUBJECT_PRELUDE = `
+local WEEK = 604800000
+local SKEW = 86400000
+local DAY = 86400000
+
+local function corrupt()
+  error({err = 'MFA subject state: a stored value is not one this store wrote; the operation is refused'})
+end
+
+local function num(text)
+  local n = tonumber(text)
+  if n == nil or n ~= n or n == math.huge or n == -math.huge then corrupt() end
+  return n
+end
+
+local function fmt(n) return string.format('%.17g', n) end
+
+local function server_ms()
+  local t = redis.call('TIME')
+  return tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+end
+
+local function trust_of(digest, value)
+  local created, until_ms, window, order = string.match(value, '^([^|]+)|([^|]+)|([^|]*)|(%d+)$')
+  if created == nil then corrupt() end
+  local w = nil
+  if window ~= '' then w = num(window) end
+  return {digest = digest, created = num(created), until_ms = num(until_ms), window = w, order = num(order)}
+end
+
+local function trust_text(t)
+  local w = ''
+  if t.window ~= nil then w = fmt(t.window) end
+  return fmt(t.created) .. '|' .. fmt(t.until_ms) .. '|' .. w .. '|' .. fmt(t.order)
+end
+
+-- When a trust ends: at trustedUntilMs, at createdAtMs + days under the
+-- policy asked with (none: the sweep's reading), and when its window empties.
+local function trust_end(t, days)
+  local e = t.until_ms
+  if days ~= nil then e = math.min(e, t.created + days * DAY) end
+  if t.window ~= nil then e = math.min(e, t.window) end
+  return e
+end
+
+-- The state: the run, the reservations in flight, the trusts, and the week in
+-- time order.
+local function load()
+  local run, pending, trusts, week = {}, {}, {}, {}
+  local flat = redis.call('HGETALL', KEYS[1])
+  for i = 1, #flat, 2 do
+    local field, value = flat[i], flat[i + 1]
+    local kind, id = string.sub(field, 1, 2), string.sub(field, 3)
+    if kind == 'r:' then
+      local seq, at = string.match(value, '^(%d+)|(.+)$')
+      if seq == nil then corrupt() end
+      run[#run + 1] = {id = id, seq = num(seq), at = num(at)}
+    elseif kind == 'p:' then
+      if string.match(value, '^%d+$') == nil then corrupt() end
+      pending[id] = num(value)
+    elseif kind == 't:' then
+      trusts[#trusts + 1] = trust_of(id, value)
+    end
+  end
+  local z = redis.call('ZRANGE', KEYS[2], 0, -1, 'WITHSCORES')
+  for i = 1, #z, 2 do week[#week + 1] = {id = z[i], at = num(z[i + 1])} end
+  return run, pending, trusts, week
+end
+
+-- Forgets what no longer counts at horizon: the week's failures and the
+-- trusts that ended before it, and the reservations nothing counts any more.
+-- Answers what is kept, and whether anything was forgotten.
+local function prune(run, pending, trusts, week, horizon, days)
+  local forgot = false
+  local kept_week, in_week = {}, {}
+  for _, a in ipairs(week) do
+    if a.at + WEEK > horizon then
+      kept_week[#kept_week + 1] = a
+      in_week[a.id] = true
+    else
+      redis.call('ZREM', KEYS[2], a.id)
+      forgot = true
+    end
+  end
+  local kept_trusts = {}
+  for _, t in ipairs(trusts) do
+    if trust_end(t, days) > horizon then
+      kept_trusts[#kept_trusts + 1] = t
+    else
+      redis.call('HDEL', KEYS[1], 't:' .. t.digest)
+      forgot = true
+    end
+  end
+  local in_run = {}
+  for _, a in ipairs(run) do in_run[a.id] = true end
+  for id in pairs(pending) do
+    if not in_run[id] and not in_week[id] then
+      redis.call('HDEL', KEYS[1], 'p:' .. id)
+      pending[id] = nil
+      forgot = true
+    end
+  end
+  return kept_week, kept_trusts, forgot
+end
+
+-- Sets what Redis reclaims: no TTL while a run is counted; else a day past
+-- the last failure or trust to stop counting; nothing left, both keys go.
+local function keep()
+  local flat = redis.call('HGETALL', KEYS[1])
+  local running, deadline = false, nil
+  for i = 1, #flat, 2 do
+    local kind = string.sub(flat[i], 1, 2)
+    if kind == 'r:' then
+      running = true
+    elseif kind == 't:' then
+      local e = trust_end(trust_of(string.sub(flat[i], 3), flat[i + 1]), nil)
+      if deadline == nil or e > deadline then deadline = e end
+    end
+  end
+  if running then
+    redis.call('PERSIST', KEYS[1])
+    redis.call('PERSIST', KEYS[2])
+    return
+  end
+  local last = redis.call('ZRANGE', KEYS[2], -1, -1, 'WITHSCORES')
+  if last[2] then
+    local e = num(last[2]) + WEEK
+    if deadline == nil or e > deadline then deadline = e end
+  end
+  if deadline == nil then
+    redis.call('DEL', KEYS[1], KEYS[2])
+    return
+  end
+  local at = string.format('%.0f', math.ceil(deadline + SKEW))
+  redis.call('PEXPIREAT', KEYS[1], at)
+  redis.call('PEXPIREAT', KEYS[2], at)
+end
+`;
+
+/**
+ * `MfaTransactionStoreClient.reserveSubjectAttempt`.
+ *
+ * `ARGV`: now, threshold, baseSeconds, maxSeconds, memorySeconds,
+ * weeklyBudget, hardLimit, trustedBrowserDays, the browser's digest (empty
+ * for none), the reservation's id. Returns `{'ok'}`, or `{'held', hold,
+ * retryAfterMs}` with an empty retry for the hard hold.
+ */
+const LUA_MFA_SUBJECT_RESERVE = `${LUA_MFA_SUBJECT_PRELUDE}
+local now = num(ARGV[1])
+local threshold, base, max_s, memory_s = num(ARGV[2]), num(ARGV[3]), num(ARGV[4]), num(ARGV[5])
+local budget, hard, days = num(ARGV[6]), num(ARGV[7]), num(ARGV[8])
+local digest, id = ARGV[9], ARGV[10]
+local run, pending, trusts, week = load()
+local forgot
+week, trusts, forgot = prune(run, pending, trusts, week, math.min(now, server_ms()) - SKEW, days)
+
+-- A refusal writes nothing of its own: the deadlines are set again only when
+-- the prune forgot something, so a held subject hammered is no write load.
+if #run >= hard then
+  if forgot then keep() end
+  return {'held', 'hard', ''}
+end
+
+-- The short backoff: the run replayed in time order. A failure memorySeconds
+-- after the last lock ended — or, before any lock, after the previous
+-- failure — starts it again; from the threshold-th, each locks for
+-- baseSeconds doubled per further failure, at most maxSeconds.
+table.sort(run, function(a, b)
+  if a.at ~= b.at then return a.at < b.at end
+  return a.seq < b.seq
+end)
+local memory_ms = memory_s * 1000
+local count, lock_until, last_at = 0, nil, nil
+for _, a in ipairs(run) do
+  local anchor = lock_until or last_at
+  if anchor ~= nil and a.at >= anchor + memory_ms then
+    count = 0
+    lock_until = nil
+  end
+  count = count + 1
+  last_at = a.at
+  if count >= threshold then
+    local doublings = math.min(count - threshold, 64)
+    lock_until = a.at + math.min(base * 2 ^ doublings, max_s) * 1000
+  end
+end
+local backoff = nil
+if lock_until ~= nil and now < lock_until then backoff = lock_until end
+
+local trusted = false
+if digest ~= '' then
+  for _, t in ipairs(trusts) do
+    if t.digest == digest and now < trust_end(t, days) then trusted = true end
+  end
+end
+
+-- The weekly budget, unless the browser is trusted: when the week will count
+-- fewer than weeklyBudget failures again.
+local weekly = nil
+if not trusted then
+  local counted = {}
+  for _, a in ipairs(week) do
+    if a.at + WEEK > now then counted[#counted + 1] = a end
+  end
+  if #counted >= budget then weekly = counted[#counted - budget + 1].at + WEEK end
+end
+
+if backoff ~= nil or weekly ~= nil then
+  if forgot then keep() end
+  -- The hold that ends later decides when to come back.
+  if (weekly or -math.huge) >= (backoff or -math.huge) then
+    return {'held', 'weekly', fmt(weekly - now)}
+  end
+  return {'held', 'backoff', fmt(backoff - now)}
+end
+
+local seq = redis.call('HINCRBY', KEYS[1], 'seq', 1)
+redis.call('HSET', KEYS[1], 'r:' .. id, seq .. '|' .. ARGV[1], 'p:' .. id, seq)
+redis.call('ZADD', KEYS[2], ARGV[1], id)
+-- Only a trust that holds is extended: one already ended stays ended.
+for _, t in ipairs(trusts) do
+  if now < trust_end(t, days) then
+    local w = now + WEEK
+    if t.window ~= nil and t.window > w then w = t.window end
+    t.window = w
+    redis.call('HSET', KEYS[1], 't:' .. t.digest, trust_text(t))
+  end
+end
+keep()
+return {'ok'}
+`;
+
+/**
+ * `MfaTransactionStoreClient.settleSubjectAttempt`.
+ *
+ * `ARGV`: the reservation, the outcome. `void` removes the attempt; `success`
+ * ends the run up to and including it, and takes it out of the week;
+ * `failure` leaves it standing. A reservation not in flight changes nothing.
+ * The whole state is read and validated before anything is written.
+ */
+const LUA_MFA_SUBJECT_SETTLE = `${LUA_MFA_SUBJECT_PRELUDE}
+local id, outcome = ARGV[1], ARGV[2]
+-- Read and validate the whole state before anything is written: a corrupt
+-- field is the refusal, with nothing half-settled.
+local run, pending = load()
+local seq = pending[id]
+if seq == nil then return 0 end
+redis.call('HDEL', KEYS[1], 'p:' .. id)
+if outcome == 'void' then
+  redis.call('HDEL', KEYS[1], 'r:' .. id)
+  redis.call('ZREM', KEYS[2], id)
+elseif outcome == 'success' then
+  for _, a in ipairs(run) do
+    if a.seq <= seq then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+  end
+  redis.call('ZREM', KEYS[2], id)
+end
+keep()
+return 1
+`;
+
+/**
+ * `MfaTransactionStoreClient.noteExemptSuccess`.
+ *
+ * `ARGV`: now, trustedBrowsers, trustedBrowserDays, the presented browser's
+ * digest (empty for none), the new browser's digest. Ends the run up to now,
+ * renews the presented browser's trust under the new digest (or adds one),
+ * and keeps the trustedBrowsers newest — oldest first out, ties by the order
+ * they were trusted in.
+ */
+const LUA_MFA_SUBJECT_EXEMPT = `${LUA_MFA_SUBJECT_PRELUDE}
+local now = num(ARGV[1])
+local cap, days = num(ARGV[2]), num(ARGV[3])
+local presented, digest = ARGV[4], ARGV[5]
+local run, pending, trusts, week = load()
+week, trusts = prune(run, pending, trusts, week, math.min(now, server_ms()) - SKEW, days)
+for _, a in ipairs(run) do
+  if a.at <= now then redis.call('HDEL', KEYS[1], 'r:' .. a.id) end
+end
+local kept = {}
+for _, t in ipairs(trusts) do
+  if presented ~= '' and t.digest == presented then
+    redis.call('HDEL', KEYS[1], 't:' .. t.digest)
+  else
+    kept[#kept + 1] = t
+  end
+end
+local newest = nil
+for _, a in ipairs(week) do
+  if a.at + WEEK > now and (newest == nil or a.at > newest) then newest = a.at end
+end
+local fresh = {digest = digest, created = now, until_ms = now + days * DAY, window = nil,
+  order = redis.call('HINCRBY', KEYS[1], 'seq', 1)}
+if newest ~= nil then fresh.window = newest + WEEK end
+redis.call('HSET', KEYS[1], 't:' .. digest, trust_text(fresh))
+kept[#kept + 1] = fresh
+if #kept > cap then
+  table.sort(kept, function(a, b)
+    if a.created ~= b.created then return a.created < b.created end
+    return a.order < b.order
+  end)
+  for i = 1, #kept - cap do redis.call('HDEL', KEYS[1], 't:' .. kept[i].digest) end
+end
+keep()
+return 1
+`;
+
+const MFA_TX_CREATE = defineScript(LUA_MFA_TX_CREATE);
+const MFA_TX_UPDATE = defineScript(LUA_MFA_TX_UPDATE);
+const MFA_TX_RESERVE_ATTEMPT = defineScript(LUA_MFA_TX_RESERVE_ATTEMPT);
+const MFA_TX_TAKE_CHALLENGE = defineScript(LUA_MFA_TX_TAKE_CHALLENGE);
+const MFA_TX_CONSUME = defineScript(LUA_MFA_TX_CONSUME);
+const MFA_SUBJECT_RESERVE = defineScript(LUA_MFA_SUBJECT_RESERVE);
+const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
+const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
+
+const HOLDS: ReadonlySet<unknown> = new Set(["backoff", "weekly", "hard"]);
+
+/**
+ * The `MfaTransactionStore`'s client over one ioredis connection (the MFA
+ * ADR's D8, D21, D25). Also part of {@link makeIoredisClients}; built on its
+ * own so a deployment can give it a dedicated database or instance.
+ */
+export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionStoreClient {
+	return {
+		async create(key, fields, deadlineMs) {
+			const reply = await runScript(
+				io,
+				MFA_TX_CREATE,
+				[key],
+				[fgNumber(deadlineMs), ...Object.entries(fields).flat()],
+			);
+			return reply === 1;
+		},
+		async read(key) {
+			return await io.hgetall(key);
+		},
+		async update(key, input) {
+			const set = Object.entries(input.set);
+			const reply = await runScript(
+				io,
+				MFA_TX_UPDATE,
+				[key],
+				[
+					input.expectedVersion,
+					input.incarnation,
+					String(set.length),
+					...set.flat(),
+					...input.clear,
+				],
+			);
+			return Array.isArray(reply) ? hashFields(reply) : null;
+		},
+		async reserveAttempt(key, max) {
+			const reply = await runScript(io, MFA_TX_RESERVE_ATTEMPT, [key], [String(max)]);
+			const [ok, attempts] = Array.isArray(reply) ? reply : [0, 0];
+			return { ok: ok === 1, attempts: Number(attempts) };
+		},
+		async takeChallenge(key, expectedVersion) {
+			const reply = await runScript(io, MFA_TX_TAKE_CHALLENGE, [key], [expectedVersion]);
+			return typeof reply === "string" ? reply : null;
+		},
+		async consume(key, expectedVersion) {
+			const reply = await runScript(io, MFA_TX_CONSUME, [key], [expectedVersion]);
+			return Array.isArray(reply) ? hashFields(reply) : null;
+		},
+		async reserveSubjectAttempt(keys, input) {
+			const { policy } = input;
+			const reply = await runScript(
+				io,
+				MFA_SUBJECT_RESERVE,
+				[keys.lock, keys.week],
+				[
+					String(input.nowMs),
+					String(policy.threshold),
+					String(policy.baseSeconds),
+					String(policy.maxSeconds),
+					String(policy.memorySeconds),
+					String(policy.weeklyBudget),
+					String(policy.hardLimit),
+					String(policy.trustedBrowserDays),
+					input.browserDigest ?? "",
+					input.reservation,
+				],
+			);
+			if (Array.isArray(reply) && reply[0] === "ok") return { ok: true };
+			const [outcome, hold, retry] = Array.isArray(reply) ? reply : [];
+			if (outcome === "held" && HOLDS.has(hold)) {
+				return {
+					ok: false,
+					hold: hold as "backoff" | "weekly" | "hard",
+					retryAfterMs: retry === "" ? null : Number(retry),
+				};
+			}
+			// A reply this release does not know is not a verdict: refuse the
+			// attempt as an outage rather than let it through or hold it.
+			throw new Error("MfaTransactionStore: the reservation script answered nothing it knows");
+		},
+		async settleSubjectAttempt(keys, reservation, outcome) {
+			await runScript(io, MFA_SUBJECT_SETTLE, [keys.lock, keys.week], [reservation, outcome]);
+		},
+		async noteExemptSuccess(keys, input) {
+			await runScript(
+				io,
+				MFA_SUBJECT_EXEMPT,
+				[keys.lock, keys.week],
+				[
+					String(input.nowMs),
+					String(input.policy.trustedBrowsers),
+					String(input.policy.trustedBrowserDays),
+					input.presentedDigest ?? "",
+					input.digest,
+				],
+			);
+		},
+		async clearSubjectState(keys) {
+			await io.del(keys.lock, keys.week);
+		},
+		async requireEmailProof(key) {
+			await io.set(key, "1");
+		},
+		async emailProofRequired(key) {
+			return (await io.exists(key)) === 1;
+		},
+		async consumeEmailProof(key) {
+			return (await io.del(key)) === 1;
+		},
+		durability: () => redisDurability(io),
 	};
 }
