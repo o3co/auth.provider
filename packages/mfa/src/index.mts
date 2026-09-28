@@ -18,4 +18,9 @@
 // packages/core/docs/adr/2026-09-25-multi-factor-authentication.md).
 // Private until the standalone template wires it (the ADR's build-order
 // step 20).
-export {};
+
+// The `mfa` keys this package reads, and the published development key a
+// development configuration may carry (D11, D19).
+export { MFA_DEVELOPMENT_SAMPLE_KEY, mfaConfigSchema } from "./config.mjs";
+// The TOTP factor, contributed as `mfaFactors.totp` (F6).
+export { mfaTotpFactorModule } from "./totp/module.mjs";
