@@ -722,7 +722,7 @@ Core's reference and schema hold what core's consumers read with the MFA package
 | email enabled, no `mailSender` | `mfaEmailFactorModule` requires the slot; the planner's missing-required refusal, with a hint naming `SMTP_HOST` | **email is never silently disabled** |
 | WebAuthn factor enabled, no `webauthnConfig` | `webauthnMfaFactorModule` requires the slot | `webauthn.rpId` / `rpName` / `origin` |
 | key ring empty, a key not 32 bytes, a duplicate id, or the sample key where D11 refuses it | the MFA config schema | `mfa.encryptionKeys` / `MFA_ENCRYPTION_KEY` |
-| `mfa.mode` not `off`, `oauthModule` or `deviceGrantModule` without `userSessionStore` | their factories (`mfa-requires-user-session-store`; amended: `deviceGrantModule` refuses an enabled grant without it whatever the mode, D16) | the slot |
+| `mfa.mode` not `off`, `oauthModule` or `deviceGrantModule` without `userSessionStore` *(superseded 2026-09-28: never built; the MFA module `requires: ["userSessionStore"]` instead, and the requires-closure refuses — the amendment at the end of this section)* | their factories (`mfa-requires-user-session-store`; amended: `deviceGrantModule` refuses an enabled grant without it whatever the mode, D16) | the slot |
 | memory MFA stores under `deployment.mode = "multi"` | core, replica safety | the modules and what forks |
 | Redis factor store on an `allkeys-*` eviction policy | `redisMfaFactorStoreModule` (D12) | the policy |
 | `mfaFactorStore.adapter = "store"` without the four URLs | foundation's builder | the missing URLs |
