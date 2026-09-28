@@ -1421,6 +1421,72 @@ describe("the undeclared-remediation line is capped (D4, D10)", () => {
 describe("step 6 — acr_values, with the reach of what is registered", () => {
 	const table = readAcrTable({ "urn:o3co:acr:mfa": ["mfa"], "urn:example:pwd": ["pwd"] });
 
+	it("judges a token carrier on the token's own amr, never the record's: a sid-less token meets an acr from its amr", async () => {
+		expect(
+			await admitSession(
+				deps({ acrTable: table }),
+				request({
+					claim: tokenClaim({ sub: "user-1", amr: ["pwd", "otp", "mfa"] }),
+					asks: { acrValues: ["urn:o3co:acr:mfa"] },
+				}),
+			),
+		).toEqual({ outcome: "admitted", session: null, acr: "urn:o3co:acr:mfa" });
+	});
+
+	it("judges a token with a sid on its own amr when the record's differs, in both directions", async () => {
+		const stepped = session({
+			amr: ["pwd", "otp", "mfa"],
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: minutesAgo(1),
+			},
+		});
+		const ask = (record: UserSession, amr: readonly string[]) =>
+			admitSession(
+				deps({ userSessionStore: holding(record), acrTable: table }),
+				request({
+					claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr }),
+					asks: { acrValues: ["urn:o3co:acr:mfa"] },
+				}),
+			);
+		// The record stepped up after the token was issued: the token is not.
+		expect(await ask(stepped, ["pwd"])).toEqual({
+			outcome: "unmet",
+			requirement: "acr",
+			session: stepped,
+		});
+		// The token carries mfa its record does not: the token's word counts.
+		const plain = session();
+		expect(await ask(plain, ["pwd", "otp", "mfa"])).toEqual({
+			outcome: "admitted",
+			session: plain,
+			acr: "urn:o3co:acr:mfa",
+		});
+	});
+
+	it("holds the token's amr in the merge too: a step-up is offered by what the token holds beside the requirement's reach", async () => {
+		const both = readAcrTable({ "urn:example:both": ["kba", "hwk"] });
+		const record = session();
+		const requirements = resolverForTests([
+			met("mfa", {
+				reach: new Set(["hwk"]),
+				stepUpPage: { url: "/mfa", params: {} },
+				remediations: ["mfa.step_up"],
+			}),
+		]);
+		expect(
+			await admitSession(
+				deps({ userSessionStore: holding(record), acrTable: both, requirements }),
+				request({
+					claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["pwd", "kba"] }),
+					asks: { acrValues: ["urn:example:both"] },
+				}),
+			),
+		).toMatchObject({ outcome: "step_up", requirement: "mfa", acrValues: ["urn:example:both"] });
+	});
+
 	it("selects over the vouched amr, with reach the union of every requirement's reach when the session is live", async () => {
 		const requirements = anyReach([
 			met("a", { reach: new Set(["risk-ok"]), stepUpPage: { url: "/a", params: {} } }),
