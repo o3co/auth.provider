@@ -57,6 +57,12 @@ export default defineConfig({
 				// that runs it are in tsconfig.test.json only: that file declares no
 				// suite of its own, which vitest 5 reports as "No test suite found".
 				"__tests__/user-session-contract-parity.test.mts",
+				// The MFA ADR's D7, D8: the MFA stores' tests build factor records
+				// and transactions, which name every key; the contract copies are
+				// compiled through the files that run them.
+				"__tests__/mfa-factor-store.test.mts",
+				"__tests__/mfa-transaction-store.test.mts",
+				"__tests__/mfa-store-modules.test.mts",
 			],
 		},
 	},

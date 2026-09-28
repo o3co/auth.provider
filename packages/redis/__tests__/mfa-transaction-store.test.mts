@@ -227,7 +227,7 @@ describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D2
 			[`${prefix}lock:${tag}`, `${prefix}week:${tag}`].sort(),
 		);
 		expect(await first().type(`${prefix}lock:${tag}`)).toBe("hash");
-		expect(await first().zrange(`${prefix}week:${tag}`, 0, -1, "WITHSCORES")).toEqual([
+		expect(await first().zrange(`${prefix}week:${tag}`, "0", "-1", "WITHSCORES")).toEqual([
 			reserved.reservation,
 			String(t),
 		]);
