@@ -500,7 +500,12 @@ describe("step 3 — the subject", () => {
 				timestamp: NOW,
 				type: "session.admission.subject_mismatch",
 				subject: "user-1",
-				details: { sid: "sid-1", claimedSubject: "user-2", action: "oauth.authorize" },
+				details: {
+					sid: "sid-1",
+					carrier: "cookie",
+					claimedSubject: "user-2",
+					recordSubject: "user-1",
+				},
 			},
 		]);
 	});
@@ -798,22 +803,28 @@ describe("step 5 — the requirements", () => {
 		expect(asked).toBe(0);
 	});
 
-	it("treats a remediation no registered requirement declared as credential_change, and says so once per process per name", async () => {
+	it("normalises the action first: a remediation no registered requirement declared is asked of every requirement as credential_change, said once per process per name", async () => {
 		const { logger, lines } = recordingLogger();
-		const seen: RequirementInput["action"][] = [];
-		const watching = met("watch", {
-			admit: async ({ action }) => {
-				seen.push(action);
-				return { outcome: "met" };
-			},
-		});
+		const seen: string[] = [];
+		const watching = (name: string) =>
+			met(name, {
+				admit: async ({ action }) => {
+					seen.push(`${name}:${action.name}:${action.grade}`);
+					return { outcome: "met" };
+				},
+			});
 		const undeclared = { name: "deployment.mislabelled", grade: "remediation" } as const;
-		const first = deps({ requirements: resolverForTests([watching]), logger });
+		const first = deps({
+			requirements: resolverForTests([watching("one"), watching("two")]),
+			logger,
+		});
 		await admitSession(first, request({ action: undeclared }));
 		await admitSession(first, request({ action: undeclared }));
 		expect(seen).toEqual([
-			{ name: "deployment.mislabelled", grade: "credential_change" },
-			{ name: "deployment.mislabelled", grade: "credential_change" },
+			"one:deployment.mislabelled:credential_change",
+			"two:deployment.mislabelled:credential_change",
+			"one:deployment.mislabelled:credential_change",
+			"two:deployment.mislabelled:credential_change",
 		]);
 		expect(lines).toEqual([
 			{
@@ -896,6 +907,56 @@ describe("step 5 — the requirements", () => {
 			whenStillUnmet: "unmet",
 		});
 		expect(reads).toBe(1);
+	});
+
+	it("takes a step_up from a requirement that registered no page as unmet by its name, said once per process: nothing could finish the trip", async () => {
+		const { logger, lines } = recordingLogger();
+		const record = session();
+		const pageless = met("pageless", {
+			admit: async () => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }),
+		});
+		const with_ = deps({
+			userSessionStore: holding(record),
+			requirements: resolverForTests([pageless]),
+			logger,
+		});
+		expect(await admitSession(with_, request())).toEqual({
+			outcome: "unmet",
+			requirement: "pageless",
+			session: record,
+		});
+		expect(await admitSession(with_, request())).toMatchObject({ outcome: "unmet" });
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_step_up_without_page",
+				fields: { requirement: "pageless" },
+			},
+		]);
+	});
+
+	it("reads a requirement's reach live, at request time: a reach that fills after registration counts", async () => {
+		const record = session();
+		let reach = new Set<string>();
+		const late: SessionRequirement = {
+			name: "late",
+			get reach() {
+				return reach;
+			},
+			stepUpPage: { url: "/late", params: {} },
+			remediations: [],
+			hintKeys: [],
+			admit: async () => ({ outcome: "met" }),
+		};
+		const with_ = deps({
+			userSessionStore: holding(record),
+			requirements: resolverForTests([late]),
+			acrTable: readAcrTable({ "urn:o3co:acr:mfa": ["mfa"] }),
+		});
+		const ask = () => admitSession(with_, request({ asks: { acrValues: ["urn:o3co:acr:mfa"] } }));
+		expect(await ask()).toMatchObject({ outcome: "unmet", requirement: "acr" });
+		reach = new Set(["mfa"]);
+		expect(await ask()).toMatchObject({ outcome: "step_up", requirement: "late" });
 	});
 
 	it("carries the live session on reauthenticate, step_up and unmet: /authorize decides freshness on it first", async () => {

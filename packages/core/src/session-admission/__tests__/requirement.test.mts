@@ -29,7 +29,7 @@ import type {
 	SessionRequirement,
 	SessionView,
 } from "#/session-admission/requirement.mjs";
-import { checkStepUpPage } from "#/session-admission/requirement.mjs";
+import { checkRegisteredReach, checkStepUpPage } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { RecordedAuthentication } from "#/user-sessions/authentication.mjs";
 
@@ -117,7 +117,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		]);
 	});
 
-	it("registers a copy, as boot does: the sets and lists are the copy's own, a getter is read once, and admit delegates", async () => {
+	it("registers a copy, as boot does: the page and the lists are the copy's own, a page getter is read once, and admit delegates", async () => {
 		let reads = 0;
 		const asked: unknown[] = [];
 		const source = {
@@ -140,14 +140,33 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		expect(registered === (source as unknown)).toBe(false);
 		expect(Object.isFrozen(registered)).toBe(true);
 		expect(registered.stepUpPage).toEqual({ url: "/x", params: { n: "1" } });
-		source.reach.add("hwk");
 		(source.remediations as string[]).push("other");
-		expect([...registered.reach]).toEqual(["risk-ok"]);
 		expect(registered.remediations).toEqual(["x.step_up"]);
 		expect(registered.hintKeys).toEqual(["level"]);
 		expect(registered.admitPrimary).toBeUndefined();
 		await registered.admit({} as never);
 		expect(asked).toHaveLength(1);
+	});
+
+	it("does not read reach at registration: the copy reads the value's reach live, so a reach that fills later — the MFA requirement's, over the factors — is read whole", () => {
+		let reads = 0;
+		let reach = new Set<string>();
+		const source = {
+			name: "x",
+			get reach() {
+				reads++;
+				return reach;
+			},
+			stepUpPage: { url: "/x", params: {} },
+			remediations: [],
+			hintKeys: [],
+			admit: async () => ({ outcome: "met" as const }),
+		} satisfies SessionRequirement;
+		const registered = resolverForTests([source]).get("x") as SessionRequirement;
+		expect(reads).toBe(0);
+		reach = new Set(["risk-ok"]);
+		expect([...registered.reach]).toEqual(["risk-ok"]);
+		expect(reads).toBe(1);
 	});
 
 	it("exposes get and entries alone, frozen", () => {
@@ -162,14 +181,11 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 			undefined,
 			null,
 			{ name: "" },
-			{ ...requirement("x"), reach: ["otp"] },
 			{ ...requirement("x"), remediations: "x" },
 			{ ...requirement("x"), hintKeys: undefined },
 			{ ...requirement("x"), hintKeys: [""] },
 			{ ...requirement("x"), admit: undefined },
 			{ ...requirement("x"), admitPrimary: "later" },
-			{ ...requirement("x"), reach: new Set(["otp"]) },
-			{ ...requirement("x"), stepUpPage: { url: "/x", params: {} } },
 			{ ...requirement("x"), stepUpPage: { url: "mfa", params: {} }, reach: new Set(["otp"]) },
 		]) {
 			expect(() => resolverForTests([bad as never]), JSON.stringify(bad)).toThrow(RangeError);
@@ -184,6 +200,68 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		});
 		expect(() => resolverForTests([paged], { issuer: ISSUER })).toThrow(RangeError);
 		expect(resolverForTests([paged]).get("x")?.stepUpPage).toEqual(paged.stepUpPage);
+	});
+});
+
+describe("checkRegisteredReach — a registered reach, read once after the name-keyed pass (D3)", () => {
+	// `"none"` rather than `undefined`: a default parameter would replace an
+	// explicit `undefined` with the page.
+	const requirement = (
+		name: string,
+		reach: unknown,
+		page: SessionRequirement["stepUpPage"] | "none" = { url: "/x", params: {} },
+	): SessionRequirement =>
+		({
+			name,
+			reach,
+			stepUpPage: page === "none" ? undefined : page,
+			remediations: [],
+			hintKeys: [],
+			admit: async () => ({ outcome: "met" }),
+		}) as SessionRequirement;
+
+	it("answers the reach as a set of its own, and lets the requirement named mfa reach the second-factor values", () => {
+		const reach = new Set(["otp", "hwk", "mfa"]);
+		const read = checkRegisteredReach(requirement("mfa", reach));
+		expect([...read]).toEqual(["otp", "hwk", "mfa"]);
+		expect(read).not.toBe(reach);
+		expect([...checkRegisteredReach(requirement("risk", new Set(["risk-ok"])))]).toEqual([
+			"risk-ok",
+		]);
+		expect(checkRegisteredReach(requirement("plain", new Set(), "none")).size).toBe(0);
+	});
+
+	it("reads the getter once", () => {
+		let reads = 0;
+		const source = requirement("x", undefined);
+		Object.defineProperty(source, "reach", {
+			get() {
+				reads++;
+				return new Set(["risk-ok"]);
+			},
+		});
+		checkRegisteredReach(source);
+		expect(reads).toBe(1);
+	});
+
+	it.each([
+		["not a Set", "otp"],
+		["a list", ["otp"]],
+		["an empty string", new Set([""])],
+		["a non-string", new Set([7])],
+		["a primary's marker", new Set(["pwd"])],
+		["the federated marker", new Set(["fed"])],
+		["a second-factor value under another name", new Set(["otp"])],
+		["mfa under another name", new Set(["mfa"])],
+	])("refuses a reach that is %s with a RangeError", (_label, reach) => {
+		expect(() => checkRegisteredReach(requirement("risk", reach))).toThrow(RangeError);
+	});
+
+	it("holds a page to a non-empty reach, and no page to an empty one", () => {
+		expect(() => checkRegisteredReach(requirement("risk", new Set(["risk-ok"]), "none"))).toThrow(
+			/where the step-up starts/,
+		);
+		expect(() => checkRegisteredReach(requirement("risk", new Set()))).toThrow(/reaches nothing/);
 	});
 });
 

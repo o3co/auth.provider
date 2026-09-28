@@ -36,15 +36,13 @@ import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationCl
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type { SessionAuthentication } from "../user-sessions/types.mjs";
 import { SECOND_FACTOR_AMR } from "./acr.mjs";
-import type {
-	CompletedRequirement,
-	PrimaryAdditions,
-	PrimaryAuthentication,
-	PrimaryContinuation,
+import {
+	type CompletedRequirement,
+	MFA_REQUIREMENT_NAME,
+	type PrimaryAdditions,
+	type PrimaryAuthentication,
+	type PrimaryContinuation,
 } from "./requirement.mjs";
-
-/** The one requirement that may reach or add a second-factor value, or a verification time (D3). */
-export const MFA_REQUIREMENT_NAME = "mfa";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);

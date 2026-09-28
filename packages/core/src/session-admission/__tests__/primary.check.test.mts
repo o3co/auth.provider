@@ -27,9 +27,11 @@ import {
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	MFA_REQUIREMENT_NAME,
 } from "#/session-admission/primary.mjs";
-import type { PrimaryAuthentication } from "#/session-admission/requirement.mjs";
+import {
+	MFA_REQUIREMENT_NAME,
+	type PrimaryAuthentication,
+} from "#/session-admission/requirement.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 

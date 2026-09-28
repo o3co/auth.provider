@@ -276,6 +276,9 @@ const actionLabel = (name: string): string =>
 /** The `remediation` names already said to be undeclared, once per process each (D4). */
 const undeclaredRemediations = new Set<string>();
 
+/** The requirements already said to have stepped up without a page, once per process each (D2, step 5). */
+const pagelessStepUps = new Set<string>();
+
 // ---------------------------------------------------------------------------
 // admitSession (D2)
 // ---------------------------------------------------------------------------
@@ -347,16 +350,6 @@ type RequirementOutcome =
 	| { readonly outcome: "unmet"; readonly requirement: string }
 	| { readonly outcome: "unavailable"; readonly store: string };
 
-/** The page a requirement with a non-empty reach declares; boot and `resolverForTests` hold it to that. */
-const pageOf = (requirement: SessionRequirement) => {
-	if (requirement.stepUpPage === undefined) {
-		throw new Error(
-			`invariant violated: requirement "${requirement.name}" reaches but has no page`,
-		);
-	}
-	return requirement.stepUpPage;
-};
-
 /**
  * `admitSession`: whether the session `request.claim` names may proceed with
  * `request.action` (D2). The steps, each fail-closed, in order:
@@ -375,7 +368,9 @@ const pageOf = (requirement: SessionRequirement) => {
  * 5. the requirements — for `use` and `credential_change`, each `admit` in
  *    registration order, the first verdict that is not `met` taken; none for
  *    a declared `remediation`; a throw → `unavailable`; a `step_up` answers
- *    the requirement's registered page;
+ *    the requirement's registered page, and one from a requirement that
+ *    registered none — nothing could finish the trip — is `unmet` by its
+ *    name, said once per process (`session_admission_step_up_without_page`);
  * 6. `acr_values` — `selectAcr` over the vouched `amr`, with reach the union
  *    of every requirement's when the session is live;
  * 7. the merge of 5 and 6, D2's table.
@@ -438,7 +433,13 @@ export async function admitSession(
 			timestamp: now,
 			type: "session.admission.subject_mismatch",
 			subject: session.sub,
-			details: { sid: session.sid, claimedSubject: presented.subject, action: label },
+			details: {
+				// The claim's sid, whichever carrier made the claim: the record was read by it.
+				sid: presented.sid,
+				carrier: presented.carrier,
+				claimedSubject: presented.subject,
+				recordSubject: session.sub,
+			},
 		});
 		return { outcome: "not_live", reason: "subject_mismatch" };
 	}
@@ -461,7 +462,8 @@ export async function admitSession(
 		}
 	}
 
-	// Step 5: the requirements, by the action's effective grade.
+	// Step 5: the requirements, by the action's effective grade — normalised
+	// first (D4): only a declared remediation keeps its grade and skips them.
 	const requirements = [...deps.requirements.entries()];
 	const effective = effectiveAction(requirements, request.action, deps);
 	const authentication =
@@ -496,14 +498,7 @@ export async function admitSession(
 			if (answer.outcome === "met") continue;
 			verdict =
 				answer.outcome === "step_up"
-					? session === null
-						? { outcome: "reauthenticate", requirement: name }
-						: {
-								outcome: "step_up",
-								requirement: name,
-								page: pageOf(requirement),
-								whenStillUnmet: answer.whenStillUnmet,
-							}
+					? stepUpVerdict(name, requirement, answer.whenStillUnmet, session, deps)
 					: { outcome: answer.outcome, requirement: name };
 			break;
 		}
@@ -527,6 +522,32 @@ export async function admitSession(
 		held: requirementSession(session)?.amr ?? [],
 		table: deps.acrTable,
 	});
+}
+
+/**
+ * A requirement's `step_up` as admission takes it: over no session it is
+ * `reauthenticate` — nothing can be stepped up onto no session, and a login
+ * can; from a requirement that registered no page it is `unmet` by its
+ * name, fail closed, said once per process — nothing could finish the trip;
+ * else the registered page.
+ */
+function stepUpVerdict(
+	name: string,
+	requirement: SessionRequirement,
+	whenStillUnmet: "reauthenticate" | "unmet",
+	session: UserSession | null,
+	deps: AdmissionDeps,
+): RequirementOutcome {
+	if (session === null) return { outcome: "reauthenticate", requirement: name };
+	const page = requirement.stepUpPage;
+	if (page === undefined) {
+		if (!pagelessStepUps.has(name)) {
+			pagelessStepUps.add(name);
+			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_page");
+		}
+		return { outcome: "unmet", requirement: name };
+	}
+	return { outcome: "step_up", requirement: name, page, whenStillUnmet };
 }
 
 /**
@@ -624,12 +645,14 @@ function stepUpThroughOne(
 					alternative.every((value) => held.has(value) || requirement.reach.has(value)),
 			),
 		);
-		if (covers) {
+		// A requirement whose reach covers the entry registered a page: boot
+		// holds a non-empty reach to one. Without one nothing could finish it.
+		if (covers && requirement.stepUpPage !== undefined) {
 			return {
 				outcome: "step_up",
 				requirement: name,
 				session,
-				page: pageOf(requirement),
+				page: requirement.stepUpPage,
 				acrValues: reachable,
 				whenStillUnmet: "unmet",
 			};

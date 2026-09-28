@@ -859,7 +859,6 @@ export {
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	MFA_REQUIREMENT_NAME,
 } from "./session-admission/primary.mjs";
 export {
 	type Admission,
@@ -869,10 +868,12 @@ export {
 	type AdmissionGrade,
 	type AdmissionRequest,
 	type CompletedRequirement,
+	checkRegisteredReach,
 	checkStepUpPage,
 	type Establishment,
 	type Interruption,
 	type InterruptionAnswer,
+	MFA_REQUIREMENT_NAME,
 	type PrimaryAdditions,
 	type PrimaryAdmission,
 	type PrimaryAuthentication,

@@ -25,13 +25,14 @@
  * requirement answers a login with, the `PrimaryContinuation` it persists,
  * and the `Establishment` capability `establishSession` requires.
  *
- * Types and one validation only; the decisions are `admit.mts`'s. The three
+ * Types and the registration checks only; the decisions are `admit.mts`'s. The three
  * brands (`SessionClaim`, `SessionRequirementResolver`, `Establishment`) are
  * type-level here and runtime-checked there, through module-private sets:
  * an `as` cast forges the type and nothing else.
  */
 
 import type { AuditSink } from "../audit/types.mjs";
+import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
 import type {
@@ -40,7 +41,10 @@ import type {
 	UserSession,
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
-import type { AcrTable } from "./acr.mjs";
+import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
+
+/** The one requirement that may reach or add a second-factor value, or a verification time (D3). */
+export const MFA_REQUIREMENT_NAME = "mfa";
 
 declare const claimBrand: unique symbol;
 declare const resolverBrand: unique symbol;
@@ -254,14 +258,18 @@ const isNameList = (value: unknown): value is readonly string[] =>
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
- * non-empty `name`, a `reach` of non-empty strings, a page exactly when the
- * reach is not empty (`checkStepUpPage`, on `issuer`'s origin when one is
- * given), `remediations` and `hintKeys` as lists of names, `admit` a
- * function, `admitPrimary` one or absent — and copied: the sets and lists
- * are the copy's own and a getter is read once here, so what the resolver
- * answers at request time is what was registered. `admit` and
- * `admitPrimary` delegate to the value's. A `RangeError` names what is
- * wrong; the boot planner reports it as the contribution's failure.
+ * non-empty `name`, `remediations` and `hintKeys` as lists of names, a
+ * `stepUpPage` that is a page when present (`checkStepUpPage`, on `issuer`'s
+ * origin when one is given), `admit` a function, `admitPrimary` one or
+ * absent — and copied: the lists and the page are the copy's own, and a
+ * getter is read once here, so what the resolver answers at request time is
+ * what was registered. `reach` is NOT read here: a requirement's reach may
+ * be a getter over what registers in the same pass (the MFA requirement's,
+ * over `mfaFactorResolver`), so the copy reads the value's `reach` live —
+ * at request time by admission, at the end of boot's stage 4 by
+ * `checkRegisteredReach`, both after the pass. `admit` and `admitPrimary`
+ * delegate to the value's. A `RangeError` names what is wrong; the boot
+ * planner reports it as the contribution's failure.
  */
 export function registeredRequirement(value: unknown, issuer?: string): SessionRequirement {
 	if (!isPlainObject(value)) throw new RangeError("a session requirement must be an object");
@@ -272,21 +280,10 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${name}": ${what}`);
 	};
-	const reach = value.reach;
-	if (!(reach instanceof Set)) refuse("reach must be a Set of amr values");
-	const reached = new Set<string>();
-	for (const entry of reach as Set<unknown>) {
-		if (!isNonEmptyString(entry)) refuse("reach holds a value that is not a non-empty string");
-		reached.add(entry as string);
-	}
-	let stepUpPage: StepUpPage | undefined;
-	if (reached.size === 0) {
-		if (value.stepUpPage !== undefined)
-			refuse("a requirement that reaches nothing declares no page");
-	} else {
-		// A page that fails names what is wrong itself (`checkStepUpPage`).
-		stepUpPage = checkStepUpPage(value.stepUpPage, issuer);
-	}
+	// A page that fails names what is wrong itself (`checkStepUpPage`). Read
+	// once: a getter is read here and never again.
+	const page = value.stepUpPage;
+	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
 	if (!isNameList(value.remediations)) refuse("remediations must be a list of names");
 	if (!isNameList(value.hintKeys)) refuse("hintKeys must be a list of names");
 	if (typeof value.admit !== "function") refuse("admit must be a function");
@@ -297,7 +294,9 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 	const admitPrimary = source.admitPrimary;
 	return Object.freeze({
 		name,
-		reach: reached,
+		get reach() {
+			return source.reach;
+		},
 		stepUpPage,
 		remediations: Object.freeze([...(value.remediations as readonly string[])]),
 		hintKeys: Object.freeze([...(value.hintKeys as readonly string[])]),
@@ -306,6 +305,45 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 			? {}
 			: { admitPrimary: (primary: PrimaryAuthentication) => admitPrimary.call(source, primary) }),
 	});
+}
+
+/**
+ * A registered requirement's `reach`, read once after the name-keyed pass
+ * (D3): a `Set` of non-empty strings, none a primary's marker (`pwd`,
+ * `fed`), none a second-factor value unless the requirement is named `mfa`
+ * (`SECOND_FACTOR_AMR`), and a `stepUpPage` exactly when the reach is not
+ * empty. The end of boot's stage 4 runs it over every registration
+ * (`contribute-factory-failed`, naming the requirement), and the contract
+ * suite over a requirement under test. Answers the reach as read, a set of
+ * its own.
+ */
+export function checkRegisteredReach(requirement: SessionRequirement): ReadonlySet<string> {
+	const refuse = (what: string): never => {
+		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
+	};
+	const reach: unknown = requirement.reach;
+	if (!(reach instanceof Set)) return refuse("reach must be a Set of amr values");
+	const read = new Set<string>();
+	for (const entry of reach as Set<unknown>) {
+		if (!isNonEmptyString(entry)) refuse("reach holds a value that is not a non-empty string");
+		const value = entry as string;
+		if (value === PASSWORD_AMR || value === FEDERATED_AMR) {
+			refuse(`reach names "${value}", a primary's marker, which no step-up adds`);
+		}
+		if (requirement.name !== MFA_REQUIREMENT_NAME && SECOND_FACTOR_AMR.has(value)) {
+			refuse(
+				`reach names "${value}", a second-factor value only the requirement named ${MFA_REQUIREMENT_NAME} may reach`,
+			);
+		}
+		read.add(value);
+	}
+	if (read.size > 0 && requirement.stepUpPage === undefined) {
+		refuse("a requirement that reaches something must declare where the step-up starts");
+	}
+	if (read.size === 0 && requirement.stepUpPage !== undefined) {
+		refuse("a requirement that reaches nothing declares no page");
+	}
+	return read;
 }
 
 /**
