@@ -40,6 +40,7 @@ import {
 	ADMISSION_ACTIONS,
 	checkStepUpPage,
 	isHintKey,
+	issuedRemediationActions,
 	MFA_REQUIREMENT_NAME,
 	type PrimaryAuthentication,
 	type RequirementInput,
@@ -241,11 +242,11 @@ export function sessionRequirementContract(
 					[requirement],
 					issuer === undefined ? {} : { issuer },
 				);
-				// The action core issued for the route (D4): a literal would be
-				// normalised to credential_change and asked of the requirement.
-				const issued = requirements.get(requirement.name)?.actions[
-					remediation.slice(requirement.name.length + 1)
-				];
+				// The action core issued for the route (D4), to the object that
+				// registered — the module's own — not through the resolver: a
+				// literal would be normalised to credential_change and asked.
+				const issued =
+					issuedRemediationActions(requirement)?.[remediation.slice(requirement.name.length + 1)];
 				assert.ok(issued !== undefined, `core issued no action for "${remediation}"`);
 				const admission = await admitSession(
 					{

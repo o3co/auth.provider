@@ -626,6 +626,12 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "the authentication the login route recorded for the primary, copied with the composed mfaAt — never a session record",
 	},
 	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "read.primary.recorded.authentication",
+		count: 1,
+		why: "resumePrimary's check that a continuation's primary is the password kind — the only login interrupted in this release — before `recorded` is recomposed from that kind; a continuation, never a session record",
+	},
+	{
 		file: "packages/core/src/session-admission/primary.mts",
 		read: "value.amr",
 		count: 5,

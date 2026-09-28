@@ -531,6 +531,26 @@ async function checkSessionRequirements(
 	for (const moduleName of material.plan.initOrder) {
 		const validatedModule = material.plan.validated.byName.get(moduleName);
 		if (!validatedModule) continue;
+		// Defence in depth behind stage 1's guard: an override of the kind is
+		// refused here too, off the same normalised entries.
+		if (
+			validatedModule.normalised.overridesEntries.some(
+				(entry) => entry.kind === "sessionRequirements",
+			)
+		) {
+			await runCleanupsReverse(material.cleanups);
+			throw new BootError({
+				message: `Module "${moduleName}" overrides a sessionRequirements entry, which nothing may.`,
+				reason: "session-requirement-kind-guarded",
+				stage: "applyContributions",
+				details: {
+					reason: "session-requirement-kind-guarded",
+					kind: "sessionRequirements",
+					channel: "overrides",
+					module: moduleName,
+				},
+			});
+		}
 		for (const entry of validatedModule.normalised.contributesEntries) {
 			if (entry.kind !== "sessionRequirements" || typeof entry.key !== "string") continue;
 			const requirement = collector.get(entry.key);
@@ -587,9 +607,13 @@ async function checkSessionRequirements(
 				),
 			);
 		}
-		const recomputed = reachOfFactors(
-			components.mfaFactorResolver as MfaFactorResolver | undefined,
-		);
+		let recomputed: ReadonlySet<string>;
+		try {
+			recomputed = reachOfFactors(components.mfaFactorResolver as MfaFactorResolver | undefined);
+		} catch (cause) {
+			// A factor's getter that throws on this read is the contribution's failure, cleanups run.
+			return failed(registration, cause);
+		}
 		if (!sameSet(reach, recomputed)) {
 			return failed(
 				registration,
@@ -620,8 +644,32 @@ async function checkSessionRequirements(
 	});
 	const config = components.config;
 	// Before the declaration: a composition that asks for MFA without the
-	// module is told to install it, not to fix a list.
-	const mode = readMfaMode(config);
+	// module is told to install it, not to fix a list. A mode the reader
+	// refuses is the configuration's failure, cleanups run — never a raw throw.
+	let mode: ReturnType<typeof readMfaMode>;
+	try {
+		mode = readMfaMode(config);
+	} catch (cause) {
+		const cleanupErrors = await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message: "mfa.mode is not a value core reads: set it to off, optional or required.",
+			reason: "config-validation-failed",
+			stage: "applyContributions",
+			details: {
+				reason: "config-validation-failed",
+				issues: [
+					{
+						code: "custom",
+						path: ["mfa", "mode"],
+						message: "mfa.mode is not a value core reads",
+					},
+				],
+				modules: [],
+				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+			} as never,
+			cause,
+		});
+	}
 	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({

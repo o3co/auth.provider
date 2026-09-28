@@ -314,6 +314,15 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 				cause,
 			});
 		}
+		// One record, one login: the transaction's subject and redirectTo are
+		// the continuation's primary's, so a record cannot resume one login
+		// under another's name or send it elsewhere afterwards.
+		if (continuation.primary.subject !== tx.subject) {
+			refuse("subject must be the continuation's primary's");
+		}
+		if (continuation.primary.redirectTo !== tx.redirectTo) {
+			refuse("redirectTo must be the continuation's primary's");
+		}
 	}
 	if (tx.acrValues !== undefined && !(Array.isArray(tx.acrValues) && tx.acrValues.every(isText))) {
 		refuse("acrValues must be a list of strings or absent");

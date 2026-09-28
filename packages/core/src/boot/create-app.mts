@@ -216,7 +216,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		federations: makeMapNameKeyedCollector<FederationProvider>(),
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
 		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
-		sessionRequirements: makeMapNameKeyedCollector<RegisteredRequirement>(),
+		sessionRequirements: withoutReplace(makeMapNameKeyedCollector<RegisteredRequirement>()),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
@@ -276,6 +276,24 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
  *
  * @internal
  */
+/**
+ * The `sessionRequirements` collector refuses `replace` outright (the
+ * session-admission ADR's D3): a requirement is switched off by not
+ * installing it, and nothing may swap one from behind the consumers, by any
+ * path the collector offers.
+ * @internal
+ */
+function withoutReplace<T>(collector: NameKeyedCollector<T>): NameKeyedCollector<T> {
+	return {
+		...collector,
+		replace(name: string): void {
+			throw new Error(
+				`NameKeyedCollector: sessionRequirements refuses replace of "${name}": a requirement is switched off by not installing it`,
+			);
+		},
+	};
+}
+
 function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
 	const m = new Map<string, T>();
 	let frozen = false;

@@ -161,9 +161,9 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 			"stepUpPage.url must not carry a backslash, an encoded backslash or a control character",
 		);
 	}
+	let resolved: URL;
 	if (url.startsWith("/")) {
 		const base = new URL(issuer ?? PATH_ORIGIN);
-		let resolved: URL;
 		try {
 			resolved = new URL(url, base);
 		} catch {
@@ -175,21 +175,39 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 			);
 		}
 	} else {
-		let parsed: URL;
 		try {
-			parsed = new URL(url);
+			resolved = new URL(url);
 		} catch {
 			throw new RangeError("stepUpPage.url must be a path or an absolute URL");
 		}
-		if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+		if (resolved.protocol !== "https:" && resolved.protocol !== "http:") {
 			throw new RangeError("stepUpPage.url must be an http or https URL");
 		}
-		if (issuer !== undefined && parsed.origin !== new URL(issuer).origin) {
+		if (issuer !== undefined && resolved.origin !== new URL(issuer).origin) {
 			throw new RangeError("stepUpPage.url must be on the issuer's origin");
 		}
 	}
-	const params = page.params;
-	if (!isPlainObject(params)) throw new RangeError("stepUpPage.params must be an object");
+	if (resolved.searchParams.has(RESERVED_PAGE_PARAM)) {
+		throw new RangeError(
+			`stepUpPage.url must not carry ${RESERVED_PAGE_PARAM} in its query: it is the consumer's return parameter`,
+		);
+	}
+	// The params: read once, copied from their own enumerable string keys
+	// into a plain object that is what gets validated — a Proxy that answers
+	// one thing to a probe and another to a read cannot get past.
+	const paramsRead = page.params;
+	if (!isPlainObject(paramsRead)) throw new RangeError("stepUpPage.params must be an object");
+	const params: Record<string, unknown> = {};
+	for (const key of Object.keys(paramsRead)) params[key] = paramsRead[key];
+	// Every own key must be in the copy: a symbol, a non-enumerable key, or one
+	// a Proxy lists but hides from the copy is refused.
+	for (const key of Reflect.ownKeys(paramsRead)) {
+		if (typeof key !== "string" || !Object.hasOwn(params, key)) {
+			throw new RangeError(
+				`stepUpPage.params.${String(key)} is not an enumerable string key the copy could read: params must be a plain object`,
+			);
+		}
+	}
 	if (Object.hasOwn(params, RESERVED_PAGE_PARAM)) {
 		throw new RangeError(
 			`stepUpPage.params must not carry ${RESERVED_PAGE_PARAM}: it is the consumer's return parameter`,
@@ -200,7 +218,7 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 			throw new RangeError(`stepUpPage.params.${key} must be a string`);
 		}
 	}
-	return Object.freeze({ url, params: Object.freeze({ ...(params as Record<string, string>) }) });
+	return Object.freeze({ url, params: Object.freeze(params as Record<string, string>) });
 }
 
 // ---------------------------------------------------------------------------
@@ -487,19 +505,44 @@ function seal(requirement: SessionRequirement, values: Iterable<string>): Readon
 /** The remediation actions core issued (D4): what D2's step 5 keeps the `remediation` grade for. */
 const issuedActions = new WeakSet<AdmissionAction>();
 
+/** The issued actions by the ORIGINAL object a factory returned: what `issuedRemediationActions` answers the contributing module. */
+const actionsByOriginal = new WeakMap<object, Readonly<Record<string, AdmissionAction>>>();
+
+/** The issued actions by the registered copy: what admission checks a `remediation` action against. */
+const actionsByCopy = new WeakMap<SessionRequirement, Readonly<Record<string, AdmissionAction>>>();
+
+/**
+ * The remediation actions core issued to a requirement (D4), keyed by route
+ * (`step_up` for `mfa.step_up`), answered to the module that holds the
+ * object its factory returned and to nothing else: the resolver hands out
+ * the registered copy, which carries none of them, so a consumer holding
+ * the resolver cannot obtain a `remediation` action. `undefined` for an
+ * object that was never registered, a copy of one, or the registered copy.
+ */
+export function issuedRemediationActions(
+	requirement: SessionRequirement,
+): Readonly<Record<string, AdmissionAction>> | undefined {
+	return typeof requirement === "object" && requirement !== null
+		? actionsByOriginal.get(requirement)
+		: undefined;
+}
+
+/** The issued actions of a registered copy, for admission's own check. @internal */
+export const issuedActionsOf = (
+	copy: SessionRequirement,
+): Readonly<Record<string, AdmissionAction>> | undefined => actionsByCopy.get(copy);
+
 /** Whether `action` is one core issued to a registered requirement — never a literal, a copy or `ADMISSION_ACTIONS`' own entry. */
 export const isIssuedAction = (action: unknown): action is AdmissionAction =>
 	typeof action === "object" && action !== null && issuedActions.has(action as AdmissionAction);
 
 /**
- * A requirement as the resolver answers it (D3, D4): the registered copy,
- * with the remediation actions core issued to it — one branded object per
- * declared route, keyed by the route (`actions.step_up` for `mfa.step_up`),
- * which the requirement's own route passes to `admitSession`.
+ * A requirement as the resolver answers it (D3): the registered copy — the
+ * page, the lists and the sealed reach its own — and nothing more: the
+ * remediation actions issued to it reach the contributing module through
+ * `issuedRemediationActions`, never the resolver (D4).
  */
-export interface RegisteredRequirement extends SessionRequirement {
-	readonly actions: Readonly<Record<string, AdmissionAction>>;
-}
+export type RegisteredRequirement = SessionRequirement;
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
@@ -523,6 +566,8 @@ export interface RegisteredRequirement extends SessionRequirement {
  */
 export function registeredRequirement(value: unknown, issuer?: string): RegisteredRequirement {
 	if (!isPlainObject(value)) throw new RangeError("a session requirement must be an object");
+	// Each field is read once, into a local that is what gets validated and
+	// copied: a getter answering differently to a second read changes nothing.
 	const name = value.name;
 	if (!isNonEmptyString(name)) {
 		throw new RangeError("a session requirement's name must be a non-empty string");
@@ -530,24 +575,27 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${name}": ${what}`);
 	};
-	// A page that fails names what is wrong itself (`checkStepUpPage`). Read
-	// once: a getter is read here and never again.
+	// A page that fails names what is wrong itself (`checkStepUpPage`).
 	const page = value.stepUpPage;
 	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
-	checkRemediations(name, value.remediations, refuse);
-	if (!isNameList(value.hintKeys) || !value.hintKeys.every(isHintKey)) {
+	const remediationsRead = value.remediations;
+	checkRemediations(name, remediationsRead, refuse);
+	const hintKeysRead = value.hintKeys;
+	if (!isNameList(hintKeysRead) || !hintKeysRead.every(isHintKey)) {
 		refuse(
 			"hintKeys must be a list of hint names: lower-case identifiers of at most 32 characters, none a name core reserves",
 		);
 	}
-	if (typeof value.admit !== "function") refuse("admit must be a function");
-	if (value.admitPrimary !== undefined && typeof value.admitPrimary !== "function") {
+	const admit = value.admit;
+	if (typeof admit !== "function") refuse("admit must be a function");
+	const primaryAsk = value.admitPrimary;
+	if (primaryAsk !== undefined && typeof primaryAsk !== "function") {
 		refuse("admitPrimary must be a function or absent");
 	}
 	const source = value as unknown as SessionRequirement;
-	const primaryAsk = source.admitPrimary;
-	const remediations = Object.freeze([...(value.remediations as readonly string[])]);
-	// The remediation actions, issued here and nowhere else (D4).
+	const remediations = Object.freeze([...(remediationsRead as readonly string[])]);
+	// The remediation actions, issued here and nowhere else (D4): handed to
+	// the contributing module by the object it returned, never on the copy.
 	const actions: Record<string, AdmissionAction> = {};
 	for (const remediation of remediations) {
 		const issued: AdmissionAction = Object.freeze({ name: remediation, grade: "remediation" });
@@ -561,14 +609,19 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 		},
 		stepUpPage,
 		remediations,
-		hintKeys: Object.freeze([...(value.hintKeys as readonly string[])]),
-		actions: Object.freeze(actions),
-		admit: (input: RequirementInput) => source.admit(input),
+		hintKeys: Object.freeze([...(hintKeysRead as readonly string[])]),
+		admit: (input: RequirementInput) => (admit as SessionRequirement["admit"]).call(source, input),
 		...(primaryAsk === undefined
 			? {}
-			: { admitPrimary: (primary: PrimaryAuthentication) => primaryAsk.call(source, primary) }),
+			: {
+					admitPrimary: (primary: PrimaryAuthentication) =>
+						(primaryAsk as NonNullable<SessionRequirement["admitPrimary"]>).call(source, primary),
+				}),
 	});
 	registeredCopies.add(copy);
+	const issued = Object.freeze(actions);
+	actionsByOriginal.set(value, issued);
+	actionsByCopy.set(copy, issued);
 	return copy;
 }
 
@@ -743,6 +796,8 @@ export interface CompletedRequirementDto {
 export interface PrimaryContinuation {
 	readonly primary: PrimaryAuthenticationDto;
 	readonly done: readonly CompletedRequirementDto[];
+	/** The requirement whose ceremony this continuation waits on: `resumePrimary` accepts its completion alone. */
+	readonly interruptedBy: string;
 }
 
 /**

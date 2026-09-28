@@ -259,7 +259,8 @@ describe("the continuation — what a requirement persists and presents back, as
 	it("reads back a completion that added nothing, and refuses an mfaAtMs beside an empty amr", () => {
 		const read = checkPrimaryContinuation({
 			primary: dto(),
-			done: [{ requirement: "consent", adds: { amr: [], interruptedBy: "mfa" } }],
+			done: [{ requirement: "consent", adds: { amr: [] } }],
+			interruptedBy: "hold",
 		});
 		expect(read.done).toEqual([{ requirement: "consent", adds: { amr: [] } }]);
 		expect(() =>
@@ -271,11 +272,16 @@ describe("the continuation — what a requirement persists and presents back, as
 	});
 
 	it("continuationOf carries the primary and every completion with epoch milliseconds, so a JSON round trip is exact", () => {
-		const continuation = continuationOf(primary(), [
-			{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
-			{ requirement: "risk", adds: { amr: ["risk-ok"] } },
-		]);
+		const continuation = continuationOf(
+			primary(),
+			[
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+				{ requirement: "risk", adds: { amr: ["risk-ok"] } },
+			],
+			"hold",
+		);
 		expect(continuation).toEqual({
+			interruptedBy: "hold",
 			primary: dto(),
 			done: [
 				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() } },
@@ -286,9 +292,11 @@ describe("the continuation — what a requirement persists and presents back, as
 		expect(Object.isFrozen(continuation.done)).toBe(true);
 		// Every instant of the continuation's own is milliseconds; what the
 		// user snapshot holds is the repository's, JSON as it comes from one.
-		const plain = continuationOf(primary({ user: { id: "user-1", groups: ["staff"] } }), [
-			{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
-		]);
+		const plain = continuationOf(
+			primary({ user: { id: "user-1", groups: ["staff"] } }),
+			[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+			"risk",
+		);
 		expect(checkPrimaryContinuation(JSON.parse(JSON.stringify(plain)))).toEqual(plain);
 	});
 
@@ -299,6 +307,7 @@ describe("the continuation — what a requirement persists and presents back, as
 				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() } },
 				{ requirement: "risk", adds: { amr: ["risk-ok"] } },
 			],
+			interruptedBy: "hold",
 		};
 		const checked = checkPrimaryContinuation(source);
 		expect(checked).toEqual(source);
@@ -309,9 +318,11 @@ describe("the continuation — what a requirement persists and presents back, as
 	});
 
 	it("rehydrates: the primary's authTime and an addition's mfaAt become dates at their milliseconds", () => {
-		const continuation = continuationOf(primary(), [
-			{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
-		]);
+		const continuation = continuationOf(
+			primary(),
+			[{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
+			"risk",
+		);
 		expect(primaryFromDto(continuation.primary)).toEqual(primary());
 		expect(additionsFromDto(continuation.done[0]?.adds as never)).toEqual({
 			amr: ["otp", "mfa"],
