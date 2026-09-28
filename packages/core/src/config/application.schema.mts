@@ -1275,6 +1275,12 @@ const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
 		type: z.string().optional(),
+		// The MFA ADR's D13: whether this federation's upstream IdP's `amr`
+		// counts — recorded in the session's `amr` beside `fed`, stamped on
+		// tokens and matched for `acr`. Absent is `false`: the values are kept
+		// apart (`authentication.upstreamAmr`). Beside `enabled` in both
+		// shapes, never inside a type's own section.
+		trustUpstreamAmr: coerceBooleanFromEnv.optional(),
 	})
 	.passthrough();
 

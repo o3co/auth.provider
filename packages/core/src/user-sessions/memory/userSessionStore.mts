@@ -14,8 +14,16 @@
  * limitations under the License.
  */
 
+import {
+	checkSecondFactorEvent,
+	copySessionAuthentication,
+	recordableSessionAuthentication,
+	sessionAfterSecondFactor,
+} from "../authentication.mjs";
 import type {
 	CreateUserSessionInput,
+	SessionAuthentication,
+	SupportsSecondFactorUpdate,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -30,6 +38,8 @@ interface Stored {
 	claims: Record<string, unknown>;
 	/** A required key, as on the session (#626): the copy into a record names it. */
 	amr: readonly string[] | undefined;
+	/** The MFA ADR's D9; a required key, as on the session. Kept as a copy that shares nothing. */
+	authentication: SessionAuthentication | undefined;
 }
 
 /**
@@ -46,13 +56,28 @@ const cloneClaims = (c: UserSessionClaims | Record<string, unknown>): Record<str
 	return out;
 };
 
+/** The session a record holds, as a copy that shares nothing with it. */
+const toSession = (s: Stored): UserSession => ({
+	sid: s.sid,
+	sub: s.sub,
+	authTime: new Date(s.authTime.getTime()),
+	createdAt: new Date(s.createdAt.getTime()),
+	expiresAt: new Date(s.expiresAt.getTime()),
+	claims: cloneClaims(s.claims) as UserSessionClaims,
+	amr: s.amr ? [...s.amr] : undefined,
+	authentication: s.authentication ? copySessionAuthentication(s.authentication) : undefined,
+});
+
 /**
- * In-memory UserSessionStore. Single-process only. Atomicity comes from
- * Node's single event loop — `Map.get/set/delete` are synchronous.
+ * In-memory UserSessionStore, with the step-up capability (the MFA ADR's D9).
+ * Single-process only. Atomicity comes from Node's single event loop —
+ * `Map.get/set/delete` are synchronous, and `recordSecondFactor` reads,
+ * computes and writes with no `await` between, so two recorded at once apply
+ * one after the other.
  *
  * Per A4 §5.1 + §7.1 (lines 469-505).
  */
-export function createInMemoryUserSessionStore(): UserSessionStore {
+export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSecondFactorUpdate {
 	const sessions = new Map<string, Stored>();
 
 	const readLive = (sid: string): Stored | null => {
@@ -82,6 +107,16 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
 				);
 			}
+			// How the session was established: what core's
+			// `recordableSessionAuthentication` answers — only what
+			// `SessionAuthentication` admits, its `mfaAt` no later than this
+			// store's clock — recorded as answered, never `input.authentication`.
+			// The Redis store records the same, so the two refuse the same values.
+			const authentication = recordableSessionAuthentication(
+				input.sid,
+				input.authentication,
+				Date.now(),
+			);
 			if (input.expiresAt.getTime() <= Date.now()) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
@@ -97,20 +132,28 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 				expiresAt: new Date(input.expiresAt.getTime()),
 				claims: cloneClaims(input.claims),
 				amr: input.amr ? [...input.amr] : undefined,
+				// Already a copy, its `mfaAt` no later than this store's clock.
+				authentication,
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {
 			const s = readLive(sid);
 			if (!s) return null;
-			return {
-				sid: s.sid,
-				sub: s.sub,
-				authTime: new Date(s.authTime.getTime()),
-				createdAt: new Date(s.createdAt.getTime()),
-				expiresAt: new Date(s.expiresAt.getTime()),
-				claims: cloneClaims(s.claims) as UserSessionClaims,
-				amr: s.amr ? [...s.amr] : undefined,
-			};
+			return toSession(s);
+		},
+		async recordSecondFactor(sid, event) {
+			// A bad event is refused before anything is read, gone session or not,
+			// its time judged on this store's clock.
+			const nowMs = Date.now();
+			checkSecondFactorEvent(event, nowMs);
+			const s = readLive(sid);
+			if (!s) return null;
+			const next = sessionAfterSecondFactor(toSession(s), event, nowMs);
+			if (next === null) return null;
+			// A field write: `expiresAt`, and everything else, stay as they were.
+			s.amr = [...next.amr];
+			s.authentication = copySessionAuthentication(next.authentication);
+			return toSession(s);
 		},
 		async delete(sid: string) {
 			sessions.delete(sid);

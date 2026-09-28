@@ -54,6 +54,7 @@ async function liveStore() {
 		expiresAt: new Date(Date.now() + 60_000),
 		claims: {},
 		amr: undefined,
+		authentication: undefined,
 	});
 	return store;
 }
@@ -157,11 +158,44 @@ describe("session grant authentication and token binding", () => {
 			expiresAt: new Date(Date.now() + 60_000),
 			claims: {},
 			amr: ["hwk"],
+			authentication: undefined,
 		});
 		const result = await mint(await buildApp(store));
 		expect(result.status).toBe(200);
 		expect(decodeJwt(result.body.access_token).amr).toEqual(["hwk"]);
 	});
+
+	it.each([
+		[
+			"a federated session from before the upstream split: fed alone",
+			["hwk", "fed"],
+			undefined,
+			["fed"],
+		],
+		[
+			"a trusted federation's session: its IdP's values beside fed",
+			["hwk", "fed"],
+			{ primary: "fed", federation: "google", upstreamAmr: undefined, mfaAt: undefined },
+			["hwk", "fed"],
+		],
+	] as const)(
+		"mirrors what the tracked session vouches for (the MFA ADR's D9, D13) — %s",
+		async (_label, amr, authentication, stamped) => {
+			const store = createInMemoryUserSessionStore();
+			await store.create({
+				sid: SID,
+				sub: SUB,
+				authTime: new Date(),
+				expiresAt: new Date(Date.now() + 60_000),
+				claims: {},
+				amr,
+				authentication,
+			});
+			const result = await mint(await buildApp(store));
+			expect(result.status).toBe(200);
+			expect(decodeJwt(result.body.access_token).amr).toEqual(stamped);
+		},
+	);
 
 	it("stamps no amr when the tracked session's is malformed", async () => {
 		// A federation login records the upstream IdP's `amr` as it arrived; an
@@ -175,6 +209,7 @@ describe("session grant authentication and token binding", () => {
 			expiresAt: new Date(Date.now() + 60_000),
 			claims: {},
 			amr: ["hwk", ""],
+			authentication: undefined,
 		});
 		const result = await mint(await buildApp(store));
 		expect(result.status).toBe(200);

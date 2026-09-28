@@ -29,7 +29,9 @@ import {
 	type FederationTokenStore,
 	jwksModule,
 	memoryAccessTokenDenylistModule,
+	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
+	memorySessionStoresModule,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -354,7 +356,7 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		"urn:example:pwd": ["pwd"],
 		"urn:example:mfa": ["pwd", "mfa"],
 	};
-	const acrConfig = () => {
+	const acrConfig = (federations: Record<string, unknown> = {}) => {
 		const base = makeValidAppConfig();
 		return {
 			...base,
@@ -363,6 +365,7 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
 				authorize: { acrValues },
 			},
+			federations,
 		} as ReturnType<typeof makeValidAppConfig>;
 	};
 	/** A federation, contributed as a federation package's module contributes one. */
@@ -380,8 +383,9 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 	});
 	const boot = async (
 		extraModules: readonly Parameters<typeof createTestApp>[0]["modules"][number][],
+		federations: Record<string, unknown> = {},
 	) => {
-		const config = acrConfig();
+		const config = acrConfig(federations);
 		const logger = createMockLogger();
 		const handle = await createTestApp({
 			modules: [
@@ -415,11 +419,56 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		expect(lines(logger.warn)).toEqual([]);
 	});
 
-	it("advertises every entry, and drops none, while a federation is installed", async () => {
-		const { body, logger, lines } = await boot([googleFederationModule]);
+	it("drops what only an upstream IdP could assert while the installed federation does not trust its amr (the MFA ADR's D13)", async () => {
+		// The default: an upstream `mfa` is kept apart from the session's `amr`
+		// and meets no `acr`, so the entry is one nothing installed can meet.
+		// The section as a composition that installs the module itself writes
+		// it: `enabled` is the template's switch, and this composition has none
+		// of the session stores an enabled federation needs.
+		const { body, logger, lines } = await boot([googleFederationModule], { google: {} });
+		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
+		expect(lines(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
+		]);
+		expect(lines(logger.warn)).toEqual([]);
+	});
+
+	/**
+	 * What an enabled federation needs beside it (boot refuses one without
+	 * them): the session stores, the federation-token store and family
+	 * revocation.
+	 */
+	const federationStores = [
+		memorySessionStoresModule,
+		memoryFederationTokenStoreModule,
+		memoryRefreshTokenFamilyStoreModule,
+		defaultRefreshTokenFamilyRevocationModule,
+	];
+
+	it("advertises every entry, and drops none, while an installed, enabled federation trusts its upstream amr", async () => {
+		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
+			google: { enabled: true, trustUpstreamAmr: true },
+		});
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
 		expect(lines(logger.info)).toEqual([]);
 		expect(lines(logger.warn)).toEqual([]);
+	});
+
+	it("counts no installed federation whose section is disabled as trusted: nothing can sign a user in through it", async () => {
+		const { body, logger, lines } = await boot([googleFederationModule], {
+			google: { enabled: false, trustUpstreamAmr: true },
+		});
+		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
+		expect(lines(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
+		]);
+	});
+
+	it("refuses to compose when a federation's trustUpstreamAmr is given but unusable", async () => {
+		// A hand-built configuration: core's schema refuses it at boot too.
+		await expect(
+			boot([googleFederationModule], { google: { trustUpstreamAmr: "yes" } }),
+		).rejects.toThrow("federations.google.trustUpstreamAmr must be true or false");
 	});
 });
 
@@ -752,6 +801,8 @@ describe("oauthModule — federation logout via typed deps", () => {
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3_600_000),
 			claims: {},
+			amr: undefined,
+			authentication: undefined,
 		};
 
 		const sessionStore: UserSessionStore = {

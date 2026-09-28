@@ -36,6 +36,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 | `FederationGrantRefreshFailure` (the stored stamp) | `retryAfterSeconds`, `upstreamCode`. It no longer `extends` `FederationGrantRefreshFailureInput`, whose fields stay optional. | #657 |
 | Redis `NoteFederationGrantRefreshFailureInput` | `retryAfterSeconds`, `upstreamCode` | #657 |
 | `UserSession`, `CreateUserSessionInput` | `amr` | #659 |
+| `UserSession`, `CreateUserSessionInput` (later) | `authentication`: how the session was established (the MFA ADR's D9), a `SessionAuthentication` whose four fields are themselves required keys. See [`UserSession.authentication`](#usersessionauthentication). | — |
 
 Some types that the library means these records to flow into now accept an explicit `undefined` (`?: T | undefined`). This only widens them:
 - `AssertionIssuerEntryInput` (#652);
@@ -64,7 +65,7 @@ Run the port's conformance suite against your adapter. The suites compare whole 
 
 Inputs that were optional are now keys you name:
 - `createCode` takes every field but `expiresIn`;
-- `UserSessionStore.create` takes `amr`;
+- `UserSessionStore.create` takes `amr` and `authentication`;
 - `DeviceCodeStore.create` takes `requestedScope`;
 - `ConsentStore.grant` takes `expiresAt` (`undefined` means until revoked);
 - `PendingConsentStore.set` takes `state`;
@@ -106,6 +107,17 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
 - **The Redis RP registry treats a stored RP record with a wrong-typed logout field as corrupt.** `listRPs` leaves the record out, with a `shape_invalid` warning when a logger is configured, as it already did for a bad `clientId` (#653). The stored record is not deleted.
 
 The behaviour of the library itself is otherwise unchanged. For example, a device authorization created by an untyped caller with a `null`, `""`, `false` or `0` `requestedScope` is still a request with no scope, as before.
+
+## `UserSession.authentication`
+
+Since the MFA ADR's build-order step 5, a session says how it was established: `authentication: { primary, federation, upstreamAmr, mfaAt }` — `"pwd"` or `"fed"`, which federation, what an untrusted upstream IdP asserted (kept for the record, never stamped), and when a second factor was last verified. Its `amr` holds only what this provider vouches for.
+
+- **A login path of your own** passes it. Core composes the pair with `amr` for the two login paths this library has: `...passwordSessionAuthentication()` for a password login, `...federatedSessionAuthentication({ federation, upstreamAmr, trusted })` for a federated one, with `trusted` from `federationTrustsUpstreamAmr(config, name)`. `undefined` writes a session read as one from before the key existed.
+- **A store of your own** round-trips all four fields, `mfaAt` as a `Date`, naming each one `undefined` where it has no value, and keeps its own copies of `upstreamAmr` and `mfaAt`. Its `create` records what core's `recordableSessionAuthentication(sid, authentication, now)` answers — never its own input. The function refuses with a `RangeError` what `SessionAuthentication` does not admit and an `mfaAt` that is an Invalid Date, before the epoch, or further ahead of `now` than the clock skew tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`), and answers a copy, its `mfaAt` no later than `now` — as the bundled stores record it, so a store of yours refuses and records what they do. The conformance suite reads the stored `mfaAt` back, so a store that records its input fails it. A record written before the key existed must read back as `authentication: undefined` — never as some default — because that is how `sessionAuthentication` / `vouchedAmr` know to split it: a pre-upgrade federated session then vouches for `fed` alone.
+- **Read a session through `sessionAuthentication` / `vouchedAmr`,** never its own `amr` or `authentication`: the record's `amr` still holds an untrusted IdP's values in a session written before the key.
+- **The step-up capability** is optional: `SupportsSecondFactorUpdate.recordSecondFactor(sid, { amr, at })`, detected by `supportsSecondFactorUpdate(store)`. A store that has it writes what core's `sessionAfterSecondFactor(session, event, now)` computes — which checks the event, and splits a pre-upgrade session first — changes nothing else (never the session's lifetime), and is safe against two calls at once. It answers `null`, and writes nothing, for a gone session, and whenever `sessionAfterSecondFactor` answers `null` (a pre-upgrade session whose primary cannot be told). It lets the `RangeError` of a bad event through before it reads anything: the caller's fault, not an outage. A store without it keeps working; a step-up asks for a re-authentication instead. Both bundled stores have it, and the Redis one needs a new client method, `UserSessionStoreClient.replaceIfUnchanged` (`makeIoredisClients` provides it).
+- **The conformance suites** in `userSessionStore.contract.mts`: `runUserSessionStoreContract`, for every store, now covers `authentication` and what `create` refuses; `runSecondFactorUpdateContract` covers the step-up capability and runs only against a store that claims it. Run the second only if your store implements `recordSecondFactor`.
+- **What sessions already minted keeps what it carries.** The split applies to sessions as they are read. An authorization code or refresh token issued before the upgrade — or by a replica on the older release during a rolling one — keeps its `acr` (and a refresh token its `amr`), untrusted upstream values included, until the code is spent or the refresh family ends (`oauth.refreshToken.expiresIn` after the login; no bound under `unknownFamilyPolicy = "accept"`). The [operator runbook](operator-runbook.md#before-you-upgrade) has the remedy — `revokeAllForSubject` for the affected subjects — and what it reaches: not an access token a resource server validates offline, which lives until its `exp`.
 
 ## If you compile with `exactOptionalPropertyTypes`
 

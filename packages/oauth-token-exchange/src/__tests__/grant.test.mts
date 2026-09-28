@@ -27,6 +27,7 @@ import {
 	type Logger,
 	MAX_CLIENT_ID_LENGTH,
 	type PublicClient,
+	passwordSessionAuthentication,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
@@ -1974,7 +1975,8 @@ describe("createTokenExchangeGrant — the session behind a sid-carrying token",
 				authTime: new Date(),
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
-				amr: ["pwd"],
+				// A password login's record (the MFA ADR's D9).
+				...passwordSessionAuthentication(),
 			});
 		}
 		return store;
@@ -2118,7 +2120,8 @@ describe("createTokenExchangeGrant — the session rule, the actor, and what the
 				authTime: new Date(),
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
-				amr: ["pwd"],
+				// A password login's record (the MFA ADR's D9).
+				...passwordSessionAuthentication(),
 			});
 		}
 		return store;

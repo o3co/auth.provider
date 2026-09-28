@@ -235,6 +235,7 @@ const sessionInput = (expiresAt: Date): CreateUserSessionInput => ({
 	expiresAt,
 	claims: {},
 	amr: undefined,
+	authentication: undefined,
 });
 
 describe("the PX an adapter sends is its record's life, rounded up to a whole millisecond", () => {
@@ -475,6 +476,7 @@ describe("an expiry that is not a finite number is refused before Redis is asked
 				set: client.set,
 				get: async () => null,
 				del: async () => 0,
+				replaceIfUnchanged: async () => false,
 			} as UserSessionStoreClient,
 			keyPrefix: "ss:us:",
 		});

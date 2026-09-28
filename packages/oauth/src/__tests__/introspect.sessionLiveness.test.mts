@@ -83,6 +83,7 @@ const liveSession: UserSession = {
 	expiresAt: new Date(Date.now() + 3_600_000),
 	claims: {},
 	amr: undefined,
+	authentication: undefined,
 };
 
 async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<string> {

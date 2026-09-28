@@ -23,8 +23,10 @@ import {
 	type GrantHandler,
 	InMemoryCodeRepository,
 	type RefreshTokenFamilyRotation,
+	type SessionAuthentication,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
+	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
@@ -1316,11 +1318,13 @@ describe("createAuthorizationGrant", () => {
 				authTime: Date;
 				claims: Record<string, unknown>;
 				amr?: readonly string[];
+				/** The MFA ADR's D9; absent, a session written before the key existed. */
+				authentication?: SessionAuthentication;
 			}) {
 				return {
 					kind: "spy",
 					async create() {},
-					async get(querySid: string) {
+					async get(querySid: string): Promise<UserSession | null> {
 						if (querySid !== session.sid) return null;
 						return {
 							sid: session.sid,
@@ -1329,7 +1333,8 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
 							claims: session.claims,
-							...(session.amr ? { amr: session.amr } : {}),
+							amr: session.amr,
+							authentication: session.authentication,
 						};
 					},
 					async delete() {},
@@ -1448,6 +1453,79 @@ describe("createAuthorizationGrant", () => {
 				expect(rt.amr).toEqual(["pwd", "mfa"]);
 				expect(rt.acr).toBe("urn:example:mfa");
 			});
+
+			it.each([
+				[
+					"a federated session from before the upstream split: fed alone, its upstream IdP's values left off",
+					["hwk", "fed"],
+					undefined,
+					["fed"],
+				],
+				[
+					"a trusted federation's session: its IdP's values beside fed",
+					["hwk", "fed"],
+					{ primary: "fed", federation: "google", upstreamAmr: undefined, mfaAt: undefined },
+					["hwk", "fed"],
+				],
+				[
+					"an untrusted federation's session: fed, never what was kept apart",
+					["fed"],
+					{ primary: "fed", federation: "google", upstreamAmr: ["hwk"], mfaAt: undefined },
+					["fed"],
+				],
+			] as const)(
+				"stamps what the session vouches for (the MFA ADR's D9, D13) — %s",
+				async (_label, amr, authentication, stamped) => {
+					// `/token` reads `amr` through `vouchedAmr`, never off the record: a
+					// value an untrusted IdP asserted is on no token.
+					const userSessionStore = makeUserSessionStore({
+						sid: "sid-1",
+						sub: "u-1",
+						authTime: new Date("2026-04-21T00:00:00Z"),
+						claims: {},
+						amr,
+						...(authentication ? { authentication } : {}),
+					});
+					const deps = {
+						...makeDepsWithIssuer(
+							vi.fn().mockResolvedValue({
+								code: "c1",
+								client_id: "client1",
+								redirect_uri: RP_URI,
+								code_challenge: S256_CHALLENGE,
+								code_challenge_method: "S256",
+								sid: "sid-1",
+								grantedScope: ["openid"],
+							}),
+						),
+						userSessionStore,
+						sessionFamilyIndex: makeSessionFamilyIndex(),
+						sessionRPRegistry: makeSessionRPRegistry(),
+					};
+					const handler = createAuthorizationGrant(deps);
+					const { result } = await handler.handle({
+						body: {
+							code: "c1",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_verifier: CODE_VERIFIER,
+						},
+						session: { code: "c1", code_client_id: "client1" },
+						issuer: "https://auth.example.com",
+						metadata: { ip: "127.0.0.1" },
+						authenticatedClient: DEFAULT_AUTH_CLIENT,
+					});
+					expect(result.status).toBe(200);
+					if (!("tokens" in result)) throw new Error("expected tokens");
+					for (const token of [
+						result.tokens.id_token,
+						result.tokens.access_token,
+						result.tokens.refresh_token,
+					]) {
+						expect((decodeJwt(token as string) as Record<string, unknown>).amr).toEqual(stamped);
+					}
+				},
+			);
 
 			it.each([
 				["an empty amr", []],
@@ -1860,6 +1938,8 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: sessionExpiresAt,
 							claims: {},
+							amr: undefined,
+							authentication: undefined,
 						};
 					},
 					async delete() {},
@@ -1958,6 +2038,8 @@ describe("createAuthorizationGrant", () => {
 									createdAt: new Date(),
 									expiresAt: new Date(Date.now() + 3600_000),
 									claims: {},
+									amr: undefined,
+									authentication: undefined,
 								};
 							},
 							async delete() {},
@@ -2124,6 +2206,8 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
 							claims: {},
+							amr: undefined,
+							authentication: undefined,
 						};
 					},
 					async delete() {},
@@ -2195,6 +2279,8 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 						createdAt: new Date(),
 						expiresAt: new Date(Date.now() + 3600_000),
 						claims: {},
+						amr: undefined,
+						authentication: undefined,
 					};
 				}
 				return null;
@@ -2277,6 +2363,8 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 						createdAt: new Date(),
 						expiresAt: new Date(Date.now() + 3600_000),
 						claims: {},
+						amr: undefined,
+						authentication: undefined,
 					};
 				}
 				throw new Error("store down on second check");
@@ -2361,6 +2449,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			},
 			async delete() {},
@@ -2458,6 +2548,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			},
 			async delete() {},
@@ -2506,6 +2598,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 					createdAt: new Date(),
 					expiresAt: new Date(Date.now() + 3600_000),
 					claims: {},
+					amr: undefined,
+					authentication: undefined,
 				};
 			},
 			async delete() {},
@@ -2743,6 +2837,8 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		createdAt: new Date(),
 		expiresAt: new Date(Date.now() + 3600_000),
 		claims: {},
+		amr: undefined,
+		authentication: undefined,
 	});
 	const outage = (): Error =>
 		Object.assign(new Error("READONLY You can't write against a read only replica."), {

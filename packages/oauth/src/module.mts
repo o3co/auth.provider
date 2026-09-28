@@ -344,6 +344,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 									?.authorize?.acrValues,
 							),
 							deps.federationProviders,
+							deps.config,
 						).table,
 					);
 					return {

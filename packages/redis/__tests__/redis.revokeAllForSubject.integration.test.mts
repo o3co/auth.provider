@@ -55,6 +55,8 @@ const session = (sid: string, sub = "u1") => ({
 	authTime: new Date(),
 	expiresAt: FUTURE(),
 	claims: {},
+	amr: undefined,
+	authentication: undefined,
 });
 
 /** One replica's view of the shared store — separate adapter objects, one Redis. */

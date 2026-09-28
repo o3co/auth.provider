@@ -35,6 +35,8 @@ import {
 	type GrantPolicyHook,
 	type Logger,
 	type PublicClient,
+	type SessionAuthentication,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
@@ -58,8 +60,13 @@ const REDIRECT_URI = "https://app.example/cb";
 const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
-const makeConfig = (oauthOverrides: Record<string, unknown>, loginUrl = "/login"): AppConfig =>
+const makeConfig = (
+	oauthOverrides: Record<string, unknown>,
+	loginUrl = "/login",
+	federations: Record<string, unknown> = {},
+): AppConfig =>
 	({
+		federations,
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
@@ -101,8 +108,12 @@ const makeApp = async (opts: {
 	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
 	userSessionStore?: UserSessionStore;
 	logger?: Logger;
-	/** Install one federation, as a federation module's contribution would. */
-	federation?: true;
+	/**
+	 * Install one federation, as a federation module's contribution would —
+	 * `"trusted"` with `federations.google.trustUpstreamAmr = true` (the MFA
+	 * ADR's D13), `"untrusted"` with the switch absent.
+	 */
+	federation?: "trusted" | "untrusted";
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -138,7 +149,15 @@ const makeApp = async (opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
-		config: makeConfig(opts.oauth ?? {}, opts.loginUrl),
+		config: makeConfig(
+			opts.oauth ?? {},
+			opts.loginUrl,
+			opts.federation === "trusted"
+				? { google: { enabled: true, trustUpstreamAmr: true } }
+				: opts.federation === "untrusted"
+					? { google: { enabled: true } }
+					: {},
+		),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -1064,6 +1083,8 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 						createdAt: new Date(),
 						expiresAt: new Date(Date.now() + 3_600_000),
 						claims: {},
+						amr: undefined,
+						authentication: undefined,
 					}
 				: null,
 		);
@@ -1229,11 +1250,17 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 	const session = { isAuthenticated: true, sid: SID, user: { id: "user-1" } };
 	// A `Date`, or a thunk when a test needs the authentication to change
 	// between two requests — which is what a login round trip is (#481).
-	const storeWith = (at: Date | (() => Date), amr?: readonly string[]): UserSessionStore =>
+	// `authentication` absent: a session written before the MFA ADR's D9,
+	// which the readers split as they read it.
+	const storeWith = (
+		at: Date | (() => Date),
+		amr?: readonly string[],
+		authentication?: SessionAuthentication,
+	): UserSessionStore =>
 		({
 			kind: "memory",
 			create: vi.fn(async () => {}),
-			get: vi.fn(async (sid: string) => {
+			get: vi.fn(async (sid: string): Promise<UserSession | null> => {
 				const authTime = typeof at === "function" ? at() : at;
 				return sid === SID
 					? {
@@ -1243,12 +1270,20 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 							createdAt: authTime,
 							expiresAt: new Date(Date.now() + 3_600_000),
 							claims: {},
-							...(amr ? { amr } : {}),
+							amr,
+							authentication,
 						}
 					: null;
 			}),
 			delete: vi.fn(async () => {}),
 		}) as unknown as UserSessionStore;
+	/** A federated session recorded since D9 for a federation that trusts its IdP's `amr`. */
+	const TRUSTED_FEDERATION: SessionAuthentication = {
+		primary: "fed",
+		federation: "google",
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
 	const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 	/**
 	 * A re-authentication, which comes strictly after the ask: the ask is
@@ -1722,23 +1757,41 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
-		it("keeps an entry only an upstream IdP can meet while a federation is installed", async () => {
-			// Every federation's upstream `amr` is recorded beside `fed` until
-			// the upstream split (the MFA ADR's build order, step 5), so such a
-			// composition can meet any entry — as #481 shipped.
+		it("keeps an entry only an upstream IdP can meet while an installed federation trusts its amr", async () => {
+			// The MFA ADR's D13: a trusted federation's upstream `amr` is recorded
+			// beside `fed` and counts, so such a composition can meet any entry.
 			const createCode = mintingCode();
 			const { app } = await makeApp({
 				session,
 				oauth: { authorize: { acrValues } },
-				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"], TRUSTED_FEDERATION),
 				createCode,
-				federation: true,
+				federation: "trusted",
 			});
 			const params = redirectParams(
 				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
 			);
 			expect(params.get("code")).toBe("code-x");
 			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:mfa" }));
+		});
+
+		it("answers an entry only an upstream IdP can meet unmet while the installed federation does not trust its amr", async () => {
+			// The MFA ADR's D13: an untrusted IdP's `amr` counts for no `acr`, so
+			// the entry is dropped at boot — and a session that carries the value
+			// does not revive it.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
+				createCode,
+				federation: "untrusted",
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+			expect(createCode).not.toHaveBeenCalled();
 		});
 
 		it("meets an any-of entry through any one of its alternatives", async () => {
@@ -1748,9 +1801,9 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				oauth: {
 					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
 				},
-				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"]),
+				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"], TRUSTED_FEDERATION),
 				createCode,
-				federation: true,
+				federation: "trusted",
 			});
 			const params = redirectParams(
 				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
@@ -1765,8 +1818,8 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				oauth: {
 					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
 				},
-				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"]),
-				federation: true,
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"], TRUSTED_FEDERATION),
+				federation: "trusted",
 			});
 			const params = redirectParams(
 				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
@@ -1876,6 +1929,7 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
 				amr: ["fed"],
+				authentication: undefined,
 			})),
 			delete: vi.fn(async () => {}),
 		} as unknown as UserSessionStore;
@@ -1892,12 +1946,31 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 	});
 
-	it("says nothing when a federation is installed: every entry can be met", async () => {
+	it("says nothing when an installed federation trusts its upstream amr: every entry can be met", async () => {
 		const logger = createMockLogger();
-		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: true });
+		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: "trusted" });
 		for (const level of [logger.info, logger.warn, logger.error]) {
 			expect(linesFor(level)).toEqual([]);
 		}
+	});
+
+	it("drops what only an upstream IdP could meet when the installed federation does not trust it", async () => {
+		// The MFA ADR's D13: the federation adds `fed` alone, so every entry
+		// needing anything else is dropped as without one — an entry needing
+		// `fed` stays.
+		const logger = createMockLogger();
+		await makeApp({
+			oauth: { authorize: { acrValues: { ...acrValues, "urn:example:fed": ["fed"] } } },
+			logger,
+			federation: "untrusted",
+		});
+		expect(linesFor(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, EVENT],
+			[{ acr: "urn:example:phr", unproducible: ["hwk", "swk"] }, EVENT],
+		]);
+		expect(linesFor(logger.warn)).toEqual([
+			[{ acr: "urn:example:kba", unproducible: ["kba"] }, EVENT],
+		]);
 	});
 
 	it("bounds what it logs of an entry", async () => {
@@ -2007,6 +2080,7 @@ describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => 
 				expiresAt: new Date(Date.now() + 3_600_000),
 				claims: {},
 				amr: ["pwd"],
+				authentication: undefined,
 			})),
 			delete: vi.fn(async () => {}),
 		} as unknown as UserSessionStore;
@@ -2059,6 +2133,7 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 		const { dropped } = vouchableAcrValues(
 			{ "urn:example:any": [[]], "urn:example:kba": [["kba"]] },
 			undefined,
+			{},
 		);
 		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
 		expect(logger.warn.mock.calls).toEqual([
@@ -2078,7 +2153,7 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 		// carries, and the count says how many there were.
 		const lacked = Array.from({ length: 12 }, (_, i) => `x${i}`);
 		const logger = createMockLogger();
-		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined);
+		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined, {});
 		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
 		expect(logger.warn.mock.calls).toEqual([
 			[

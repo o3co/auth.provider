@@ -567,6 +567,7 @@ describe("account linking across federations (#482)", () => {
 		expiresAt: new Date(Date.now() + 3_600_000),
 		claims: {},
 		amr: undefined,
+		authentication: undefined,
 	};
 	/** The browser already holds an authenticated session for user-1. */
 	const seed = { sid: "s-1", isAuthenticated: true };
@@ -2998,38 +2999,154 @@ describe("federation login: subject session index (#296)", () => {
 	});
 });
 
-describe("amr on federated sessions (#481)", () => {
-	it("records the upstream amr plus the deployment marker fed, or fed alone", async () => {
-		const cases: ReadonlyArray<readonly [readonly string[] | undefined, readonly string[]]> = [
-			[["hwk"], ["hwk", "fed"]],
-			[undefined, ["fed"]],
-		];
-		for (const [upstream, expected] of cases) {
-			const provider = makeFakeProvider({
-				exchangeCode: vi.fn(async () => ({
-					issuer: "https://idp.example.com",
-					sub: "external-42",
-					accessToken: "at",
-					expiresAt: null,
-					...(upstream ? { amr: upstream } : {}),
-				})),
+describe("amr on federated sessions (#481, the MFA ADR's D9 and D13)", () => {
+	/** One federated login through the callback: what it handed `UserSessionStore.create`. */
+	const loginWith = async (
+		upstream: readonly string[] | undefined,
+		config: Record<string, unknown> = {},
+	): Promise<{ amr?: unknown; authentication?: unknown }> => {
+		const provider = makeFakeProvider({
+			exchangeCode: vi.fn(async () => ({
+				issuer: "https://idp.example.com",
+				sub: "external-42",
+				accessToken: "at",
+				expiresAt: null,
+				...(upstream ? { amr: upstream } : {}),
+			})),
+		});
+		const uss = makeUserSessionStore();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+			userSessionStore: uss,
+			config,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(302);
+		return (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			amr?: unknown;
+			authentication?: unknown;
+		};
+	};
+
+	it("keeps an untrusted IdP's amr apart by default: amr is fed alone, and the IdP's values are kept for the record", async () => {
+		const created = await loginWith(["hwk", "mfa"]);
+		expect(created.amr).toEqual(["fed"]);
+		expect(created.authentication).toStrictEqual({
+			primary: "fed",
+			federation: "test",
+			upstreamAmr: ["hwk", "mfa"],
+			mfaAt: undefined,
+		});
+	});
+
+	it("records a trusted IdP's amr beside fed, where it counts (federations.<name>.trustUpstreamAmr)", async () => {
+		const created = await loginWith(["hwk", "mfa"], {
+			federations: { test: { enabled: true, trustUpstreamAmr: true } },
+		});
+		expect(created.amr).toEqual(["hwk", "mfa", "fed"]);
+		expect(created.authentication).toStrictEqual({
+			primary: "fed",
+			federation: "test",
+			upstreamAmr: undefined,
+			mfaAt: undefined,
+		});
+	});
+
+	it("records fed alone when the IdP asserted nothing, trusted or not", async () => {
+		for (const trustUpstreamAmr of [true, false]) {
+			const created = await loginWith(undefined, {
+				federations: { test: { enabled: true, trustUpstreamAmr } },
 			});
+			expect(created.amr).toEqual(["fed"]);
+			expect(created.authentication).toStrictEqual({
+				primary: "fed",
+				federation: "test",
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			});
+		}
+	});
+
+	it("decides trust by the name the callback resolved the provider by, even when one provider is installed under two names", async () => {
+		// One adapter instance registered as two federations, only one of
+		// them trusted: whichever name the callback came in on is the switch
+		// that applies — never the one registered last for the same object.
+		const shared = makeFakeProvider({
+			exchangeCode: vi.fn(async () => ({
+				issuer: "https://idp.example.com",
+				sub: "external-42",
+				accessToken: "at",
+				expiresAt: null,
+				amr: ["hwk", "mfa"],
+			})),
+		});
+		const loginOn = async (name: string) => {
 			const uss = makeUserSessionStore();
 			const { app } = buildCallbackApp({
-				providers: new Map([["test", provider]]),
-				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				providers: new Map([
+					["trusted", shared],
+					["untrusted", shared],
+				]),
+				// The adapter's own name is "test": the routes look its callback URL
+				// and redirect policy up by it.
+				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
+				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
+				federation: { name, state: "s1", codeVerifier: "v1" },
 				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
 				userSessionStore: uss,
+				config: {
+					federations: {
+						trusted: { enabled: true, trustUpstreamAmr: true },
+						untrusted: { enabled: true },
+					},
+				},
 			});
 			const res = await (await plantAndGetAgent(app)).get(
-				"/oauth/federation/test/callback?state=s1&code=c1",
+				`/oauth/federation/${name}/callback?state=s1&code=c1`,
 			);
 			expect(res.status).toBe(302);
-			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			return (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
 				amr?: unknown;
+				authentication?: { federation?: unknown; upstreamAmr?: unknown };
 			};
-			expect(createArg.amr).toEqual(expected);
-		}
+		};
+		const trusted = await loginOn("trusted");
+		expect(trusted.amr).toEqual(["hwk", "mfa", "fed"]);
+		expect(trusted.authentication?.federation).toBe("trusted");
+		expect(trusted.authentication?.upstreamAmr).toBeUndefined();
+		const untrusted = await loginOn("untrusted");
+		expect(untrusted.amr).toEqual(["fed"]);
+		expect(untrusted.authentication?.federation).toBe("untrusted");
+		expect(untrusted.authentication?.upstreamAmr).toEqual(["hwk", "mfa"]);
+	});
+
+	it("keeps an IdP's amr apart for a federation whose section is not enabled, as the acr drop reads it", async () => {
+		// One reading for the split and the drop: a disabled section's switch
+		// trusts nothing, whichever of the two asks.
+		const created = await loginWith(["hwk", "mfa"], {
+			federations: { test: { enabled: false, trustUpstreamAmr: true } },
+		});
+		expect(created.amr).toEqual(["fed"]);
+		expect(created.authentication).toStrictEqual({
+			primary: "fed",
+			federation: "test",
+			upstreamAmr: ["hwk", "mfa"],
+			mfaAt: undefined,
+		});
+	});
+
+	it("refuses to build the routes when a federation's trustUpstreamAmr is given but unusable", () => {
+		expect(() =>
+			buildCallbackApp({
+				providers: new Map([["test", makeFakeProvider()]]),
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				config: { federations: { test: { enabled: true, trustUpstreamAmr: "yes" } } },
+			}),
+		).toThrow(new RangeError("federations.test.trustUpstreamAmr must be true or false"));
 	});
 });
 
@@ -3363,6 +3480,7 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 					expiresAt: new Date(Date.now() + 3_600_000),
 					claims: {},
 					amr: undefined,
+					authentication: undefined,
 				})),
 			},
 			federationRedirectPolicyResolver: unconfiguredPolicy(),

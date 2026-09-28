@@ -22,9 +22,10 @@ import {
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
-	FEDERATED_AMR,
 	type FederationProvider,
 	type FederationTokenStore,
+	federatedSessionAuthentication,
+	federationTrustsUpstreamAmr,
 	type Logger,
 	loggableError,
 	resolveFederationResponseMode,
@@ -92,18 +93,17 @@ declare module "express-session" {
 const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
 
 /**
- * #481 — the `amr` a federated login records: whatever the upstream IdP
- * asserted (a provider that surfaces the id_token's `amr` puts it on the
- * profile) plus core's `FEDERATED_AMR` (`fed`), the deployment-defined
- * marker for "authenticated through a federation".
+ * #481 — what the upstream IdP asserted about its own login: the profile's
+ * `amr`, when the provider surfaces the id_token's there and it is a string
+ * array; else nothing. Whether it counts is the federation's
+ * `trustUpstreamAmr` (the MFA ADR's D13): core's
+ * `federatedSessionAuthentication` records it beside `fed` for a trusted
+ * federation, and apart from the session's `amr` otherwise.
  */
-const federatedAmr = (profile: Readonly<Record<string, unknown>>): readonly string[] => {
-	const upstream =
-		Array.isArray(profile.amr) && profile.amr.every((v) => typeof v === "string")
-			? (profile.amr as string[])
-			: [];
-	return [...new Set([...upstream, FEDERATED_AMR])];
-};
+const upstreamAmrOf = (profile: Readonly<Record<string, unknown>>): readonly string[] =>
+	Array.isArray(profile.amr) && profile.amr.every((v) => typeof v === "string")
+		? (profile.amr as string[])
+		: [];
 
 /**
  * What goes in the record's `tokenType` for what an adapter answered (#645).
@@ -359,6 +359,20 @@ export const createRouter = (
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
 
 	const router = express.Router();
+
+	// The MFA ADR's D13: whether each installed federation's upstream `amr`
+	// counts, read once, here, at composition — where a switch that is given
+	// but unusable refuses to build the routes — by the reading the `acr`
+	// drop uses, so what a session records and what `/authorize` advertises
+	// cannot disagree. Keyed by the name the federation is installed under,
+	// which is the name the callback resolves it by: one adapter installed
+	// under two names takes each name's switch, not the last one read.
+	const trustsUpstreamAmr = new Map<string, boolean>(
+		[...federationProviders.keys()].map((name) => [
+			name,
+			federationTrustsUpstreamAmr(config, name),
+		]),
+	);
 
 	const transactionCookieName =
 		federationTransactionCookieName ??
@@ -1052,7 +1066,15 @@ export const createRouter = (
 				authTime,
 				expiresAt,
 				claims,
-				amr: federatedAmr(profile),
+				// The MFA ADR's D9 and D13: `fed`, with a trusted IdP's values
+				// beside it, or an untrusted one's kept apart for the record —
+				// decided, and recorded, under the name this callback resolved
+				// the provider by (`fed.name`, checked equal to the path's).
+				...federatedSessionAuthentication({
+					federation: fed.name,
+					upstreamAmr: upstreamAmrOf(profile),
+					trusted: trustsUpstreamAmr.get(fed.name) === true,
+				}),
 			});
 		} catch (err) {
 			logStoreUnavailable(

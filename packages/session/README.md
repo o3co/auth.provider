@@ -285,8 +285,8 @@ The manifest ([`src/module.mts`](src/module.mts)):
   never the username. After a failed regeneration or save the `UserSession`
   and its subject-index entry are rolled back best-effort; a rollback step
   that fails is one `login_cleanup_failed` warn.
-- On success it creates a `UserSession` (`amr: ["pwd"]`, lifetime
-  `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
+- On success it creates a `UserSession` (`amr: ["pwd"]`, `authentication`
+  primary `pwd`, lifetime `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
   regenerates the express session and saves it, and answers `200` with a fresh
   CSRF cookie. The save comes before the answer: a store that cannot save it is
   `503`, not a `200` for a session the next request would not find.
@@ -384,16 +384,57 @@ verification page with them.
 
 ### What a session records about the authentication
 
-Every session carries `authTime` and `amr` — RFC 8176 values naming how the user
-authenticated — so `/authorize` can honour `max_age`, `prompt=login` and
+Every session carries `authTime`, `amr` — RFC 8176 values naming how the user
+authenticated, as far as this provider vouches for it — and `authentication`,
+how the session was established (the MFA ADR's D9: the primary, which
+federation, what an untrusted upstream IdP asserted, when a second factor was
+verified). So `/authorize` can honour `max_age`, `prompt=login` and
 `acr_values`, and the id_token can say `auth_time`, `amr` and `acr` (the whole
-picture is in the [oauth package README](../oauth/README.md)):
+picture is in the [oauth package README](../oauth/README.md)). Core composes
+both for each login path (`passwordSessionAuthentication`,
+`federatedSessionAuthentication`):
 
-| login path | `amr` |
-| --- | --- |
-| `POST /session/login` | `["pwd"]` (core's `PASSWORD_AMR`) |
-| federation callback | the upstream IdP's `amr` when the provider surfaces it on the profile (`profile.amr`, a string array), plus `fed` — the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports. RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. |
-| account linking (`?link=1`) | unchanged — a link is not a login |
+| login path | `amr` | `authentication` |
+| --- | --- | --- |
+| `POST /session/login` | `["pwd"]` (core's `PASSWORD_AMR`) | primary `pwd` |
+| federation callback | `["fed"]` — `fed` is the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports; RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. For a federation with `trustUpstreamAmr = true`, the upstream IdP's `amr` beside it | primary `fed`, the federation's name, and — unless the federation trusts its IdP — the IdP's `amr` as `upstreamAmr` |
+| account linking (`?link=1`) | unchanged — a link is not a login | unchanged |
+
+**What an upstream IdP asserted counts only for a federation that trusts it**
+(`federations.<name>.trustUpstreamAmr`, default `false`, the MFA ADR's D13).
+The upstream `amr` is what a provider surfaces on the profile (`profile.amr`, a
+string array; none of the bundled adapters does). By default it is kept in
+`authentication.upstreamAmr`, for the record: no token carries it and no
+`acr_values` entry is met by it — an IdP's word about its own login is not this
+provider's. `trustUpstreamAmr = true`, beside `enabled` in the federation's
+section, records it beside `fed`, where it counts, as every federation's did
+before the switch existed. The routes read each installed federation's switch
+once, when they are built, through core's `federationTrustsUpstreamAmr` — the
+reading `@o3co/auth-provider-oauth`'s `acr` drop uses, so what a session
+records and what `/authorize` advertises agree; a switch that is neither
+`true` nor `false` refuses the composition (`RangeError`), and the schema
+coerces the spellings an environment variable delivers. Each federation's
+switch is kept by the name it is installed under, and a login takes the switch
+of the name its callback came in on, which is also the federation
+`authentication.federation` names. The decision is written into the session
+when it is created: changing the switch applies to sessions established
+afterwards.
+
+**Withdrawing trust.** Turning `trustUpstreamAmr` from `true` to `false`
+does not reach a session already recorded under it: its `amr` keeps the IdP's
+values — they were vouched for when it was written — so tokens minted from it
+keep carrying them, and the refresh tokens minted from it carry them forward
+until their family ends (`oauth.refreshToken.expiresIn` after the login, a day
+by default). To withdraw at once, call core's `revokeAllForSubject` for the
+subjects who signed in through that federation: it ends their sessions, the
+refresh families and codes minted from them, and every access token this
+provider itself verifies (introspection, `/oauth/userinfo`, the
+federation-token route, token exchange, the refresh grant), and they log in
+again under the new setting. An access token a resource server validates
+offline lives until its `exp`. `revokeAllForSubject` needs
+`subjectRevocation` and `subjectSessionIndex` wired, and reports itself
+`incomplete` without them. The [operator runbook](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust)
+has the procedure.
 
 Re-authentication is a *new* session: `POST /session/login` and the federation
 callback always create one with a fresh `authTime`, which is what `max_age` and
@@ -490,7 +531,9 @@ URL is exactly what the adapter returned.
    `null` is `401 unknown_user` (unless the start asked to link).
 4. **Claims** are the local `User`'s, merged with `mapClaims` under
    [claim precedence](#claim-precedence-local-wins-federated-is-namespaced); `amr`
-   is `profile.amr` plus `fed`.
+   is `fed` — with `profile.amr` beside it for a trusted federation, else
+   `profile.amr` kept in `authentication.upstreamAmr`
+   ([above](#what-a-session-records-about-the-authentication)).
 5. **The session** is a new `UserSession` (lifetime `session.maxAge`), a
    `subjectSessionIndex` entry when that is wired, a `sessionFederationIndex`
    entry, and a regenerated express session. Any store the callback cannot do
@@ -794,6 +837,13 @@ Boot rules:
 
 - Every enabled section must have a `callbackURL`, or `sessionModule` fails boot.
   The federation router hands exactly that value to the adapter as `redirect_uri`.
+- `trustUpstreamAmr` sits at a section's top level, beside `enabled`, in every
+  shape; it is `false` when absent, and anything but a boolean (after the
+  schema's coercion) fails boot. Written inside a nested section's
+  sub-section (`federations.okta.oidc.trustUpstreamAmr`) it fails boot too,
+  saying it belongs beside `enabled` — it would otherwise be ignored. No
+  environment variable is wired for it. What it decides is
+  [above](#what-a-session-records-about-the-authentication).
 - Every `federations.<name>` contribution must be paired with a
   `federationRedirectPolicies.<name>` one and vice versa, or boot fails with
   `federation-redirect-policy-unpaired`.

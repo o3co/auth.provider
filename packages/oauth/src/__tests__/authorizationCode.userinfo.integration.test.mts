@@ -63,6 +63,8 @@ const userSession: UserSession = {
 		emailVerified: true,
 		name: "Alice",
 	},
+	amr: undefined,
+	authentication: undefined,
 };
 
 const config = {

@@ -84,7 +84,10 @@ const federatedSession = (
 	amr,
 });
 
-/** A record as it is stored today, read the one way every consumer reads it (D9). */
+/**
+ * A record written before `UserSession.authentication` existed, read the one
+ * way every consumer reads it (D9): split as it is read.
+ */
 const recorded = (amr: readonly string[]): MfaRequirementSession => {
 	const input = requirementSession({
 		sid: "sid-1",
@@ -94,6 +97,7 @@ const recorded = (amr: readonly string[]): MfaRequirementSession => {
 		expiresAt: new Date(Date.now() + 3_600_000),
 		claims: {},
 		amr,
+		authentication: undefined,
 	});
 	if (input === null) throw new Error("a session reads as a session");
 	return input;
@@ -168,6 +172,14 @@ describe("decideMfaRequirement — D17's rows", () => {
 			session: recorded(["hwk", "fed"]),
 			factors: "installed",
 			expected: { outcome: "met", acr: undefined },
+		},
+		{
+			row: "acr_values=phr · pre-upgrade, holding fed and an upstream hwk → the hwk is not vouched for, whatever the federation (D9's split)",
+			mode: "optional",
+			session: recorded(["hwk", "fed"]),
+			acrValues: [PHR],
+			factors: "none",
+			expected: { outcome: "unmet", requirement: "acr" },
 		},
 		{
 			row: "acr_values met · D15's preference order: one the session meets wins over stepping up to an earlier one",

@@ -130,7 +130,8 @@ export interface DisposableRefreshTokenFamilyClient
 
 /**
  * Backing client for UserSessionStore adapters. Declares only `set`, `get`,
- * `del` — the exact methods `createRedisUserSessionStore` consumes.
+ * `del` and `replaceIfUnchanged` — the exact methods
+ * `createRedisUserSessionStore` consumes.
  *
  * `set` has two overloads:
  *  - plain PX form (no condition): always succeeds with `"OK"` per Redis
@@ -144,6 +145,22 @@ export interface UserSessionStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	get(key: string): Promise<string | null>;
 	del(key: string): Promise<number>;
+	/**
+	 * Replace the value at `key` with `next` only while it still holds exactly
+	 * `expected`, keeping the key's TTL — as one indivisible operation. `true`
+	 * when it replaced; `false`, and nothing written, when the key held
+	 * anything else or nothing.
+	 *
+	 * The step-up capability's write (`recordSecondFactor`, the MFA ADR's D9):
+	 * the adapter reads the session, computes the next one in JavaScript and
+	 * writes it through this, re-reading when it loses — the refresh-token
+	 * family's compare-and-set, as one call. A GET then a SET would let two
+	 * step-ups in flight each overwrite the other's factor; a write that set
+	 * a new expiry, or none, would change how long the session lives.
+	 * `makeIoredisClients` answers it with a script (`SET … KEEPTTL`, Redis
+	 * 6.0+).
+	 */
+	replaceIfUnchanged(key: string, expected: string, next: string): Promise<boolean>;
 }
 
 // --- SessionRPRegistryClient -----------------------------------------------

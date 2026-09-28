@@ -138,6 +138,7 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 		expiresAt: new Date(Date.now() + 3_600_000),
 		claims: { name: "User" },
 		amr: undefined,
+		authentication: undefined,
 	};
 	const userSessionStore: UserSessionStore = {
 		kind: "memory",

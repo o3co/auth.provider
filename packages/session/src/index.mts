@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-// #481 — the `amr` value a federated login records beside the upstream IdP's.
-// Core's since the MFA ADR (D13); re-exported so an import from here keeps working.
+// #481 — the `amr` value a federated login records (beside the upstream IdP's
+// only for a federation that trusts it, the MFA ADR's D13). Core's since the
+// MFA ADR; re-exported so an import from here keeps working.
 export { FEDERATED_AMR } from "@o3co/auth-provider-core";
 // #272 — CSRF protection for the state-changing session routes. Exported so a
 // composition root can issue tokens from its own login page, or mount the same

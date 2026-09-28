@@ -49,7 +49,10 @@ export interface RegisteredRP {
 
 /**
  * Authenticated user session aggregate. Post-create immutable at v0.5.0
- * (claims update deferred post-publish). Per A4 §5.1.
+ * (claims update deferred post-publish), except for what a second factor
+ * verified in it adds — `amr` and `authentication`, through the optional
+ * step-up capability ({@link SupportsSecondFactorUpdate}, the MFA ADR's D9).
+ * Per A4 §5.1.
  *
  * Expiry encoding: `expiresAt: Date` (not `expiresAtMs: number`) is intentional
  * for A4 aggregates. Per A3 §5.1: low-level storage primitives (A3:
@@ -79,25 +82,44 @@ export interface UserSession {
 	 * without an error — `/authorize` answering a request whose `acr_values`
 	 * needs it `unmet_authentication_requirements`, and the id_token carrying
 	 * no `amr`. On the input, it makes a login path say what it knows.
+	 *
+	 * Since the MFA ADR's D9 it holds only what this provider vouches for —
+	 * the primary, a trusted upstream IdP's values, each verified second
+	 * factor — in a session that says so in `authentication`. A session
+	 * written before that key existed is read through `vouchedAmr`
+	 * (`./authentication.mts`), which splits it.
 	 */
 	readonly amr: readonly string[] | undefined;
+	/**
+	 * The MFA ADR's D9: how the session was established — `undefined` for a
+	 * session written before this key existed, which `sessionAuthentication`
+	 * reads from its `amr`. A required key, as `amr` is (#626): a store's copy
+	 * that forgot it would read every session as a pre-upgrade one, splitting
+	 * a trusted federation's values out and forgetting a verified second
+	 * factor. Read it through `sessionAuthentication`, never directly.
+	 */
+	readonly authentication: SessionAuthentication | undefined;
 }
 
 /**
- * How a session was established (the MFA ADR's D9), as
- * `sessionAuthentication` reads it: the primary authentication, which
- * federation, what an untrusted upstream IdP asserted, and when a second
- * factor was last verified in the session.
- *
- * Not yet a key of the record: the build order's step 5 adds it as
- * `UserSession.authentication`, with the upstream split, in one change — so
- * no release writes it beside an `amr` that still mixes in untrusted values.
- * Until then every session is read from its `amr` (`./authentication.mts`).
+ * How a session was established (the MFA ADR's D9): the primary
+ * authentication, which federation, what an untrusted upstream IdP asserted,
+ * and when a second factor was last verified in the session. The record's
+ * `authentication` key, read through `sessionAuthentication`
+ * (`./authentication.mts`), which answers the same shape for a session
+ * written before the key existed. Every field is a required key, holding
+ * `undefined` where there is nothing to say, so a copy names each one.
  */
 export interface SessionAuthentication {
 	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
 	readonly primary: string;
-	/** The federation, for `"fed"`. */
+	/**
+	 * The federation, for `"fed"`: the name it is installed under — the key
+	 * its callback resolved it by, whose `trustUpstreamAmr` applied. Equal to
+	 * the adapter's `provider.name` in every bundled composition; the
+	 * federation index, logout and the federation-token store use
+	 * `provider.name`.
+	 */
 	readonly federation: string | undefined;
 	/** What an untrusted upstream IdP asserted (D13): kept for the record, never stamped, never read for `acr`. */
 	readonly upstreamAmr: readonly string[] | undefined;
@@ -133,6 +155,16 @@ export interface CreateUserSessionInput {
 	 * no `amr`. On the input, it makes a login path say what it knows.
 	 */
 	readonly amr: readonly string[] | undefined;
+	/**
+	 * The MFA ADR's D9: how the session was established. A login path writes
+	 * it (`passwordSessionAuthentication`, `federatedSessionAuthentication` in
+	 * `./authentication.mts` compose it with the `amr` beside it); `undefined`
+	 * writes a session read as one from before the key existed. A required
+	 * key: a login path says what it knows, and a copy cannot drop it.
+	 * `mfaAt`, when present, must be a valid date at or after the epoch — a
+	 * `RangeError` otherwise, and nothing is recorded.
+	 */
+	readonly authentication: SessionAuthentication | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,7 +173,9 @@ export interface CreateUserSessionInput {
 
 /**
  * Sid-keyed store for the authenticated user session. Post-create immutable
- * at v0.5.0 (claims update deferred post-publish). Per A4 §5.1.
+ * at v0.5.0 (claims update deferred post-publish); a store may add the
+ * step-up capability ({@link SupportsSecondFactorUpdate}), which writes a
+ * verified second factor into a live session and nothing else. Per A4 §5.1.
  *
  * Cascade semantics: `delete(sid)` is the global session-invalidation
  * primitive. Sibling reverse-index stores hold orphan entries naturally
@@ -155,12 +189,79 @@ export interface UserSessionStore {
 	/**
 	 * Record a new session. Rejects when `sid` already has one, when
 	 * `expiresAt` is already past, and — with a `RangeError`, recording
-	 * nothing — when `expiresAt` is an Invalid Date or `authTime` is an
-	 * Invalid Date or before the epoch.
+	 * nothing — when `expiresAt` is an Invalid Date, or `authTime` or
+	 * `authentication.mfaAt` is an Invalid Date or before the epoch.
 	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
 	delete(sid: string): Promise<void>;
+}
+
+/**
+ * A second factor verified in a session (the MFA ADR's D9, D14): the `amr`
+ * the verification adds — the factor's values, and `mfa` when the factor adds
+ * it (`composeAmr` of nothing held gives exactly that) — and when it was
+ * verified.
+ */
+export interface SecondFactorEvent {
+	readonly amr: readonly string[];
+	readonly at: Date;
+}
+
+/**
+ * The step-up capability (the MFA ADR's D9): a store that can record a second
+ * factor verified in a live session, which a step-up needs. Detected by
+ * method presence ({@link supportsSecondFactorUpdate}), like
+ * {@link SupportsSessionsOnlyRevocation}: a custom store written without it
+ * keeps working, and a step-up asks for a re-authentication instead. Both
+ * bundled stores have it.
+ */
+export interface SupportsSecondFactorUpdate {
+	/**
+	 * Record that a second factor was verified in the live session `sid`, and
+	 * answer the session as it is now stored.
+	 *
+	 * `amr` becomes what the session vouches for followed by `event.amr`, in
+	 * insertion order, each value once — no vouched value is lost. `mfaAt`
+	 * becomes the later of the stored one and the event's, each no later than
+	 * the recording store's clock: monotonic on that clock, so one a replica
+	 * whose clock ran ahead recorded comes back to it. Nothing else changes —
+	 * `authTime` (a step-up never moves it, D18) and the session's lifetime
+	 * included. A session written
+	 * before `authentication` existed is split first
+	 * (`sessionAfterSecondFactor`), so a value an untrusted upstream IdP
+	 * asserted never becomes a vouched one.
+	 *
+	 * `null`, and nothing written, when the session is gone — or predates
+	 * `authentication` and its primary cannot be told, which no second factor
+	 * fixes: such a session logs in again. Under `mfa.mode = "required"` the
+	 * requirement rule re-authenticates it (D16) before a step-up is asked;
+	 * under `optional` it does not, and the MFA ADR's step-5 amendment obliges
+	 * `/authorize` (build-order step 13), when it would ask a step-up of such
+	 * a session, to send it to the login page instead.
+	 *
+	 * An event with no values, an empty value, a primary's marker (`pwd`,
+	 * `fed`), only `mfa`, or a time that is not a valid date at or after the
+	 * epoch or is further ahead of the store's clock than the clock skew
+	 * tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`), is a `RangeError`
+	 * before anything is read, and nothing is written: the caller's fault,
+	 * never an outage (`checkSecondFactorEvent`). A time accepted is recorded
+	 * no later than the store's clock, and a stored `mfaAt` ahead of it is
+	 * brought back to it before the later of the two is taken. A store that cannot answer rejects with an
+	 * error of its own, as every store method does: its outage.
+	 */
+	recordSecondFactor(sid: string, event: SecondFactorEvent): Promise<UserSession | null>;
+}
+
+/**
+ * Whether `value` has the step-up capability. `false` for `null` and
+ * `undefined`, so an optional slot's value can be passed straight in.
+ */
+export function supportsSecondFactorUpdate(
+	value: UserSessionStore | null | undefined,
+): value is UserSessionStore & SupportsSecondFactorUpdate {
+	const candidate = value as Partial<SupportsSecondFactorUpdate> | null | undefined;
+	return typeof candidate?.recordSecondFactor === "function";
 }
 
 /**

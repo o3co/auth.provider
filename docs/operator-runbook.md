@@ -464,6 +464,33 @@ The rules a Store must apply before it links — never on an unverified or
 relay address, never by e-mail alone, `sub` verbatim — are in
 [`packages/session/README.md`](../packages/session/README.md#account-linking-across-federations-482).
 
+### Trusting an upstream IdP's `amr`, and withdrawing that trust
+
+What an upstream IdP says about its own login — `mfa`, `hwk`, … on the
+profile it hands the federation callback — counts only for a federation
+configured with `federations.<name>.trustUpstreamAmr = true`, beside its
+`enabled` (the MFA ADR's D13). Otherwise the session records `amr` `["fed"]`
+and keeps the IdP's values in `authentication.upstreamAmr`, where no token and
+no `acr_values` entry sees them. None of the bundled adapters surfaces an
+upstream `amr` (`profile.amr`); a custom adapter may.
+
+- **Switching it on** applies to logins from then on. Entries of
+  `oauth.authorize.acrValues` that only the IdP's values meet come back into
+  `acr_values_supported` at the next boot (`acr_value_unsatisfiable` stops
+  naming them).
+- **Switching it off** also applies to logins from then on, and does not reach
+  what was already written: a session recorded while it was on keeps the
+  IdP's values in its `amr` and goes on stamping them; its refresh tokens
+  carry them forward until their family ends — `oauth.refreshToken.expiresIn`
+  after the login that began it, a day by default — and a code `/authorize`
+  issued keeps the `acr` it chose. To withdraw at once, call
+  `revokeAllForSubject` for the subjects who signed in through that
+  federation. It stamps their revocation boundary and ends their sessions, and with them the refresh families and codes minted from them and every access token this provider itself verifies — at introspection, `/oauth/userinfo`, the federation-token route, token exchange and the refresh grant. An access token a resource server validates offline lives until its `exp` ([Which logout endpoint invalidates what](#which-logout-endpoint-invalidates-what)). It needs `subjectRevocation` and `subjectSessionIndex` wired; without them it reports itself `incomplete`. The users log in again under the new
+  setting.
+- **A switch in the wrong place** — inside a nested section's sub-section,
+  `federations.<name>.<type>.trustUpstreamAmr` — refuses boot, saying it
+  belongs beside `enabled`.
+
 ### Federation grants — what each answer means (#593)
 
 `POST /oauth/federation-grants/:grantId/token` hands a client an **upstream**
@@ -714,7 +741,7 @@ stream — its level is fixed at `info`.
 | `federation_store_plaintext` (warn, `store`, `mode`) | `redis/src/internal/encryption-mode.mts` | a sealing store runs `allow-plaintext` where that is allowed (development); set `mode = "required"` and a key before it leaves development |
 | `config_key_deprecated` (warn, `key`, `env`, `replacement`, `replacementEnv`) | `templates/standalone/src/buildModules.mts` | `key = "repositories.code.type"`: move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`). `key = "oauth.accessToken.expiresIn"`: the deprecated key decides the access-token default; move the value to `oauth.accessToken.defaultExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`). Both were `[buildModules] … is deprecated` console lines |
 | `adapter_builder_deprecated` (warn, `builder`, `replacement`) | `redis/src/code-repository.mts` | a composition registers `redisCodeRepositoryBuilder`; wire `redisCodeRepositoryModule` instead |
-| `acr_value_unsatisfiable` (warn, or info — `acr`, `unproducible`, `unproducibleCount` when the list was cut, and `emptyAlternative: true` when an alternative requires nothing — a hand-built table only — which is never met) | `oauth/src/acrValues.mts` | an `oauth.authorize.acrValues` entry nothing this composition installs can satisfy was dropped: it is not advertised in `acr_values_supported`, and `/authorize` answers it `unmet_authentication_requirements`. `unproducible` names the values nothing records — `fed` without a federation installed, a second factor's values (`otp`, `hwk`, `swk`, `email`, `recovery`, `mfa`) without MFA, anything else always. `info` under `mfa.mode = "off"` when only a second factor is missing (the operator's choice: installing MFA would meet it); `warn` otherwise. Remove the entry, or install what produces its values (a federation, or MFA). One line per dropped entry per process |
+| `acr_value_unsatisfiable` (warn, or info — `acr`, `unproducible`, `unproducibleCount` when the list was cut, and `emptyAlternative: true` when an alternative requires nothing — a hand-built table only — which is never met) | `oauth/src/acrValues.mts` | an `oauth.authorize.acrValues` entry nothing this composition installs can satisfy was dropped: it is not advertised in `acr_values_supported`, and `/authorize` answers it `unmet_authentication_requirements`. `unproducible` names the values nothing records — `fed` without a federation installed, a second factor's values (`otp`, `hwk`, `swk`, `email`, `recovery`, `mfa`) without MFA, anything else always. `info` under `mfa.mode = "off"` when only a second factor is missing (the operator's choice: installing MFA would meet it); `warn` otherwise. Remove the entry, or install what produces its values (a federation, or MFA). An installed federation adds `fed` alone unless `federations.<name>.trustUpstreamAmr = true`, which counts whatever its IdP asserts (the MFA ADR's D13): an entry that only an upstream IdP's `mfa` or `hwk` met before that switch existed is dropped until one trusted federation is installed. One line per dropped entry per process |
 | `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; nothing installs it while `mfa.mode` is `"off"` |
 
 ### Data corruption — a stored record could not be read
@@ -722,7 +749,10 @@ stream — its level is fixed at `info`.
 `user_session_corrupt_envelope` and `session_rp_registry_corrupt_envelope`
 (warn, `sid`, `reason` `json_parse` with the parser's projection as `err`, or
 `shape_invalid`; `packages/redis/src/userSessionStore.mts`,
-`sessionRPRegistry.mts`) — the record is treated as absent (fail-closed).
+`sessionRPRegistry.mts`) — the record is treated as absent (fail-closed). A
+session envelope whose `authentication` is not a well-formed object — `null`
+included — is `shape_invalid`: it is never read as a session from before the
+key, which would split it again and forget a verified second factor.
 `authorization_code_corrupt_record` (error, `codeHash`, `reason` `json_parse`
 with `err`, or `identity_fields_missing`;
 `packages/redis/src/code-repository.mts`) — the code is refused. They were
@@ -847,7 +877,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `oauth:code:<code>` | string, JSON code record | `redisCodeRepository.defaultExpiresIn` (`CLIENT_CODE_DEFAULT_EXPIRES_IN`, default 600 s) or the per-call `expiresIn`; consumed with `GETDEL` | `packages/redis/src/code-repository.mts` |
 | `atdeny:<jti>` | string `"1"` | the revoked access token's **remaining** lifetime plus about five minutes (`REVOCATION_RETENTION_ALLOWANCE_MS` — the verifier accepts a token that long past its `exp`); a token already past that writes nothing | `packages/redis/src/access-token-denylist.mts`, `packages/oauth/src/routes/revoke.mts` |
 | `<tag>:ip:<ip>` — `token`, `authorize`, `introspect`, `login`, `device_authorization`, `webauthn-authentication-options`; `device_verification:user:<subject>` | integer counter | the prefix's `windowSeconds`: `defaultLimit` 60/60 s unless `redisRateLimiter.limits.<prefix>` is declared; `login` seeded 20 per 900 s from `rateLimit.login`; `device_verification` seeded 5 per 300 s from `oauth.deviceAuthorization.rateLimit`; `mfa` and `mfa-email` seeded from `mfa.rateLimit.routes` and `mfa.factors.email.sendLimit` when a configuration carries them. The expiry is set atomically with the increment and only when missing, so a steady stream cannot hold a window open | `packages/redis/src/ratelimit.mts`, `ioredis.mts` (`LUA_INCREMENT_WITH_TTL`), `core/src/ratelimit/seededSpecs.mts` |
-| `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none | the session's `expiresAt` (`SET … PX … NX`) | `packages/redis/src/userSessionStore.mts` |
+| `ss:us:<sid>` | string, JSON `{sid, sub, authTimeMs, createdAtMs, expiresAtMs, claims, amr?, authentication?}` — `amr` (RFC 8176, #481) is left out when the login path recorded none; `authentication` (`{primary, federation?, upstreamAmr?, mfaAtMs?}`, the MFA ADR's D9) is left out by a release before it, and such a session is read as one to split — a federated one vouches for `fed` alone | the session's `expiresAt` (`SET … PX … NX`); a verified second factor rewrites the value with `KEEPTTL` | `packages/redis/src/userSessionStore.mts` |
 | `ss:rp:<sid>` | hash, field = `clientId`, value = RP envelope | `session.expiresAt`, raised but never truncated (`PEXPIREAT NX` + `GT`) | `packages/redis/src/sessionRPRegistry.mts`, `internal/redisSidHash.mts` |
 | `ss:fi:<sid>`, `ss:fed:<sid>` | sorted sets of family ids / federation names | same rule | `packages/redis/src/sessionFamilyIndex.mts`, `sessionFederationIndex.mts`, `internal/redisSidSortedSet.mts` |
 | `ss:sub:<subject>` | sorted set of sids, **score = each session's expiry** | key TTL raised to the latest member expiry; members pruned on read against the server's `TIME` | `packages/redis/src/subjectSessionIndex.mts` |
@@ -1262,7 +1292,33 @@ before you flip — and a relying party holding the secret can also mint.
    one also turns on `private_key_jwt` wherever client authentication runs
    ([§1](#1-deployment-shapes)).
 
-3. Note the migration windows that are **still open** at `v0.11.0`, each of
+3. **The upstream `amr` split (the MFA ADR's D13).** From this release an
+   upstream IdP's `amr` counts only for a federation with
+   `federations.<name>.trustUpstreamAmr = true`; decide it per federation
+   before you upgrade ([§3](#trusting-an-upstream-idps-amr-and-withdrawing-that-trust)).
+   A session written by an older release that carries `fed` is read as
+   vouching for `fed` alone, whatever the switch. What sessions already
+   minted is not re-read:
+
+   - an authorization code issued before the upgrade — or by a replica still
+     on the older release during a rolling one — keeps the `acr` its
+     `/authorize` chose, possibly met by an IdP's value this release would
+     not count, and `/token` stamps it as it is;
+   - a refresh token issued before the upgrade, or by an older replica, keeps
+     its `amr` and `acr` — upstream values included — and the refresh grant
+     carries them forward at every refresh until the token's family ends:
+     `oauth.refreshToken.expiresIn` after the login that began it (a day by
+     default). Under `oauth.refreshToken.unknownFamilyPolicy = "accept"` a
+     token with no family record has no such bound.
+
+   A deployment for which that matters calls `revokeAllForSubject` for the
+   subjects who signed in through an untrusted federation (or revokes a known
+   token's family) once the fleet is on the new release; the rest waits a
+   family lifetime. What that call reaches, and what it cannot — an access
+   token a resource server validates offline — is in
+   [§3](#trusting-an-upstream-idps-amr-and-withdrawing-that-trust).
+
+4. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:
    `redisFederationTokenStore.scanFallback` ([§5](#operational-notes)),
    `oauth.jwt.legacyTypAccept` (`OAUTH_JWT_LEGACY_TYP_ACCEPT`), and
