@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-09-26
+最終更新: 2026-09-28
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -274,11 +274,13 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 oauth.authorize.acrValues {
   "urn:example:pwd" = ["pwd"]
   "urn:example:mfa" = ["pwd", "mfa"]
-  "urn:example:passkey" = ["hwk"]
+  "urn:example:passkey" = [["hwk"], ["swk"]]
 }
 ```
 
-各キーはこのデプロイが保証する Authentication Context Class Reference で、値はそれを満たすためにセッションが持つべき `amr` の集合。要求された値のうちセッションが最初に満たすものが、コードと id_token の `acr` になる。どれも満たされない — あるいは表にまったく無い値 — ときは、満たされなかったものを名指して `redirect_uri` で `unmet_authentication_requirements` を返す。黙って受け入れることも、ステップアップのリダイレクトも無い — ログインページにどの要素を追加すべきか伝えられないからである。表が空でなければ、ディスカバリーはキーを `acr_values_supported` として広告する。何も要求しない acr は boot で拒否される: どのセッションもそれを満たし、何も保証しないからである。
+各キーはこのデプロイが保証する Authentication Context Class Reference で、値はそれを満たすためにセッションが持つべき `amr` の集合 — あるいはそのような集合のリストで、そのどれか 1 つが満たせばよい（上の `urn:example:passkey`: デバイスに縛られたパスキーでも同期されたパスキーでもよい）。要求された値のうちセッションが最初に満たすものが、コードと id_token の `acr` になる。照合するのは core の要件ルール（`selectAcr`）で、相手はセッションが保証する `amr`（`vouchedAmr`）である。どれも満たされない — あるいは表にまったく無い値 — ときは、満たされなかったものを名指して `redirect_uri` で `unmet_authentication_requirements` を返す。黙って受け入れることも、ステップアップのリダイレクトも無い — ログインページにどの要素を追加すべきか伝えられないからである。表が空でなければ、ディスカバリーはキーを `acr_values_supported` として広告する。何も要求しない acr や選択肢は boot で拒否される: どのセッションもそれを満たし、何も保証しないからである。
+
+**インストールされたものでは満たせないエントリーは boot で落とす**: `acr_values_supported` から外し、表に無い値と同じく `unmet_authentication_requirements` を返し — たまたまその値を持つセッションに対しても — エントリー（`acr`）と何も生み出さない値（`unproducible`）を添えて `acr_value_unsatisfiable` として一度だけ記録する。行は `warn` だが、`mfa.mode = "off"` のもとで第二要素だけが足りないエントリーは `info` である: それは運用者の選択であって誤りではない。構成が満たせるもの: `pwd` と `fed` は常に。フェデレーションがインストールされていれば任意の値 — フェデレーションのコールバックが上流 IdP の `amr` を `fed` の横に記録するからである（フェデレーションを信頼しないと指定できるようになるまで、どのフェデレーションの上流 `amr` も数える）。第二要素の値（`otp`、`hwk`、`swk`、`email`、`recovery`、`mfa`）は多要素認証がインストールされてから — どのリリースもまだしていない。したがってフェデレーションが無ければ、上の `mfa` と `passkey` のエントリーは落とされる。落とす判定はルーターを組むところとディスカバリーを contribute するところで、同じ入力から計算する（`src/acrValues.mts`）。
 
 **再認証を求められたら、どちらのログイン経路も再認証しなければならない。** デプロイが提供するログインページは `prompt=login` / `max_age` と目印を載せた `redirect_to` を受け取る。既に認証済みのブラウザーをそのまま送り返すページは、ループではなく `login_required` を受け取る。`POST /session/login` とフェデレーションコールバックは常に新しい `auth_time` を持つ*新しい*セッションを確立し、それが再認証である。
 

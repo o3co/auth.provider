@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
 
@@ -280,11 +280,13 @@ The login page must return the browser to `redirect_to` **verbatim**: a page tha
 oauth.authorize.acrValues {
   "urn:example:pwd" = ["pwd"]
   "urn:example:mfa" = ["pwd", "mfa"]
-  "urn:example:passkey" = ["hwk"]
+  "urn:example:passkey" = [["hwk"], ["swk"]]
 }
 ```
 
-Each key is an Authentication Context Class Reference this deployment vouches for; its value is the `amr` set a session must carry to satisfy it. The first requested value the session satisfies becomes the `acr` of the code and of the id_token. None satisfied — or a value that is not in the table at all — is `unmet_authentication_requirements` at the `redirect_uri`, naming what was unmet; there is no silent acceptance, and no step-up redirect, because the login page cannot be told which factor to add. Discovery advertises the keys as `acr_values_supported` when the table is non-empty. An acr that requires nothing is refused at boot: every session would satisfy it, and it would vouch for nothing.
+Each key is an Authentication Context Class Reference this deployment vouches for; its value is the `amr` set a session must carry to satisfy it — or a list of such sets, any one of which satisfies it (`urn:example:passkey` above: a device-bound or a synced passkey). The first requested value the session satisfies becomes the `acr` of the code and of the id_token, matched by core's requirement rule (`selectAcr`) against the `amr` the session vouches for (`vouchedAmr`). None satisfied — or a value that is not in the table at all — is `unmet_authentication_requirements` at the `redirect_uri`, naming what was unmet; there is no silent acceptance, and no step-up redirect, because the login page cannot be told which factor to add. Discovery advertises the keys as `acr_values_supported` when the table is non-empty. An acr, or an alternative, that requires nothing is refused at boot: every session would satisfy it, and it would vouch for nothing.
+
+**An entry nothing installed can satisfy is dropped at boot**: withheld from `acr_values_supported`, answered `unmet_authentication_requirements` like a value the table does not carry — even for a session that happens to carry its values — and said once as `acr_value_unsatisfiable` with the entry (`acr`) and what nothing produces (`unproducible`). The line is `warn`, except under `mfa.mode = "off"` for an entry only a second factor would meet, which is `info`: that is the operator's choice, not a mistake. What a composition can satisfy: `pwd` and `fed`, always; any value while a federation is installed, because the federation callback records the upstream IdP's `amr` beside `fed` (every federation's upstream `amr` counts until a federation can be marked untrusted); a second factor's values (`otp`, `hwk`, `swk`, `email`, `recovery`, `mfa`) once multi-factor authentication is installed, which no release does yet. So without a federation, the `mfa` and `passkey` entries above are dropped. The drop is computed where the router is built and where discovery is contributed, from the same inputs (`src/acrValues.mts`).
 
 **Both login paths must re-authenticate when asked.** The login page the deployment serves receives `redirect_to` carrying `prompt=login` / `max_age` and the marker; a page that bounces an already-authenticated browser straight back gets `login_required`, never a loop. `POST /session/login` and the federation callback always establish a *new* session with a fresh `auth_time`, which is the re-authentication.
 

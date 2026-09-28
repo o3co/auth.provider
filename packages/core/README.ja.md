@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-27
+最終更新: 2026-09-28
 
 ## 責務と役割
 
@@ -568,7 +568,7 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 - `token_endpoint_auth_signing_alg_values_supported` — アサーションのアルゴリズムで、非対称のみ（`RS*`、`PS*`、`ES*`、`EdDSA`）。同じ一覧が introspection と revocation のエンドポイント向けに `*_endpoint_auth_signing_alg_values_supported` として出力される。3 つとも方式と一緒に動く: `replaySeenSet` が wire されていなければ方式と一緒に省略される。提供されない方式のアルゴリズムは、クライアントが行動に移せる何ものも伝えないから。
 - `introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"]`、同じ条件で `private_key_jwt` も加わる — `none` は無い: `/oauth/introspect` は RFC 7662 §2.1 に従い public client を拒否する。メタデータが言えないが運用者に必要なことが 2 つある: (a) RFC 6749 §2.3.1 は `client_secret_basic` で `client_id` と secret を base64 の**前に** form-urlencode することを要求するので、予約文字を含む `client_id` — `:` が Basic のフィールド区切りと読まれてしまうリソース URI — はパーセントエンコードしなければならない（`https%3A%2F%2Fapi.example.com`）。(b) 認証済みの呼び出し側は、`aud` がそのクライアントの `allowedAudiences` ∪ `{client_id}` に含まれるトークンを introspect できる。これにより、リソースサーバーは RFC 8707 のもとで自分のリソース URI 向けに発行されたトークンを introspect できる。どちらも [oauth パッケージの README](../oauth/README.md#introspection-which-tokens-a-caller-may-ask-about) に詳しくある。
 - `revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`、同じ条件で `private_key_jwt` も加わる — `revocation_endpoint` と同時に出力。RFC 7009 §2.1 が public client による自身の token の revoke を認めるため `none` を含む
-- `acr_values_supported` — `oauth.authorize.acrValues` のキー（表が空でないとき）: セッションが記録した `amr` から `/authorize` が満たせる Authentication Context Class Reference。表がなければ省略され、そのとき `acr_values` は `unmet_authentication_requirements` になる。
+- `acr_values_supported` — `oauth.authorize.acrValues` のキー（表が空でないとき）: セッションが記録した `amr` から `/authorize` が満たせる Authentication Context Class Reference。ただし、インストールされたものでは満たせないエントリーは除く（boot で落とす。MFA ADR の D15、oauth パッケージの README を参照）。エントリーが残らなければ省略され、そのとき `acr_values` は `unmet_authentication_requirements` になる。
 - `code_challenge_methods_supported: ["S256"]` — `S256` のみ。`oauth.grants.authorization_code.pkce.supportedMethods` から導出は**しない**。この配列は server-wide メタデータであり、読んだ client は「このいずれかを使ってよい」と解釈する。`plain` はそれを満たさない（`/authorize` は RFC 9700 §2.1.1 に従い public client には即座に拒否する）ので載せない — client 単位の例外は、どちらの向きであれ server-wide 配列には属さない。
 - `dpop_signing_alg_values_supported` — `oauth.dpop.enabled = true` のとき `@o3co/auth-provider-dpop` が contribute し、そのモジュールの `alg-whitelist` をそのまま載せる（RFC 9449 §5.1）
 - `tls_client_certificate_bound_access_tokens: true` — `oauth.mtls.enabled = true` のとき `@o3co/auth-provider-mtls` が contribute する（RFC 8705 §3.3）。それ以外では省略し、RFC はこれを `false` と定義している。`oauth.mtls.source` には依存しない: TLS layer 経由でも trusted-proxy header 経由でも token に載る `cnf["x5t#S256"]` は同じで、このフラグは token を説明するものだから。

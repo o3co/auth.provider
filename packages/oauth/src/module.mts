@@ -23,10 +23,12 @@ import {
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
+	readAcrTable,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
+import { vouchableAcrValues } from "./acrValues.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
@@ -331,9 +333,18 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					const grantTypesSupported = [...deps.grantHandlerResolver.entries()].map(
 						([grantType]) => grantType,
 					);
+					// The MFA ADR's D15: the entries `/authorize` answers from — the
+					// configured table less what nothing this composition installs can
+					// satisfy, computed as the router computes it (which says at boot
+					// what it dropped).
 					const acrValuesSupported = Object.keys(
-						(deps.config as { oauth?: { authorize?: { acrValues?: Record<string, unknown> } } })
-							.oauth?.authorize?.acrValues ?? {},
+						vouchableAcrValues(
+							readAcrTable(
+								(deps.config as { oauth?: { authorize?: { acrValues?: unknown } } }).oauth
+									?.authorize?.acrValues,
+							),
+							deps.federationProviders,
+						).table,
 					);
 					return {
 						// oauth owns the authorization-server surface, so it is the
@@ -448,9 +459,11 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// So the advertised set is what EVERY authorization-code client
 							// may use and the AS always accepts, which is exactly `S256`.
 							code_challenge_methods_supported: ["S256"],
-							// #481: the acr table's keys, when there is one. Omitted otherwise —
-							// an RP that sends `acr_values` to a server with no table gets
-							// `unmet_authentication_requirements`, and the metadata says so.
+							// #481: the acr table's keys, when there is one — less the entries
+							// nothing installed can satisfy (the MFA ADR's D15). Omitted
+							// otherwise — an RP that sends `acr_values` to a server with no
+							// table gets `unmet_authentication_requirements`, and the metadata
+							// says so.
 							...(acrValuesSupported.length > 0
 								? { acr_values_supported: acrValuesSupported }
 								: {}),

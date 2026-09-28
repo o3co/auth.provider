@@ -42,9 +42,12 @@ import {
 	parseScopeTokens,
 	readSpaceDelimitedParameter,
 	sanitizeErrorText,
+	selectAcr,
+	stepUpReach,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
+	vouchedAmr,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import {
@@ -890,12 +893,20 @@ const evaluateReauthentication = async (
 };
 
 /**
- * #481 — `acr_values` (OIDC Core §3.1.2.1) against the configured table
- * (`oauth.authorize.acrValues`): the first requested value whose `amr`
- * requirement the session's recorded `amr` covers is the `acr` the code —
- * and so the id_token — carries. None satisfied, or a value this
- * deployment never configured, is `unmet_authentication_requirements`
- * rather than a token the RP would read as meeting its requirement.
+ * #481 — `acr_values` (OIDC Core §3.1.2.1) against the acr table: the
+ * configured `oauth.authorize.acrValues` less the entries nothing this
+ * composition installs can satisfy (the MFA ADR's D15, `../acrValues.mts`).
+ * Core's `selectAcr` decides over the `amr` the session vouches for
+ * (`vouchedAmr`): the first requested value one of whose alternatives the
+ * session holds is the `acr` the code — and so the id_token — carries. None
+ * satisfied, or a value this deployment does not carry, is
+ * `unmet_authentication_requirements` rather than a token the RP would read
+ * as meeting its requirement.
+ *
+ * Nothing is stepped up to here: `/authorize` consults no `mfaCoordinator`
+ * until D17's single decision (the MFA ADR's build order, step 13), so the
+ * reach of a step-up is empty and what the session does not meet is unmet —
+ * what D20 says an MFA-off deployment answers.
  */
 const resolveAcr = (
 	ctx: AuthorizeContext,
@@ -913,21 +924,17 @@ const resolveAcr = (
 	}
 	if (requested.length === 0) return { value: undefined };
 	const table = ctx.opts.oauth.acrValues;
-	const held = new Set(session?.amr ?? []);
-	// `Object.hasOwn` rather than a bare read, and not only because
-	// `resolveOAuthOptions` now builds the table without a prototype:
-	// `ResolvedOAuthOptions` is exported, so a composition may hand in a
-	// plain object, and the value being looked up is one an unauthenticated
-	// caller writes.
-	const entryFor = (acr: string): readonly string[] | undefined =>
-		Object.hasOwn(table, acr) ? table[acr] : undefined;
-	for (const acr of requested) {
-		const required = entryFor(acr);
-		if (required?.every((method) => held.has(method))) {
-			return { value: acr };
-		}
-	}
-	const unknown = requested.filter((acr) => entryFor(acr) === undefined);
+	const selection = selectAcr(
+		requested,
+		session === null ? [] : vouchedAmr(session),
+		table,
+		stepUpReach(undefined),
+	);
+	if (selection.outcome === "met") return { value: selection.acr };
+	// `Object.hasOwn` rather than a bare read, as `selectAcr` does: the table
+	// may be a plain object a composition handed in, and the value being
+	// looked up is one an unauthenticated caller writes.
+	const unknown = requested.filter((acr) => !Object.hasOwn(table, acr));
 	redirectError(
 		ctx,
 		"unmet_authentication_requirements",
