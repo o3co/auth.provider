@@ -26,7 +26,12 @@
  *
  * The rows below are D17's table, the rows the rule decided: the freshness
  * rows (`max_age`, `prompt=login`, the ask) and the `prompt=none` answers are
- * `/authorize`'s, around the admission. After them, the rows of D2's merge
+ * `/authorize`'s, around the admission. Four rows' inputs are re-expressed:
+ * the rule was handed a session's `amr` and an `authentication`, admission
+ * reads a stored record, so a "primary unknown" row is a record with no
+ * primary marker in its `amr` (`recorded(["hwk"])`, `recorded(["kba", "hwk"])`)
+ * and a pre-upgrade row a record without `authentication` — the expectations
+ * are the rows' own, unchanged. After them, the rows of D2's merge
  * table that the MFA table alone does not reach: a step-up whose page is
  * another requirement's, and one no single requirement can finish.
  */
@@ -174,7 +179,9 @@ const claim = () =>
 const deps = (session: UserSession | null, requirements: SessionRequirement[]): AdmissionDeps => ({
 	userSessionStore: session === null ? undefined : storeOf(session),
 	subjectRevocation: undefined,
-	requirements: resolverForTests(requirements),
+	// The merge's own mechanics need two reaching requirements: the reach
+	// rules boot holds a registration to are lifted here, the snapshot kept.
+	requirements: resolverForTests(requirements, { allowAnyReach: true }),
 	acrTable: TABLE,
 	logger: undefined,
 	auditSink: undefined,

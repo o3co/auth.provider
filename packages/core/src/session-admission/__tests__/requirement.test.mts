@@ -41,6 +41,13 @@ import type { UserSessionClaims } from "#/user-sessions/types.mjs";
 
 const ISSUER = "https://auth.test";
 
+/** A resolver over a reaching non-mfa fixture: the reach rules boot holds lifted, the snapshot kept. */
+const anyReach = (requirements: SessionRequirement[], issuer?: string) =>
+	resolverForTests(requirements, {
+		allowAnyReach: true,
+		...(issuer === undefined ? {} : { issuer }),
+	});
+
 describe("checkStepUpPage — the deployment's page for a step-up (D2, D3)", () => {
 	it("accepts a path, and an absolute URL on the issuer's origin, answering a frozen copy", () => {
 		for (const url of ["/mfa", "/account/mfa?step=1", `${ISSUER}/mfa`, `${ISSUER}/a/b#c`]) {
@@ -215,7 +222,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 				return { outcome: "met" as const };
 			},
 		} satisfies SessionRequirement;
-		const registered = resolverForTests([source]).get("x") as SessionRequirement;
+		const registered = anyReach([source]).get("x") as SessionRequirement;
 		// Read once, at registration — before any matcher that might read it again.
 		expect(reads).toBe(1);
 		expect(registered === (source as unknown)).toBe(false);
@@ -246,7 +253,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		expect(registeredRequirement(source).name).toBe("x");
 		expect(reads).toBe(0);
 		reach = new Set(["risk-ok"]);
-		const registered = resolverForTests([source]).get("x") as SessionRequirement;
+		const registered = anyReach([source]).get("x") as SessionRequirement;
 		expect(reads).toBe(1);
 		expect([...registered.reach]).toEqual(["risk-ok"]);
 		reach.add("other");
@@ -310,7 +317,8 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		);
 		expect([...(lifted.get("x")?.reach ?? [])]).toEqual(["risk-ok"]);
 		// Still sealed under the opt-out: a snapshot, not the contributor's Set.
-		expect("add" in (lifted.get("x")?.reach as object)).toBe(false);
+		const sealed = lifted.get("x")?.reach as object;
+		expect("add" in sealed).toBe(false);
 	});
 
 	it("holds the page to the issuer given, and to its shape alone when none is", () => {
@@ -318,8 +326,8 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 			reach: new Set(["otp"]),
 			stepUpPage: { url: "https://other.test/x", params: {} },
 		});
-		expect(() => resolverForTests([paged], { issuer: ISSUER })).toThrow(RangeError);
-		expect(resolverForTests([paged]).get("x")?.stepUpPage).toEqual(paged.stepUpPage);
+		expect(() => anyReach([paged], ISSUER)).toThrow(RangeError);
+		expect(anyReach([paged]).get("x")?.stepUpPage).toEqual(paged.stepUpPage);
 	});
 });
 

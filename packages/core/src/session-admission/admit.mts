@@ -73,6 +73,7 @@ import {
 	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionAction,
+	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionGrade,
 	type AdmissionRequest,
@@ -313,8 +314,13 @@ const sessionlessStepUps = new Set<string>();
 const isStringList = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0);
 
-/** A caller's fault is a `RangeError` before anything is read. */
-function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): void {
+/** What `checkRequest` answers: the caller's `asks`, copied and frozen — a requirement cannot reach the caller's object, nor change what the ones after it are asked. */
+interface CheckedRequest {
+	readonly asks: AdmissionAsks | undefined;
+}
+
+/** A caller's fault is a `RangeError` before anything is read. Answers core's copy of what it read. */
+function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRequest {
 	if (!isObject(deps)) throw new RangeError("admitSession: deps must be an object");
 	checkResolver(deps.requirements);
 	if (!isObject(deps.acrTable)) throw new RangeError("admitSession: acrTable must be an object");
@@ -333,12 +339,18 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): void {
 	) {
 		throw new RangeError("admitSession: the action must be a name with a grade");
 	}
-	if (request.asks !== undefined) {
-		if (!isObject(request.asks)) throw new RangeError("admitSession: asks must be an object");
-		if (request.asks.acrValues !== undefined && !isStringList(request.asks.acrValues)) {
-			throw new RangeError("admitSession: asks.acrValues must be a list of non-empty strings");
-		}
+	const asks = request.asks;
+	if (asks === undefined) return { asks: undefined };
+	if (!isObject(asks)) throw new RangeError("admitSession: asks must be an object");
+	const acrValues = asks.acrValues;
+	if (acrValues !== undefined && !isStringList(acrValues)) {
+		throw new RangeError("admitSession: asks.acrValues must be a list of non-empty strings");
 	}
+	return {
+		asks: Object.freeze({
+			...(acrValues === undefined ? {} : { acrValues: Object.freeze([...acrValues]) }),
+		}),
+	};
 }
 
 const isValidDate = (value: unknown): value is Date =>
@@ -382,7 +394,7 @@ type RequirementOutcome =
  * `request.action` (D2). The steps, each fail-closed, in order:
  *
  * 1. the claim — not authenticated → `unauthenticated`; a cookie without a
- *    subject → `not_live` (`subject_mismatch`);
+ *    subject → `not_live` (`no_subject`), logged at warn;
  * 2. the live read — with a store: no `sid` → `not_live` (`no_sid`), except
  *    for a token carrier, whose absent `sid` skips the read (D9); no record,
  *    a record without a `sub` or past its `expiresAt` → `not_live` (`gone`),
@@ -412,8 +424,8 @@ export async function admitSession(
 	deps: AdmissionDeps,
 	request: AdmissionRequest,
 ): Promise<Admission> {
-	checkRequest(deps, request);
-	const { claim: presented, asks } = request;
+	const { asks } = checkRequest(deps, request);
+	const { claim: presented } = request;
 	const now = deps.now === undefined ? new Date() : deps.now();
 	const label = actionLabel(request.action);
 	const logger = deps.logger;
@@ -450,6 +462,7 @@ export async function admitSession(
 		if (
 			record == null ||
 			nonEmptyString(record.sub) === undefined ||
+			!isValidDate(record.authTime) ||
 			!isValidDate(record.expiresAt) ||
 			!(record.expiresAt.getTime() > now.getTime())
 		) {
@@ -546,7 +559,7 @@ export async function admitSession(
 			? undefined
 			: selectAcr(requested, requirementSession(session)?.amr ?? [], deps.acrTable, reach);
 	const noneConfigured =
-		requested.length > 0 && requested.every((acr) => !Object.hasOwn(deps.acrTable, acr));
+		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(deps.acrTable, acr));
 
 	// Step 7: the merge.
 	return merge(verdict, selection, {
@@ -930,7 +943,9 @@ export async function admitPrimary(
 	if (!isObject(deps)) throw new RangeError("admitPrimary: deps must be an object");
 	checkResolver(deps.requirements);
 	if (!isObject(primary) || !knownPrimaries.has(primary)) {
-		throw new RangeError("admitPrimary: the primary must be one passwordPrimary built");
+		throw new RangeError(
+			"admitPrimary: the primary must be one passwordPrimary or establishWithoutAsking built",
+		);
 	}
 	return askEvery(deps, primary, continuationOf(primary, []));
 }

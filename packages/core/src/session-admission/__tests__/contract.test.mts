@@ -98,7 +98,7 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 			"name equals its key, and a fixture is never named mfa",
 			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
 			"reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
-			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
+			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
 			"hintKeys are hint names",
 			"admit is never called with a dead session",
 			"admit is never called for a remediation action",
@@ -165,7 +165,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 
 	it("remediations that are not names, are not the requirement's own routes, or repeat", async () => {
 		const remediations =
-			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade";
+			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS";
 		expect(await failing({ build: () => fixture({ remediations: [""] }) })).toContain(remediations);
 		expect(await failing({ build: () => fixture({ remediations: ["a", "a"] }) })).toContain(
 			remediations,
@@ -195,7 +195,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 				build: () => fixture({ name: "oauth", remediations: ["oauth.authorize"] }),
 			}),
 		).toContain(
-			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
+			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
 		);
 	});
 

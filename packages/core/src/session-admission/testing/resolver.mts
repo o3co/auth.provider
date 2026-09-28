@@ -22,17 +22,22 @@
  * entry on purpose. Each requirement is registered as boot registers one
  * (`registeredRequirement`): its shape held to the contract, its page on the
  * issuer's origin when one is given, and what the resolver answers a copy —
- * its reach sealed as boot seals it (`snapshotReach`: read once when the
- * resolver is built, a frozen snapshot answered afterwards), without the
- * reserved-value rule, which the contract suite and boot hold.
+ * its reach sealed as boot seals it: read once when the resolver is built,
+ * held to the reach rules boot holds it to (`sealRegisteredReach`, and an
+ * empty reach under any name but `mfa` in this release), a read-only
+ * snapshot answered afterwards. `allowAnyReach` lifts the reach rules —
+ * the snapshot stays — for the tests of admission's own mechanics that
+ * need two reaching requirements (the merge table); nothing else uses it.
  */
 
 import { sessionRequirementResolverOver } from "../admit.mjs";
 import {
+	MFA_REQUIREMENT_NAME,
 	type RegisteredRequirement,
 	registeredRequirement,
 	type SessionRequirement,
 	type SessionRequirementResolver,
+	sealRegisteredReach,
 	snapshotReach,
 } from "../requirement.mjs";
 
@@ -40,11 +45,12 @@ import {
  * The resolver a test hands a consumer: `requirements` by their names, in the
  * order given. Two of one name are refused, as boot refuses a duplicate
  * contribution. With `issuer`, each page is held to that origin. Each reach
- * is read once, here, and the resolver answers that snapshot.
+ * is read once, here, held to boot's rules unless `allowAnyReach`, and the
+ * resolver answers that snapshot.
  */
 export function resolverForTests(
 	requirements: readonly SessionRequirement[],
-	options: { readonly issuer?: string } = {},
+	options: { readonly issuer?: string; readonly allowAnyReach?: boolean } = {},
 ): SessionRequirementResolver {
 	if (!Array.isArray(requirements)) {
 		throw new RangeError("resolverForTests: requirements must be a list");
@@ -57,7 +63,16 @@ export function resolverForTests(
 			throw new RangeError(`resolverForTests: two requirements are named "${requirement.name}"`);
 		}
 		byName.set(requirement.name, requirement);
-		snapshotReach(requirement);
+		if (options.allowAnyReach === true) {
+			snapshotReach(requirement);
+			continue;
+		}
+		const reach = sealRegisteredReach(requirement);
+		if (requirement.name !== MFA_REQUIREMENT_NAME && reach.size > 0) {
+			throw new RangeError(
+				`resolverForTests: "${requirement.name}" reaches ${[...reach].join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session — pass allowAnyReach for a test of admission's own mechanics`,
+			);
+		}
 	}
 	return sessionRequirementResolverOver({
 		get: (name) => byName.get(name),
