@@ -32,7 +32,7 @@ Rules for a source directory's README — it describes the directory, not its fi
 
 When you change what a directory does, what it depends on or an invariant it keeps, update its README in the same PR. When you change what a file does, update its header comment.
 
-In `packages/core/src`, `boot/`, `federation-grants/`, `federations/`, `grants/`, `modules/manifest/`, `repositories/` and `user-sessions/` have a README of their own; every other directory directly under `src/` is described by `packages/core/src/README.md`, and every other nested directory by the README that describes its parent. `README.md` is the source of truth; a `README.ja.md` carries the same facts.
+In `packages/core/src`, `boot/`, `federation-grants/`, `federations/`, `grants/`, `modules/manifest/`, `repositories/`, `session-admission/` and `user-sessions/` have a README of their own; every other directory directly under `src/` is described by `packages/core/src/README.md`, and every other nested directory by the README that describes its parent. `README.md` is the source of truth; a `README.ja.md` carries the same facts.
 
 ## Development Process
 
