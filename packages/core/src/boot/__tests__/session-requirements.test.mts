@@ -286,7 +286,7 @@ describe("the three channels, three refusals (D3)", () => {
 	});
 
 	it.each(["sessionRequirements", "mfaFactors"] as const)(
-		"refuses a host contributionKinds entry for %s: session-requirement-kind-guarded",
+		"refuses a host contributionKinds entry for %s in createApp, before the kinds are merged and the manifests validated: session-requirement-kind-guarded",
 		async (kind) => {
 			const err = await refusal(
 				boot([], {}, { contributionKinds: { [kind]: hostCollector() } as never }),
@@ -297,6 +297,15 @@ describe("the three channels, three refusals (D3)", () => {
 				kind,
 				channel: "contributionKinds",
 			});
+			// Before stage 1: a module list that would not validate is not reached.
+			const first = await refusal(
+				createApp({
+					modules: [{ name: "" } as never],
+					bootstrapComponents: { config: config(), pathResolver: (p: string) => p } as never,
+					contributionKinds: { [kind]: hostCollector() } as never,
+				}),
+			);
+			expect(first.reason).toBe("session-requirement-kind-guarded");
 		},
 	);
 

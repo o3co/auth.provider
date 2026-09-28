@@ -615,9 +615,15 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 		expect(admission).toMatchObject({ outcome: "step_up", requirement: "a" });
 	});
 
-	it("met + step_up: the hint is every reachable value, whichever requirement's page is taken", async () => {
-		const admission = await ask([reaching("a", ["hwk", "mfa"])], [KBA, PHR, MFA]);
+	it("met + step_up: the hint is what the chosen requirement's reach alone can finish — not every value the union reaches", async () => {
+		const admission = await ask([reaching("a", ["hwk"]), reaching("b", ["mfa"])], [KBA, PHR, MFA]);
 		expect(admission).toMatchObject({
+			outcome: "step_up",
+			requirement: "a",
+			acrValues: [PHR],
+		});
+		// One requirement reaching both: both, in the request's order.
+		expect(await ask([reaching("a", ["hwk", "mfa"])], [KBA, PHR, MFA])).toMatchObject({
 			outcome: "step_up",
 			requirement: "a",
 			acrValues: [PHR, MFA],

@@ -368,11 +368,36 @@ describe("step 1 — the claim", () => {
 		expect(asked).toBe(0);
 	});
 
-	it("answers not_live (subject_mismatch) for a cookie without a subject: the three consumers that refuse it keep doing so, and the two that did not join them", async () => {
-		expect(await admitSession(deps(), request({ claim: cookie({ user: undefined }) }))).toEqual({
-			outcome: "not_live",
-			reason: "subject_mismatch",
-		});
+	it("answers not_live (no_subject) for a cookie without a subject, logged at warn with the action and nothing else, not audited: the three consumers that refuse it keep doing so, and the two that did not join them", async () => {
+		const { logger, lines } = recordingLogger();
+		const { sink, events } = recordingSink();
+		let read = 0;
+		const store = holding(session());
+		expect(
+			await admitSession(
+				deps({
+					userSessionStore: {
+						...store,
+						get: async (sid) => {
+							read++;
+							return store.get(sid);
+						},
+					},
+					logger,
+					auditSink: sink,
+				}),
+				request({ claim: cookie({ user: undefined }) }),
+			),
+		).toEqual({ outcome: "not_live", reason: "no_subject" });
+		expect(read).toBe(0);
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_no_subject",
+				fields: { action: "oauth.authorize" },
+			},
+		]);
+		expect(events).toEqual([]);
 	});
 
 	it("does not ask a subject of a code claim's first read, which has none", async () => {

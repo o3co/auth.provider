@@ -57,6 +57,7 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 		primary: {
 			subject: "user-1",
 			user: { id: "user-1", groups: ["staff"] },
+			claims: { email: "user-1@example.test" },
 			recorded: {
 				amr: ["pwd"],
 				authentication: {

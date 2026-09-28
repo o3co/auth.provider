@@ -58,6 +58,7 @@ const TX = (id: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
 		primary: {
 			subject: "user-1",
 			user: { id: "user-1" },
+			claims: { email: "user-1@example.test" },
 			recorded: {
 				amr: ["pwd"],
 				authentication: {
