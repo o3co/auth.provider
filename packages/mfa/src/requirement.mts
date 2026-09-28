@@ -71,10 +71,10 @@ import {
 import type { LoginInterruption, LoginTransactions } from "./transactions.mjs";
 
 /** The remediation the MFA page's step-up call admits with (D4): `POST /session/mfa/step-up`, build-order step 11. */
-export const MFA_STEP_UP_REMEDIATION = `${MFA_REQUIREMENT_NAME}.step_up`;
+const MFA_STEP_UP_REMEDIATION = `${MFA_REQUIREMENT_NAME}.step_up`;
 
 /** The hint keys a first binding's answer carries (D5; the MFA ADR's F3). */
-export const MFA_HINT_KEYS = ["enrollable", "email_proof"] as const;
+const MFA_HINT_KEYS = ["enrollable", "email_proof"] as const;
 
 /** The two modes the requirement is registered under: `off` is refused by the module. */
 export type MfaRequirementMode = "optional" | "required";
@@ -102,7 +102,7 @@ const STEP_UP: RequirementVerdict = Object.freeze({
 const GRANTS_NOTHING: ReadonlySet<string> = new Set(["device.lookup", "device.deny"]);
 
 /** The `amr` values a step-up through the installed factors can add: each one's `amrValues`, and `mfa` when one adds it. */
-export function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
+function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
 	const reach = new Set<string>();
 	for (const [, factor] of factors.entries()) {
 		for (const value of factor.amrValues) reach.add(value);

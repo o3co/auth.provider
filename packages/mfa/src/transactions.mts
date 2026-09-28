@@ -54,7 +54,7 @@ const TRANSACTION_ID_BYTES = 32;
 export const MFA_TRANSACTION_TTL_SECONDS = { min: 60, max: 1800 } as const;
 
 /** A new transaction id: 32 bytes from the CSPRNG, base64url. Never in a URL. */
-export const newTransactionId = (): string =>
+const newTransactionId = (): string =>
 	randomBytes(TRANSACTION_ID_BYTES).toString("base64url");
 
 /** What the login is interrupted for: a second factor, or a first binding with what it may bind. */
