@@ -91,7 +91,9 @@
  * `session_admission_unavailable`, with the `store` (`user_session`,
  * `revocation_boundary`, or a requirement's name) and the `action`, when the
  * session's part could not be answered — written through this router's
- * logger bound to the flow's `grantId` and the request's `correlationId`. A record of another subject than the
+ * logger bound to the flow's `grantId`, the request's `correlationId` and,
+ * at the consent, its `method`. Admission's audit event is registered with
+ * the shutdown drain, as the route's own are. A record of another subject than the
  * cookie's is admission's warn, `session_admission_subject_mismatch`, and its
  * audit event. A client registry that cannot answer is core's
  * `client_repository_unavailable`, with this route as its `site`. A failure
@@ -130,6 +132,7 @@ import {
 	parseScopeTokens,
 	type RateLimiter,
 	type RateLimitFailMode,
+	recordAuditEvent,
 	type SessionClaim,
 	type SessionRequirementResolver,
 	type SubjectRevocation,
@@ -143,7 +146,7 @@ import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
-import { createFederationGrantLog } from "./log.mjs";
+import { createFederationGrantLog, type LogFields } from "./log.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
 import { parserRefusals, unexpectedErrors } from "./routes.mjs";
 
@@ -438,25 +441,54 @@ export function createFederationGrantBrowserRouter(
 	// Refused where the composition is assembled, not answered 500 on every
 	// request: a missing resolver, or one the planner did not build.
 	const requirements = checkResolver(options.requirements);
+	// The sessions boundary is read by admission only when it is handed one:
+	// without it, a session the boundary has ended would be admitted. The
+	// module always hands the subject revocation it requires; a router built
+	// by hand without one is refused here, as it was when the boundary was a
+	// required function of its own.
+	const subjectRevocation = options.subjectRevocation;
+	if (typeof subjectRevocation !== "object" || subjectRevocation === null) {
+		throw new TypeError(
+			"createFederationGrantBrowserRouter: subjectRevocation is required — the sessions " +
+				"boundary a session must have authenticated after (D13) is read through it",
+		);
+	}
 	const now = options.now ?? (() => new Date());
 	const randomId = options.randomId ?? (() => randomBytes(32).toString("base64url"));
 	const log = createFederationGrantLog(options.logger);
 	/**
-	 * Admission's dependencies for one request of one flow: this router's own
-	 * slots and clock, and its logger bound to the flow's grant and this
-	 * request's correlation id, so the line admission writes for an outage
-	 * carries them as the route's own lines do.
+	 * The audit sink admission writes through: the deployment's, with every
+	 * write registered with the drain, as this router's own audit writes are
+	 * (`auditFor`, D12) — a shutdown that has begun waits for the
+	 * subject-mismatch event admission records as it waits for the route's.
 	 */
-	const admissionFor = (flow: {
-		readonly grantId: string;
-		readonly correlationId: string;
-	}): AdmissionDeps => ({
+	const auditSink = options.auditSink;
+	const drainedAuditSink: AuditSink | undefined =
+		auditSink === undefined
+			? undefined
+			: {
+					kind: auditSink.kind,
+					record: (event) => {
+						// Through core's `recordAuditEvent`, the one writer of a sink.
+						const written = recordAuditEvent(auditSink, event);
+						options.background.register(written.catch(() => undefined));
+						return written;
+					},
+				};
+	/**
+	 * Admission's dependencies for one request of one flow: this router's own
+	 * slots and clock, the drained audit sink, and its logger bound to the
+	 * flow's grant and this request's correlation id — and, at the consent,
+	 * its method — so the line admission writes for an outage carries them as
+	 * the route's own lines do.
+	 */
+	const admissionFor = (flow: LogFields): AdmissionDeps => ({
 		userSessionStore: options.userSessionStore,
-		subjectRevocation: options.subjectRevocation,
+		subjectRevocation,
 		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger: log.bound(flow),
-		auditSink: options.auditSink,
+		auditSink: drainedAuditSink,
 		now,
 	});
 	const router = express.Router();
@@ -752,7 +784,11 @@ export function createFederationGrantBrowserRouter(
 		}
 		const judged = await judge(
 			options,
-			admissionFor({ grantId: intent.grantId, correlationId: requestIdOf(res) }),
+			admissionFor({
+				method: req.method,
+				grantId: intent.grantId,
+				correlationId: requestIdOf(res),
+			}),
 			req,
 			claim,
 			CONSENT,
