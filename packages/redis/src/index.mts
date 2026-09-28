@@ -57,18 +57,27 @@ export type {
 	FederationGrantStoreClient,
 	FederationTokenStoreClient,
 	GrantConsentInput,
+	MfaFactorRecordUpdateInput,
+	MfaFactorStoreClient,
+	MfaSubjectKeys,
+	MfaTransactionStoreClient,
+	MfaTransactionUpdateInput,
 	NameFederationGrantIntentInput,
 	NoteFederationGrantRefreshFailureInput,
+	NoteMfaExemptSuccessInput,
 	ParkPendingConsentInput,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,
 	RateLimiterClient,
 	RateLimitIncrement,
+	RedisDurability,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaceFederationGrantCredentialsInput,
 	ReplaySeenSetClient,
 	RequireFederationGrantReauthorizationInput,
+	ReserveMfaSubjectAttemptInput,
+	ReserveMfaSubjectAttemptReply,
 	RetireFederationGrantIntentInput,
 	RevokeFederationGrantInput,
 	SessionRPRegistryClient,
@@ -165,6 +174,23 @@ export {
 	redisFederationTokenStoreModule,
 	redisFederationTokenStoreModuleFor,
 } from "./federation-tokens.mjs";
+// ---------------------------------------------------------------------------
+// MFA (the MFA ADR's D7, D8, D12): enrolled second factors, and the
+// transactions, subject lock and email-proof requirement beside them. Each
+// module checks the server's eviction policy and persistence at boot.
+// ---------------------------------------------------------------------------
+export {
+	createRedisMfaFactorStore,
+	DEFAULT_REDIS_MFA_FACTOR_STORE_KEY_PREFIX,
+	type RedisMfaFactorStoreOptions,
+	redisMfaFactorStoreModule,
+} from "./mfa-factor-store.mjs";
+export {
+	createRedisMfaTransactionStore,
+	DEFAULT_REDIS_MFA_TRANSACTION_STORE_KEY_PREFIX,
+	type RedisMfaTransactionStoreOptions,
+	redisMfaTransactionStoreModule,
+} from "./mfa-transaction-store.mjs";
 export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
 // ---------------------------------------------------------------------------
 // RateLimiter (Phase 10 Q3).
