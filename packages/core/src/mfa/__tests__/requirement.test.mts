@@ -51,12 +51,17 @@ const TABLE: AcrTable = readAcrTable({
 	[KBA]: ["kba"],
 });
 
-/** What the installed factors can add (`mfaCoordinator.secondFactorMethods`). */
+/**
+ * What the installed factors can add (`mfaCoordinator.secondFactorMethods`):
+ * each factor's values, and `mfa` when one of them adds it.
+ */
 const FACTORS = {
 	/** TOTP, WebAuthn and recovery codes. */
 	installed: new Set(["otp", "hwk", "swk", "recovery", "mfa"]),
 	/** TOTP and recovery codes: no factor adds `hwk` or `swk`. */
 	withoutWebAuthn: new Set(["otp", "recovery", "mfa"]),
+	/** Email codes alone, which do not add `mfa` (O7). */
+	emailOnly: new Set(["email"]),
 	/** No coordinator: nothing can step a session up. */
 	none: undefined,
 } as const;
@@ -201,6 +206,14 @@ describe("decideMfaRequirement — D17's rows", () => {
 			expected: { outcome: "step_up", requirement: "acr", acrValues: [MFA] },
 		},
 		{
+			row: "acr_values=mfa · an email-only login, and no installed factor adds mfa → unmet",
+			mode: "required",
+			session: passwordSession(["pwd", "email"], minutesAgo(1)),
+			acrValues: [MFA],
+			factors: "emailOnly",
+			expected: { outcome: "unmet", requirement: "acr" },
+		},
+		{
 			row: "nothing requested · an email-only login meets the baseline (O7)",
 			mode: "required",
 			session: passwordSession(["pwd", "email"], minutesAgo(1)),
@@ -280,10 +293,51 @@ describe("decideMfaRequirement — the baseline beside acr_values (D16)", () => 
 			expected: { outcome: "unmet", requirement: "baseline" },
 		},
 		{
-			row: "a session of unknown primary is re-authenticated before any acr is weighed",
+			row: "a session of unknown primary is re-authenticated before any acr in the table is weighed",
 			mode: "required",
 			session: { authentication: undefined, amr: ["hwk"] },
 			acrValues: [PHR],
+			factors: "installed",
+			expected: { outcome: "reauthenticate" },
+		},
+		...["PWD", "", "magiclink", "hwk"].map(
+			(primary): Row => ({
+				row: `a primary the baseline does not know (${JSON.stringify(primary)}) is re-authenticated, never met`,
+				mode: "required",
+				session: {
+					authentication: {
+						primary,
+						federation: undefined,
+						upstreamAmr: undefined,
+						mfaAt: undefined,
+					},
+					amr: ["pwd"],
+				},
+				factors: "installed",
+				expected: { outcome: "reauthenticate" },
+			}),
+		),
+		{
+			row: "a request no value of which the table carries is unmet before a missing session is re-authenticated",
+			mode: "required",
+			session: null,
+			acrValues: ["urn:nope", "constructor"],
+			factors: "installed",
+			expected: { outcome: "unmet", requirement: "acr" },
+		},
+		{
+			row: "a request no value of which the table carries is unmet before an unknown primary is re-authenticated",
+			mode: "required",
+			session: { authentication: undefined, amr: ["pwd"] },
+			acrValues: ["urn:nope"],
+			factors: "installed",
+			expected: { outcome: "unmet", requirement: "acr" },
+		},
+		{
+			row: "one value the table carries is enough to re-authenticate a missing session: a new login may meet it",
+			mode: "required",
+			session: null,
+			acrValues: ["urn:nope", PWD],
 			factors: "installed",
 			expected: { outcome: "reauthenticate" },
 		},
@@ -382,12 +436,20 @@ describe("decideMfaRequirement — any-of entries and step-up targets (D15, D16)
 			expected: { outcome: "step_up", requirement: "acr", acrValues: [PHR, MFA] },
 		},
 		{
-			row: "mfa is within a step-up's reach whenever a coordinator is installed (D16's ∪ {mfa})",
+			row: "mfa is within a step-up's reach when an installed factor adds it",
 			mode: "optional",
 			session: passwordSession(["pwd"]),
 			acrValues: [MFA],
 			factors: "withoutWebAuthn",
 			expected: { outcome: "step_up", requirement: "acr", acrValues: [MFA] },
+		},
+		{
+			row: "mfa is out of reach when no installed factor adds it, coordinator or not",
+			mode: "optional",
+			session: passwordSession(["pwd"]),
+			acrValues: [MFA],
+			factors: "emailOnly",
+			expected: { outcome: "unmet", requirement: "acr" },
 		},
 		{
 			row: "a value the step-up cannot add keeps an entry out of reach: pwd is the primary's",
@@ -423,6 +485,21 @@ describe("selectAcr — D15's selection over what the session vouches for", () =
 
 	it("never steps up without a step-up to take: an empty reach leaves an unmet entry unmet", () => {
 		expect(selectAcr([MFA], ["pwd"], TABLE, new Set())).toEqual({ outcome: "unmet" });
+	});
+
+	it("never meets, and never steps up to, an alternative that requires nothing", () => {
+		// `AcrTable` is a structural type: a table built by hand rather than by
+		// `readAcrTable` can hold `[]`, and `[].every(…)` is true — an entry that
+		// would vouch for every session.
+		const handBuilt: AcrTable = { [KBA]: [[]], [PHR]: [[], ["hwk"]] };
+		expect(selectAcr([KBA], [], handBuilt, new Set(["mfa"]))).toEqual({ outcome: "unmet" });
+		expect(selectAcr([KBA], ["pwd", "mfa"], handBuilt, new Set())).toEqual({ outcome: "unmet" });
+		expect(selectAcr([PHR], ["pwd"], handBuilt, new Set())).toEqual({ outcome: "unmet" });
+		expect(selectAcr([PHR], ["pwd"], handBuilt, new Set(["hwk"]))).toEqual({
+			outcome: "step_up",
+			acrValues: [PHR],
+		});
+		expect(selectAcr([PHR], ["hwk"], handBuilt, new Set())).toEqual({ outcome: "met", acr: PHR });
 	});
 });
 
@@ -482,26 +559,61 @@ describe("readAcrTable — `oauth.authorize.acrValues` as the rule reads it", ()
 });
 
 describe("producibleAmr — what something installed can put in a session's amr (D15)", () => {
-	it("is pwd and fed without MFA or a trusted federation", () => {
-		const producible = producibleAmr({ secondFactorMethods: undefined, trustedFederation: false });
+	it("is pwd alone without MFA or a federation: no federation callback writes fed", () => {
+		const producible = producibleAmr({
+			secondFactorMethods: undefined,
+			federationInstalled: false,
+			trustedFederation: false,
+		});
+		expect(producible.anything).toBe(false);
+		expect([...producible.values]).toEqual(["pwd"]);
+	});
+
+	it("adds fed once a federation is installed, and nothing else for one whose upstream amr does not count", () => {
+		const producible = producibleAmr({
+			secondFactorMethods: undefined,
+			federationInstalled: true,
+			trustedFederation: false,
+		});
 		expect(producible.anything).toBe(false);
 		expect([...producible.values].sort()).toEqual(["fed", "pwd"]);
 	});
 
-	it("adds the installed factors' values and mfa with a coordinator", () => {
-		const producible = producibleAmr({
+	it("adds what the installed factors add — mfa only when the coordinator says one of them adds it", () => {
+		const emailOnly = producibleAmr({
 			secondFactorMethods: new Set(["email"]),
+			federationInstalled: false,
 			trustedFederation: false,
 		});
-		expect([...producible.values].sort()).toEqual(["email", "fed", "mfa", "pwd"]);
+		expect([...emailOnly.values].sort()).toEqual(["email", "pwd"]);
+		const totp = producibleAmr({
+			secondFactorMethods: new Set(["otp", "mfa"]),
+			federationInstalled: false,
+			trustedFederation: false,
+		});
+		expect([...totp.values].sort()).toEqual(["mfa", "otp", "pwd"]);
 	});
 
 	it("is anything once a federation whose upstream amr counts is installed", () => {
 		// An upstream IdP may assert any value, and a trusted one is recorded
 		// beside `fed` (D13). Until the upstream split every federation is.
 		expect(
-			producibleAmr({ secondFactorMethods: undefined, trustedFederation: true }).anything,
+			producibleAmr({
+				secondFactorMethods: undefined,
+				federationInstalled: true,
+				trustedFederation: true,
+			}).anything,
 		).toBe(true);
+	});
+
+	it("refuses a trusted federation that is not installed", () => {
+		expect(() =>
+			producibleAmr({
+				secondFactorMethods: undefined,
+				federationInstalled: false,
+				trustedFederation: true,
+			}),
+		).toThrow(RangeError);
 	});
 });
 
@@ -515,13 +627,15 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 	});
 	const nothingInstalled = producibleAmr({
 		secondFactorMethods: undefined,
+		federationInstalled: false,
 		trustedFederation: false,
 	});
 
-	it("keeps what pwd and fed meet and drops the rest, saying what no module produces", () => {
+	it("keeps what pwd meets and drops the rest, saying what no module produces", () => {
 		const { table, dropped } = vouchableAcrTable(configured, nothingInstalled);
-		expect(Object.keys(table)).toEqual([PWD, "urn:example:fed"]);
+		expect(Object.keys(table)).toEqual([PWD]);
 		expect(dropped).toEqual([
+			{ acr: "urn:example:fed", unproducible: ["fed"], forWantOfSecondFactor: false },
 			{ acr: MFA, unproducible: ["mfa"], forWantOfSecondFactor: true },
 			{ acr: PHR, unproducible: ["hwk", "swk"], forWantOfSecondFactor: true },
 			{ acr: KBA, unproducible: ["kba"], forWantOfSecondFactor: false },
@@ -531,17 +645,33 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 	it("keeps an entry the installed factors meet, and drops one they do not", () => {
 		const totpOnly = producibleAmr({
 			secondFactorMethods: new Set(["otp", "recovery", "mfa"]),
+			federationInstalled: false,
 			trustedFederation: false,
 		});
 		const { table, dropped } = vouchableAcrTable(configured, totpOnly);
-		expect(Object.keys(table)).toEqual([PWD, "urn:example:fed", MFA]);
-		expect(dropped.map((entry) => entry.acr)).toEqual([PHR, KBA]);
+		expect(Object.keys(table)).toEqual([PWD, MFA]);
+		expect(dropped.map((entry) => entry.acr)).toEqual(["urn:example:fed", PHR, KBA]);
+	});
+
+	it("keeps a fed entry once a federation is installed, and drops what its IdP's amr would meet when that does not count", () => {
+		const untrusted = producibleAmr({
+			secondFactorMethods: undefined,
+			federationInstalled: true,
+			trustedFederation: false,
+		});
+		const { table, dropped } = vouchableAcrTable(configured, untrusted);
+		expect(Object.keys(table)).toEqual([PWD, "urn:example:fed"]);
+		expect(dropped.map((entry) => entry.acr)).toEqual([MFA, PHR, KBA]);
 	});
 
 	it("drops nothing when an installed federation's upstream amr counts", () => {
 		const { table, dropped } = vouchableAcrTable(
 			configured,
-			producibleAmr({ secondFactorMethods: undefined, trustedFederation: true }),
+			producibleAmr({
+				secondFactorMethods: undefined,
+				federationInstalled: true,
+				trustedFederation: true,
+			}),
 		);
 		expect({ ...table }).toEqual({ ...configured });
 		expect(dropped).toEqual([]);
@@ -575,6 +705,29 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 		expect(dropped).toEqual([
 			{ acr: KBA, unproducible: ["kba", "mfa"], forWantOfSecondFactor: false },
 		]);
+	});
+
+	it("reads an alternative that requires nothing as one nothing can meet", () => {
+		// A table built by hand: `readAcrTable` never makes one.
+		const { table, dropped } = vouchableAcrTable(
+			{ [KBA]: [[]], [PHR]: [[], ["hwk"]], [PWD]: [[], ["pwd"]] },
+			nothingInstalled,
+		);
+		expect(Object.keys(table)).toEqual([PWD]);
+		expect(dropped).toEqual([
+			{ acr: KBA, unproducible: [], forWantOfSecondFactor: false },
+			{ acr: PHR, unproducible: ["hwk"], forWantOfSecondFactor: true },
+		]);
+		// Even under a trusted federation, which can produce anything.
+		const trusted = vouchableAcrTable(
+			{ [KBA]: [[]] },
+			producibleAmr({
+				secondFactorMethods: undefined,
+				federationInstalled: true,
+				trustedFederation: true,
+			}),
+		);
+		expect(Object.keys(trusted.table)).toEqual([]);
 	});
 
 	it("builds a new table with no prototype and leaves the configured one as it was", () => {
