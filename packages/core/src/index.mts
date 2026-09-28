@@ -545,6 +545,21 @@ export {
 	MfaTransactionStoreFullError,
 } from "./mfa/memoryTransactionStore.mjs";
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
+// The requirement rule (the MFA ADR's D15, D16): the baseline and acr_values,
+// asked the same way by every consumer of an authenticated browser session.
+export {
+	type AcrRequirement,
+	type AcrSelection,
+	type AcrTable,
+	decideMfaRequirement,
+	type MfaMode,
+	type MfaRequirementDecision,
+	type MfaRequirementInput,
+	type MfaRequirementSession,
+	readAcrTable,
+	selectAcr,
+	stepUpReach,
+} from "./mfa/requirement.mjs";
 export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
@@ -877,9 +892,9 @@ export {
 export type {
 	CreateUserSessionInput,
 	RegisteredRP,
+	SessionAuthentication,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
-	SessionAuthentication,
 	SessionFederationIndex,
 	SessionFederationIndexFactory,
 	SessionRPRegistry,

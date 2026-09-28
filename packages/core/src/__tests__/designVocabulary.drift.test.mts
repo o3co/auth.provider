@@ -153,6 +153,17 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+composeAmr\b/,
 	},
 	{
+		concept:
+			"the requirement rule — the baseline and acr_values over one session (the MFA ADR's D16)",
+		home: "packages/core/src/mfa/requirement.mts",
+		definition: /(?:function|const)\s+decideMfaRequirement\b/,
+	},
+	{
+		concept: "the acr table — oauth.authorize.acrValues as it is read (the MFA ADR's D15)",
+		home: "packages/core/src/mfa/requirement.mts",
+		definition: /(?:function|const)\s+readAcrTable\b/,
+	},
+	{
 		concept: "how a session was established (the MFA ADR's D9)",
 		home: "packages/core/src/user-sessions/authentication.mts",
 		definition: /(?:function|const)\s+sessionAuthentication\b/,
