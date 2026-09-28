@@ -33,10 +33,11 @@ import {
 	type MfaRequirementSession,
 	producibleAmr,
 	readAcrTable,
+	readMfaMode,
 	selectAcr,
 	vouchableAcrTable,
 } from "#/mfa/requirement.mjs";
-import { sessionAuthentication, vouchedAmr } from "#/user-sessions/authentication.mjs";
+import { requirementSession } from "#/user-sessions/authentication.mjs";
 
 const MFA = "urn:o3co:acr:mfa";
 const PHR = "urn:o3co:acr:phr";
@@ -83,7 +84,7 @@ const federatedSession = (
 
 /** A record as it is stored today, read the one way every consumer reads it (D9). */
 const recorded = (amr: readonly string[]): MfaRequirementSession => {
-	const session = {
+	const input = requirementSession({
 		sid: "sid-1",
 		sub: "user-1",
 		authTime: minutesAgo(1),
@@ -91,8 +92,9 @@ const recorded = (amr: readonly string[]): MfaRequirementSession => {
 		expiresAt: new Date(Date.now() + 3_600_000),
 		claims: {},
 		amr,
-	};
-	return { authentication: sessionAuthentication(session), amr: vouchedAmr(session) };
+	});
+	if (input === null) throw new Error("a session reads as a session");
+	return input;
 };
 
 interface Row {
@@ -736,4 +738,24 @@ describe("vouchableAcrTable — an entry nothing installed can satisfy is droppe
 		expect(Object.getPrototypeOf(table)).toBeNull();
 		expect({ ...configured }).toEqual(before);
 	});
+});
+
+describe("readMfaMode — `mfa.mode` as a consumer reads it", () => {
+	it.each(["off", "optional", "required"] as const)("reads %s", (mode) => {
+		expect(readMfaMode({ mfa: { mode } })).toBe(mode);
+	});
+
+	it.each([
+		["no config", undefined],
+		["no mfa section", {}],
+		["no mode", { mfa: {} }],
+		["a mode it does not know", { mfa: { mode: "maybe" } }],
+		["a casing slip", { mfa: { mode: "Required" } }],
+		["a non-string", { mfa: { mode: true } }],
+	])(
+		"answers undefined for %s: the schema refuses it at boot, and the caller decides",
+		(_label, config) => {
+			expect(readMfaMode(config)).toBeUndefined();
+		},
+	);
 });

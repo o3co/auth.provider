@@ -24,7 +24,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { sessionAuthentication, vouchedAmr } from "#/user-sessions/authentication.mjs";
+import {
+	requirementSession,
+	sessionAuthentication,
+	vouchedAmr,
+} from "#/user-sessions/authentication.mjs";
 import type { UserSession } from "#/user-sessions/types.mjs";
 
 const session = (amr: readonly string[] | undefined): UserSession => ({
@@ -86,5 +90,33 @@ describe("vouchedAmr — the amr this provider vouches for (D9, D13)", () => {
 
 	it("is empty for a session that recorded no amr", () => {
 		expect(vouchedAmr(session(undefined))).toEqual([]);
+	});
+});
+
+describe("requirementSession — the requirement rule's input, built only through the D9 reading", () => {
+	it("is sessionAuthentication and vouchedAmr of the session", () => {
+		const recorded = session(["pwd", "otp"]);
+		expect(requirementSession(recorded)).toEqual({
+			authentication: sessionAuthentication(recorded),
+			amr: vouchedAmr(recorded),
+		});
+	});
+
+	it("carries the vouched amr, never the record's own array", () => {
+		const recorded = session(["hwk", "fed"]);
+		const input = requirementSession(recorded);
+		expect(input?.amr).toEqual(["hwk", "fed"]);
+		expect(input?.amr).not.toBe(recorded.amr);
+	});
+
+	it("keeps an unknown primary unknown", () => {
+		expect(requirementSession(session(["hwk"]))).toEqual({
+			authentication: undefined,
+			amr: ["hwk"],
+		});
+	});
+
+	it("is null for no session: no sid, or no store", () => {
+		expect(requirementSession(null)).toBeNull();
 	});
 });

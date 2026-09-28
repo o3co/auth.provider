@@ -164,6 +164,26 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+readAcrTable\b/,
 	},
 	{
+		concept: "D15's selection of an acr over what a session vouches for",
+		home: "packages/core/src/mfa/requirement.mts",
+		definition: /(?:function|const)\s+selectAcr\b/,
+	},
+	{
+		concept: "the acr table less the entries nothing installed can satisfy (the MFA ADR's D15)",
+		home: "packages/core/src/mfa/requirement.mts",
+		definition: /(?:function|const)\s+vouchableAcrTable\b/,
+	},
+	{
+		concept: "mfa.mode as a consumer reads it (the MFA ADR's D19)",
+		home: "packages/core/src/mfa/requirement.mts",
+		definition: /(?:function|const)\s+readMfaMode\b/,
+	},
+	{
+		concept: "the amr a verified second factor adds when it adds mfa — mfa (the MFA ADR's D14)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+MFA_AMR\b/,
+	},
+	{
 		concept: "how a session was established (the MFA ADR's D9)",
 		home: "packages/core/src/user-sessions/authentication.mts",
 		definition: /(?:function|const)\s+sessionAuthentication\b/,
@@ -172,6 +192,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "the amr this provider vouches for in a session (the MFA ADR's D9, D13)",
 		home: "packages/core/src/user-sessions/authentication.mts",
 		definition: /(?:function|const)\s+vouchedAmr\b/,
+	},
+	{
+		concept: "the requirement rule's input, built through the D9 reading (the MFA ADR's D9, D16)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+requirementSession\b/,
 	},
 	{
 		concept: "secret entropy floor — measuring a secret (#282)",
