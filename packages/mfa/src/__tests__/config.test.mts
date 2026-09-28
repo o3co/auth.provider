@@ -250,6 +250,35 @@ describe("the development sample key (D11, #473's rule)", () => {
 		}
 	});
 
+	it("reads the environment's name whatever its case and the whitespace around it", () => {
+		vi.stubEnv("NODE_ENV", "development");
+		for (const environment of [
+			"Production",
+			" production",
+			"production\n",
+			"Staging",
+			"STAGING",
+			"\tstaging ",
+		]) {
+			const message = refusal(() => readMfaSettings(sample(), { environment }));
+			expect(message, JSON.stringify(environment)).toMatch(
+				/sample key.*the environment is "(production|staging)"/,
+			);
+		}
+		for (const nodeEnv of ["Production", " staging\n"]) {
+			vi.stubEnv("NODE_ENV", nodeEnv);
+			expect(
+				refusal(() => readMfaSettings(sample())),
+				JSON.stringify(nodeEnv),
+			).toMatch(/the environment is "(production|staging)"/);
+		}
+	});
+
+	it("keeps #473's two names: an alias such as prod is not one of them", () => {
+		vi.stubEnv("NODE_ENV", "development");
+		expect(readMfaSettings(sample(), { environment: "prod" }).encryptionKeys).toHaveLength(1);
+	});
+
 	it("is refused under deployment.mode = multi, in any environment", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		const message = refusal(() =>
