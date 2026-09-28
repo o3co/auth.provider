@@ -2871,7 +2871,9 @@ end
 
 -- Forgets what no longer counts at horizon: the week's failures and the
 -- trusts that ended before it, and the reservations nothing counts any more.
+-- Answers what is kept, and whether anything was forgotten.
 local function prune(run, pending, trusts, week, horizon, days)
+  local forgot = false
   local kept_week, in_week = {}, {}
   for _, a in ipairs(week) do
     if a.at + WEEK > horizon then
@@ -2879,6 +2881,7 @@ local function prune(run, pending, trusts, week, horizon, days)
       in_week[a.id] = true
     else
       redis.call('ZREM', KEYS[2], a.id)
+      forgot = true
     end
   end
   local kept_trusts = {}
@@ -2887,6 +2890,7 @@ local function prune(run, pending, trusts, week, horizon, days)
       kept_trusts[#kept_trusts + 1] = t
     else
       redis.call('HDEL', KEYS[1], 't:' .. t.digest)
+      forgot = true
     end
   end
   local in_run = {}
@@ -2895,9 +2899,10 @@ local function prune(run, pending, trusts, week, horizon, days)
     if not in_run[id] and not in_week[id] then
       redis.call('HDEL', KEYS[1], 'p:' .. id)
       pending[id] = nil
+      forgot = true
     end
   end
-  return kept_week, kept_trusts
+  return kept_week, kept_trusts, forgot
 end
 
 -- Sets what Redis reclaims: no TTL while a run is counted; else a day past
@@ -2948,10 +2953,13 @@ local threshold, base, max_s, memory_s = num(ARGV[2]), num(ARGV[3]), num(ARGV[4]
 local budget, hard, days = num(ARGV[6]), num(ARGV[7]), num(ARGV[8])
 local digest, id = ARGV[9], ARGV[10]
 local run, pending, trusts, week = load()
-week, trusts = prune(run, pending, trusts, week, math.min(now, server_ms()) - SKEW, days)
+local forgot
+week, trusts, forgot = prune(run, pending, trusts, week, math.min(now, server_ms()) - SKEW, days)
 
+-- A refusal writes nothing of its own: the deadlines are set again only when
+-- the prune forgot something, so a held subject hammered is no write load.
 if #run >= hard then
-  keep()
+  if forgot then keep() end
   return {'held', 'hard', ''}
 end
 
@@ -3000,7 +3008,7 @@ if not trusted then
 end
 
 if backoff ~= nil or weekly ~= nil then
-  keep()
+  if forgot then keep() end
   -- The hold that ends later decides when to come back.
   if (weekly or -math.huge) >= (backoff or -math.huge) then
     return {'held', 'weekly', fmt(weekly - now)}
