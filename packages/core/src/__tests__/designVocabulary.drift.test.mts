@@ -831,7 +831,8 @@ function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecor
 			ts.isTypeAssertionExpression(node) ||
 			ts.isNonNullExpression(node)
 		) {
-			return spreadsInto(node.expression);
+			spreadsInto(node.expression);
+			return;
 		}
 		if (ts.isConditionalExpression(node)) {
 			spreadsInto(node.whenTrue);
