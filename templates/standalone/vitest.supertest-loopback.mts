@@ -37,12 +37,17 @@
  * is sent (`end`, which `then` and `expect(..., fn)` go through). A server the
  * test started itself is never touched.
  *
- * Which version of supertest closes the server it started, and when, has
- * changed under this file once (7.3.0): 7.2 closed `_server` before asserting;
- * 7.3 tracks the servers it started itself in a private registry and closes
- * only those, so a server this file bound is left listening. The patched
- * `end` therefore closes the server this request started, before the test's
- * callback, whenever supertest has not — the same order either way.
+ * When the server supertest started is closed has changed under this file
+ * once (7.3.0). 7.2 closed it after the response of the request whose call
+ * bound it — for an agent, whose requests share one server, that is the first
+ * request, and any other still on its way has its connection reset (#703:
+ * ECONNRESET on Node 26). 7.3 counts the requests on each server it started
+ * and closes the server after the last of them settles, but only for servers
+ * in its own private registry, and a server this file bound is not in it. So
+ * this file keeps that count itself, for either version and without them:
+ * every request on a server bound here is counted from `end`, and the last to
+ * settle closes the server before its own callback, the order supertest keeps.
+ * A request built before that close and sent after it binds the server again.
  *
  * supertest is loaded from the package that owns the running test file (the
  * nearest `package.json` above it), so the patched class is the one that test
@@ -73,17 +78,25 @@ const LOOPBACK = "127.0.0.1";
 const PATCHED = Symbol.for("o3co.auth.provider.supertest-loopback");
 const PENDING = Symbol("o3co.auth.provider.supertest-loopback.pending");
 
+/** A server this file bound, from its `listen` until the last request on it settles. */
+type Bound = {
+	/** Settles on `listening`, rejects on a listen `error`. */
+	readonly ready: Promise<unknown>;
+	/** The requests sent over it that have not settled. */
+	pending: number;
+	/** Set once the last of them has closed it. */
+	closed: boolean;
+};
+
 type Pending = {
 	readonly server: Server;
 	readonly protocol: string;
 	readonly path: string;
-	/** Settles on `listening`, rejects on a listen `error`. */
-	readonly ready: Promise<unknown>;
+	readonly bound: Bound;
 };
 
 type TestInstance = {
 	url: string;
-	_server?: Server;
 	[PENDING]?: Pending;
 };
 
@@ -141,12 +154,30 @@ function supertestFor(testPath: string): TestPrototype | undefined {
 }
 
 /**
- * The bind in progress per server. A second request on a server whose bind has
- * not finished (an agent's requests sent together share one server) waits on
- * the same bind instead of calling `listen` twice — and, like unpatched
- * supertest when it finds a server already listening, does not own it.
+ * The servers this file bound, each until the last request on it closes it.
+ * A request on a server whose bind has not finished (an agent's requests sent
+ * together share one server) waits on that bind instead of calling `listen`
+ * twice, and one sent while the server is serving others joins their count.
  */
-const binding = new WeakMap<Server, Promise<unknown>>();
+const bound = new WeakMap<Server, Bound>();
+
+/** The server's bind in progress or in service, or a new one. */
+function share(server: Server): Bound {
+	const current = bound.get(server);
+	if (current) return current;
+	server.listen(0, LOOPBACK);
+	// Subscribed now, not in `end`: a listen error emitted before the test
+	// sends the request must still reach it, not crash the worker as an
+	// unhandled 'error' event.
+	const fresh: Bound = { ready: once(server, "listening"), pending: 0, closed: false };
+	bound.set(server, fresh);
+	// Once it has failed, the bind is left to the requests already waiting on
+	// it, each of which fails with its error; the next request binds again.
+	fresh.ready.catch(() => {
+		if (bound.get(server) === fresh) bound.delete(server);
+	});
+	return fresh;
+}
 
 /**
  * A throw from the test's own callback, raised where it cannot propagate to
@@ -165,27 +196,14 @@ function patch(proto: TestPrototype): void {
 	const originalEnd = proto.end;
 
 	proto.serverAddress = function serverAddress(app, path) {
-		// Already listening: the test owns the server and chose its address.
-		if (app.address()) return originalServerAddress.call(this, app, path);
+		// Listening, and not bound here: the test owns the server and chose its
+		// address.
+		if (!bound.has(app) && app.address()) return originalServerAddress.call(this, app, path);
 
+		// supertest is never told about this bind — neither 7.2's `_server` nor
+		// 7.3's registry — so neither closes the server; the patched `end` does.
 		const protocol = app instanceof TlsServer ? "https" : "http";
-		let ready = binding.get(app);
-		if (!ready) {
-			// supertest 7.2 closes `_server` after the response; 7.3 does not,
-			// and the callback in the patched `end` below closes it instead.
-			this._server = app.listen(0, LOOPBACK);
-			// Subscribed now, not in `end`: a listen error emitted before the test
-			// sends the request must still reach it, not crash the worker as an
-			// unhandled 'error' event.
-			const bound = once(app, "listening");
-			binding.set(app, bound);
-			bound.then(
-				() => binding.delete(app),
-				() => binding.delete(app),
-			);
-			ready = bound;
-		}
-		this[PENDING] = { server: app, protocol, path, ready };
+		this[PENDING] = { server: app, protocol, path, bound: share(app) };
 		// No port yet; `end` fills it in before anything is sent.
 		return `${protocol}://${LOOPBACK}${path}`;
 	};
@@ -195,17 +213,23 @@ function patch(proto: TestPrototype): void {
 		if (!pending) return originalEnd.call(this, fn);
 		this[PENDING] = undefined;
 
-		const { server, protocol, path, ready } = pending;
+		const { server, protocol, path } = pending;
+		// Built before the last request on its server closed it: bind it again.
+		const shared = pending.bound.closed ? share(server) : pending.bound;
+		shared.pending += 1;
 		let called = false;
 		const callback = (err: unknown, res?: unknown) => {
 			called = true;
-			// supertest 7.2 has closed the server it started by now, before the
-			// callback; 7.3 closes only servers in its own private registry, which
-			// this bind is not in. Close what this request started, if it is
-			// still open, before the callback — the order 7.2 kept.
-			if (this._server === server && server.listening) {
-				server.close(() => fn?.(err, res));
-				return;
+			// The last request on the server closes it, before its own callback —
+			// the order supertest keeps. A bind that failed has nothing to close.
+			shared.pending -= 1;
+			if (shared.pending === 0 && bound.get(server) === shared) {
+				bound.delete(server);
+				shared.closed = true;
+				if (server.listening) {
+					server.close(() => fn?.(err, res));
+					return;
+				}
 			}
 			fn?.(err, res);
 		};
@@ -218,16 +242,15 @@ function patch(proto: TestPrototype): void {
 		// this chain is one nobody awaits.
 		const fail = (err: unknown) => {
 			if (called) return rethrowOutsideThisChain(err);
-			// The request never went out, so supertest will not close the server
-			// this request started.
-			if (this._server?.listening) this._server.close();
+			// The request never went out; it still leaves the count, and closes
+			// the server if it was the last one on it.
 			try {
 				callback(err);
 			} catch (thrown) {
 				rethrowOutsideThisChain(thrown);
 			}
 		};
-		ready
+		shared.ready
 			.then(() => {
 				const { port } = server.address() as { port: number };
 				this.url = `${protocol}://${LOOPBACK}:${port}${path}`;
