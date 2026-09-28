@@ -281,7 +281,93 @@ const TOKEN_SIDE =
  * count, with why. `recordSecondFactor(` and `establishWithoutAsking(` are
  * not counted here: their callers are held to files by prefix below.
  */
-const ALLOWED: ReadonlyArray<AllowedSites> = [];
+const ALLOWED: ReadonlyArray<AllowedSites> = [
+	// The oauth consumers, until A3.
+	{
+		file: "packages/oauth/src/routes/authorize.mts",
+		sites: { get: 1, selectAcr: 1 },
+		why: `${UNTIL_A3}: readLiveSession's read and resolveAcr's selection`,
+	},
+	{
+		file: "packages/oauth/src/routes/consent.mts",
+		sites: { get: 1 },
+		why: `${UNTIL_A3}: refuseUnlessLive's read`,
+	},
+	{
+		file: "packages/oauth/src/grants/session.mts",
+		sites: { get: 1 },
+		why: `${UNTIL_A3}: the session grant's read of the tracked session`,
+	},
+	{
+		file: "packages/oauth/src/grants/authorization.mts",
+		sites: { get: 2 },
+		why: `${UNTIL_A3}: the authorization_code grant's two reads, before signing and before linking`,
+	},
+	{
+		file: "packages/oauth/src/grants/refreshToken.mts",
+		sites: { get: 1 },
+		why: `${UNTIL_A3}: the refresh grant's read by the token's sid (D9: it moves with A3, on tokenClaim)`,
+	},
+	// The token side of D9: not through admission in this release.
+	{
+		file: "packages/oauth/src/routes.mts",
+		sites: { get: 1 },
+		why: `${TOKEN_SIDE}: introspection's liveness read`,
+	},
+	{
+		file: "packages/oauth/src/routes/federationToken.mts",
+		sites: { get: 1 },
+		why: `${TOKEN_SIDE}: the federation-token route's read`,
+	},
+	{
+		file: "packages/oauth/src/routes/logout.mts",
+		sites: { get: 2 },
+		why: `${TOKEN_SIDE}: the two logout routes' reads`,
+	},
+	{
+		file: "packages/oauth/src/routes/userinfo.mts",
+		sites: { get: 1 },
+		why: `${TOKEN_SIDE}: userinfo's liveness read`,
+	},
+	{
+		file: "packages/oauth-token-exchange/src/grant.mts",
+		sites: { get: 1 },
+		why: `${TOKEN_SIDE}: the token-exchange grant's liveness read`,
+	},
+	{
+		file: "packages/device-grant/src/grant.mts",
+		sites: { revokedBefore: 1 },
+		why: `${TOKEN_SIDE}: the device_code grant's boundary read at the poll`,
+	},
+	// The token side's boundary, permanent.
+	{
+		file: "packages/core/src/jwt/verify.mts",
+		sites: { revokedBefore: 1 },
+		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9); a token carrier's admission skips the boundary because this reads it",
+	},
+	// Device verification and the federation-grants browser half, until A4.
+	{
+		file: "packages/device-grant/src/verificationEndpoint.mts",
+		sites: { get: 1, revokedBefore: 1 },
+		why: `${UNTIL_A4}: livenessOf's read and its boundary read`,
+	},
+	{
+		file: "packages/federation-grants/src/browserRoutes.mts",
+		sites: { get: 2 },
+		why: `${UNTIL_A4}: judge's read and the callback's re-read before activation`,
+	},
+	{
+		file: "packages/federation-grants/src/module.mts",
+		sites: { revokedBefore: 1 },
+		why: `${UNTIL_A4}: the sessions boundary handed to the browser routes (sessionsBoundaryFor)`,
+	},
+	// The link flow, until A5.
+	{
+		file: "packages/session/src/routes/Federation.mts",
+		sites: { get: 1 },
+		why: `${UNTIL_A5}: the link callback's read of the session the start bound`,
+	},
+];
 
 /** The files whose prefixes may call `recordSecondFactor(`: the two bundled stores, and the MFA package (D3, D10). */
 const RECORD_SECOND_FACTOR_CALLERS: readonly string[] = [
@@ -311,7 +397,7 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 			"const { userSessionStore: sessions } = options; await sessions.get(sid);",
 			"function f(store: UserSessionStore) { return store.get(sid); }",
 			"function f({ userSessionStore }: Options) { return userSessionStore.get(sid); }",
-			"const store = opts.userSessionStore; if (store) { const s = await (store as UserSessionStore).get(sid); }",
+			"async function f() { const store = opts.userSessionStore; if (store) { const s = await (store as UserSessionStore).get(sid); } }",
 			"const store = a ? opts.userSessionStore : undefined; store?.get(sid);",
 			"let store: UserSessionStore | undefined; store = undefined; store?.get(sid);",
 		]) {
@@ -377,7 +463,8 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		const home = [...sites].filter(([file]) => file.startsWith(HOME));
 		expect(home.length).toBeGreaterThan(0);
 		const inHome = counted(home.flatMap(([, s]) => s));
-		expect(inHome.claim).toBe(4);
+		// The four builders, and the contract suite's own live input.
+		expect(inHome.claim).toBe(5);
 		expect(inHome.selectAcr).toBe(1);
 		expect(inHome.get).toBe(1);
 		expect(inHome.revokedBefore).toBe(1);
