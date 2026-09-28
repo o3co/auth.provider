@@ -153,6 +153,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+composeAmr\b/,
 	},
 	{
+		concept: "how a session was established (the MFA ADR's D9)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+sessionAuthentication\b/,
+	},
+	{
+		concept: "the amr this provider vouches for in a session (the MFA ADR's D9, D13)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+vouchedAmr\b/,
+	},
+	{
 		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,

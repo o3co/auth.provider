@@ -84,6 +84,28 @@ export interface UserSession {
 }
 
 /**
+ * How a session was established (the MFA ADR's D9), as
+ * `sessionAuthentication` reads it: the primary authentication, which
+ * federation, what an untrusted upstream IdP asserted, and when a second
+ * factor was last verified in the session.
+ *
+ * Not yet a key of the record: the build order's step 5 adds it as
+ * `UserSession.authentication`, with the upstream split, in one change — so
+ * no release writes it beside an `amr` that still mixes in untrusted values.
+ * Until then every session is read from its `amr` (`./authentication.mts`).
+ */
+export interface SessionAuthentication {
+	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
+	readonly primary: string;
+	/** The federation, for `"fed"`. */
+	readonly federation: string | undefined;
+	/** What an untrusted upstream IdP asserted (D13): kept for the record, never stamped, never read for `acr`. */
+	readonly upstreamAmr: readonly string[] | undefined;
+	/** When a second factor was last verified — or bound (D24) — in this session. */
+	readonly mfaAt: Date | undefined;
+}
+
+/**
  * Parameters for creating a new session. `federations` field DELETED vs
  * v0.4.x — federations are added separately via
  * `SessionFederationIndex.addFederation` after session create. Per A4 §5.1.
