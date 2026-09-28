@@ -290,7 +290,12 @@ export interface SessionRequirement {
 	readonly hintKeys: readonly string[];
 	/** Use-time: a view of the session, read once by admission, and the action. Throws only on an outage. */
 	admit(input: RequirementInput): Promise<RequirementVerdict>;
-	/** Establishment-time (D5); absent when the requirement never interrupts a login. */
+	/**
+	 * Establishment-time (D5); absent when the requirement never interrupts a
+	 * login. Asked at most once per ceremony it could open: once its
+	 * interruption completes, `resumePrimary` does not ask it again in that
+	 * login.
+	 */
 	admitPrimary?(primary: PrimaryAuthentication): Promise<"establish" | RequirementInterruption>;
 }
 

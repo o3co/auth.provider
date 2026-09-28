@@ -26,7 +26,8 @@
  * `ADMISSION_ACTIONS` names the bundled actions with their grades.
  * `admitPrimary` asks the requirements that interrupt a login and answers
  * the `Establishment` `establishSession` requires; `resumePrimary` composes
- * what every completed requirement added and asks them all again;
+ * what every completed requirement added and asks, in order, every one not
+ * already done in this login;
  * `establishWithoutAsking` builds a federated login's establishment from
  * the federation's own facts; an interruption's `open` is wrapped, so its
  * answer is validated against the requirement's declared `hintKeys` before
@@ -1026,11 +1027,13 @@ const unavailableAtEstablishment = (
 };
 
 /**
- * Asks every requirement with `admitPrimary`, in registration order, about
- * `composed`: the first interruption wins, carrying `continuation` and an
- * `open` that validates the answer; a throw, or an answer that is neither
- * `establish` nor an interruption, is `unavailable`; when every one answered
- * `establish`, the establishment over `composed`.
+ * Asks every requirement with `admitPrimary` not already in `done`, in
+ * registration order, about `composed` — a requirement that completed its
+ * ceremony is done for this login, whatever it added, and is not asked
+ * again: the first interruption wins, carrying `continuation` and an `open`
+ * that validates the answer; a throw, or an answer that is neither
+ * `establish` nor an interruption, is `unavailable`; when every one asked
+ * answered `establish`, the establishment over `composed`.
  */
 async function askEvery(
 	deps: AdmissionDeps,
@@ -1039,9 +1042,10 @@ async function askEvery(
 	primary: PrimaryAuthentication,
 	done: readonly CompletedRequirement[],
 ): Promise<PrimaryAdmission> {
+	const completed = new Set(done.map((entry) => entry.requirement));
 	for (const [name, requirement] of requirements.entries()) {
 		const ask = requirement.admitPrimary;
-		if (ask === undefined) continue;
+		if (ask === undefined || completed.has(name)) continue;
 		let answer: unknown;
 		try {
 			answer = await ask.call(requirement, composed);
@@ -1148,10 +1152,10 @@ function composeRecorded(
  * `admitPrimary` — or one already in `done` — and what the name may not add
  * (`checkPrimaryAdditions`); then appends the completion, composes the
  * session's `recorded` from the primary and every completed requirement's
- * additions, and asks every requirement with `admitPrimary` again, in order,
- * over the composed result: a requirement that already completed sees its
- * own additions and answers `establish`; one that has not may interrupt,
- * with the updated continuation.
+ * additions, and asks, in order, every requirement with `admitPrimary` not
+ * already in `done` over the composed result — a requirement that completed
+ * is not asked again in this login, whatever it added; one that has not may
+ * interrupt, with the updated continuation.
  */
 export async function resumePrimary(
 	deps: AdmissionDeps,
