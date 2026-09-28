@@ -441,13 +441,21 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 				`mfaFactors "${name}": the factor's amrValues must be a list of non-empty strings`,
 			);
 		}
-		for (const entry of amrValues as readonly string[]) {
+		// A frozen copy of the list read here, validated: what the reach is
+		// recomputed from — never a second read of the factor, which a getter
+		// or a list mutated after registration could answer differently.
+		const snapshot = Object.freeze([...(amrValues as readonly string[])]);
+		for (const entry of snapshot) {
 			if (entry === PASSWORD_AMR || entry === FEDERATED_AMR || entry === MFA_AMR) {
 				throw new RangeError(
 					`mfaFactors "${name}": the factor's amrValues name "${entry}", which no factor produces — a primary's marker, or mfa, which addsMfa says`,
 				);
 			}
 		}
+		factorSnapshots.set(value as object, {
+			amrValues: snapshot,
+			addsMfa: (value as { addsMfa?: unknown }).addsMfa === true,
+		});
 		return value;
 	}
 	if (kind === "sessionRequirements") {
@@ -478,12 +486,31 @@ const MFA_PORTS = ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"]
 /** The remediation the MFA requirement's step-up route admits with (D4). */
 const MFA_STEP_UP = "mfa.step_up";
 
-/** The reach core recomputes from the enabled factors: each one's `amrValues`, and `mfa` when one adds it. */
+/**
+ * What each registered factor said at registration, read once there and
+ * validated: its `amrValues` (frozen) and whether it adds `mfa` — keyed by
+ * the value the factory returned, which is what the resolver answers.
+ */
+const factorSnapshots = new WeakMap<
+	object,
+	{ readonly amrValues: readonly string[]; readonly addsMfa: boolean }
+>();
+
+/**
+ * The reach core recomputes from the enabled factors — each one's
+ * `amrValues`, and `mfa` when one adds it — read from the snapshots taken at
+ * registration alone, never from the factor again. A factor that did not
+ * register through the name-keyed pass has none, and is refused.
+ */
 function reachOfFactors(resolver: MfaFactorResolver | undefined): ReadonlySet<string> {
 	const reach = new Set<string>();
-	for (const [, factor] of resolver?.entries() ?? []) {
-		for (const value of factor.amrValues) reach.add(value);
-		if (factor.addsMfa) reach.add(MFA_REQUIREMENT_NAME);
+	for (const [kind, factor] of resolver?.entries() ?? []) {
+		const snapshot = factorSnapshots.get(factor as object);
+		if (snapshot === undefined) {
+			throw new RangeError(`mfaFactors "${kind}": a factor core did not register at registration`);
+		}
+		for (const value of snapshot.amrValues) reach.add(value);
+		if (snapshot.addsMfa) reach.add(MFA_REQUIREMENT_NAME);
 	}
 	return reach;
 }
