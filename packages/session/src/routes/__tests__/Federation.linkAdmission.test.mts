@@ -203,7 +203,7 @@ function setup(options: Setup = {}): HarnessApp & { repo: LinkableRepo } {
 		...(options.auditSink ? { auditSink: options.auditSink } : {}),
 	});
 	const record = options.record === undefined ? live() : options.record;
-	harness.userSessionStore.get.mockImplementation(async () => {
+	vi.mocked(harness.userSessionStore.get).mockImplementation(async () => {
 		if (record instanceof Error) throw record;
 		return record;
 	});

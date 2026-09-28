@@ -23,16 +23,25 @@
  * establishes a session through `establishSession`
  * (`../establish-session.mts`), the tail it shares with `POST /session/login`,
  * adding the federation's index entry and upstream tokens as the steps of its
- * own; then redirects as the federation's redirect policy answers. The
- * package README says what each leg does and what a store's outage answers.
+ * own; then redirects as the federation's redirect policy answers. The link
+ * flow reads its session through core's session admission (the
+ * session-admission ADR's D8): the start as `session.link` over the cookie,
+ * recording the admitted `sid` and subject in the transaction, the callback
+ * as `session.link_callback` over that transaction. The package README says
+ * what each leg does and what a store's outage answers.
  */
 
 import { randomBytes } from "node:crypto";
 import {
+	ADMISSION_ACTIONS,
+	type Admission,
+	type AdmissionAction,
 	type AppConfig,
 	type AuditSink,
+	admitSession,
 	auditErrorText,
 	consoleLogger,
+	cookieClaim,
 	emitAuditEvent,
 	errorEnvelope,
 	type FederationProvider,
@@ -40,9 +49,13 @@ import {
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	type Logger,
+	linkClaim,
 	loggableError,
 	resolveFederationResponseMode,
+	type SessionClaim,
 	type SessionFederationIndex,
+	type SessionRequirementResolver,
+	type SubjectRevocation,
 	type SubjectSessionIndex,
 	sanitizeErrorText,
 	supportsClaimMapping,
@@ -63,6 +76,7 @@ import {
 	type FederationTransactionEnvelope,
 	type FederationTransactionSessionStore,
 	type FederationTransactionStore,
+	type LinkIntent,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
 import {
@@ -94,13 +108,31 @@ declare module "express-session" {
 			redirectTo?: string;
 			/** #482: the browser asked to link this federation's identity to the
 			 *  account of the session `sid` it held then (`?link=1`), rather than
-			 *  to log in. */
-			link?: { readonly sid: string };
+			 *  to log in — with that session's subject, as admission let it link
+			 *  (the session-admission ADR's D8). */
+			link?: LinkIntent;
 		};
 	}
 }
 
 const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
+
+/** The link routes ask admission for no `acr_values`: the table it selects against is empty. */
+const NO_ACR_TABLE = Object.freeze({});
+
+/**
+ * What the link start answers a requirement's step-up with (the
+ * session-admission ADR's D8): `403 step_up_required`, the requirement that
+ * asked, and its page — the start is a browser navigation, and the page the
+ * link was started from can send the user through the step-up and start it
+ * again. The page is as the requirement registered it, validated then.
+ */
+const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>) => ({
+	error: "step_up_required",
+	error_description: "Linking a federated identity requires a step-up first",
+	requirement: admission.requirement,
+	page: admission.page,
+});
 
 /**
  * #481 — what the upstream IdP asserted about its own login: the profile's
@@ -335,11 +367,13 @@ export const createRouter = (
 		userRepository,
 		userSessionStore,
 		subjectSessionIndex,
+		subjectRevocation,
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		federationTransactionTtlMs = DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
 		federationTransactionCookieName,
+		requirements,
 		auditSink,
 		logger = consoleLogger,
 	}: {
@@ -355,6 +389,13 @@ export const createRouter = (
 		 * `revokeAllForSubject` reports rather than hiding.
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
+		/**
+		 * The subject-revocation boundary the link flow's admission reads
+		 * against the live session (the session-admission ADR's D2, step 4).
+		 * Optional, as the slot is: without it a session established before its
+		 * subject's sessions were revoked can link until it expires.
+		 */
+		subjectRevocation?: SubjectRevocation;
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
@@ -372,11 +413,23 @@ export const createRouter = (
 		 * path-scoped cookie could not satisfy.
 		 */
 		federationTransactionCookieName?: string;
-		/** #482: `federation.identity.linked` / `federation.identity.link_refused`. Optional, like every sink. */
+		/**
+		 * The registered session requirements (the session-admission ADR's
+		 * D1): the synthetic key `sessionRequirementResolver`, which
+		 * `sessionModule` passes, or `resolverForTests` in a test. Required:
+		 * the link routes admit their session through it, and admission refuses
+		 * any resolver the boot planner did not build.
+		 */
+		requirements: SessionRequirementResolver;
+		/**
+		 * #482: `federation.identity.linked` / `federation.identity.link_refused`;
+		 * admission's `session.admission.subject_mismatch`. Optional, like every sink.
+		 */
 		auditSink?: AuditSink;
 		logger?: Logger;
 	},
 ): Router => {
+	if (!requirements) throw new Error("federation routes require requirements");
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
 	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
@@ -384,6 +437,24 @@ export const createRouter = (
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
 
 	const router = express.Router();
+
+	/**
+	 * The link flow's one reading of a session (the session-admission ADR's
+	 * D1, D8): admission, with this router's slots. `log` is the leg's
+	 * logger; an outage is logged there, once, by admission.
+	 */
+	const admitLink = (claim: SessionClaim, action: AdmissionAction, log: Logger) =>
+		admitSession(
+			{
+				userSessionStore,
+				subjectRevocation,
+				requirements,
+				acrTable: NO_ACR_TABLE,
+				logger: log,
+				auditSink,
+			},
+			{ claim, action },
+		);
 
 	// The MFA ADR's D13: whether each installed federation's upstream `amr`
 	// counts, read once, here, at composition — where a switch that is given
@@ -500,6 +571,12 @@ export const createRouter = (
 	 * upstream tokens under the current `sid` — and the browser is redirected as
 	 * after a login. No `UserSession` is created and the express session is not
 	 * regenerated, so the session's claims envelope stays what it was.
+	 *
+	 * The session is read through admission as `session.link_callback` over
+	 * the transaction's `sid` and subject (`linkClaim`, the session-admission
+	 * ADR's D8): liveness, the subject, the revocation boundary, the
+	 * requirements. A step-up is `login_required` here — the callback comes
+	 * from the IdP and has no page to return to; the start decided it.
 	 */
 	const completeLink = async (
 		provider: FederationProvider,
@@ -507,7 +584,7 @@ export const createRouter = (
 		identityToken: string,
 		resolved: Awaited<ReturnType<typeof userRepository.authenticateByToken>>,
 		redirectTo: string | undefined,
-		linkSid: string,
+		link: LinkIntent,
 		req: Request,
 		res: Response,
 		log: Logger,
@@ -520,35 +597,37 @@ export const createRouter = (
 		// `req.session` is a fresh one there and the recorded sid is the only
 		// binding. A request that does carry an authenticated session must be
 		// that same one: switching accounts in between links nothing.
-		const currentSid = linkSid;
+		const currentSid = link.sid;
 		if (req.session.isAuthenticated === true && req.session.sid !== currentSid) {
 			return res.status(401).json({
 				error: "login_required",
 				error_description: "The link was started from a different session",
 			});
 		}
-		// Every line the link writes names the session it was for.
-		const linkContext = { sid: currentSid };
-		let current: Awaited<ReturnType<typeof userSessionStore.get>>;
-		try {
-			current = await userSessionStore.get(currentSid);
-		} catch (err) {
-			logStoreUnavailable(
-				log,
-				"federation_link_store_unavailable",
-				"user_session",
-				"get",
-				err,
-				linkContext,
-			);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-		if (!current) {
-			return res.status(401).json({
+		const notLive = () =>
+			res.status(401).json({
 				error: "login_required",
 				error_description: "Linking a federated identity requires a live session",
 			});
+		// A transaction a start wrote before it recorded the subject — one in
+		// flight across the upgrade — binds its callback by the sid alone, and
+		// the link claim is the sid and the subject together: the user starts
+		// the link again.
+		if (typeof link.subject !== "string" || link.subject.length === 0) return notLive();
+		const admission = await admitLink(
+			linkClaim({ sid: currentSid, subject: link.subject }),
+			ADMISSION_ACTIONS["session.link_callback"],
+			log,
+		);
+		if (admission.outcome === "unavailable") {
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
+		// Not live, revoked, a requirement not met — or one asking for a
+		// step-up, which the callback has no page to return to.
+		if (admission.outcome !== "admitted" || admission.session === null) return notLive();
+		const current = admission.session;
+		// Every line the link writes names the session it was for.
+		const linkContext = { sid: currentSid };
 		// The three emissions below spell their `type` literally, which is what
 		// the audit-inventory guard reads.
 		const auditBase = () => ({
@@ -1054,7 +1133,7 @@ export const createRouter = (
 				identityToken,
 				user,
 				redirectTo,
-				fed.link.sid,
+				fed.link,
 				req,
 				res,
 				log,
@@ -1335,7 +1414,7 @@ export const createRouter = (
 			// with another provider never links by itself — and refused here, before
 			// the browser is sent anywhere, when it cannot succeed.
 			const wantsLink = req.query.link === "1" || req.query.link === "true";
-			let linkSid: string | undefined;
+			let link: LinkIntent | undefined;
 			if (wantsLink) {
 				// A link changes an existing account, so it must be the user asking,
 				// not a page that navigated them here. The start is a GET and the
@@ -1361,7 +1440,23 @@ export const createRouter = (
 							"Linking a federated identity must be started from this site or an origin on session.csrf.trustedOrigins",
 					});
 				}
-				if (req.session.isAuthenticated !== true || typeof req.session.sid !== "string") {
+				// The session the link is for, read through admission as
+				// `session.link` (the session-admission ADR's D8): graded
+				// `credential_change` — a linked identity is a new way into the
+				// account — so a requirement's recent-authentication rule is
+				// decided here, where a step-up has a page to return to.
+				const admission = await admitLink(
+					cookieClaim(req),
+					ADMISSION_ACTIONS["session.link"],
+					logger.child({ provider: provider.name }),
+				);
+				if (admission.outcome === "unavailable") {
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				}
+				if (admission.outcome === "step_up") {
+					return res.status(403).json(stepUpRequired(admission));
+				}
+				if (admission.outcome !== "admitted" || admission.session === null) {
 					return res.status(401).json({
 						error: "login_required",
 						error_description: "Linking a federated identity requires an authenticated session",
@@ -1373,11 +1468,12 @@ export const createRouter = (
 						error_description: "The user repository does not support linking federated identities",
 					});
 				}
-				// The session the link is for. The callback binds to it — a form_post
-				// callback arrives without the application session cookie, and a
-				// browser that switched accounts in between must not link to the new
-				// one — so it is recorded in the transaction, not inferred later.
-				linkSid = req.session.sid;
+				// The session the link is for, and its subject. The callback binds
+				// to them — a form_post callback arrives without the application
+				// session cookie, and a browser that switched accounts in between
+				// must not link to the new one — so they are recorded in the
+				// transaction, not inferred later.
+				link = { sid: admission.session.sid, subject: admission.session.sub };
 			}
 
 			const responseMode = resolveFederationResponseMode(provider);
@@ -1413,7 +1509,7 @@ export const createRouter = (
 				codeVerifier,
 				nonce,
 				redirectTo,
-				...(linkSid === undefined ? {} : { link: { sid: linkSid } }),
+				...(link === undefined ? {} : { link }),
 			};
 
 			// #494: a form_post callback arrives as a cross-site POST from the

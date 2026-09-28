@@ -89,7 +89,18 @@ export interface FederationTransactionEnvelope {
 	 * without the application session cookie, so the record is what says
 	 * whose link this is.
 	 */
-	readonly link?: { readonly sid: string } | undefined;
+	readonly link?: LinkIntent | undefined;
+}
+
+/**
+ * What a `?link=1` start records: the session admission let link, and that
+ * session's subject (the session-admission ADR's D8) — together the callback's
+ * link claim. `subject` is absent only in a transaction a start wrote before
+ * it recorded one, which the callback refuses.
+ */
+export interface LinkIntent {
+	readonly sid: string;
+	readonly subject?: string | undefined;
 }
 
 /**
@@ -152,10 +163,18 @@ export const deriveFederationTransactionCookieName = (sessionCookieName: string)
 	return `__Secure-${base}${FEDERATION_TRANSACTION_COOKIE_SUFFIX}`;
 };
 
-const isLinkIntent = (value: unknown): value is { readonly sid: string } =>
+const isLinkIntent = (
+	value: unknown,
+): value is { readonly sid: string; readonly subject?: unknown } =>
 	typeof value === "object" &&
 	value !== null &&
 	typeof (value as { sid?: unknown }).sid === "string";
+
+/** The intent as the callback reads it: the `sid`, and the subject when one was recorded. */
+const readLinkIntent = (link: { readonly sid: string; readonly subject?: unknown }): LinkIntent =>
+	typeof link.subject === "string" && link.subject.length > 0
+		? { sid: link.sid, subject: link.subject }
+		: { sid: link.sid };
 
 /** Reject anything that is not the envelope this module wrote. */
 const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => {
@@ -175,7 +194,7 @@ const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => 
 		codeVerifier,
 		...(typeof nonce === "string" ? { nonce } : {}),
 		...(typeof redirectTo === "string" ? { redirectTo } : {}),
-		...(isLinkIntent(link) ? { link: { sid: link.sid } } : {}),
+		...(isLinkIntent(link) ? { link: readLinkIntent(link) } : {}),
 	};
 };
 

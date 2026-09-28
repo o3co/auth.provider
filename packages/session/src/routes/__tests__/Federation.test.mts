@@ -3499,9 +3499,9 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 				state: "s1",
 				codeVerifier: "v1",
 				redirectTo: "https://app.example.com/account",
-				link: { sid: "s-1" },
+				link: { sid: "s-1", subject: "user-1" },
 			},
-			sessionSeed: { sid: "s-1", isAuthenticated: true },
+			sessionSeed: { sid: "s-1", isAuthenticated: true, user: { id: "user-1" } },
 			userRepository: {
 				authenticate: vi.fn(async () => null),
 				authenticateByToken: vi.fn(async () => ({ id: "user-1", username: "alice" })),

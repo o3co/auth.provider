@@ -88,6 +88,9 @@ function deriveProviderCallbackUrls(
  *
  * `requires` (Amendment 5):
  *   - "config", "userRepository" — bootstrap / DI
+ *   - "sessionRequirementResolver" — synthetic (the session-admission ADR's
+ *     D1): the federation link routes read their session through admission,
+ *     and every consumer of admission takes the resolver.
  *   - "userSessionStore", "federationTokenStore", "sessionFederationIndex" —
  *     three sibling stores actually consumed by these routes (NOT the four-store
  *     superset; `sessionRPRegistry` and `sessionFamilyIndex` are the oauth
@@ -114,8 +117,9 @@ export const sessionModule = defineModule<
 	| "federationTokenStore"
 	| "sessionFederationIndex"
 	| "federationProviders"
-	| "federationRedirectPolicyResolver",
-	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex"
+	| "federationRedirectPolicyResolver"
+	| "sessionRequirementResolver",
+	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex" | "subjectRevocation"
 >({
 	name: "session",
 	configSchema: sessionConfigSchema,
@@ -127,6 +131,7 @@ export const sessionModule = defineModule<
 		"sessionFederationIndex",
 		"federationProviders",
 		"federationRedirectPolicyResolver",
+		"sessionRequirementResolver",
 	],
 	// `rateLimiter` is optional so a composition that installs no limiter module
 	// still boots; the session router falls back to a private in-memory limiter
@@ -137,17 +142,23 @@ export const sessionModule = defineModule<
 	// #296: `subjectSessionIndex` is optional so a composition that has not
 	// adopted subject-level revocation still boots; `revokeAllForSubject` then
 	// reports the capability as unavailable rather than silently doing nothing.
-	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex"],
+	// `subjectRevocation` is the boundary the link routes' admission reads
+	// against the live session (the session-admission ADR's D8): optional, as
+	// it is on every consumer, and its absence decided, below.
+	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
 	// #363: `auditSink` is optional to wire, not optional to decide — an
 	// unfilled slot must be declared with audit.sink.type = "none" or boot
 	// refuses. Same shared policy as the oauth and webauthn modules.
 	// #406: subject-level revocation is optional to wire, not optional to
 	// decide. Its absence must be declared with
 	// oauth.revocation.subject = "unsupported", or a credential change
-	// silently invalidates nothing that was already issued.
+	// silently invalidates nothing that was already issued. One constant on
+	// both keys: the declared-absence check requires every module's policy on
+	// a key to agree, and the two slots are one capability.
 	absencePolicies: {
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY,
+		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 	},
 	contributes: {
 		routes: [
@@ -188,6 +199,11 @@ export const sessionModule = defineModule<
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
+						// The session-admission ADR's D8: the link flow admits its
+						// session with these — the resolver, read at request time,
+						// and the boundary when it is wired.
+						requirements: deps.sessionRequirementResolver,
+						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: config.session.maxAge,
 						// #494: named after the deployment's own session cookie, the
