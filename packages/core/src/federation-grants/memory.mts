@@ -138,8 +138,17 @@ function copyCredentials(from: FederationGrantCredentials): FederationGrantCrede
 	};
 }
 
-const credentialDatesAreDates = (credentials: FederationGrantCredentials): boolean =>
-	credentials.accessToken === undefined || isDate(credentials.accessToken.obtainedAt);
+/**
+ * Whether the credentials are ones a store can keep: the access token's date
+ * is a date, and its issued lifetime a finite number. A lifetime of NaN or
+ * infinity is refused at the write, where every adapter refuses it alike,
+ * rather than kept here and read back as unreadable by an adapter that seals
+ * what it stores (#631).
+ */
+const storableCredentials = (credentials: FederationGrantCredentials): boolean =>
+	credentials.accessToken === undefined ||
+	(isDate(credentials.accessToken.obtainedAt) &&
+		Number.isFinite(credentials.accessToken.issuedLifetime));
 
 /**
  * In-process Map-backed {@link FederationGrantStore} (#593, D16).
@@ -266,16 +275,14 @@ export function createMemoryFederationGrantStore(
 		return { ok: true, grant: structuredClone(grant) };
 	};
 
-	const tryLock = (
-		grantId: string,
-		ttlMs: number,
-	): { readonly token: symbol; readonly startedAt: number } | null => {
+	/** Takes the lock if nobody holds it. The lease is on this process's clock, as a key TTL is on the server's. */
+	const tryLock = (grantId: string, ttlMs: number): symbol | null => {
 		const held = locks.get(grantId);
-		const startedAt = Date.now();
-		if (held !== undefined && held.expiresAt > startedAt) return null;
+		const wallMs = Date.now();
+		if (held !== undefined && held.expiresAt > wallMs) return null;
 		const token = Symbol("federation-grant-refresh-lock");
-		locks.set(grantId, { expiresAt: startedAt + ttlMs, token });
-		return { token, startedAt };
+		locks.set(grantId, { expiresAt: wallMs + ttlMs, token });
+		return token;
 	};
 
 	return {
@@ -420,7 +427,7 @@ export function createMemoryFederationGrantStore(
 			// that a date that is not one is refused as well.
 			if (!(authorization.consent.at.getTime() <= nowMs)) return failed();
 			if (!(authorization.authorizedAt.getTime() <= nowMs)) return failed();
-			if (!credentialDatesAreDates(input.credentials)) return failed();
+			if (!storableCredentials(input.credentials)) return failed();
 			// A renewal never re-points a grant: same upstream account, same
 			// identity revision (D4, D7). `mayActivate` has refused a revoked grant,
 			// so one that has an authorization here is `active` or needs the user.
@@ -463,8 +470,18 @@ export function createMemoryFederationGrantStore(
 			const grant = entry.grant;
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
-			if (!credentialDatesAreDates(input.credentials)) return failed();
+			// The credential it replaces must still be there. One this process's
+			// clock has reclaimed is not written back by a caller whose clock is
+			// behind, as a key TTL that has fired is not (#631): that same caller
+			// would read the new one as `absent` a call later.
+			if (entry.credentials === null) return failed();
+			if (!storableCredentials(input.credentials)) return failed();
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return failed();
+			// A maximum that is not a finite number is not one the marker was judged
+			// against, nor one every adapter can keep (#631).
+			if (input.ineligible !== null && !Number.isFinite(input.ineligible.judgedAgainst)) {
+				return failed();
+			}
 
 			const next: AuthorizedFederationGrant = {
 				...grant,
@@ -525,6 +542,10 @@ export function createMemoryFederationGrantStore(
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
 			if (!isDate(input.failure.at)) return failed();
+			// A backoff that is not a finite number is not one the classifier
+			// bounded, nor one every adapter can keep (#631).
+			const retryAfter = input.failure.retryAfterSeconds;
+			if (retryAfter !== undefined && !Number.isFinite(retryAfter)) return failed();
 			const atMs = input.failure.at.getTime();
 			const previous = grant.refreshFailure;
 			// Never back: a stamp that outlived its caller's budget arrives after a
@@ -571,25 +592,34 @@ export function createMemoryFederationGrantStore(
 			if (!isStorableLifetime(waitForMs, { allowZero: true })) {
 				throw new RangeError("acquireRefreshLock: waitForMs must be a non-negative finite number");
 			}
-			const askedAt = Date.now();
+			// The wait and its deadline are measured on the monotonic clock, as the
+			// Redis lock measures them: `Date.now()` steps when the host's clock is
+			// set, and a wait would then be reported as negative, or as hours, and
+			// core would refuse the lease of a lock that was in fact taken at once
+			// (#631). The lease itself stays on this process's clock, in `tryLock`.
+			const askedAt = performance.now();
 			const deadline = askedAt + waitForMs;
-			let taken = tryLock(grantId, ttlMs);
-			while (taken === null) {
+			// Rounded DOWN to a whole millisecond, as the Redis lock rounds: a
+			// lower bound on when the lease began, taken immediately before the
+			// attempt that succeeded was made.
+			let waitedMs = 0;
+			let held = tryLock(grantId, ttlMs);
+			while (held === null) {
 				// The deadline is looked at BEFORE every further try, and the wait
 				// never runs past it: a lock released between the deadline and the
 				// next poll is not taken, since the caller has given up by then.
-				const remaining = deadline - Date.now();
+				const remaining = deadline - performance.now();
 				if (remaining <= 0) return { acquired: false, reason: "timeout" };
 				await new Promise((resolve) =>
 					setTimeout(resolve, Math.min(LOCK_POLL_INTERVAL_MS, remaining)),
 				);
-				if (Date.now() >= deadline) return { acquired: false, reason: "timeout" };
-				taken = tryLock(grantId, ttlMs);
+				if (performance.now() >= deadline) return { acquired: false, reason: "timeout" };
+				waitedMs = Math.floor(performance.now() - askedAt);
+				held = tryLock(grantId, ttlMs);
 			}
-			const held = taken.token;
 			return {
 				acquired: true,
-				waitedMs: taken.startedAt - askedAt,
+				waitedMs,
 				release: async () => {
 					// Only while it is still this holder's: past the TTL another
 					// caller may hold the lock, and that one is not ours to free.

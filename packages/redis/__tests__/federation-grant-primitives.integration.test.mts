@@ -572,6 +572,27 @@ describe("replaceCredentials (#593, D2, D10)", () => {
 		).toBeNull();
 		expect(await redis.get(credKey("g-1"))).toBe("v2.sealed-1");
 	});
+
+	it("refuses to replace a credential that is not there, in the same step as the write (#631, Copilot)", async () => {
+		// The credential key's deadline is the expiry on the server's clock; once
+		// it has fired, a refresh whose caller's clock is still before the expiry
+		// finds nothing to rotate. The adapter reads the credential a round trip
+		// before the script, and the deadline can fire in between — so the
+		// script checks again, and neither bumps the version nor writes a
+		// credential that would take the same past deadline and be gone at once.
+		await activeWithCredential();
+		await redis.del(credKey("g-1"));
+		expect(
+			await client.replaceCredentials(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY),
+				expectedVersion: 2,
+				credential: "v2.sealed-2",
+				ineligible: null,
+			}),
+		).toBeNull();
+		expect(await redis.hget(grantKey("g-1"), "version")).toBe("2");
+		expect(await redis.exists(credKey("g-1"))).toBe(0);
+	});
 });
 
 describe("requireReauthorization (#593, D2)", () => {

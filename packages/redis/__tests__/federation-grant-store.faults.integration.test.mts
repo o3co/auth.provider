@@ -328,6 +328,61 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
 	});
 
+	it("still ends a grant whose expiry copy was rewritten into the past: the horizon a revocation honours is the authenticated text's (#627)", async () => {
+		// `expiresAtMs` is a copy outside the envelope. A horizon read from it,
+		// once the copy is moved sixty days back, is in the past, and the script
+		// would answer "a tombstone is not revoked again" — for a grant `find`
+		// still reports as active, whose credential then stays at rest until the
+		// key's own TTL. The read side judges the horizon on the authenticated
+		// text; so does the one write that must always win.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(-60 * DAY).getTime()));
+		expect(await held.revoke("g-1", "operator", at(DAY))).toMatchObject({
+			ok: true,
+			grant: { status: "revoked", revocation: { by: "operator" } },
+		});
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("revoked");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
+		expect(await held.find("g-1", at(DAY))).toMatchObject({ status: "revoked" });
+	});
+
+	it("reads the tombstone's horizon from the text as well: a copy moved into the future revokes nothing for a caller past the real one (#627)", async () => {
+		// The other direction of the same rule. The text says the grant is
+		// retained until thirty days past its expiry; a caller whose clock is
+		// past that is asking to revoke a tombstone, whatever the copy says.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(365 * DAY).getTime()));
+		expect(await held.revoke("g-1", "operator", at(61 * DAY))).toStrictEqual({ ok: false });
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("active");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(1);
+	});
+
+	it("still ends a grant whose text carries an expiry the reader refuses: a number Lua would take is not a horizon (#627, Codex)", async () => {
+		// `"-1.5"` is JSON, and `tonumber` reads it; the codec's reader does not
+		// (a string of digits, within the safe-integer range), so the record
+		// answers nothing — and a horizon computed from it here would be in the
+		// past, refusing to end exactly the record that cannot be read.
+		const held = await activated();
+		const text = JSON.parse((await redis.hget(key("g-1", "grant"), "authorization")) as string);
+		text[10] = "-1.5";
+		await redis.hset(key("g-1", "grant"), "authorization", JSON.stringify(text));
+		expect(await held.find("g-1", at(DAY))).toBeNull();
+		await held.revoke("g-1", "operator", at(DAY));
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("revoked");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
+	});
+
+	it("still ends a grant whose retention was rewritten negative: a horizon before the expiry is none (#627)", async () => {
+		// Both stores refuse a negative retention at construction, so this is a
+		// rewrite. Honoured, it puts the horizon in the past: `find` says gone,
+		// and a revocation would be refused while the credential rests.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "retentionMs", String(-9_999_999_999_999));
+		await held.revoke("g-1", "operator", at(DAY));
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("revoked");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
+	});
+
 	it("still refuses a revocation for a record whose horizon says it has gone", async () => {
 		// Computable and past is a different thing from not computable: a
 		// tombstone is not revoked again, and the first revocation stays as it
