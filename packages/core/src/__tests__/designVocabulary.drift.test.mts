@@ -597,9 +597,15 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	// Session admission.
 	{
 		file: REQUIREMENT_RULE_HOME,
-		read: "requirementSession(session)?.amr",
-		count: 2,
-		why: "the amr of the acr selection's input, built by requirementSession: once handed to selectAcr, once held by the merge to find the requirement whose reach covers a reachable entry",
+		read: '(presented.carrier==="token"?requirementSessionFromAmr(presented.tokenAmr):requirementSession(session))?.amr',
+		count: 1,
+		why: "the amr of the acr selection's input, built inline by the D9 readers — a token's own amr through requirementSessionFromAmr, a record through requirementSession (D2, step 5) — handed to selectAcr",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "authentication?.amr",
+		count: 1,
+		why: "the same reading, as step 5 built it for the requirements, held by the merge to find the requirement whose reach finishes a reachable entry",
 	},
 	{
 		file: REQUIREMENT_RULE_HOME,

@@ -646,7 +646,17 @@ export async function admitSession(
 	const selection: AcrSelection | undefined =
 		requested.length === 0
 			? undefined
-			: selectAcr(requested, requirementSession(session)?.amr ?? [], checked.acrTable, reach);
+			: // The amr a carrier is judged on (D2, step 5): a token's own — the
+				// record is only the live view — else the D9 reading of the record.
+				selectAcr(
+					requested,
+					(presented.carrier === "token"
+						? requirementSessionFromAmr(presented.tokenAmr)
+						: requirementSession(session)
+					)?.amr ?? [],
+					checked.acrTable,
+					reach,
+				);
 	const noneConfigured =
 		requested.length > 0 && requested.every((acr: string) => !Object.hasOwn(checked.acrTable, acr));
 
@@ -655,7 +665,8 @@ export async function admitSession(
 		session,
 		noneConfigured,
 		requirements,
-		held: requirementSession(session)?.amr ?? [],
+		// What step 5 handed the requirements, the same reading the selection took.
+		held: authentication?.amr ?? [],
 		table: checked.acrTable,
 	});
 }
