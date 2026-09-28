@@ -34,6 +34,10 @@
  * - RDB snapshots without AOF are one warning: a crash loses the last
  *   snapshot interval of what was written;
  * - no persistence at all is one warning: a restart loses everything;
+ * - the policy is judged by an allow-list: `noeviction` passes, the four
+ *   `volatile-*` policies are each store's to judge, the three `allkeys-*`
+ *   refuse; anything else — empty, unknown, a future server's — is a policy
+ *   the check cannot judge, named in the warning below;
  * - what could not be read — a question the server refused, as many managed
  *   services refuse `CONFIG`, or answered without the value — is named in one
  *   warning that the check could not run, and the boot goes on. The policy is
@@ -46,6 +50,21 @@
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { RedisDurability } from "../clients.mjs";
+
+/** The policies that cannot evict a key without a TTL, which is what each store's durable keys are. */
+const VOLATILE_POLICIES: ReadonlySet<string> = new Set([
+	"volatile-lru",
+	"volatile-lfu",
+	"volatile-random",
+	"volatile-ttl",
+]);
+
+/** The policies that may evict any key. */
+const ALLKEYS_POLICIES: ReadonlySet<string> = new Set([
+	"allkeys-lru",
+	"allkeys-lfu",
+	"allkeys-random",
+]);
 
 /** The two stores the check guards, by their slot. */
 export type RedisMfaStoreSlot = "mfaFactorStore" | "mfaTransactionStore";
@@ -115,8 +134,9 @@ export class RedisMfaStoreEvictableError extends Error {
  * Runs the check for `store` on what `durability` answers: throws
  * {@link RedisMfaStoreEvictableError} for a known `allkeys-*` policy, and
  * writes each warning that applies once on `logger`, object-first — the
- * eviction policy's, then the persistence's, then the one naming what could
- * not be read (`unread`: `maxmemory-policy`, `appendonly`, `save`).
+ * eviction policy's, then the persistence's, then the one naming a policy it
+ * cannot judge (`maxmemoryPolicy`) and what could not be read (`unread`:
+ * `maxmemory-policy`, `appendonly`, `save`).
  */
 export async function checkRedisMfaStoreDurability(
 	store: RedisMfaStoreSlot,
@@ -126,12 +146,17 @@ export async function checkRedisMfaStoreDurability(
 	const names = NAMES[store];
 	const report = await durability();
 	const policy = report.maxmemoryPolicy;
-	if (policy?.startsWith("allkeys-")) {
+	if (policy !== undefined && ALLKEYS_POLICIES.has(policy)) {
 		throw new RedisMfaStoreEvictableError(store, policy);
 	}
-	if (names.lockEvictable !== undefined && policy?.startsWith("volatile-")) {
+	if (names.lockEvictable !== undefined && policy !== undefined && VOLATILE_POLICIES.has(policy)) {
 		logger.warn({ store, adapter: "redis", maxmemoryPolicy: policy }, names.lockEvictable);
 	}
+	/** A policy read but not one the allow-list knows: it cannot be judged. */
+	const unjudged =
+		policy !== undefined && policy !== "noeviction" && !VOLATILE_POLICIES.has(policy)
+			? policy
+			: undefined;
 	if (report.appendOnly === false && report.snapshots !== undefined) {
 		logger.warn({ store, adapter: "redis" }, report.snapshots ? names.lossy : names.volatile);
 	}
@@ -140,12 +165,13 @@ export async function checkRedisMfaStoreDurability(
 		...(report.appendOnly === undefined ? ["appendonly"] : []),
 		...(report.appendOnly === false && report.snapshots === undefined ? ["save"] : []),
 	];
-	if (unread.length > 0) {
+	if (unread.length > 0 || unjudged !== undefined) {
 		logger.warn(
 			{
 				store,
 				adapter: "redis",
-				unread,
+				...(unjudged === undefined ? {} : { maxmemoryPolicy: unjudged }),
+				...(unread.length === 0 ? {} : { unread }),
 				...(report.refusal === undefined ? {} : { err: loggableError(report.refusal) }),
 			},
 			names.unchecked,
