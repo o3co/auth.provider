@@ -5,7 +5,7 @@ import type { ProviderDeps } from "../provider.mjs";
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata", () => {
+test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements", () => {
 	// Per A2-α §4.1 baseline declares 7 kinds. A5 (Phase 7) adds
 	// `federationRedirectPolicies` via `declare module` augmentation in the
 	// session package. Wave 2 Phase 1 retro (Phase 2 DPoP spec §11.1) adds
@@ -16,6 +16,9 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 	// aggregator adds `discoveryMetadata` as the 10th kind so endpoint-owning
 	// modules contribute their slice of the
 	// `/.well-known/openid-configuration` document, which core synthesizes.
+	// The session-admission ADR's D3 adds `sessionRequirements` as the 11th:
+	// the requirements every consumer of a browser session asks through
+	// admission.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
@@ -28,6 +31,7 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 		| "grantMiddleware"
 		| "tokenBindingMechanisms"
 		| "discoveryMetadata"
+		| "sessionRequirements"
 	>();
 });
 

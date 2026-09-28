@@ -19,11 +19,12 @@
  * deployment's step-up page at `endpoints.mfa.url`, and the two store
  * switches a composition root installs MFA's stores from.
  *
- * `mfa.mode` is `"off"` by reference default, and `"off"` is the only value
- * this release can honour: no module here asks for or verifies a second
- * factor. A setting nothing can honour is refused at boot, naming its key,
- * rather than accepted and ignored — an operator who wrote `required` must
- * not believe their logins ask for a second factor.
+ * `mfa.mode` is `"off"` by reference default and admits its three values
+ * (the session-admission ADR's D7 lifted the step-3 lock): whether a mode
+ * other than `off` is honoured is boot's to refuse — `session-requirement-missing`
+ * when no requirement named `mfa` is registered — so an operator who wrote
+ * `required` never believes their logins ask for a second factor. A value
+ * that is none of the three is refused here, naming its key.
  */
 
 import { fileURLToPath } from "node:url";
@@ -71,8 +72,18 @@ describe("the MFA configuration core owns (D19)", () => {
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 	});
 
-	it("refuses an mfa.mode this release cannot honour, naming the key", () => {
-		for (const mode of ["required", "optional", "", "on", "OFF"]) {
+	it("admits off, optional and required (D7 lifted the step-3 lock)", () => {
+		for (const mode of ["off", "optional", "required"]) {
+			expect(fromReference({ MFA_MODE: mode }).mfa?.mode, mode).toBe(mode);
+			expect(
+				issuesAt(AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfa: { mode } })),
+				mode,
+			).toEqual([]);
+		}
+	});
+
+	it("refuses an mfa.mode that is none of the three, naming the key", () => {
+		for (const mode of ["", "on", "OFF", "Required"]) {
 			expect(() => fromReference({ MFA_MODE: mode }), mode).toThrow(/mfa\.mode/);
 			expect(
 				issuesAt(AppConfigSchema.safeParse({ ...makeValidAppConfig(), mfa: { mode } })),
@@ -85,12 +96,12 @@ describe("the MFA configuration core owns (D19)", () => {
 		// createApp validates CoreConfigSchema itself, so a hand-built
 		// configuration is refused too — before any module is built.
 		expect(
-			issuesAt(CoreConfigSchema.safeParse({ ...makeValidCoreConfig(), mfa: { mode: "required" } })),
+			issuesAt(CoreConfigSchema.safeParse({ ...makeValidCoreConfig(), mfa: { mode: "on" } })),
 		).toContain("mfa.mode");
 		const err = await createApp({
 			modules: [],
 			bootstrapComponents: {
-				config: { ...makeValidCoreConfig(), mfa: { mode: "required" } },
+				config: { ...makeValidCoreConfig(), mfa: { mode: "on" } },
 				pathResolver: (p: string) => p,
 			} as never,
 		}).then(
@@ -103,11 +114,11 @@ describe("the MFA configuration core owns (D19)", () => {
 		expect(issues?.map((issue) => issue.path.join("."))).toContain("mfa.mode");
 	});
 
-	it('reads a configuration with no mfa section, or no mode, as mode "off" until the flip', () => {
-		// A hand-built composition root that never wrote the key still boots once
-		// a module attaches MFA_ABSENCE_POLICY: before the release that turns MFA
-		// on, "off" is the default in the schema as well as in reference.conf.
-		// That release removes the default (the ADR's O2).
+	it('reads a configuration with no mfa section, or no mode, as mode "off"', () => {
+		// A hand-built composition root that never wrote the key boots with MFA
+		// off: "off" is the default in the schema as well as in reference.conf,
+		// and stays so (the session-admission ADR's D7 re-decided O2: the
+		// template and create-app flip their own default, core keeps its).
 		const { mfa: _absent, ...withoutMfa } = makeValidCoreConfig() as Record<string, unknown>;
 		expect((CoreConfigSchema.parse(withoutMfa) as { mfa?: { mode?: string } }).mfa?.mode).toBe(
 			"off",

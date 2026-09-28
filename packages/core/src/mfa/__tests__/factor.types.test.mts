@@ -80,6 +80,16 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
+	it("names the amr values a verification may add statically, beside amrFor (D14; the session-admission ADR's D3)", () => {
+		// `amrFor(data)` depends on a record — a WebAuthn credential is `hwk` or
+		// `swk` by its backup flag — so the values a factor can ever add are
+		// declared once, for the MFA requirement's reach and for the acr drop
+		// at boot; `addsMfa` says the rest.
+		expectTypeOf<MfaFactor["amrValues"]>().toEqualTypeOf<readonly string[]>();
+		expectTypeOf<MfaFactor["addsMfa"]>().toEqualTypeOf<boolean>();
+		expect(true).toBe(true);
+	});
+
 	it("may say a user cannot enroll one, without throwing (F3, F5)", () => {
 		expectTypeOf<MfaFactor["enrollable"]>().toEqualTypeOf<
 			((user: Readonly<Record<string, unknown>>) => boolean) | undefined

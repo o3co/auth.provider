@@ -54,6 +54,7 @@ describe("stage-1 check registries (#368)", () => {
 			"unique-module-names",
 			"provides-closure",
 			"bootstrap-synthetic-disjointness",
+			"session-requirement-kind-guard",
 			"requires-closure",
 			"contribution-kind-coverage",
 			"per-kind-contribute-duplicates",
