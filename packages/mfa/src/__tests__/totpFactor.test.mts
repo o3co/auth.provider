@@ -351,6 +351,18 @@ describe("enrolling a TOTP factor (F6; core's contract requires it of every fact
 		);
 	});
 
+	it("refuses, with a RangeError, an email or a username that is not well-formed text, rather than let the URI's encoding throw", async () => {
+		for (const user of [
+			{ id: "u-alice", username: "alice", email: "alice\uD800@example.com" },
+			{ id: "u-bob", username: "bob\uDC00" },
+		]) {
+			await expect(
+				factor.beginEnrollment(enrollmentContext(user)),
+				JSON.stringify(user),
+			).rejects.toThrow(RangeError);
+		}
+	});
+
 	it("hands each enrollment a secret of its own", async () => {
 		const a = await factor.beginEnrollment(enrollmentContext());
 		const b = await factor.beginEnrollment(enrollmentContext());
