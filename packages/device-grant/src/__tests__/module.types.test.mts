@@ -25,7 +25,13 @@ import { type DeviceGrantModuleDeps, deviceGrantModule } from "#/module.mjs";
 // Compile-time facts: they fire under vitest's typecheck mode only, so this
 // file is in both typecheck lists (vitest.config.mts and tsconfig.test.json).
 
-const REQUIRES = ["config", "clientRepository", "keyStore"] as const;
+const REQUIRES = [
+	"config",
+	"clientRepository",
+	"keyStore",
+	// The session-admission ADR's D1: every consumer of admission requires it.
+	"sessionRequirementResolver",
+] as const;
 const OPTIONAL = [
 	"deviceCodeStore",
 	"rateLimiter",

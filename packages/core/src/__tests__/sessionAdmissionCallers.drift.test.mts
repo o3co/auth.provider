@@ -442,11 +442,6 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 	},
 	// Device verification and the federation-grants browser half, until A4.
 	{
-		file: "packages/device-grant/src/verificationEndpoint.mts",
-		sites: { get: 1, revokedBefore: 1 },
-		why: `${UNTIL_A4}: livenessOf's read and its boundary read`,
-	},
-	{
 		file: "packages/federation-grants/src/browserRoutes.mts",
 		sites: { get: 2 },
 		why: `${UNTIL_A4}: judge's read and the callback's re-read before activation`,
