@@ -677,6 +677,18 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "the store's clock, a number, handed to sessionAfterSecondFactor",
 	},
 	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "s=readLive(sid)",
+		count: 1,
+		why: "the stored record, handed (through toSession) to sessionAfterSecondFactor, which reads it through the D9 readers",
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "stored=readEnvelope(sid,raw)",
+		count: 1,
+		why: "the stored envelope, handed (through fromEnvelope) to sessionAfterSecondFactor, which reads it through the D9 readers",
+	},
+	{
 		file: "packages/oauth/src/routes/authorize.mts",
 		read: "table=ctx.opts.oauth.acrValues",
 		count: 1,
@@ -778,7 +790,11 @@ interface SessionRecordRead {
  * followed in turn), and — for a local used whole — so is an initializer that
  * is not an object literal (`o=initializer`), so re-initialising a pinned
  * local from a session fails. The key store's `sign` is checked through its
- * object argument and the locals named in it (`sign({ claims })`).
+ * object argument and the locals named in it (`sign({ claims })`), and a
+ * local handed whole to it is followed for its spreads only. A taker's
+ * argument that is a call to something else (`formatObject({ … })`) is
+ * looked through to what that call is handed, through any number of such
+ * calls.
  *
  * Read with TypeScript's parser, so a comment or a string that names the
  * field is not a read, and neither is an object literal written for a store,
@@ -788,7 +804,8 @@ interface SessionRecordRead {
  * What it does not follow is left to review, and to a branded type for a
  * vouched `amr` planned for a later change: a local it cannot resolve here (a
  * parameter, a loop variable, an import, a value built in another function
- * or file); a callee reached under another name (an alias, a method taken
+ * or file); a reassigned `let`, or a `var` hoisted from an inner block, whose
+ * value is not the one it was declared with; a callee reached under another name (an alias, a method taken
  * off its object); a copy that is not a spread (`Object.assign`,
  * `structuredClone`); a cast that relabels a record; and reflection with a
  * key that is not a literal. A consumer reads a session through
@@ -1050,6 +1067,27 @@ function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecor
 			}
 		}
 	};
+	/**
+	 * What a taker is handed, as an argument: an object literal's spreads and
+	 * the locals it names; a local handed whole, followed to its declaration —
+	 * with `whole`, an initializer that is not an object literal is reported
+	 * too; without it, only its spreads are. A call to something that is not
+	 * a taker (`formatObject({ … })`) is looked through to what it is handed,
+	 * through any number of such calls; a call to a taker is checked where it
+	 * is made.
+	 */
+	const inspectArgument = (argument: ts.Expression, whole: boolean): void => {
+		const value = bare(argument);
+		if (ts.isCallExpression(value)) {
+			const inner = calleeName(value.expression);
+			if (inner === undefined || !AMR_TAKERS.has(inner)) {
+				for (const handed of value.arguments) inspectArgument(handed, whole);
+			}
+			return;
+		}
+		spreadsInto(argument, true);
+		if (ts.isIdentifier(value)) follow(value.text, whole, argument);
+	};
 	const visit = (node: ts.Node): void => {
 		if (ts.isPropertyAccessExpression(node) && SESSION_RECORD_FIELDS.has(node.name.text)) {
 			found(node, text(node));
@@ -1085,16 +1123,11 @@ function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecor
 			}
 			const name = calleeName(callee);
 			if (name !== undefined && AMR_TAKERS.has(name)) {
-				for (const argument of node.arguments) {
-					spreadsInto(argument, true);
-					// A local handed whole: `generateIdToken(options)`. Not for the
-					// signer, whose amr rides inside its `claims`, and whose name
-					// other libraries' key-taking `sign(key)` share.
-					const value = bare(argument);
-					if (ts.isIdentifier(value) && !CLAIMS_ONLY_TAKERS.has(name)) {
-						follow(value.text, true, argument);
-					}
-				}
+				// A local handed whole to the signer is followed for its spreads
+				// only: its amr rides inside its `claims`, and other libraries'
+				// key-taking `sign(key)` share the name.
+				const whole = !CLAIMS_ONLY_TAKERS.has(name);
+				for (const argument of node.arguments) inspectArgument(argument, whole);
 			}
 		}
 		ts.forEachChild(node, visit);
