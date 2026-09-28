@@ -442,9 +442,11 @@ const withoutRequirementSession = (source: string): string[] =>
 	requirementRuleCalls(source).filter((args) => !/\brequirementSession\s*\(/.test(args));
 
 /**
- * Where a session's own `amr` and `authentication` may be read, whole files
+ * The files that read a session's own `amr` and `authentication` on purpose
  * (the MFA ADR's D9): the readers themselves, the requirement rule (whose
  * input they build), and the two bundled stores, which copy the record.
+ * Their reads are pinned one by one in {@link SESSION_RECORD_READS_ALLOWED}
+ * like any other file's; this list only holds the scan to finding them.
  */
 const SESSION_RECORD_READERS: ReadonlySet<string> = new Set([
 	"packages/core/src/user-sessions/authentication.mts",
@@ -453,43 +455,200 @@ const SESSION_RECORD_READERS: ReadonlySet<string> = new Set([
 	"packages/redis/src/userSessionStore.mts",
 ]);
 
-/**
- * The other reads of a field named `amr` or `authentication` that stay, each
- * file's count exact, with why: none of them is a session record's. The
- * matcher cannot tell a session from anything else with the field, so every
- * read outside the readers is either here, counted, or a failure — a second
- * read added to a listed file is the drift this exists to catch, and an entry
- * whose reads went away fails as stale.
- */
-const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<{
+/** A read of `amr` or `authentication` that stays: where, by what receiver, how many times, and why. */
+interface AllowedSessionRecordRead {
 	readonly file: string;
-	readonly reads: number;
+	/** The read as `sessionRecordReads` writes it: its source text, whitespace removed. */
+	readonly read: string;
+	readonly count: number;
 	readonly why: string;
-}> = [
+}
+
+const READER_WHY = "the D9 reading itself: how a session was established and what it vouches for";
+const RULE_WHY = "the requirement rule, over the input requirementSession built";
+const MEMORY_STORE_WHY = "the memory store copying the record in and out, and the step-up write";
+const REDIS_STORE_WHY =
+	"the Redis store copying the record to and from its envelope, and the step-up write";
+
+/**
+ * Every read of a field named `amr` or `authentication` in the scanned
+ * sources, each pinned to its file, its receiver's text and its exact count,
+ * with why — the readers' own included. None outside the readers is a session
+ * record's. The matcher cannot tell a session from anything else with the
+ * field, so a read that is not here, a second one, or a swap of receiver
+ * inside a listed file (`claims.amr` becoming `session.amr`) fails; an entry
+ * whose read went away fails as stale.
+ */
+const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
+	// The D9 reading itself.
+	{
+		file: "packages/core/src/user-sessions/authentication.mts",
+		read: "session.authentication",
+		count: 3,
+		why: READER_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/authentication.mts",
+		read: "session.amr",
+		count: 2,
+		why: READER_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/authentication.mts",
+		read: "event?.amr",
+		count: 1,
+		why: "checkSecondFactorEvent reads the event a step-up hands it, not a session",
+	},
+	{
+		file: "packages/core/src/user-sessions/authentication.mts",
+		read: "event.amr",
+		count: 1,
+		why: "sessionAfterSecondFactor adds the event's values onto what the session vouches for",
+	},
+	// The requirement rule.
+	{ file: REQUIREMENT_RULE_HOME, read: "session?.authentication", count: 1, why: RULE_WHY },
+	{ file: REQUIREMENT_RULE_HOME, read: "session.authentication", count: 1, why: RULE_WHY },
+	{ file: REQUIREMENT_RULE_HOME, read: "session?.amr", count: 1, why: RULE_WHY },
+	// The memory store.
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "s.amr",
+		count: 3,
+		why: MEMORY_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "s.authentication",
+		count: 3,
+		why: MEMORY_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "input.authentication",
+		count: 1,
+		why: MEMORY_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "input.amr",
+		count: 2,
+		why: MEMORY_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "next.amr",
+		count: 1,
+		why: MEMORY_STORE_WHY,
+	},
+	{
+		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
+		read: "next.authentication",
+		count: 1,
+		why: MEMORY_STORE_WHY,
+	},
+	// The Redis store.
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "e.amr",
+		count: 4,
+		why: REDIS_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "e.authentication",
+		count: 3,
+		why: REDIS_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "input.amr",
+		count: 2,
+		why: REDIS_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "input.authentication",
+		count: 3,
+		why: REDIS_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "next.amr",
+		count: 1,
+		why: REDIS_STORE_WHY,
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "stored.authentication",
+		count: 1,
+		why: "the step-up write keeping what a newer release added inside authentication",
+	},
+	{
+		file: "packages/redis/src/userSessionStore.mts",
+		read: "next.authentication",
+		count: 1,
+		why: REDIS_STORE_WHY,
+	},
+	// Reads of a field of that name that is not a session's.
 	{
 		file: "packages/core/src/grants/authenticationClaims.mts",
-		reads: 2,
-		why: "composeAmr reads the verified factor's own values (verified.amr), not a session's",
+		read: "verified.amr",
+		count: 2,
+		why: "composeAmr reads the verified factor's own values, not a session's",
 	},
 	{
 		file: "packages/core/src/grants/idToken.mts",
-		reads: 1,
-		why: "generateIdToken reads its caller's option (opts.amr), which a grant fills with vouchedAmr",
+		read: "opts.amr",
+		count: 1,
+		why: "generateIdToken reads its caller's option, which a grant fills with vouchedAmr",
 	},
 	{
 		file: "packages/oauth/src/grants/refreshToken.mts",
-		reads: 1,
-		why: "the refresh grant carries the amr its presented refresh token carries (claims.amr), minted from vouchedAmr",
+		read: "claims.amr",
+		count: 1,
+		why: "the refresh grant carries the amr its presented refresh token carries, minted from vouchedAmr",
+	},
+	{
+		file: "packages/oauth/src/grants/refreshToken.mts",
+		read: "...authenticationClaims",
+		count: 2,
+		why: "the amr and acr the presented refresh token carries, read above as claims.amr and wellFormedAcr",
 	},
 	{
 		file: "packages/oauth/src/routes/authorize.mts",
-		reads: 1,
-		why: "the amr of the requirement rule's input, built by requirementSession (requirementSession(session)?.amr)",
+		read: "requirementSession(session)?.amr",
+		count: 1,
+		why: "the amr of the requirement rule's input, built by requirementSession",
 	},
 	{
 		file: "packages/session/src/routes/Federation.mts",
-		reads: 3,
-		why: "what the upstream IdP asserted on the profile (profile.amr), handed to federatedSessionAuthentication",
+		read: "profile.amr",
+		count: 3,
+		why: "what the upstream IdP asserted on the profile, handed to federatedSessionAuthentication",
+	},
+	{
+		file: "packages/session/src/routes/Federation.mts",
+		read: "...federatedSessionAuthentication()",
+		count: 1,
+		why: "the amr and authentication core composes for a federated login, spread into create",
+	},
+	{
+		file: "packages/session/src/routes/Session.mts",
+		read: "...passwordSessionAuthentication()",
+		count: 1,
+		why: "the amr and authentication core composes for a password login, spread into create",
+	},
+	{
+		file: "packages/session/src/modules/sessionStoreModule.mts",
+		read: "...((storageSlice[storageSlice.type]??{})asRecord<string,unknown>)",
+		count: 1,
+		why: "a cookie-session store factory's create, handed its storage settings: no session record",
+	},
+	{
+		file: "templates/standalone/src/modules.mts",
+		read: "...slice",
+		count: 1,
+		why: "an adapter factory's create, handed its configuration slice: no session record",
 	},
 ];
 
@@ -497,56 +656,302 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<{
 const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authentication"]);
 
 /**
- * The 1-based lines of `source` that read a field named `amr` or
- * `authentication`: a property access (`x.amr`, `x?.authentication`, on any
- * receiver — a name, a call, an awaited read), an element access by the
- * literal name (`x["amr"]`, `x?.["authentication"]`), or a destructuring
- * binding, renamed or not, a parameter's included. Read with TypeScript's
- * parser, so a comment or a string that names the field is not a read, and
- * neither is an object literal written for a store, a type or an interface
- * member. By shape, never by what the receiver is called: a consumer reads a
- * session through `sessionAuthentication` / `vouchedAmr`
- * (`core/src/user-sessions/authentication.mts`), because the record's own
- * `amr` still holds an untrusted IdP's values in a session written before the
- * upstream split.
+ * The functions that take an `amr` — as an option, an argument or a token
+ * claim — matched by the name they are called by: a token minter
+ * (`generateToken`, whose payload is the token's claims, and the id_token's
+ * `generateIdToken`), the amr composer, a store's `create` and the step-up
+ * (`recordSecondFactor`, `sessionAfterSecondFactor`, `checkSecondFactorEvent`),
+ * the coordinator's primary (`decideAfterPrimary`, `openLoginTransaction`) and
+ * the requirement rule (`decideMfaRequirement`, `selectAcr`). A spread into an
+ * object handed to one of them copies a record's own `amr` without naming it.
+ * `create` is also other factories' name: their spreads are pinned like reads.
  */
-function sessionRecordReads(source: string): number[] {
-	const file = ts.createSourceFile("scan.mts", source, ts.ScriptTarget.Latest, true);
-	const lines: number[] = [];
-	const named = (node: ts.Node | undefined): boolean =>
-		node !== undefined &&
-		(ts.isIdentifier(node) || ts.isStringLiteralLike(node)) &&
-		SESSION_RECORD_FIELDS.has(node.text);
-	const visit = (node: ts.Node): void => {
-		const reads =
-			(ts.isPropertyAccessExpression(node) && SESSION_RECORD_FIELDS.has(node.name.text)) ||
-			(ts.isElementAccessExpression(node) && named(node.argumentExpression)) ||
-			(ts.isBindingElement(node) &&
-				(node.propertyName !== undefined ? named(node.propertyName) : named(node.name)));
-		if (reads) lines.push(file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1);
-		ts.forEachChild(node, visit);
-	};
-	visit(file);
-	return lines;
+const AMR_TAKERS: ReadonlySet<string> = new Set([
+	"generateToken",
+	"generateIdToken",
+	"composeAmr",
+	"create",
+	"recordSecondFactor",
+	"sessionAfterSecondFactor",
+	"checkSecondFactorEvent",
+	"decideAfterPrimary",
+	"openLoginTransaction",
+	"decideMfaRequirement",
+	"selectAcr",
+]);
+
+/** Whether `name` is a source file the session-read guard scans: any TypeScript or JavaScript source, no declaration file, no test. */
+function isSessionReadSource(name: string): boolean {
+	return (
+		/\.(?:ts|mts|cts|js|mjs|cjs)$/.test(name) &&
+		!/\.d\.(?:ts|mts|cts)$/.test(name) &&
+		!/\.test\.(?:ts|mts|cts|js|mjs|cjs)$/.test(name)
+	);
+}
+
+/** A read `sessionRecordReads` found: its 1-based line, and its text. */
+interface SessionRecordRead {
+	readonly line: number;
+	readonly read: string;
 }
 
 /**
- * The product sources the session-read guard scans: every package's shipped
- * sources and the standalone template's, `/`-separated from the root.
+ * The reads of a field named `amr` or `authentication` in `source`, each with
+ * its line and its text (whitespace removed, so formatting does not move it):
+ *
+ * - a property access on any receiver (`x.amr`, `x?.authentication`, a call's
+ *   or an awaited read's), written as the access;
+ * - an element access by the literal name (`x["amr"]`, `` x?.[`amr`] ``), and
+ *   `Reflect.get(x, "amr")`, written as the expression;
+ * - a destructuring — by declaration, by parameter, or by assignment
+ *   (`({ amr } = s)`, `for ({ amr } of …)`) — renamed or not, the key a
+ *   literal or a computed literal (`{ ["amr"]: a }`), written as
+ *   `{key}=source`;
+ * - a spread into an object handed to a function that takes an `amr`
+ *   ({@link AMR_TAKERS}), unless it spreads only literals or a choice
+ *   between them, written as `...` and what is spread (a call as its callee).
+ *
+ * Read with TypeScript's parser, so a comment or a string that names the
+ * field is not a read, and neither is an object literal written for a store,
+ * a type or an interface member. By shape, never by what the receiver is
+ * called: a consumer reads a session through `sessionAuthentication` /
+ * `vouchedAmr` (`core/src/user-sessions/authentication.mts`), because the
+ * record's own `amr` still holds an untrusted IdP's values in a session
+ * written before the upstream split.
  */
-function sessionReadScope(): string[] {
-	const files = listShippedSources();
-	walk(join(repoRoot, "templates", "standalone", "src"), files);
-	return files.map((file) => relative(repoRoot, file).split(sep).join("/")).sort();
+function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecordRead[] {
+	const kind = /\.(?:js|mjs|cjs)$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
+	const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+	const reads: SessionRecordRead[] = [];
+	const text = (node: ts.Node): string => node.getText(file).replace(/\s+/g, "");
+	const found = (node: ts.Node, read: string): void => {
+		reads.push({ line: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1, read });
+	};
+	const literalName = (node: ts.Node | undefined): string | undefined => {
+		if (node === undefined) return undefined;
+		if (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) return node.text;
+		if (ts.isComputedPropertyName(node) && ts.isStringLiteralLike(node.expression)) {
+			return node.expression.text;
+		}
+		return undefined;
+	};
+	const named = (node: ts.Node | undefined): boolean => {
+		const name = literalName(node);
+		return name !== undefined && SESSION_RECORD_FIELDS.has(name);
+	};
+	/** What a destructuring reads from: a declaration's initializer, a loop's list, or a parameter. */
+	const destructuredFrom = (node: ts.Node): string => {
+		for (let current: ts.Node | undefined = node.parent; current; current = current.parent) {
+			if (ts.isVariableDeclaration(current)) {
+				if (current.initializer) return text(current.initializer);
+				const loop = current.parent?.parent;
+				if (loop && (ts.isForOfStatement(loop) || ts.isForInStatement(loop))) {
+					return text(loop.expression);
+				}
+				return "(declaration)";
+			}
+			if (ts.isParameter(current)) return "(parameter)";
+		}
+		return "(pattern)";
+	};
+	/** The assignment an object or array literal is the target of, if it is one. */
+	const assignedFrom = (node: ts.Node): string | undefined => {
+		let current: ts.Node = node;
+		for (;;) {
+			const parent: ts.Node | undefined = current.parent;
+			if (parent === undefined) return undefined;
+			if (ts.isParenthesizedExpression(parent) || ts.isArrayLiteralExpression(parent)) {
+				current = parent;
+				continue;
+			}
+			if (ts.isSpreadElement(parent) || ts.isSpreadAssignment(parent)) {
+				current = parent.parent;
+				continue;
+			}
+			if (
+				ts.isPropertyAssignment(parent) &&
+				parent.initializer === current &&
+				ts.isObjectLiteralExpression(parent.parent)
+			) {
+				current = parent.parent;
+				continue;
+			}
+			if (
+				ts.isBinaryExpression(parent) &&
+				parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+				parent.left === current
+			) {
+				// A default inside a pattern (`{ x: { amr } = {} } = s`) is one too.
+				const outer = parent.parent;
+				if (outer && ts.isPropertyAssignment(outer) && outer.initializer === parent) {
+					current = outer.parent;
+					continue;
+				}
+				return text(parent.right);
+			}
+			if (
+				(ts.isForOfStatement(parent) || ts.isForInStatement(parent)) &&
+				parent.initializer === current
+			) {
+				return text(parent.expression);
+			}
+			return undefined;
+		}
+	};
+	/** Whether a spread's operand holds only literals: an object literal, or a choice between them. */
+	const literalOnly = (node: ts.Expression): boolean => {
+		if (ts.isParenthesizedExpression(node)) return literalOnly(node.expression);
+		if (ts.isAsExpression(node) || ts.isSatisfiesExpression(node))
+			return literalOnly(node.expression);
+		if (ts.isObjectLiteralExpression(node)) {
+			return node.properties.every((p) => !ts.isSpreadAssignment(p) || literalOnly(p.expression));
+		}
+		if (ts.isConditionalExpression(node))
+			return literalOnly(node.whenTrue) && literalOnly(node.whenFalse);
+		if (ts.isBinaryExpression(node)) {
+			const op = node.operatorToken.kind;
+			if (op === ts.SyntaxKind.AmpersandAmpersandToken) return literalOnly(node.right);
+			if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) {
+				return literalOnly(node.left) && literalOnly(node.right);
+			}
+		}
+		return false;
+	};
+	const calleeName = (node: ts.Expression): string | undefined =>
+		ts.isIdentifier(node)
+			? node.text
+			: ts.isPropertyAccessExpression(node)
+				? node.name.text
+				: undefined;
+	const spreadsInto = (node: ts.Expression): void => {
+		if (
+			ts.isParenthesizedExpression(node) ||
+			ts.isAsExpression(node) ||
+			ts.isSatisfiesExpression(node) ||
+			ts.isTypeAssertionExpression(node) ||
+			ts.isNonNullExpression(node)
+		) {
+			return spreadsInto(node.expression);
+		}
+		if (ts.isConditionalExpression(node)) {
+			spreadsInto(node.whenTrue);
+			spreadsInto(node.whenFalse);
+			return;
+		}
+		if (!ts.isObjectLiteralExpression(node)) return;
+		for (const property of node.properties) {
+			if (ts.isPropertyAssignment(property)) spreadsInto(property.initializer);
+			else if (ts.isSpreadAssignment(property) && !literalOnly(property.expression)) {
+				const spread = property.expression;
+				found(
+					property,
+					`...${ts.isCallExpression(spread) ? `${text(spread.expression)}()` : text(spread)}`,
+				);
+			}
+		}
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isPropertyAccessExpression(node) && SESSION_RECORD_FIELDS.has(node.name.text)) {
+			found(node, text(node));
+		} else if (ts.isElementAccessExpression(node) && named(node.argumentExpression)) {
+			found(node, text(node));
+		} else if (
+			ts.isBindingElement(node) &&
+			(node.propertyName !== undefined ? named(node.propertyName) : named(node.name))
+		) {
+			found(node, `{${text(node)}}=${destructuredFrom(node)}`);
+		} else if (ts.isObjectLiteralExpression(node)) {
+			const from = assignedFrom(node);
+			if (from !== undefined) {
+				for (const property of node.properties) {
+					if (
+						(ts.isShorthandPropertyAssignment(property) || ts.isPropertyAssignment(property)) &&
+						named(property.name)
+					) {
+						found(property, `{${text(property)}}=${from}`);
+					}
+				}
+			}
+		} else if (ts.isCallExpression(node)) {
+			const callee = node.expression;
+			if (
+				ts.isPropertyAccessExpression(callee) &&
+				ts.isIdentifier(callee.expression) &&
+				callee.expression.text === "Reflect" &&
+				callee.name.text === "get" &&
+				named(node.arguments[1])
+			) {
+				found(node, text(node));
+			}
+			const name = calleeName(callee);
+			if (name !== undefined && AMR_TAKERS.has(name)) {
+				for (const argument of node.arguments) spreadsInto(argument);
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(file);
+	return reads;
 }
 
-/** Each scanned file outside the readers, with the lines it reads the fields on. */
-function sessionRecordReadSites(): Map<string, number[]> {
-	const sites = new Map<string, number[]>();
+/**
+ * The reads in `file` that `allowed` does not cover: each one not listed for
+ * that file under its text, or beyond the count listed. One line per text,
+ * naming the lines.
+ */
+function readsBeyondAllowance(
+	file: string,
+	reads: readonly SessionRecordRead[],
+	allowed: ReadonlyArray<Pick<AllowedSessionRecordRead, "file" | "read" | "count">>,
+): string[] {
+	const byRead = new Map<string, number[]>();
+	for (const { line, read } of reads) byRead.set(read, [...(byRead.get(read) ?? []), line]);
+	const beyond: string[] = [];
+	for (const [read, lines] of byRead) {
+		const count = allowed.find((entry) => entry.file === file && entry.read === read)?.count ?? 0;
+		if (lines.length > count)
+			beyond.push(`${file}:${lines.join(",")} ${read} ×${lines.length} (allowed ${count})`);
+	}
+	return beyond;
+}
+
+/**
+ * The product sources the session-read guard scans, `/`-separated from the
+ * root: every TypeScript and JavaScript source of every package's `src` and
+ * of the standalone template's, no declaration file and no test.
+ */
+function sessionReadScope(): string[] {
+	const files: string[] = [];
+	const collect = (dir: string): void => {
+		let entries: Dirent[];
+		try {
+			entries = readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			if (entry.name === "__tests__" || entry.name === "node_modules" || entry.name === "dist") {
+				continue;
+			}
+			const path = join(dir, entry.name);
+			if (entry.isDirectory()) collect(path);
+			else if (isSessionReadSource(entry.name))
+				files.push(relative(repoRoot, path).split(sep).join("/"));
+		}
+	};
+	for (const pkg of readdirSync(join(repoRoot, "packages"), { withFileTypes: true })) {
+		if (pkg.isDirectory()) collect(join(repoRoot, "packages", pkg.name, "src"));
+	}
+	collect(join(repoRoot, "templates", "standalone", "src"));
+	return files.sort();
+}
+
+/** Each scanned file with the reads it makes. */
+function sessionRecordReadSites(): Map<string, SessionRecordRead[]> {
+	const sites = new Map<string, SessionRecordRead[]>();
 	for (const rel of sessionReadScope()) {
-		if (SESSION_RECORD_READERS.has(rel)) continue;
-		const lines = sessionRecordReads(readFileSync(join(repoRoot, rel), "utf8"));
-		if (lines.length > 0) sites.set(rel, lines);
+		const reads = sessionRecordReads(readFileSync(join(repoRoot, rel), "utf8"), rel);
+		if (reads.length > 0) sites.set(rel, reads);
 	}
 	return sites;
 }
@@ -618,6 +1023,8 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			"composeAmr(held, { ...factor });",
 			"generateToken({ family_id, ...extra.payload }, options);",
 			"await sessions.recordSecondFactor(sid, { ...event });",
+			"generateToken({ ...(tracked as object) } as never, options);",
+			"generateIdToken(<GenerateIdTokenOptions>{ ...claims });",
 		]) {
 			expect(sessionRecordReads(spread), spread).toHaveLength(1);
 		}
@@ -665,31 +1072,33 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(sessionRecordReads("const a = record.amr;", "x.cjs")).toHaveLength(1);
 	});
 
-	it("reads a session's amr and authentication only through the D9 readers", () => {
-		const unexpected: string[] = [];
-		for (const [file, lines] of sessionRecordReadSites()) {
-			const allowed = SESSION_RECORD_READS_ALLOWED.find((entry) => entry.file === file)?.reads ?? 0;
-			if (lines.length > allowed) unexpected.push(`${file}:${lines.join(",")}`);
-		}
+	it("reads a session's amr and authentication only through the D9 readers, each read pinned to its receiver", () => {
+		const beyond = [...sessionRecordReadSites()].flatMap(([file, reads]) =>
+			readsBeyondAllowance(file, reads, SESSION_RECORD_READS_ALLOWED),
+		);
 		expect(
-			unexpected,
+			beyond,
 			"read a session through sessionAuthentication / vouchedAmr (core/src/user-sessions/authentication.mts)",
 		).toEqual([]);
 	});
 
 	it("has no stale entry in SESSION_RECORD_READS_ALLOWED, and scans the readers, the packages and the template", () => {
 		const sites = sessionRecordReadSites();
-		for (const { file, reads, why } of SESSION_RECORD_READS_ALLOWED) {
-			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(reads);
+		for (const { file, read, count, why } of SESSION_RECORD_READS_ALLOWED) {
+			expect(
+				sites.get(file)?.filter((found) => found.read === read).length ?? 0,
+				`${file} ${read} — ${why}`,
+			).toBe(count);
 		}
 		const scope = sessionReadScope();
 		for (const reader of SESSION_RECORD_READERS) {
 			expect(scope, reader).toContain(reader);
-			// Not vacuous: each reader reads the fields it is allowed to.
+			// Not vacuous: each reader's reads are found, and pinned.
+			expect(sites.get(reader)?.length ?? 0, reader).toBeGreaterThan(0);
 			expect(
-				sessionRecordReads(readFileSync(join(repoRoot, reader), "utf8")).length,
+				SESSION_RECORD_READS_ALLOWED.some((entry) => entry.file === reader),
 				reader,
-			).toBeGreaterThan(0);
+			).toBe(true);
 		}
 		expect(scope).toContain("templates/standalone/src/buildModules.mts");
 		expect(scope.filter((file) => /(^|\/)__tests__\//.test(file))).toEqual([]);
