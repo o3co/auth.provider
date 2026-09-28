@@ -1539,6 +1539,7 @@ describe("the actions (D4)", () => {
 			"oauth.consent": "use",
 			"oauth.session_grant": "use",
 			"oauth.code_exchange": "use",
+			"oauth.refresh": "use",
 			"device.lookup": "use",
 			"device.approve": "use",
 			"device.deny": "use",
