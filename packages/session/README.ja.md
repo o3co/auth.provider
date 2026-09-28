@@ -115,7 +115,7 @@ const handle = await createApp({
 `POST /session/login` は `username` と `password` を受け取る（JSON またはフォーム）。
 
 - どちらかが欠けていれば `400 invalid_request`。`UserRepository.authenticate` が `null` を返せば `401 invalid_credentials`。ログインに必要なストアが答えられなければ `503 temporarily_unavailable` — `UserRepository` が例外を投げた、`UserSession` の書き込みが例外を投げた、または express session を再生成（そのストアが古いレコードを破棄できなかった）・保存できなかった場合。いずれも error レベルで 1 行、`login_store_unavailable` として `store`（`user_repository`、`user_session`、`cookie_session`）、`step`（`authenticate`、`create`、`regenerate`、`save`）、エラーの射影とともにログに出る。ユーザー名は出さない。成功時は再生成したセッションを答える前に保存するので、保存できないストアは、次のリクエストが見つけられないセッションへの `200` ではなく `503` になる。再生成または保存に失敗したときは `UserSession` とその subject index のエントリーをベストエフォートでロールバックし、失敗したロールバックの各ステップは `login_cleanup_failed` の warn 1 行になる。
-- 成功すると `UserSession`（`amr: ["pwd"]`、寿命 `session.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
+- 成功すると `UserSession`（`amr: ["pwd"]`、`authentication` の primary は `pwd`、寿命 `session.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
 - `redirect_to` を送るなら `session.redirectAllowlist` に載っていなければならず（[リダイレクト許可リスト](#リダイレクト許可リスト) を参照）、`req.session.redirectTo` に保存される。このパッケージの中にそこへリダイレクトするものは無い。
 - ブルートフォース対策のガードは共有の `rateLimiter`（接頭辞 `login`、クライアント IP ごと）の上で `rateLimit.login` の窓と上限で動き、拒否すれば `429`、リミッター自体が失敗すれば `rateLimit.failMode` に従う。`rateLimiter` が配線されていなければルートはプロセス内のリミッターにフォールバックする: `deployment.mode = "multi"` では起動が拒否され、未設定なら `login_rate_limiter_not_shared` の警告がログに出て、`"single"` では何も言わない。
 
@@ -156,13 +156,15 @@ const handle = await createApp({
 
 ### セッションが認証について記録するもの
 
-すべてのセッションは `authTime` と `amr` — ユーザーがどう認証したかを表す RFC 8176 の値 — を持つ。これにより `/authorize` は `max_age`・`prompt=login`・`acr_values` を扱え、id_token は `auth_time`・`amr`・`acr` を示せる（全体像は [oauth パッケージの README](../oauth/README.ja.md) にある）:
+すべてのセッションは `authTime`、`amr` — ユーザーがどう認証したかを表す RFC 8176 の値のうち、このプロバイダーが保証するもの — と `authentication` — セッションがどう確立されたか（MFA ADR の D9: primary、どのフェデレーションか、信頼しない上流 IdP が主張したもの、第 2 要素がいつ検証されたか） — を持つ。これにより `/authorize` は `max_age`・`prompt=login`・`acr_values` を扱え、id_token は `auth_time`・`amr`・`acr` を示せる（全体像は [oauth パッケージの README](../oauth/README.ja.md) にある）。各ログイン経路について両方を core が組み立てる（`passwordSessionAuthentication`、`federatedSessionAuthentication`）:
 
-| ログイン経路 | `amr` |
-| --- | --- |
-| `POST /session/login` | `["pwd"]`（core の `PASSWORD_AMR`） |
-| フェデレーションのコールバック | プロバイダーがプロファイルに載せた上流 IdP の `amr`（`profile.amr`、文字列の配列）に、`fed` — 「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する — を加えたもの。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。 |
-| アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない |
+| ログイン経路 | `amr` | `authentication` |
+| --- | --- | --- |
+| `POST /session/login` | `["pwd"]`（core の `PASSWORD_AMR`） | primary は `pwd` |
+| フェデレーションのコールバック | `["fed"]` — `fed` は「フェデレーション経由」を表すデプロイ定義のマーカーで、core の `FEDERATED_AMR`。このパッケージも re-export する。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。`trustUpstreamAmr = true` のフェデレーションでは、その横に上流 IdP の `amr` | primary は `fed`、フェデレーションの名前、そして — フェデレーションが IdP を信頼しない限り — IdP の `amr` を `upstreamAmr` として |
+| アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない | 変わらない |
+
+**上流 IdP が主張したものが数えられるのは、それを信頼するフェデレーションだけ**（`federations.<name>.trustUpstreamAmr`、既定 `false`、MFA ADR の D13）。上流の `amr` とは、プロバイダーがプロファイルに載せるもの（`profile.amr`、文字列の配列。同梱のアダプターはどれも載せない）である。既定では記録のために `authentication.upstreamAmr` に保持され、どのトークンにも載らず、どの `acr_values` のエントリーも満たさない — IdP が自分のログインについて言うことは、このプロバイダーの言うことではない。フェデレーションのセクションの `enabled` の横に `trustUpstreamAmr = true` と書くと `fed` の横に記録され、数えられる。このスイッチができる前は、すべてのフェデレーションがそうだった。ルートはインストールされた各フェデレーションのスイッチを、構築時に一度、core の `federationTrustsUpstreamAmr` で読む — `@o3co/auth-provider-oauth` の `acr` の除外が使うのと同じ読み方なので、セッションが記録するものと `/authorize` が広告するものは一致する。`true` でも `false` でもないスイッチは合成を拒否し（`RangeError`）、環境変数が渡す綴りはスキーマが変換する。判断はセッションを作るときにセッションへ書き込まれる: スイッチを変えると、それ以後に確立されたセッションに効く。
 
 再認証は *新しい* セッションである: `POST /session/login` とフェデレーションのコールバックは常に新しい `authTime` でセッションを作り、`max_age` と `prompt=login` が測るのはそれである。既に認証済みのブラウザをそのまま `/authorize` に送り返すログインページは、そこで `login_required` を返され、ループしない。
 
@@ -209,7 +211,7 @@ const handle = await createApp({
 1. **アダプターは `callbackParams` を見る** — コールバックの文字列パラメーターから、ルーターが既に束縛した `code` と `state` を除いたもの。ユーザーエージェント経由で中継され署名されていない。アダプターはその中の RFC 9207 `iss` を core の `callbackUrlForExchange` 経由で渡す。
 2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation_callback_exchange_failed`（その行にはプロバイダーが束縛される）が運ぶのは core の `loggableError(err)` であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。これらのルートがログに書く他の失敗 — ストア、リポジトリ、express-session のもの — も同じように射影する（Redis ストアのエラーは拒否されたコマンドの引数を運ぶ。`allow-plaintext` ならトークンレコードである）。
 3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
-4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `profile.amr` に `fed` を加えたもの。
+4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `fed` — 信頼するフェデレーションではその横に `profile.amr`、そうでなければ `profile.amr` は `authentication.upstreamAmr` に保持される（[上](#セッションが認証について記録するもの)）。
 5. **セッション** は新しい `UserSession`（寿命 `session.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session。コールバックに欠かせないストアが失敗した場合 — Store の照会、`UserSession` か `sessionFederationIndex` の書き込み、express session の再生成・保存、下のトークンの紐づけ、そしてそれらすべてに先立つ一時状態の破棄（[トランザクションが消費されるとき](#トランザクションが消費されるとき) を参照） — はいずれも `503 temporarily_unavailable` で、error レベルで 1 行、`federation_callback_store_unavailable` として `store`、`step`、エラーの射影とともにログに出る。書き込んだものはベストエフォートで逆順にロールバックされ、失敗したロールバックの各ステップは `federation_cleanup_failed` の warn 1 行になる。`subjectSessionIndex` の書き込みが失敗してもログに出る（`subject_session_index_write_failed`）だけでログインは進む。
 6. **トークン** は、プロファイルが `accessToken` を持つときにだけ、新しい `sid` の下で `federationTokenStore` に紐づけられる:
    - `accessToken`、`refreshToken`、`idToken`、`expiresAt` はアダプターが返したまま — `expiresAt: null` は `null`（「リフレッシュしない」）として保存され、ルーターが有効期限をでっち上げることはない。
@@ -350,6 +352,7 @@ federations {
 起動時の規則:
 
 - 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
+- `trustUpstreamAmr` はどの形でもセクションの最上位、`enabled` の横に置く。無ければ `false` で、（スキーマの変換のあと）真偽値でないものは起動に失敗する。何を決めるかは [上](#セッションが認証について記録するもの) にある。
 - すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。
 - `sessionModule` は設定と contribution を突き合わせない。設定で有効だがどのモジュールも contribute していないフェデレーションは起動し、そのルートは `404` を返す。有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。どちらかで起動を失敗させたい組み立ては自分で検査を加える。
 

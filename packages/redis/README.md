@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -132,7 +132,19 @@ Each one implements a port core declares; the slot name is in parentheses.
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
   `SessionFederationIndex`, `SubjectSessionIndex`, `SubjectRevocation` — the
   six user-session and subject-revocation stores, installed together by
-  `redisSessionStoresModule`.
+  `redisSessionStoresModule`. The `UserSessionStore` has the step-up
+  capability (`recordSecondFactor`, the MFA ADR's D9): it reads the session,
+  computes the next one with core's `sessionAfterSecondFactor` — which splits
+  a session written before `authentication` existed — and writes it through
+  the client's `replaceIfUnchanged`, a script that `SET`s with `KEEPTTL` only
+  while the key still holds what was read, re-reading on a loss at most five
+  times before it throws. A second factor never changes how long a session
+  lives. The session envelope carries `authentication` as a key of its own:
+  an envelope written before it reads as `authentication: undefined` (a
+  pre-upgrade session, split as core reads it), a malformed one is refused as
+  corrupt, and a release before this one reads the envelope and ignores the
+  key. A custom `UserSessionStoreClient` implements `replaceIfUnchanged`
+  (`makeIoredisClients` does).
 - `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
   held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
 - `FederationGrantStore` (`federationGrantStore`) and
@@ -374,7 +386,7 @@ give the same answers:
 | `CodeRepository.createCode` | an `expiresIn` that is not a positive number of seconds ending within the Date range; a default that is not whole seconds (at construction) | `PX` = `expiresIn` × 1000, rounded up |
 | `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
-| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range) |
+| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` or `authentication.mfaAt` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range); `recordSecondFactor` keeps it (`KEEPTTL`) |
 | `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt` |
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |

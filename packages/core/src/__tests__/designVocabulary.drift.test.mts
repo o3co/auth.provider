@@ -199,6 +199,21 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+requirementSession\b/,
 	},
 	{
+		concept: "what a federated login records — the upstream split (the MFA ADR's D9, D13)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+federatedSessionAuthentication\b/,
+	},
+	{
+		concept: "whether a federation's upstream amr counts — trustUpstreamAmr (the MFA ADR's D13)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+federationTrustsUpstreamAmr\b/,
+	},
+	{
+		concept: "what a verified second factor makes of a session (the MFA ADR's D9)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+sessionAfterSecondFactor\b/,
+	},
+	{
 		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,

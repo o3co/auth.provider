@@ -15,9 +15,10 @@
  */
 
 /**
- * A session store's copy of a session cannot leave `amr` out and still
- * compile (#626) — for a copy built as an object literal of the record type;
- * not for one behind a cast or one that names it with the wrong value.
+ * A session store's copy of a session cannot leave `amr` — or, since the MFA
+ * ADR's D9, `authentication` — out and still compile (#626) — for a copy
+ * built as an object literal of the record type; not for one behind a cast or
+ * one that names it with the wrong value.
  *
  * Both bundled stores copy the session field by field on the way in and on
  * the way out, and `amr` is the one field a copy could forget without an
