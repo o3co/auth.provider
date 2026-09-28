@@ -108,11 +108,11 @@ const isStringList = (x: unknown): x is string[] =>
 	Array.isArray(x) && x.every((v) => typeof v === "string");
 
 /**
- * `authentication` is absent, or well-formed: a string primary, and each
- * other field absent or of its type. `null` is neither — this store never
- * writes one — and an envelope holding it is refused rather than read as a
- * session from before the key, which would split it again and forget a
- * verified second factor.
+ * `authentication` is absent, or well-formed: a non-empty string primary —
+ * what `create` admits — and each other field absent or of its type. `null`
+ * is neither — this store never writes one — and an envelope holding it is
+ * refused rather than read as a session from before the key, which would
+ * split it again and forget a verified second factor.
  */
 const isValidEnvelopeAuthentication = (v: unknown): v is EnvelopeAuthentication | undefined => {
 	if (v === undefined) return true;
@@ -120,6 +120,7 @@ const isValidEnvelopeAuthentication = (v: unknown): v is EnvelopeAuthentication 
 	const a = v as Partial<EnvelopeAuthentication>;
 	return (
 		typeof a.primary === "string" &&
+		a.primary.length > 0 &&
 		(a.federation === undefined || typeof a.federation === "string") &&
 		(a.upstreamAmr === undefined || isStringList(a.upstreamAmr)) &&
 		(a.mfaAtMs === undefined || isValidTimestamp(a.mfaAtMs))
