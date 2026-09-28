@@ -156,6 +156,8 @@ interface Setup {
 	/** The cookie store's `set` — the route's save — fails. */
 	readonly saveError?: Error;
 	readonly logger?: SpyLogger;
+	/** The user the Store verifies alice as; `ALICE` by default. */
+	readonly user?: Record<string, unknown>;
 }
 
 /**
@@ -201,7 +203,7 @@ function setup(options: Setup = {}) {
 	};
 	const userRepository = {
 		authenticate: vi.fn(async (username: string, password: string) =>
-			username === "alice" && password === "secret" ? ALICE : null,
+			username === "alice" && password === "secret" ? (options.user ?? ALICE) : null,
 		),
 		authenticateByToken: vi.fn(async () => null),
 	} as unknown as UserRepository;
@@ -372,6 +374,32 @@ describe("POST /session/login — every requirement answers establish", () => {
 		expect((await login(app, { password: "wrong" })).status).toBe(401);
 		expect((await login(app, { password: "" })).status).toBe(400);
 		expect(asked).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A primary core cannot build
+// ---------------------------------------------------------------------------
+
+describe("POST /session/login — a user core cannot copy into the primary", () => {
+	it("is refused before any requirement is asked and before anything is written: the route's error, answered 500", async () => {
+		// `passwordPrimary` holds a structured-clone copy of the user, so a
+		// value that cannot be copied — a function — is a RangeError there.
+		// Before admission the express session's JSON store dropped it and
+		// the login succeeded.
+		const { requirement, asked } = fixture(() => "establish");
+		const { app, userSessionStore, trace } = setup({
+			requirements: [requirement],
+			user: { ...ALICE, greet: () => "hello" },
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(500);
+		expect(asked).toEqual([]);
+		expect(userSessionStore.create).not.toHaveBeenCalled();
+		expect(trace).toEqual([]);
+		expect(cookieSessionId(res)).toBeUndefined();
 	});
 });
 

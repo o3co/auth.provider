@@ -555,7 +555,7 @@ export const createRouter = (
 						user,
 						claims: extractUserClaims(user),
 						authTime: new Date(),
-						redirectTo: redirectTo ? redirectTo : undefined,
+						redirectTo: redirectTo || undefined,
 						request: loginRequestFacts(req),
 					}),
 				);
@@ -566,17 +566,18 @@ export const createRouter = (
 					return answerInterruption(req, res, admission);
 				}
 
-				// The tail of the login — the `UserSession` record, its subject-index
-				// entry, the express session's regeneration, its authenticated state
-				// and its save — is `establishSession`'s (`../establish-session.mts`),
-				// shared with the federation callback. What this route adds is its own
-				// log vocabulary: a store that could not answer is one error line,
-				// `login_store_unavailable`, and a rollback step that failed one warn,
-				// `login_cleanup_failed`. The login answers `503`, with everything
-				// written rolled back and the request's cookie session dropped.
-				// What it writes is the establishment's primary: for a password
-				// login (#481, the MFA ADR's D9) `amr` `["pwd"]` (RFC 8176), primary
-				// `pwd`, no second factor verified — composed by core, never here.
+				// Every requirement answered `establish`. The tail of the login — the
+				// `UserSession` record, its subject-index entry, the express session's
+				// regeneration, its authenticated state and its save — is
+				// `establishSession`'s (`../establish-session.mts`), shared with the
+				// federation callback, and it writes the establishment's primary: for
+				// a password login (#481, the MFA ADR's D9) `amr` `["pwd"]` (RFC 8176),
+				// primary `pwd`, no second factor verified — composed by core, never
+				// here. What this route adds is its own log vocabulary: a store that
+				// could not answer is one error line, `login_store_unavailable`, and a
+				// rollback step that failed one warn, `login_cleanup_failed`. The login
+				// answers `503`, with everything written rolled back and the request's
+				// cookie session dropped.
 				const established = await establishSession(admission.establishment, {
 					req,
 					...(userSessionStore === undefined ? {} : { userSessionStore }),
