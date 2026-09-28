@@ -34,10 +34,14 @@
  * - RDB snapshots without AOF are one warning: a crash loses the last
  *   snapshot interval of what was written;
  * - no persistence at all is one warning: a restart loses everything;
- * - a server that refuses `CONFIG` — many managed services rename or disable
- *   it — is one warning that the check could not run, and the boot goes on;
- * - a server that cannot be asked at all fails the boot, as any store outage
- *   at boot does: it is not a refusal.
+ * - what could not be read — a question the server refused, as many managed
+ *   services refuse `CONFIG`, or answered without the value — is named in one
+ *   warning that the check could not run, and the boot goes on. The policy is
+ *   read from `INFO memory` first, so a server that blocks `CONFIG` is still
+ *   held to the refusal, and each part is judged on its own: a known
+ *   `allkeys-*` policy refuses whatever else could not be read;
+ * - a server that cannot answer at all fails the boot, as any store outage at
+ *   boot does: it is not a refusal.
  */
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
@@ -109,9 +113,10 @@ export class RedisMfaStoreEvictableError extends Error {
 
 /**
  * Runs the check for `store` on what `durability` answers: throws
- * {@link RedisMfaStoreEvictableError} for an `allkeys-*` policy, and writes
- * each warning that applies once on `logger`, object-first — the eviction
- * policy's, then the persistence's.
+ * {@link RedisMfaStoreEvictableError} for a known `allkeys-*` policy, and
+ * writes each warning that applies once on `logger`, object-first — the
+ * eviction policy's, then the persistence's, then the one naming what could
+ * not be read (`unread`: `maxmemory-policy`, `appendonly`, `save`).
  */
 export async function checkRedisMfaStoreDurability(
 	store: RedisMfaStoreSlot,
@@ -120,19 +125,30 @@ export async function checkRedisMfaStoreDurability(
 ): Promise<void> {
 	const names = NAMES[store];
 	const report = await durability();
-	if (!report.checked) {
-		logger.warn({ store, adapter: "redis", err: loggableError(report.refusal) }, names.unchecked);
-		return;
+	const policy = report.maxmemoryPolicy;
+	if (policy?.startsWith("allkeys-")) {
+		throw new RedisMfaStoreEvictableError(store, policy);
 	}
-	if (report.maxmemoryPolicy.startsWith("allkeys-")) {
-		throw new RedisMfaStoreEvictableError(store, report.maxmemoryPolicy);
+	if (names.lockEvictable !== undefined && policy?.startsWith("volatile-")) {
+		logger.warn({ store, adapter: "redis", maxmemoryPolicy: policy }, names.lockEvictable);
 	}
-	if (names.lockEvictable !== undefined && report.maxmemoryPolicy.startsWith("volatile-")) {
+	if (report.appendOnly === false && report.snapshots !== undefined) {
+		logger.warn({ store, adapter: "redis" }, report.snapshots ? names.lossy : names.volatile);
+	}
+	const unread = [
+		...(policy === undefined ? ["maxmemory-policy"] : []),
+		...(report.appendOnly === undefined ? ["appendonly"] : []),
+		...(report.appendOnly === false && report.snapshots === undefined ? ["save"] : []),
+	];
+	if (unread.length > 0) {
 		logger.warn(
-			{ store, adapter: "redis", maxmemoryPolicy: report.maxmemoryPolicy },
-			names.lockEvictable,
+			{
+				store,
+				adapter: "redis",
+				unread,
+				...(report.refusal === undefined ? {} : { err: loggableError(report.refusal) }),
+			},
+			names.unchecked,
 		);
 	}
-	if (report.appendOnly) return;
-	logger.warn({ store, adapter: "redis" }, report.snapshots ? names.lossy : names.volatile);
 }

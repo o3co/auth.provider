@@ -1369,24 +1369,20 @@ export interface FederationGrantIntentStoreClient {
 
 /**
  * What a Redis server says about keeping what it is written — read at boot
- * by the two MFA store modules (the MFA ADR's D12).
+ * by the two MFA store modules (the MFA ADR's D12). Each part is `undefined`
+ * when it could not be read: the server refused the question (`refusal`), or
+ * answered without the value.
  */
-export type RedisDurability =
-	| {
-			readonly checked: true;
-			/** `CONFIG GET maxmemory-policy`. */
-			readonly maxmemoryPolicy: string;
-			/** `INFO persistence` reports `aof_enabled:1`. */
-			readonly appendOnly: boolean;
-			/** `CONFIG GET save` is not empty: RDB snapshots are taken. */
-			readonly snapshots: boolean;
-	  }
-	| {
-			/** The server refused to say — `CONFIG` renamed, disabled or not permitted, as on many managed services. */
-			readonly checked: false;
-			/** What it answered instead, as the driver raised it. Logged by its projection only. */
-			readonly refusal: unknown;
-	  };
+export interface RedisDurability {
+	/** `INFO memory`'s `maxmemory_policy`, or `CONFIG GET maxmemory-policy` where INFO does not say. */
+	readonly maxmemoryPolicy: string | undefined;
+	/** `INFO persistence`'s `aof_enabled`. */
+	readonly appendOnly: boolean | undefined;
+	/** `CONFIG GET save` is not empty: RDB snapshots are taken. Asked only when AOF is off. */
+	readonly snapshots: boolean | undefined;
+	/** The first reply that refused a question — an unknown or renamed command, `NOPERM`, a disabled command — as the driver raised it. Logged by its projection only. */
+	readonly refusal: unknown;
+}
 
 /**
  * What an update writes over a factor record's version and its mutable part,
@@ -1435,8 +1431,8 @@ export interface MfaFactorStoreClient {
 	removeAll(key: string): Promise<void>;
 	/**
 	 * What the server says about keeping what it is written (D12). A reply
-	 * that refuses the question is `{ checked: false }`; a server that cannot
-	 * be asked at all rejects.
+	 * that refuses a question leaves that part unread; any other reply error,
+	 * and a server that cannot be asked at all, rejects.
 	 */
 	durability(): Promise<RedisDurability>;
 }
