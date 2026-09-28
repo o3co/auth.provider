@@ -19,6 +19,12 @@ import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
+import {
+	PRE_UPGRADE_FEDERATED_ENVELOPE,
+	PRE_UPGRADE_FEDERATED_SID,
+	PRE_UPGRADE_PASSWORD_ENVELOPE,
+	PRE_UPGRADE_PASSWORD_SID,
+} from "./support/preUpgradeEnvelopes.mjs";
 import { keysExpire, testRedis } from "./support/redis.mjs";
 import {
 	runSecondFactorUpdateContract,
@@ -56,28 +62,24 @@ runUserSessionStoreContract(freshStore, { expiry });
 runSecondFactorUpdateContract(freshStore, { expiry });
 
 describe("a session Redis holds from before the MFA ADR's D9", () => {
-	// The envelope a release before `authentication` wrote, byte for byte in
-	// shape. A live one survives the upgrade and must read no more trusted
-	// than it was: a federated session's upstream values are split out as it
-	// is read, never vouched for.
-	const envelope = (sid: string) => ({
-		sid,
-		sub: "user-1",
-		authTimeMs: Date.now() - 60_000,
-		createdAtMs: Date.now() - 60_000,
-		expiresAtMs: Date.now() + 60_000,
-		claims: { email: "user@example.com" },
-		amr: ["hwk", "fed"],
-	});
-
-	it("reads with authentication undefined, and splits as it is read", async () => {
-		const { userSessionStoreClient } = makeIoredisClients(raw);
-		const store = createRedisUserSessionStore({
-			client: userSessionStoreClient,
+	// Envelopes as the release before `authentication` wrote them, captured
+	// from its writer (`support/preUpgradeEnvelopes.mts`). A live one survives
+	// the upgrade and must read no more trusted than it was: a federated
+	// session's upstream values are split out as it is read, never vouched for.
+	const store = () =>
+		createRedisUserSessionStore({
+			client: makeIoredisClients(raw).userSessionStoreClient,
 			keyPrefix: "t14:pre-upgrade:",
 		});
-		await raw.set("t14:pre-upgrade:sid-old", JSON.stringify(envelope("sid-old")), "PX", 60_000);
-		const session = await store.get("sid-old");
+
+	it("reads a federated one with authentication undefined, and splits it as it is read", async () => {
+		await raw.set(
+			`t14:pre-upgrade:${PRE_UPGRADE_FEDERATED_SID}`,
+			PRE_UPGRADE_FEDERATED_ENVELOPE,
+			"PX",
+			60_000,
+		);
+		const session = await store().get(PRE_UPGRADE_FEDERATED_SID);
 		expect(session).not.toBeNull();
 		if (session === null) return;
 		expect(session).toHaveProperty("authentication", undefined);
@@ -89,6 +91,21 @@ describe("a session Redis holds from before the MFA ADR's D9", () => {
 			mfaAt: undefined,
 		});
 		expect(vouchedAmr(session)).toEqual(["fed"]);
+	});
+
+	it("reads a password one as the password login it was", async () => {
+		await raw.set(
+			`t14:pre-upgrade:${PRE_UPGRADE_PASSWORD_SID}`,
+			PRE_UPGRADE_PASSWORD_ENVELOPE,
+			"PX",
+			60_000,
+		);
+		const session = await store().get(PRE_UPGRADE_PASSWORD_SID);
+		expect(session).not.toBeNull();
+		if (session === null) return;
+		expect(session).toHaveProperty("authentication", undefined);
+		expect(sessionAuthentication(session)?.primary).toBe("pwd");
+		expect(vouchedAmr(session)).toEqual(["pwd"]);
 	});
 });
 
@@ -126,18 +143,11 @@ describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
 
 	it("splits a session Redis holds from before the upgrade, keeping its TTL, and an older reader still reads it", async () => {
 		const sessions = store("t14:sf-pre:");
-		const envelope = {
-			sid: "sid-old",
-			sub: "user-1",
-			authTimeMs: Date.now() - 60_000,
-			createdAtMs: Date.now() - 60_000,
-			expiresAtMs: Date.now() + 60_000,
-			claims: { email: "user@example.com" },
-			amr: ["hwk", "fed"],
-		};
-		await raw.set("t14:sf-pre:sid-old", JSON.stringify(envelope), "PX", 60_000);
+		const key = `t14:sf-pre:${PRE_UPGRADE_FEDERATED_SID}`;
+		await raw.set(key, PRE_UPGRADE_FEDERATED_ENVELOPE, "PX", 60_000);
+		const envelope = JSON.parse(PRE_UPGRADE_FEDERATED_ENVELOPE);
 		const verifiedAt = new Date();
-		const recorded = await sessions.recordSecondFactor("sid-old", {
+		const recorded = await sessions.recordSecondFactor(PRE_UPGRADE_FEDERATED_SID, {
 			amr: ["otp", "mfa"],
 			at: verifiedAt,
 		});
@@ -148,11 +158,11 @@ describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
 			upstreamAmr: ["hwk"],
 			mfaAt: verifiedAt,
 		});
-		expect(await raw.pttl("t14:sf-pre:sid-old")).toBeGreaterThan(0);
+		expect(await raw.pttl(key)).toBeGreaterThan(0);
 		// What a release before `authentication` reads: every field it knows,
 		// as it wrote them, and the split `amr` — `authentication` beside it is
 		// a key it ignores (the ADR's "Rolling back").
-		const stored = JSON.parse((await raw.get("t14:sf-pre:sid-old")) as string);
+		const stored = JSON.parse((await raw.get(key)) as string);
 		expect(stored).toMatchObject({ ...envelope, amr: ["fed", "otp", "mfa"] });
 		expect(stored.authentication).toEqual({
 			primary: "fed",

@@ -16,6 +16,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { UserSessionStoreClient } from "../src/clients.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
+import {
+	PRE_UPGRADE_FEDERATED_ENVELOPE,
+	PRE_UPGRADE_FEDERATED_SID,
+} from "./support/preUpgradeEnvelopes.mjs";
 
 // Lightweight in-memory mock with a `seed()` helper to inject corrupt
 // payloads directly into the Redis store. Matches the exactly-what-we-test
@@ -170,14 +174,16 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 	});
 
 	it("reads an envelope written before authentication existed as a session with authentication undefined (the MFA ADR's D9)", async () => {
-		// The bytes a release before the key wrote: nothing to split here —
-		// `sessionAuthentication` / `vouchedAmr` split it as it is read.
+		// The bytes a release before the key wrote, captured from its writer:
+		// nothing to split here — `sessionAuthentication` / `vouchedAmr` split
+		// it as it is read.
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix });
-		client.seed(`${keyPrefix}sid-1`, JSON.stringify({ ...validEnvelope, amr: ["hwk", "fed"] }));
-		const result = await store.get("sid-1");
+		client.seed(`${keyPrefix}${PRE_UPGRADE_FEDERATED_SID}`, PRE_UPGRADE_FEDERATED_ENVELOPE);
+		const result = await store.get(PRE_UPGRADE_FEDERATED_SID);
 		expect(result).toHaveProperty("authentication", undefined);
 		expect(result?.amr).toEqual(["hwk", "fed"]);
+		expect(result?.claims).toEqual({ email: "alice@example.com", name: "Alice" });
 	});
 
 	it("reads authentication from the envelope, every field named", async () => {
@@ -280,8 +286,52 @@ describe("RedisUserSessionStore.recordSecondFactor — what it reads and how oft
 		await expect(
 			store.recordSecondFactor("sid-1", { amr: ["otp", "mfa"], at: new Date() }),
 		).rejects.toThrow(/recordSecondFactor/);
-		expect(lost.mock.calls.length).toBeGreaterThan(1);
-		expect(lost.mock.calls.length).toBeLessThanOrEqual(10);
+		// Five tries: the first and four re-reads.
+		expect(lost).toHaveBeenCalledTimes(5);
 		expect(client.read(`${keyPrefix}sid-1`)).toBe(JSON.stringify(passwordEnvelope));
+	});
+});
+
+describe("RedisUserSessionStore — what the store needs from its client, and what it keeps of a newer release's envelope (the MFA ADR's D9)", () => {
+	const keyPrefix = "sess:";
+
+	it("refuses at construction a client without replaceIfUnchanged, naming it, rather than failing the first step-up", () => {
+		const { replaceIfUnchanged: _omitted, ...withoutIt } = makeMockClient();
+		expect(() =>
+			createRedisUserSessionStore({
+				client: withoutIt as unknown as UserSessionStoreClient,
+				keyPrefix,
+			}),
+		).toThrow(/replaceIfUnchanged/);
+	});
+
+	it("keeps what a newer release added to the envelope — beside the session and inside authentication — when it records a second factor", async () => {
+		// A rolling upgrade, then a step-up on a replica still on this release:
+		// what the newer release wrote beside the fields this one knows must
+		// survive the write.
+		const client = makeMockClient();
+		const store = createRedisUserSessionStore({ client, keyPrefix });
+		client.seed(
+			`${keyPrefix}sid-1`,
+			JSON.stringify({
+				...validEnvelope,
+				amr: ["pwd"],
+				addedLater: { kept: true },
+				authentication: { primary: "pwd", addedLater: { kept: true } },
+			}),
+		);
+		const verifiedAt = new Date();
+		const recorded = await store.recordSecondFactor("sid-1", {
+			amr: ["otp", "mfa"],
+			at: verifiedAt,
+		});
+		expect(recorded?.amr).toEqual(["pwd", "otp", "mfa"]);
+		const written = JSON.parse(client.read(`${keyPrefix}sid-1`) as string);
+		expect(written.addedLater).toEqual({ kept: true });
+		expect(written.authentication).toEqual({
+			primary: "pwd",
+			addedLater: { kept: true },
+			mfaAtMs: verifiedAt.getTime(),
+		});
 	});
 });
