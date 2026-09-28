@@ -212,6 +212,8 @@ export interface RequirementInput {
 	readonly authentication: RequirementSession | null;
 	/** What the claim was built from (D2, D9). */
 	readonly carrier: SessionClaim["carrier"];
+	/** The record's `sub` when one was read, else the claim's subject: `undefined` only on the code record's first read (D2, step 3). */
+	readonly subject: string | undefined;
 	/** The action by its effective grade: an undeclared `remediation` arrives as `credential_change` (D4). */
 	readonly action: AdmissionAction;
 	readonly asks: AdmissionAsks | undefined;
@@ -238,7 +240,7 @@ export interface SessionRequirement {
 	readonly name: string;
 	/** The `amr` values a step-up through this requirement can add; empty when it offers none. */
 	readonly reach: ReadonlySet<string>;
-	/** Where that step-up starts; `undefined` exactly when `reach` is empty. Copied and validated at registration; a `step_up` verdict names no page of its own (D2, step 7). */
+	/** Where that step-up starts: required when `reach` is not empty, allowed when it is (a re-consent). Copied and validated at registration; a `step_up` verdict names no page of its own (D2, step 7). */
 	readonly stepUpPage: StepUpPage | undefined;
 	/** The names of this requirement's own remediation routes (D4): the only actions admission accepts as `remediation`. */
 	readonly remediations: readonly string[];
@@ -247,7 +249,7 @@ export interface SessionRequirement {
 	/** Use-time: a view of the session, read once by admission, and the action. Throws only on an outage. */
 	admit(input: RequirementInput): Promise<RequirementVerdict>;
 	/** Establishment-time (D5); absent when the requirement never interrupts a login. */
-	admitPrimary?(primary: PrimaryAuthentication): Promise<"establish" | Interruption>;
+	admitPrimary?(primary: PrimaryAuthentication): Promise<"establish" | RequirementInterruption>;
 }
 
 const isNonEmptyString = (value: unknown): value is string =>
@@ -540,8 +542,9 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
  * (D3): a `Set` — or any other iterable that is not a string, answered as a
  * `Set` — of non-empty strings, none a primary's marker (`pwd`, `fed`), none
  * a second-factor value unless the requirement is named `mfa`
- * (`SECOND_FACTOR_AMR`), and a `stepUpPage` exactly when the reach is not
- * empty. The end of boot's stage 4 runs it over every registration
+ * (`SECOND_FACTOR_AMR`), and a `stepUpPage` when the reach is not empty —
+ * a requirement that reaches nothing may still register one, a step-up that
+ * adds no value. The end of boot's stage 4 runs it over every registration
  * (`contribute-factory-failed`, naming the requirement), and the contract
  * suite over a requirement under test. Answers the reach as read, a
  * read-only view over a set of its own — and seals a registered copy on it:
@@ -570,9 +573,6 @@ export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySe
 	}
 	if (read.size > 0 && requirement.stepUpPage === undefined) {
 		refuse("a requirement that reaches something must declare where the step-up starts");
-	}
-	if (read.size === 0 && requirement.stepUpPage !== undefined) {
-		refuse("a requirement that reaches nothing declares no page");
 	}
 	return seal(requirement, read);
 }
@@ -719,10 +719,15 @@ export interface InterruptionAnswer {
 	};
 }
 
-/** A requirement's answer at establishment time: the login does not complete yet, and the browser is told what to do next. */
-export interface Interruption {
-	/** After the route regenerated the express session: opens the ceremony, bound to `sessionId`. A throw is an outage. */
-	open(sessionId: string): Promise<InterruptionAnswer>;
+/**
+ * A requirement's answer at establishment time (D5): the login does not
+ * complete yet, and the browser is told what to do next. Core wraps it: the
+ * route's `PrimaryAdmission.open(sessionId)` passes the continuation core
+ * built, and the requirement persists what it receives.
+ */
+export interface RequirementInterruption {
+	/** After the route regenerated the express session: opens the ceremony, bound to `sessionId`, over the continuation to persist. A throw is an outage. */
+	open(sessionId: string, continuation: PrimaryContinuation): Promise<InterruptionAnswer>;
 }
 
 /**
