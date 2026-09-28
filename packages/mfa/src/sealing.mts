@@ -27,6 +27,12 @@
  *   with the transaction id (and the factor's kind) as the authenticated
  *   data, under a purpose of its own for each, so neither opens as the
  *   other, nor as a factor's data.
+ * - **Every part of a binding or a digest is well-formed text**: UTF-8 would
+ *   write a lone surrogate as U+FFFD's bytes, making two bindings one.
+ *   Sealing and digesting refuse such a part; opening answers `unreadable`.
+ * - **What is sealed is what opening gives back**: a JSON object of JSON
+ *   values — nothing JSON would change, drop or refuse (a Date, a Map, a
+ *   `toJSON`, a BigInt, NaN, a cycle) — or a `RangeError` that quotes nothing.
  * - **Opening never throws** on what it is handed: `unreadable` for anything
  *   that is not its envelope or does not open to a JSON object under this
  *   binding — which no key would cure — and `key_unavailable`, naming the
@@ -41,7 +47,8 @@
  *   HMAC-SHA-256 over the factor's kind and the parts, each length-prefixed,
  *   base64url, kept with the id of the key it was made under and compared
  *   in constant time under that key — or `key_unavailable` when it has left
- *   the ring. The HMAC key is not the sealing key itself but one derived
+ *   the ring. A stored value that is not such a digest is refused with a
+ *   `RangeError`: it is neither a missing key nor a wrong code. The HMAC key is not the sealing key itself but one derived
  *   from it (HKDF-SHA-256, info `o3co:mfa:digest`): the same key is not used
  *   by two algorithms.
  *
@@ -54,6 +61,7 @@ import {
 	checkSealingKeyRing,
 	consoleLogger,
 	constantTimeStringEqual,
+	isSealingKeyId,
 	type Logger,
 	type MfaDigestMatch,
 	type MfaDigests,
@@ -127,7 +135,15 @@ const u32 = (value: number): Buffer => {
 	return out;
 };
 
-/** Each part after its UTF-8 length, so no part can absorb its neighbour. */
+/**
+ * Whether `part` is well-formed text: UTF-8 writes a lone surrogate as
+ * U+FFFD's bytes, so `"\uD800"`, `"\uDC00"` and `"\uFFFD"` would be one
+ * binding, and one digest.
+ */
+const isWellFormedText = (part: unknown): part is string =>
+	typeof part === "string" && part.isWellFormed();
+
+/** Each part after its UTF-8 length, so no part can absorb its neighbour. Every part well-formed. */
 const lengthPrefixed = (parts: readonly string[]): Buffer =>
 	Buffer.concat(
 		parts.flatMap((part) => {
@@ -136,16 +152,65 @@ const lengthPrefixed = (parts: readonly string[]): Buffer =>
 		}),
 	);
 
-/** A binding's parts, length-prefixed — or `undefined` when one is not a non-empty string. */
+/** A binding's parts, length-prefixed — or `undefined` when one is not non-empty, well-formed text. */
 const bindingRecord = (parts: readonly unknown[]): Buffer | undefined =>
-	parts.every((part) => typeof part === "string" && part !== "")
+	parts.every((part) => isWellFormedText(part) && part !== "")
 		? lengthPrefixed(parts as readonly string[])
 		: undefined;
 
 const isJsonObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Where a value is sealed: its purpose and its record, or `undefined` for a binding with a part that is not a non-empty string. */
+/**
+ * Whether JSON gives `value` back as it is: `null`, a boolean, a finite
+ * number, a string, a list of such values, or a plain object whose values
+ * are such values or `undefined` (which JSON leaves out). Not a Date, a Map,
+ * a class instance, anything with a `toJSON`, a BigInt, a function, NaN or
+ * Infinity, a cycle, or a hole or `undefined` in a list — each of which JSON
+ * would change, drop or refuse.
+ */
+function isJsonValue(value: unknown, ancestors: Set<object>): boolean {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (typeof value !== "object" || ancestors.has(value)) return false;
+	if (typeof (value as { toJSON?: unknown }).toJSON === "function") return false;
+	ancestors.add(value);
+	try {
+		if (Array.isArray(value)) {
+			for (let index = 0; index < value.length; index++) {
+				if (!(index in value) || !isJsonValue(value[index], ancestors)) return false;
+			}
+			return true;
+		}
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) return false;
+		return Object.values(value).every(
+			(entry) => entry === undefined || isJsonValue(entry, ancestors),
+		);
+	} finally {
+		ancestors.delete(value);
+	}
+}
+
+/**
+ * `value` as JSON text, when it is a JSON object JSON gives back as it is —
+ * which {@link isJsonValue} checks value by value, so parsing the text gives
+ * back an equal object — and `undefined` otherwise. Never throws.
+ */
+function jsonObjectText(value: unknown): string | undefined {
+	if (!isJsonObject(value)) return undefined;
+	try {
+		return isJsonValue(value, new Set()) ? JSON.stringify(value) : undefined;
+	} catch {
+		// A getter that throws, or anything else JSON cannot write.
+		return undefined;
+	}
+}
+
+/** The shape of a stored digest's digest: base64url of an HMAC-SHA-256, unpadded. */
+const DIGEST_TEXT = /^[A-Za-z0-9_-]{43}$/;
+
+/** Where a value is sealed: its purpose and its record, or `undefined` for a binding with a part that is not non-empty, well-formed text. */
 interface Placement {
 	readonly purpose: string;
 	readonly record: Buffer | undefined;
@@ -177,10 +242,17 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 
 	const seal = (placement: Placement, value: unknown, what: string): string => {
 		if (placement.record === undefined || placement.purpose === "") {
-			throw new RangeError(`${what} is sealed to a binding whose every part is a non-empty string`);
+			throw new RangeError(
+				`${what} is sealed to a binding whose every part is non-empty, well-formed text`,
+			);
 		}
-		if (!isJsonObject(value)) throw new RangeError(`${what} must be a JSON object`);
-		return sealWithKeyRing(JSON.stringify(value), keys, {
+		const text = jsonObjectText(value);
+		if (text === undefined) {
+			throw new RangeError(
+				`${what} must be a JSON object of JSON values, which JSON gives back as it is`,
+			);
+		}
+		return sealWithKeyRing(text, keys, {
 			purpose: placement.purpose,
 			record: placement.record,
 		});
@@ -216,14 +288,16 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 		return derived;
 	};
 
-	const mac = (entry: SealingKey, kind: string, parts: readonly string[]): string => {
-		if (!Array.isArray(parts) || parts.some((part) => typeof part !== "string")) {
-			throw new RangeError("a digest is made over a list of strings");
+	/** What a digest is made over: the kind and the parts, length-prefixed. A `RangeError` for parts that are not well-formed strings. */
+	const digestInput = (kind: string, parts: readonly string[]): Buffer => {
+		if (!Array.isArray(parts) || !parts.every(isWellFormedText)) {
+			throw new RangeError("a digest is made over a list of well-formed strings");
 		}
-		return createHmac("sha256", digestKey(entry))
-			.update(lengthPrefixed([kind, ...parts]))
-			.digest("base64url");
+		return lengthPrefixed([kind, ...parts]);
 	};
+
+	const mac = (entry: SealingKey, input: Buffer): string =>
+		createHmac("sha256", digestKey(entry)).update(input).digest("base64url");
 
 	return Object.freeze({
 		sealFactorData: (binding: MfaFactorBinding, data: MfaFactorData) =>
@@ -244,22 +318,30 @@ export function createMfaSealing({ ring, logger = consoleLogger }: MfaSealingOpt
 		openState: (binding: MfaStateBinding, sealed: unknown) => open(statePlacement(binding), sealed),
 
 		digestsFor(kind: string): MfaDigests {
-			if (typeof kind !== "string" || kind === "") {
-				throw new RangeError("a digest is bound to a factor's kind, a non-empty string");
+			if (!isWellFormedText(kind) || kind === "") {
+				throw new RangeError("a digest is bound to a factor's kind, non-empty well-formed text");
 			}
 			return Object.freeze({
 				digest: (parts: readonly string[]): MfaKeyedDigest => ({
 					keyId: first.id,
-					digest: mac(first, kind, parts),
+					digest: mac(first, digestInput(kind, parts)),
 				}),
 				matchesDigest(parts: readonly string[], stored: MfaKeyedDigest): MfaDigestMatch {
-					const entry = keys.find((candidate) => candidate.id === stored?.keyId);
+					// A record that is not a digest is neither a missing key nor a
+					// wrong code (D11): it is refused, quoting nothing.
+					if (
+						typeof stored !== "object" ||
+						stored === null ||
+						!isSealingKeyId(stored.keyId) ||
+						typeof stored.digest !== "string" ||
+						!DIGEST_TEXT.test(stored.digest)
+					) {
+						throw new RangeError("a stored digest must be { keyId, digest } as digest made it");
+					}
+					const input = digestInput(kind, parts);
+					const entry = keys.find((candidate) => candidate.id === stored.keyId);
 					if (entry === undefined) return "key_unavailable";
-					const computed = mac(entry, kind, parts);
-					return typeof stored.digest === "string" &&
-						constantTimeStringEqual(computed, stored.digest)
-						? "match"
-						: "mismatch";
+					return constantTimeStringEqual(mac(entry, input), stored.digest) ? "match" : "mismatch";
 				},
 			});
 		},

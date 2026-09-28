@@ -399,6 +399,16 @@ describe("what is sealed is what opening gives back", () => {
 			["Infinity inside", { secret: SECRET_TEXT, n: Number.POSITIVE_INFINITY }],
 			["a function inside", { secret: SECRET_TEXT, f: () => SECRET_TEXT }],
 			["undefined in a list", { secret: SECRET_TEXT, list: [1, undefined] }],
+			// biome-ignore lint/suspicious/noSparseArray: a hole is what this case is
+			["a hole in a list", { secret: SECRET_TEXT, list: [1, , 2] }],
+			[
+				"a getter that throws",
+				{
+					get secret(): string {
+						throw new Error(SECRET_TEXT);
+					},
+				},
+			],
 		] as const) {
 			for (const seal of [
 				() => sealing.sealFactorData(RECORD, value as never),
