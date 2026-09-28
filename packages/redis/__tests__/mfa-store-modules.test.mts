@@ -25,7 +25,10 @@
  * persistence before it provides its store: an `allkeys-*` policy, which may
  * evict any key, refuses the boot; RDB snapshots without AOF, and no
  * persistence at all, are each one warning; a server that refuses `CONFIG`
- * is one warning that the check could not run.
+ * is one warning that the check could not run. The transaction store also
+ * warns on a `volatile-*` policy: its lock and week keys carry a TTL once no
+ * run is counted, and an evicted one lifts a D21 hold early. The factor
+ * store's keys carry none, so a `volatile-*` policy never picks them.
  *
  * The check's verdicts are pinned against a stub client; the client's reading
  * of a real server, a user the server refuses `CONFIG`, and `allkeys-lru` set
@@ -105,6 +108,8 @@ interface Case {
 	readonly lossy: string;
 	readonly volatile: string;
 	readonly unchecked: string;
+	/** The notice a `volatile-*` policy is given, for the store whose keys carry a TTL. */
+	readonly lockEvictable: string | undefined;
 	readonly memoryModule: Module;
 	readonly client: (io: Redis) => { durability(): Promise<RedisDurability> };
 }
@@ -120,6 +125,7 @@ const CASES: readonly Case[] = [
 		lossy: "mfa_factor_store_lossy",
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
+		lockEvictable: undefined,
 		memoryModule: memoryMfaFactorStoreModule,
 		client: makeIoredisMfaFactorStoreClient,
 	},
@@ -133,6 +139,7 @@ const CASES: readonly Case[] = [
 		lossy: "mfa_transaction_store_lossy",
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
+		lockEvictable: "mfa_transaction_store_lock_evictable",
 		memoryModule: memoryMfaTransactionStoreModule,
 		client: makeIoredisMfaTransactionStoreClient,
 	},
@@ -212,14 +219,43 @@ describe.each(CASES)("$module.name", (c) => {
 		},
 	);
 
-	it.each(["noeviction", "volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl"])(
-		"boots on %s with AOF, and says nothing",
+	it("boots on noeviction with AOF, and says nothing", async () => {
+		const { logger, calls } = recordingLogger();
+		expect((await boot(DURABLE, logger)).kind).toBe("redis");
+		expect(calls).toEqual([]);
+	});
+
+	it.each(["volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl"])(
+		"boots on %s with AOF, and warns once only where an evicted key would lift a D21 hold",
 		async (policy) => {
+			// The factor store's keys carry no TTL, so a volatile-* policy never
+			// picks them. The transaction store's lock and week keys carry one
+			// once no run is counted: evicted, a weekly hold ends early.
 			const { logger, calls } = recordingLogger();
 			expect((await boot({ ...DURABLE, maxmemoryPolicy: policy }, logger)).kind).toBe("redis");
-			expect(calls).toEqual([]);
+			expect(calls).toEqual(
+				c.lockEvictable === undefined
+					? []
+					: [
+							{
+								level: "warn",
+								args: [
+									{ store: c.slot, adapter: "redis", maxmemoryPolicy: policy },
+									c.lockEvictable,
+								],
+							},
+						],
+			);
 		},
 	);
+
+	it("says each thing once when a volatile-* policy and RDB-only persistence come together", async () => {
+		const { logger, calls } = recordingLogger();
+		await boot({ ...DURABLE, maxmemoryPolicy: "volatile-lru", appendOnly: false }, logger);
+		expect(calls.map((call) => call.args[1])).toEqual(
+			c.lockEvictable === undefined ? [c.lossy] : [c.lockEvictable, c.lossy],
+		);
+	});
 
 	it("warns once when RDB snapshots are the only persistence: the last interval is lost on a crash", async () => {
 		const { logger, calls } = recordingLogger();
