@@ -110,9 +110,10 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   ADR's D12). An enrolled second factor lost to an eviction or a restart
   reads as "never enrolled", and whoever holds the password can then bind
   their own; the email proof an operator reset requires is lost the same way.
-  Give them a `maxmemory-policy` that cannot evict their keys — `noeviction`,
-  or a `volatile-*` policy, since those keys carry no TTL — and AOF
-  (`appendfsync everysec`), preferably on a database or instance of their own.
+  Give them `noeviction` and AOF (`appendfsync everysec`), preferably on a
+  database or instance of their own. A `volatile-*` policy never picks the
+  factors or the requirement, which carry no TTL, but it may pick a subject's
+  lock state once that carries one, ending a hold on guessable proofs early.
   Both modules check at boot (see [MFA stores](#mfa-stores)).
 
 ## Adapters
@@ -653,7 +654,11 @@ incarnation `create` wrote, after core's own checks of the patch; and
 `reserveAttempt`, `takeChallenge` and `consume`. A record is kept as core's
 `newMfaTransactionRecord` answers it and read back through the same function,
 so it has the in-process store's shape; one that does not read back is
-answered as absent, and the ceremony starts again.
+answered as absent, and the ceremony starts again. The record travels as JSON,
+as the session envelope's `claims` and the cookie session's `user` do, so a
+login continuation's `user` and `claims` must be JSON-representable: a `Date`
+comes back as its string and an `undefined` value as a missing key, where the
+in-process store's `structuredClone` keeps both.
 
 **The subject lock.** `reserveSubjectAttempt`, `settleSubjectAttempt` and
 `noteExemptSuccess` are one script each that applies the port's rules exactly
@@ -679,7 +684,10 @@ snapshots without AOF (`mfa_factor_store_lossy`,
 warning; a server that refuses `CONFIG`, as many managed services do, is one
 warning that the check could not run (`…_durability_unchecked`), and the boot
 goes on. The transaction store runs the check because of the email-proof
-requirement (D12's step-3 amendment).
+requirement (D12's step-3 amendment), and warns once more on a `volatile-*`
+policy (`mfa_transaction_store_lock_evictable`): its lock and week keys carry
+a TTL once no run is counted, and an evicted one lifts a D21 hold early.
+`noeviction` is what both stores' key families are meant to run on.
 
 ## Contract tests
 
