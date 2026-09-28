@@ -249,11 +249,17 @@ export const createOAuthRouter = async (
 		 */
 		clientIdMetadataDocuments?: Pick<ClientIdMetadataDocumentOptions, "fetch" | "lookup" | "now">;
 		/**
-		 * Lazy getter for the federation providers Map. Evaluated at request time so
-		 * module init order does not affect resolution — pass `() => context.federationProviders`
-		 * from `module.mts`. Defaults to `() => undefined` when not provided. Read
-		 * once more at composition: whether a federation is installed decides
-		 * which acr entries this composition can satisfy (`./acrValues.mts`).
+		 * Getter for the installed federation providers Map. Defaults to
+		 * `() => undefined` (no federation) when not provided.
+		 *
+		 * It is read twice. **Once when `createOAuthRouter` is called**, so it must
+		 * already answer every federation the composition installs by then: whether
+		 * a federation is installed decides which acr entries this composition can
+		 * satisfy (`./acrValues.mts`), and a map that fills later leaves those
+		 * entries dropped. `oauthModule` passes `() => deps.federationProviders`,
+		 * which the boot planner has filled before any route factory runs (federations
+		 * are name-keyed contributions, registered before the list-shaped `routes`).
+		 * And again at request time, by the federation logout and token routes.
 		 */
 		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 		logger?: Logger;

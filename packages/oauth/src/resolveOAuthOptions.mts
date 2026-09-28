@@ -170,23 +170,17 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
  *   required + S256-only whatever the config says, and warns about the keys
  *   that no longer do anything.
  *
+ * - `acrValues` (#481) is the configured table, or an empty one, read by
+ *   core's `readAcrTable` — the one reading, which discovery shares. It has no
+ *   prototype, because an `acr_values` an unauthenticated caller chooses is
+ *   used as a key into it: on a plain object every request asking for
+ *   `constructor` reads `Object` — the class of defect the replica-safety
+ *   table's move to a `Map` fixed (`core/src/boot/replica-safety.mts`).
+ *
  * The optional `logger` receives the `resolvePkceOptions` inert-config
  * warning. Resolution runs once at composition, so an operator sees one
  * boot-time warning instead of one per `/authorize` request.
  */
-/**
- * #481: the configured acr table, or an empty one, read by core's
- * `readAcrTable` — the one reading, which discovery shares. The schema already
- * held the shape at boot. The table has no prototype, because an
- * `acr_values` an unauthenticated caller chooses is used as a key into it: on
- * a plain object every request asking for `constructor` reads `Object`. The
- * same class of defect as the replica-safety table's move to a `Map`
- * (`core/src/boot/replica-safety.mts`).
- */
-const readAcrValues = (oauth: unknown): AcrTable =>
-	readAcrTable(
-		(oauth as { authorize?: { acrValues?: unknown } } | undefined)?.authorize?.acrValues,
-	);
 
 export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedOAuthOptions => {
 	const oauth = (config as { oauth?: OAuthConfigShape } | undefined)?.oauth;
@@ -205,7 +199,9 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		pkce: resolvePkceOptions(pkceConfig, logger),
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
-		acrValues: readAcrValues(oauth),
+		acrValues: readAcrTable(
+			(oauth as { authorize?: { acrValues?: unknown } } | undefined)?.authorize?.acrValues,
+		),
 		clientIdMetadataDocuments: {
 			enabled: oauth?.clientIdMetadataDocuments?.enabled === true,
 			allowedScopes: listOf(oauth?.clientIdMetadataDocuments?.allowedScopes),
