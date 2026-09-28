@@ -48,6 +48,8 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { isStorableLifetime } from "../adapters/expiry.mjs";
+import { checkPrimaryContinuation } from "../session-admission/primary.mjs";
+import type { PrimaryContinuation } from "../session-admission/requirement.mjs";
 
 /** One second-factor ceremony. Every field is a required key: a store that drops one does not compile. */
 export interface MfaTransaction {
@@ -59,10 +61,14 @@ export interface MfaTransaction {
 	readonly subject: string;
 	/** `step_up` / `enroll`: the `UserSession` it upgrades. */
 	readonly sid: string | undefined;
-	/** `login`: how the primary authentication was made, and when. */
-	readonly primary: { readonly method: string; readonly authTimeMs: number } | undefined;
-	/** `login`: the `User` the session will be built from, for at most the transaction's life. */
-	readonly user: Readonly<Record<string, unknown>> | undefined;
+	/**
+	 * `login`: the continuation `admitPrimary` answered (the session-admission
+	 * ADR's D5) — the primary as the login route built it, the `User` the
+	 * session will be built from among it, and what every requirement that
+	 * completed before this one added — presented to `resumePrimary` when the
+	 * ceremony completes, for at most the transaction's life.
+	 */
+	readonly continuation: PrimaryContinuation | undefined;
 	/** `login`: where the page goes afterwards, already held to `session.redirectAllowlist`. */
 	readonly redirectTo: string | undefined;
 	readonly enrollment: "none" | "allowed" | "required";
@@ -299,13 +305,16 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 	if (!isTextOrAbsent(tx.sid) || !isTextOrAbsent(tx.redirectTo)) {
 		refuse("sid and redirectTo must be strings or absent");
 	}
-	if (
-		tx.primary !== undefined &&
-		!(isRecord(tx.primary) && isText(tx.primary.method) && isInstant(tx.primary.authTimeMs))
-	) {
-		refuse("primary is not a value it admits");
+	let continuation: PrimaryContinuation | undefined;
+	if (tx.continuation !== undefined) {
+		try {
+			continuation = checkPrimaryContinuation(tx.continuation);
+		} catch (cause) {
+			throw new RangeError("MfaTransactionStore.create: continuation is not a value it admits", {
+				cause,
+			});
+		}
 	}
-	if (tx.user !== undefined && !isRecord(tx.user)) refuse("user must be an object or absent");
 	if (tx.acrValues !== undefined && !(Array.isArray(tx.acrValues) && tx.acrValues.every(isText))) {
 		refuse("acrValues must be a list of strings or absent");
 	}
@@ -323,11 +332,7 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 		sessionId: tx.sessionId,
 		subject: tx.subject,
 		sid: tx.sid,
-		primary:
-			tx.primary === undefined
-				? undefined
-				: { method: tx.primary.method, authTimeMs: tx.primary.authTimeMs },
-		user: tx.user === undefined ? undefined : structuredClone(tx.user),
+		continuation,
 		redirectTo: tx.redirectTo,
 		enrollment: field("enrollment", false) as MfaTransaction["enrollment"],
 		emailProof: field("emailProof", false) as MfaTransaction["emailProof"],

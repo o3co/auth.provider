@@ -35,6 +35,7 @@ import {
 	passwordSessionAuthentication,
 	recordableSessionAuthentication,
 	requirementSession,
+	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
 	vouchedAmr,
@@ -199,6 +200,42 @@ describe("requirementSession — the requirement rule's input, built only throug
 
 	it("is null for no session: no sid, or no store", () => {
 		expect(requirementSession(null)).toBeNull();
+	});
+});
+
+describe("requirementSessionFromAmr — what a requirement is asked about a token with no live session (the session-admission ADR's D9)", () => {
+	it("reads the primary from the token's amr — fed first, else pwd — with no second factor on record, and the amr as vouched", () => {
+		expect(requirementSessionFromAmr(["pwd", "otp", "mfa"])).toEqual({
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+			amr: ["pwd", "otp", "mfa"],
+		});
+		expect(requirementSessionFromAmr(["hwk", "fed"])).toEqual({
+			authentication: {
+				primary: "fed",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+			amr: ["hwk", "fed"],
+		});
+		expect(requirementSessionFromAmr(["pwd", "fed"]).authentication?.primary).toBe("fed");
+	});
+
+	it("reads a token without an amr, or one naming no primary, as a primary that cannot be told", () => {
+		expect(requirementSessionFromAmr(undefined)).toEqual({ authentication: undefined, amr: [] });
+		expect(requirementSessionFromAmr(["otp"])).toEqual({ authentication: undefined, amr: ["otp"] });
+	});
+
+	it("copies the amr", () => {
+		const amr = ["pwd"];
+		const input = requirementSessionFromAmr(amr);
+		amr.push("otp");
+		expect(input.amr).toEqual(["pwd"]);
 	});
 });
 

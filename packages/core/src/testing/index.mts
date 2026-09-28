@@ -49,6 +49,7 @@
  * `createApp` / module-based wiring.
  */
 export { GrantRegistry, GrantRegistryError } from "../grants/registry.mjs";
+export { resolverForTests } from "../session-admission/testing/resolver.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
 export {
 	createFakeIdp,

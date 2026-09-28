@@ -144,6 +144,7 @@ const mfaRequirement = (mode: MfaMode, reach: ReadonlySet<string>): SessionRequi
 	reach,
 	stepUpPage: reach.size > 0 ? PAGE : undefined,
 	remediations: ["mfa.step_up"],
+	hintKeys: ["enrollable", "email_proof"],
 	admit: async ({ session, authentication }) => {
 		if (mode !== "required") return { outcome: "met" };
 		const primary = authentication?.authentication?.primary;
@@ -154,7 +155,7 @@ const mfaRequirement = (mode: MfaMode, reach: ReadonlySet<string>): SessionRequi
 			return { outcome: "met" };
 		}
 		return reach.size > 0
-			? { outcome: "step_up", page: PAGE, whenStillUnmet: "reauthenticate" }
+			? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
 			: { outcome: "unmet" };
 	},
 });
@@ -583,6 +584,7 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 		reach: new Set(reach),
 		stepUpPage: reach.length > 0 ? { url: `/${name}`, params: { via: name } } : undefined,
 		remediations: [`${name}.step_up`],
+		hintKeys: [],
 		admit: async () => ({ outcome: "met" }),
 	});
 	const session = passwordSession(["pwd"]);
@@ -638,18 +640,14 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 	it("step_up + step_up: one trip — the requirement's page, the acr hint, and unmet when it comes back still unmet", async () => {
 		const stepping: SessionRequirement = {
 			...reaching("first", ["otp", "mfa"]),
-			admit: async () => ({
-				outcome: "step_up",
-				page: { url: "/first", params: {} },
-				whenStillUnmet: "reauthenticate",
-			}),
+			admit: async () => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }),
 		};
 		const admission = await ask([stepping, reaching("keys", ["hwk"])], [PHR]);
 		expect(admission).toEqual({
 			outcome: "step_up",
 			requirement: "first",
 			session,
-			page: { url: "/first", params: {} },
+			page: { url: "/first", params: { via: "first" } },
 			acrValues: [PHR],
 			whenStillUnmet: "unmet",
 		});
@@ -693,11 +691,7 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 	it("reads a step_up answered over no session as reauthenticate: nothing can be stepped up onto no session, and a login can", async () => {
 		const stepping: SessionRequirement = {
 			...reaching("first", ["otp"]),
-			admit: async () => ({
-				outcome: "step_up",
-				page: { url: "/first", params: {} },
-				whenStillUnmet: "unmet",
-			}),
+			admit: async () => ({ outcome: "step_up", whenStillUnmet: "unmet" }),
 		};
 		const admission = await admitSession(deps(null, [stepping]), {
 			claim: claim(),

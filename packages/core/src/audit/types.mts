@@ -82,6 +82,9 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"logout.family_revoked",
 	"logout.success",
 	"rate_limit.unavailable",
+	// The session-admission ADR's D10: a claim's subject that is not the
+	// record's, at any consumer of an authenticated browser session.
+	"session.admission.subject_mismatch",
 	"token.issued",
 	"token.issued.failure",
 ] as const;

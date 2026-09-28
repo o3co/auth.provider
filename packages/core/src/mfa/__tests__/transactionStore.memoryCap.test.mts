@@ -54,8 +54,25 @@ const TX = (id: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
 	sessionId: `express-session-${id}`,
 	subject: "user-1",
 	sid: undefined,
-	primary: { method: "pwd", authTimeMs: T0 },
-	user: { id: "user-1" },
+	continuation: {
+		primary: {
+			subject: "user-1",
+			user: { id: "user-1" },
+			recorded: {
+				amr: ["pwd"],
+				authentication: {
+					primary: "pwd",
+					federation: undefined,
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			},
+			authTime: new Date(T0),
+			redirectTo: undefined,
+			request: {},
+		},
+		done: [],
+	},
 	redirectTo: undefined,
 	enrollment: "none",
 	emailProof: "not_required",

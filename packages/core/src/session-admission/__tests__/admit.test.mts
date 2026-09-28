@@ -31,6 +31,7 @@ import {
 	codeClaim,
 	cookieClaim,
 	linkClaim,
+	tokenClaim,
 } from "#/session-admission/admit.mjs";
 import type {
 	AdmissionDeps,
@@ -133,6 +134,7 @@ const met = (name: string, over: Partial<SessionRequirement> = {}): SessionRequi
 	reach: new Set(),
 	stepUpPage: undefined,
 	remediations: [],
+	hintKeys: [],
 	admit: async () => ({ outcome: "met" }),
 	...over,
 });
@@ -204,11 +206,32 @@ describe("the claim builders — one reading of each carrier (D2)", () => {
 		});
 	});
 
+	it("reads a verified token: authenticated, its sid when it carries one, its sub, and its amr when well formed", () => {
+		expect(tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["pwd", "otp", "mfa"] })).toMatchObject({
+			authenticated: true,
+			sid: "sid-1",
+			subject: "user-1",
+			carrier: "token",
+			tokenAmr: ["pwd", "otp", "mfa"],
+		});
+		expect(tokenClaim({ sub: "user-1" })).toMatchObject({ sid: undefined, subject: "user-1" });
+		expect(tokenClaim({ sub: "user-1" })).not.toHaveProperty("tokenAmr");
+		// A token issued before #481, or one whose amr is not a well-formed list.
+		for (const amr of [undefined, [], [""], "pwd", [1]]) {
+			expect(tokenClaim({ sub: "user-1", amr }), JSON.stringify(amr)).not.toHaveProperty(
+				"tokenAmr",
+			);
+		}
+		expect(() => tokenClaim({ sub: "" })).toThrow(RangeError);
+		expect(() => tokenClaim({ sid: "sid-1" } as never)).toThrow(RangeError);
+	});
+
 	it("refuses, before anything is read, what is not a carrier: a caller's fault is a RangeError", () => {
 		for (const bad of [undefined, null, "cookie", 7]) {
 			expect(() => cookieClaim(bad as never), String(bad)).toThrow(RangeError);
 			expect(() => codeClaim(bad as never), String(bad)).toThrow(RangeError);
 			expect(() => linkClaim(bad as never), String(bad)).toThrow(RangeError);
+			expect(() => tokenClaim(bad as never), String(bad)).toThrow(RangeError);
 		}
 		expect(() => codeClaim({ sid: "sid-1" }, { subject: "" })).toThrow(RangeError);
 		expect(() => codeClaim({ sid: "sid-1" }, { subject: 7 as never })).toThrow(RangeError);
@@ -329,6 +352,41 @@ describe("step 2 — the live read", () => {
 		});
 	});
 
+	it("skips the read for a token without a sid, as the refresh grant does today: the session is null and the requirements decide", async () => {
+		let asked = 0;
+		const seen: RequirementInput[] = [];
+		const store = storeOf(async () => {
+			asked++;
+			return session();
+		});
+		const watching = met("watch", {
+			admit: async (input) => {
+				seen.push(input);
+				return { outcome: "met" };
+			},
+		});
+		expect(
+			await admitSession(
+				deps({ userSessionStore: store, requirements: resolverForTests([watching]) }),
+				request({ claim: tokenClaim({ sub: "user-1", amr: ["pwd"] }) }),
+			),
+		).toEqual({ outcome: "admitted", session: null, acr: undefined });
+		expect(asked).toBe(0);
+		expect(seen[0]).toMatchObject({ session: null, carrier: "token" });
+	});
+
+	it("reads the record for a token with a sid, and compares its sub", async () => {
+		expect(
+			await admitSession(deps(), request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1" }) })),
+		).toMatchObject({ outcome: "admitted", session: session() });
+		expect(
+			await admitSession(deps(), request({ claim: tokenClaim({ sid: "sid-1", sub: "user-2" }) })),
+		).toEqual({ outcome: "not_live", reason: "subject_mismatch" });
+		expect(
+			await admitSession(deps(), request({ claim: tokenClaim({ sid: "sid-9", sub: "user-1" }) })),
+		).toEqual({ outcome: "not_live", reason: "gone" });
+	});
+
 	it("answers not_live (gone) for a store that answers null or undefined", async () => {
 		for (const answer of [null, undefined]) {
 			expect(
@@ -439,6 +497,7 @@ describe("step 3 — the subject", () => {
 		await flush();
 		expect(events).toEqual([
 			{
+				timestamp: NOW,
 				type: "session.admission.subject_mismatch",
 				subject: "user-1",
 				details: { sid: "sid-1", claimedSubject: "user-2", action: "oauth.authorize" },
@@ -553,6 +612,22 @@ describe("step 4 — the revocation boundary", () => {
 		}
 	});
 
+	it("does not read the boundary for a token carrier: verifyJwt reads it, so the two readings do not double up", async () => {
+		let asked = 0;
+		expect(
+			await admitSession(
+				deps({
+					subjectRevocation: revocationOf(async () => {
+						asked++;
+						return minutesAgo(1);
+					}),
+				}),
+				request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1" }) }),
+			),
+		).toMatchObject({ outcome: "admitted" });
+		expect(asked).toBe(0);
+	});
+
 	it("does not read the boundary without a store: no record, no authTime and no sub to compare", async () => {
 		let asked = 0;
 		expect(
@@ -628,9 +703,63 @@ describe("step 5 — the requirements", () => {
 			},
 			amr: ["fed"],
 		});
+		expect(input.carrier).toBe("cookie");
 		expect(input.action).toEqual({ name: "oauth.authorize", grade: "use" });
 		expect(input.asks).toEqual({ acrValues: ["urn:x"] });
 		expect(input.now).toEqual(NOW);
+	});
+
+	it("builds a token carrier's authentication from the token's amr when no record was read: the primary from fed or pwd, else unknown, no mfaAt, the amr as vouched", async () => {
+		const seen: RequirementInput[] = [];
+		const watching = met("watch", {
+			admit: async (input) => {
+				seen.push(input);
+				return { outcome: "met" };
+			},
+		});
+		const without = deps({
+			userSessionStore: undefined,
+			requirements: resolverForTests([watching]),
+		});
+		for (const amr of [["pwd", "otp", "mfa"], ["hwk", "fed"], ["otp"], undefined]) {
+			await admitSession(without, request({ claim: tokenClaim({ sub: "user-1", amr }) }));
+		}
+		expect(seen.map((input) => input.authentication)).toEqual([
+			{
+				authentication: {
+					primary: "pwd",
+					federation: undefined,
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+				amr: ["pwd", "otp", "mfa"],
+			},
+			{
+				authentication: {
+					primary: "fed",
+					federation: undefined,
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+				amr: ["hwk", "fed"],
+			},
+			{ authentication: undefined, amr: ["otp"] },
+			{ authentication: undefined, amr: [] },
+		]);
+		// With a record, the record's reading wins over the token's amr.
+		await admitSession(
+			deps({ requirements: resolverForTests([watching]) }),
+			request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["hwk", "fed"] }) }),
+		);
+		expect(seen.at(-1)?.authentication).toEqual({
+			authentication: {
+				primary: "pwd",
+				federation: undefined,
+				upstreamAmr: undefined,
+				mfaAt: undefined,
+			},
+			amr: ["pwd"],
+		});
 	});
 
 	it("asks every requirement for use and credential_change, in registration order", async () => {
@@ -718,7 +847,13 @@ describe("step 5 — the requirements", () => {
 
 	it("answers unavailable (the requirement's name) for a verdict that is not one of the four", async () => {
 		const { logger, lines } = recordingLogger();
-		for (const verdict of [undefined, "met", { outcome: "maybe" }, { outcome: "step_up" }]) {
+		for (const verdict of [
+			undefined,
+			"met",
+			{ outcome: "maybe" },
+			{ outcome: "step_up" },
+			{ outcome: "step_up", whenStillUnmet: "retry" },
+		]) {
 			lines.length = 0;
 			const odd = met("odd", { admit: async () => verdict as never });
 			expect(
@@ -729,19 +864,49 @@ describe("step 5 — the requirements", () => {
 		}
 	});
 
+	it("answers the requirement's registered page on step_up, never one the verdict names: a getter is read once at registration", async () => {
+		let reads = 0;
+		const record = session();
+		const requirement = {
+			name: "r",
+			reach: new Set(["risk-ok"]),
+			get stepUpPage() {
+				reads++;
+				return { url: "/r", params: { v: String(reads) } };
+			},
+			remediations: [],
+			hintKeys: [],
+			admit: async () =>
+				({
+					outcome: "step_up",
+					whenStillUnmet: "unmet",
+					page: { url: "/evil", params: {} },
+				}) as never,
+		} satisfies SessionRequirement;
+		const requirements = resolverForTests([requirement]);
+		expect(reads).toBe(1);
+		expect(
+			await admitSession(deps({ userSessionStore: holding(record), requirements }), request()),
+		).toEqual({
+			outcome: "step_up",
+			requirement: "r",
+			session: record,
+			page: { url: "/r", params: { v: "1" } },
+			acrValues: [],
+			whenStillUnmet: "unmet",
+		});
+		expect(reads).toBe(1);
+	});
+
 	it("carries the live session on reauthenticate, step_up and unmet: /authorize decides freshness on it first", async () => {
 		const record = session();
 		for (const verdict of [
 			{ outcome: "reauthenticate" as const },
 			{ outcome: "unmet" as const },
-			{
-				outcome: "step_up" as const,
-				page: { url: "/r", params: {} },
-				whenStillUnmet: "reauthenticate" as const,
-			},
+			{ outcome: "step_up" as const, whenStillUnmet: "reauthenticate" as const },
 		]) {
 			const requirement = met("r", {
-				reach: new Set(["otp"]),
+				reach: new Set(["risk-ok"]),
 				stepUpPage: { url: "/r", params: {} },
 				admit: async () => verdict,
 			});
@@ -764,7 +929,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 
 	it("selects over the vouched amr, with reach the union of every requirement's reach when the session is live", async () => {
 		const requirements = resolverForTests([
-			met("a", { reach: new Set(["otp"]), stepUpPage: { url: "/a", params: {} } }),
+			met("a", { reach: new Set(["risk-ok"]), stepUpPage: { url: "/a", params: {} } }),
 			met("b", { reach: new Set(["mfa"]), stepUpPage: { url: "/b", params: {} } }),
 		]);
 		expect(

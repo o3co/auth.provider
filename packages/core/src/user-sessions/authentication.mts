@@ -17,9 +17,9 @@
 /**
  * How a session was established and what this provider vouches for, read the
  * one way every consumer of a session reads them (the MFA ADR's D9): the
- * requirement rule (`../mfa/requirement.mts`), whose input
- * `requirementSession` builds; `/authorize`; `/token` and the `session` grant,
- * which stamp `vouchedAmr`. And what each login path records, so the write
+ * requirements a session admission asks (`../session-admission/`), whose
+ * input `requirementSession` builds; `/token` and the `session` grant, which
+ * stamp `vouchedAmr`. And what each login path records, so the write
  * and the read are one design: `passwordSessionAuthentication`,
  * `federatedSessionAuthentication`, and whether a federation's upstream IdP's
  * `amr` counts at all (`federationTrustsUpstreamAmr`, D13).
@@ -39,7 +39,7 @@
 
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
-import type { MfaRequirementSession } from "../mfa/requirement.mjs";
+import type { RequirementSession } from "../session-admission/requirement.mjs";
 import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
 /** A copy of `authentication` that shares nothing with it: its list and its date are new. */
@@ -312,16 +312,41 @@ export function sessionAfterSecondFactor(
 }
 
 /**
- * The requirement rule's input for `session` (the MFA ADR's D16): how it was
- * established and what it vouches for, through the two readers above — or
- * `null` when there is no session (no `sid`, or no `UserSessionStore`). Every
- * consumer builds the rule's input here and nowhere else: one built from the
- * record's own `amr` would let a value an untrusted IdP asserted in a
- * pre-upgrade session meet an `acr`.
+ * What a session requirement is asked about `session` (the MFA ADR's D16,
+ * the session-admission ADR's D3): how it was established and what it
+ * vouches for, through the two readers above — or `null` when there is no
+ * session (no `sid`, or no `UserSessionStore`). Admission builds it here and
+ * nowhere else, and its own `acr` selection reads the `amr` from it: one
+ * built from the record's own `amr` would let a value an untrusted IdP
+ * asserted in a pre-upgrade session meet an `acr`.
  */
-export function requirementSession(session: UserSession | null): MfaRequirementSession | null {
+export function requirementSession(session: UserSession | null): RequirementSession | null {
 	if (session === null) return null;
 	return { authentication: sessionAuthentication(session), amr: vouchedAmr(session) };
+}
+
+/**
+ * What a session requirement is asked about a token that carries no live
+ * session (the session-admission ADR's D2 step 5, D9): the primary read from
+ * the token's `amr` — `fed` makes it federated, else `pwd` a password login,
+ * else it cannot be told, as a token issued before #481 carries no `amr` at
+ * all — no second factor on record, and the `amr` as vouched, since a token
+ * is minted from `vouchedAmr` and carries nothing an IdP asserted. Copied.
+ */
+export function requirementSessionFromAmr(amr: readonly string[] | undefined): RequirementSession {
+	const held = amr === undefined ? [] : [...amr];
+	const primary = held.includes(FEDERATED_AMR)
+		? FEDERATED_AMR
+		: held.includes(PASSWORD_AMR)
+			? PASSWORD_AMR
+			: undefined;
+	return {
+		authentication:
+			primary === undefined
+				? undefined
+				: { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined },
+		amr: held,
+	};
 }
 
 /**

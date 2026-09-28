@@ -32,6 +32,7 @@ import {
 	type Logger,
 	producibleAmr,
 	readMfaMode,
+	stepUpReach,
 	type UnsatisfiableAcrValue,
 	vouchableAcrTable,
 } from "@o3co/auth-provider-core";
@@ -75,7 +76,7 @@ export const vouchableAcrValues = (
 	return vouchableAcrTable(
 		configured,
 		producibleAmr({
-			secondFactorMethods: undefined,
+			reach: stepUpReach([]),
 			federationInstalled: installed.length > 0,
 			trustedFederation: trusted.includes(true),
 		}),

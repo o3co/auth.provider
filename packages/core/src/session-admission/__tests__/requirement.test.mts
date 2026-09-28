@@ -100,6 +100,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		reach: new Set(),
 		stepUpPage: undefined,
 		remediations: [],
+		hintKeys: [],
 		admit: async () => ({ outcome: "met" }),
 		...over,
 	});
@@ -108,12 +109,45 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		const a = requirement("a");
 		const b = requirement("b");
 		const resolver = resolverForTests([b, a]);
-		expect(resolver.get("a")).toBe(a);
+		expect(resolver.get("a")?.name).toBe("a");
 		expect(resolver.get("missing")).toBeUndefined();
-		expect([...resolver.entries()]).toEqual([
-			["b", b],
-			["a", a],
+		expect([...resolver.entries()].map(([name, r]) => [name, r.name])).toEqual([
+			["b", "b"],
+			["a", "a"],
 		]);
+	});
+
+	it("registers a copy, as boot does: the sets and lists are the copy's own, a getter is read once, and admit delegates", async () => {
+		let reads = 0;
+		const asked: unknown[] = [];
+		const source = {
+			name: "x",
+			reach: new Set(["risk-ok"]),
+			get stepUpPage() {
+				reads++;
+				return { url: "/x", params: { n: String(reads) } };
+			},
+			remediations: ["x.step_up"],
+			hintKeys: ["level"],
+			admit: async (input: unknown) => {
+				asked.push(input);
+				return { outcome: "met" as const };
+			},
+		} satisfies SessionRequirement;
+		const registered = resolverForTests([source]).get("x") as SessionRequirement;
+		// Read once, at registration — before any matcher that might read it again.
+		expect(reads).toBe(1);
+		expect(registered === (source as unknown)).toBe(false);
+		expect(Object.isFrozen(registered)).toBe(true);
+		expect(registered.stepUpPage).toEqual({ url: "/x", params: { n: "1" } });
+		source.reach.add("hwk");
+		(source.remediations as string[]).push("other");
+		expect([...registered.reach]).toEqual(["risk-ok"]);
+		expect(registered.remediations).toEqual(["x.step_up"]);
+		expect(registered.hintKeys).toEqual(["level"]);
+		expect(registered.admitPrimary).toBeUndefined();
+		await registered.admit({} as never);
+		expect(asked).toHaveLength(1);
 	});
 
 	it("exposes get and entries alone, frozen", () => {
@@ -130,7 +164,10 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 			{ name: "" },
 			{ ...requirement("x"), reach: ["otp"] },
 			{ ...requirement("x"), remediations: "x" },
+			{ ...requirement("x"), hintKeys: undefined },
+			{ ...requirement("x"), hintKeys: [""] },
 			{ ...requirement("x"), admit: undefined },
+			{ ...requirement("x"), admitPrimary: "later" },
 			{ ...requirement("x"), reach: new Set(["otp"]) },
 			{ ...requirement("x"), stepUpPage: { url: "/x", params: {} } },
 			{ ...requirement("x"), stepUpPage: { url: "mfa", params: {} }, reach: new Set(["otp"]) },
@@ -146,7 +183,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 			stepUpPage: { url: "https://other.test/x", params: {} },
 		});
 		expect(() => resolverForTests([paged], { issuer: ISSUER })).toThrow(RangeError);
-		expect(resolverForTests([paged]).get("x")).toBe(paged);
+		expect(resolverForTests([paged]).get("x")?.stepUpPage).toEqual(paged.stepUpPage);
 	});
 });
 
@@ -160,9 +197,16 @@ describe("the shapes the contract names", () => {
 			readonly expiresAt: Date;
 		}>();
 		expectTypeOf<RequirementInput["authentication"]>().toEqualTypeOf<RequirementSession | null>();
+		expectTypeOf<RequirementInput["carrier"]>().toEqualTypeOf<
+			"cookie" | "code" | "link" | "token"
+		>();
 		expectTypeOf<RequirementInput["now"]>().toEqualTypeOf<Date>();
-		expectTypeOf<RequirementVerdict["outcome"]>().toEqualTypeOf<
-			"met" | "reauthenticate" | "step_up" | "unmet"
+		// A step_up names no page: admission answers the registered one.
+		expectTypeOf<RequirementVerdict>().toEqualTypeOf<
+			| { readonly outcome: "met" }
+			| { readonly outcome: "reauthenticate" }
+			| { readonly outcome: "step_up"; readonly whenStillUnmet: "reauthenticate" | "unmet" }
+			| { readonly outcome: "unmet" }
 		>();
 		expect(true).toBe(true);
 	});

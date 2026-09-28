@@ -53,8 +53,25 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 	sessionId: "express-session-1",
 	subject: "user-1",
 	sid: undefined,
-	primary: { method: "pwd", authTimeMs: T0 },
-	user: { id: "user-1", groups: ["staff"] },
+	continuation: {
+		primary: {
+			subject: "user-1",
+			user: { id: "user-1", groups: ["staff"] },
+			recorded: {
+				amr: ["pwd"],
+				authentication: {
+					primary: "pwd",
+					federation: undefined,
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			},
+			authTime: new Date(T0),
+			redirectTo: undefined,
+			request: {},
+		},
+		done: [],
+	},
 	redirectTo: undefined,
 	enrollment: "none",
 	emailProof: "not_required",
@@ -79,12 +96,12 @@ describe("the in-process MfaTransactionStore", () => {
 		const store = createMemoryMfaTransactionStore({ now: () => T0 });
 		const written = TX();
 		await store.create(written);
-		(written.user as Record<string, unknown>).id = "someone-else";
+		(written.continuation?.primary.user as Record<string, unknown>).id = "someone-else";
 		const got = (await store.get("tx-1")) as unknown as {
-			user: { groups: string[] };
+			continuation: { primary: { user: { groups: string[] } } };
 			acrValues: string[];
 		};
-		got.user.groups.push("admin");
+		got.continuation.primary.user.groups.push("admin");
 		got.acrValues.push("urn:other");
 		expect(await store.get("tx-1")).toStrictEqual(TX());
 	});

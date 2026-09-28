@@ -501,13 +501,6 @@ export {
 } from "./logging/loggableError.mjs";
 // Mail (the MFA ADR's D5): the port MFA codes and notices leave through
 export type { MailMessage, MailSender } from "./mail/types.mjs";
-// MFA (the MFA ADR): the coordinator slot and its absence policy; the stores,
-// their memory adapters, factories and modules
-export {
-	MFA_ABSENCE_POLICY,
-	type MfaCoordinator,
-	type PrimaryAuthentication,
-} from "./mfa/coordinator.mjs";
 // MFA — the second-factor contract (the manifest group below exports its
 // MfaFactor name)
 export type {
@@ -547,27 +540,10 @@ export {
 	type MemoryMfaTransactionStoreOptions,
 	MfaTransactionStoreFullError,
 } from "./mfa/memoryTransactionStore.mjs";
+// MFA (the MFA ADR): the stores, their memory adapters, factories and
+// modules; `mfa.mode` as a consumer reads it
+export { type MfaMode, readMfaMode } from "./mfa/mode.mjs";
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
-// The requirement rule (the MFA ADR's D15, D16): the baseline and acr_values,
-// asked the same way by every consumer of an authenticated browser session.
-export {
-	type AcrRequirement,
-	type AcrSelection,
-	type AcrTable,
-	decideMfaRequirement,
-	type MfaMode,
-	type MfaRequirementDecision,
-	type MfaRequirementInput,
-	type MfaRequirementSession,
-	type ProducibleAmr,
-	producibleAmr,
-	readAcrTable,
-	readMfaMode,
-	selectAcr,
-	stepUpReach,
-	type UnsatisfiableAcrValue,
-	vouchableAcrTable,
-} from "./mfa/requirement.mjs";
 export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
@@ -850,6 +826,67 @@ export {
 	createRouter as createReadinessRouter,
 	type ReadinessRouterOptions,
 } from "./routes/Readiness.mjs";
+// Session admission (the session-admission ADR): the one decision point every
+// consumer of an authenticated browser session calls, the claims it reads, the
+// actions and their grades, the requirement contract, and the acr vocabulary.
+export {
+	type AcrRequirement,
+	type AcrSelection,
+	type AcrTable,
+	type ProducibleAmr,
+	producibleAmr,
+	readAcrTable,
+	SECOND_FACTOR_AMR,
+	selectAcr,
+	stepUpReach,
+	type UnsatisfiableAcrValue,
+	vouchableAcrTable,
+} from "./session-admission/acr.mjs";
+export {
+	ADMISSION_ACTIONS,
+	type AdmissionActionName,
+	admitSession,
+	type CodeCarrier,
+	type CookieCarrier,
+	codeClaim,
+	cookieClaim,
+	type LinkCarrier,
+	linkClaim,
+	type TokenCarrier,
+	tokenClaim,
+} from "./session-admission/admit.mjs";
+export {
+	checkPrimaryAdditions,
+	checkPrimaryAuthentication,
+	checkPrimaryContinuation,
+	MFA_REQUIREMENT_NAME,
+} from "./session-admission/primary.mjs";
+export {
+	type Admission,
+	type AdmissionAction,
+	type AdmissionAsks,
+	type AdmissionDeps,
+	type AdmissionGrade,
+	type AdmissionRequest,
+	type CompletedRequirement,
+	checkStepUpPage,
+	type Establishment,
+	type Interruption,
+	type InterruptionAnswer,
+	type PrimaryAdditions,
+	type PrimaryAdmission,
+	type PrimaryAuthentication,
+	type PrimaryContinuation,
+	type RequirementInput,
+	type RequirementSession,
+	type RequirementVerdict,
+	registeredRequirement,
+	type SessionClaim,
+	type SessionRequirement,
+	type SessionRequirementResolver,
+	type SessionView,
+	type StepUpPage,
+} from "./session-admission/requirement.mjs";
 // The token-exchange validator port (#626 P1). `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.
 export type {
@@ -866,6 +903,7 @@ export {
 	type RecordedAuthentication,
 	recordableSessionAuthentication,
 	requirementSession,
+	requirementSessionFromAmr,
 	sessionAfterSecondFactor,
 	sessionAuthentication,
 	vouchedAmr,
