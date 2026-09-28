@@ -16,8 +16,8 @@
 
 import { randomUUID } from "node:crypto";
 import {
+	ADMISSION_ACTIONS,
 	type Admission,
-	type AdmissionAction,
 	type AdmissionDeps,
 	admitSession,
 	boundPolicyAudience,
@@ -80,14 +80,6 @@ export type RefreshTokenGrantDeps = Pick<
 	| "userSessionStore"
 > &
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
-
-/**
- * The refresh grant's action (the session-admission ADR's D9), graded `use`.
- * Core's closed `ADMISSION_ACTIONS` names no action for this consumer, so
- * the grant states its own, as D4 lets a route do: a requirement decides by
- * the grade, and on a token carrier by what the token carries.
- */
-const REFRESH_ACTION: AdmissionAction = Object.freeze({ name: "oauth.refresh", grade: "use" });
 
 /**
  * The token endpoint's answer to an admission that does not refresh (D9,
@@ -575,7 +567,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const admission = await admitSession(admissionDeps, {
 				// `subjectStr` was refused above when the token carries no `sub`.
 				claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
-				action: REFRESH_ACTION,
+				action: ADMISSION_ACTIONS["oauth.refresh"],
 			});
 			const refusal = refusalFor(admission);
 			if (refusal !== undefined) return { result: refusal };
