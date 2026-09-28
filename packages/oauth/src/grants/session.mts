@@ -14,15 +14,19 @@
  * limitations under the License.
  */
 import {
-	auditErrorText,
+	ADMISSION_ACTIONS,
+	type Admission,
+	type AdmissionDeps,
+	admitSession,
+	cookieClaim,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantError,
 	type GrantHandler,
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
-	loggableError,
 	ownedConfirmation,
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
@@ -30,7 +34,7 @@ import {
 	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-import { requireRequirements } from "../admission.mjs";
+import { requireRequirements, stepUpRefusal, unavailableDescription } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
@@ -64,9 +68,74 @@ export type SessionGrantDeps = Pick<
 > &
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
+/**
+ * The token endpoint's answer to an admission that does not mint (the
+ * session-admission ADR's D8), or `undefined` for `admitted`:
+ *
+ * - `unauthenticated` → `401 unauthorized`, as the flag's refusal always was;
+ * - `not_live` → `400 invalid_grant`: `session identifier (sid) is required`
+ *   for a cookie that names no record while a store is wired, else
+ *   `session_invalid` — a record gone or past its expiry, a subject that is
+ *   not the cookie's, a cookie that names no user;
+ * - `revoked` → `400 invalid_grant` `session_invalid`: established before the
+ *   subject's sessions were revoked (change 4);
+ * - `unmet`, `reauthenticate` → `400 invalid_grant` naming the requirement;
+ *   `step_up` → the same, with `step_up: "<requirement>"` beside it (the MFA
+ *   ADR's D16 row: RFC 6749's vocabulary, so an existing client keeps its
+ *   mapping and an updated one can offer the step-up);
+ * - `unavailable` → `503 temporarily_unavailable`, logged once by admission.
+ */
+const refusalFor = (admission: Admission): GrantError | undefined => {
+	switch (admission.outcome) {
+		case "admitted":
+			return undefined;
+		case "unauthenticated":
+			return {
+				status: 401,
+				error: "unauthorized",
+				errorDescription: "session is not authenticated",
+			};
+		case "not_live":
+			return {
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					admission.reason === "no_sid"
+						? "session identifier (sid) is required"
+						: "session_invalid",
+			};
+		case "revoked":
+			return { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
+		case "unmet":
+		case "reauthenticate":
+			return {
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: `the session does not meet the ${admission.requirement} requirement`,
+			};
+		case "step_up":
+			return stepUpRefusal(admission.requirement);
+		case "unavailable":
+			return {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: unavailableDescription(admission.store),
+			};
+	}
+};
+
 export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
-	requireRequirements("createSessionGrant", deps.sessionRequirementResolver);
+	// What admission reads for this grant (D1): the module's own slots as
+	// wired, and no acr table — the grant asks for no acr.
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore: deps.userSessionStore,
+		subjectRevocation: deps.subjectRevocation,
+		requirements: requireRequirements("createSessionGrant", deps.sessionRequirementResolver),
+		acrTable: {},
+		logger: deps.logger,
+		auditSink: deps.auditSink,
+	};
 	// #328: deployment config, not request state — resolved once at grant
 	// construction, matching the altitude the router resolves its knobs at.
 	// `resolveOAuthOptions` owns the defensive read for hand-built configs
@@ -103,80 +172,32 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				};
 			}
 
-			if (!session.isAuthenticated) {
-				return {
-					result: {
-						status: 401,
-						error: "unauthorized",
-						errorDescription: "session is not authenticated",
-					},
-				};
-			}
-
 			// express-session and UserSession are separate stores. A retained
 			// browser cookie must not mint fresh tokens after the tracked session
-			// is revoked or expires. Match authorization-code issuance: tracking
-			// is optional, but a configured store requires a live sid.
-			const sid =
-				typeof session.sid === "string" && session.sid.length > 0 ? session.sid : undefined;
-			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
-			let userId = typeof rawUserId === "string" ? rawUserId : undefined;
+			// is revoked, expired, or established before the subject's sessions
+			// were revoked. The cookie handed to the grant is read through
+			// admission (the session-admission ADR's D8): the flag, the live
+			// record its `sid` names when a store is wired, the subject, the
+			// boundary and the registered requirements, decided in core.
+			const claim = cookieClaim({ session });
+			const admission = await admitSession(admissionDeps, {
+				claim,
+				action: ADMISSION_ACTIONS["oauth.session_grant"],
+			});
+			const refusal = refusalFor(admission);
+			if (refusal !== undefined) return { result: refusal };
+			// `admitted`: the tracked identity is authoritative — the record's
+			// `sub`, which admission held equal to the cookie's — else, with no
+			// store, the cookie's own, which a cookie claim always names by now.
+			const tracked = (admission as Extract<Admission, { outcome: "admitted" }>).session;
+			const userId = tracked === null ? claim.subject : tracked.sub;
+			const sid = claim.sid;
 			// #481 audit: how the tracked session authenticated, mirrored onto the
-			// access token as the authorization_code grant does. Only a tracked
-			// session has one; the browser's own session is not a source for it.
-			let trackedAmr: readonly string[] | undefined;
-			if (deps.userSessionStore) {
-				if (!sid) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "session identifier (sid) is required",
-						},
-					};
-				}
-				try {
-					const tracked = await deps.userSessionStore.get(sid);
-					// The tracked identity is authoritative. A retained browser
-					// identity must agree before its claims can satisfy issuance policy.
-					if (
-						!tracked ||
-						typeof tracked.sub !== "string" ||
-						tracked.sub.length === 0 ||
-						tracked.sub !== userId
-					) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_grant",
-								errorDescription: "session_invalid",
-							},
-						};
-					}
-					userId = tracked.sub;
-					// What the session vouches for (the MFA ADR's D9, D13), never
-					// the record's own `amr`.
-					trackedAmr = wellFormedAmr(vouchedAmr(tracked));
-				} catch (err) {
-					// The outage's one line: error level, the error's projection.
-					deps.logger?.error(
-						{
-							store: "user_session",
-							step: "get",
-							clientId: auditErrorText(ctx.authenticatedClient?.clientId),
-							err: loggableError(err),
-						},
-						"session_grant_store_unavailable",
-					);
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "session store unavailable",
-						},
-					};
-				}
-			}
+			// access token as the authorization_code grant does — what the session
+			// vouches for (the MFA ADR's D9, D13), never the record's own `amr`.
+			// Only a tracked session has one; the browser's own session is not a
+			// source for it.
+			const trackedAmr = tracked === null ? undefined : wellFormedAmr(vouchedAmr(tracked));
 
 			// #297: this grant mints a token straight from the browser session, so
 			// it is the second point (with `/authorize`) that holds the user at

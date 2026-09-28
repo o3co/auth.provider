@@ -72,7 +72,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
-import { requireRequirements } from "./admission.mjs";
+import { requireRequirements, stepUpOf } from "./admission.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -822,6 +822,12 @@ export const createOAuthRouter = async (
 				// passed through by core's policy evaluation, can carry anything.
 				const errorDescription = sanitizeErrorText(result.errorDescription);
 				if (errorDescription) errorBody.error_description = errorDescription;
+				// The session-admission ADR's D8: a grant whose session can be met
+				// by a step-up names the requirement beside `invalid_grant`, so an
+				// updated client can offer it (the MFA ADR's D16 row). A
+				// requirement's name, held to the same character set as `error`.
+				const stepUp = stepUpOf(result);
+				if (stepUp !== undefined && isWellFormedErrorCode(stepUp)) errorBody.step_up = stepUp;
 				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
 				// The token endpoint is not a protected resource (RFC 6750 §3 applies to
 				// resource servers, not authorization endpoints), and `clientAuthMw`

@@ -52,6 +52,20 @@ export function requireRequirements(
 	return checkResolver(requirements);
 }
 
+/**
+ * What an `unavailable` admission is described as, by the store it names
+ * (the session-admission ADR's D10): the session store, the revocation
+ * boundary's store — the words the token side uses for it — or a registered
+ * requirement, whose name is the operator's, in the log line, and not the
+ * client's.
+ */
+export const unavailableDescription = (store: string): string =>
+	store === "user_session"
+		? "session store unavailable"
+		: store === "revocation_boundary"
+			? "revocation store unavailable"
+			: "session requirement unavailable";
+
 /** The token endpoint's `step_up` refusal: `invalid_grant`, and the requirement that asked, so an updated client can offer the step-up. */
 export interface StepUpRefusal extends GrantError {
 	readonly status: 400;
