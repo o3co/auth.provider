@@ -45,9 +45,10 @@ import {
 	type GrantDependencies,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -75,9 +76,10 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const mockDeps: GrantDependencies = {
+const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
 	keyStore,
+	sessionRequirementResolver: resolverForTests([]),
 };
 
 const confidentialAuthClient = {

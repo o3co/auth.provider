@@ -48,7 +48,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -149,9 +149,18 @@ async function buildApp(lookup: "up" | "down"): Promise<Harness> {
 	const revokeFamily = vi.fn(async () => {});
 	const denylist = createMemoryAccessTokenDenylist();
 	const registry = new GrantRegistry();
-	registry.register("refresh_token", createRefreshTokenGrant({ config, keyStore, logger }));
+	registry.register(
+		"refresh_token",
+		createRefreshTokenGrant({
+			config,
+			keyStore,
+			logger,
+			sessionRequirementResolver: resolverForTests([]),
+		}),
+	);
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config,
 		clientRepository,

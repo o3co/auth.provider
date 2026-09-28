@@ -39,7 +39,7 @@ import {
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -126,6 +126,7 @@ async function buildApp(handler: GrantHandler, options: BuildOptions): Promise<e
 		);
 	}
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config: options.config ?? fullConfig,
 		clientRepository: options.clientRepo,
@@ -432,6 +433,7 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 		const registry = new GrantRegistry();
 		registry.register("client_credentials", handler);
 		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
 			registry,
 			config: fullConfig,
 			clientRepository: repo,

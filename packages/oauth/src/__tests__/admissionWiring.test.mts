@@ -17,11 +17,13 @@
 /**
  * How `oauth`'s consumers of admission are wired (the session-admission
  * ADR's D1, D8): every factory a composition can build by hand takes the
- * branded `requirements` resolver as a required option and refuses to build
- * without it, and every manifest that hands a consumer its slots lists the
- * synthetic key `sessionRequirementResolver` beside the slots admission
- * reads — `userSessionStore`, `subjectRevocation`, `auditSink`, `logger`.
- * What each consumer answers per outcome is its own suite's.
+ * branded resolver as a required option — `requirements` on the router, the
+ * slot `sessionRequirementResolver` on the grants, whose deps are the
+ * module's slots by name (#626 P2) — and refuses to build without it, and
+ * every manifest that hands a consumer its slots lists the synthetic key
+ * `sessionRequirementResolver` beside the slots admission reads —
+ * `userSessionStore`, `subjectRevocation`, `auditSink`, `logger`. What each
+ * consumer answers per outcome is its own suite's.
  */
 
 import {
@@ -108,7 +110,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 		// @ts-expect-error — the option is required; the refusal at runtime is the test.
 		expect(() => createSessionGrant(grantDeps)).toThrow(/requirements/);
 		expect(() =>
-			createSessionGrant({ ...grantDeps, requirements: resolverForTests([]) }),
+			createSessionGrant({ ...grantDeps, sessionRequirementResolver: resolverForTests([]) }),
 		).not.toThrow();
 	});
 
@@ -117,7 +119,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 		// @ts-expect-error — the option is required; the refusal at runtime is the test.
 		expect(() => createAuthorizationGrant(deps)).toThrow(/requirements/);
 		expect(() =>
-			createAuthorizationGrant({ ...deps, requirements: resolverForTests([]) }),
+			createAuthorizationGrant({ ...deps, sessionRequirementResolver: resolverForTests([]) }),
 		).not.toThrow();
 	});
 
@@ -125,7 +127,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 		// @ts-expect-error — the option is required; the refusal at runtime is the test.
 		expect(() => createRefreshTokenGrant(grantDeps)).toThrow(/requirements/);
 		expect(() =>
-			createRefreshTokenGrant({ ...grantDeps, requirements: resolverForTests([]) }),
+			createRefreshTokenGrant({ ...grantDeps, sessionRequirementResolver: resolverForTests([]) }),
 		).not.toThrow();
 	});
 });

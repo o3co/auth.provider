@@ -48,7 +48,12 @@ import {
 	type RefreshTokenFamilyRevocation,
 	type RefreshTokenFamilyRotation,
 } from "@o3co/auth-provider-core";
-import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	createTestApp,
+	GrantRegistry,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,6 +139,7 @@ async function buildApp(): Promise<Harness> {
 	registry.register(
 		"refresh_token",
 		createRefreshTokenGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			config,
 			keyStore,
 			refreshTokenFamilyRotation: rotation,
@@ -141,6 +147,7 @@ async function buildApp(): Promise<Harness> {
 		}),
 	);
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config,
 		clientRepository,

@@ -39,8 +39,15 @@ import {
 // proves nothing about them. The `if (false as boolean)` blocks keep the
 // negative assertions from executing.
 
-const REQUIRES = ["config", "clientRepository", "codeRepository", "keyStore"] as const;
+const REQUIRES = [
+	"config",
+	"clientRepository",
+	"codeRepository",
+	"keyStore",
+	"sessionRequirementResolver",
+] as const;
 const OPTIONAL = [
+	"auditSink",
 	"refreshTokenFamilyRotation",
 	"refreshTokenFamilyRevocation",
 	"subjectRevocation",

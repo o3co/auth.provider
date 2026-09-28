@@ -41,9 +41,10 @@ import {
 	type GrantDependencies,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import {
 	COMPOUND_DPOP_BINDING,
 	COMPOUND_MTLS_BINDING,
@@ -76,16 +77,17 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const mockDeps: GrantDependencies = {
+const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
 	keyStore,
+	sessionRequirementResolver: resolverForTests([]),
 };
 
 /**
  * `mockDeps` with `oauth.tokenBinding.bindConfidentialClientRefreshTokens`
  * set — the #275 opt-in.
  */
-const depsWithConfidentialBinding = (enabled: boolean): GrantDependencies => ({
+const depsWithConfidentialBinding = (enabled: boolean): RefreshTokenGrantDeps => ({
 	...mockDeps,
 	config: {
 		...(mockConfig as unknown as Record<string, unknown>),

@@ -45,11 +45,12 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
-import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared setup
@@ -117,8 +118,9 @@ const makeRefreshToken = async (): Promise<string> =>
 function makeRefreshDeps(
 	extra: Partial<GrantDependencies> = {},
 	enabled = true,
-): GrantDependencies {
+): RefreshTokenGrantDeps {
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config: {
 			oauth: {
 				jwt: { secret: SECRET },
@@ -165,8 +167,9 @@ const mockClientRepository: ClientRepository = {
 function makeAuthzDeps(
 	grantedAudience: readonly string[] | undefined,
 	enabled = true,
-): GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository } {
+): AuthorizationGrantDeps {
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config: {
 			oauth: {
 				jwt: { secret: "test-secret" },

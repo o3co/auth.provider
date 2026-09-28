@@ -24,11 +24,13 @@ import {
 	isEmailVerified,
 	loggableError,
 	ownedConfirmation,
+	type ProviderDeps,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	vouchedAmr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
+import { requireRequirements } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
@@ -48,14 +50,23 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  * decision reads the raw body). #295 kept the parameter for compatibility
  * after removing the read; #331 removed it.
  */
-/** What the session grant reads (#626 P2); see `AuthorizationGrantDeps`. */
+/**
+ * What the session grant reads (#626 P2); see `AuthorizationGrantDeps`.
+ * `sessionRequirementResolver`, `subjectRevocation` and `auditSink` are what
+ * it hands admission beside the store and the logger (the session-admission
+ * ADR's D1, D8): the resolver — the synthetic key, by its slot's name, so
+ * `oauthSessionModule` hands its deps over whole — is required, and a
+ * factory built by hand without one is refused.
+ */
 export type SessionGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "userSessionStore" | "logger"
->;
+	"config" | "keyStore" | "userSessionStore" | "subjectRevocation" | "logger"
+> &
+	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
 export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
+	requireRequirements("createSessionGrant", deps.sessionRequirementResolver);
 	// #328: deployment config, not request state — resolved once at grant
 	// construction, matching the altitude the router resolves its knobs at.
 	// `resolveOAuthOptions` owns the defensive read for hand-built configs

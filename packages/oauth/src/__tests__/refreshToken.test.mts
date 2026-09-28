@@ -26,9 +26,10 @@ import {
 	type RefreshTokenFamilyRotation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 
 // Vitest mock-shaped Logger that satisfies the interface; tests pass a fresh
 // `vi.fn()` for `warn` and inspect its calls. Other levels are vi.fn() so
@@ -70,9 +71,10 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const mockDeps: GrantDependencies = {
+const mockDeps: RefreshTokenGrantDeps = {
 	config: mockConfig,
 	keyStore,
+	sessionRequirementResolver: resolverForTests([]),
 };
 
 // D-6 (v0.5.1): every test that hits the binding gate must supply both an
@@ -674,7 +676,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const depsWithStore: GrantDependencies = {
+			const depsWithStore: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: stub,
 				refreshTokenFamilyRevocation: noopRevocation,
@@ -715,7 +717,7 @@ describe("createRefreshTokenGrant", () => {
 					throw new Error("redis down");
 				},
 			};
-			const depsWithStore: GrantDependencies = {
+			const depsWithStore: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: throwingRotation,
 			};
@@ -777,7 +779,7 @@ describe("createRefreshTokenGrant", () => {
 				metadata: {},
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
-			const withOAuth = (over: Record<string, unknown>): GrantDependencies => ({
+			const withOAuth = (over: Record<string, unknown>): RefreshTokenGrantDeps => ({
 				...mockDeps,
 				config: {
 					...mockConfig,
@@ -814,7 +816,10 @@ describe("createRefreshTokenGrant", () => {
 
 		it("returns invalid_grant/family_revoked when the rotation reports 'revoked'", async () => {
 			const stub = createStubRotation("revoked");
-			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenFamilyRotation: stub };
+			const depsWithStore: RefreshTokenGrantDeps = {
+				...mockDeps,
+				refreshTokenFamilyRotation: stub,
+			};
 			// SF-6 (v0.5.1): token must carry family_id when rotation is wired.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
@@ -882,7 +887,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
 				refreshTokenFamilyRevocation: revocation,
@@ -932,7 +937,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: atomicallyRevokedRotation,
 				refreshTokenFamilyRevocation: revocation,
@@ -959,7 +964,7 @@ describe("createRefreshTokenGrant", () => {
 			// quiet just because the revocation moved into the store.
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: atomicallyRevokedRotation,
 				refreshTokenFamilyRevocation: {
@@ -985,7 +990,7 @@ describe("createRefreshTokenGrant", () => {
 			// while sibling RTs stay live. Once the family is already revoked
 			// there is nothing left to fail closed about, and returning 503
 			// would tell a client to retry a replay.
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: atomicallyRevokedRotation,
 			};
@@ -1005,7 +1010,7 @@ describe("createRefreshTokenGrant", () => {
 		it("returns 503 when revocation dep is missing (PB-1 Codex Delta 1, fail-closed)", async () => {
 			// Rotation wired but no revocation dep — fail-closed per Delta 1
 			// (silent skip would violate RFC 6819 §5.2.2 compliance guarantee).
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
 			};
@@ -1030,7 +1035,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
 				refreshTokenFamilyRevocation: revocation,
@@ -1056,7 +1061,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
 				refreshTokenFamilyRevocation: revocation,
@@ -1083,7 +1088,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
 				refreshTokenFamilyRevocation: revocation,
@@ -1119,7 +1124,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotated,
 				refreshTokenFamilyRevocation: revocation,
@@ -1182,7 +1187,7 @@ describe("createRefreshTokenGrant", () => {
 		}
 
 		it("returns 400 invalid_grant for unknown_family with default policy (RED 1)", async () => {
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
 			};
@@ -1202,7 +1207,8 @@ describe("createRefreshTokenGrant", () => {
 		it("issues tokens with unknownFamilyPolicy=accept (RED 2 — legacy mode)", async () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
+				sessionRequirementResolver: resolverForTests([]),
 				config: configWithUnknownPolicy("accept"),
 				keyStore: mockDeps.keyStore,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
@@ -1225,7 +1231,8 @@ describe("createRefreshTokenGrant", () => {
 		it("returns 400 with explicit unknownFamilyPolicy=reject (RED 3)", async () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
+				sessionRequirementResolver: resolverForTests([]),
 				config: configWithUnknownPolicy("reject"),
 				keyStore: mockDeps.keyStore,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
@@ -1260,7 +1267,7 @@ describe("createRefreshTokenGrant", () => {
 					return false;
 				},
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
 				refreshTokenFamilyRevocation: revocation,
@@ -1296,7 +1303,7 @@ describe("createRefreshTokenGrant", () => {
 		};
 
 		it("returns 400 invalid_grant for RT without jti when rotation is wired (RED 1)", async () => {
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotatedRotation,
 			};
@@ -1320,7 +1327,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 400 invalid_grant for RT without family_id when rotation is wired (RED 2)", async () => {
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotatedRotation,
 			};
@@ -1349,7 +1356,7 @@ describe("createRefreshTokenGrant", () => {
 				async register() {},
 				rotate: rotateSpy,
 			};
-			const deps: GrantDependencies = {
+			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotation,
 			};
@@ -1388,7 +1395,7 @@ describe("createRefreshTokenGrant", () => {
 				outcome: "allow",
 				grantedScope: ["read"],
 			}));
-			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const depsWithPolicy: RefreshTokenGrantDeps = { ...mockDeps, grantPolicy: policy };
 			const handler = createRefreshTokenGrant(depsWithPolicy);
 			const ctx: GrantContext = {
 				body: { refresh_token: token },
@@ -1512,7 +1519,7 @@ describe("createRefreshTokenGrant", () => {
 				observedUa = ctxArg.userAgent;
 				return { outcome: "allow" };
 			});
-			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const depsWithPolicy: RefreshTokenGrantDeps = { ...mockDeps, grantPolicy: policy };
 			const handler = createRefreshTokenGrant(depsWithPolicy);
 			const ctx: GrantContext = {
 				body: { refresh_token: token },
@@ -1537,7 +1544,7 @@ describe("createRefreshTokenGrant", () => {
 				error: "access_denied",
 				errorDescription: "policy",
 			}));
-			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const depsWithPolicy: RefreshTokenGrantDeps = { ...mockDeps, grantPolicy: policy };
 			const handler = createRefreshTokenGrant(depsWithPolicy);
 			const ctx: GrantContext = {
 				body: { refresh_token: token },
@@ -1564,7 +1571,7 @@ describe("createRefreshTokenGrant", () => {
 				outcome: "allow",
 				grantedScope: ["read", "admin"], // admin is NOT in the original "read"
 			}));
-			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const depsWithPolicy: RefreshTokenGrantDeps = { ...mockDeps, grantPolicy: policy };
 			const handler = createRefreshTokenGrant(depsWithPolicy);
 			const ctx: GrantContext = {
 				body: { refresh_token: token },
@@ -1587,7 +1594,7 @@ describe("createRefreshTokenGrant", () => {
 			const policy = createStubPolicy(async () => {
 				throw new Error("policy backend 502");
 			});
-			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const depsWithPolicy: RefreshTokenGrantDeps = { ...mockDeps, grantPolicy: policy };
 			const handler = createRefreshTokenGrant(depsWithPolicy);
 
 			const { result } = await handler.handle({
@@ -1610,7 +1617,7 @@ describe("createRefreshTokenGrant", () => {
 				outcome: "allow",
 				grantedScope: [],
 			}));
-			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const depsWithPolicy: RefreshTokenGrantDeps = { ...mockDeps, grantPolicy: policy };
 			const handler = createRefreshTokenGrant(depsWithPolicy);
 
 			const { result } = await handler.handle({
@@ -1633,7 +1640,7 @@ describe("createRefreshTokenGrant", () => {
 			return { kind: "stub", evaluate };
 		}
 
-		function depsWithAudiencePolicy(evaluate: GrantPolicyHook["evaluate"]): GrantDependencies {
+		function depsWithAudiencePolicy(evaluate: GrantPolicyHook["evaluate"]): RefreshTokenGrantDeps {
 			return {
 				...mockDeps,
 				config: {
@@ -1735,7 +1742,7 @@ describe("createRefreshTokenGrant", () => {
 				amr: undefined,
 				authentication: undefined,
 			}));
-			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1761,7 +1768,7 @@ describe("createRefreshTokenGrant", () => {
 		it("returns 400 invalid_grant when userSessionStore.get returns null (F-3-4-2)", async () => {
 			const token = await makeRefreshToken({ sid: "sid-dead" });
 			const store = createStubUserSessionStore(async (_sid) => null);
-			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1783,7 +1790,7 @@ describe("createRefreshTokenGrant", () => {
 			const store = createStubUserSessionStore(async (_sid) => {
 				throw new Error("redis down");
 			});
-			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
+			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
 			const handler = createRefreshTokenGrant(deps);
 
 			const { result } = await handler.handle({
@@ -1845,7 +1852,7 @@ describe("createRefreshTokenGrant", () => {
 					>;
 				},
 			} satisfies RefreshTokenFamilyRotation;
-			const depsWithStore: GrantDependencies = {
+			const depsWithStore: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotation,
 			};

@@ -19,6 +19,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
@@ -37,6 +38,7 @@ const mockConfig = {
 } as unknown as GrantDependencies["config"];
 
 const makeDeps = (overrides?: Partial<GrantDependencies>) => ({
+	sessionRequirementResolver: resolverForTests([]),
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
 	...overrides,

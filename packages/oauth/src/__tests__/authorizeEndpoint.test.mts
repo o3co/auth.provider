@@ -148,6 +148,7 @@ const makeApp = async (opts: {
 	};
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config: makeConfig(
 			opts.oauth ?? {},

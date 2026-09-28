@@ -72,6 +72,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
+import { requireRequirements } from "./admission.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -267,17 +268,20 @@ export const createOAuthRouter = async (
 		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 		/**
 		 * The registered session requirements (the session-admission ADR's
-		 * D1, D6): what a step-up can add decides which acr entries this
-		 * composition can satisfy (`./acrValues.mts`). `oauthModule` passes the
-		 * synthetic key `sessionRequirementResolver`, which the boot planner has
-		 * filled before any route factory runs; a router built by hand without
-		 * one reaches nothing. Every consumer of admission in this router takes
-		 * it as required in A3.
+		 * D1, D6, D8): what every consumer of admission in this router —
+		 * `/authorize`, the consent step — reads its session through, and what
+		 * a step-up can add, which decides which acr entries this composition
+		 * can satisfy (`./acrValues.mts`). `oauthModule` passes the synthetic
+		 * key `sessionRequirementResolver`, which the boot planner has filled
+		 * before any route factory runs. Required: a router built by hand
+		 * without one is refused here, and one handed a resolver the planner
+		 * (or `resolverForTests`) did not build is refused by `admitSession`.
 		 */
-		requirements?: SessionRequirementResolver;
+		requirements: SessionRequirementResolver;
 		logger?: Logger;
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
+	requireRequirements("createOAuthRouter", requirements);
 	const router = express.Router();
 
 	// #328: every `oauth.*` knob this router consumes is resolved exactly once,
@@ -293,7 +297,7 @@ export const createOAuthRouter = async (
 	// an entry dropped is said once, here, at composition.
 	// What the registered requirements can add to a session by a step-up: read
 	// once here, after every name-keyed contribution registered (D6).
-	const reach = stepUpReach(Array.from(requirements?.entries() ?? [], ([, r]) => r));
+	const reach = stepUpReach(Array.from(requirements.entries(), ([, r]) => r));
 	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config, reach);
 	logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token

@@ -13,7 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { type AppConfig, defineModule, type Module } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	AUDIT_SINK_ABSENCE_POLICY,
+	defineModule,
+	type Module,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
+} from "@o3co/auth-provider-core";
 import { createSessionGrant } from "./grants/session.mjs";
 
 /**
@@ -73,12 +79,26 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 		name: "oauth-session",
 		// `config` is required because createSessionGrant reads the access-token lifetime from it
 		// when building the token response for authenticated sessions.
-		requires: ["config", "keyStore"],
-		// `logger` carries the grant's one line for a session-store outage
-		// (`session_grant_store_unavailable`). Boot hands a module only the
-		// slots its manifest names, so without it the grant answered 503 and
-		// logged nothing, whatever logger the composition root had wired.
-		optional: ["userSessionStore", "logger"],
+		// `sessionRequirementResolver` (the session-admission ADR's D1): the
+		// synthetic key every consumer of admission takes; the grant reads the
+		// browser session through `admitSession` with it.
+		requires: ["config", "keyStore", "sessionRequirementResolver"],
+		// The slots admission reads beside the resolver (D8, D10): the durable
+		// session, the subject-revocation boundary — change (4): the boundary
+		// now applies here when it is wired — the audit sink for a subject
+		// mismatch, and the logger, which carries admission's outage line
+		// (`session_admission_unavailable`). Boot hands a module only the
+		// slots its manifest names, so without them the grant would read no
+		// boundary and log nothing, whatever the composition root had wired.
+		optional: ["userSessionStore", "subjectRevocation", "auditSink", "logger"],
+		// Optional to wire, not optional to decide (#363, #406): an unfilled
+		// slot must be declared absent, as every other consumer of the two
+		// slots declares it, so that the grants installed without `oauthModule`
+		// still refuse a composition that left the decision unmade.
+		absencePolicies: {
+			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+		},
 		contributes: {
 			grants: {
 				session: (deps) => createSessionGrant(deps),

@@ -42,11 +42,12 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
-import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promis
 function makeRefreshDeps(
 	extra: Partial<GrantDependencies> = {},
 	enableResourceIndicator?: boolean,
-): GrantDependencies {
+): RefreshTokenGrantDeps {
 	const base = {
 		oauth: {
 			jwt: { secret: SECRET },
@@ -109,6 +110,7 @@ function makeRefreshDeps(
 		};
 	}
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config: base as unknown as GrantDependencies["config"],
 		keyStore,
 		...extra,
@@ -127,7 +129,7 @@ const mockClientRepository: ClientRepository = {
 function makeAuthzDeps(
 	extra: Partial<GrantDependencies> = {},
 	enableResourceIndicator?: boolean,
-): GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository } {
+): AuthorizationGrantDeps {
 	const base = {
 		oauth: {
 			jwt: { secret: "test-secret" },
@@ -145,6 +147,7 @@ function makeAuthzDeps(
 		};
 	}
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config: base as unknown as GrantDependencies["config"],
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {

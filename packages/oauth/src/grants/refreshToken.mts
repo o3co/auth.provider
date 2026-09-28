@@ -30,6 +30,7 @@ import {
 	loggableError,
 	matchConfirmation,
 	ownedConfirmation,
+	type ProviderDeps,
 	readIssuedScope,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
@@ -41,6 +42,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
+import { requireRequirements } from "../admission.mjs";
 
 /**
  * Taken off the family ceiling a rotation reports before the refresh token's
@@ -52,7 +54,14 @@ import type { JWTPayload } from "jose";
  */
 const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
 
-/** What the refresh grant reads (#626 P2); see `AuthorizationGrantDeps`. */
+/**
+ * What the refresh grant reads (#626 P2); see `AuthorizationGrantDeps`.
+ * `sessionRequirementResolver` and `auditSink` are what it hands admission
+ * for the read of the token's session (the session-admission ADR's D9): the
+ * resolver — the synthetic key, by its slot's name, so
+ * `oauthAuthorizationModule` hands its deps over whole — is required, and a
+ * factory built by hand without one is refused.
+ */
 export type RefreshTokenGrantDeps = Pick<
 	GrantDependencies,
 	| "config"
@@ -63,10 +72,12 @@ export type RefreshTokenGrantDeps = Pick<
 	| "refreshTokenFamilyRevocation"
 	| "subjectRevocation"
 	| "userSessionStore"
->;
+> &
+	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { config, keyStore, logger, subjectRevocation } = deps;
+	requireRequirements("createRefreshTokenGrant", deps.sessionRequirementResolver);
 	// The lifetimes it mints with, read once, when the grant is built. A
 	// configuration built by hand that the resolvers refuse is a composition
 	// fault: refused here, it never reaches a request — read per request, it

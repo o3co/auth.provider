@@ -30,7 +30,7 @@ import {
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -140,6 +140,7 @@ function createTrackingExpress() {
 describe("createOAuthRouter", () => {
 	it("returns a router", async () => {
 		const result = await createOAuthRouter(mockExpress, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -169,6 +170,7 @@ describe("createOAuthRouter", () => {
 		};
 
 		await createOAuthRouter(trackingExpress, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -193,6 +195,7 @@ describe("createOAuthRouter", () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -211,6 +214,7 @@ describe("createOAuthRouter", () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -227,6 +231,7 @@ describe("createOAuthRouter", () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: fullConfig,
 			clientRepository: {} as ClientRepository,
@@ -262,6 +267,7 @@ describe("createOAuthRouter", () => {
 			const registry = new GrantRegistry();
 			registry.register(opts.grantType, opts.grantHandler);
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry,
 				config: fullConfig,
 				clientRepository: integrationClientRepo,
@@ -618,6 +624,7 @@ describe("createOAuthRouter", () => {
 			const registry = new GrantRegistry();
 			registry.register("session-mutating", sessionGrant);
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry,
 				config: fullConfig,
 				clientRepository: integrationClientRepo,
@@ -651,6 +658,7 @@ describe("createOAuthRouter", () => {
 			app.use(express.json());
 			app.use(express.urlencoded({ extended: false }));
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: fullConfig,
 				clientRepository: integrationClientRepo,

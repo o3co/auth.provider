@@ -39,6 +39,7 @@ import {
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
+import { requireRequirements } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -54,14 +55,21 @@ export type AuthorizationGrantDeps = Pick<
 	| "keyStore"
 	| "logger"
 	| "userSessionStore"
+	| "subjectRevocation"
 	| "refreshTokenFamilyRotation"
 	| "sessionFamilyIndex"
 	| "sessionRPRegistry"
 > &
-	ProviderDeps<"codeRepository" | "clientRepository">;
+	// The session-admission ADR's D1, D8: `sessionRequirementResolver` — the
+	// synthetic key, by its slot's name, so the module hands its deps over
+	// whole — is what the two reads of the code's session go through, with
+	// `subjectRevocation` and `auditSink` beside the store and the logger.
+	// Required: a factory built by hand without one is refused.
+	ProviderDeps<"codeRepository" | "clientRepository" | "sessionRequirementResolver", "auditSink">;
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
+	requireRequirements("createAuthorizationGrant", deps.sessionRequirementResolver);
 	// Every store this grant reads or writes that cannot answer is `503`,
 	// logged once at error level as `authorization_grant_store_unavailable`,
 	// `store` naming which and `step` the operation, with the error's

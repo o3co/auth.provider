@@ -41,9 +41,10 @@ import {
 	type RefreshTokenFamilyStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	REFUSED_COMMAND_MARKER,
@@ -95,11 +96,12 @@ const failingFamilyStore = (): RefreshTokenFamilyStore => {
 
 const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
 	createRefreshTokenGrant({
+		sessionRequirementResolver: resolverForTests([]),
 		config,
 		keyStore: createSymmetricKeyStore(SECRET),
 		logger,
 		...deps,
-	} as GrantDependencies);
+	} as RefreshTokenGrantDeps);
 
 /** The one error-level line for the outage, with its projection and not the error. */
 const expectLogged = (logger: MockLogger, fields: Record<string, unknown>): void => {

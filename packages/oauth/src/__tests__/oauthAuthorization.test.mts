@@ -32,12 +32,17 @@ import {
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	createTestApp,
+	GrantRegistry,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -189,6 +194,7 @@ async function buildAuthorizeApp(opts: {
 	) as AppConfig;
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config: mergedConfig,
 		clientRepository: opts.clientRepo ?? authorizeClientRepo,
@@ -569,7 +575,8 @@ describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", ()
 			rotate: rotateSpy,
 		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
-		const baseDeps: GrantDependencies = {
+		const baseDeps: RefreshTokenGrantDeps = {
+			sessionRequirementResolver: resolverForTests([]),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -652,10 +659,8 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			code_challenge_method: "S256",
 		});
 
-		const deps: GrantDependencies & {
-			codeRepository: CodeRepository;
-			clientRepository: ClientRepository;
-		} = {
+		const deps: AuthorizationGrantDeps = {
+			sessionRequirementResolver: resolverForTests([]),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -713,10 +718,8 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 
 		// Build a valid refresh token first via authorization grant
 		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code" });
-		const authDeps: GrantDependencies & {
-			codeRepository: CodeRepository;
-			clientRepository: ClientRepository;
-		} = {
+		const authDeps: AuthorizationGrantDeps = {
+			sessionRequirementResolver: resolverForTests([]),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -758,7 +761,8 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 		if (!refreshTokenValue) return; // skip if no token
 
 		// Now test the refresh grant with grantPolicy
-		const rtDeps: GrantDependencies = {
+		const rtDeps: RefreshTokenGrantDeps = {
+			sessionRequirementResolver: resolverForTests([]),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -787,10 +791,8 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 	it("registered authorization handler returns 400 for invalid code", async () => {
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const consumeByCode = vi.fn().mockResolvedValue(null);
-		const deps: GrantDependencies & {
-			codeRepository: CodeRepository;
-			clientRepository: ClientRepository;
-		} = {
+		const deps: AuthorizationGrantDeps = {
+			sessionRequirementResolver: resolverForTests([]),
 			config: {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -1481,6 +1483,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		};
 
 		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: authorizeConfig,
 			clientRepository: publicClientRepo,
