@@ -33,7 +33,7 @@
  *   time; a digest whose key left the ring cannot be judged.
  */
 
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, hkdfSync, randomBytes } from "node:crypto";
 import { type Logger, type SealingKeyRing, sealWithKeyRing } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -284,10 +284,23 @@ describe("keyed digests (D7, D11)", () => {
 		).toBe("key_unavailable");
 	});
 
-	it("never uses a sealing key as the HMAC key itself", () => {
-		const stored = sealingOver([K1]).digestsFor("email").digest(["a"]);
-		const raw = createHmac("sha256", K1.key).update("a").digest("base64url");
-		expect(stored.digest).not.toBe(raw);
+	it("is HMAC-SHA-256, keyed by HKDF-SHA-256 from the ring key (info o3co:mfa:digest), over the kind and the parts length-prefixed, base64url — a format at rest for as long as a recovery code", () => {
+		// A fixed key: the bytes 0x00 to 0x1f.
+		const key = Buffer.from(Array.from({ length: 32 }, (_, index) => index));
+		// kind "email", then "tx-1", "f-1", "123456": each after its length as
+		// a 32-bit big-endian number, spelled out.
+		const input = Buffer.from(
+			"00000005656d61696c" + "0000000474782d31" + "00000003662d31" + "00000006313233343536",
+			"hex",
+		);
+		const digestKey = Buffer.from(hkdfSync("sha256", key, Buffer.alloc(0), "o3co:mfa:digest", 32));
+		const expected = createHmac("sha256", digestKey).update(input).digest("base64url");
+		// The answer, as a literal: a change to any part of the format fails here.
+		expect(expected).toBe("gi4UdFcuz4TVZjc1-WHOFk3EHl6KVtbWSFHEvr_ceGE");
+		const digests = sealingOver([{ id: "fixed", key }]).digestsFor("email");
+		expect(digests.digest(["tx-1", "f-1", "123456"])).toEqual({ keyId: "fixed", digest: expected });
+		// Never the ring key itself as the HMAC key, over the same input.
+		expect(expected).not.toBe(createHmac("sha256", key).update(input).digest("base64url"));
 	});
 
 	it("refuses parts that are not strings, and a kind it cannot bind to", () => {
