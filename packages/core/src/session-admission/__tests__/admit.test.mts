@@ -623,6 +623,26 @@ describe("step 4 — the revocation boundary", () => {
 		}
 	});
 
+	it("reads the boundary for a code claim — either read — and a link claim as for a cookie: only a token carrier's is verifyJwt's", async () => {
+		const record = session({ authTime: minutesAgo(5) });
+		for (const [label, claim] of [
+			["a code's first read", codeClaimFirstRead({ sid: "sid-1" })],
+			["a code's revalidation", codeClaimRevalidation({ sid: "sid-1" }, "user-1")],
+			["a link", linkClaim({ sid: "sid-1", subject: "user-1" })],
+		] as const) {
+			expect(
+				await admitSession(
+					deps({
+						userSessionStore: holding(record),
+						subjectRevocation: revocationOf(async () => minutesAgo(1)),
+					}),
+					request({ claim }),
+				),
+				label,
+			).toEqual({ outcome: "revoked" });
+		}
+	});
+
 	it("admits a session established after the boundary, or with no boundary in force", async () => {
 		const record = session({ authTime: minutesAgo(5) });
 		for (const boundary of [null, minutesAgo(6)]) {
