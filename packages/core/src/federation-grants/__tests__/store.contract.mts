@@ -1258,7 +1258,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					now: T0(),
 				});
 				if (!activation.ok) throw new Error("fixture: the activation did not succeed");
-				const deadline = expiresAt.getTime() + 5_000;
+				// Bounds the failure path only: a store on another clock — a container
+				// VM lagging its host after a sleep — may take seconds to reclaim.
+				const deadline = expiresAt.getTime() + 30_000;
 				for (;;) {
 					const inspected = await store.inspect("g-short", T0());
 					if (inspected === null) throw new Error("fixture: the record itself was reclaimed");

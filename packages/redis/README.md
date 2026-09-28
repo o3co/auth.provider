@@ -497,9 +497,10 @@ what a caller is told is judged on the time it passes, and what Redis reclaims
 is judged by Redis. The scripts guard on arithmetic copies of the expiry and
 the upstream account kept beside the canonical text; a write that has the
 record in hand refuses when the copies no longer agree with the text, and a
-revocation, which has none and must always win, takes the horizon it honours
-from the text itself (#627), so a copy moved into the past cannot keep a live
-grant from being ended.
+revocation, which gates on none and must always win, takes the horizon it
+honours from the text itself (#627) — read as the TypeScript reader reads it,
+so a value the reader refuses gives no horizon and the revocation proceeds —
+and a copy moved into the past cannot keep a live grant from being ended.
 
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the

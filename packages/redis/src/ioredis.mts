@@ -1154,16 +1154,29 @@ const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
 -- one write meant to end it, while the credential stayed at rest until the
 -- key's own TTL. A pending grant has no text and runs from its intent; a text
 -- that does not parse gives no horizon, which is the retention case below.
+--
+-- Every number is read as the TypeScript reader reads it — a string of digits
+-- within the safe-integer range, and the retention not negative — and not
+-- with tonumber, which takes "-1.5" and "1e21": a value the reader refuses
+-- makes a record it answers nothing for, and a horizon computed from such a
+-- value here would refuse to end exactly that record (Codex). No horizon
+-- instead, and the revocation proceeds.
+local function fg_int(v)
+  if type(v) ~= 'string' or string.match(v, '^%-?%d+$') == nil then return nil end
+  local n = tonumber(v)
+  if n == nil or n > 9007199254740991 or n < -9007199254740991 then return nil end
+  return n
+end
 local function fg_revoke_horizon(g)
-  local retention = fg_num(g['retentionMs'])
-  if retention == nil then return nil end
-  if g['status'] == 'pending' then return fg_num(g['intentExpiresAt']) end
+  local retention = fg_int(g['retentionMs'])
+  if retention == nil or retention < 0 then return nil end
+  if g['status'] == 'pending' then return fg_int(g['intentExpiresAt']) end
   local text = g['authorization']
   if text == nil then return nil end
   local ok, parsed = pcall(cjson.decode, text)
   if not ok or type(parsed) ~= 'table' then return nil end
   -- The eleventh element of the canonical text, as the codec lays it out.
-  local expiresAt = fg_num(parsed[11])
+  local expiresAt = fg_int(parsed[11])
   if expiresAt == nil then return nil end
   return expiresAt + retention
 end

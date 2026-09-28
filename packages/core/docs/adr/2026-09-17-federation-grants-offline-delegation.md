@@ -2094,7 +2094,7 @@ adapter that skips either is broken in a way its tests will not show:
   grant allows, and a round trip on every use is not worth a pointer's
   removal. A revocation reads the one thing it judges — whether the record is
   a tombstone already — from the text and never from the expiry copy (#627):
-  it has no snapshot in hand and must always win, and a copy moved into the
+  it gates on no snapshot and must always win, and a copy moved into the
   past would otherwise make a live grant read as a tombstone to the one write
   meant to end it. A rewrite of the text *and* its copies together is the
   restore case above, and is not detected.

@@ -40,7 +40,10 @@ import type {
  *
  * The text is never decoded and re-encoded on the way to the authenticated
  * data — the bytes the HASH holds are the bytes that are authenticated, which
- * is also why no Lua script may pass it through `cjson`.
+ * is also why no Lua script may re-encode it, or write anything derived from
+ * a decode of it back to the record. A read-only decode is fine:
+ * `LUA_FG_REVOKE` reads the expiry out of it for the horizon it honours
+ * (#627), and writes nothing of what it read.
  */
 
 /** The instant as the format writes it: a decimal millisecond string. */

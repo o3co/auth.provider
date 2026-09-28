@@ -53,10 +53,11 @@ import type {
  * written back by a refresh whose `now` is still before it, as a key TTL that
  * has fired is not. A time that is not a date is refused with a
  * `RangeError`, and not compared — every comparison with NaN is false, and the
- * record would read as lapsed. A number that is not a finite one, and a
- * version that is not a whole one, refuse the write they arrive in
- * (`{ ok: false }`): no adapter can keep the first, and no caller ever read
- * the second.
+ * record would read as lapsed. A number the record would keep that is not a
+ * finite one, and a version that is not a whole one, refuse the write they
+ * arrive in (`{ ok: false }`): no adapter can keep the first, and no caller
+ * ever read the second. A bound that is only compared, such as `rowMs`, is
+ * compared as given.
  *
  * **What is not here.** The intent records — the redirect URI, the scopes, the
  * consent challenge — the connect transactions, and the bound on live intents
