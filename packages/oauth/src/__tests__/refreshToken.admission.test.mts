@@ -29,6 +29,7 @@
 
 import { createSecretKey } from "node:crypto";
 import {
+	ADMISSION_ACTIONS,
 	type AppConfig,
 	createInMemorySubjectRevocation,
 	createSymmetricKeyStore,
@@ -215,7 +216,11 @@ describe("the refresh grant on admission — no requirement registered: as befor
 		});
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ store: "user_session", err: expect.anything() }),
+			expect.objectContaining({
+				store: "user_session",
+				action: "oauth.refresh",
+				err: expect.anything(),
+			}),
 			"session_admission_unavailable",
 		);
 		expect(rotation.rotate).not.toHaveBeenCalled();
@@ -244,6 +249,8 @@ describe("the refresh grant on admission — a requirement's verdicts (D9)", () 
 		expect(requirement.inputs).toHaveLength(1);
 		const [input] = requirement.inputs;
 		expect(input?.carrier).toBe("token");
+		// The bundled action, the frozen entry itself (the session-admission ADR's D4).
+		expect(input?.action).toEqual(ADMISSION_ACTIONS["oauth.refresh"]);
 		expect(input?.action.grade).toBe("use");
 		expect(input?.subject).toBe(SUBJECT);
 		expect(input?.session).toBeNull();
