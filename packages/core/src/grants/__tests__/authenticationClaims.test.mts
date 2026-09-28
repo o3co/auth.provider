@@ -19,9 +19,12 @@ import {
 	composeAmr,
 	EMAIL_OTP_AMR,
 	FEDERATED_AMR,
+	HARDWARE_KEY_AMR,
 	MFA_AMR,
+	OTP_AMR,
 	PASSWORD_AMR,
 	RECOVERY_CODE_AMR,
+	SOFTWARE_KEY_AMR,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "#/grants/authenticationClaims.mjs";
@@ -72,6 +75,12 @@ describe("the amr values this provider records (the MFA ADR's D13, D14)", () => 
 		expect(MFA_AMR).toBe("mfa");
 		expect(EMAIL_OTP_AMR).toBe("email");
 		expect(RECOVERY_CODE_AMR).toBe("recovery");
+	});
+
+	it("include RFC 8176's otp, hwk and swk, which D14 assigns to TOTP and WebAuthn", () => {
+		expect(OTP_AMR).toBe("otp");
+		expect(HARDWARE_KEY_AMR).toBe("hwk");
+		expect(SOFTWARE_KEY_AMR).toBe("swk");
 	});
 });
 
@@ -125,6 +134,21 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 		expect(() => composeAmr(["pwd"], { amr: [MFA_AMR], addsMfa: false })).toThrow(RangeError);
 		expect(() => composeAmr(["pwd"], { amr: ["otp", MFA_AMR], addsMfa: true })).toThrow(RangeError);
 	});
+
+	it.each([
+		["pwd", PASSWORD_AMR],
+		["fed", FEDERATED_AMR],
+	])(
+		"refuses a factor that names the primary marker %s: a second factor cannot forge a primary",
+		(_label, marker) => {
+			// The baseline is decided on the primary (D13), which the session's
+			// `pwd` / `fed` say; a factor listing either would change it.
+			expect(() => composeAmr(["pwd"], { amr: [marker], addsMfa: true })).toThrow(RangeError);
+			expect(() => composeAmr(["fed"], { amr: ["otp", marker], addsMfa: true })).toThrow(
+				RangeError,
+			);
+		},
+	);
 
 	it.each([
 		["an empty value", [""]],
