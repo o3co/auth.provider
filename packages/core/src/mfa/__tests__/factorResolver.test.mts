@@ -41,6 +41,7 @@ const bootstrapComponents = {
 
 const factor = (kind: string): MfaFactor => ({
 	kind,
+	amrValues: [kind],
 	addsMfa: true,
 	counting: true,
 	guessable: false,
@@ -240,6 +241,7 @@ describe("mfaFactorResolver (D3, D7)", () => {
 			"federationProviders",
 			"federationRedirectPolicyResolver",
 			"mfaFactorResolver",
+			"sessionRequirementResolver",
 		];
 		const provider = defineModule({
 			name: "test:reads-every-projection",
