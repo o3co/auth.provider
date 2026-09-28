@@ -78,7 +78,12 @@ import {
 	tokenExchangeModule,
 } from "@o3co/auth-provider-oauth-token-exchange";
 import { redisChallengeStoreModule, redisDeviceCodeStoreModule } from "@o3co/auth-provider-redis";
-import { establishSession } from "@o3co/auth-provider-session";
+import {
+	answerInterruption,
+	createCsrfProtectionFromConfig,
+	establishSession,
+	type SessionCsrfConfigSlice,
+} from "@o3co/auth-provider-session";
 import {
 	type ComposeOptions,
 	type Composition,
@@ -276,16 +281,6 @@ export const FIXTURE_COMPLETION = {
 	bare: "/fixture/bare",
 } as const;
 
-/** One of the express session's callback operations, as a promise of its failure. */
-const sessionOperation = (run: (done: (err: unknown) => void) => unknown): Promise<unknown> =>
-	new Promise((resolve) => {
-		try {
-			run((err) => resolve(err ?? undefined));
-		} catch (err) {
-			resolve(err);
-		}
-	});
-
 const FIXTURE_UNAVAILABLE = {
 	error: "temporarily_unavailable",
 	error_description: "Session store unavailable",
@@ -306,13 +301,12 @@ const FIXTURE_UNAVAILABLE = {
  * own record (here, memory), and its completion route, `POST
  * <FIXTURE_COMPLETION>/complete` on that session, completes it adding
  * nothing (`amr: []`: the requirement reaches nothing), resumes the login
- * through `resumePrimary`, and answers what admission answers: another
- * requirement's interruption, opened on a regenerated session as the login
- * route opens one, or the session established through the session package's
- * exported `establishSession`. A requirement that reaches nothing leaves no
- * trace in `recorded`, so it remembers which logins it completed and answers
- * `establish` for them when it is asked again. Every ceremony opened is
- * pushed on `ceremonies`, for a test to read.
+ * through `resumePrimary` — which does not ask a requirement already done in
+ * that login again, so a fixture interrupts every login it is asked about —
+ * and answers what admission answers, through the session package's
+ * exports: another requirement's interruption, as the login answers one
+ * (`answerInterruption`), or the session established (`establishSession`).
+ * Every ceremony opened is pushed on `ceremonies`, for a test to read.
  */
 function requirementModules(
 	interrupt: ReadonlySet<string>,
@@ -333,9 +327,6 @@ function requirementModules(
 		const answer: InterruptionAnswer = FIXTURE_INTERRUPTION[spec.key];
 		/** The requirement's own record: each open ceremony by the session it is bound to. */
 		const opened = new Map<string, PrimaryContinuation>();
-		/** The logins it completed, by subject and `authTime`. */
-		const completed = new Set<string>();
-		const loginOf = (subject: string, authTimeMs: number): string => `${subject}@${authTimeMs}`;
 		const interruption: RequirementInterruption = {
 			open: async (sessionId, continuation) => {
 				opened.set(sessionId, continuation);
@@ -363,16 +354,19 @@ function requirementModules(
 						hintKeys: spec.hintKeys,
 						admit: async () => ({ outcome: "met" }),
 						admitPrimary: async (primary: PrimaryAuthentication) =>
-							!interrupt.has(primary.subject) ||
-							completed.has(loginOf(primary.subject, primary.authTime.getTime()))
-								? "establish"
-								: interruption,
+							interrupt.has(primary.subject) ? interruption : "establish",
 					}),
 				},
 				routes: [
 					(deps) => {
 						const config = deps.config as AppConfig;
 						const logger = deps.logger ?? consoleLogger;
+						// The session's own CSRF mechanism, from the same config: the
+						// token is signed, not stored, so this one's and the login
+						// router's accept each other's.
+						const csrf = createCsrfProtectionFromConfig(
+							config.session as unknown as SessionCsrfConfigSlice,
+						);
 						const admissionDeps: AdmissionDeps = {
 							userSessionStore: deps.userSessionStore,
 							subjectRevocation: undefined,
@@ -394,7 +388,6 @@ function requirementModules(
 								return;
 							}
 							opened.delete(req.sessionID);
-							completed.add(loginOf(continuation.primary.subject, continuation.primary.authTimeMs));
 							const admission = await resumePrimary(admissionDeps, continuation, {
 								requirement: spec.name,
 								adds: { amr: [] },
@@ -404,17 +397,16 @@ function requirementModules(
 								return;
 							}
 							if (admission.outcome === "interrupt") {
-								// As the login route opens one: regenerate, open, save.
-								if (await sessionOperation((done) => req.session.regenerate(done))) {
-									res.status(503).json(FIXTURE_UNAVAILABLE);
-									return;
-								}
-								const next = await admission.open(req.sessionID);
-								if (await sessionOperation((done) => req.session.save(done))) {
-									res.status(503).json(FIXTURE_UNAVAILABLE);
-									return;
-								}
-								res.status(next.status).json(next.body);
+								// As the login answers one: regenerate, open, save, the 403.
+								await answerInterruption(admission, {
+									req,
+									res,
+									csrf,
+									reporter: {
+										storeUnavailable: (store, step, cause) =>
+											logger.error({ store, step, cause }, "fixture_completion_unavailable"),
+									},
+								});
 								return;
 							}
 							const established = await establishSession(admission.establishment, {

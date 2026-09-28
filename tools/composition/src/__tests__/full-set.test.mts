@@ -348,7 +348,7 @@ describe("the session requirements a deployment writes", () => {
 describe("a password login both requirements interrupt, resumed through each (the session-admission ADR's D5, acceptance criterion 2)", () => {
 	it("is interrupted by the first, resumed into the second with the first's completion done, and established once — as a password login, through the exported establishSession", async () => {
 		const ceremonies: FixtureCeremony[] = [];
-		const { app, handle } = await boot({ interruptLogins: [ALICE.sub], ceremonies });
+		const { app, handle, config } = await boot({ interruptLogins: [ALICE.sub], ceremonies });
 		const { userSessionStore, subjectSessionIndex } = handle.components as unknown as {
 			userSessionStore: UserSessionStore;
 			subjectSessionIndex: SubjectSessionIndex;
@@ -381,6 +381,9 @@ describe("a password login both requirements interrupt, resumed through each (th
 			.set("Cookie", cookiesOf(login));
 		expect(first.status).toBe(403);
 		expect(first.body).toEqual(FIXTURE_INTERRUPTION.bare.body);
+		// Answered as the login answers an interruption (the session package's
+		// answerInterruption): a fresh CSRF token beside the 403.
+		expect(cookiesOf(first).some((c) => c.startsWith(`${config.session.name}.csrf=`))).toBe(true);
 		expect(ceremonies.map((c) => c.requirement)).toEqual(["fixture-page", "fixture-bare"]);
 		const atFirst = ceremonies[1];
 		expect(atFirst?.continuation).toMatchObject({
