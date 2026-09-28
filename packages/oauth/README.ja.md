@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-09-26
+最終更新: 2026-09-28
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -246,7 +246,9 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **`request` と `request_uri` は無視せず拒否する**（`request_not_supported` / `request_uri_not_supported`）: 署名付きリクエストオブジェクトはパラメーターを改ざん不能にするためにあるので、代わりにクエリ文字列を処理すれば、RP がそれを尊重されたと信じている間に、オブジェクトが防ぐはずだったものを攻撃者に与えることになる。ディスカバリードキュメントが `request_uri_parameter_supported: false` と言うのも同じ理由である — OIDC Discovery はこのフィールドの省略時の既定を **`true`** としているので、省略すること自体が主張になる。
 
-**未実装:** `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
+**`acr` を名指す `claims` パラメーターは拒否する**（`invalid_request`、`request acr through acr_values`）— essential かどうか、id_token 向けか userinfo 向けかを問わない（OIDC Core §5.5.1.1）。JSON オブジェクトでない `claims` や繰り返された `claims` も、`acr` を名指していないと判断できないので拒否する。空の `claims=` は省略されたものとして扱う（RFC 6749 §3.1）。このサーバーは `acr` を `acr_values` とその表を通してのみ保証する。リクエストを無視すれば、RP はそれが尊重されたと読むトークンを受け取ることになる。この拒否は `prompt=login` や `max_age` がブラウザーをログインへ送るより先に行う。`claims` のそれ以外の使い方は無視する。
+
+**未実装:** その拒否を除く `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
 **`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアもフェイルクローズになるが、それを判定としては扱わない: 対話的なリクエストはこれまでどおりログインページへ送り（ユーザーはそこで行動でき、ログイン経路は自分の障害を自分で報告する）、`prompt=none` のリクエストには `redirect_uri` で `temporarily_unavailable`（"session store unavailable"、RFC 6749 §4.1.2.1）を返す。`login_required` は誰もサインインしていないと RP に告げることになるが、障害にはそれが分からない。どちらの場合も障害は error レベルで 1 行、`authorize_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。
 
@@ -258,7 +260,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **トークンが運ぶもの。** id_token は `auth_time` を常に持ち、セッションが記録していれば `amr` を、`/authorize` が `acr_values` のリクエストを満たしたときは `acr` を持つ。アクセストークンは `amr` と `acr` があればそれを写すので、`auth.policy-verifier` やリソースサーバーは id_token 無しでそれに基づいて判断できる — そして**リフレッシュを越えて写し続ける**: `authorization_code` グラントはリフレッシュトークンにも両方を刻み、`refresh_token` グラントは提示されたトークンから、自分が発行するアクセストークンとリフレッシュトークンへそれらを運ぶ。リフレッシュは認証を繰り返さないからである（OIDC Core §12.2 は `auth_time` を同じように扱う）。`session` グラントは追跡中のセッションの `amr` を写し（`acr_values` の交渉が無いので `acr` は無い）、パスキーのグラント（`@o3co/auth-provider-webauthn`）はアクセストークンと同じくリフレッシュトークンにも `amr: ["hwk"]` を刻む。どのグラントもこれらのクレームを 1 つの形で読む — `amr` は空でない文字列の空でない配列、`acr` は空でない文字列（core の `wellFormedAmr` / `wellFormedAcr`） — そしてそれ以外は省く。したがって `amr: []` を記録したセッションは、最初のリフレッシュで消える `amr` ではなく、どのトークンにも `amr` を刻まない。どちらも持たないリフレッシュトークンからは、どちらも持たないトークンが生まれる。
 
-**`max_age`。** 負でない整数（それ以外は `invalid_request`）。`auth_time` が `max_age` 秒より古いセッション — `max_age=0` は常に古い — は、未認証のものとまったく同じくリクエストを往復させてログインページへ送られ、加えて 1 つだけ: 要求した時刻が**サーバー側に**記録される。戻ってきたとき、その時刻よりミリ秒単位で厳密に後に認証したセッションが求められた再認証であり、リクエストは進む — `max_age=0` も含めて。これがループを防ぐ。それより前に認証したセッションは、もう一度送り返されるのではなく `login_required` を返される。`prompt=none` では古いセッションは即座に `login_required`: 無言は無言である。id_token の `auth_time` が RP の検証するものであり、常に真実である。
+**`max_age`。** 負でない整数（それ以外は `invalid_request`）。空の `max_age=` は、値の無いパラメーターについて RFC 6749 §3.1 が求めるとおり、省略されたものとして扱う。`auth_time` が `max_age` 秒より古いセッション — `max_age=0` は常に古い — は、未認証のものとまったく同じくリクエストを往復させてログインページへ送られ、加えて 1 つだけ: 要求した時刻が**サーバー側に**記録される。戻ってきたとき、その時刻よりミリ秒単位で厳密に後に認証したセッションが求められた再認証であり、リクエストは進む — `max_age=0` も含めて。これがループを防ぐ。それより前に認証したセッションは、もう一度送り返されるのではなく `login_required` を返される。`prompt=none` では古いセッションは即座に `login_required`: 無言は無言である。id_token の `auth_time` が RP の検証するものであり、常に真実である。
 
 要求は**セッションストア内のレコード**であり、戻り URL が `reauth_ask` として運ぶ不透明な ID で名指される。URL 上のタイムスタンプそのものではない: リクエストからそのまま読む目印は呼び出し元が書けるもので、偽造されれば任意の生存セッションでチェックを満たし、強制するための往復を飛ばせてしまう。レコードは偽造できない（ID は CSPRNG からの 32 バイトで、存在しないものを名指すのは何も名指さないのと同じ）。`/session/login` が行うセッション再生成を越えて残る（セッション上のフィールドでは残らない）。発行元の authorize リクエストに結び付けられるので、あるリクエストに対する未処理の要求が別のリクエストの鮮度要件を満たすことはない。読まれた時点で消費されるので、戻り URL をリプレイすると 2 つ目のコードを発行するのではなく改めて要求する。有効期限は 10 分。理由は [`routes/reauthAsk.mts`](./src/routes/reauthAsk.mts) にある。
 
@@ -274,11 +276,13 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 oauth.authorize.acrValues {
   "urn:example:pwd" = ["pwd"]
   "urn:example:mfa" = ["pwd", "mfa"]
-  "urn:example:passkey" = ["hwk"]
+  "urn:example:passkey" = [["hwk"], ["swk"]]
 }
 ```
 
-各キーはこのデプロイが保証する Authentication Context Class Reference で、値はそれを満たすためにセッションが持つべき `amr` の集合。要求された値のうちセッションが最初に満たすものが、コードと id_token の `acr` になる。どれも満たされない — あるいは表にまったく無い値 — ときは、満たされなかったものを名指して `redirect_uri` で `unmet_authentication_requirements` を返す。黙って受け入れることも、ステップアップのリダイレクトも無い — ログインページにどの要素を追加すべきか伝えられないからである。表が空でなければ、ディスカバリーはキーを `acr_values_supported` として広告する。何も要求しない acr は boot で拒否される: どのセッションもそれを満たし、何も保証しないからである。
+各キーはこのデプロイが保証する Authentication Context Class Reference で、値はそれを満たすためにセッションが持つべき `amr` の集合 — あるいはそのような集合のリストで、そのどれか 1 つが満たせばよい（上の `urn:example:passkey`: デバイスに縛られたパスキーでも同期されたパスキーでもよい）。要求された値のうちセッションが最初に満たすものが、コードと id_token の `acr` になる。照合するのは core の要件ルール（`selectAcr`）で、相手はセッションが保証する `amr`（`vouchedAmr`）である。どれも満たされない — あるいは表にまったく無い値 — ときは、満たされなかったものを名指して `redirect_uri` で `unmet_authentication_requirements` を返す。黙って受け入れることも、ステップアップのリダイレクトも無い — ログインページにどの要素を追加すべきか伝えられないからである。表が空でなければ、ディスカバリーはキーを `acr_values_supported` として広告する。何も要求しない acr や選択肢は boot で拒否される: どのセッションもそれを満たし、何も保証しないからである。
+
+**インストールされたものでは満たせないエントリーは boot で落とす**: `acr_values_supported` から外し、表に無い値と同じく `unmet_authentication_requirements` を返し — たまたまその値を持つセッションに対しても — エントリー（`acr`）と何も生み出さない値（`unproducible`）を添えて `acr_value_unsatisfiable` として一度だけ記録する。行は `warn` だが、`mfa.mode = "off"` のもとで第二要素だけが足りないエントリーは `info` である: それは運用者の選択であって誤りではない。構成が満たせるもの: `pwd` は常に。フェデレーションがインストールされていれば `fed` と任意の値 — フェデレーションのコールバックが `fed` と、その横に上流 IdP の `amr` を記録するからである（フェデレーションを信頼しないと指定できるようになるまで、どのフェデレーションの上流 `amr` も数える）。第二要素の値（`otp`、`hwk`、`swk`、`email`、`recovery`）は多要素認証がインストールされてから — どのリリースもまだしていない — で、`mfa` はインストールされた要素のどれかがそれを加えるときだけ。したがってフェデレーションが無ければ、上の `mfa` と `passkey` のエントリーは落とされ、`fed` を必要とするエントリーも落とされる — 多要素認証をインストールしても満たせないので、`mfa.mode = "off"` のもとでも warn である。落とす判定はルーターを組むところとディスカバリーを contribute するところで、同じ入力から計算する（`src/acrValues.mts`）。
 
 **再認証を求められたら、どちらのログイン経路も再認証しなければならない。** デプロイが提供するログインページは `prompt=login` / `max_age` と目印を載せた `redirect_to` を受け取る。既に認証済みのブラウザーをそのまま送り返すページは、ループではなく `login_required` を受け取る。`POST /session/login` とフェデレーションコールバックは常に新しい `auth_time` を持つ*新しい*セッションを確立し、それが再認証である。
 

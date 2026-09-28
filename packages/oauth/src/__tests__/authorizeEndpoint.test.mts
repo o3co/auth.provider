@@ -31,6 +31,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type FederationProvider,
 	type GrantPolicyHook,
 	type Logger,
 	type PublicClient,
@@ -40,6 +41,11 @@ import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import {
+	ACR_VALUE_UNSATISFIABLE,
+	logUnsatisfiableAcrValues,
+	vouchableAcrValues,
+} from "#/acrValues.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -95,6 +101,8 @@ const makeApp = async (opts: {
 	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
 	userSessionStore?: UserSessionStore;
 	logger?: Logger;
+	/** Install one federation, as a federation module's contribution would. */
+	federation?: true;
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -138,6 +146,12 @@ const makeApp = async (opts: {
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
+		...(opts.federation
+			? {
+					getFederationProviders: () =>
+						new Map([["google", { name: "google" } as unknown as FederationProvider]]),
+				}
+			: {}),
 	});
 
 	const app = express();
@@ -1295,10 +1309,40 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 
 		it("refuses a max_age that is not a non-negative integer", async () => {
 			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(1)) });
-			for (const bad of ["-1", "abc", "1.5", ""]) {
+			for (const bad of ["-1", "abc", "1.5", " "]) {
 				const res = await authorize(app, { ...baseQuery, max_age: bad });
 				expect(redirectParams(res).get("error"), bad).toBe("invalid_request");
 			}
+		});
+
+		it("reads an empty max_age as omitted (RFC 6749 §3.1): no freshness asked for", async () => {
+			// "Parameters sent without a value MUST be treated as if they were
+			// omitted from the request." A session of any age proceeds, on GET and
+			// POST alike, and no ask is recorded.
+			const createCode = mintingCode();
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(600)),
+				createCode,
+			});
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "" })).get("code"),
+			).toBe("code-x");
+			expect(
+				redirectParams(await authorizePost(harness.app, { ...baseQuery, max_age: "" })).get("code"),
+			).toBe("code-x");
+			expect(harness.records.size).toBe(0);
+		});
+
+		it("reads an empty max_age as omitted where no session store is wired, too", async () => {
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(1)),
+				sessionStore: false,
+			});
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "" })).get("code"),
+			).toBe("code-x");
 		});
 
 		it("refuses a repeated max_age like every other single-valued parameter", async () => {
@@ -1566,6 +1610,16 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(params.get("error_description")).toMatch(/urn:example:mfa/);
 		});
 
+		it("meets no acr where no session store is wired: there is no amr to read", async () => {
+			// The no-store composition is authenticated on the cookie alone
+			// (`live: true, session: null`); nothing records how, so nothing is met.
+			const { app } = await makeApp({ session, oauth: { authorize: { acrValues } } });
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:pwd" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+		});
+
 		it("refuses an acr this deployment has not configured rather than accepting it silently", async () => {
 			const { app } = await makeApp({
 				session,
@@ -1648,6 +1702,78 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
+		it("answers an entry nothing installed can satisfy unmet, even for a session that carries it", async () => {
+			// The MFA ADR's D15: no login this composition can perform records
+			// `mfa`, so the entry is dropped at boot — withheld from discovery and
+			// answered as one never configured. A session that carries the value
+			// anyway (a custom login path) does not revive it.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa"]),
+				createCode,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+			expect(params.get("error_description")).toMatch(/urn:example:mfa/);
+			expect(createCode).not.toHaveBeenCalled();
+		});
+
+		it("keeps an entry only an upstream IdP can meet while a federation is installed", async () => {
+			// Every federation's upstream `amr` is recorded beside `fed` until
+			// the upstream split (the MFA ADR's build order, step 5), so such a
+			// composition can meet any entry — as #481 shipped.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa", "fed"]),
+				createCode,
+				federation: true,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" }),
+			);
+			expect(params.get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:mfa" }));
+		});
+
+		it("meets an any-of entry through any one of its alternatives", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: {
+					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
+				},
+				userSessionStore: storeWith(minutesAgo(1), ["swk", "fed"]),
+				createCode,
+				federation: true,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
+			);
+			expect(params.get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:phr" }));
+		});
+
+		it("answers an any-of entry none of whose alternatives the session holds unmet", async () => {
+			const { app } = await makeApp({
+				session,
+				oauth: {
+					authorize: { acrValues: { "urn:example:phr": [["hwk"], ["swk"]] } },
+				},
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "fed"]),
+				federation: true,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:phr" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+		});
+
 		it("records no acr when none was requested", async () => {
 			const createCode = mintingCode();
 			const { app } = await makeApp({
@@ -1661,5 +1787,304 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			// rather than leaving the field out.
 			expect(createCode.mock.calls[0]?.[0]).toHaveProperty("acr", undefined);
 		});
+	});
+});
+
+describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
+	const EVENT = "acr_value_unsatisfiable";
+	const acrValues = {
+		"urn:example:pwd": ["pwd"],
+		"urn:example:mfa": ["pwd", "mfa"],
+		"urn:example:phr": [["hwk"], ["swk"]],
+		"urn:example:kba": ["kba"],
+	};
+	const linesFor = (fn: ReturnType<typeof vi.fn>) =>
+		fn.mock.calls.filter((call) => call[1] === EVENT);
+
+	it("says once, object-first, which entries it dropped: info when only a second factor is missing under mfa.mode off", async () => {
+		const logger = createMockLogger();
+		await makeApp({ oauth: { authorize: { acrValues } }, logger });
+		expect(linesFor(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, EVENT],
+			[{ acr: "urn:example:phr", unproducible: ["hwk", "swk"] }, EVENT],
+		]);
+		expect(linesFor(logger.warn)).toEqual([
+			[{ acr: "urn:example:kba", unproducible: ["kba"] }, EVENT],
+		]);
+		for (const level of [logger.trace, logger.debug, logger.error, logger.fatal]) {
+			expect(linesFor(level)).toEqual([]);
+		}
+	});
+
+	it("warns for every dropped entry once MFA is not off", async () => {
+		// A hand-built configuration: core's schema admits only `off` until a
+		// module honours another mode, but the level is decided on the mode.
+		const logger = createMockLogger();
+		const { router } = await createOAuthRouter(express, {
+			registry: new GrantRegistry(),
+			config: {
+				...makeConfig({ authorize: { acrValues } }),
+				mfa: { mode: "optional" },
+			} as unknown as AppConfig,
+			clientRepository: { findById: async () => null, authenticate: async () => null },
+			codeRepository: {
+				createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+				findByCode: async () => null,
+				consumeByCode: async () => null,
+				removeByCode: async () => {},
+			},
+			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+			logger,
+		});
+		expect(router).toBeDefined();
+		expect(linesFor(logger.info)).toEqual([]);
+		expect(linesFor(logger.warn).map((call) => (call[0] as { acr: string }).acr)).toEqual([
+			"urn:example:mfa",
+			"urn:example:phr",
+			"urn:example:kba",
+		]);
+	});
+
+	it("warns for an entry needing fed while no federation is installed, whatever the mode", async () => {
+		// `fed` is no second factor: MFA installed would not meet the entry, so
+		// the line is a warning even under `mfa.mode = "off"`.
+		const logger = createMockLogger();
+		await makeApp({
+			oauth: { authorize: { acrValues: { "urn:example:fed": ["fed"] } } },
+			logger,
+		});
+		expect(linesFor(logger.warn)).toEqual([
+			[{ acr: "urn:example:fed", unproducible: ["fed"] }, EVENT],
+		]);
+		expect(linesFor(logger.info)).toEqual([]);
+	});
+
+	it("answers an entry needing fed unmet while no federation is installed", async () => {
+		const createCode = vi.fn(async () => ({
+			code: "code-x",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+		}));
+		const store = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async () => ({
+				sid: "sid-1",
+				sub: "user-1",
+				authTime: new Date(Date.now() - 60_000),
+				createdAt: new Date(Date.now() - 60_000),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["fed"],
+			})),
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		const { app } = await makeApp({
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
+			oauth: { authorize: { acrValues: { "urn:example:fed": ["fed"] } } },
+			userSessionStore: store,
+			createCode,
+		});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, acr_values: "urn:example:fed" }),
+		);
+		expect(params.get("error")).toBe("unmet_authentication_requirements");
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("says nothing when a federation is installed: every entry can be met", async () => {
+		const logger = createMockLogger();
+		await makeApp({ oauth: { authorize: { acrValues } }, logger, federation: true });
+		for (const level of [logger.info, logger.warn, logger.error]) {
+			expect(linesFor(level)).toEqual([]);
+		}
+	});
+
+	it("bounds what it logs of an entry", async () => {
+		const logger = createMockLogger();
+		const acr = `urn:example:${"x".repeat(300)}`;
+		await makeApp({ oauth: { authorize: { acrValues: { [acr]: ["kba\nforged"] } } }, logger });
+		const [fields] = linesFor(logger.warn)[0] as [{ acr: string; unproducible: string[] }];
+		expect(fields.acr.length).toBeLessThanOrEqual(200);
+		expect(fields.unproducible[0]).not.toContain("\n");
+	});
+});
+
+describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => {
+	const REFUSAL = "request acr through acr_values";
+	const claims = (value: unknown) => JSON.stringify(value);
+
+	it.each([
+		["essential, for the id_token", { id_token: { acr: { essential: true, values: ["urn:x"] } } }],
+		["voluntary, for the id_token", { id_token: { acr: null } }],
+		["essential, for userinfo", { userinfo: { acr: { essential: true } } }],
+		["with a value, for userinfo", { userinfo: { acr: { value: "urn:x" } }, id_token: {} }],
+	])(
+		"refuses a request naming acr %s: it would be vouched for through a door the table does not guard",
+		async (_label, value) => {
+			// OIDC Core §5.5.1.1 lets an RP ask for `acr` here, essential or not;
+			// this server vouches for an acr only through `acr_values` and its
+			// table. Ignoring the request would hand back a token the RP reads as
+			// having honoured it — #284's rule for a security-relevant parameter.
+			const createCode = vi.fn(async () => ({
+				code: "code-x",
+				client_id: CLIENT_ID,
+				redirect_uri: REDIRECT_URI,
+			}));
+			const { app } = await makeApp({ createCode });
+			const params = redirectParams(await authorize(app, { ...baseQuery, claims: claims(value) }));
+			expect(params.get("error")).toBe("invalid_request");
+			expect(params.get("error_description")).toBe(REFUSAL);
+			expect(params.get("state")).toBe("xyz");
+			expect(createCode).not.toHaveBeenCalled();
+		},
+	);
+
+	it("reads an empty claims as omitted (RFC 6749 §3.1), on GET and POST", async () => {
+		const { app } = await makeApp({});
+		expect(redirectParams(await authorize(app, { ...baseQuery, claims: "" })).get("code")).toBe(
+			"code-x",
+		);
+		expect(redirectParams(await authorizePost(app, { ...baseQuery, claims: "" })).get("code")).toBe(
+			"code-x",
+		);
+	});
+
+	it("ignores every other use of claims, as before", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, {
+			...baseQuery,
+			claims: claims({
+				id_token: { auth_time: { essential: true }, email: { acr: 1 } },
+				userinfo: { name: { essential: true } },
+				acr: { essential: true },
+			}),
+		});
+		expect(redirectParams(res).get("code")).toBe("code-x");
+	});
+
+	it.each([
+		["not JSON", "acr"],
+		["a JSON array", "[]"],
+		["a JSON string", '"acr"'],
+		["JSON null", "null"],
+		["a JSON number", "1"],
+	])("refuses claims that is %s: whether it names acr cannot be told", async (_label, value) => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, claims: value }));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe("claims is not a JSON object");
+	});
+
+	it("refuses a repeated claims parameter", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, claims: [claims({}), claims({})] }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe("claims must be a single string value");
+	});
+
+	it("refuses it on POST as on GET", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorizePost(app, { ...baseQuery, claims: claims({ id_token: { acr: null } }) }),
+		);
+		expect(params.get("error_description")).toBe(REFUSAL);
+	});
+
+	it("refuses before sending the browser to log in again", async () => {
+		// `prompt=login` would otherwise send the user through a login, only to
+		// refuse the request when they come back.
+		const store = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async () => ({
+				sid: "sid-1",
+				sub: "user-1",
+				authTime: new Date(Date.now() - 60_000),
+				createdAt: new Date(Date.now() - 60_000),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["pwd"],
+			})),
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		const harness = await makeApp({
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
+			userSessionStore: store,
+		});
+		const params = redirectParams(
+			await authorize(harness.app, {
+				...baseQuery,
+				prompt: "login",
+				claims: claims({ id_token: { acr: { essential: true } } }),
+			}),
+		);
+		expect(params.get("error_description")).toBe(REFUSAL);
+		expect(harness.records.size).toBe(0);
+	});
+});
+
+describe("/authorize — mfa.mode as the acr table's boot line reads it", () => {
+	it("refuses to compose with an mfa.mode that is given but unusable, rather than read it as off", async () => {
+		// A hand-built configuration: core's schema refuses it at boot too.
+		await expect(
+			createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config: {
+					...makeConfig({ authorize: { acrValues: { "urn:example:mfa": ["mfa"] } } }),
+					mfa: { mode: "requried" },
+				} as unknown as AppConfig,
+				clientRepository: { findById: async () => null, authenticate: async () => null },
+				codeRepository: {
+					createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+					findByCode: async () => null,
+					consumeByCode: async () => null,
+					removeByCode: async () => {},
+				},
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				logger: createMockLogger(),
+			}),
+		).rejects.toThrow(RangeError);
+	});
+});
+
+describe("the acr drop's boot line for an entry with an empty alternative", () => {
+	it("says the entry has an alternative that requires nothing, so an empty unproducible list is not the whole story", () => {
+		// A table built by hand — `readAcrTable` and the schema never build
+		// one — whose only alternative requires nothing: nothing is missing,
+		// and it is still never met.
+		const logger = createMockLogger();
+		const { dropped } = vouchableAcrValues(
+			{ "urn:example:any": [[]], "urn:example:kba": [["kba"]] },
+			undefined,
+		);
+		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ acr: "urn:example:any", unproducible: [], emptyAlternative: true },
+				ACR_VALUE_UNSATISFIABLE,
+			],
+			[{ acr: "urn:example:kba", unproducible: ["kba"] }, ACR_VALUE_UNSATISFIABLE],
+		]);
+		for (const level of [logger.info, logger.error, logger.debug, logger.trace, logger.fatal]) {
+			expect(level).not.toHaveBeenCalled();
+		}
+	});
+
+	it("keeps the first ten values an entry lacks, and counts them all when it cut", () => {
+		// Values an operator wrote; `auditErrorList` bounds the list the line
+		// carries, and the count says how many there were.
+		const lacked = Array.from({ length: 12 }, (_, i) => `x${i}`);
+		const logger = createMockLogger();
+		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined);
+		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ acr: "urn:example:many", unproducible: lacked.slice(0, 10), unproducibleCount: 12 },
+				ACR_VALUE_UNSATISFIABLE,
+			],
+		]);
 	});
 });

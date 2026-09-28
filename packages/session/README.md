@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-09-26
+Last updated: 2026-09-28
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -391,8 +391,8 @@ picture is in the [oauth package README](../oauth/README.md)):
 
 | login path | `amr` |
 | --- | --- |
-| `POST /session/login` | `["pwd"]` |
-| federation callback | the upstream IdP's `amr` when the provider surfaces it on the profile (`profile.amr`, a string array), plus `fed` — the deployment-defined marker for "through a federation", exported as `FEDERATED_AMR`. RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. |
+| `POST /session/login` | `["pwd"]` (core's `PASSWORD_AMR`) |
+| federation callback | the upstream IdP's `amr` when the provider surfaces it on the profile (`profile.amr`, a string array), plus `fed` — the deployment-defined marker for "through a federation", core's `FEDERATED_AMR`, which this package re-exports. RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. |
 | account linking (`?link=1`) | unchanged — a link is not a login |
 
 Re-authentication is a *new* session: `POST /session/login` and the federation

@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+// #481 — the `amr` value a federated login records beside the upstream IdP's.
+// Core's since the MFA ADR (D13); re-exported so an import from here keeps working.
+export { FEDERATED_AMR } from "@o3co/auth-provider-core";
 // #272 — CSRF protection for the state-changing session routes. Exported so a
 // composition root can issue tokens from its own login page, or mount the same
 // guard on routes this package does not own.
@@ -101,8 +104,6 @@ export {
 	sessionStoreModule,
 	sessionStoreModuleFor,
 } from "./modules/sessionStoreModule.mjs";
-// #481 — the `amr` value a federated login records beside the upstream IdP's.
-export { FEDERATED_AMR } from "./routes/Federation.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";
 export {
 	createSessionStoreFactory,

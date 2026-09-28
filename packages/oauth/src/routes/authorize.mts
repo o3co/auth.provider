@@ -41,7 +41,10 @@ import {
 	type PublicClient,
 	parseScopeTokens,
 	readSpaceDelimitedParameter,
+	requirementSession,
 	sanitizeErrorText,
+	selectAcr,
+	stepUpReach,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
@@ -667,6 +670,8 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	"max_age",
 	"acr_values",
 	"reauth_ask",
+	// The MFA ADR's D15: one JSON object, read by `checkClaimsParameter`.
+	"claims",
 ] as const;
 
 /**
@@ -774,11 +779,13 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 /**
  * #481 — `max_age` (OIDC Core §3.1.2.1): the seconds since the End-User's
  * authentication that the RP will accept. A non-negative integer, or a
- * refusal; absent means no constraint.
+ * refusal; absent means no constraint, and so does an empty value — RFC 6749
+ * §3.1: "Parameters sent without a value MUST be treated as if they were
+ * omitted from the request."
  */
 const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefined } | null => {
 	const raw = ctx.params.max_age;
-	if (raw === undefined) return { value: undefined };
+	if (raw === undefined || raw === "") return { value: undefined };
 	if (typeof raw !== "string" || !/^[0-9]+$/.test(raw)) {
 		redirectError(ctx, "invalid_request", "max_age must be a non-negative integer");
 		return null;
@@ -890,12 +897,20 @@ const evaluateReauthentication = async (
 };
 
 /**
- * #481 — `acr_values` (OIDC Core §3.1.2.1) against the configured table
- * (`oauth.authorize.acrValues`): the first requested value whose `amr`
- * requirement the session's recorded `amr` covers is the `acr` the code —
- * and so the id_token — carries. None satisfied, or a value this
- * deployment never configured, is `unmet_authentication_requirements`
- * rather than a token the RP would read as meeting its requirement.
+ * #481 — `acr_values` (OIDC Core §3.1.2.1) against the acr table: the
+ * configured `oauth.authorize.acrValues` less the entries nothing this
+ * composition installs can satisfy (the MFA ADR's D15, `../acrValues.mts`).
+ * Core's `selectAcr` decides over the `amr` the session vouches for
+ * (`requirementSession`, the rule's one reading of a session): the first requested value one of whose alternatives the
+ * session holds is the `acr` the code — and so the id_token — carries. None
+ * satisfied, or a value this deployment does not carry, is
+ * `unmet_authentication_requirements` rather than a token the RP would read
+ * as meeting its requirement.
+ *
+ * Nothing is stepped up to here: `/authorize` consults no `mfaCoordinator`
+ * until D17's single decision (the MFA ADR's build order, step 13), so the
+ * reach of a step-up is empty and what the session does not meet is unmet —
+ * what D20 says an MFA-off deployment answers.
  */
 const resolveAcr = (
 	ctx: AuthorizeContext,
@@ -913,21 +928,17 @@ const resolveAcr = (
 	}
 	if (requested.length === 0) return { value: undefined };
 	const table = ctx.opts.oauth.acrValues;
-	const held = new Set(session?.amr ?? []);
-	// `Object.hasOwn` rather than a bare read, and not only because
-	// `resolveOAuthOptions` now builds the table without a prototype:
-	// `ResolvedOAuthOptions` is exported, so a composition may hand in a
-	// plain object, and the value being looked up is one an unauthenticated
-	// caller writes.
-	const entryFor = (acr: string): readonly string[] | undefined =>
-		Object.hasOwn(table, acr) ? table[acr] : undefined;
-	for (const acr of requested) {
-		const required = entryFor(acr);
-		if (required?.every((method) => held.has(method))) {
-			return { value: acr };
-		}
-	}
-	const unknown = requested.filter((acr) => entryFor(acr) === undefined);
+	const selection = selectAcr(
+		requested,
+		requirementSession(session)?.amr ?? [],
+		table,
+		stepUpReach(undefined),
+	);
+	if (selection.outcome === "met") return { value: selection.acr };
+	// `Object.hasOwn` rather than a bare read, as `selectAcr` does: the table
+	// may be a plain object a composition handed in, and the value being
+	// looked up is one an unauthenticated caller writes.
+	const unknown = requested.filter((acr) => !Object.hasOwn(table, acr));
 	redirectError(
 		ctx,
 		"unmet_authentication_requirements",
@@ -969,6 +980,48 @@ const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean => {
 			"request_uri_not_supported",
 			"this authorization server does not accept request_uri",
 		);
+		return false;
+	}
+	return true;
+};
+
+/**
+ * OIDC Core §5.5 `claims` (the MFA ADR's D15): a request that names `acr` in
+ * it — essential or not, for the id_token or for userinfo (§5.5.1.1) — is
+ * refused with `invalid_request`, by #284's rule for a security-relevant
+ * parameter this server does not honour. It vouches for an `acr` only
+ * through `acr_values` and its table; ignoring the request would hand back a
+ * token the RP reads as having honoured it. Every other use of `claims` is
+ * ignored, as it always was, and discovery keeps `claims_parameter_supported`
+ * absent, which reads as `false`.
+ *
+ * An empty value is omitted (RFC 6749 §3.1). Any other value that is not a
+ * JSON object cannot be told not to name `acr`, so it is malformed, as a
+ * malformed `acr_values` is. A repeat never reaches here
+ * (`checkSingleValuedParams`). Runs before the re-authentication decision, so
+ * a refused request is never sent by a `prompt=login` or `max_age` to log in
+ * first. (An unauthenticated browser is still sent to the login page before
+ * this runs, as for every parameter: its `redirect_uri` is not yet trusted to
+ * answer at — #284's ordering.)
+ */
+const checkClaimsParameter = (ctx: AuthorizeContext): boolean => {
+	const raw = ctx.params.claims;
+	if (raw === undefined || raw === "") return true;
+	let claims: unknown;
+	try {
+		claims = JSON.parse(raw as string);
+	} catch {
+		claims = undefined;
+	}
+	if (typeof claims !== "object" || claims === null || Array.isArray(claims)) {
+		redirectError(ctx, "invalid_request", "claims is not a JSON object");
+		return false;
+	}
+	const namesAcr = (member: unknown): boolean =>
+		typeof member === "object" && member !== null && Object.hasOwn(member, "acr");
+	const { id_token: idToken, userinfo } = claims as Record<string, unknown>;
+	if (namesAcr(idToken) || namesAcr(userinfo)) {
+		redirectError(ctx, "invalid_request", "request acr through acr_values");
 		return false;
 	}
 	return true;
@@ -1561,6 +1614,10 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// evaluation as well as the client-policy gates, so a malformed request
 		// never reaches the repository or the policy hook either.
 		if (!checkSingleValuedParams(ctx)) return;
+		// The MFA ADR's D15: `acr` is asked for through `acr_values` alone —
+		// refused here, before a `prompt=login` or `max_age` sends the browser to
+		// log in.
+		if (!checkClaimsParameter(ctx)) return;
 		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
 		if (maxAge === null) return;

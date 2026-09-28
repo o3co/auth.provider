@@ -300,7 +300,19 @@ export {
 	supportsRefresh,
 } from "./federations/types.mjs";
 // The authentication claims a token may carry (#481)
-export { wellFormedAcr, wellFormedAmr } from "./grants/authenticationClaims.mjs";
+export {
+	composeAmr,
+	EMAIL_OTP_AMR,
+	FEDERATED_AMR,
+	HARDWARE_KEY_AMR,
+	MFA_AMR,
+	OTP_AMR,
+	PASSWORD_AMR,
+	RECOVERY_CODE_AMR,
+	SOFTWARE_KEY_AMR,
+	wellFormedAcr,
+	wellFormedAmr,
+} from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
 // The ONE cnf/token-binding comparison matrix (#324) — consumed by the
@@ -536,6 +548,26 @@ export {
 	MfaTransactionStoreFullError,
 } from "./mfa/memoryTransactionStore.mjs";
 export { memoryMfaFactorStoreModule, memoryMfaTransactionStoreModule } from "./mfa/module.mjs";
+// The requirement rule (the MFA ADR's D15, D16): the baseline and acr_values,
+// asked the same way by every consumer of an authenticated browser session.
+export {
+	type AcrRequirement,
+	type AcrSelection,
+	type AcrTable,
+	decideMfaRequirement,
+	type MfaMode,
+	type MfaRequirementDecision,
+	type MfaRequirementInput,
+	type MfaRequirementSession,
+	type ProducibleAmr,
+	producibleAmr,
+	readAcrTable,
+	readMfaMode,
+	selectAcr,
+	stepUpReach,
+	type UnsatisfiableAcrValue,
+	vouchableAcrTable,
+} from "./mfa/requirement.mjs";
 export {
 	checkMfaLockoutPolicy,
 	checkMfaTransactionTransitions,
@@ -824,6 +856,13 @@ export type {
 	ExchangeTokenValidationContext,
 	ValidatedToken,
 } from "./token-exchange/validator.mjs";
+// The MFA ADR's D9: how a session was established and what this provider
+// vouches for, read one way by every consumer of a session.
+export {
+	requirementSession,
+	sessionAuthentication,
+	vouchedAmr,
+} from "./user-sessions/authentication.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,
@@ -865,6 +904,7 @@ export {
 export type {
 	CreateUserSessionInput,
 	RegisteredRP,
+	SessionAuthentication,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
 	SessionFederationIndex,

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { Logger } from "@o3co/auth-provider-core";
+import { type AcrTable, type Logger, readAcrTable } from "@o3co/auth-provider-core";
 import { type ResolvedPkceOptions, resolvePkceOptions } from "./grants/pkce.mjs";
 
 /**
@@ -57,8 +57,15 @@ export interface ResolvedOAuthOptions {
 	readonly nonceMaxLength: number;
 	/** Wave 1 §5.3 (RFC 8707): opt-in gate for Resource Indicator enforcement. */
 	readonly resourceIndicatorEnabled: boolean;
-	/** #481: `oauth.authorize.acrValues` — acr → the amr values a session must carry. Empty when unset. */
-	readonly acrValues: Readonly<Record<string, readonly string[]>>;
+	/**
+	 * #481: `oauth.authorize.acrValues` — each acr and the amr values a
+	 * session must carry, or the alternatives any one of which it must (the
+	 * MFA ADR's D15), as core's `readAcrTable` reads it; empty when unset.
+	 * This is the configured table: the router narrows it to what the
+	 * composition can satisfy (`vouchableAcrValues`) before `/authorize` reads
+	 * it.
+	 */
+	readonly acrValues: AcrTable;
 	/**
 	 * #529: Client ID Metadata Documents, resolved to plain lists and numbers
 	 * whatever shape the config carried them in — an environment variable
@@ -163,33 +170,17 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
  *   required + S256-only whatever the config says, and warns about the keys
  *   that no longer do anything.
  *
+ * - `acrValues` (#481) is the configured table, or an empty one, read by
+ *   core's `readAcrTable` — the one reading, which discovery shares. It has no
+ *   prototype, because an `acr_values` an unauthenticated caller chooses is
+ *   used as a key into it: on a plain object every request asking for
+ *   `constructor` reads `Object` — the class of defect the replica-safety
+ *   table's move to a `Map` fixed (`core/src/boot/replica-safety.mts`).
+ *
  * The optional `logger` receives the `resolvePkceOptions` inert-config
  * warning. Resolution runs once at composition, so an operator sees one
  * boot-time warning instead of one per `/authorize` request.
  */
-/**
- * #481: the configured acr table, or an empty one. The schema already held
- * the shape at boot.
- *
- * Null-prototype, because an `acr_values` an unauthenticated caller chooses
- * is used as a key into it: on a plain object `{}` every request asking for
- * `constructor` reads `Object`, which is truthy and has no `.every`. The
- * same reasoning — and the same class of defect — as the replica-safety
- * table's move to a `Map` (`core/src/boot/replica-safety.mts`).
- */
-const readAcrValues = (oauth: unknown): Readonly<Record<string, readonly string[]>> => {
-	const raw = (oauth as { authorize?: { acrValues?: unknown } } | undefined)?.authorize?.acrValues;
-	const out: Record<string, readonly string[]> = Object.create(null);
-	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
-	for (const [acr, amr] of Object.entries(raw as Record<string, unknown>)) {
-		// `Object.entries` yields own keys only, so nothing from the source
-		// object's prototype is copied in either.
-		if (Array.isArray(amr) && amr.length > 0 && amr.every((v) => typeof v === "string")) {
-			out[acr] = [...(amr as string[])];
-		}
-	}
-	return out;
-};
 
 export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedOAuthOptions => {
 	const oauth = (config as { oauth?: OAuthConfigShape } | undefined)?.oauth;
@@ -208,7 +199,9 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		pkce: resolvePkceOptions(pkceConfig, logger),
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
-		acrValues: readAcrValues(oauth),
+		acrValues: readAcrTable(
+			(oauth as { authorize?: { acrValues?: unknown } } | undefined)?.authorize?.acrValues,
+		),
 		clientIdMetadataDocuments: {
 			enabled: oauth?.clientIdMetadataDocuments?.enabled === true,
 			allowedScopes: listOf(oauth?.clientIdMetadataDocuments?.allowedScopes),

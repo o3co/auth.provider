@@ -69,6 +69,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 // sessions (see authorization.mts `sessionMutation.clear`).
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
+import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -248,9 +249,17 @@ export const createOAuthRouter = async (
 		 */
 		clientIdMetadataDocuments?: Pick<ClientIdMetadataDocumentOptions, "fetch" | "lookup" | "now">;
 		/**
-		 * Lazy getter for the federation providers Map. Evaluated at request time so
-		 * module init order does not affect resolution — pass `() => context.federationProviders`
-		 * from `module.mts`. Defaults to `() => undefined` when not provided.
+		 * Getter for the installed federation providers Map. Defaults to
+		 * `() => undefined` (no federation) when not provided.
+		 *
+		 * It is read twice. **Once when `createOAuthRouter` is called**, so it must
+		 * already answer every federation the composition installs by then: whether
+		 * a federation is installed decides which acr entries this composition can
+		 * satisfy (`./acrValues.mts`), and a map that fills later leaves those
+		 * entries dropped. `oauthModule` passes `() => deps.federationProviders`,
+		 * which the boot planner has filled before any route factory runs (federations
+		 * are name-keyed contributions, registered before the list-shaped `routes`).
+		 * And again at request time, by the federation logout and token routes.
 		 */
 		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 		logger?: Logger;
@@ -266,6 +275,11 @@ export const createOAuthRouter = async (
 	// `legacyTypAccept` left optional for sub-routers to default). The
 	// /authorize handler receives the whole object (routes/authorize.mts).
 	const options = resolveOAuthOptions(config, logger);
+	// The MFA ADR's D15: `/authorize` answers `acr_values` only from the entries
+	// this composition can satisfy — the same table discovery advertises — and
+	// an entry dropped is said once, here, at composition.
+	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders());
+	logUnsatisfiableAcrValues(acrValues.dropped, config, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token
 	// endpoint used to compute `config.oauth.jwt.issuer ?? req.get("host")`, so an
 	// unconfigured deployment behind a trusted proxy minted tokens whose issuer the
@@ -373,7 +387,7 @@ export const createOAuthRouter = async (
 		consentUrl: () => config.endpoints.consent?.url ?? "/consent",
 		consentStore,
 		pendingConsentStore,
-		oauth: options,
+		oauth: { ...options, acrValues: acrValues.table },
 		// R1b: `/authorize` re-checks that the express-session's `sid` still
 		// names a live `UserSession` before minting. Optional here for the same
 		// reason the slot itself is: a composition without session-backed login
