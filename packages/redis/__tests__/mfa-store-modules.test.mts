@@ -30,9 +30,18 @@
  * run is counted, and an evicted one lifts a D21 hold early. The factor
  * store's keys carry none, so a `volatile-*` policy never picks them.
  *
+ * The policy is read from `INFO memory` — `CONFIG GET maxmemory-policy` only
+ * where INFO does not say — so a managed server that blocks `CONFIG` is still
+ * held to the refusal; AOF from `INFO persistence`; `CONFIG GET save` only to
+ * tell RDB snapshots from no persistence. A part that could not be read is
+ * named in the one warning that the check could not run. Only a reply that
+ * refuses the question — an unknown or renamed command, `NOPERM`, a disabled
+ * command — is read so; any other reply error, and any failure to reach the
+ * server, fails the boot.
+ *
  * The check's verdicts are pinned against a stub client; the client's reading
- * of a real server, a user the server refuses `CONFIG`, and `allkeys-lru` set
- * on the server, against the shared container. Every real-server case that
+ * against fakes and a real server, users the server refuses `CONFIG` or `INFO`
+ * or both, and `allkeys-lru` set on the server, against the shared container. Every real-server case that
  * reads or sets the eviction policy is in this file alone, so no other file
  * sees the policy this one sets for a moment.
  */
@@ -146,11 +155,15 @@ const CASES: readonly Case[] = [
 ];
 
 const DURABLE: RedisDurability = {
-	checked: true,
 	maxmemoryPolicy: "noeviction",
 	appendOnly: true,
-	snapshots: true,
+	snapshots: undefined,
+	refusal: undefined,
 };
+
+/** A reply error as ioredis raises one. */
+const replyError = (message: string): Error =>
+	Object.assign(new Error(message), { name: "ReplyError" });
 
 /** A client whose server answers `report`; nothing else is asked of it at boot. */
 const stubClient = (report: RedisDurability | (() => Promise<RedisDurability>)) => ({
@@ -251,7 +264,10 @@ describe.each(CASES)("$module.name", (c) => {
 
 	it("says each thing once when a volatile-* policy and RDB-only persistence come together", async () => {
 		const { logger, calls } = recordingLogger();
-		await boot({ ...DURABLE, maxmemoryPolicy: "volatile-lru", appendOnly: false }, logger);
+		await boot(
+			{ ...DURABLE, maxmemoryPolicy: "volatile-lru", appendOnly: false, snapshots: true },
+			logger,
+		);
 		expect(calls.map((call) => call.args[1])).toEqual(
 			c.lockEvictable === undefined ? [c.lossy] : [c.lockEvictable, c.lossy],
 		);
@@ -259,7 +275,9 @@ describe.each(CASES)("$module.name", (c) => {
 
 	it("warns once when RDB snapshots are the only persistence: the last interval is lost on a crash", async () => {
 		const { logger, calls } = recordingLogger();
-		expect((await boot({ ...DURABLE, appendOnly: false }, logger)).kind).toBe("redis");
+		expect((await boot({ ...DURABLE, appendOnly: false, snapshots: true }, logger)).kind).toBe(
+			"redis",
+		);
 		expect(calls).toEqual([
 			{ level: "warn", args: [{ store: c.slot, adapter: "redis" }, c.lossy] },
 		]);
@@ -275,16 +293,63 @@ describe.each(CASES)("$module.name", (c) => {
 		]);
 	});
 
-	it("warns once that the check could not run when the server refuses CONFIG, and boots", async () => {
-		const refusal = Object.assign(new Error("ERR unknown command 'CONFIG'"), {
-			name: "ReplyError",
-		});
+	it("warns once that the check could not run when nothing could be read, naming the parts, and boots", async () => {
+		const refusal = replyError("ERR unknown command 'CONFIG'");
 		const { logger, calls } = recordingLogger();
-		expect((await boot({ checked: false, refusal }, logger)).kind).toBe("redis");
+		const unread: RedisDurability = {
+			maxmemoryPolicy: undefined,
+			appendOnly: undefined,
+			snapshots: undefined,
+			refusal,
+		};
+		expect((await boot(unread, logger)).kind).toBe("redis");
 		expect(calls).toEqual([
 			{
 				level: "warn",
-				args: [{ store: c.slot, adapter: "redis", err: loggableError(refusal) }, c.unchecked],
+				args: [
+					{
+						store: c.slot,
+						adapter: "redis",
+						unread: ["maxmemory-policy", "appendonly"],
+						err: loggableError(refusal),
+					},
+					c.unchecked,
+				],
+			},
+		]);
+	});
+
+	it("refuses an allkeys-* policy it could read, whatever else it could not", async () => {
+		const { logger, calls } = recordingLogger();
+		const refused = boot(
+			{
+				maxmemoryPolicy: "allkeys-lru",
+				appendOnly: undefined,
+				snapshots: undefined,
+				refusal: replyError("NOPERM this user has no permissions to run the 'config|get' command"),
+			},
+			logger,
+		);
+		await expect(refused).rejects.toMatchObject({ reason: c.evictable });
+		expect(calls).toEqual([]);
+	});
+
+	it("warns that the check could not run for the part it could not read alone", async () => {
+		// AOF is off, and the server would not say whether it takes snapshots:
+		// neither the lossy nor the volatile notice can be told, so it names
+		// `save` as unread — and says nothing of the policy it did read.
+		const refusal = replyError(
+			"NOPERM this user has no permissions to run the 'config|get' command",
+		);
+		const { logger, calls } = recordingLogger();
+		await boot({ ...DURABLE, appendOnly: false, snapshots: undefined, refusal }, logger);
+		expect(calls).toEqual([
+			{
+				level: "warn",
+				args: [
+					{ store: c.slot, adapter: "redis", unread: ["save"], err: loggableError(refusal) },
+					c.unchecked,
+				],
 			},
 		]);
 	});
@@ -296,7 +361,7 @@ describe.each(CASES)("$module.name", (c) => {
 
 	it("writes its line on consoleLogger when no logger slot is filled", async () => {
 		const warn = vi.spyOn(consoleLogger, "warn").mockImplementation(() => undefined);
-		await boot({ ...DURABLE, appendOnly: false });
+		await boot({ ...DURABLE, appendOnly: false, snapshots: true });
 		expect(warn).toHaveBeenCalledTimes(1);
 		expect(warn).toHaveBeenCalledWith({ store: c.slot, adapter: "redis" }, c.lossy);
 	});
@@ -395,51 +460,207 @@ describe.each(CASES)("$clientSlot's durability() against a real server", (c) => 
 		// redis:7.2-alpine with no configuration file: noeviction, no AOF, the
 		// default save points.
 		expect(await c.client(raw).durability()).toStrictEqual({
-			checked: true,
 			maxmemoryPolicy: "noeviction",
 			appendOnly: false,
 			snapshots: true,
+			refusal: undefined,
 		});
 	});
 
-	it("answers a check that could not run for a user the server refuses CONFIG, with the refusal", async () => {
-		const user = `mfa-durability-${c.slot}-${Date.now()}`;
-		await raw.call("ACL", "SETUSER", user, "on", ">secret", "~*", "+@all", "-config");
-		const restricted = new Redis({ ...at, username: user, password: "secret" });
-		try {
+	it("reads the policy and AOF from INFO for a user the server refuses CONFIG, and names the refusal", async () => {
+		await asUser(["-config"], async (restricted) => {
 			const report = await c.client(restricted).durability();
-			expect(report.checked).toBe(false);
-			if (report.checked) return;
+			expect(report).toMatchObject({
+				maxmemoryPolicy: "noeviction",
+				appendOnly: false,
+				snapshots: undefined,
+			});
 			expect(loggableError(report.refusal)).toMatchObject({ name: "ReplyError" });
-		} finally {
-			restricted.disconnect();
-			await raw.call("ACL", "DELUSER", user);
-		}
+		});
 	});
 
-	it("answers a check that could not run when CONFIG GET answers no value", async () => {
-		const silent = {
-			config: async () => [],
-			info: async () => "# Persistence\r\naof_enabled:0\r\n",
-		} as unknown as Redis;
-		expect((await c.client(silent).durability()).checked).toBe(false);
+	it("falls back to CONFIG GET maxmemory-policy for a user the server refuses INFO", async () => {
+		await asUser(["-info"], async (restricted) => {
+			const report = await c.client(restricted).durability();
+			expect(report).toMatchObject({
+				maxmemoryPolicy: "noeviction",
+				appendOnly: undefined,
+				snapshots: undefined,
+			});
+			expect(loggableError(report.refusal)).toMatchObject({ name: "ReplyError" });
+		});
 	});
 });
 
+describe.each(CASES)("$clientSlot's durability() against fakes", (c) => {
+	/** A connection whose INFO sections and CONFIG values are what `answers` says; each a text, or an error to throw. */
+	const fake = (answers: {
+		readonly memory?: string | Error;
+		readonly persistence?: string | Error;
+		readonly policy?: unknown;
+		readonly save?: unknown;
+	}) => {
+		const asked: string[] = [];
+		const answer = (value: unknown) =>
+			value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
+		const io = {
+			info: async (section: string) => {
+				asked.push(`INFO ${section}`);
+				return answer(section === "memory" ? answers.memory : answers.persistence);
+			},
+			config: async (_get: string, name: string) => {
+				asked.push(`CONFIG GET ${name}`);
+				return answer(name === "save" ? answers.save : answers.policy);
+			},
+		} as unknown as Redis;
+		return { io, asked };
+	};
+
+	it("reads the policy from INFO memory, asking CONFIG nothing about it, and CONFIG GET save only when AOF is off", async () => {
+		const withAof = fake({
+			memory: "# Memory\r\nmaxmemory_policy:allkeys-lru\r\n",
+			persistence: "# Persistence\r\naof_enabled:1\r\n",
+		});
+		expect(await c.client(withAof.io).durability()).toStrictEqual({
+			maxmemoryPolicy: "allkeys-lru",
+			appendOnly: true,
+			snapshots: undefined,
+			refusal: undefined,
+		});
+		expect(withAof.asked).toEqual(["INFO memory", "INFO persistence"]);
+		const withoutAof = fake({
+			memory: "# Memory\r\nmaxmemory_policy:noeviction\r\n",
+			persistence: "# Persistence\r\naof_enabled:0\r\n",
+			save: ["save", ""],
+		});
+		expect(await c.client(withoutAof.io).durability()).toMatchObject({
+			appendOnly: false,
+			snapshots: false,
+		});
+		expect(withoutAof.asked).toEqual(["INFO memory", "INFO persistence", "CONFIG GET save"]);
+	});
+
+	it("asks CONFIG GET maxmemory-policy where INFO memory does not say", async () => {
+		const { io, asked } = fake({
+			memory: "# Memory\r\nused_memory:1\r\n",
+			persistence: "# Persistence\r\naof_enabled:1\r\n",
+			policy: ["maxmemory-policy", "volatile-lru"],
+		});
+		expect((await c.client(io).durability()).maxmemoryPolicy).toBe("volatile-lru");
+		expect(asked).toContain("CONFIG GET maxmemory-policy");
+	});
+
+	it("leaves unread what answers without a value, with no refusal to name", async () => {
+		const { io } = fake({
+			memory: "# Memory\r\n",
+			persistence: "# Persistence\r\naof_enabled:0\r\n",
+			policy: [],
+			save: [],
+		});
+		expect(await c.client(io).durability()).toStrictEqual({
+			maxmemoryPolicy: undefined,
+			appendOnly: false,
+			snapshots: undefined,
+			refusal: undefined,
+		});
+	});
+
+	it.each([
+		"NOPERM this user has no permissions to run the 'config|get' command",
+		"ERR unknown command 'CONFIG', with args beginning with: 'GET' 'maxmemory-policy' ",
+		"ERR unknown subcommand 'GET'. Try CONFIG HELP.",
+		"ERR CONFIG is disabled",
+	])("reads a reply that refuses the question as a part it could not read: %s", async (message) => {
+		const refusal = replyError(message);
+		const { io } = fake({ memory: refusal, persistence: refusal, policy: refusal });
+		const report = await c.client(io).durability();
+		expect(report).toMatchObject({ maxmemoryPolicy: undefined, appendOnly: undefined });
+		expect(report.refusal).toBe(refusal);
+	});
+
+	it.each([
+		"BUSY Redis is busy running a script. You can only call SCRIPT KILL or FUNCTION KILL.",
+		"NOAUTH Authentication required.",
+		"LOADING Redis is loading the dataset in memory",
+		"READONLY You can't write against a read only replica.",
+		"ERR something else went wrong",
+	])(
+		"fails on any other reply error, which says the server cannot answer, not that it will not: %s",
+		async (message) => {
+			const failure = replyError(message);
+			const { io } = fake({ memory: failure });
+			await expect(c.client(io).durability()).rejects.toBe(failure);
+		},
+	);
+});
+
+/** Runs `use` over a connection as a fresh ACL user with every command but `denied`, and removes the user. */
+async function asUser(denied: readonly string[], use: (io: Redis) => Promise<void>): Promise<void> {
+	const user = `mfa-durability-${denied.join("").replace(/\W/g, "")}-${Date.now()}-${Math.random()}`;
+	await raw.call("ACL", "SETUSER", user, "on", ">secret", "~*", "+@all", ...denied);
+	const restricted = new Redis({ ...at, username: user, password: "secret" });
+	try {
+		await use(restricted);
+	} finally {
+		restricted.disconnect();
+		await raw.call("ACL", "DELUSER", user);
+	}
+}
+
 describe("allkeys-lru set on the real server", () => {
-	it("refuses both modules at boot, and the policy is put back", async () => {
+	/** Runs `use` with the server's policy at allkeys-lru, and puts the policy back. */
+	async function underAllkeysLru(use: () => Promise<void>): Promise<void> {
 		const [, original] = (await raw.config("GET", "maxmemory-policy")) as [string, string];
 		await raw.config("SET", "maxmemory-policy", "allkeys-lru");
 		try {
-			for (const c of CASES) {
-				await expect(
-					providerOf(c)({ [c.clientSlot]: c.client(raw), config: {} }),
-					c.module.name,
-				).rejects.toMatchObject({ reason: c.evictable, maxmemoryPolicy: "allkeys-lru" });
-			}
+			await use();
 		} finally {
 			await raw.config("SET", "maxmemory-policy", original);
 		}
 		expect(await raw.config("GET", "maxmemory-policy")).toEqual(["maxmemory-policy", original]);
+	}
+
+	const refusesBoth = async (io: Redis): Promise<void> => {
+		for (const c of CASES) {
+			await expect(
+				providerOf(c)({ [c.clientSlot]: c.client(io), config: {} }),
+				c.module.name,
+			).rejects.toMatchObject({ reason: c.evictable, maxmemoryPolicy: "allkeys-lru" });
+		}
+	};
+
+	it("refuses both modules at boot, and the policy is put back", async () => {
+		await underAllkeysLru(() => refusesBoth(raw));
+	});
+
+	it("refuses both modules for a user the server refuses CONFIG: INFO memory says the policy", async () => {
+		await underAllkeysLru(() => asUser(["-config"], refusesBoth));
+	});
+
+	it("refuses both modules for a user the server refuses INFO: CONFIG GET says the policy", async () => {
+		await underAllkeysLru(() => asUser(["-info"], refusesBoth));
+	});
+
+	it("boots both modules with the warning that the check could not run for a user refused INFO and CONFIG", async () => {
+		await underAllkeysLru(() =>
+			asUser(["-info", "-config"], async (restricted) => {
+				for (const c of CASES) {
+					const { logger, calls } = recordingLogger();
+					const store = await providerOf(c)({
+						[c.clientSlot]: c.client(restricted),
+						config: {},
+						logger,
+					});
+					expect(store.kind, c.module.name).toBe("redis");
+					expect(
+						calls.map((call) => call.args[1]),
+						c.module.name,
+					).toEqual([c.unchecked]);
+					expect(calls[0]?.args[0], c.module.name).toMatchObject({
+						unread: ["maxmemory-policy", "appendonly"],
+					});
+				}
+			}),
+		);
 	});
 });
