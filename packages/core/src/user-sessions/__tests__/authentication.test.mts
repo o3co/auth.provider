@@ -307,6 +307,28 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (
 		).toBe(false);
 	});
 
+	it("is false for a section that is not enabled, whatever its switch says: nothing signs a user in through it", () => {
+		for (const enabled of [false, undefined, "true", 1]) {
+			expect(
+				federationTrustsUpstreamAmr(config({ enabled, trustUpstreamAmr: true }), "google"),
+			).toBe(false);
+		}
+		expect(federationTrustsUpstreamAmr(config({ trustUpstreamAmr: true }), "google")).toBe(false);
+	});
+
+	it("still refuses an unusable switch on a section that is not enabled, and one inside its sub-section", () => {
+		// Enabling the federation later must not be what first reveals it.
+		expect(() =>
+			federationTrustsUpstreamAmr(config({ enabled: false, trustUpstreamAmr: "yes" }), "google"),
+		).toThrow(new RangeError("federations.google.trustUpstreamAmr must be true or false"));
+		expect(() =>
+			federationTrustsUpstreamAmr(
+				config({ enabled: false, type: "oidc", oidc: { trustUpstreamAmr: true } }),
+				"google",
+			),
+		).toThrow(RangeError);
+	});
+
 	it("reads the switch beside enabled in the nested shape too", () => {
 		expect(
 			federationTrustsUpstreamAmr(

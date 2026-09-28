@@ -3124,6 +3124,21 @@ describe("amr on federated sessions (#481, the MFA ADR's D9 and D13)", () => {
 		expect(untrusted.authentication?.upstreamAmr).toEqual(["hwk", "mfa"]);
 	});
 
+	it("keeps an IdP's amr apart for a federation whose section is not enabled, as the acr drop reads it", async () => {
+		// One reading for the split and the drop: a disabled section's switch
+		// trusts nothing, whichever of the two asks.
+		const created = await loginWith(["hwk", "mfa"], {
+			federations: { test: { enabled: false, trustUpstreamAmr: true } },
+		});
+		expect(created.amr).toEqual(["fed"]);
+		expect(created.authentication).toStrictEqual({
+			primary: "fed",
+			federation: "test",
+			upstreamAmr: ["hwk", "mfa"],
+			mfaAt: undefined,
+		});
+	});
+
 	it("refuses to build the routes when a federation's trustUpstreamAmr is given but unusable", () => {
 		expect(() =>
 			buildCallbackApp({
