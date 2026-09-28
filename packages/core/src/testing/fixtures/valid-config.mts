@@ -138,10 +138,14 @@ export function makeValidCoreConfig() {
 			// `allowUnmarkedClients` migration flag was removed, and /authorize
 			// enforces the first-party invariant unconditionally.
 		},
-		// The MFA ADR's D19: the one mode this release honours, as
-		// `reference.conf` and the schema's default give it. A test of the
-		// default removes the key.
+		// The MFA ADR's D19: MFA off, as `reference.conf` and the schema's
+		// default give it. A test of the default removes the key.
 		mfa: { mode: "off" },
+		// The session-admission ADR's D7: what this composition expects of
+		// session admission — nothing — so a createApp test that installs a
+		// consumer of admission states its posture, as every composition must.
+		// A test of the declaration itself removes the key.
+		sessionRequirements: { expected: [] },
 	} satisfies CoreConfig;
 }
 

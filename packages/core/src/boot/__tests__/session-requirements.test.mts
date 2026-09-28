@@ -349,14 +349,19 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 
 	it("reads the reach after the name-keyed pass: a reach that fills as later contributions register is read whole", async () => {
 		let filled = false;
+		// A literal with a real getter: spreading `{ get reach() … }` into
+		// another object would read it once, at factory time.
 		const late = contributing("test:late", {
-			late: () =>
-				requirement("late", {
-					get reach() {
-						return new Set(filled ? ["risk-ok"] : ["otp"]);
-					},
-					stepUpPage: { url: "/late", params: {} },
-				}),
+			late: () => ({
+				name: "late",
+				get reach() {
+					return new Set(filled ? ["risk-ok"] : ["otp"]);
+				},
+				stepUpPage: { url: "/late", params: {} },
+				remediations: ["late.step_up"],
+				hintKeys: [],
+				admit: async () => ({ outcome: "met" }),
+			}),
 		});
 		const filler = defineModule({
 			name: "test:filler",
@@ -493,20 +498,24 @@ describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
 				sessionRequirements: {
 					mfa: (deps: {
 						mfaFactorResolver?: { entries(): Iterable<readonly [string, MfaFactor]> };
-					}) =>
-						requirement("mfa", {
-							get reach() {
-								const reach = new Set<string>();
-								for (const [, f] of deps.mfaFactorResolver?.entries() ?? []) {
-									for (const value of f.amrValues) reach.add(value);
-									if (f.addsMfa) reach.add("mfa");
-								}
-								return reach;
-							},
-							stepUpPage: { url: "/mfa", params: {} },
-							remediations: ["mfa.step_up"],
-							...over,
-						}),
+					}) => ({
+						name: "mfa",
+						// A real getter over the resolver, read after the pass: a
+						// spread would read it at factory time, before the factors.
+						get reach() {
+							const reach = new Set<string>();
+							for (const [, f] of deps.mfaFactorResolver?.entries() ?? []) {
+								for (const value of f.amrValues) reach.add(value);
+								if (f.addsMfa) reach.add("mfa");
+							}
+							return reach;
+						},
+						stepUpPage: { url: "/mfa", params: {} },
+						remediations: ["mfa.step_up"],
+						hintKeys: [],
+						admit: async () => ({ outcome: "met" as const }),
+						...over,
+					}),
 				},
 			},
 		} as never);

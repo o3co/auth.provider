@@ -65,15 +65,16 @@ describe("sessionRequirements.expected (D7)", () => {
 
 	it("refuses what is not a list of non-empty strings, and a section without the list, naming the key", () => {
 		for (const expected of ["mfa", [""], [7], null, undefined]) {
+			// An entry's issue is at its index (`sessionRequirements.expected.0`).
 			expect(
 				issuesAt(
 					CoreConfigSchema.safeParse({
 						...makeValidCoreConfig(),
 						sessionRequirements: { expected },
 					}),
-				),
+				).some((path) => path.startsWith("sessionRequirements.expected")),
 				JSON.stringify(expected),
-			).toContain("sessionRequirements.expected");
+			).toBe(true);
 		}
 	});
 

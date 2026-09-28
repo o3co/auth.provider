@@ -633,6 +633,7 @@ export type {
 	RouteContributionEntry,
 	RouteContributionFactory,
 	RouteHandler,
+	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
 } from "./modules/index.mjs";

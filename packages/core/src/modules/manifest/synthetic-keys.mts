@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { SessionRequirementResolver } from "../../session-admission/requirement.mjs";
 import type {
 	ExchangeTokenValidator,
 	FederationProvider,
@@ -73,7 +74,10 @@ export type { FederationProvider };
  * A5 (Phase 7) added `federationRedirectPolicyResolver` — the synthetic
  * projection for `federationRedirectPolicies` contributions (typed in
  * `@o3co/auth-provider-session/src/federations/contributes.mts`).
- * `mfaFactorResolver` is the projection for `mfaFactors` (the MFA ADR's D3).
+ * `mfaFactorResolver` is the projection for `mfaFactors` (the MFA ADR's D3);
+ * `sessionRequirementResolver` for `sessionRequirements` (the
+ * session-admission ADR's D3), whose contract is in
+ * `session-admission/requirement.mts` and whose value the boot planner brands.
  *
  * Per A2-α §6.5 NORMATIVE constraints. The PRIMARY immutability guard
  * is the TypeScript declared type `ReadonlySet<string>` — `.add()`,
@@ -92,6 +96,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"grantHandlerResolver",
 		"federationRedirectPolicyResolver",
 		"mfaFactorResolver",
+		"sessionRequirementResolver",
 		// D-5: lifecycleRegistrar is boot-planner-owned (pre-seeded into the
 		// bootstrap map by createApp). Consumer-supplied values via
 		// bootstrapComponents/overrideComponents would create two registrars
@@ -151,5 +156,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly tokenExchangeValidatorResolver?: TokenExchangeValidatorResolver;
 		readonly federationProviders?: ReadonlyMap<string, FederationProvider>;
 		readonly mfaFactorResolver?: MfaFactorResolver;
+		/** The registered session requirements, in registration order (the session-admission ADR's D3): branded, the planner's alone. */
+		readonly sessionRequirementResolver?: SessionRequirementResolver;
 	}
 }
