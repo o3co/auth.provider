@@ -33,6 +33,7 @@ import {
 	tokenClaim,
 } from "#/session-admission/admit.mjs";
 import type {
+	AdmissionAction,
 	AdmissionDeps,
 	AdmissionRequest,
 	RequirementInput,
@@ -222,7 +223,9 @@ describe("the claim builders — one reading of each carrier (D2)", () => {
 				"tokenAmr",
 			);
 		}
-		expect(() => tokenClaim({ sub: "" })).toThrow(RangeError);
+		for (const sub of ["", 7, null, undefined, ["user-1"]]) {
+			expect(() => tokenClaim({ sid: "sid-1", sub }), JSON.stringify(sub)).toThrow(RangeError);
+		}
 		expect(() => tokenClaim({ sid: "sid-1" } as never)).toThrow(RangeError);
 	});
 
@@ -813,7 +816,7 @@ describe("step 5 — the requirements", () => {
 		expect(asked).toEqual(["b", "a", "b", "a"]);
 	});
 
-	it("asks no requirement for a remediation action a registered requirement declared: the route belongs to the requirement", async () => {
+	it("asks no requirement for the remediation action core issued to the requirement that declared it: the route belongs to the requirement", async () => {
 		let asked = 0;
 		const owner = met("mfa", {
 			remediations: ["mfa.step_up"],
@@ -822,13 +825,61 @@ describe("step 5 — the requirements", () => {
 				return { outcome: "unmet" };
 			},
 		});
+		const requirements = resolverForTests([owner, met("other")]);
+		const issued = requirements.get("mfa")?.actions.step_up;
+		expect(issued).toEqual({ name: "mfa.step_up", grade: "remediation" });
 		expect(
-			await admitSession(
-				deps({ requirements: resolverForTests([owner, met("other")]) }),
-				request({ action: ADMISSION_ACTIONS["mfa.step_up"] }),
-			),
+			await admitSession(deps({ requirements }), request({ action: issued as AdmissionAction })),
 		).toMatchObject({ outcome: "admitted" });
 		expect(asked).toBe(0);
+	});
+
+	it('keeps the remediation grade for the issued object alone: a literal { name: "mfa.step_up", grade: "remediation" } from a consumer, ADMISSION_ACTIONS\' own entry, or a copy of the issued object is asked of every requirement as credential_change', async () => {
+		const { logger, lines } = recordingLogger();
+		const seen: string[] = [];
+		const owner = met("mfa", {
+			remediations: ["mfa.step_up"],
+			admit: async ({ action }) => {
+				seen.push(`mfa:${action.name}:${action.grade}`);
+				return { outcome: "met" };
+			},
+		});
+		const other = met("other", {
+			admit: async ({ action }) => {
+				seen.push(`other:${action.name}:${action.grade}`);
+				return { outcome: "met" };
+			},
+		});
+		const requirements = resolverForTests([owner, other]);
+		const issued = requirements.get("mfa")?.actions.step_up as AdmissionAction;
+		const with_ = deps({ requirements, logger });
+		for (const action of [
+			{ name: "mfa.step_up", grade: "remediation" } as const,
+			ADMISSION_ACTIONS["mfa.step_up"],
+			{ ...issued },
+			Object.freeze({ ...issued }),
+		]) {
+			expect(await admitSession(with_, request({ action }))).toMatchObject({
+				outcome: "admitted",
+			});
+		}
+		expect(seen).toEqual(
+			Array.from({ length: 4 }, () => [
+				"mfa:mfa.step_up:credential_change",
+				"other:mfa.step_up:credential_change",
+			]).flat(),
+		);
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_remediation_undeclared",
+				fields: { action: "mfa.step_up" },
+			},
+		]);
+		// The issued object itself: the route's own, no requirement asked.
+		seen.length = 0;
+		await admitSession(with_, request({ action: issued }));
+		expect(seen).toEqual([]);
 	});
 
 	it("normalises the action first: a remediation no registered requirement declared is asked of every requirement as credential_change, said once per process per name", async () => {
@@ -1134,7 +1185,21 @@ describe("the actions (D4)", () => {
 			deps({ userSessionStore: down, logger }),
 			request({ action: { name: "deployment.export", grade: "use" } }),
 		);
-		expect(lines.map((line) => line.fields.action)).toEqual(["device.approve", "custom"]);
+		const requirements = resolverForTests([met("mfa", { remediations: ["mfa.step_up"] })]);
+		await admitSession(
+			deps({ userSessionStore: down, logger, requirements }),
+			request({ action: requirements.get("mfa")?.actions.step_up as AdmissionAction }),
+		);
+		await admitSession(
+			deps({ userSessionStore: down, logger }),
+			request({ action: { name: "mfa.step_up", grade: "remediation" } }),
+		);
+		expect(lines.map((line) => line.fields.action)).toEqual([
+			"device.approve",
+			"custom",
+			"mfa.step_up",
+			"custom",
+		]);
 	});
 });
 

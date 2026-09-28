@@ -156,6 +156,20 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		).toEqual(["mfa.step_up"]);
 	});
 
+	it("issues one branded remediation action per declared route on the registered copy, keyed by route, frozen", () => {
+		const registered = resolverForTests([
+			requirement("x", { remediations: ["x.step_up", "x.recover"] }),
+		]).get("x");
+		expect(registered?.actions).toEqual({
+			step_up: { name: "x.step_up", grade: "remediation" },
+			recover: { name: "x.recover", grade: "remediation" },
+		});
+		expect(Object.isFrozen(registered?.actions)).toBe(true);
+		expect(Object.isFrozen(registered?.actions.step_up)).toBe(true);
+		expect(registeredRequirement(requirement("y")).actions).toEqual({});
+		expect(Object.isFrozen(registeredRequirement(requirement("y")).actions)).toBe(true);
+	});
+
 	it("registers a copy, as boot does: the page and the lists are the copy's own, a page getter is read once, and admit delegates", async () => {
 		let reads = 0;
 		const asked: unknown[] = [];
@@ -316,11 +330,28 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect([...registered.reach]).toEqual(["risk-ok"]);
 		expect(reads).toBe(1);
 		expect(Object.isFrozen(sealed)).toBe(true);
+		// A read-only view over a private set — not a native Set, which a
+		// frozen one still lets add and delete: has, size and iteration alone.
+		expect(sealed instanceof Set).toBe(false);
+		for (const method of ["add", "delete", "clear"]) {
+			expect(method in sealed, method).toBe(false);
+		}
 		const mutable = sealed as Set<string>;
 		expect(() => mutable.add("x")).toThrow(TypeError);
 		expect(() => mutable.delete("risk-ok")).toThrow(TypeError);
 		expect(() => mutable.clear()).toThrow(TypeError);
+		expect(sealed.has("risk-ok")).toBe(true);
+		expect(sealed.has("other")).toBe(false);
+		expect(sealed.size).toBe(1);
 		expect([...sealed]).toEqual(["risk-ok"]);
+		expect([...sealed.keys()]).toEqual(["risk-ok"]);
+		expect([...sealed.values()]).toEqual(["risk-ok"]);
+		expect([...sealed.entries()]).toEqual([["risk-ok", "risk-ok"]]);
+		const seen: string[] = [];
+		sealed.forEach((value) => {
+			seen.push(value);
+		});
+		expect(seen).toEqual(["risk-ok"]);
 	});
 
 	it("answers a frozen set of its own for a requirement that is not a registered copy — the contract suite's fixture — and seals nothing on it", () => {
@@ -339,7 +370,9 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		]);
 		const registered = registeredRequirement(requirement("risk", ["risk-ok"]));
 		sealRegisteredReach(registered);
-		expect(registered.reach).toBeInstanceOf(Set);
+		expect("add" in registered.reach).toBe(false);
+		expect(registered.reach.has("risk-ok")).toBe(true);
+		expect(registered.reach.size).toBe(1);
 		expect([...registered.reach]).toEqual(["risk-ok"]);
 	});
 

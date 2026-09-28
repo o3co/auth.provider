@@ -113,10 +113,13 @@ const asking = (
 	over: Partial<SessionRequirement> = {},
 ): SessionRequirement & { readonly asked: PrimaryAuthentication[] } => {
 	const asked: PrimaryAuthentication[] = [];
+	// What a fixture may add at completion is within its reach (D5): the
+	// MFA one reaches the second-factor values, the risk one its own.
+	const reach = { mfa: ["otp", "hwk", "mfa"], risk: ["risk-ok"] }[name] ?? [];
 	return {
 		name,
-		reach: new Set(),
-		stepUpPage: undefined,
+		reach: new Set(reach),
+		stepUpPage: reach.length === 0 ? undefined : { url: `/${name}`, params: {} },
 		remediations: [],
 		hintKeys: ["enrollable", "email_proof"],
 		admit: async () => ({ outcome: "met" }),
@@ -460,6 +463,21 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 			],
 			["a primary's marker", continuation(), { requirement: "mfa", adds: { amr: ["pwd"] } }],
 			["mfa alone", continuation(), { requirement: "mfa", adds: { amr: ["mfa"] } }],
+			[
+				"a value outside the completing requirement's reach",
+				continuation(),
+				{ requirement: "risk", adds: { amr: ["risk-other"] } },
+			],
+			[
+				"a second-factor value the mfa requirement's reach does not name",
+				continuation(),
+				{ requirement: "mfa", adds: { amr: ["swk", "mfa"] } },
+			],
+			[
+				"an earlier completion, read back, outside its requirement's reach",
+				continuationOf(primary(), [{ requirement: "risk", adds: { amr: ["risk-other"] } }]),
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+			],
 			[
 				"a name completing twice",
 				continuationOf(primary(), [

@@ -306,6 +306,30 @@ describe("the three channels, three refusals (D3)", () => {
 	});
 });
 
+describe("the remediation actions core issues (D4)", () => {
+	it("hands each registered copy one branded action per declared route, which the resolver projects", async () => {
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[
+				contributing("test:first", {
+					a: () => requirement("a", { remediations: ["a.step_up", "a.recover"] }),
+				}),
+				consumer(seen),
+			],
+			{ sessionRequirements: { expected: ["a"] } },
+		);
+		try {
+			expect(seen.resolver?.get("a")?.actions).toEqual({
+				step_up: { name: "a.step_up", grade: "remediation" },
+				recover: { name: "a.recover", grade: "remediation" },
+			});
+			expect(Object.isFrozen(seen.resolver?.get("a")?.actions)).toBe(true);
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
 describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 	it("refuses a second-factor value in the reach of a requirement not named mfa, naming the module and the requirement", async () => {
 		const err = await refusal(
