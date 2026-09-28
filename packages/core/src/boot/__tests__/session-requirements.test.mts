@@ -380,6 +380,44 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 		await handle.dispose();
 	});
 
+	it("reads the reach once and seals it on the registered copy: the resolver answers a frozen snapshot, and a contributor that keeps a mutable Set changes nothing after boot", async () => {
+		let reads = 0;
+		const live = new Set(["risk-ok"]);
+		const risk = contributing("test:risk", {
+			risk: () => ({
+				name: "risk",
+				get reach() {
+					reads++;
+					return live;
+				},
+				stepUpPage: { url: "/risk", params: {} },
+				remediations: [],
+				hintKeys: [],
+				admit: async () => ({ outcome: "met" }),
+			}),
+		});
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot([risk, consumer(seen)], {
+			sessionRequirements: { expected: ["risk"] },
+		});
+		try {
+			expect(reads).toBe(1);
+			const registered = seen.resolver?.get("risk");
+			expect([...(registered?.reach ?? [])]).toEqual(["risk-ok"]);
+			live.add("other");
+			live.delete("risk-ok");
+			expect([...(registered?.reach ?? [])]).toEqual(["risk-ok"]);
+			const [entry] = Array.from(seen.resolver?.entries() ?? []);
+			expect([...(entry?.[1].reach ?? [])]).toEqual(["risk-ok"]);
+			expect(reads).toBe(1);
+			const sealed = registered?.reach as Set<string>;
+			expect(Object.isFrozen(sealed)).toBe(true);
+			expect(() => sealed.add("x")).toThrow(TypeError);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("holds the page to the issuer's origin at registration", async () => {
 		const err = await refusal(
 			boot(

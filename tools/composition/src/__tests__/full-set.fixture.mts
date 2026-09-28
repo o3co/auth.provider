@@ -52,10 +52,13 @@ import {
 	defaultChallengeCeremonyModule,
 	defineModule,
 	type GrantPolicyHook,
+	type Interruption,
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
 	memoryWebAuthnCredentialStoreModule,
+	type PrimaryAuthentication,
+	type SessionRequirement,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
@@ -139,9 +142,15 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 		oauth: Record<string, Record<string, unknown>>;
 		federations: Record<string, Record<string, unknown>>;
 		webauthn?: Record<string, unknown>;
+		sessionRequirements?: { expected?: readonly string[] };
 	};
 	return {
 		...config,
+		// The session-admission ADR's D7: a deployment that adds a requirement
+		// declares it beside what the template derived from `mfa.mode`.
+		sessionRequirements: {
+			expected: [...(c.sessionRequirements?.expected ?? []), ...FIXTURE_REQUIREMENTS],
+		},
 		oauth: {
 			...c.oauth,
 			deviceAuthorization: {
@@ -252,6 +261,76 @@ const webauthnSubjectModule = defineModule({
 	},
 });
 
+/** The fixture's two session requirements, in registration order (see `requirementModules`). */
+export const FIXTURE_REQUIREMENTS = ["fixture-page", "fixture-bare"] as const;
+
+/**
+ * The 403 the fixture requirements answer a login they interrupt with: the
+ * closed body core validates (the session-admission ADR's D5), a hint under
+ * the one key the page requirement declares.
+ */
+export const FIXTURE_INTERRUPTION = {
+	page: { status: 403, body: { error: "fixture_page_required", hints: { fixture_hint: true } } },
+	bare: { status: 403, body: { error: "fixture_bare_required" } },
+} as const;
+
+/**
+ * Two session requirements a deployment might write, registered under the
+ * `sessionRequirements` kind so the full set exercises the kind through the
+ * template's boot (the session-admission ADR's D3, D7): one that reaches a
+ * value and has a page — the shape of a step-up — and one that reaches
+ * nothing. Each admits every use and interrupts the login of the subjects in
+ * `interrupt` alone, so the full set's own logins run uninterrupted; the
+ * step-up and interruption flows are the consumers' and the MFA module's
+ * suites, which name a subject here to start one.
+ */
+function requirementModules(interrupt: ReadonlySet<string>): Module[] {
+	const interruption =
+		(answer: Interruption extends { open(sessionId: string): infer R } ? Awaited<R> : never) =>
+		async (primary: PrimaryAuthentication): Promise<"establish" | Interruption> =>
+			interrupt.has(primary.subject) ? { open: async () => answer } : "establish";
+	const pageReach: ReadonlySet<string> = new Set(["fixture-ok"]);
+	const bareReach: ReadonlySet<string> = new Set();
+	return [
+		defineModule({
+			name: "deployment:requirement-page",
+			contributes: {
+				sessionRequirements: {
+					"fixture-page": (): SessionRequirement => ({
+						name: "fixture-page",
+						get reach() {
+							return pageReach;
+						},
+						stepUpPage: { url: "/fixture/step-up", params: { requirement: "fixture-page" } },
+						remediations: ["fixture.step_up"],
+						hintKeys: ["fixture_hint"],
+						admit: async () => ({ outcome: "met" }),
+						admitPrimary: interruption(FIXTURE_INTERRUPTION.page),
+					}),
+				},
+			},
+		}),
+		defineModule({
+			name: "deployment:requirement-bare",
+			contributes: {
+				sessionRequirements: {
+					"fixture-bare": (): SessionRequirement => ({
+						name: "fixture-bare",
+						get reach() {
+							return bareReach;
+						},
+						stepUpPage: undefined,
+						remediations: [],
+						hintKeys: [],
+						admit: async () => ({ outcome: "met" }),
+						admitPrimary: interruption(FIXTURE_INTERRUPTION.bare),
+					}),
+				},
+			},
+		}),
+	];
+}
+
 /**
  * Stands in for the deployment's own WebAuthn credential store on several
  * replicas: no package ships a shared one, and the README has a production
@@ -344,6 +423,7 @@ function addedModules(
 	features: Features,
 	stores: AddedStores,
 	f: Fakes,
+	interrupt: ReadonlySet<string>,
 ): Module[] {
 	return [
 		deviceGrantModule({ config }),
@@ -362,6 +442,7 @@ function addedModules(
 				]
 			: []),
 		grantPolicyModule,
+		...requirementModules(interrupt),
 		...federationBridges(config, features, f),
 	];
 }
@@ -441,6 +522,8 @@ export interface FullSetOptions extends Omit<ComposeOptions, "extraModules" | "r
 	readonly credentialStore?: Module;
 	/** Adjust the resolved config after the features are laid over it. */
 	readonly adjust?: (config: AppConfig) => AppConfig;
+	/** The subjects whose login both fixture requirements interrupt; none by default. */
+	readonly interruptLogins?: readonly string[];
 }
 
 export interface FullSet extends Composition {
@@ -466,8 +549,10 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 		challengeStore: _challengeStore,
 		credentialStore: _credentialStore,
 		adjust: _adjust,
+		interruptLogins,
 		...compose
 	} = options;
+	const interrupt = new Set(interruptLogins ?? []);
 	return {
 		...compose,
 		referenceConfs: REFERENCE_CONFS,
@@ -476,7 +561,7 @@ export async function fullSetOptions(options: FullSetOptions = {}): Promise<Comp
 			const featured = withFeatures(adjusted, features);
 			return options.adjust ? options.adjust(featured) : featured;
 		},
-		extraModules: (config) => addedModules(config, features, added, f),
+		extraModules: (config) => addedModules(config, features, added, f, interrupt),
 		extraClients: { ...EXTRA_CLIENTS, ...options.extraClients },
 		extraUsers: { ...EXTRA_USERS, ...options.extraUsers },
 	};
