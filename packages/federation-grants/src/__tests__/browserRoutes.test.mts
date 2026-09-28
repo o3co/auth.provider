@@ -3243,6 +3243,26 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 		}
 	});
 
+	it("binds the flow to the admitted record's sid: a store answering a record whose sid is not its key fails closed at the consent", async () => {
+		// The binding's sid is the record admission read, not the cookie's: a
+		// store that answers a record under another sid — a deployment's own
+		// store gone wrong — leaves a challenge no browser can read or answer.
+		const w = world();
+		const { handle } = await w.lodge();
+		const sid = w.signIn("b-1");
+		const durable = w.durable.get(sid) as UserSession;
+		w.durable.set(sid, { ...durable, sid: "sid-somebody-else" });
+		const connected = await w.connect(handle, "b-1");
+		expect(connected.status).toBe(303);
+		const challenge =
+			new URL(connected.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+		const read = await w.page(challenge, "b-1");
+		expect(read.status).toBe(400);
+		expect(read.body).toEqual(noPending);
+		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(400);
+		expect(w.authorized).toEqual([]);
+	});
+
 	it("refuses to be built without requirements, or with a resolver the planner did not build", () => {
 		expect(() => createFederationGrantBrowserRouter({} as never)).toThrow(/requirements/);
 		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
