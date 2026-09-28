@@ -261,7 +261,13 @@ export interface FederationGrantStore {
 	 * revokes is told `revoked`, and not that the grant had expired anyway.
 	 *
 	 * `ok` is whether it changed anything: `false` for an unknown grant, and for
-	 * one already revoked, whose first revocation stays as recorded.
+	 * one already revoked, whose first revocation stays as recorded. One more
+	 * case answers `false` although the grant was ended: a record the adapter
+	 * cannot describe as a grant — a stored text it cannot read — is revoked
+	 * and its credentials deleted all the same, since a revocation does not
+	 * need to understand the record it ends, but `ok: true` carries the grant
+	 * as written, and there is none to carry. The caller is told the write
+	 * could not be represented, not that nothing happened.
 	 */
 	revoke(grantId: string, by: FederationGrantRevokedBy, at: Date): Promise<FederationGrantWrite>;
 
