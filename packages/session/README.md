@@ -19,7 +19,12 @@ responsibilities:
    token route, and the federation start and callback routes. They turn a
    password check or an upstream IdP's answer into a `UserSession` record and an
    authenticated express session — both through one function,
-   [`establishSession`](#establishing-the-session) — and undo it at logout.
+   [`establishSession`](#establishing-the-session), which writes what core's
+   [session admission](../core/src/session-admission/README.md) established and
+   which a session requirement's completion (the MFA package's) calls too — and
+   undo it at logout. A password login asks the registered session
+   requirements before anything is written, and one may
+   [interrupt it](#when-a-requirement-interrupts-the-login).
 2. **The federation-adapter toolkit** — what an adapter package imports from
    the router it plugs into: `createFederationRedirectPolicy` and the allowlist
    rules it is built from, and `extractFederationSection`. The helpers an
@@ -267,10 +272,15 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `federationProviders` and `federationRedirectPolicyResolver`, which the boot
   planner builds from per-federation modules' `federations.<name>` and
   `federationRedirectPolicies.<name>` contributions, and
-  `sessionRequirementResolver` — the account-linking routes read their session
-  through core's [session admission](../core/src/session-admission/README.md),
+  `sessionRequirementResolver` — the password login asks the registered
+  requirements through core's
+  [session admission](../core/src/session-admission/README.md) before anything
+  is written, and the account-linking routes read their session through it,
   so a composition installing `sessionModule` declares
-  `sessionRequirements.expected`. `sessionRPRegistry` and
+  `sessionRequirements.expected`. A router built by hand
+  (`routes/Session.mts`, `routes/Federation.mts`) takes the resolver as the
+  required `requirements` option and throws without it; a test builds one with
+  core's `resolverForTests`. `sessionRPRegistry` and
   `sessionFamilyIndex`, the other two session stores, are `oauth`'s.
 - `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`,
   `subjectRevocation` (the boundary the linking routes' admission reads).
@@ -294,8 +304,22 @@ The manifest ([`src/module.mts`](src/module.mts)):
   and its subject-index entry are rolled back best-effort; a rollback step
   that fails is one `login_cleanup_failed` warn. The sequence is
   [Establishing the session](#establishing-the-session).
-- On success it creates a `UserSession` (`amr: ["pwd"]`, `authentication`
-  primary `pwd`, lifetime `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
+- Once the Store verified the user, and before anything is written, the route
+  asks core's [session admission](../core/src/session-admission/README.md)
+  (`admitPrimary`) about the primary core builds from the login
+  (`passwordPrimary`: the subject, the `User`, the claims the record will hold,
+  `authTime`, the allowlisted `redirect_to`, the client's address and user
+  agent — `amr` and `authentication` are core's, never the route's). With no
+  requirement registered every login is answered `establish`. A requirement's
+  outage is `503 temporarily_unavailable` with nothing written, logged once by
+  admission as `session_admission_unavailable` (`store` the requirement's
+  name, `phase: "establishment"`). A requirement's interruption is
+  [below](#when-a-requirement-interrupts-the-login). A `User` holding a value
+  core cannot copy into the primary (a function) is refused before anything
+  is written, as the route's error (`500`).
+- On success — every requirement answered `establish` — it creates a
+  `UserSession` (`amr: ["pwd"]`, `authentication` primary `pwd`, lifetime
+  `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
   regenerates the express session and saves it, and answers `200` with a fresh
   CSRF cookie. The save comes before the answer: a store that cannot save it is
   `503`, not a `200` for a session the next request would not find.
@@ -310,23 +334,61 @@ The manifest ([`src/module.mts`](src/module.mts)):
   warning is logged when the mode is unset, and nothing is said under
   `"single"`.
 
+#### When a requirement interrupts the login
+
+A registered requirement (MFA, when its package is installed) may answer the
+login with an interruption: the login does not complete yet. The route then,
+in two phases because the express session is regenerated between them:
+
+1. regenerates the express session and leaves it unauthenticated — no
+   `isAuthenticated`, `user`, `sid` or `redirectTo`;
+2. opens the requirement's ceremony bound to the regenerated session's id; the
+   requirement persists, in its own record, the continuation core built — the
+   primary as the route built it, `redirect_to` included, and what earlier
+   requirements added;
+3. saves the session, and answers the requirement's `403` with its body — the
+   closed shape core validated against what the requirement declared
+   (`error`, and optionally `transaction`, `expires_in` and `hints`; never the
+   `User`, a subject or an address) — and a fresh CSRF cookie.
+
+No `UserSession` is written. The requirement's completion route establishes
+the session later: it resumes the login through core's `resumePrimary`, which
+asks every requirement again, and calls [`establishSession`](#establishing-the-session)
+with the establishment it answers — or, when another requirement interrupts,
+answers that one's `403` the same way. A regeneration, an `open` that throws
+or answers a body core refuses, or a save that fails is
+`503 temporarily_unavailable` with the request's cookie session dropped and
+nothing established, logged once as `login_store_unavailable`
+(`store: "cookie_session"` with `step` `regenerate` or `save`, or the
+requirement's name with `step: "open"`); after a failed save the
+requirement's record is left to its own expiry, bound to a session id no
+browser holds. That the `403` tells whoever holds the password it was right
+is accepted (the MFA ADR's D23).
+
 ### Establishing the session
 
 The tail of a login — from the user verified to the session saved — is one
 function, `establishSession`
 ([`src/establish-session.mts`](src/establish-session.mts)), which
-`POST /session/login` and the federation callback both call; it is the
-package's own and not exported. It takes
-what the login verified — the `User`, the claims envelope, `authTime`, and the
-`amr` / `authentication` core composed for the path — and runs, in order: the
+`POST /session/login` and the federation callback both call, and which the
+package exports — with the types a caller needs — so a requirement's
+completion (the MFA package's, after core's `resumePrimary`) finishes a login
+the same way. It takes the `Establishment` core's session admission built —
+`admitPrimary`'s for the password login, `establishWithoutAsking`'s for the
+federation callback, `resumePrimary`'s for a completion — and writes from its
+primary alone: the subject, the `User`, the claims envelope, `authTime`, the
+`amr` / `authentication` core composed, and the `redirectTo`; nothing a
+caller passes beside it. Anything that is not an `Establishment` core built —
+an object shaped like one, a copy of one — is a `RangeError` before anything
+is written. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
 regeneration; the express session's regeneration (session fixation); the
-caller's steps after it; `isAuthenticated`, `user`, `sid` and the login's
+caller's steps after it; `isAuthenticated`, `user`, `sid` and the primary's
 `redirectTo` on the regenerated session; and its save. It answers
 `established` with the `sid`, or `unavailable` naming the store and the step,
-which the route answers as `503 temporarily_unavailable`.
+which the caller answers as `503 temporarily_unavailable`.
 
 What holds:
 
@@ -352,7 +414,7 @@ What holds:
 - **Without a `UserSessionStore`** — which only `POST /session/login`'s router
   accepts — no record is created and no step runs: the express session alone
   is regenerated, flagged and saved.
-- The CSRF token, the `200` and the redirect stay with the routes.
+- The CSRF token, the `200` and the redirect stay with the callers.
 
 ### What `POST /session/logout` invalidates
 
@@ -606,7 +668,12 @@ URL is exactly what the adapter returned.
    `subjectSessionIndex` entry when that is wired, a `sessionFederationIndex`
    entry, and a regenerated express session —
    [Establishing the session](#establishing-the-session), with the index entry
-   and the tokens below as the callback's own steps. Any store the callback cannot do
+   and the tokens below as the callback's own steps. Its establishment is the
+   one core's `establishWithoutAsking` builds from the federation's own facts:
+   no session requirement is asked at a federated login in this release (an
+   interruption there would have to be a navigation), so a requirement that
+   interrupts a password login does not interrupt it; the requirements'
+   use-time admission applies to the session at each use. Any store the callback cannot do
    without that fails — the Store's lookup, the `UserSession` or
    `sessionFederationIndex` write, regenerating or saving the express session,
    attaching the tokens below, and before all of them retiring the ephemeral
@@ -1074,10 +1141,12 @@ The bundled adapters are the worked examples — for instance
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
 | [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
-| [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail's sequence, what it hands each write, and the rollback at every point it can fail |
+| [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
+| [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |
+| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, and the record is what core composes |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts; the request helpers are pinned in core ([`core/src/federations/__tests__/`](../core/src/federations/__tests__/)) |
 

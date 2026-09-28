@@ -22,8 +22,10 @@
  * `UserRepository`, links it to the live session for a `?link=1` start, or
  * establishes a session through `establishSession`
  * (`../establish-session.mts`), the tail it shares with `POST /session/login`,
- * adding the federation's index entry and upstream tokens as the steps of its
- * own; then redirects as the federation's redirect policy answers. The link
+ * from the establishment core builds without asking the session requirements
+ * (`establishWithoutAsking`, the session-admission ADR's D5), adding the
+ * federation's index entry and upstream tokens as the steps of its own; then
+ * redirects as the federation's redirect policy answers. The link
  * flow reads its session through core's session admission (the
  * session-admission ADR's D8): the start as `session.link` over the cookie,
  * recording the admitted `sid` and subject in the transaction, the callback
