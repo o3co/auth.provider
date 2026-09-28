@@ -262,6 +262,16 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 		});
 	});
 
+	it("copies the subject to its three fields: nothing else the mapper answered reaches the route", async () => {
+		const { app } = setup({
+			subjectFor: (session) =>
+				({ userId: session.sub, email: "alice@example.com" }) as unknown as WebAuthnSubject,
+		});
+		const res = await register(app);
+		expect(res.status).toBe(200);
+		expect(res.body.subject).toEqual({ userId: SUBJECT });
+	});
+
 	it("sets no subject for a browser that is not signed in, reading no store", async () => {
 		const { app, get, subjectFor } = setup({ session: {} });
 		const res = await register(app);
@@ -384,6 +394,10 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 describe("webauthnSessionSubjectModule — the deployment's mapper is held to the subject's shape", () => {
 	it.each([
 		["not an object", () => "u-1"],
+		[
+			"a function, even one carrying a userId",
+			() => Object.assign(() => undefined, { userId: "u-1" }),
+		],
 		["null", () => null],
 		["without a userId", () => ({})],
 		["with an empty userId", () => ({ userId: "" })],
