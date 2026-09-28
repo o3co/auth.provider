@@ -70,6 +70,7 @@ import {
 	primaryFromDto,
 } from "./primary.mjs";
 import {
+	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionAction,
 	type AdmissionDeps,
@@ -260,40 +261,9 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 }
 
 // ---------------------------------------------------------------------------
-// The actions (D4)
+// The actions (D4): `ADMISSION_ACTIONS` is `requirement.mts`'s, beside the
+// remediation rule that reads it.
 // ---------------------------------------------------------------------------
-
-const action = <N extends string, G extends AdmissionGrade>(
-	name: N,
-	grade: G,
-): { readonly name: N; readonly grade: G } => Object.freeze({ name, grade });
-
-/**
- * The bundled consumers' actions, each with its grade (D4). A deployment's
- * own route builds `{ name, grade }` for what it does and is treated by its
- * grade; `remediation` is accepted only for a name a registered requirement
- * declared, else treated as `credential_change`.
- */
-export const ADMISSION_ACTIONS = Object.freeze({
-	"oauth.authorize": action("oauth.authorize", "use"),
-	"oauth.consent": action("oauth.consent", "use"),
-	"oauth.session_grant": action("oauth.session_grant", "use"),
-	"oauth.code_exchange": action("oauth.code_exchange", "use"),
-	"device.lookup": action("device.lookup", "use"),
-	"device.approve": action("device.approve", "use"),
-	"device.deny": action("device.deny", "use"),
-	"federation_grants.connect": action("federation_grants.connect", "use"),
-	"federation_grants.consent": action("federation_grants.consent", "use"),
-	"federation_grants.callback": action("federation_grants.callback", "use"),
-	"session.link": action("session.link", "credential_change"),
-	"session.link_callback": action("session.link_callback", "use"),
-	"webauthn.register": action("webauthn.register", "credential_change"),
-	"mfa.manage": action("mfa.manage", "credential_change"),
-	"mfa.step_up": action("mfa.step_up", "remediation"),
-});
-
-/** A bundled action's name. */
-export type AdmissionActionName = keyof typeof ADMISSION_ACTIONS;
 
 const GRADES: ReadonlySet<string> = new Set<AdmissionGrade>([
 	"use",

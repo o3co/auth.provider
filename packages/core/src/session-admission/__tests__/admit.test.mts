@@ -26,7 +26,6 @@ import type { AuditEvent, AuditSink } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
-	ADMISSION_ACTIONS,
 	admitSession,
 	codeClaim,
 	cookieClaim,
@@ -41,6 +40,7 @@ import type {
 	SessionRequirement,
 	SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";
+import { ADMISSION_ACTIONS } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 

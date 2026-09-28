@@ -216,7 +216,7 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept:
 			"session admission — the bundled actions and their grades (the session-admission ADR's D4)",
-		home: "packages/core/src/session-admission/admit.mts",
+		home: "packages/core/src/session-admission/requirement.mts",
 		definition: /(?:function|const)\s+ADMISSION_ACTIONS\b/,
 	},
 	{

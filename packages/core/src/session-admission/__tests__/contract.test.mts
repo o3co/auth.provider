@@ -95,7 +95,7 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 		expect(cases.map((c) => c.name)).toEqual([
 			"name equals its key, and a fixture is never named mfa",
 			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set exactly when reach is not empty, and is valid",
-			"remediations are non-empty names, each once",
+			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
 			"hintKeys are hint names",
 			"admit is never called with a dead session",
 			"admit is never called for a remediation action",

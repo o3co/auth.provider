@@ -34,13 +34,14 @@
 import { describe, expect, it } from "vitest";
 import type { MfaMode } from "#/mfa/mode.mjs";
 import { type AcrTable, readAcrTable } from "#/session-admission/acr.mjs";
-import { ADMISSION_ACTIONS, admitSession, cookieClaim } from "#/session-admission/admit.mjs";
+import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
 import type {
 	Admission,
 	AdmissionDeps,
 	SessionRequirement,
 	StepUpPage,
 } from "#/session-admission/requirement.mjs";
+import { ADMISSION_ACTIONS } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 

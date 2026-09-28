@@ -844,8 +844,6 @@ export {
 	vouchableAcrTable,
 } from "./session-admission/acr.mjs";
 export {
-	ADMISSION_ACTIONS,
-	type AdmissionActionName,
 	admitPrimary,
 	admitSession,
 	type CodeCarrier,
@@ -872,8 +870,10 @@ export {
 	primaryFromDto,
 } from "./session-admission/primary.mjs";
 export {
+	ADMISSION_ACTIONS,
 	type Admission,
 	type AdmissionAction,
+	type AdmissionActionName,
 	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionGrade,

@@ -166,9 +166,16 @@ export function sessionRequirementContract(
 			},
 		},
 		{
-			name: "remediations are non-empty names, each once",
+			name: "remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
 			run: async () => {
-				const { remediations } = registeredRequirement(build(), issuer);
+				// Registration holds the rule; a fixture that breaks it does not register.
+				const { name, remediations } = registeredRequirement(build(), issuer);
+				for (const remediation of remediations) {
+					assert.ok(
+						remediation.startsWith(`${name}.`),
+						`"${remediation}" is not a route of "${name}"`,
+					);
+				}
 				assert.equal(
 					new Set(remediations).size,
 					remediations.length,
