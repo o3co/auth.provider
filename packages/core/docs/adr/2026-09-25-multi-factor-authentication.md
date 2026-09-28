@@ -94,6 +94,8 @@
 
 Rejected: **core-only**, for the route rule; **two packages (routes, factors)**, which splits one flow's state across a package boundary for no deployment that would install one without the other.
 
+**Amended 2026-09-28 (session admission): the rows above that name the coordinator slot are superseded.** In the table: `packages/core/src/mfa/` no longer holds "the `MfaCoordinator` slot type and `MFA_ABSENCE_POLICY`", and the requirement rule's merge moves to `packages/core/src/session-admission/` (`acr.mts`, `admit.mts`) while its baseline moves to `packages/mfa`; `packages/mfa` "fills `mfaCoordinator`" reads "contributes `sessionRequirements.mfa`", the coordinator being its internal; `packages/session`'s "the login route consults `mfaCoordinator`" reads "the login route calls `admitPrimary` and establishes with the `Establishment` it returns", and `packages/oauth`, `packages/device-grant` and `packages/federation-grants` are "gated through `admitSession`" rather than "through core's rule"; `packages/webauthn` also gains `webauthnSessionSubjectModule`. The paragraph "Why the coordinator is a slot and not an import" keeps its reasoning — neither `session` nor `oauth` may import an optional feature — but the port they reach is admission, and the extension is a contribution, not a slot (the session-admission ADR's D1, D3, D6). The package split itself stands.
+
 ### D2 — The dependency directions, checked against the repository's rules
 
 | Package | Depends on (peers) | New? | Rule it satisfies |
