@@ -46,6 +46,10 @@ type Failures = {
 	readonly removeSid?: Error;
 	readonly regenerate?: Error;
 	readonly save?: Error;
+	/** Thrown synchronously by `regenerate`, before its callback — never handed to it. */
+	readonly regenerateThrows?: Error;
+	/** Thrown synchronously by `save`, as a store serialising the record does. */
+	readonly saveThrows?: Error;
 	readonly before?: Error;
 	readonly beforeUndo?: Error;
 	readonly after?: Error;
@@ -110,10 +114,12 @@ function harness(
 	const req: { session: FakeSession | undefined } = { session: undefined };
 	const save = vi.fn((cb: (err: unknown) => void) => {
 		trace.push("save");
+		if (fail.saveThrows) throw fail.saveThrows;
 		cb(fail.save ?? null);
 	});
 	const regenerate = vi.fn((cb: (err: unknown) => void) => {
 		trace.push("regenerate");
+		if (fail.regenerateThrows) throw fail.regenerateThrows;
 		if (fail.regenerate) {
 			cb(fail.regenerate);
 			return;
@@ -409,6 +415,63 @@ describe("establishSession", () => {
 				"cookie_session",
 				"save",
 				down,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("a save that throws synchronously — a store serialising the record throws there — is the store's failure: the full ladder, and the cookie session dropped", async () => {
+			const thrown = new TypeError("Do not know how to serialize a BigInt");
+			const h = harness({ saveThrows: thrown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+				"after-undo",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"cookie_session",
+				"save",
+				thrown,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("a regenerate that throws synchronously is the store's failure too: the ladder, and the cookie session dropped", async () => {
+			const thrown = new Error("cookie store threw");
+			const h = harness({ regenerateThrows: thrown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({
+				outcome: "unavailable",
+				store: "cookie_session",
+				step: "regenerate",
+			});
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"cookie_session",
+				"regenerate",
+				thrown,
 			);
 			expect(h.req.session).toBeUndefined();
 		});

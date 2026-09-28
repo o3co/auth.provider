@@ -198,6 +198,27 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 			readonly step: "create" | "regenerate" | "save" | T;
 	  };
 
+/**
+ * Run one of the express session's callback operations — `regenerate`,
+ * `save` — as a promise of its failure. An error handed to the callback is
+ * the store's failure; so is one thrown synchronously, before the callback
+ * is ever called: a store serialises the record in the call itself
+ * (`MemoryStore`'s `JSON.stringify`), so a record it cannot serialise — a
+ * `User` carrying a `BigInt` or a cycle — throws there, not through the
+ * callback, and must roll the login back exactly as a callback error does
+ * rather than escape the route as a `500` with the session still saved.
+ */
+const sessionOperation = (
+	run: (done: (err: unknown) => void) => unknown,
+): Promise<{ readonly failed: false } | { readonly failed: true; readonly cause: unknown }> =>
+	new Promise((resolve) => {
+		try {
+			run((err) => resolve(err ? { failed: true, cause: err } : { failed: false }));
+		} catch (cause) {
+			resolve({ failed: true, cause });
+		}
+	});
+
 export async function establishSession<S extends string = never, T extends string = never>(
 	input: EstablishSessionInput,
 	deps: EstablishSessionDeps<S, T>,
@@ -299,11 +320,9 @@ export async function establishSession<S extends string = never, T extends strin
 
 	// express-session regenerates by destroying the old record in its store,
 	// so a failure is that store's outage.
-	const regenerateErr = await new Promise<unknown>((resolve) => {
-		req.session.regenerate((err: unknown) => resolve(err ?? null));
-	});
-	if (regenerateErr) {
-		reporter.storeUnavailable("cookie_session", "regenerate", regenerateErr);
+	const regenerated = await sessionOperation((done) => req.session.regenerate(done));
+	if (regenerated.failed) {
+		reporter.storeUnavailable("cookie_session", "regenerate", regenerated.cause);
 		await rollBack();
 		abandonCookieSession(req);
 		return { outcome: "unavailable", store: "cookie_session", step: "regenerate" };
@@ -330,11 +349,9 @@ export async function establishSession<S extends string = never, T extends strin
 		req.session.redirectTo = redirectTo;
 	}
 
-	const saveErr = await new Promise<unknown>((resolve) => {
-		req.session.save((err: unknown) => resolve(err ?? null));
-	});
-	if (saveErr) {
-		reporter.storeUnavailable("cookie_session", "save", saveErr);
+	const saved = await sessionOperation((done) => req.session.save(done));
+	if (saved.failed) {
+		reporter.storeUnavailable("cookie_session", "save", saved.cause);
 		await rollBack();
 		abandonCookieSession(req);
 		return { outcome: "unavailable", store: "cookie_session", step: "save" };
