@@ -792,6 +792,45 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 });
 
 // ---------------------------------------------------------------------------
+// Session admission at the link start and WebAuthn registration
+// ---------------------------------------------------------------------------
+
+/** A `?link=1` start from this deployment's own page, on the signed-in jar. */
+const linkStart = (agent: ReturnType<typeof request.agent>) =>
+	agent.get("/session/oauth/federation/google?link=1").set("Sec-Fetch-Site", "same-origin");
+
+describe("session admission at the link start and WebAuthn registration (the session-admission ADR's acceptance criterion 2)", () => {
+	/** Stamps the subject-revocation boundary for alice now, as a credential change does. */
+	const revokeAlice = async ({ handle }: FullSet): Promise<void> => {
+		const revocation = handle.components.subjectRevocation;
+		expect(revocation, "the full set wires subject revocation").toBeDefined();
+		await revocation?.revokeBefore(ALICE.sub, new Date(), new Date(Date.now() + 86_400_000));
+	};
+
+	it("admits a live session at both, and refuses it at both once alice's sessions are revoked", async () => {
+		const set = await boot();
+		const { agent, header, token } = await signedIn(set.app);
+		expect((await linkStart(agent)).status).toBe(302);
+		expect(
+			(await agent.post("/oauth/webauthn/registration/options").set(header, token).send({})).status,
+		).toBe(200);
+
+		await revokeAlice(set);
+
+		const link = await linkStart(agent);
+		expect(link.status).toBe(401);
+		expect(link.body.error).toBe("login_required");
+		// No subject reaches the registration route: its own 401.
+		const registration = await agent
+			.post("/oauth/webauthn/registration/options")
+			.set(header, token)
+			.send({});
+		expect(registration.status).toBe(401);
+		expect(registration.body.error).toBe("unauthorized");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Token exchange and the session behind the subject token
 // ---------------------------------------------------------------------------
 
@@ -1159,6 +1198,56 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "webauthn_ceremony_store_unavailable",
+	},
+	// The session-admission ADR's acceptance criterion 2: a store outage is
+	// 503 at every consumer of admission — here the two this package set adds.
+	{
+		module: "session",
+		slot: "userSessionStore",
+		surface: "GET /session/oauth/federation/google?link=1 (the link start's session read)",
+		run: async (app, outage) => {
+			const { agent } = await signedIn(app);
+			outage.down = true;
+			return linkStart(agent);
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "webauthn-session-subject",
+		slot: "userSessionStore",
+		surface: "POST /oauth/webauthn/registration/options (the session-subject module's read)",
+		run: async (app, outage) => {
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "session",
+		slot: "subjectRevocation",
+		surface: "GET /session/oauth/federation/google?link=1 (the revocation boundary)",
+		run: async (app, outage) => {
+			const { agent } = await signedIn(app);
+			outage.down = true;
+			return linkStart(agent);
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
+	},
+	{
+		module: "webauthn-session-subject",
+		slot: "subjectRevocation",
+		surface: "POST /oauth/webauthn/registration/options (the revocation boundary)",
+		run: async (app, outage) => {
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "session_admission_unavailable",
 	},
 ];
 
