@@ -37,8 +37,9 @@
  * never read as more trusted than it was written.
  */
 
-import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
+import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { MfaRequirementSession } from "../mfa/requirement.mjs";
+import { MFA_CLOCK_SKEW_ALLOWANCE_MS } from "../mfa/transactionStore.mjs";
 import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
 /** A copy of `authentication` that shares nothing with it: its list and its date are new. */
@@ -155,14 +156,29 @@ export function federatedSessionAuthentication(login: {
 }
 
 /**
+ * Whether `ms` is an instant a session may record as when a second factor was
+ * verified, judged on the store's clock `nowMs`: at or after the epoch, and
+ * no further ahead than the MFA stores' clock-skew allowance
+ * (`MFA_CLOCK_SKEW_ALLOWANCE_MS`, a day). Callers' clocks are NTP-synced
+ * (D22); one far ahead is not a clock but a time that would count as
+ * verified long after it was — and, kept as the later of two, would stick.
+ */
+const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
+	Number.isFinite(ms) && ms >= 0 && ms <= nowMs + MFA_CLOCK_SKEW_ALLOWANCE_MS;
+
+/**
  * Refuse, with a `RangeError`, an event that is not a second factor's (D9):
  * no values, one that is not a non-empty string, a primary's marker (`pwd`,
  * `fed` — a second factor must not change the primary the baseline is decided
- * on, as `composeAmr` holds a factor to), or a time that is not a valid date
- * at or after the epoch. What `recordSecondFactor` checks before it reads
- * anything, in every bundled store.
+ * on, as `composeAmr` holds a factor to), `mfa` with no value of the factor's
+ * own beside it (`mfa` comes from a factor that adds it, D14, and alone names
+ * no factor that was verified), or a time that is not a valid date at or
+ * after the epoch, or further ahead of `nowMs` — the store's clock — than the
+ * MFA stores' clock-skew allowance. What `recordSecondFactor` checks before it
+ * reads anything, in every bundled store. The message names what is wrong
+ * and quotes nothing but a primary's marker.
  */
-export function checkSecondFactorEvent(event: SecondFactorEvent): void {
+export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number): void {
 	const amr: unknown = event?.amr;
 	if (!Array.isArray(amr) || amr.length === 0) {
 		throw new RangeError("recordSecondFactor: a second factor adds at least one amr value");
@@ -177,9 +193,70 @@ export function checkSecondFactorEvent(event: SecondFactorEvent): void {
 			);
 		}
 	}
+	if (amr.every((value) => value === MFA_AMR)) {
+		throw new RangeError(
+			`recordSecondFactor: "${MFA_AMR}" comes beside a factor's own amr values, never alone`,
+		);
+	}
 	const atMs = event.at instanceof Date ? event.at.getTime() : Number.NaN;
-	if (!Number.isFinite(atMs) || atMs < 0) {
-		throw new RangeError("recordSecondFactor: at must be a valid date at or after the epoch");
+	if (!isRecordableVerificationTime(atMs, nowMs)) {
+		throw new RangeError(
+			"recordSecondFactor: at must be a valid date at or after the epoch, and no further ahead than clocks drift",
+		);
+	}
+}
+
+/**
+ * Refuse, with a `RangeError`, an `authentication` a store is asked to record
+ * that `SessionAuthentication` does not admit (D9) — so the two bundled
+ * stores refuse the same values, rather than one copying a string's
+ * characters as a list and the other writing an envelope it then reads as
+ * corrupt. `undefined` is a session written as one from before the key; else
+ * an object with a non-empty string `primary`, a `federation` that is a
+ * string or `undefined`, an `upstreamAmr` that is a list of strings or
+ * `undefined`, and an `mfaAt` that is `undefined` or a `Date` the store may
+ * record (a valid instant at or after the epoch, no further ahead of `nowMs`,
+ * the store's clock, than the MFA stores' clock-skew allowance). The message
+ * names the session and the field, and quotes nothing of the value. What
+ * every bundled store's `create` checks before it writes.
+ */
+export function checkSessionAuthentication(
+	sid: string,
+	authentication: unknown,
+	nowMs: number,
+): asserts authentication is SessionAuthentication | undefined {
+	if (authentication === undefined) return;
+	const refuse = (field: string, rule: string): never => {
+		throw new RangeError(`UserSession ${sid}: ${field} must be ${rule}`);
+	};
+	if (
+		typeof authentication !== "object" ||
+		authentication === null ||
+		Array.isArray(authentication)
+	) {
+		return refuse("authentication", "an object, or undefined");
+	}
+	const a = authentication as Partial<Record<keyof SessionAuthentication, unknown>>;
+	if (typeof a.primary !== "string" || a.primary.length === 0) {
+		refuse("authentication.primary", "a non-empty string");
+	}
+	if (a.federation !== undefined && typeof a.federation !== "string") {
+		refuse("authentication.federation", "a string, or undefined");
+	}
+	if (
+		a.upstreamAmr !== undefined &&
+		!(Array.isArray(a.upstreamAmr) && a.upstreamAmr.every((value) => typeof value === "string"))
+	) {
+		refuse("authentication.upstreamAmr", "a list of strings, or undefined");
+	}
+	if (
+		a.mfaAt !== undefined &&
+		!(a.mfaAt instanceof Date && isRecordableVerificationTime(a.mfaAt.getTime(), nowMs))
+	) {
+		refuse(
+			"authentication.mfaAt",
+			"a valid date at or after the epoch, no further ahead than clocks drift, or undefined",
+		);
 	}
 }
 
@@ -194,13 +271,15 @@ export function checkSecondFactorEvent(event: SecondFactorEvent): void {
  * pre-upgrade `["hwk", "fed"]` plus TOTP becomes `amr` `["fed", "otp", "mfa"]`
  * and `upstreamAmr` `["hwk"]` — never `["hwk", "fed", "otp", "mfa"]`, whose
  * `hwk`, an untrusted IdP's word, would meet `phr`. `null` for one whose
- * primary cannot be told. The event is checked (`checkSecondFactorEvent`).
+ * primary cannot be told. The event is checked (`checkSecondFactorEvent`)
+ * against `nowMs`, the store's clock.
  */
 export function sessionAfterSecondFactor(
 	session: UserSession,
 	event: SecondFactorEvent,
+	nowMs: number,
 ): RecordedAuthentication | null {
-	checkSecondFactorEvent(event);
+	checkSecondFactorEvent(event, nowMs);
 	const authentication = sessionAuthentication(session);
 	if (authentication === undefined) return null;
 	const atMs = event.at.getTime();

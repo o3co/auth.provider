@@ -18,6 +18,7 @@ import {
 	type AdapterBuilder,
 	type CreateUserSessionInput,
 	checkSecondFactorEvent,
+	checkSessionAuthentication,
 	consoleLogger,
 	type Logger,
 	loggableError,
@@ -291,14 +292,12 @@ export function createRedisUserSessionStore(
 					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
 				);
 			}
-			// Likewise when a second factor was verified: written as JSON `null`
-			// or a negative number, it would read back as corrupt.
-			const mfaAtMs = input.authentication?.mfaAt?.getTime();
-			if (mfaAtMs !== undefined && (!Number.isFinite(mfaAtMs) || mfaAtMs < 0)) {
-				throw new RangeError(
-					`UserSession ${input.sid}: authentication.mfaAt must be a valid date at or after the epoch`,
-				);
-			}
+			// Likewise how the session was established: only what
+			// `SessionAuthentication` admits, `mfaAt` judged on the host's clock
+			// (the one a write is checked against) — anything else would be
+			// written as an envelope that reads back as corrupt. Core's check, so
+			// the memory store refuses the same values.
+			checkSessionAuthentication(input.sid, input.authentication, Date.now());
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
@@ -323,15 +322,17 @@ export function createRedisUserSessionStore(
 			return fromEnvelope(stored);
 		},
 		async recordSecondFactor(sid, event) {
-			// A bad event is refused before Redis is asked, gone session or not.
-			checkSecondFactorEvent(event);
+			// A bad event is refused before Redis is asked, gone session or not,
+			// its time judged on the host's clock.
+			const nowMs = Date.now();
+			checkSecondFactorEvent(event, nowMs);
 			for (let attempt = 0; attempt < RECORD_SECOND_FACTOR_ATTEMPTS; attempt++) {
 				const raw = await opts.client.get(k(sid));
 				if (raw === null) return null;
 				// Read as `get` reads: a corrupt envelope is a session that is gone.
 				const stored = readEnvelope(sid, raw);
 				if (stored === null || stored.expiresAtMs <= Date.now()) return null;
-				const next = sessionAfterSecondFactor(fromEnvelope(stored), event);
+				const next = sessionAfterSecondFactor(fromEnvelope(stored), event, nowMs);
 				if (next === null) return null;
 				const written: Envelope = {
 					...stored,

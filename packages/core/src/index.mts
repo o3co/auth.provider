@@ -860,6 +860,7 @@ export type {
 // vouches for, read one way by every consumer of a session.
 export {
 	checkSecondFactorEvent,
+	checkSessionAuthentication,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,

@@ -16,6 +16,7 @@
 
 import {
 	checkSecondFactorEvent,
+	checkSessionAuthentication,
 	copySessionAuthentication,
 	sessionAfterSecondFactor,
 } from "../authentication.mjs";
@@ -106,14 +107,10 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
 				);
 			}
-			// When a second factor was verified: the baseline's reading, and one
-			// the Redis store could not read back if it were no instant.
-			const mfaAtMs = input.authentication?.mfaAt?.getTime();
-			if (mfaAtMs !== undefined && (!Number.isFinite(mfaAtMs) || mfaAtMs < 0)) {
-				throw new RangeError(
-					`UserSession ${input.sid}: authentication.mfaAt must be a valid date at or after the epoch`,
-				);
-			}
+			// How the session was established: only what `SessionAuthentication`
+			// admits, its `mfaAt` judged on this store's clock — the check the
+			// Redis store makes, so the two refuse the same values.
+			checkSessionAuthentication(input.sid, input.authentication, Date.now());
 			if (input.expiresAt.getTime() <= Date.now()) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
@@ -140,11 +137,13 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			return toSession(s);
 		},
 		async recordSecondFactor(sid, event) {
-			// A bad event is refused before anything is read, gone session or not.
-			checkSecondFactorEvent(event);
+			// A bad event is refused before anything is read, gone session or not,
+			// its time judged on this store's clock.
+			const nowMs = Date.now();
+			checkSecondFactorEvent(event, nowMs);
 			const s = readLive(sid);
 			if (!s) return null;
-			const next = sessionAfterSecondFactor(toSession(s), event);
+			const next = sessionAfterSecondFactor(toSession(s), event, nowMs);
 			if (next === null) return null;
 			// A field write: `expiresAt`, and everything else, stay as they were.
 			s.amr = [...next.amr];
