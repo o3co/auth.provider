@@ -1039,6 +1039,47 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		}
 	});
 
+	it("counts the key store's signer among what takes an amr: a token's claims reach it whole", () => {
+		for (const spread of [
+			"await keyStore.sign({ claims: { ...session } });",
+			"const claims = { iat, ...session }; await keyStore.sign({ claims });",
+		]) {
+			expect(sessionRecordReads(spread), spread).toHaveLength(1);
+		}
+		expect(
+			sessionRecordReads(
+				"const claims = { iat, ...(amr ? { amr } : {}) }; await keyStore.sign({ claims, ...(typ ? { header: { typ } } : {}) });",
+			),
+		).toHaveLength(0);
+	});
+
+	it("follows a pinned spread to its declaration: what it is initialised from is held to the same rule", () => {
+		const allowed = [{ file: "f.mts", read: "...extra", count: 1, why: "a test's" }];
+		const beyond = (source: string) =>
+			readsBeyondAllowance("f.mts", sessionRecordReads(source), allowed);
+		expect(
+			beyond("const extra = { ...(amr ? { amr } : {}) }; generateToken({ sub, ...extra }, o);"),
+		).toEqual([]);
+		// Re-initialised from a session, the pinned spread carries its amr.
+		for (const source of [
+			"const extra = { ...userSession }; generateToken({ sub, ...extra }, o);",
+			"const extra = userSession; generateToken({ sub, ...extra }, o);",
+			"const extra = await store.get(sid); generateToken({ sub, ...extra }, o);",
+		]) {
+			expect(beyond(source), source).toHaveLength(1);
+		}
+	});
+
+	it("follows a local handed whole to what takes an amr to its declaration", () => {
+		for (const source of [
+			"const o = { ...userSession, aud }; generateIdToken(o);",
+			"const o = userSession; generateIdToken(o);",
+		]) {
+			expect(sessionRecordReads(source), source).toHaveLength(1);
+		}
+		expect(sessionRecordReads("const o = { sub, aud }; generateIdToken(o);")).toHaveLength(0);
+	});
+
 	it("pins an allowed read to its file, its receiver and its count: a swap or a second one fails", () => {
 		const allowed = [{ file: "f.mts", read: "claims.amr", count: 1, why: "a test's" }];
 		expect(
