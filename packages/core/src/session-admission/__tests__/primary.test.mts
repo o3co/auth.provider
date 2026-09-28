@@ -524,7 +524,7 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		).rejects.toThrow(RangeError);
 	});
 
-	it("composes the session's recorded from the primary and every completed requirement's additions, and asks every requirement again over it", async () => {
+	it("composes the session's recorded from the primary and every completed requirement's additions, and asks every requirement not yet done over it", async () => {
 		const mfa = asking("mfa", (p) =>
 			p.recorded.authentication.mfaAt === undefined ? interrupting() : "establish",
 		);
@@ -540,10 +540,48 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 			authentication: { primary: "pwd", federation: undefined, upstreamAmr: undefined, mfaAt: NOW },
 		});
 		expect(isEstablishment(admission.establishment)).toBe(true);
-		// Both were asked, over the composed result: the completed one sees its
-		// own additions and answers establish.
-		expect(mfa.asked.map((p) => p.recorded.amr)).toEqual([["pwd", "otp", "mfa"]]);
+		// The completed one is done for this login and is not asked again; the
+		// other is asked over the composed result.
+		expect(mfa.asked).toEqual([]);
 		expect(risk.asked.map((p) => p.recorded.authentication.mfaAt)).toEqual([NOW]);
+	});
+
+	it("asks a requirement that would interrupt every time once per login: its completion establishes, whatever it added", async () => {
+		const always = asking("always", () => interrupting());
+		const all = deps([always]);
+		const first = await admitPrimary(all, passwordPrimary(facts()));
+		if (first.outcome !== "interrupt") throw new Error("expected an interruption");
+		const resumed = await resumePrimary(all, first.continuation, {
+			requirement: "always",
+			adds: { amr: [] },
+		});
+		expect(resumed.outcome).toBe("establish");
+		expect(always.asked).toHaveLength(1);
+	});
+
+	it("still asks a second requirement after the first completes, and neither again once both are done", async () => {
+		const first = asking("first", () => interrupting());
+		const second = asking("second", () => interrupting());
+		const all = deps([first, second]);
+		const atLogin = await admitPrimary(all, passwordPrimary(facts()));
+		if (atLogin.outcome !== "interrupt") throw new Error("expected an interruption");
+		expect(atLogin.requirement).toBe("first");
+		// The login stops at the first interruption: the second is not asked yet.
+		expect(second.asked).toHaveLength(0);
+		const afterFirst = await resumePrimary(all, atLogin.continuation, {
+			requirement: "first",
+			adds: { amr: [] },
+		});
+		if (afterFirst.outcome !== "interrupt") throw new Error("expected the second to interrupt");
+		expect(afterFirst.requirement).toBe("second");
+		expect(afterFirst.continuation.done).toEqual([{ requirement: "first", adds: { amr: [] } }]);
+		const afterSecond = await resumePrimary(all, afterFirst.continuation, {
+			requirement: "second",
+			adds: { amr: [] },
+		});
+		expect(afterSecond.outcome).toBe("establish");
+		expect(first.asked).toHaveLength(1);
+		expect(second.asked).toHaveLength(1);
 	});
 
 	it("interrupts again with the updated continuation, the first completion's additions still in it", async () => {
