@@ -202,6 +202,18 @@ const expectLoginRequired = (res: request.Response): void => {
 };
 
 describe("/oauth/consent on admission — the pinned changes (D8)", () => {
+	it("a cookie whose isAuthenticated is not exactly true is refused before anything is read, as every reader reads the flag", async () => {
+		const store = storeWith(record());
+		const { app } = await makeApp({
+			userSessionStore: store,
+			session: { isAuthenticated: "true", user: { id: SUBJECT }, sid: SID },
+		});
+		const res = await show(app);
+		expectLoginRequired(res);
+		expect(res.body.error_description).toBe("no authenticated session");
+		expect(store.get).not.toHaveBeenCalled();
+	});
+
 	it("(1) a cookie with isAuthenticated but no sid, while a store is wired, is not_live: 401 login_required on both methods", async () => {
 		// It used to proceed: nothing to check meant authentication stood.
 		const store = storeWith(record());

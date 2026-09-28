@@ -142,13 +142,52 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 		expect(backing.records.size).toBe(0);
 	});
 
-	it("refuses one that has aged past its window, measured from its write", async () => {
+	it("refuses one whose last write has aged past its window", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const old = Date.now() - REAUTH_ASK_TTL_MS - 1000;
+		const id = await store.ask({ ...loginAsk(old), stepUpAskedAt: { fixture: old } });
+
+		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("measures the window from the last write, not from the record's creation, which a chain of trips keeps", async () => {
+		// The MFA ADR's D17: each stage write opens a new window; `createdAt`
+		// is kept across writes, for the cap a later record measures from it.
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
 		const createdAt = Date.now() - REAUTH_ASK_TTL_MS - 1000;
-		const id = await store.ask({ ...loginAsk(Date.now()), createdAt });
+		const record: ReauthAskRecord = {
+			request: REQUEST,
+			createdAt,
+			loginAskedAt: createdAt,
+			stepUpAskedAt: { fixture: Date.now() },
+		};
+		const id = await store.ask(record);
 
-		expect(await store.consume(id, REQUEST)).toBeNull();
+		expect(await store.consume(id, REQUEST)).toEqual(record);
+	});
+
+	it("writes askedAt beside a login ask, for one release, so an older replica reads the record it would have written", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const at = Date.now();
+		const withLogin = await store.ask(loginAsk(at));
+		const stepUpOnly = await store.ask({
+			request: REQUEST,
+			createdAt: at,
+			loginAskedAt: undefined,
+			stepUpAskedAt: { fixture: at },
+		});
+		const stored = (id: string) =>
+			(backing.records.get(`${REAUTH_ASK_KEY_PREFIX}${id}`) as { reauth: Record<string, unknown> })
+				.reauth;
+		expect(stored(withLogin).askedAt).toBe(at);
+		// A step-up alone asked for no login: an older replica finds no ask
+		// and evaluates the request on its merits.
+		expect(stored(stepUpOnly)).not.toHaveProperty("askedAt");
+		// And the record reads back without it.
+		expect(await store.consume(withLogin, REQUEST)).toEqual(loginAsk(at));
 	});
 
 	it("refuses anything under its key that is not the record it wrote", async () => {

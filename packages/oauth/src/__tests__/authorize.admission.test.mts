@@ -156,6 +156,8 @@ const makeApp = async (opts: {
 	sessionStoreFail?: "set" | "get";
 	/** The cookie session's `regenerate` fails, as a store outage makes it. */
 	regenerateFails?: boolean;
+	/** Register the requirements without holding their pages to the issuer's origin, as a hand-built resolver may. */
+	anyPageOrigin?: boolean;
 	/** Compose without an express-session store (no ask can be recorded). */
 	sessionStore?: false;
 }) => {
@@ -190,7 +192,10 @@ const makeApp = async (opts: {
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		logger,
-		requirements: resolverForTests(opts.requirements ?? [], { issuer: ISSUER }),
+		requirements: resolverForTests(
+			opts.requirements ?? [],
+			opts.anyPageOrigin === true ? {} : { issuer: ISSUER },
+		),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
@@ -855,5 +860,76 @@ describe("/authorize on admission — a POST's parameters survive every trip", (
 		const back = loginRedirectTo(await authorizePost(harness.app, baseQuery));
 		expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
 		expect(back.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
+	});
+});
+
+describe("/authorize on admission — the trip's own guards", () => {
+	it("never sends the browser to a step-up page off the issuer's origin: server_error at the redirect_uri, logged", async () => {
+		// Registration holds a page to the issuer's origin; a resolver built
+		// without an issuer does not. The trip checks the URL it built anyway.
+		const requirement = fixture(
+			"fixture",
+			() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }),
+			{ url: "https://evil.example/step-up", params: {} },
+		);
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [requirement],
+			anyPageOrigin: true,
+		});
+		const params = redirectParams(await authorize(harness.app, baseQuery));
+		expect(params.get("error")).toBe("server_error");
+		expect(harness.logger.error).toHaveBeenCalledWith(
+			{ requirement: "fixture" },
+			"authorize_step_up_page_off_origin",
+		);
+		expect(harness.records.size).toBe(0);
+	});
+
+	it("keeps the ask's createdAt across the login trip and the step-up trip that follows it", async () => {
+		const state = { met: false };
+		const requirement = fixture("fixture", () =>
+			state.met ? { outcome: "met" } : { outcome: "step_up", whenStillUnmet: "reauthenticate" },
+		);
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const askOf = (url: URL) =>
+			(
+				harness.records.get(`reauth:${url.searchParams.get("reauth_ask")}`) as {
+					reauth: Record<string, unknown>;
+				}
+			).reauth;
+		const toLogin = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "60" }));
+		const createdAt = askOf(toLogin).createdAt;
+		expect(createdAt).toEqual(expect.any(Number));
+
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		clock.authTime = new Date();
+		const toStepUp = await authorize(
+			harness.app,
+			Object.fromEntries(toLogin.searchParams.entries()),
+		);
+		const back = new URL(
+			new URL(toStepUp.headers.location as string).searchParams.get("redirect_to") as string,
+		);
+		expect(askOf(back).createdAt).toBe(createdAt);
+		expect(askOf(back).loginAskedAt).toBe(createdAt);
+	});
+
+	it("puts no acr_values on the page when the request asked for none", async () => {
+		const requirement = fixture("fixture", () => ({
+			outcome: "step_up",
+			whenStillUnmet: "reauthenticate",
+		}));
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [requirement],
+		});
+		const res = await authorize(harness.app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location as string).searchParams.has("acr_values")).toBe(false);
 	});
 });

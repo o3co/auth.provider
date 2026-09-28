@@ -34,6 +34,8 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantError,
+	type GrantHandler,
+	type GrantResult,
 	type RequirementInput,
 	type RequirementVerdict,
 	type SessionRequirement,
@@ -308,7 +310,7 @@ describe("the session grant on admission — a requirement's verdicts", () => {
 });
 
 describe("the step_up member on the wire (/oauth/token)", () => {
-	const buildApp = async (requirements: readonly SessionRequirement[]) => {
+	const buildApp = async (requirements: readonly SessionRequirement[], grant?: GrantHandler) => {
 		const client = {
 			clientId: "app",
 			tokenEndpointAuthMethod: "none" as const,
@@ -330,12 +332,13 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		const registry = new GrantRegistry();
 		registry.register(
 			"session",
-			createSessionGrant({
-				config,
-				keyStore,
-				userSessionStore: store,
-				sessionRequirementResolver: resolverForTests(requirements),
-			}),
+			grant ??
+				createSessionGrant({
+					config,
+					keyStore,
+					userSessionStore: store,
+					sessionRequirementResolver: resolverForTests(requirements),
+				}),
 		);
 		const { router } = await createOAuthRouter(express, {
 			registry,
@@ -370,6 +373,41 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		expect(res.body.error).toBe("invalid_grant");
 		expect(res.body.step_up).toBe("fixture");
 		expect(typeof res.body.error_description).toBe("string");
+	});
+
+	const answering = (result: Record<string, unknown>): GrantHandler => ({
+		handle: async () => ({ result: result as unknown as GrantResult }),
+	});
+
+	it("carries step_up only beside invalid_grant: a grant that sets it on another error does not reach the wire", async () => {
+		const app = await buildApp(
+			[],
+			answering({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "no",
+				step_up: "fixture",
+			}),
+		);
+		const res = await mint(app);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
+		expect(res.body).not.toHaveProperty("step_up");
+	});
+
+	it("carries no step_up outside the error-code character set", async () => {
+		const app = await buildApp(
+			[],
+			answering({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "no",
+				step_up: 'a "quoted" name',
+			}),
+		);
+		const res = await mint(app);
+		expect(res.body.error).toBe("invalid_grant");
+		expect(res.body).not.toHaveProperty("step_up");
 	});
 
 	it("carries no step_up on any other refusal", async () => {
