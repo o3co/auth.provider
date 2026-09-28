@@ -150,9 +150,15 @@ const stubClient = (report: RedisDurability | (() => Promise<RedisDurability>)) 
 	durability: typeof report === "function" ? report : async () => report,
 });
 
+/** The factory a case's module provides its slot with. */
+const providerOf = (c: Case): ((deps: unknown) => Promise<{ kind: string }>) => {
+	const provider = c.module.provides?.[c.slot];
+	if (provider === undefined) throw new Error(`${c.module.name} provides no ${c.slot}`);
+	return provider as (deps: unknown) => Promise<{ kind: string }>;
+};
+
 describe.each(CASES)("$module.name", (c) => {
-	const provide = (deps: Record<string, unknown>) =>
-		(c.module.provides?.[c.slot] as (deps: unknown) => Promise<{ kind: string }>)(deps);
+	const provide = (deps: Record<string, unknown>) => providerOf(c)(deps);
 
 	const boot = (report: RedisDurability | (() => Promise<RedisDurability>), logger?: Logger) =>
 		provide({
@@ -391,10 +397,7 @@ describe("allkeys-lru set on the real server", () => {
 		try {
 			for (const c of CASES) {
 				await expect(
-					(c.module.provides?.[c.slot] as (deps: unknown) => Promise<unknown>)({
-						[c.clientSlot]: c.client(raw),
-						config: {},
-					}),
+					providerOf(c)({ [c.clientSlot]: c.client(raw), config: {} }),
 					c.module.name,
 				).rejects.toMatchObject({ reason: c.evictable, maxmemoryPolicy: "allkeys-lru" });
 			}
