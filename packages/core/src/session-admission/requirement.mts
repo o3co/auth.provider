@@ -292,9 +292,9 @@ export interface SessionRequirement {
 	admit(input: RequirementInput): Promise<RequirementVerdict>;
 	/**
 	 * Establishment-time (D5); absent when the requirement never interrupts a
-	 * login. Asked at most once per ceremony it could open: once its
-	 * interruption completes, `resumePrimary` does not ask it again in that
-	 * login.
+	 * login. Never asked again in a login once its own interruption completes;
+	 * a requirement that answered `establish` is asked again on each
+	 * resumption.
 	 */
 	admitPrimary?(primary: PrimaryAuthentication): Promise<"establish" | RequirementInterruption>;
 }
