@@ -27,7 +27,10 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { MFA_CLOCK_SKEW_ALLOWANCE_MS } from "#/mfa/transactionStore.mjs";
 import {
+	checkSecondFactorEvent,
+	checkSessionAuthentication,
 	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
@@ -338,4 +341,97 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (
 		expect(federationTrustsUpstreamAmr({ federations: {} }, "constructor")).toBe(false);
 		expect(federationTrustsUpstreamAmr({ federations: {} }, "__proto__")).toBe(false);
 	});
+});
+
+describe("checkSecondFactorEvent — what a verified second factor may add, and when (D9, D14)", () => {
+	const NOW = Date.parse("2026-09-28T12:00:00Z");
+
+	it("accepts a factor's values, and a time up to the MFA stores' clock-skew allowance ahead of the store's clock", () => {
+		expect(() =>
+			checkSecondFactorEvent({ amr: ["otp", "mfa"], at: new Date(NOW) }, NOW),
+		).not.toThrow();
+		expect(() =>
+			checkSecondFactorEvent(
+				{ amr: ["email"], at: new Date(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS) },
+				NOW,
+			),
+		).not.toThrow();
+	});
+
+	it("refuses a time further ahead than that: it would count as verified long after it was", () => {
+		expect(() =>
+			checkSecondFactorEvent(
+				{ amr: ["otp", "mfa"], at: new Date(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1) },
+				NOW,
+			),
+		).toThrow(RangeError);
+	});
+
+	it("refuses mfa without a factor's own value: it names no factor that was verified", () => {
+		expect(() => checkSecondFactorEvent({ amr: ["mfa"], at: new Date(NOW) }, NOW)).toThrow(
+			RangeError,
+		);
+	});
+});
+
+describe("checkSessionAuthentication — what a session may record as authentication (D9)", () => {
+	const NOW = Date.parse("2026-09-28T12:00:00Z");
+	const PASSWORD = {
+		primary: "pwd",
+		federation: undefined,
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
+
+	it("accepts nothing recorded, and what SessionAuthentication admits", () => {
+		for (const authentication of [
+			undefined,
+			PASSWORD,
+			{ ...PASSWORD, mfaAt: new Date(NOW) },
+			{ primary: "fed", federation: "google", upstreamAmr: ["hwk"], mfaAt: undefined },
+			{ primary: "fed", federation: "google", upstreamAmr: [], mfaAt: undefined },
+		]) {
+			expect(() => checkSessionAuthentication("sid-1", authentication, NOW)).not.toThrow();
+		}
+	});
+
+	it.each([
+		["a string", "pwd", "authentication"],
+		["null", null, "authentication"],
+		["a list", [], "authentication"],
+		["no primary", { federation: undefined }, "authentication.primary"],
+		["an empty primary", { ...PASSWORD, primary: "" }, "authentication.primary"],
+		["a federation that is a number", { ...PASSWORD, federation: 1 }, "authentication.federation"],
+		[
+			"an upstreamAmr that is a string",
+			{ ...PASSWORD, upstreamAmr: "hwk" },
+			"authentication.upstreamAmr",
+		],
+		[
+			"an upstreamAmr holding a number",
+			{ ...PASSWORD, upstreamAmr: ["hwk", 1] },
+			"authentication.upstreamAmr",
+		],
+		["an mfaAt that is a number", { ...PASSWORD, mfaAt: NOW }, "authentication.mfaAt"],
+		["an Invalid Date mfaAt", { ...PASSWORD, mfaAt: new Date(Number.NaN) }, "authentication.mfaAt"],
+		["an mfaAt before 1970", { ...PASSWORD, mfaAt: new Date(-1) }, "authentication.mfaAt"],
+		[
+			"an mfaAt further ahead than clocks drift",
+			{ ...PASSWORD, mfaAt: new Date(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1) },
+			"authentication.mfaAt",
+		],
+	])(
+		"refuses %s with a RangeError naming the field, and quoting nothing of the value",
+		(_label, authentication, field) => {
+			let thrown: unknown;
+			try {
+				checkSessionAuthentication("sid-1", authentication, NOW);
+			} catch (err) {
+				thrown = err;
+			}
+			expect(thrown).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).toContain(field);
+			expect((thrown as Error).message).not.toMatch(/hwk|google/);
+		},
+	);
 });

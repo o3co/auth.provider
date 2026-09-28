@@ -16,6 +16,7 @@
 
 import {
 	type CreateUserSessionInput,
+	MFA_CLOCK_SKEW_ALLOWANCE_MS,
 	type SupportsSecondFactorUpdate,
 	supportsSecondFactorUpdate,
 	type UserSessionStore,
@@ -193,17 +194,72 @@ export function runUserSessionStoreContract(
 			expect((await store.get("sid-bad-auth"))?.authTime.getTime()).toBe(0);
 		});
 
-		it("create refuses an authentication.mfaAt that is not a valid date, or is before 1970, and records nothing", async () => {
+		it("create refuses an authentication.mfaAt that is not a valid date, is before 1970, or is further ahead than clocks drift, and records nothing", async () => {
 			// When a second factor was verified is what the baseline reads; an
 			// Invalid Date is no time, and the Redis store could not read one back.
+			// One far in the future would count as verified long after it was:
+			// the store's clock bounds it by the MFA stores' skew allowance.
 			const store = await factory();
-			for (const mfaAt of [new Date(Number.NaN), new Date(-1)]) {
+			for (const mfaAt of [
+				new Date(Number.NaN),
+				new Date(-1),
+				new Date(Date.now() + MFA_CLOCK_SKEW_ALLOWANCE_MS + 60_000),
+			]) {
 				await expect(
 					store.create(INPUT({ sid: "sid-bad-mfa", authentication: { ...PASSWORD_LOGIN, mfaAt } })),
 				).rejects.toThrow(RangeError);
 				expect(await store.get("sid-bad-mfa")).toBeNull();
 			}
+			// A clock a minute ahead is a clock, not a forgery.
+			const aheadAt = new Date(Date.now() + 60_000);
+			await store.create(
+				INPUT({ sid: "sid-bad-mfa", authentication: { ...PASSWORD_LOGIN, mfaAt: aheadAt } }),
+			);
+			expect((await store.get("sid-bad-mfa"))?.authentication?.mfaAt?.getTime()).toBe(
+				aheadAt.getTime(),
+			);
 		});
+
+		it.each([
+			["a value that is not an object", "pwd"],
+			["null", null],
+			["a list", []],
+			["no primary", { federation: undefined, upstreamAmr: undefined, mfaAt: undefined }],
+			["an empty primary", { ...PASSWORD_LOGIN, primary: "" }],
+			["a primary that is not a string", { ...PASSWORD_LOGIN, primary: 1 }],
+			["a federation that is not a string", { ...PASSWORD_LOGIN, federation: 1 }],
+			["a federation that is null", { ...PASSWORD_LOGIN, federation: null }],
+			[
+				"an upstreamAmr that is a string",
+				{ ...PASSWORD_LOGIN, primary: "fed", upstreamAmr: "hwk" },
+			],
+			[
+				"an upstreamAmr holding a number",
+				{ ...PASSWORD_LOGIN, primary: "fed", upstreamAmr: ["hwk", 1] },
+			],
+			["an upstreamAmr that is null", { ...PASSWORD_LOGIN, primary: "fed", upstreamAmr: null }],
+			["an mfaAt that is not a Date", { ...PASSWORD_LOGIN, mfaAt: Date.now() }],
+		])(
+			"create refuses an authentication with %s — a RangeError, and records nothing",
+			async (_label, authentication) => {
+				// What SessionAuthentication admits, and nothing else: the two stores
+				// would otherwise part ways on it — one copying a string's characters
+				// as a list, the other writing an envelope it then reads as corrupt.
+				const store = await factory();
+				await expect(
+					store.create(
+						INPUT({
+							sid: "sid-bad-auth",
+							authentication: authentication as unknown as CreateUserSessionInput["authentication"],
+						}),
+					),
+				).rejects.toThrow(RangeError);
+				expect(await store.get("sid-bad-auth")).toBeNull();
+				// Nothing was recorded, so this is not a duplicate.
+				await store.create(INPUT({ sid: "sid-bad-auth", authentication: PASSWORD_LOGIN }));
+				expect((await store.get("sid-bad-auth"))?.authentication).toStrictEqual(PASSWORD_LOGIN);
+			},
+		);
 
 		it("get returns null for unknown sid", async () => {
 			const store = await factory();
@@ -473,6 +529,14 @@ export function runSecondFactorUpdateContract(
 			["a primary's marker, fed", { amr: ["otp", "fed"], at: new Date() }],
 			["an invalid date", { amr: ["otp", "mfa"], at: new Date(Number.NaN) }],
 			["a time before 1970", { amr: ["otp", "mfa"], at: new Date(-1) }],
+			[
+				"a time further ahead than clocks drift",
+				{ amr: ["otp", "mfa"], at: new Date(Date.now() + MFA_CLOCK_SKEW_ALLOWANCE_MS + 60_000) },
+			],
+			// `mfa` comes from a factor that adds it, beside that factor's own
+			// values: alone, it names no factor that was verified.
+			["mfa alone", { amr: ["mfa"], at: new Date() }],
+			["mfa repeated alone", { amr: ["mfa", "mfa"], at: new Date() }],
 		])("refuses an event with %s — a RangeError, and nothing recorded", async (_label, event) => {
 			// A second factor adds its own values; it never changes the primary
 			// the baseline is decided on, and a time that is no instant is not
@@ -483,6 +547,17 @@ export function runSecondFactorUpdateContract(
 			const unchanged = await store.get("sf-bad");
 			expect(unchanged?.amr).toEqual(["pwd"]);
 			expect(unchanged?.authentication).toStrictEqual(PASSWORD_LOGIN);
+		});
+
+		it("records a time a minute ahead of the store's clock: a clock, not a forgery", async () => {
+			const store = await capable();
+			await store.create(INPUT({ sid: "sf-ahead", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
+			const ahead = new Date(Date.now() + 60_000);
+			const recorded = await store.recordSecondFactor("sf-ahead", {
+				amr: ["otp", "mfa"],
+				at: ahead,
+			});
+			expect(recorded?.authentication?.mfaAt?.getTime()).toBe(ahead.getTime());
 		});
 
 		it("keeps its own copy: neither the event nor what it answers changes what is stored", async () => {
