@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { MFA_CLOCK_SKEW_ALLOWANCE_MS } from "#/mfa/transactionStore.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "#/jwt/verify.mjs";
 import {
 	checkSecondFactorEvent,
 	checkSessionAuthentication,
@@ -35,6 +35,7 @@ import {
 	federationTrustsUpstreamAmr,
 	passwordSessionAuthentication,
 	requirementSession,
+	sessionAfterSecondFactor,
 	sessionAuthentication,
 	vouchedAmr,
 } from "#/user-sessions/authentication.mjs";
@@ -376,22 +377,19 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (
 describe("checkSecondFactorEvent — what a verified second factor may add, and when (D9, D14)", () => {
 	const NOW = Date.parse("2026-09-28T12:00:00Z");
 
-	it("accepts a factor's values, and a time up to the MFA stores' clock-skew allowance ahead of the store's clock", () => {
+	it("accepts a factor's values, and a time up to the clock skew tolerated between hosts ahead of the store's clock", () => {
 		expect(() =>
 			checkSecondFactorEvent({ amr: ["otp", "mfa"], at: new Date(NOW) }, NOW),
 		).not.toThrow();
 		expect(() =>
-			checkSecondFactorEvent(
-				{ amr: ["email"], at: new Date(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS) },
-				NOW,
-			),
+			checkSecondFactorEvent({ amr: ["email"], at: new Date(NOW + DEFAULT_CLOCK_SKEW_MS) }, NOW),
 		).not.toThrow();
 	});
 
-	it("refuses a time further ahead than that: it would count as verified long after it was", () => {
+	it("refuses a time further ahead than that: no host's clock reads it", () => {
 		expect(() =>
 			checkSecondFactorEvent(
-				{ amr: ["otp", "mfa"], at: new Date(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1) },
+				{ amr: ["otp", "mfa"], at: new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 1) },
 				NOW,
 			),
 		).toThrow(RangeError);
@@ -447,7 +445,7 @@ describe("checkSessionAuthentication — what a session may record as authentica
 		["an mfaAt before 1970", { ...PASSWORD, mfaAt: new Date(-1) }, "authentication.mfaAt"],
 		[
 			"an mfaAt further ahead than clocks drift",
-			{ ...PASSWORD, mfaAt: new Date(NOW + MFA_CLOCK_SKEW_ALLOWANCE_MS + 1) },
+			{ ...PASSWORD, mfaAt: new Date(NOW + DEFAULT_CLOCK_SKEW_MS + 1) },
 			"authentication.mfaAt",
 		],
 	])(
@@ -464,4 +462,58 @@ describe("checkSessionAuthentication — what a session may record as authentica
 			expect((thrown as Error).message).not.toMatch(/hwk|google/);
 		},
 	);
+});
+
+describe("never a verification time ahead of the store's clock (D9)", () => {
+	const NOW = Date.parse("2026-09-28T12:00:00Z");
+	const PASSWORD = {
+		primary: "pwd",
+		federation: undefined,
+		upstreamAmr: undefined,
+		mfaAt: undefined,
+	};
+	const recorded = (mfaAt: Date | undefined): UserSession => ({
+		...session(["pwd", "otp", "mfa"]),
+		authentication: { ...PASSWORD, mfaAt },
+	});
+
+	it("checkSessionAuthentication answers what to record: a copy, its mfaAt no later than the store's clock", () => {
+		const given = { ...PASSWORD, mfaAt: new Date(NOW + 60_000) };
+		const toRecord = checkSessionAuthentication("sid-1", given, NOW);
+		expect(toRecord).toStrictEqual({ ...PASSWORD, mfaAt: new Date(NOW) });
+		expect(toRecord).not.toBe(given);
+		const past = { ...PASSWORD, mfaAt: new Date(NOW - 60_000) };
+		expect(checkSessionAuthentication("sid-1", past, NOW)).toStrictEqual(past);
+		expect(checkSessionAuthentication("sid-1", undefined, NOW)).toBeUndefined();
+	});
+
+	it("sessionAfterSecondFactor records a factor's time a little ahead as the store's now", () => {
+		expect(
+			sessionAfterSecondFactor(
+				recorded(undefined),
+				{ amr: ["otp", "mfa"], at: new Date(NOW + 60_000) },
+				NOW,
+			)?.authentication.mfaAt,
+		).toStrictEqual(new Date(NOW));
+	});
+
+	it("sessionAfterSecondFactor brings a stored mfaAt ahead of the store's clock back to it before taking the later of the two", () => {
+		// A replica whose clock ran ahead recorded it; kept as the later, it
+		// would never come back, and would count as recent for as long.
+		expect(
+			sessionAfterSecondFactor(
+				recorded(new Date(NOW + 10 * 60_000)),
+				{ amr: ["otp", "mfa"], at: new Date(NOW - 1_000) },
+				NOW,
+			)?.authentication.mfaAt,
+		).toStrictEqual(new Date(NOW));
+		// One in the past stays the later when it is.
+		expect(
+			sessionAfterSecondFactor(
+				recorded(new Date(NOW - 1_000)),
+				{ amr: ["otp", "mfa"], at: new Date(NOW - 5_000) },
+				NOW,
+			)?.authentication.mfaAt,
+		).toStrictEqual(new Date(NOW - 1_000));
+	});
 });

@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it } from "vitest";
-import { MFA_CLOCK_SKEW_ALLOWANCE_MS } from "../../mfa/transactionStore.mjs";
+import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_CLOCK_SKEW_MS } from "../../jwt/verify.mjs";
 import {
 	type CreateUserSessionInput,
 	type SupportsSecondFactorUpdate,
@@ -193,30 +193,39 @@ export function runUserSessionStoreContract(
 			expect((await store.get("sid-bad-auth"))?.authTime.getTime()).toBe(0);
 		});
 
-		it("create refuses an authentication.mfaAt that is not a valid date, is before 1970, or is further ahead than clocks drift, and records nothing", async () => {
+		it("create refuses an authentication.mfaAt that is not a valid date, is before 1970, or is further ahead than hosts' clocks are tolerated to drift, and records nothing", async () => {
 			// When a second factor was verified is what the baseline reads; an
 			// Invalid Date is no time, and the Redis store could not read one back.
-			// One far in the future would count as verified long after it was:
-			// the store's clock bounds it by the MFA stores' skew allowance.
+			// One further ahead of the store's clock than the clock skew tolerated
+			// between hosts (DEFAULT_CLOCK_SKEW_MS) is no clock's reading.
 			const store = await factory();
 			for (const mfaAt of [
 				new Date(Number.NaN),
 				new Date(-1),
-				new Date(Date.now() + MFA_CLOCK_SKEW_ALLOWANCE_MS + 60_000),
+				new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000),
 			]) {
 				await expect(
 					store.create(INPUT({ sid: "sid-bad-mfa", authentication: { ...PASSWORD_LOGIN, mfaAt } })),
 				).rejects.toThrow(RangeError);
 				expect(await store.get("sid-bad-mfa")).toBeNull();
 			}
-			// A clock a minute ahead is a clock, not a forgery.
-			const aheadAt = new Date(Date.now() + 60_000);
+		});
+
+		it("create records an mfaAt a minute ahead of the store's clock as the store's now: never a time still to come", async () => {
+			// A clock a minute ahead is a clock, not a forgery — but kept as it
+			// came, it would count as recent for a minute longer than it is.
+			const store = await factory();
+			const before = Date.now();
 			await store.create(
-				INPUT({ sid: "sid-bad-mfa", authentication: { ...PASSWORD_LOGIN, mfaAt: aheadAt } }),
+				INPUT({
+					sid: "sid-ahead-mfa",
+					authentication: { ...PASSWORD_LOGIN, mfaAt: new Date(before + 60_000) },
+				}),
 			);
-			expect((await store.get("sid-bad-mfa"))?.authentication?.mfaAt?.getTime()).toBe(
-				aheadAt.getTime(),
-			);
+			const after = Date.now();
+			const recorded = (await store.get("sid-ahead-mfa"))?.authentication?.mfaAt?.getTime();
+			expect(recorded).toBeGreaterThanOrEqual(before);
+			expect(recorded).toBeLessThanOrEqual(after);
 		});
 
 		it.each([
@@ -529,8 +538,8 @@ export function runSecondFactorUpdateContract(
 			["an invalid date", { amr: ["otp", "mfa"], at: new Date(Number.NaN) }],
 			["a time before 1970", { amr: ["otp", "mfa"], at: new Date(-1) }],
 			[
-				"a time further ahead than clocks drift",
-				{ amr: ["otp", "mfa"], at: new Date(Date.now() + MFA_CLOCK_SKEW_ALLOWANCE_MS + 60_000) },
+				"a time further ahead than hosts' clocks are tolerated to drift",
+				{ amr: ["otp", "mfa"], at: new Date(Date.now() + DEFAULT_CLOCK_SKEW_MS + 60_000) },
 			],
 			// `mfa` comes from a factor that adds it, beside that factor's own
 			// values: alone, it names no factor that was verified.
@@ -548,15 +557,60 @@ export function runSecondFactorUpdateContract(
 			expect(unchanged?.authentication).toStrictEqual(PASSWORD_LOGIN);
 		});
 
-		it("records a time a minute ahead of the store's clock: a clock, not a forgery", async () => {
+		it("records a time a minute ahead of the store's clock as the store's now: never a time still to come", async () => {
 			const store = await capable();
 			await store.create(INPUT({ sid: "sf-ahead", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
-			const ahead = new Date(Date.now() + 60_000);
+			const before = Date.now();
 			const recorded = await store.recordSecondFactor("sf-ahead", {
 				amr: ["otp", "mfa"],
-				at: ahead,
+				at: new Date(before + 60_000),
 			});
-			expect(recorded?.authentication?.mfaAt?.getTime()).toBe(ahead.getTime());
+			const after = Date.now();
+			for (const mfaAt of [
+				recorded?.authentication?.mfaAt?.getTime(),
+				(await store.get("sf-ahead"))?.authentication?.mfaAt?.getTime(),
+			]) {
+				expect(mfaAt).toBeGreaterThanOrEqual(before);
+				expect(mfaAt).toBeLessThanOrEqual(after);
+			}
+		});
+
+		it("repairs an mfaAt a replica whose clock ran ahead recorded: the next step-up brings it back to the store's now", async () => {
+			// Written by a replica ten minutes ahead, a stored mfaAt is ten minutes
+			// in this store's future; kept as the later of the two, it would never
+			// come back. Only this process's Date is moved, so a Redis store's
+			// socket and timers are untouched.
+			const store = await capable();
+			const realNow = Date.now();
+			vi.useFakeTimers({ toFake: ["Date"] });
+			try {
+				vi.setSystemTime(realNow + 10 * 60_000);
+				await store.create(
+					INPUT({
+						sid: "sf-repair",
+						amr: ["pwd", "otp", "mfa"],
+						authentication: { ...PASSWORD_LOGIN, mfaAt: new Date() },
+					}),
+				);
+			} finally {
+				vi.useRealTimers();
+			}
+			expect((await store.get("sf-repair"))?.authentication?.mfaAt?.getTime()).toBeGreaterThan(
+				Date.now(),
+			);
+			const before = Date.now();
+			const recorded = await store.recordSecondFactor("sf-repair", {
+				amr: ["otp", "mfa"],
+				at: new Date(before - 1_000),
+			});
+			const after = Date.now();
+			for (const mfaAt of [
+				recorded?.authentication?.mfaAt?.getTime(),
+				(await store.get("sf-repair"))?.authentication?.mfaAt?.getTime(),
+			]) {
+				expect(mfaAt).toBeGreaterThanOrEqual(before);
+				expect(mfaAt).toBeLessThanOrEqual(after);
+			}
 		});
 
 		it("keeps its own copy: neither the event nor what it answers changes what is stored", async () => {
