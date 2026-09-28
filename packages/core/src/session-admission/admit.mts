@@ -939,11 +939,13 @@ function checkInterruptionAnswer(
 	};
 	if (!isObject(value)) return refuse("that is not an object");
 	if (value.status !== 403) refuse("whose status is not 403");
-	// The body: read once, its own keys copied into a plain object that is
-	// what gets validated and answered.
+	// The body: read once, its own keys copied into an object with no
+	// prototype that is what gets validated and answered — so an own
+	// "__proto__" key is copied and listed like any other, not taken for the
+	// prototype's setter.
 	const bodyRead = value.body;
 	if (!isObject(bodyRead) || Array.isArray(bodyRead)) return refuse("without a body");
-	const body: Record<string, unknown> = {};
+	const body: Record<string, unknown> = Object.create(null);
 	for (const key of Object.keys(bodyRead)) body[key] = bodyRead[key];
 	for (const key of Object.keys(body)) {
 		if (!ANSWER_KEYS.has(key)) {
