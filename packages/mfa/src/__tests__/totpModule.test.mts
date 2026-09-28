@@ -173,6 +173,20 @@ describe("mfaTotpFactorModule (D1, D3)", () => {
 		expect([...(resolver?.entries() ?? [])]).toEqual([]);
 	});
 
+	it("boots a switched-off factor whatever oauth.jwt.issuer names: the issuer is resolved only for a factor that is on", async () => {
+		const noHost = (enabled: unknown) => ({
+			...configWith({ factors: { totp: { ...TOTP, enabled } } }),
+			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://[2001:db8::1]" } },
+		});
+		const { resolver } = await boot(noHost(false));
+		expect(resolver?.get("totp")).toBeUndefined();
+		await disposable?.dispose();
+		disposable = undefined;
+		const refused = await bootRefusal(noHost(true));
+		expect(refused.reason).toBe("contribute-factory-failed");
+		expect(refused.message).toContain("MFA_TOTP_ISSUER");
+	});
+
 	it("reads no key ring: the factor never holds a key", async () => {
 		const { resolver } = await boot(
 			configWith({ encryptionKeys: [], factors: { totp: { ...TOTP } } }),

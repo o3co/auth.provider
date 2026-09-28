@@ -365,6 +365,51 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		}
 	});
 
+	it("resolves the issuer only for a factor that is on: a switched-off one never refuses over a default nothing uses", () => {
+		const noHost = { jwt: { issuer: "https://[2001:db8::1]" } };
+		const off = readMfaTotpSettings({ ...withTotp({ enabled: false }), oauth: noHost });
+		expect(off.enabled).toBe(false);
+		expect(off.issuer).toBeUndefined();
+		expect(readMfaSettings({ ...withTotp({ enabled: false }), oauth: noHost }).totp.enabled).toBe(
+			false,
+		);
+		// Written, it is kept, and still held to its rule.
+		expect(
+			readMfaTotpSettings({ ...withTotp({ enabled: false, issuer: "Example" }), oauth: noHost })
+				.issuer,
+		).toBe("Example");
+		expect(
+			refusal(() => readMfaTotpSettings(withTotp({ enabled: false, issuer: "a:b" }))),
+		).toContain("mfa.factors.totp.issuer");
+		// On, the same configuration is refused.
+		expect(refusal(() => readMfaTotpSettings({ ...withTotp({}), oauth: noHost }))).toContain(
+			"MFA_TOTP_ISSUER",
+		);
+	});
+
+	it("refuses an issuer that is not well-formed text, carries a control character, or is blank", () => {
+		for (const issuer of [
+			"Ex\uD800ample",
+			"\uDC00",
+			"Ex\u0000ample",
+			"Ex\nample",
+			"Ex\tample",
+			"Ex\u007Fample",
+			"Ex\u0085ample",
+			"Ex\u009Fample",
+			"   ",
+			"\t",
+		]) {
+			expect(
+				refusal(() => readMfaTotpSettings(withTotp({ issuer }))),
+				JSON.stringify(issuer),
+			).toContain("mfa.factors.totp.issuer");
+		}
+		for (const issuer of ["Example Co", "Exämple", "例え"]) {
+			expect(readMfaTotpSettings(withTotp({ issuer })).issuer).toBe(issuer);
+		}
+	});
+
 	it("refuses a configuration without the section, naming the reference.conf that carries it", () => {
 		for (const mfa of [{ mode: "off" }, { factors: {} }]) {
 			const message = refusal(() => readMfaTotpSettings({ ...valid(), mfa }));
