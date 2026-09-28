@@ -110,7 +110,11 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 			// How the session was established: only what `SessionAuthentication`
 			// admits, its `mfaAt` judged on this store's clock — the check the
 			// Redis store makes, so the two refuse the same values.
-			checkSessionAuthentication(input.sid, input.authentication, Date.now());
+			const authentication = checkSessionAuthentication(
+				input.sid,
+				input.authentication,
+				Date.now(),
+			);
 			if (input.expiresAt.getTime() <= Date.now()) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
@@ -126,9 +130,8 @@ export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSec
 				expiresAt: new Date(input.expiresAt.getTime()),
 				claims: cloneClaims(input.claims),
 				amr: input.amr ? [...input.amr] : undefined,
-				authentication: input.authentication
-					? copySessionAuthentication(input.authentication)
-					: undefined,
+				// Already a copy, its `mfaAt` no later than this store's clock.
+				authentication,
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {

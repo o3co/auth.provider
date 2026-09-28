@@ -38,8 +38,8 @@
  */
 
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
+import { DEFAULT_CLOCK_SKEW_MS } from "../jwt/verify.mjs";
 import type { MfaRequirementSession } from "../mfa/requirement.mjs";
-import { MFA_CLOCK_SKEW_ALLOWANCE_MS } from "../mfa/transactionStore.mjs";
 import type { SecondFactorEvent, SessionAuthentication, UserSession } from "./types.mjs";
 
 /** A copy of `authentication` that shares nothing with it: its list and its date are new. */
@@ -156,15 +156,19 @@ export function federatedSessionAuthentication(login: {
 }
 
 /**
- * Whether `ms` is an instant a session may record as when a second factor was
- * verified, judged on the store's clock `nowMs`: at or after the epoch, and
- * no further ahead than the MFA stores' clock-skew allowance
- * (`MFA_CLOCK_SKEW_ALLOWANCE_MS`, a day). Callers' clocks are NTP-synced
- * (D22); one far ahead is not a clock but a time that would count as
- * verified long after it was — and, kept as the later of two, would stick.
+ * Whether `ms` is an instant a session may take as when a second factor was
+ * verified, judged on the store's clock `nowMs`: at or after the epoch, and no
+ * further ahead than the clock skew tolerated between hosts
+ * (`DEFAULT_CLOCK_SKEW_MS`, five minutes — the tolerance the JWT verifier
+ * gives an `iat` another host stamped ahead of it). Clocks are NTP-synced
+ * (D22); one further ahead is no clock's reading. What is accepted is still
+ * recorded no later than `nowMs` (`notAfter`): never a time still to come.
  */
 const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
-	Number.isFinite(ms) && ms >= 0 && ms <= nowMs + MFA_CLOCK_SKEW_ALLOWANCE_MS;
+	Number.isFinite(ms) && ms >= 0 && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS;
+
+/** `ms` as an instant no later than `nowMs`, the store's clock: a new `Date`. */
+const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowMs));
 
 /**
  * Refuse, with a `RangeError`, an event that is not a second factor's (D9):
@@ -174,7 +178,8 @@ const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
  * own beside it (`mfa` comes from a factor that adds it, D14, and alone names
  * no factor that was verified), or a time that is not a valid date at or
  * after the epoch, or further ahead of `nowMs` — the store's clock — than the
- * MFA stores' clock-skew allowance. What `recordSecondFactor` checks before it
+ * clock skew tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`). What
+ * `recordSecondFactor` checks before it
  * reads anything, in every bundled store. The message names what is wrong
  * and quotes nothing but a primary's marker.
  */
@@ -201,31 +206,34 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 	const atMs = event.at instanceof Date ? event.at.getTime() : Number.NaN;
 	if (!isRecordableVerificationTime(atMs, nowMs)) {
 		throw new RangeError(
-			"recordSecondFactor: at must be a valid date at or after the epoch, and no further ahead than clocks drift",
+			"recordSecondFactor: at must be a valid date at or after the epoch, and no further ahead than hosts' clocks drift",
 		);
 	}
 }
 
 /**
- * Refuse, with a `RangeError`, an `authentication` a store is asked to record
- * that `SessionAuthentication` does not admit (D9) — so the two bundled
- * stores refuse the same values, rather than one copying a string's
- * characters as a list and the other writing an envelope it then reads as
- * corrupt. `undefined` is a session written as one from before the key; else
- * an object with a non-empty string `primary`, a `federation` that is a
- * string or `undefined`, an `upstreamAmr` that is a list of strings or
- * `undefined`, and an `mfaAt` that is `undefined` or a `Date` the store may
- * record (a valid instant at or after the epoch, no further ahead of `nowMs`,
- * the store's clock, than the MFA stores' clock-skew allowance). The message
- * names the session and the field, and quotes nothing of the value. What
- * every bundled store's `create` checks before it writes.
+ * Check an `authentication` a store is asked to record, and answer what to
+ * record (D9). Refused, with a `RangeError`, is what `SessionAuthentication`
+ * does not admit — so the two bundled stores refuse the same values, rather
+ * than one copying a string's characters as a list and the other writing an
+ * envelope it then reads as corrupt. `undefined` is a session written as one
+ * from before the key; else an object with a non-empty string `primary`, a
+ * `federation` that is a string or `undefined`, an `upstreamAmr` that is a
+ * list of strings or `undefined`, and an `mfaAt` that is `undefined` or a
+ * `Date` at or after the epoch and no further ahead of `nowMs`, the store's
+ * clock, than the clock skew tolerated between hosts. The message names the
+ * session and the field, and quotes nothing of the value.
+ *
+ * What it answers is a copy, its `mfaAt` no later than `nowMs`: a time a
+ * little ahead is a clock, but recorded as it came it would count as recent
+ * for longer than it is. What every bundled store's `create` records.
  */
 export function checkSessionAuthentication(
 	sid: string,
 	authentication: unknown,
 	nowMs: number,
-): asserts authentication is SessionAuthentication | undefined {
-	if (authentication === undefined) return;
+): SessionAuthentication | undefined {
+	if (authentication === undefined) return undefined;
 	const refuse = (field: string, rule: string): never => {
 		throw new RangeError(`UserSession ${sid}: ${field} must be ${rule}`);
 	};
@@ -255,9 +263,14 @@ export function checkSessionAuthentication(
 	) {
 		refuse(
 			"authentication.mfaAt",
-			"a valid date at or after the epoch, no further ahead than clocks drift, or undefined",
+			"a valid date at or after the epoch, no further ahead than hosts' clocks drift, or undefined",
 		);
 	}
+	const valid = authentication as SessionAuthentication;
+	return {
+		...copySessionAuthentication(valid),
+		mfaAt: valid.mfaAt === undefined ? undefined : notAfter(valid.mfaAt.getTime(), nowMs),
+	};
 }
 
 /**
@@ -265,7 +278,10 @@ export function checkSessionAuthentication(
  * computation both bundled stores' `recordSecondFactor` write, so they cannot
  * differ. `amr`: what the session vouches for (`vouchedAmr`), then the
  * event's values, each once, in insertion order. `authentication`: the
- * session's (`sessionAuthentication`) with `mfaAt` the later of the two.
+ * session's (`sessionAuthentication`) with `mfaAt` the later of the two —
+ * each first brought to no later than `nowMs`, the store's clock, so nothing
+ * recorded is still to come, and a stored `mfaAt` a replica whose clock ran
+ * ahead wrote is repaired here rather than kept as the later for as long.
  *
  * A session written before `authentication` existed is split here, first: a
  * pre-upgrade `["hwk", "fed"]` plus TOTP becomes `amr` `["fed", "otp", "mfa"]`
@@ -282,11 +298,12 @@ export function sessionAfterSecondFactor(
 	checkSecondFactorEvent(event, nowMs);
 	const authentication = sessionAuthentication(session);
 	if (authentication === undefined) return null;
-	const atMs = event.at.getTime();
-	const mfaAt =
-		authentication.mfaAt !== undefined && authentication.mfaAt.getTime() >= atMs
-			? authentication.mfaAt
-			: new Date(atMs);
+	const atMs = Math.min(event.at.getTime(), nowMs);
+	const storedMs =
+		authentication.mfaAt === undefined
+			? undefined
+			: Math.min(authentication.mfaAt.getTime(), nowMs);
+	const mfaAt = new Date(storedMs !== undefined && storedMs >= atMs ? storedMs : atMs);
 	return {
 		amr: [...new Set([...vouchedAmr(session), ...event.amr])],
 		authentication: { ...authentication, mfaAt },

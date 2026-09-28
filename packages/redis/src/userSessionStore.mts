@@ -308,12 +308,18 @@ export function createRedisUserSessionStore(
 			// (the one a write is checked against) — anything else would be
 			// written as an envelope that reads back as corrupt. Core's check, so
 			// the memory store refuses the same values.
-			checkSessionAuthentication(input.sid, input.authentication, Date.now());
+			const authentication = checkSessionAuthentication(
+				input.sid,
+				input.authentication,
+				Date.now(),
+			);
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}
-			const envelope = toEnvelope(input, Date.now());
+			// `authentication` as checked: a copy, its `mfaAt` no later than the
+			// host's clock.
+			const envelope = toEnvelope({ ...input, authentication }, Date.now());
 			const result = await opts.client.set(
 				k(input.sid),
 				JSON.stringify(envelope),
