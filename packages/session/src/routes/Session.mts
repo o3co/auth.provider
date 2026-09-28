@@ -14,7 +14,17 @@
  * limitations under the License.
  */
 
-import { randomUUID } from "node:crypto";
+/**
+ * The `/session` routes for a browser's own login and logout — `GET /csrf`,
+ * `POST /login`, `POST /logout` — with the CSRF guard and the login rate limit
+ * in front of them. A password login verifies the credentials against
+ * `UserRepository`, establishes the session through `establishSession`
+ * (`../establish-session.mts`), the tail it shares with the federation
+ * callback, and answers with a fresh CSRF token; a logout invalidates the
+ * records the session owns before destroying the cookie session. The package
+ * README says what each route answers and what a logout reaches.
+ */
+
 import {
 	type AppConfig,
 	type AuditSink,
@@ -41,24 +51,14 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
+import { establishSession } from "../establish-session.mjs";
 import {
-	abandonCookieSession,
 	SESSION_STORE_UNAVAILABLE,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
-
-declare module "express-session" {
-	interface SessionData {
-		isAuthenticated?: boolean;
-		user?: Record<string, unknown>;
-		redirectTo?: string;
-		/** UserSession ID — set by local login and preserved across session regeneration. */
-		sid?: string;
-	}
-}
 
 const DEFAULT_SESSION_TTL_MS = 86400_000;
 
@@ -380,21 +380,19 @@ export const createRouter = (
 	};
 
 	/**
-	 * One best-effort rollback step of a login that failed after its
-	 * `UserSession` was created. A step that fails is one warn,
-	 * `login_cleanup_failed`, and the login's own answer stands.
+	 * A best-effort rollback step of a login that failed after its
+	 * `UserSession` was created could not run: one warn, `login_cleanup_failed`,
+	 * with `store`, `step`, the `sid` and the error's projection.
+	 * `establishSession` runs the rest of the rollback, and the login's own
+	 * answer stands.
 	 */
-	const loginCleanup = async (
+	const loginCleanupFailed = (
 		store: "user_session" | "subject_session_index",
 		step: "delete" | "remove_sid",
-		context: { readonly sid: string; readonly sub?: string },
-		run: () => Promise<unknown>,
-	): Promise<void> => {
-		try {
-			await run();
-		} catch (err) {
-			logger.warn({ ...context, store, step, err: loggableError(err) }, "login_cleanup_failed");
-		}
+		cause: unknown,
+		context: { readonly sid?: string; readonly sub?: string },
+	): void => {
+		logger.warn({ ...context, store, step, err: loggableError(cause) }, "login_cleanup_failed");
 	};
 
 	router
@@ -446,116 +444,60 @@ export const createRouter = (
 
 				const redirectTo = req.body.redirect_to as string | undefined;
 
-				// Generate sid and create UserSession before regenerating the browser session,
-				// so we can restore the sid on the new session afterwards.
-				let sid: string | undefined;
-				if (userSessionStore) {
-					const claims = extractUserClaims(user);
-					const now = new Date();
-					const createdSid = randomUUID();
-					const expiresAt = new Date(now.getTime() + sessionTtlMs);
-					try {
-						await userSessionStore.create({
-							sid: createdSid,
-							sub: user.id,
-							authTime: now,
-							expiresAt,
-							claims,
-							// #481, the MFA ADR's D9: a password login — `amr` `["pwd"]`
-							// (RFC 8176), primary `pwd`, no second factor verified.
-							...passwordSessionAuthentication(),
-						});
-					} catch (err) {
-						// Fail-closed: the store's outage, answered as one — never a
-						// session-less login, and never an unhandled rejection reaching
-						// Express's default HTML error handler. Matches the /token grant
-						// fail-closed pattern (CP-16/CP-17), in RFC 6749 §5.2's shape.
-						loginStoreUnavailable("user_session", "create", err, {
-							sid: createdSid,
-							sub: user.id,
-						});
-						return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-					}
-					sid = createdSid;
-					// #296: record the session against its subject so a later
-					// credential change can find it. Best-effort and AFTER the
-					// session exists: a failure here must not deny a legitimate
-					// login, and the cost is that this one session is missed by
-					// `revokeAllForSubject` — logged so it is not silent.
-					//
-					// Written at the earliest point the session exists rather than
-					// after the regeneration below, because the two failure modes
-					// are not symmetric: a missing entry is a live session a
-					// credential change will never find, while an orphan entry
-					// costs one redundant cascade that `cascadeLogout` absorbs
-					// idempotently. The regeneration rollback compensates.
-					if (subjectSessionIndex) {
-						try {
-							await subjectSessionIndex.addSid(user.id, createdSid, expiresAt);
-						} catch (err) {
-							logger.error(
-								{ err: loggableError(err), sub: user.id, sid: createdSid },
-								"subject_session_index_write_failed",
-							);
-						}
-					}
-				}
-
-				/**
-				 * The cookie session could not be regenerated or saved: its store's
-				 * outage. The UserSession was created but no browser session names
-				 * it, so the orphan is deleted best-effort, and (#296) its
-				 * subject-index entry with it — otherwise `revokeAllForSubject`
-				 * would enumerate a sid that no longer exists. The request's cookie
-				 * session is dropped so express-session neither writes it again nor
-				 * sets a cookie for it (`../internal/cookieSession.mts`).
-				 */
-				const refuseCookieSessionOutage = async (
-					step: "regenerate" | "save",
-					cause: unknown,
-				): Promise<Response> => {
-					loginStoreUnavailable("cookie_session", step, cause, sid === undefined ? {} : { sid });
-					if (sid !== undefined && userSessionStore) {
-						const orphan = sid;
-						await loginCleanup("user_session", "delete", { sid: orphan }, () =>
-							userSessionStore.delete(orphan),
-						);
-						if (subjectSessionIndex) {
-							await loginCleanup(
-								"subject_session_index",
-								"remove_sid",
-								{ sid: orphan, sub: user.id },
-								() => subjectSessionIndex.removeSid(user.id, orphan),
-							);
-						}
-					}
-					abandonCookieSession(req);
+				// The tail of the login — the `UserSession` record, its subject-index
+				// entry, the express session's regeneration, its authenticated state
+				// and its save — is `establishSession`'s (`../establish-session.mts`),
+				// shared with the federation callback. What this route adds is its own
+				// log vocabulary: a store that could not answer is one error line,
+				// `login_store_unavailable`, and a rollback step that failed one warn,
+				// `login_cleanup_failed`. The login answers `503`, with everything
+				// written rolled back and the request's cookie session dropped.
+				const established = await establishSession(
+					{
+						user,
+						claims: extractUserClaims(user),
+						authTime: new Date(),
+						// #481, the MFA ADR's D9: a password login — `amr` `["pwd"]`
+						// (RFC 8176), primary `pwd`, no second factor verified.
+						recorded: passwordSessionAuthentication(),
+						...(redirectTo ? { redirectTo } : {}),
+					},
+					{
+						req,
+						...(userSessionStore === undefined ? {} : { userSessionStore }),
+						...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+						sessionTtlMs,
+						reporter: ({ sid, sub }) => {
+							// Every line names the sid where there is one; the record's
+							// create and the index removal name the subject beside it.
+							const named = sid === undefined ? {} : { sid };
+							return {
+								storeUnavailable: (store, step, cause) =>
+									loginStoreUnavailable(
+										store,
+										step,
+										cause,
+										step === "create" ? { ...named, sub } : named,
+									),
+								cleanupFailed: (store, step, cause) =>
+									loginCleanupFailed(
+										store,
+										step,
+										cause,
+										step === "remove_sid" ? { ...named, sub } : named,
+									),
+								subjectIndexWriteFailed: (cause) =>
+									logger.error(
+										{ err: loggableError(cause), sub, ...named },
+										"subject_session_index_write_failed",
+									),
+							};
+						},
+					},
+				);
+				if (established.outcome === "unavailable") {
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-				};
-
-				// express-session regenerates by destroying the old record in its
-				// store, so a failure is that store's outage.
-				const regenerateErr = await new Promise<unknown>((resolve) => {
-					req.session.regenerate((err: unknown) => resolve(err ?? null));
-				});
-				if (regenerateErr) return refuseCookieSessionOutage("regenerate", regenerateErr);
-				req.session.isAuthenticated = true;
-				req.session.user = user as Record<string, unknown> | undefined;
-				if (redirectTo) {
-					req.session.redirectTo = redirectTo;
 				}
-				// Restore sid on the new session so downstream (token/introspect) can read it.
-				if (sid) {
-					req.session.sid = sid;
-				}
-				// Saved before answering, as the federation callback does: left to
-				// express-session's save when the response ends, a store that failed
-				// there did so after the `200`, and the browser held a cookie for a
-				// session the next request would not find.
-				const saveErr = await new Promise<unknown>((resolve) => {
-					req.session.save((err: unknown) => resolve(err ?? null));
-				});
-				if (saveErr) return refuseCookieSessionOutage("save", saveErr);
 				// The caller is now on a regenerated session; hand it a fresh
 				// token in the same response so the follow-up `/session/logout`
 				// does not need another round trip to `/session/csrf`.

@@ -14,7 +14,20 @@
  * limitations under the License.
  */
 
-import { randomBytes, randomUUID } from "node:crypto";
+/**
+ * The federation routes. `GET /oauth/federation/:name` starts a federation
+ * (state, PKCE, nonce; the `form_post` transaction and its cookie). The
+ * callback — `GET` for a `query` federation, `POST` for a `form_post` one —
+ * checks the envelope, exchanges the code, resolves the identity through
+ * `UserRepository`, links it to the live session for a `?link=1` start, or
+ * establishes a session through `establishSession`
+ * (`../establish-session.mts`), the tail it shares with `POST /session/login`,
+ * adding the federation's index entry and upstream tokens as the steps of its
+ * own; then redirects as the federation's redirect policy answers. The
+ * package README says what each leg does and what a store's outage answers.
+ */
+
+import { randomBytes } from "node:crypto";
 import {
 	type AppConfig,
 	type AuditSink,
@@ -38,6 +51,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { checkRequestOrigin } from "../csrf.mjs";
+import { type EstablishSessionStep, establishSession } from "../establish-session.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { consentedScope } from "../federations/consented-scope.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
@@ -83,10 +97,6 @@ declare module "express-session" {
 			 *  to log in. */
 			link?: { readonly sid: string };
 		};
-		/** UserSession ID — set after successful federation callback. */
-		sid?: string;
-		isAuthenticated?: boolean;
-		user?: Record<string, unknown>;
 	}
 }
 
@@ -277,10 +287,25 @@ const logMisconfigured = (
 };
 
 /**
- * Run one best-effort cleanup step — a rollback after a failed login or link,
- * the discard of a refused transaction. A step that fails is one warn line,
- * `federation_cleanup_failed`, with `store`, `step` and the error's
- * projection; the request's own answer stands either way.
+ * The warn line a best-effort step that failed is logged as,
+ * `federation_cleanup_failed`: `store`, `step` and the error's projection.
+ * {@link cleanUp} emits it for the steps this router runs itself; the login
+ * tail's reporter emits it for the ones `establishSession` runs.
+ */
+const logCleanupFailed = (
+	log: Logger,
+	store: FederationStore,
+	step: FederationStoreStep,
+	cause: unknown,
+	context: Readonly<Record<string, unknown>> = {},
+): void => {
+	log.warn({ ...context, store, step, err: loggableError(cause) }, "federation_cleanup_failed");
+};
+
+/**
+ * Run one best-effort cleanup step — a rollback after a failed link, the
+ * discard of a refused transaction. A step that fails is one
+ * {@link logCleanupFailed} line; the request's own answer stands either way.
  */
 const cleanUp = async (
 	log: Logger,
@@ -292,7 +317,7 @@ const cleanUp = async (
 	try {
 		await run();
 	} catch (err) {
-		log.warn({ ...context, store, step, err: loggableError(err) }, "federation_cleanup_failed");
+		logCleanupFailed(log, store, step, err, context);
 	}
 };
 
@@ -1053,209 +1078,112 @@ export const createRouter = (
 			mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
 		});
 
-		const sid = randomUUID();
-		// Rebind: from this point onward, every log call carries `provider` AND `sid`.
-		log = log.child({ sid });
-		const authTime = new Date();
-		const expiresAt = new Date(Date.now() + sessionTtlMs);
+		// The tail of the login — the `UserSession` record, its subject-index
+		// entry, the express session's regeneration, its authenticated state and
+		// its save — is `establishSession`'s (`../establish-session.mts`), shared
+		// with `POST /session/login`. What this callback writes beside the record
+		// are its two steps: the federation's index entry before the regeneration
+		// and the upstream tokens after it, each undone in reverse when a later
+		// write fails. A store that could not answer is `503`, logged in this
+		// router's vocabulary through the reporter —
+		// `federation_callback_store_unavailable` for the write that failed,
+		// `federation_cleanup_failed` for a rollback step that did.
+		//
+		// A4 §5.2: the federation linkage is a sibling-store write, and per A4
+		// §6.1 it is NOT atomic with the record's create: a failed `addFederation`
+		// rolls the orphan `UserSession` back, and the user logs in again to
+		// re-establish the link. A compound atomic call was rejected — it would
+		// re-couple the stores (Theme B).
+		//
+		// Session fixation: the express session is regenerated after the record
+		// and its index entry exist (so there is a sid to restore) and before the
+		// tokens are attached or any session field is written.
+		const accessToken = profile.accessToken;
+		const attachTokens: ReadonlyArray<EstablishSessionStep<FederationStore, FederationStoreStep>> =
+			accessToken
+				? [
+						{
+							store: "federation_token",
+							step: "attach",
+							run: ({ sid }) => {
+								// `profile.expiresAt` is `Date | null` (required on
+								// FederationProfile). `null` propagates to the store and
+								// signals "do not refresh; reuse" — the route layer never
+								// invents a fallback expiry.
+								const consented = consentedScope(profile.scope, provider.scope);
+								return federationTokenStore.attach(sid, provider.name, {
+									accessToken,
+									refreshToken: profile.refreshToken,
+									idToken: profile.idToken,
+									expiresAt: profile.expiresAt,
+									// #647 — as above: the consented scope, and the ceiling it sets.
+									scope: consented,
+									grantedScope: consented,
+									// #645 — as above: what the upstream named, recorded and not
+									// judged. The disclosure point owns that decision.
+									tokenType: recordedTokenType(profile.tokenType),
+								});
+							},
+							undo: {
+								step: "delete",
+								run: ({ sid }) => federationTokenStore.delete(sid, provider.name),
+							},
+						},
+					]
+				: [];
 
-		try {
-			await userSessionStore.create({
-				sid,
-				sub: user.id,
-				authTime,
-				expiresAt,
+		const established = await establishSession<FederationStore, FederationStoreStep>(
+			{
+				user,
 				claims,
+				authTime: new Date(),
 				// The MFA ADR's D9 and D13: `fed`, with a trusted IdP's values
 				// beside it, or an untrusted one's kept apart for the record —
 				// decided, and recorded, under the name this callback resolved
 				// the provider by (`fed.name`, checked equal to the path's).
-				...federatedSessionAuthentication({
+				recorded: federatedSessionAuthentication({
 					federation: fed.name,
 					upstreamAmr: upstreamAmrOf(profile),
 					trusted: trustsUpstreamAmr.get(fed.name) === true,
 				}),
-			});
-		} catch (err) {
-			logStoreUnavailable(
-				log,
-				"federation_callback_store_unavailable",
-				"user_session",
-				"create",
-				err,
-			);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-
-		// #296: record the session against its subject so a later credential
-		// change can find it. Best-effort and after the session exists — a
-		// failure here must not deny a legitimate federated login, and the
-		// cost is that this one session is missed by `revokeAllForSubject`.
-		//
-		// Written HERE, at the earliest point the session exists, rather than
-		// after the last rollback point, because the two failure modes are not
-		// symmetric: a missing entry is a live session a credential change will
-		// never find, while an orphan entry costs one redundant cascade that
-		// `cascadeLogout` absorbs idempotently. So the write goes early and
-		// every rollback path below compensates with `rollbackSubjectIndex`.
-		if (subjectSessionIndex) {
-			try {
-				await subjectSessionIndex.addSid(user.id, sid, expiresAt);
-			} catch (err) {
-				log.error({ err: loggableError(err), sub: user.id }, "subject_session_index_write_failed");
-			}
-		}
-
-		/**
-		 * Undo the subject-index entry written above. Best-effort like every
-		 * other rollback step here — the caller's original error is the one
-		 * that must reach them.
-		 */
-		const rollbackSubjectIndex = async (): Promise<void> => {
-			if (!subjectSessionIndex) return;
-			// A failure is bounded by the index's own TTL.
-			await cleanUp(log, "subject_session_index", "remove_sid", () =>
-				subjectSessionIndex.removeSid(user.id, sid),
-			);
-		};
-
-		// A4 §5.2: federation linkage recorded as a sibling-store operation.
-		// Per A4 §6.1, this call is NOT atomic with userSessionStore.create above.
-		// If addFederation fails, the orphan UserSession is rolled back below; the
-		// caller can re-login to re-establish the link. Compound atomic call rejected
-		// — would violate Theme B (re-coupling of responsibilities).
-		try {
-			await sessionFederationIndex.addFederation(sid, provider.name, expiresAt);
-		} catch (err) {
-			logStoreUnavailable(
-				log,
-				"federation_callback_store_unavailable",
-				"session_federation_index",
-				"add",
-				err,
-			);
-			// Rollback the orphan UserSession (created above; addFederation failure
-			// means the session has no federation linkage, which would silently
-			// bypass federation logout / token-attach paths).
-			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
-			// #296: the session is gone, so its subject-index entry must go too.
-			await rollbackSubjectIndex();
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-
-		// Session fixation mitigation: regenerate the session ID before writing auth state.
-		// This must happen AFTER userSessionStore.create + sessionFederationIndex.addFederation
-		// (so we have a sid to restore) but BEFORE attaching federation tokens or writing
-		// session fields.
-		//
-		// Rollback responsibility:
-		//  - If regenerate fails: both stores need to be rolled back in REVERSE order
-		//    (sessionFederationIndex first, then userSessionStore).
-		//  - If post-regenerate work fails: rollback in REVERSE order
-		//    (token → federationIndex → userSession).
-		const regenerateErr = await new Promise<Error | null>((resolve) => {
-			req.session.regenerate((err: Error | null) => resolve(err));
-		});
-		if (regenerateErr) {
-			// express-session regenerates by destroying the old record in its
-			// store: a failure is that store's outage.
-			logStoreUnavailable(
-				log,
-				"federation_callback_store_unavailable",
-				"cookie_session",
-				"regenerate",
-				regenerateErr,
-			);
-			// Rollback in REVERSE order of creation:
-			//   1. sessionFederationIndex.removeBySid (created last — added in step above)
-			//   2. userSessionStore.delete (created first)
-			// Per A4 §6.1: cross-store atomicity is not promised; reverse-order rollback
-			// is best-effort but minimizes the window where one store has the linkage
-			// and the other doesn't.
-			await cleanUp(log, "session_federation_index", "remove_by_sid", () =>
-				sessionFederationIndex.removeBySid(sid),
-			);
-			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
-			// #296: the session is gone, so its subject-index entry must go too.
-			await rollbackSubjectIndex();
-			// express-session generated a fresh session for the failed
-			// regeneration; it must not be saved against the store that failed.
-			abandonCookieSession(req);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-
-		// Post-regenerate: attach federation tokens + restore sid on the new session.
-		// Any failure here rolls back in REVERSE order (F-6 pattern).
-		// Note: `session` is a stale reference after regenerate — use req.session exclusively.
-		let attachedToFederation = false;
-		// The write in flight, so the catch can log the store that failed.
-		let persisting: { store: FederationStore; step: FederationStoreStep } = {
-			store: "federation_token",
-			step: "attach",
-		};
-		try {
-			if (profile.accessToken) {
-				// `profile.expiresAt` is `Date | null` (required on FederationProfile).
-				// `null` propagates to the store and signals "do not refresh; reuse" —
-				// the route layer never invents a fallback expiry.
-				const consented = consentedScope(profile.scope, provider.scope);
-				const tokenType = recordedTokenType(profile.tokenType);
-				await federationTokenStore.attach(sid, provider.name, {
-					accessToken: profile.accessToken,
-					refreshToken: profile.refreshToken,
-					idToken: profile.idToken,
-					expiresAt: profile.expiresAt,
-					// #647 — as above: the consented scope, and the ceiling it sets.
-					scope: consented,
-					grantedScope: consented,
-					// #645 — as above: what the upstream named, recorded and not
-					// judged. The disclosure point owns that decision.
-					tokenType,
-				});
-				attachedToFederation = true;
-			}
-
-			// Restore auth state on the new session (req.session is now the fresh one).
-			req.session.sid = sid;
-			req.session.isAuthenticated = true;
-			req.session.user = user as Record<string, unknown>;
-
-			// Persist the new session with auth state.
-			persisting = { store: "cookie_session", step: "save" };
-			await new Promise<void>((resolve, reject) => {
-				req.session.save((err) => (err ? reject(err as Error) : resolve()));
-			});
-		} catch (err) {
-			logStoreUnavailable(
-				log,
-				"federation_callback_store_unavailable",
-				persisting.store,
-				persisting.step,
-				err,
-			);
-			// Rollback in REVERSE order of creation:
-			//   1. federationTokenStore (attached last, undone first — already here)
-			//   2. sessionFederationIndex.removeBySid (NEW — undone before session)
-			//   3. userSessionStore.delete (created first, undone last)
-			if (attachedToFederation) {
-				await cleanUp(log, "federation_token", "delete", () =>
-					federationTokenStore.delete(sid, provider.name),
-				);
-			}
-			await cleanUp(log, "session_federation_index", "remove_by_sid", () =>
-				sessionFederationIndex.removeBySid(sid),
-			);
-			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
-			// #296: the session is gone, so its subject-index entry must go too.
-			await rollbackSubjectIndex();
-			// The regenerated session was never saved — its save is what failed,
-			// or the attach before it — so there is no record to destroy. Drop it
-			// from the request instead, so express-session neither saves it as
-			// the response ends nor sets a cookie naming it. (A save whose reply
-			// was lost after Redis wrote it does leave a record. It is harmless:
-			// no cookie names it, its `sid` was rolled back above so `/authorize`
-			// refuses it, and it expires at its TTL.)
-			abandonCookieSession(req);
+			},
+			{
+				req,
+				userSessionStore,
+				...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+				sessionTtlMs,
+				beforeRegenerate: [
+					{
+						store: "session_federation_index",
+						step: "add",
+						run: ({ sid, expiresAt }) =>
+							sessionFederationIndex.addFederation(sid, provider.name, expiresAt),
+						undo: {
+							step: "remove_by_sid",
+							run: ({ sid }) => sessionFederationIndex.removeBySid(sid),
+						},
+					},
+				],
+				afterRegenerate: attachTokens,
+				reporter: ({ sid }) => {
+					// Rebind: from this point onward, every log call carries
+					// `provider` AND `sid` — the lines the tail emits, and this
+					// callback's own after it.
+					log = log.child({ sid });
+					return {
+						storeUnavailable: (store, step, cause) =>
+							logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause),
+						cleanupFailed: (store, step, cause) => logCleanupFailed(log, store, step, cause),
+						subjectIndexWriteFailed: (cause) =>
+							log.error(
+								{ err: loggableError(cause), sub: user.id },
+								"subject_session_index_write_failed",
+							),
+					};
+				},
+			},
+		);
+		if (established.outcome === "unavailable") {
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
