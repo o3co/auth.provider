@@ -27,6 +27,10 @@
  * - an `allkeys-*` `maxmemory-policy`, which may evict any key, refuses the
  *   boot. `noeviction` and the `volatile-*` policies pass: the factors and
  *   the requirement carry no TTL, so a `volatile-*` policy never picks them;
+ * - for the transaction store, a `volatile-*` policy is one warning: its
+ *   subject lock and weekly window carry a TTL once no run is counted, and an
+ *   evicted one lifts a D21 hold early. `noeviction` is what the MFA key
+ *   families are meant to run on;
  * - RDB snapshots without AOF are one warning: a crash loses the last
  *   snapshot interval of what was written;
  * - no persistence at all is one warning: a restart loses everything;
@@ -50,8 +54,12 @@ const NAMES: Readonly<
 			readonly lossy: string;
 			readonly volatile: string;
 			readonly unchecked: string;
+			/** The notice a `volatile-*` policy is given, where some of the store's keys carry a TTL. */
+			readonly lockEvictable: string | undefined;
 			/** What an eviction would lose, for the refusal's message. */
 			readonly holds: string;
+			/** What the refusal tells an operator to set. */
+			readonly remedy: string;
 		}
 	>
 > = {
@@ -60,16 +68,21 @@ const NAMES: Readonly<
 		lossy: "mfa_factor_store_lossy",
 		volatile: "mfa_factor_store_volatile",
 		unchecked: "mfa_factor_store_durability_unchecked",
+		lockEvictable: undefined,
 		holds:
 			"enrolled second factors, and an account whose factors are evicted reads as never enrolled",
+		remedy:
+			'"noeviction" (or a "volatile-*" policy, which never picks these keys: they carry no TTL)',
 	},
 	mfaTransactionStore: {
 		evictable: "mfa-transaction-store-evictable",
 		lossy: "mfa_transaction_store_lossy",
 		volatile: "mfa_transaction_store_volatile",
 		unchecked: "mfa_transaction_store_durability_unchecked",
+		lockEvictable: "mfa_transaction_store_lock_evictable",
 		holds:
 			"the email proof an operator reset requires at the next first binding, which a password holder could then skip",
+		remedy: '"noeviction"',
 	},
 };
 
@@ -86,7 +99,7 @@ export class RedisMfaStoreEvictableError extends Error {
 	constructor(store: RedisMfaStoreSlot, maxmemoryPolicy: string) {
 		const names = NAMES[store];
 		super(
-			`${store}: the Redis server's maxmemory-policy is "${maxmemoryPolicy}", which may evict any key — ${names.holds}; set maxmemory-policy to "noeviction" (or a "volatile-*" policy), or give ${store} a server of its own (${names.evictable})`,
+			`${store}: the Redis server's maxmemory-policy is "${maxmemoryPolicy}", which may evict any key — ${names.holds}; set maxmemory-policy to ${names.remedy}, or give ${store} a server of its own (${names.evictable})`,
 		);
 		this.name = "RedisMfaStoreEvictableError";
 		this.reason = names.evictable;
@@ -97,7 +110,8 @@ export class RedisMfaStoreEvictableError extends Error {
 /**
  * Runs the check for `store` on what `durability` answers: throws
  * {@link RedisMfaStoreEvictableError} for an `allkeys-*` policy, and writes
- * at most one warning on `logger`, object-first.
+ * each warning that applies once on `logger`, object-first — the eviction
+ * policy's, then the persistence's.
  */
 export async function checkRedisMfaStoreDurability(
 	store: RedisMfaStoreSlot,
@@ -112,6 +126,12 @@ export async function checkRedisMfaStoreDurability(
 	}
 	if (report.maxmemoryPolicy.startsWith("allkeys-")) {
 		throw new RedisMfaStoreEvictableError(store, report.maxmemoryPolicy);
+	}
+	if (names.lockEvictable !== undefined && report.maxmemoryPolicy.startsWith("volatile-")) {
+		logger.warn(
+			{ store, adapter: "redis", maxmemoryPolicy: report.maxmemoryPolicy },
+			names.lockEvictable,
+		);
 	}
 	if (report.appendOnly) return;
 	logger.warn({ store, adapter: "redis" }, report.snapshots ? names.lossy : names.volatile);

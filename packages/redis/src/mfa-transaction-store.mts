@@ -60,7 +60,8 @@
  *
  * **Durability.** The requirement must be kept as the factor store is (D12's
  * step-3 amendment): it has no TTL, and `redisMfaTransactionStoreModule` holds
- * the server to the factor store's boot check.
+ * the server to the factor store's boot check — and warns on a `volatile-*`
+ * policy, which may evict the lock state once it carries a TTL.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -372,7 +373,10 @@ const moduleConfigSchema = z.object({
  * (`mfa_transaction_store_lossy`), no persistence
  * (`mfa_transaction_store_volatile`) and a server that refuses `CONFIG`
  * (`mfa_transaction_store_durability_unchecked`) are each one warning on the
- * `logger` slot, or on `consoleLogger`.
+ * `logger` slot, or on `consoleLogger`. So is a `volatile-*` policy
+ * (`mfa_transaction_store_lock_evictable`), which the factor store does not
+ * mind: the subject lock and weekly window carry a TTL once no run is
+ * counted, and an evicted one lifts a D21 hold early.
  */
 export const redisMfaTransactionStoreModule = defineModule({
 	name: "redis-mfa-transaction-store",
