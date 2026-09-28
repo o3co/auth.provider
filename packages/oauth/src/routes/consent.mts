@@ -255,12 +255,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				return null;
 			case "admitted": {
 				// The record's subject when one was read — admission made it the
-				// claim's — else the cookie's, which a cookie claim always names.
+				// claim's — else the cookie's, which an admitted cookie claim always
+				// names: admission refuses one without it (`not_live`, `no_subject`).
 				const sub = admission.session === null ? claim.subject : admission.session.sub;
-				if (sub === undefined) {
-					jsonError(res, 401, "login_required", "the session names no subject");
-					return null;
-				}
 				if (sub !== pending.sub) {
 					jsonError(res, 400, "invalid_request", NO_PENDING);
 					return null;
