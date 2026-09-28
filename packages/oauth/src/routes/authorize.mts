@@ -1823,8 +1823,11 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// The cookie's claim, read once (the session-admission ADR's D2): the
 		// flag first, before the client is looked up and with no store read, so
 		// a genuinely anonymous request costs no lookup (#284, R1b). Whether the
-		// session behind the flag is live is admission's to say, once the
-		// client and the parameters are validated below.
+		// session behind the flag is live is admission's to say, once, below:
+		// after the client lookup and the `redirect_uri` check, the request-object
+		// refusal, and the parsing of `prompt`, the single-valued parameters,
+		// `claims`, `max_age` and `acr_values`; before the `response_type`, grant
+		// type, first-party, email-verified, PKCE, nonce and scope checks.
 		const claim = cookieClaim(req);
 		if (!claim.authenticated && !wantsSilentAuth) {
 			loginRedirect(res, opts.loginUrl(), authorizeRequestUrl(issuerOrigin, req).toString());
