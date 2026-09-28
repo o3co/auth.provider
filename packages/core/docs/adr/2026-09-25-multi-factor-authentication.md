@@ -212,6 +212,8 @@ Attempts are **reserved before** the proof is checked, so fifty guesses sent at 
 
 `optional` with no factor on record, and a composition whose `mfa.mode` is `off`, log in as today, with `authentication = {primary:"pwd", mfaAt: undefined}`.
 
+**Amended 2026-09-28 (session admission): F1's steps 1, 2 and 5(h) are superseded.** Step 1's "`mfaCoordinator.decideAfterPrimary` reads the subject's factors and the witness" reads: the login route calls `admitPrimary` (the session-admission ADR's D5), and the `mfa` requirement's `admitPrimary` does that reading. Step 2's record is the continuation: the route regenerates, `open(req.sessionID)` writes the `MfaTransaction` with `continuation` — the primary as the route built it and what earlier requirements added — in place of `primary` and `user` (D8's amendment), and answers the closed body of D5 (`transaction`, `expires_in`, `hints.enrollable`, `hints.email_proof`; the F3 amendment below). Step 5(h) reads: `resumePrimary(deps, continuation, { requirement: "mfa", adds: { amr per D14, mfaAt: now } })`, then `establishSession` with the `Establishment` it returns — or, when another requirement interrupts, that requirement's answer. Steps 3, 4 and 5(a)–(g), and the paragraph after the table, stand. The same reading applies to F3's steps 1 and 4.
+
 ### F2 — `/authorize` with `acr_values` / `max_age` / `prompt=login` → step-up → back
 
 `/authorize` makes one decision per request, over one ask record that accumulates what has been asked (D17).
@@ -712,7 +714,7 @@ Core's reference and schema hold what core's consumers read with the MFA package
 
 | Composition | Refused by | Names |
 | --- | --- | --- |
-| `mfaCoordinator` unfilled and `mfa.mode` not `off` (after the flip, an unset mode too) | core, `component-absence-undeclared` | `mfa.mode = "off"`, and what is lost |
+| `mfaCoordinator` unfilled and `mfa.mode` not `off` (after the flip, an unset mode too) *(superseded 2026-09-28: no such slot; `session-requirement-missing` and `session-requirements-undeclared` take its place — the amendment at the end of this section)* | core, `component-absence-undeclared` | `mfa.mode = "off"`, and what is lost |
 | MFA installed, `mfa.mode` `off` or unset | `mfaModule` | "remove the module, or set `mfa.mode` to `required` or `optional`" |
 | MFA installed, no `mailSender`, `mfa.notices` not `"none"` | core, `component-absence-undeclared` | `mfa.notices = "none"` or the SMTP keys |
 | `required`, no counting factor enabled | `mfaModule` (`mfa-no-counting-factor`) | the `mfa.factors.*.enabled` keys |
