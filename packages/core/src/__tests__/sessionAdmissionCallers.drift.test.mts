@@ -463,7 +463,7 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		const home = [...sites].filter(([file]) => file.startsWith(HOME));
 		expect(home.length).toBeGreaterThan(0);
 		const inHome = counted(home.flatMap(([, s]) => s));
-		// The four builders, and the contract suite's own live input.
+		// The five builders — cookie, the code's two reads, link, token — and the contract suite's own live input.
 		expect(inHome.claim).toBe(6);
 		expect(inHome.selectAcr).toBe(1);
 		expect(inHome.get).toBe(1);

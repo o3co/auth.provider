@@ -142,7 +142,9 @@ const interrupting = (
 const deps = (requirements: SessionRequirement[], logger?: Logger): AdmissionDeps => ({
 	userSessionStore: undefined,
 	subjectRevocation: undefined,
-	requirements: resolverForTests(requirements),
+	// The mechanics over a reaching `risk` fixture; the boot-shaped case is in
+	// boot/__tests__/session-requirements.test.mts.
+	requirements: resolverForTests(requirements, { allowAnyReach: true }),
 	acrTable: readAcrTable({}),
 	logger,
 	auditSink: undefined,

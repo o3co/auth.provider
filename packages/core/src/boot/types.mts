@@ -1097,6 +1097,11 @@ export interface SessionRequirementsUndeclaredDetails {
 	readonly registered: readonly string[];
 	/** The modules that require or read `sessionRequirementResolver`. */
 	readonly consumedBy: readonly string[];
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
 }
 
 /**
@@ -1109,6 +1114,11 @@ export interface SessionRequirementMissingDetails {
 	readonly configKey: "mfa.mode";
 	readonly mode: string;
 	readonly requirement: "mfa";
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
 }
 
 /**

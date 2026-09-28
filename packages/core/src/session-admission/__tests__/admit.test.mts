@@ -153,6 +153,10 @@ const deps = (over: Partial<AdmissionDeps> = {}): AdmissionDeps => ({
 	...over,
 });
 
+/** A resolver over reaching non-mfa fixtures: a test of admission's own mechanics, the reach rules boot holds lifted. */
+const anyReach = (requirements: SessionRequirement[]) =>
+	resolverForTests(requirements, { allowAnyReach: true });
+
 const request = (over: Partial<AdmissionRequest> = {}): AdmissionRequest => ({
 	claim: cookie(),
 	action: ADMISSION_ACTIONS["oauth.authorize"],
@@ -1047,7 +1051,7 @@ describe("step 5 — the requirements", () => {
 					page: { url: "/evil", params: {} },
 				}) as never,
 		} satisfies SessionRequirement;
-		const requirements = resolverForTests([requirement]);
+		const requirements = anyReach([requirement]);
 		expect(reads).toBe(1);
 		expect(
 			await admitSession(deps({ userSessionStore: holding(record), requirements }), request()),
@@ -1097,7 +1101,7 @@ describe("step 5 — the requirements", () => {
 		});
 		const without = deps({
 			userSessionStore: undefined,
-			requirements: resolverForTests([stepping]),
+			requirements: anyReach([stepping]),
 			logger,
 		});
 		expect(await admitSession(without, request())).toEqual({
@@ -1136,11 +1140,11 @@ describe("step 5 — the requirements", () => {
 				deps({ userSessionStore: holding(record), requirements, acrTable }),
 				request({ asks: { acrValues: ["urn:o3co:acr:mfa"] } }),
 			);
-		const sealedEmpty = resolverForTests([late]);
+		const sealedEmpty = anyReach([late]);
 		expect(await ask(sealedEmpty)).toMatchObject({ outcome: "unmet", requirement: "acr" });
 		reach.add("mfa");
 		expect(await ask(sealedEmpty)).toMatchObject({ outcome: "unmet", requirement: "acr" });
-		expect(await ask(resolverForTests([late]))).toMatchObject({
+		expect(await ask(anyReach([late]))).toMatchObject({
 			outcome: "step_up",
 			requirement: "late",
 		});
@@ -1181,7 +1185,7 @@ describe("step 5 — the requirements", () => {
 				await admitSession(
 					deps({
 						userSessionStore: holding(record),
-						requirements: resolverForTests([requirement]),
+						requirements: anyReach([requirement]),
 					}),
 					request(),
 				),
@@ -1286,7 +1290,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 	const table = readAcrTable({ "urn:o3co:acr:mfa": ["mfa"], "urn:example:pwd": ["pwd"] });
 
 	it("selects over the vouched amr, with reach the union of every requirement's reach when the session is live", async () => {
-		const requirements = resolverForTests([
+		const requirements = anyReach([
 			met("a", { reach: new Set(["risk-ok"]), stepUpPage: { url: "/a", params: {} } }),
 			met("b", { reach: new Set(["mfa"]), stepUpPage: { url: "/b", params: {} } }),
 		]);
@@ -1305,7 +1309,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 	});
 
 	it("reaches nothing without a session: nothing can be stepped up onto no session", async () => {
-		const requirements = resolverForTests([
+		const requirements = anyReach([
 			met("b", { reach: new Set(["mfa"]), stepUpPage: { url: "/b", params: {} } }),
 		]);
 		expect(

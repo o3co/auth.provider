@@ -37,6 +37,7 @@ import type { UserSession, UserSessionStore } from "../../user-sessions/types.mj
 import { readAcrTable } from "../acr.mjs";
 import { admitPrimary, admitSession, cookieClaim } from "../admit.mjs";
 import {
+	ADMISSION_ACTIONS,
 	checkStepUpPage,
 	isHintKey,
 	MFA_REQUIREMENT_NAME,
@@ -181,7 +182,7 @@ export function sessionRequirementContract(
 			},
 		},
 		{
-			name: "remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade",
+			name: "remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
 			run: async () => {
 				// Registration holds the rule; a fixture that breaks it does not register.
 				const { name, remediations } = registeredRequirement(build(), issuer);
@@ -189,6 +190,10 @@ export function sessionRequirementContract(
 					assert.ok(
 						remediation.startsWith(`${name}.`),
 						`"${remediation}" is not a route of "${name}"`,
+					);
+					assert.ok(
+						!Object.hasOwn(ADMISSION_ACTIONS, remediation),
+						`"${remediation}" is a consumer's action: registered as a remediation it would skip every requirement for it`,
 					);
 				}
 				assert.equal(
@@ -319,6 +324,13 @@ export function sessionRequirementContract(
 						auditSink: undefined,
 					},
 					primary,
+				);
+				// A primary the fixture establishes for makes this case vacuous:
+				// said so, rather than passed.
+				assert.equal(
+					admission.outcome,
+					"interrupt",
+					`the fixture's admitPrimary answered ${admission.outcome} for the primary given, so its interruption cannot be checked: hand in a primary it interrupts, or leave \`primary\` out`,
 				);
 				if (admission.outcome !== "interrupt") return;
 				// Core's validation of the answer is what holds the body to its

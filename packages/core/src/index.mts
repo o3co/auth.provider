@@ -848,6 +848,7 @@ export {
 	admitSession,
 	type CodeCarrier,
 	type CookieCarrier,
+	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
@@ -863,12 +864,9 @@ export {
 	tokenClaim,
 } from "./session-admission/admit.mjs";
 export {
-	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
-	continuationOf,
-	primaryFromDto,
 } from "./session-admission/primary.mjs";
 export {
 	ADMISSION_ACTIONS,
@@ -898,13 +896,11 @@ export {
 	type RequirementInterruption,
 	type RequirementSession,
 	type RequirementVerdict,
-	registeredRequirement,
 	type SessionClaim,
 	type SessionRequirement,
 	type SessionRequirementResolver,
 	type SessionView,
 	type StepUpPage,
-	sealRegisteredReach,
 } from "./session-admission/requirement.mjs";
 // The token-exchange validator port (#626 P1). `ExchangeTokenValidator` is
 // exported with the manifest types below, as the contribution value type.

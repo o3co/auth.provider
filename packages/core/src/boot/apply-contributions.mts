@@ -39,6 +39,7 @@
  * Per A2-β §5.4.
  */
 
+import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { readMfaMode } from "../mfa/mode.mjs";
@@ -428,6 +429,25 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 				`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
 			);
 		}
+		// The values the MFA requirement's reach is recomputed from (D3): held
+		// here, so a factor written in JavaScript fails as a contribution, not
+		// as a raw TypeError at the end of the pass.
+		const amrValues = (value as { amrValues?: unknown }).amrValues;
+		if (
+			!Array.isArray(amrValues) ||
+			!amrValues.every((entry) => typeof entry === "string" && entry.length > 0)
+		) {
+			throw new RangeError(
+				`mfaFactors "${name}": the factor's amrValues must be a list of non-empty strings`,
+			);
+		}
+		for (const entry of amrValues as readonly string[]) {
+			if (entry === PASSWORD_AMR || entry === FEDERATED_AMR || entry === MFA_AMR) {
+				throw new RangeError(
+					`mfaFactors "${name}": the factor's amrValues name "${entry}", which no factor produces — a primary's marker, or mfa, which addsMfa says`,
+				);
+			}
+		}
 		return value;
 	}
 	if (kind === "sessionRequirements") {
@@ -603,7 +623,7 @@ async function checkSessionRequirements(
 	// module is told to install it, not to fix a list.
 	const mode = readMfaMode(config);
 	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
-		await runCleanupsReverse(material.cleanups);
+		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
 			message:
 				`mfa.mode = "${mode}" asks for a second factor, but no requirement named "${MFA_REQUIREMENT_NAME}" is registered: ` +
@@ -615,6 +635,7 @@ async function checkSessionRequirements(
 				configKey: "mfa.mode",
 				mode,
 				requirement: MFA_REQUIREMENT_NAME,
+				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
 			},
 		});
 	}
@@ -626,7 +647,7 @@ async function checkSessionRequirements(
 				? (declared as readonly string[])
 				: undefined;
 		if (declaredNames === undefined || !sameSet(new Set(declaredNames), new Set(registered))) {
-			await runCleanupsReverse(material.cleanups);
+			const cleanupErrors = await runCleanupsReverse(material.cleanups);
 			throw new BootError({
 				message:
 					`sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
@@ -641,6 +662,7 @@ async function checkSessionRequirements(
 					declared: declaredNames,
 					registered,
 					consumedBy,
+					...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
 				},
 			});
 		}
