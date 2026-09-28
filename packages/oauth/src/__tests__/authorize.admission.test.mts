@@ -664,6 +664,67 @@ describe("/authorize on admission — the step-up trip (the MFA ADR's D17, amend
 		).toBe("code-x");
 	});
 
+	it("prompt=login and a step-up in one ask: login trip, step-up trip, code — the login is not asked for again on the way back", async () => {
+		const { requirement, state } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const toLogin = loginRedirectTo(
+			await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+		);
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		clock.authTime = new Date();
+		const toStepUp = stepUpRedirect(
+			await authorize(harness.app, Object.fromEntries(toLogin.searchParams.entries())),
+		);
+		const back = new URL(toStepUp.searchParams.get("redirect_to") as string);
+		expect(back.searchParams.get("prompt")).toBe("login");
+		// The step-up ask carries the login ask's time: prompt=login is met by
+		// the login made during this request, not sent round again.
+		state.met = true;
+		expect(
+			codeOf(await authorize(harness.app, Object.fromEntries(back.searchParams.entries()))),
+		).toBe("code-x");
+	});
+
+	it("a session whose authentication is exactly as old as the trip was sent is refused, not sent again", async () => {
+		// "Not later than" the ask, to the millisecond: an authentication made
+		// at the instant the trip was recorded is not one made after it.
+		const { requirement } = steppingUp();
+		const clock = { authTime: minutesAgo(5) };
+		const harness = await makeApp({
+			userSessionStore: storeAnswering(async () => record({ authTime: clock.authTime })),
+			requirements: [requirement],
+		});
+		const first = stepUpRedirect(await authorize(harness.app, baseQuery));
+		const back = new URL(first.searchParams.get("redirect_to") as string);
+		const askId = back.searchParams.get("reauth_ask") as string;
+		const ask = (harness.records.get(`reauth:${askId}`) as { reauth: Record<string, unknown> })
+			.reauth as { stepUpAskedAt: Record<string, number> };
+		clock.authTime = new Date(ask.stepUpAskedAt.fixture as number);
+		const params = redirectParams(
+			await authorize(harness.app, Object.fromEntries(back.searchParams.entries())),
+		);
+		expect(params.get("error")).toBe("login_required");
+	});
+
+	it("freshness first: an acr nothing can meet, asked with a stale max_age, is sent to log in before it is refused", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record({ authTime: minutesAgo(5) })),
+			oauth: { authorize: { acrValues: { "urn:example:mfa": ["pwd", "mfa"] } } },
+		});
+		const back = loginRedirectTo(
+			await authorize(harness.app, {
+				...baseQuery,
+				acr_values: "urn:example:mfa",
+				max_age: "60",
+			}),
+		);
+		expect(back.searchParams.get("reauth_ask")).toBeTruthy();
+	});
+
 	it("the page's URL is built with searchParams: a page whose url already carries a query keeps it, and redirect_to is one parameter", async () => {
 		const { requirement } = steppingUp("reauthenticate", {
 			url: `${ISSUER}/step-up?tenant=x`,

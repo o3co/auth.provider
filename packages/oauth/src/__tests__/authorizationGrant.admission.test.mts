@@ -308,6 +308,7 @@ describe("the authorization_code grant on admission — the first read (D8)", ()
 				}).handler,
 			);
 			expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+			expect(result.errorDescription).toMatch(/fixture/);
 			expect(result.step_up).toBeUndefined();
 		}
 	});
