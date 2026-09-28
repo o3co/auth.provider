@@ -782,13 +782,13 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		file: "packages/session/src/routes/Federation.mts",
 		read: "profile.amr",
 		count: 3,
-		why: "what the upstream IdP asserted on the profile, handed to federatedSessionAuthentication",
+		why: "what the upstream IdP asserted on the profile, handed to establishWithoutAsking, which composes the record through federatedSessionAuthentication",
 	},
 	{
 		file: "packages/session/src/establish-session.mts",
 		read: "...recorded",
 		count: 1,
-		why: "the amr and authentication core composes for a login (passwordSessionAuthentication in routes/Session.mts, federatedSessionAuthentication in routes/Federation.mts), handed whole to the login tail both routes share and spread into create there",
+		why: "the amr and authentication core composed for a login, read off the Establishment's primary (passwordPrimary through admitPrimary, establishWithoutAsking, resumePrimary) and spread into create by the login tail",
 	},
 	{
 		file: "packages/session/src/modules/sessionStoreModule.mts",
