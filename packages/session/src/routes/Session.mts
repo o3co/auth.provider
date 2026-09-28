@@ -565,7 +565,6 @@ export const createRouter = (
 				if (admission.outcome === "interrupt") {
 					return answerInterruption(req, res, admission);
 				}
-				const { primary } = admission.establishment;
 
 				// The tail of the login — the `UserSession` record, its subject-index
 				// entry, the express session's regeneration, its authenticated state
@@ -575,49 +574,41 @@ export const createRouter = (
 				// `login_store_unavailable`, and a rollback step that failed one warn,
 				// `login_cleanup_failed`. The login answers `503`, with everything
 				// written rolled back and the request's cookie session dropped.
-				const established = await establishSession(
-					{
-						user,
-						claims: primary.claims,
-						authTime: primary.authTime,
-						// #481, the MFA ADR's D9: a password login — `amr` `["pwd"]`
-						// (RFC 8176), primary `pwd`, no second factor verified.
-						recorded: primary.recorded,
-						...(primary.redirectTo ? { redirectTo: primary.redirectTo } : {}),
+				// What it writes is the establishment's primary: for a password
+				// login (#481, the MFA ADR's D9) `amr` `["pwd"]` (RFC 8176), primary
+				// `pwd`, no second factor verified — composed by core, never here.
+				const established = await establishSession(admission.establishment, {
+					req,
+					...(userSessionStore === undefined ? {} : { userSessionStore }),
+					...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
+					sessionTtlMs,
+					reporter: ({ sid, sub }) => {
+						// Every line names the sid where there is one; the record's
+						// create and the index removal name the subject beside it.
+						const named = sid === undefined ? {} : { sid };
+						return {
+							storeUnavailable: (store, step, cause) =>
+								loginStoreUnavailable(
+									store,
+									step,
+									cause,
+									step === "create" ? { ...named, sub } : named,
+								),
+							cleanupFailed: (store, step, cause) =>
+								loginCleanupFailed(
+									store,
+									step,
+									cause,
+									step === "remove_sid" ? { ...named, sub } : named,
+								),
+							subjectIndexWriteFailed: (cause) =>
+								logger.error(
+									{ err: loggableError(cause), sub, ...named },
+									"subject_session_index_write_failed",
+								),
+						};
 					},
-					{
-						req,
-						...(userSessionStore === undefined ? {} : { userSessionStore }),
-						...(subjectSessionIndex === undefined ? {} : { subjectSessionIndex }),
-						sessionTtlMs,
-						reporter: ({ sid, sub }) => {
-							// Every line names the sid where there is one; the record's
-							// create and the index removal name the subject beside it.
-							const named = sid === undefined ? {} : { sid };
-							return {
-								storeUnavailable: (store, step, cause) =>
-									loginStoreUnavailable(
-										store,
-										step,
-										cause,
-										step === "create" ? { ...named, sub } : named,
-									),
-								cleanupFailed: (store, step, cause) =>
-									loginCleanupFailed(
-										store,
-										step,
-										cause,
-										step === "remove_sid" ? { ...named, sub } : named,
-									),
-								subjectIndexWriteFailed: (cause) =>
-									logger.error(
-										{ err: loggableError(cause), sub, ...named },
-										"subject_session_index_write_failed",
-									),
-							};
-						},
-					},
-				);
+				});
 				if (established.outcome === "unavailable") {
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}

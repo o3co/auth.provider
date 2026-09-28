@@ -15,23 +15,34 @@
  */
 
 /**
- * The tail of a login, as one function. `establishSession` turns a user the
- * route has verified into a `UserSession` record and an authenticated express
- * session, and undoes what it wrote when a store fails along the way. Both
- * login paths call it — `POST /session/login` (`routes/Session.mts`) and the
- * federation callback (`routes/Federation.mts`) — and nothing else does: it
- * is the package's own, not exported. What only one of them writes beside
- * the record (a federation's index entry, its upstream tokens) is a step the
- * caller supplies; what each of them logs is a reporter the caller supplies,
- * so the two routes' log vocabularies stay their own.
+ * The tail of a login, as one function. `establishSession` turns the
+ * `Establishment` core's session admission built — the capability to
+ * establish, which only `admitPrimary`, `resumePrimary` and
+ * `establishWithoutAsking` make (the session-admission ADR's D5) — into a
+ * `UserSession` record and an authenticated express session, and undoes what
+ * it wrote when a store fails along the way. It writes from
+ * `establishment.primary` alone — the subject, the user, the claims,
+ * `authTime`, the `amr` / `authentication` core composed, the `redirectTo` —
+ * and nothing a caller passes beside it: what a session vouches for is what
+ * admission established. Both login paths call it — `POST /session/login`
+ * (`routes/Session.mts`) and the federation callback
+ * (`routes/Federation.mts`) — and it is exported so a requirement's
+ * completion (the MFA package's, after `resumePrimary`) finishes a login the
+ * same way. What only one caller writes beside the record (a federation's
+ * index entry, its upstream tokens) is a step it supplies; what each caller
+ * logs is a reporter it supplies, so their log vocabularies stay their own.
+ *
+ * Anything that is not an `Establishment` core built — an object shaped like
+ * one, a copy of one — is a `RangeError` before anything is written: the
+ * caller's fault, never an outage.
  *
  * The sequence, and the rollback at each point it can fail:
  *
  * 1. `UserSessionStore.create`. A `sid` is minted, the reporter is built with
- *    it before anything is written, and the record carries the claims,
- *    `authTime`, `expiresAt` (`authTime` plus the session lifetime) and the
- *    `amr` / `authentication` the caller recorded. Fails: reported as
- *    `user_session` / `create`; nothing to undo.
+ *    it before anything is written, and the record carries the primary's
+ *    claims, `authTime`, `expiresAt` (`authTime` plus the session lifetime)
+ *    and its `amr` / `authentication`. Fails: reported as `user_session` /
+ *    `create`; nothing to undo.
  * 2. `SubjectSessionIndex.addSid`, when wired — best-effort: a failure is
  *    reported (`subjectIndexWriteFailed`) and the login proceeds. Written
  *    here, at the earliest point the session exists, because the two failure
@@ -48,8 +59,9 @@
  * 5. The caller's `afterRegenerate` steps, in order — what needs the
  *    regenerated session to exist first. One that fails: as 3, and the cookie
  *    session dropped.
- * 6. `isAuthenticated`, `user`, `sid` (when there is a record) and
- *    `redirectTo` (when the login carried one) on the regenerated session.
+ * 6. `isAuthenticated`, the primary's `user`, `sid` (when there is a record)
+ *    and the primary's `redirectTo` (when it carries one) on the regenerated
+ *    session.
  * 7. `req.session.save`, before the route answers: a store that cannot save
  *    it is the route's `503`, never a `200` for a session the next request
  *    would not find. Fails: as 5.
@@ -75,12 +87,11 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type {
-	RecordedAuthentication,
-	SubjectSessionIndex,
-	User,
-	UserSessionClaims,
-	UserSessionStore,
+import {
+	type Establishment,
+	isEstablishment,
+	type SubjectSessionIndex,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
 // The augmentation below extends express-session's `SessionData`. Naming the
@@ -101,29 +112,6 @@ declare module "express-session" {
 		/** The `UserSession` record's id, written by {@link establishSession} when a record was created. */
 		sid?: string;
 	}
-}
-
-/** What a login verified, and what the session it establishes records. */
-export interface EstablishSessionInput {
-	/**
-	 * The user the login verified: `user.id` is the session's subject, and
-	 * the object is what the express session keeps as `user`.
-	 */
-	readonly user: User;
-	/**
-	 * The claims envelope the record is created with — the local claims, and
-	 * a federation's merged under claim precedence where there is one.
-	 */
-	readonly claims: UserSessionClaims;
-	/** When the user authenticated: the record's `authTime`, and what its expiry counts from. */
-	readonly authTime: Date;
-	/**
-	 * The `amr` and `authentication` the record is created with — core's
-	 * `passwordSessionAuthentication()` or `federatedSessionAuthentication(…)`.
-	 */
-	readonly recorded: RecordedAuthentication;
-	/** Kept on the express session as `redirectTo`, when the login carried one its allowlist accepted. */
-	readonly redirectTo?: string;
 }
 
 /** The record a login's tail wrote, as the caller's steps see it. */
@@ -204,23 +192,29 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 	  };
 
 /**
- * Establish the session a login verified: the `UserSession` record, its
- * subject-index entry, the caller's steps, the express session's
- * regeneration, its authenticated state and its save — the sequence, and the
- * rollback at each point it can fail, are in this file's header. Answers
- * `established` with the record's `sid` (`undefined` without a store), or
- * `unavailable` naming the store and the step that could not answer, after
- * everything written was rolled back and — from the regeneration on — the
- * request's cookie session dropped. The caller answers the response either
- * way; the reporter it supplied has already been told what to log.
+ * Establish the session admission established: from `establishment.primary`
+ * alone, the `UserSession` record, its subject-index entry, the caller's
+ * steps, the express session's regeneration, its authenticated state and its
+ * save — the sequence, and the rollback at each point it can fail, are in
+ * this file's header. Answers `established` with the record's `sid`
+ * (`undefined` without a store), or `unavailable` naming the store and the
+ * step that could not answer, after everything written was rolled back and —
+ * from the regeneration on — the request's cookie session dropped. The
+ * caller answers the response either way; the reporter it supplied has
+ * already been told what to log. Rejects with a `RangeError`, before anything
+ * is written, when `establishment` is not one core built.
  */
 export async function establishSession<S extends string = never, T extends string = never>(
-	input: EstablishSessionInput,
+	establishment: Establishment,
 	deps: EstablishSessionDeps<S, T>,
 ): Promise<EstablishSessionResult<S, T>> {
+	if (!isEstablishment(establishment)) {
+		throw new RangeError(
+			"establishSession: the establishment must be one admitPrimary, resumePrimary or establishWithoutAsking built",
+		);
+	}
 	const { req, userSessionStore, subjectSessionIndex, sessionTtlMs } = deps;
-	const { user, claims, authTime, recorded, redirectTo } = input;
-	const sub = user.id;
+	const { subject: sub, user, claims, authTime, recorded, redirectTo } = establishment.primary;
 
 	// The record is minted before it is written, so the reporter and every
 	// line it emits can name the sid from the first write on.

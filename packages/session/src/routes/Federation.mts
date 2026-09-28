@@ -1235,12 +1235,7 @@ export const createRouter = (
 			request: loginRequestFacts(req),
 		});
 		const established = await establishSession<FederationStore, FederationStoreStep>(
-			{
-				user,
-				claims: establishment.primary.claims,
-				authTime: establishment.primary.authTime,
-				recorded: establishment.primary.recorded,
-			},
+			establishment,
 			{
 				req,
 				userSessionStore,
