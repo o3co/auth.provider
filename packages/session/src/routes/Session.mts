@@ -41,10 +41,8 @@ import {
 	createMemoryRateLimiter,
 	createRateLimitGuard,
 	type FederationTokenStore,
-	type InterruptionAnswer,
 	type Logger,
 	loggableError,
-	type PrimaryAdmission,
 	passwordPrimary,
 	type RateLimiter,
 	type SessionFederationIndex,
@@ -55,6 +53,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
+import { answerInterruption } from "../answer-interruption.mjs";
 import {
 	type CsrfProtection,
 	createCsrfGuard,
@@ -64,9 +63,7 @@ import {
 } from "../csrf.mjs";
 import { establishSession } from "../establish-session.mjs";
 import {
-	abandonCookieSession,
 	SESSION_STORE_UNAVAILABLE,
-	sessionOperation,
 	USER_DIRECTORY_UNAVAILABLE,
 } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
@@ -444,55 +441,6 @@ export const createRouter = (
 		logger.warn({ ...context, store, step, err: loggableError(cause) }, "login_cleanup_failed");
 	};
 
-	/**
-	 * A requirement interrupted the login (the session-admission ADR's D5):
-	 * the two phases, because the express session is regenerated between
-	 * them. Regenerate — a fresh session id, unauthenticated: no
-	 * `isAuthenticated`, `user`, `sid` or `redirectTo` is written — then open
-	 * the requirement's ceremony bound to that id, which persists the
-	 * continuation core built, then save, then answer the requirement's `403`
-	 * with the closed body core validated, and a fresh CSRF token as a
-	 * successful login gets one (the MFA ADR's D27). No `UserSession` is
-	 * written and `establishSession` is never reached: the requirement's
-	 * completion establishes the session, through `resumePrimary`.
-	 *
-	 * From the regeneration on, a failure drops the request's cookie session
-	 * (`abandonCookieSession`) and answers `503`: the regeneration's own
-	 * store; `open` throwing — the requirement's outage, or an answer core
-	 * refused, which is the requirement's fault and answered the same way —
-	 * logged under the requirement's name; the save, after which the
-	 * requirement's record is left to its own expiry, bound to a session id
-	 * no browser holds.
-	 */
-	const answerInterruption = async (
-		req: Request,
-		res: Response,
-		admission: Extract<PrimaryAdmission, { outcome: "interrupt" }>,
-	) => {
-		const regenerated = await sessionOperation((done) => req.session.regenerate(done));
-		if (regenerated.failed) {
-			loginStoreUnavailable("cookie_session", "regenerate", regenerated.cause);
-			abandonCookieSession(req);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-		let answer: InterruptionAnswer;
-		try {
-			answer = await admission.open(req.sessionID);
-		} catch (err) {
-			loginStoreUnavailable(admission.requirement, "open", err);
-			abandonCookieSession(req);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-		const saved = await sessionOperation((done) => req.session.save(done));
-		if (saved.failed) {
-			loginStoreUnavailable("cookie_session", "save", saved.cause);
-			abandonCookieSession(req);
-			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-		}
-		csrfProtection.issue(res);
-		return res.status(answer.status).json(answer.body);
-	};
-
 	router
 		// This router's own paths, exactly: it is mounted at `/session`, a prefix
 		// other modules mount routes under too, and a `.use` parser would read
@@ -563,7 +511,21 @@ export const createRouter = (
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}
 				if (admission.outcome === "interrupt") {
-					return answerInterruption(req, res, admission);
+					// A requirement interrupted the login: regenerate, open its
+					// ceremony bound to the regenerated session, save, and answer its
+					// `403` with a fresh CSRF token — or `503`, the cookie session
+					// dropped, logged once as `login_store_unavailable`
+					// (`../answer-interruption.mts`, which a requirement's completion
+					// calls too). No `UserSession` is written here.
+					await answerInterruption(admission, {
+						req,
+						res,
+						csrf: csrfProtection,
+						reporter: {
+							storeUnavailable: (store, step, cause) => loginStoreUnavailable(store, step, cause),
+						},
+					});
+					return;
 				}
 
 				// Every requirement answered `establish`. The tail of the login — the

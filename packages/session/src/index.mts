@@ -18,6 +18,17 @@
 // only for a federation that trusts it, the MFA ADR's D13). Core's since the
 // MFA ADR; re-exported so an import from here keeps working.
 export { FEDERATED_AMR } from "@o3co/auth-provider-core";
+// The session-admission ADR's D5 — the answer to a login a session requirement
+// interrupted: the login route's, and a requirement's completion's when
+// `resumePrimary` answers another requirement's interruption.
+export {
+	type AnswerInterruptionDeps,
+	type AnswerInterruptionResult,
+	answerInterruption,
+	type InterruptAdmission,
+	type InterruptionReporter,
+	type InterruptionStep,
+} from "./answer-interruption.mjs";
 // #272 — CSRF protection for the state-changing session routes. Exported so a
 // composition root can issue tokens from its own login page, or mount the same
 // guard on routes this package does not own.
