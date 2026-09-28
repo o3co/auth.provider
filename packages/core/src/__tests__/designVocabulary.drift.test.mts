@@ -858,6 +858,24 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: "the code repository's adapter settings, the base of a pinned spread into its factory's create",
 	},
+	{
+		file: "packages/redis/src/mfa-factor-store.mts",
+		read: "value=`${record.version}\\n${fixedPart(record)}\\n${mutablePart(record)}`",
+		count: 1,
+		why: "the MFA factor store's client create (HSETNX), handed the text of the factor record it was given: a second factor's, no session record",
+	},
+	{
+		file: "packages/redis/src/mfa-transaction-store.mts",
+		read: "record=newMfaTransactionRecord(tx)",
+		count: 1,
+		why: "the MFA transaction store's client create, handed (through fieldsOf) the transaction newMfaTransactionRecord checked: its continuation's recorded amr is the primary's as core's builders composed it (continuationOf, the session-admission ADR's D5), never read off a session record",
+	},
+	{
+		file: "packages/redis/src/mfa-transaction-store.mts",
+		read: 'incarnation=randomBytes(16).toString("base64url")',
+		count: 1,
+		why: "the random value the MFA transaction store's create writes (through fieldsOf) for its update's compare-and-set: no session record",
+	},
 ];
 
 /** The names a session record's reading is kept to. */
