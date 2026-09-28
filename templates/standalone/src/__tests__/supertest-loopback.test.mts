@@ -206,6 +206,36 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect((await second).status).toBe(200);
 	});
 
+	it("joins the bind another request made since, for a request built before the server was closed (#703)", async () => {
+		// Built on the first bind, sent while a later request is being served
+		// on the second: it joins that bind — one server, two requests in
+		// flight — and the server closes once, after the last of them.
+		const held = holdingApp();
+		const server = http.createServer(held.app);
+		const closes = recordCloses(server, held);
+		const agent = request.agent(server);
+
+		const early = agent.get("/hold/early");
+		const first = agent.get("/hold/first").then((res) => res);
+		await held.arrived("first");
+		held.release("first");
+		expect((await first).text).toBe("first");
+		expect(server.listening).toBe(false);
+
+		const second = agent.get("/hold/second").then((res) => res);
+		await held.arrived("second");
+		const earlySent = early.then((res) => res);
+		await held.arrived("early");
+		held.release("second");
+		expect((await second).text).toBe("second");
+		expect(server.listening).toBe(true);
+		held.release("early");
+
+		expect((await earlySent).text).toBe("early");
+		expect(closes).toEqual([[], []]);
+		expect(server.listening).toBe(false);
+	});
+
 	it("serves a request built on a bind that failed, once another request has bound the server again (#703)", async () => {
 		// The first `listen` lands on a port another socket holds; the bind
 		// fails, and the request built on it is not sent until a later request
