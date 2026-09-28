@@ -1288,6 +1288,33 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(sessionRecordReads("const o = { sub, aud }; generateIdToken(o);")).toHaveLength(0);
 	});
 
+	it("looks through a call that is not a taker to the object it is handed: formatObject({ … }) is checked like the literal", () => {
+		for (const source of [
+			"generateToken(formatObject({ family_id, ...liveSession }), o);",
+			"generateToken(formatObject(merge({ ...liveSession })), o);",
+			"const payload = { ...liveSession }; generateToken(formatObject(payload), o);",
+		]) {
+			expect(sessionRecordReads(source), source).toHaveLength(1);
+		}
+		expect(
+			sessionRecordReads(
+				"generateToken(formatObject({ family_id, ...(sid ? { sid } : {}), act: buildActClaim(actor) }), o);",
+			),
+		).toHaveLength(0);
+	});
+
+	it("follows a local handed whole to the signer for its spreads, and leaves a key handed to another library's sign alone", () => {
+		expect(
+			sessionRecordReads("const req = { claims: { ...session } }; await keyStore.sign(req);"),
+		).toHaveLength(1);
+		for (const source of [
+			"const key = await importPKCS8(pem, alg); await new SignJWT(payload).sign(key);",
+			"const key = createSecretKey(secret); crypto.sign(null, data, key);",
+		]) {
+			expect(sessionRecordReads(source), source).toHaveLength(0);
+		}
+	});
+
 	it("pins an allowed read to its file, its receiver and its count: a swap or a second one fails", () => {
 		const allowed = [{ file: "f.mts", read: "claims.amr", count: 1, why: "a test's" }];
 		expect(
