@@ -1359,6 +1359,55 @@ export interface FederationGrantIntentStoreClient {
 	finishIntent(prefix: string, handle: string, nowMs: number): Promise<void>;
 }
 
+// --- MfaFactorStoreClient (the MFA ADR's D7) --------------------------------
+
+/**
+ * What an update writes over a factor record's version and its mutable part,
+ * each as the text the record keeps.
+ */
+export interface MfaFactorRecordUpdateInput {
+	/** The version the record must still be at, as decimal text. */
+	readonly expectedVersion: string;
+	/** The version it is at afterwards, as decimal text. */
+	readonly nextVersion: string;
+	/** The new mutable part: one line of JSON. */
+	readonly mutable: string;
+}
+
+/**
+ * Backing client for the `MfaFactorStore` adapter (the MFA ADR's D7): one
+ * hash per subject, a field per factor.
+ *
+ * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
+ * `<version>` is decimal text and `<fixed>` and `<mutable>` are one line of
+ * JSON each (`JSON.stringify` never writes a raw line feed). The split is what
+ * lets `update` be one indivisible step that never decodes the JSON: it
+ * compares the version as text, keeps the fixed part byte for byte, and
+ * writes the new version and mutable part beside it. A script that decoded
+ * and re-encoded the record would change it — `cjson` writes an empty array
+ * as `{}` — so none does.
+ *
+ * Every operation touches the one key it is handed, so this client needs no
+ * hash tag to run on Cluster.
+ */
+export interface MfaFactorStoreClient {
+	/** Every field of the hash at `key` and its value (`HGETALL`); `{}` when there is none. */
+	list(key: string): Promise<Readonly<Record<string, string>>>;
+	/** Write `value` under `field` only while the field is absent (`HSETNX`). Resolves whether it wrote. */
+	create(key: string, field: string, value: string): Promise<boolean>;
+	/**
+	 * Atomically: while the value under `field` is at `input.expectedVersion`,
+	 * replace its version and mutable part, keep its fixed part, and resolve
+	 * the value as written; `null` when the field is absent, at another
+	 * version, or not three lines.
+	 */
+	update(key: string, field: string, input: MfaFactorRecordUpdateInput): Promise<string | null>;
+	/** Remove `field` (`HDEL`). Idempotent. */
+	remove(key: string, field: string): Promise<void>;
+	/** Remove the whole hash (`DEL`). Idempotent. */
+	removeAll(key: string): Promise<void>;
+}
+
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStoreClient?: ChallengeStoreClient;
@@ -1379,5 +1428,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly pendingConsentStoreClient?: PendingConsentStoreClient;
 		readonly federationGrantStoreClient?: FederationGrantStoreClient;
 		readonly federationGrantIntentStoreClient?: FederationGrantIntentStoreClient;
+		readonly mfaFactorStoreClient?: MfaFactorStoreClient;
 	}
 }

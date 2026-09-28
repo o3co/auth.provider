@@ -20,6 +20,7 @@ import type {
 	FederationGrantIntentStoreClient,
 	FederationGrantStoreClient,
 	FederationTokenStoreClient,
+	MfaFactorStoreClient,
 	PendingConsentStoreClient,
 	RateLimiterClient,
 	RateLimitIncrement,
@@ -1456,6 +1457,7 @@ export function makeIoredisClients(
 	deviceCodeStoreClient: DeviceCodeStoreClient;
 	consentStoreClient: ConsentStoreClient;
 	pendingConsentStoreClient: PendingConsentStoreClient;
+	mfaFactorStoreClient: MfaFactorStoreClient;
 } {
 	const logger = options.logger ?? consoleLogger;
 
@@ -2018,6 +2020,7 @@ export function makeIoredisClients(
 		deviceCodeStoreClient,
 		consentStoreClient,
 		pendingConsentStoreClient,
+		mfaFactorStoreClient: makeIoredisMfaFactorStoreClient(io),
 	};
 }
 
@@ -2579,6 +2582,64 @@ export function makeIoredisFederationGrantIntentStoreClient(
 
 		async finishIntent(prefix, handle, _nowMs) {
 			await runScript(connection, FGI_FINISH, [`${prefix}i:${handle}`], [prefix, handle]);
+		},
+	};
+}
+
+// --- MFA stores (the MFA ADR's D7, D8, D12) ---------------------------------
+
+/**
+ * `MfaFactorStoreClient.update` — the version compare-and-set.
+ *
+ * `KEYS[1]` = the subject's hash; `ARGV[1]` = the factor's field, `ARGV[2]` =
+ * the expected version, `ARGV[3]` = the next version, `ARGV[4]` = the new
+ * mutable part. Returns the value as written, or nil.
+ *
+ * The value is `<version>\n<fixed>\n<mutable>` (see `MfaFactorStoreClient`).
+ * The version is compared as text and the fixed part is carried over byte
+ * for byte: nothing here decodes the JSON, because `cjson` would write an
+ * empty array back as `{}` (the MFA ADR's D7).
+ */
+const LUA_MFA_FACTOR_UPDATE = `
+local current = redis.call('HGET', KEYS[1], ARGV[1])
+if not current then return false end
+local version, fixed = string.match(current, '^([^\\n]*)\\n([^\\n]*)\\n')
+if version ~= ARGV[2] or fixed == nil then return false end
+local written = ARGV[3] .. '\\n' .. fixed .. '\\n' .. ARGV[4]
+redis.call('HSET', KEYS[1], ARGV[1], written)
+return written
+`.trim();
+
+const MFA_FACTOR_UPDATE = defineScript(LUA_MFA_FACTOR_UPDATE);
+
+/**
+ * The `MfaFactorStore`'s client over one ioredis connection (the MFA ADR's
+ * D7). Also part of {@link makeIoredisClients}; built on its own so a
+ * deployment can keep enrolled factors on a dedicated database or instance,
+ * as D12's durability requirements prefer.
+ */
+export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient {
+	return {
+		async list(key) {
+			return await io.hgetall(key);
+		},
+		async create(key, field, value) {
+			return (await io.hsetnx(key, field, value)) === 1;
+		},
+		async update(key, field, input) {
+			const reply = await runScript(
+				io,
+				MFA_FACTOR_UPDATE,
+				[key],
+				[field, input.expectedVersion, input.nextVersion, input.mutable],
+			);
+			return typeof reply === "string" ? reply : null;
+		},
+		async remove(key, field) {
+			await io.hdel(key, field);
+		},
+		async removeAll(key) {
+			await io.del(key);
 		},
 	};
 }
