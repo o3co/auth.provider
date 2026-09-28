@@ -379,22 +379,19 @@ const subjectOf = (req: Request): string | null => {
 // is not asked to consent to a request that would fail anyway, and the
 // policy sees the request only once the user has allowed it.
 /**
- * The authorize request to come back to once the consent page has an
- * answer.
- *
- * Not `req.originalUrl`, for two reasons the review found (#527). A POST
- * carries its parameters in the body — `authorizeParams` reads them from
- * there — so the URL alone names no client, no `redirect_uri`, no PKCE, and
- * the resumed request would be a different, invalid one; the parameters are
- * written back into the query of the URL the browser returns to. And
- * `prompt=consent` is answered by this very round trip: carried back, it
- * would park the request again, forever. Every other prompt value is left
- * alone — `login` has its own one-shot ask, recorded on the session (#481).
+ * This authorization request as a GET URL on the issuer's origin: the path
+ * it arrived at, and its parameters — a GET's query, a POST's form body
+ * (`authorizeParams`) — written as the query, a repeated one once per value.
+ * What every page the browser is sent to returns it to — the consent page,
+ * the login page, a requirement's step-up page — and what an ask is bound
+ * to. Not `req.originalUrl` (#527): a POST carries its parameters in the
+ * body, so its URL alone names no client, no `redirect_uri`, no PKCE, and
+ * the browser would come back to a different, invalid request.
  */
-const resumeUrl = (ctx: AuthorizeContext): string => {
-	const url = new URL(buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl));
+const authorizeRequestUrl = (issuerOrigin: string, req: Request): URL => {
+	const url = new URL(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
 	url.search = "";
-	for (const [name, value] of Object.entries(authorizeParams(ctx.req))) {
+	for (const [name, value] of Object.entries(authorizeParams(req))) {
 		if (typeof value === "string") {
 			url.searchParams.append(name, value);
 		} else if (Array.isArray(value)) {
@@ -403,6 +400,19 @@ const resumeUrl = (ctx: AuthorizeContext): string => {
 			}
 		}
 	}
+	return url;
+};
+
+/**
+ * The authorize request to come back to once the consent page has an
+ * answer: this request (`authorizeRequestUrl`, which carries a POST's
+ * parameters back as the query), less `prompt=consent`, which this very
+ * round trip answers — carried back, it would park the request again,
+ * forever (#527). Every other prompt value is left alone — `login` has its
+ * own ask (#481), a record the ask parameter names.
+ */
+const resumeUrl = (ctx: AuthorizeContext): string => {
+	const url = authorizeRequestUrl(ctx.issuerOrigin, ctx.req);
 	const prompt = url.searchParams.get("prompt");
 	// Read as `resolvePrompt` read it; a malformed one was refused there, so
 	// it never reaches a consent page to be carried back from.
@@ -773,11 +783,13 @@ const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefine
  * record and the reasoning.
  */
 /**
- * The authorize request an ask is minted for and returned to: the canonical
- * URL without the ask parameter, so both sides agree by construction.
+ * The authorize request an ask is minted for and returned to: this request
+ * as a GET URL (`authorizeRequestUrl` — a POST's form body written as the
+ * query) without the ask parameter, so both sides agree by construction —
+ * the POST that sends the browser away and the GET it comes back as.
  */
 const askRequestOf = (ctx: AuthorizeContext): string => {
-	const url = new URL(buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl));
+	const url = authorizeRequestUrl(ctx.issuerOrigin, ctx.req);
 	url.searchParams.delete(REAUTH_ASK_PARAM);
 	return url.toString();
 };
@@ -1127,7 +1139,7 @@ const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise
 	loginRedirect(
 		ctx.res,
 		ctx.opts.loginUrl(),
-		buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl),
+		authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString(),
 	);
 };
 
@@ -1795,7 +1807,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// client and the parameters are validated below.
 		const claim = cookieClaim(req);
 		if (!claim.authenticated && !wantsSilentAuth) {
-			loginRedirect(res, opts.loginUrl(), buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
+			loginRedirect(res, opts.loginUrl(), authorizeRequestUrl(issuerOrigin, req).toString());
 			return;
 		}
 
