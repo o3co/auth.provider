@@ -44,9 +44,9 @@ import {
 	cookieClaim,
 	emitAuditEvent,
 	errorEnvelope,
+	establishWithoutAsking,
 	type FederationProvider,
 	type FederationTokenStore,
-	federatedSessionAuthentication,
 	federationTrustsUpstreamAmr,
 	type Logger,
 	linkClaim,
@@ -86,6 +86,7 @@ import {
 } from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { loginRequestFacts } from "../internal/loginRequest.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 
 declare module "express-session" {
@@ -1211,20 +1212,34 @@ export const createRouter = (
 					]
 				: [];
 
+		// The session-admission ADR's D5: the callback does not consult
+		// admission in this release — an interruption here would have to be a
+		// navigation, and the upstream tokens would have to travel in the
+		// requirement's record — so core builds its establishment without
+		// asking, from the federation's own facts. `recorded` is core's
+		// (`federatedSessionAuthentication`, the MFA ADR's D9 and D13): `fed`,
+		// with a trusted IdP's values beside it, or an untrusted one's kept
+		// apart for the record — decided under the name this callback resolved
+		// the provider by (`fed.name`, checked equal to the path's). No
+		// `redirectTo`: the callback redirects by its policy, below, and never
+		// wrote one on the session.
+		const establishment = establishWithoutAsking({
+			subject: user.id,
+			user,
+			claims,
+			federation: fed.name,
+			upstreamAmr: upstreamAmrOf(profile),
+			trusted: trustsUpstreamAmr.get(fed.name) === true,
+			authTime: new Date(),
+			redirectTo: undefined,
+			request: loginRequestFacts(req),
+		});
 		const established = await establishSession<FederationStore, FederationStoreStep>(
 			{
 				user,
-				claims,
-				authTime: new Date(),
-				// The MFA ADR's D9 and D13: `fed`, with a trusted IdP's values
-				// beside it, or an untrusted one's kept apart for the record —
-				// decided, and recorded, under the name this callback resolved
-				// the provider by (`fed.name`, checked equal to the path's).
-				recorded: federatedSessionAuthentication({
-					federation: fed.name,
-					upstreamAmr: upstreamAmrOf(profile),
-					trusted: trustsUpstreamAmr.get(fed.name) === true,
-				}),
+				claims: establishment.primary.claims,
+				authTime: establishment.primary.authTime,
+				recorded: establishment.primary.recorded,
 			},
 			{
 				req,

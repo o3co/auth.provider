@@ -1,0 +1,39 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * What a login's primary authentication records of the request it arrived
+ * on (the session-admission ADR's D5): the client address Express resolved
+ * under the deployment's `trust proxy`, and the `User-Agent` — each only when
+ * it is a string, as core's primary checks hold it. Both login paths build
+ * their primary with it: `POST /session/login` (`routes/Session.mts`) and the
+ * federation callback (`routes/Federation.mts`).
+ */
+
+import type { Request } from "express";
+
+/** The request's `ip` and `User-Agent`, each present only when it is a string. */
+export function loginRequestFacts(req: Request): {
+	readonly ip?: string;
+	readonly userAgent?: string;
+} {
+	const ip = req.ip;
+	const userAgent = req.get("user-agent");
+	return {
+		...(typeof ip === "string" ? { ip } : {}),
+		...(typeof userAgent === "string" ? { userAgent } : {}),
+	};
+}
