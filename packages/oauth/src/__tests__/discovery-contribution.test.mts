@@ -357,6 +357,14 @@ describe("acr_values_supported (#481)", () => {
 		expect(meta.metadata).not.toHaveProperty("acr_values_supported");
 	});
 
+	it("keeps claims_parameter_supported absent: only its acr use is refused, the rest ignored (the MFA ADR's D15)", async () => {
+		// OIDC Discovery defaults it to false, which is the truth: `/authorize`
+		// honours no `claims` request.
+		expect((await discoveryContribution()).metadata).not.toHaveProperty(
+			"claims_parameter_supported",
+		);
+	});
+
 	it("advertises every entry while a federation is installed: an upstream IdP may assert any value", async () => {
 		const meta = await discoveryContribution(
 			{ federationProviders: new Map([["google", {}]]) },

@@ -1817,3 +1817,109 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		expect(fields.unproducible[0]).not.toContain("\n");
 	});
 });
+
+describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => {
+	const REFUSAL = "request acr through acr_values";
+	const claims = (value: unknown) => JSON.stringify(value);
+
+	it.each([
+		["essential, for the id_token", { id_token: { acr: { essential: true, values: ["urn:x"] } } }],
+		["voluntary, for the id_token", { id_token: { acr: null } }],
+		["essential, for userinfo", { userinfo: { acr: { essential: true } } }],
+		["with a value, for userinfo", { userinfo: { acr: { value: "urn:x" } }, id_token: {} }],
+	])(
+		"refuses a request naming acr %s: it would be vouched for through a door the table does not guard",
+		async (_label, value) => {
+			// OIDC Core §5.5.1.1 lets an RP ask for `acr` here, essential or not;
+			// this server vouches for an acr only through `acr_values` and its
+			// table. Ignoring the request would hand back a token the RP reads as
+			// having honoured it — #284's rule for a security-relevant parameter.
+			const createCode = vi.fn(async () => ({
+				code: "code-x",
+				client_id: CLIENT_ID,
+				redirect_uri: REDIRECT_URI,
+			}));
+			const { app } = await makeApp({ createCode });
+			const params = redirectParams(await authorize(app, { ...baseQuery, claims: claims(value) }));
+			expect(params.get("error")).toBe("invalid_request");
+			expect(params.get("error_description")).toBe(REFUSAL);
+			expect(params.get("state")).toBe("xyz");
+			expect(createCode).not.toHaveBeenCalled();
+		},
+	);
+
+	it("ignores every other use of claims, as before", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, {
+			...baseQuery,
+			claims: claims({
+				id_token: { auth_time: { essential: true }, email: { acr: 1 } },
+				userinfo: { name: { essential: true } },
+				acr: { essential: true },
+			}),
+		});
+		expect(redirectParams(res).get("code")).toBe("code-x");
+	});
+
+	it.each([
+		["not JSON", "acr"],
+		["a JSON array", "[]"],
+		["a JSON string", '"acr"'],
+		["JSON null", "null"],
+		["a JSON number", "1"],
+	])("refuses claims that is %s: whether it names acr cannot be told", async (_label, value) => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, claims: value }));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe("claims is not a JSON object");
+	});
+
+	it("refuses a repeated claims parameter", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, claims: [claims({}), claims({})] }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe("claims must be a single string value");
+	});
+
+	it("refuses it on POST as on GET", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorizePost(app, { ...baseQuery, claims: claims({ id_token: { acr: null } }) }),
+		);
+		expect(params.get("error_description")).toBe(REFUSAL);
+	});
+
+	it("refuses before sending the browser to log in again", async () => {
+		// `prompt=login` would otherwise send the user through a login, only to
+		// refuse the request when they come back.
+		const store = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async () => ({
+				sid: "sid-1",
+				sub: "user-1",
+				authTime: new Date(Date.now() - 60_000),
+				createdAt: new Date(Date.now() - 60_000),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["pwd"],
+			})),
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		const harness = await makeApp({
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
+			userSessionStore: store,
+		});
+		const params = redirectParams(
+			await authorize(harness.app, {
+				...baseQuery,
+				prompt: "login",
+				claims: claims({ id_token: { acr: { essential: true } } }),
+			}),
+		);
+		expect(params.get("error_description")).toBe(REFUSAL);
+		expect(harness.records.size).toBe(0);
+	});
+});
