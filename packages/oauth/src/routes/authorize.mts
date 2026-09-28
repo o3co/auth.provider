@@ -15,7 +15,11 @@
  */
 
 import {
+	ADMISSION_ACTIONS,
+	type Admission,
+	type AdmissionDeps,
 	type AuditSink,
+	admitSession,
 	auditErrorList,
 	auditErrorText,
 	boundPolicyAudience,
@@ -24,6 +28,7 @@ import {
 	type CodeRepository,
 	type ConsentStore,
 	consentCovers,
+	cookieClaim,
 	deriveAudienceFromResources,
 	emitAuditEvent,
 	extractResourceParam,
@@ -41,15 +46,15 @@ import {
 	type PublicClient,
 	parseScopeTokens,
 	readSpaceDelimitedParameter,
-	requirementSession,
+	type SessionRequirementResolver,
+	type SubjectRevocation,
 	sanitizeErrorText,
-	selectAcr,
-	stepUpReach,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
+import { requireRequirements } from "../admission.mjs";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	PKCE_METHOD_S256,
@@ -57,7 +62,12 @@ import {
 } from "../grants/pkce.mjs";
 import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { newConsentChallenge, PENDING_CONSENT_TTL_MS } from "./consent.mjs";
-import { REAUTH_ASK_PARAM, type ReauthAskStore, reauthAskStoreFor } from "./reauthAsk.mjs";
+import {
+	REAUTH_ASK_PARAM,
+	type ReauthAskRecord,
+	type ReauthAskStore,
+	reauthAskStoreFor,
+} from "./reauthAsk.mjs";
 
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
@@ -96,76 +106,40 @@ export interface AuthorizeHandlerOptions {
 	/** The `oauth.*` knobs, resolved once at router composition (#328). */
 	readonly oauth: ResolvedOAuthOptions;
 	/**
-	 * R1b: the durable session store, so an express-session claiming
-	 * authentication can be checked against the `UserSession` record its `sid`
-	 * names. Optional for the same reason it is optional on the router: a
-	 * deployment without session-backed login has no record to check, and this
-	 * endpoint must keep working for it exactly as before.
+	 * The durable session store, which admission reads the cookie's session
+	 * from (the session-admission ADR's D2). Optional for the same reason it
+	 * is optional on the router: a deployment without session-backed login
+	 * has no record to read, and admission then decides on the cookie alone.
 	 */
 	readonly userSessionStore?: UserSessionStore;
+	/**
+	 * The subject-revocation boundary, which admission applies to the live
+	 * record when it is wired (D8, change 4): a session established before
+	 * the subject's sessions were revoked is refused here too, not only at
+	 * the token side.
+	 */
+	readonly subjectRevocation?: SubjectRevocation;
+	/**
+	 * The registered session requirements (D1): what admission asks about the
+	 * session. Required — `oauthModule` passes the synthetic key
+	 * `sessionRequirementResolver` through the router; a handler built by
+	 * hand without one is refused.
+	 */
+	readonly requirements: SessionRequirementResolver;
 }
 
+/** The parameter this endpoint adds to a page it sends the browser to, naming the request to come back to. */
+const REDIRECT_TO_PARAM = "redirect_to";
+
 /**
- * R1b — does the express-session's `sid` still name a live `UserSession`?
- *
- * `isAuthenticated` is a claim the browser's cookie makes; the `UserSession`
- * record is the fact. `/oauth/logout`'s cascade deletes the record, and a
- * store can also lose it to a restart or an out-of-band delete — after which
- * this endpoint went on minting codes carrying a dead `sid` that `/token`
- * refused with `invalid_grant`, leaving the browser in a login loop it was
- * never shown a login page to escape. This is the same read `/token` already
- * performs at redemption, moved to the point where "log in again" is still an
- * available answer.
- *
- * Returns `true` — authentication stands — in the two cases where there is
- * nothing to check: no store wired, or a session that recorded no `sid`
- * (a deployment whose login wiring predates it). Neither is evidence of a
- * dead session, and refusing them would revoke authentication from every such
- * deployment.
- *
- * A store that cannot answer fails CLOSED. Minting a code is an authorization
- * decision, and an outage is not a reason to make it. An interactive request
- * lands on the login page, where the user can act and the login path reports
- * its own outage. A `prompt=none` request is answered
- * `temporarily_unavailable` (RFC 6749 §4.1.2.1), not `login_required`:
- * that would tell the relying party the user is not signed in, a verdict the
- * outage cannot make. Either way the outage is logged once at error level as
- * `authorize_session_liveness_unavailable`, with the store and the projection.
- *
- * Callers MUST short-circuit on `isAuthenticated` first, so a genuinely
- * unauthenticated request still answers without touching any repository
- * (#284) — this function is only reached once the session claims otherwise.
+ * The login-page redirect with the request to come back to.
+ * `endpoints.login.url` may already carry a query string (e.g.
+ * `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
+ * otherwise — a second `?` would corrupt both parameters.
  */
-/**
- * The live `UserSession` behind the request's `sid`, when this composition
- * wires a store (#481 widened it from a boolean: `max_age`, `prompt=login`
- * and `acr_values` all read the record, not just its presence).
- *
- * `live: true, session: null` is the no-store composition — authenticated
- * on the cookie's word alone, with no `auth_time` to reason about.
- */
-const readLiveSession = async (
-	req: Request,
-	opts: AuthorizeHandlerOptions,
-): Promise<{
-	readonly live: boolean;
-	readonly session: UserSession | null;
-	/** The store could not answer: not live, and not a verdict either. */
-	readonly unavailable?: true;
-}> => {
-	const store = opts.userSessionStore;
-	const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
-	if (!store || sid === undefined) return { live: true, session: null };
-	try {
-		const session = await store.get(sid);
-		return { live: session != null, session };
-	} catch (err) {
-		opts.logger.error(
-			{ store: "user_session", sid, err: loggableError(err) },
-			"authorize_session_liveness_unavailable",
-		);
-		return { live: false, session: null, unavailable: true };
-	}
+const loginRedirect = (res: Response, loginUrl: string, target: string): void => {
+	const joiner = loginUrl.includes("?") ? "&" : "?";
+	res.redirect(`${loginUrl}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(target)}`);
 };
 
 /**
@@ -811,25 +785,76 @@ const askRequestOf = (ctx: AuthorizeContext): string => {
 type ReauthOutcome = "proceed" | "login" | "answered";
 
 /**
+ * The ask the request presents, consumed — spent, as #481's was, so a
+ * replay of the returned URL asks again rather than minting twice: `null`
+ * when none is presented, none is found, it names another request or has
+ * expired; `undefined` after an outage has been answered. Read only when a
+ * decision needs it — freshness asked for, or a step-up to send — so a
+ * request that asks for neither never touches the store, as before.
+ */
+const presentedAsk = async (
+	ctx: AuthorizeContext,
+	askStore: ReauthAskStore | undefined,
+): Promise<ReauthAskRecord | null | undefined> => {
+	const presented = ctx.params[REAUTH_ASK_PARAM];
+	if (typeof presented !== "string" || presented.length === 0 || askStore === undefined) {
+		return null;
+	}
+	try {
+		return await askStore.consume(presented, askRequestOf(ctx));
+	} catch (err) {
+		// The same rule the session read applies: an outage is not a decision
+		// either way.
+		ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
+		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		return undefined;
+	}
+};
+
+/** Writes an ask, or answers the outage and returns `null`. */
+const recordAsk = async (
+	ctx: AuthorizeContext,
+	askStore: ReauthAskStore,
+	record: ReauthAskRecord,
+): Promise<string | null> => {
+	try {
+		return await askStore.ask(record);
+	} catch (err) {
+		ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
+		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		return null;
+	}
+};
+
+/** The request to come back to, carrying the ask `askId` names. */
+const returnWithAsk = (askRequest: string, askId: string): string => {
+	const back = new URL(askRequest);
+	back.searchParams.set(REAUTH_ASK_PARAM, askId);
+	return back.toString();
+};
+
+/**
  * #481 — decide whether the session's authentication is fresh enough.
  *
  * `prompt=login` and a `max_age` the session's `auth_time` is older than
  * both mean "re-authenticate". The first time through, the browser is sent
- * to the login page with the request round-tripped and the marker set —
+ * to the login page with the request round-tripped and the ask recorded —
  * unless the RP asked for `prompt=none`, in which case the only honest
- * answer is `login_required`. When the marker is already on the request the
- * user has been to the login page: a session authenticated after the ask
- * satisfies both `prompt=login` and any `max_age` (it is as fresh as this
- * request), and one that was not is refused with `login_required` rather
- * than looped.
+ * answer is `login_required`. When the presented ask records a login trip
+ * the user has been to the login page: a session authenticated after the
+ * ask satisfies both `prompt=login` and any `max_age` (it is as fresh as
+ * this request), and one that was not is refused with `login_required`
+ * rather than looped. Decided on the session the admission carries, before
+ * its verdict is acted on (the MFA ADR's D17: freshness first).
  */
-const evaluateReauthentication = async (
+const evaluateReauthentication = (
 	ctx: AuthorizeContext,
 	prompt: PromptDirective,
 	maxAge: number | undefined,
 	session: UserSession | null,
 	askStore: ReauthAskStore | undefined,
-): Promise<ReauthOutcome> => {
+	ask: ReauthAskRecord | null,
+): ReauthOutcome => {
 	if (!prompt.login && maxAge === undefined) return "proceed";
 	if (session === null) {
 		// No UserSessionStore in this composition: there is no `auth_time` to
@@ -854,35 +879,23 @@ const evaluateReauthentication = async (
 		);
 		return "answered";
 	}
+	if (ask !== null && ask.loginAskedAt !== undefined) {
+		// Strictly after the ask, to the millisecond: an authentication made
+		// before it — even earlier in the same second — is not the one it asked for.
+		if (session.authTime.getTime() > ask.loginAskedAt) return "proceed";
+		redirectError(
+			ctx,
+			"login_required",
+			"re-authentication was requested but the session was not re-established",
+		);
+		return "answered";
+	}
+	// An id that names no ask, names one for another request, or has expired,
+	// is simply not an ask — and one that records a step-up trip alone asked
+	// for no login: evaluate the request on its merits, which asks again
+	// rather than proceeding.
 	const nowSeconds = Math.floor(Date.now() / 1000);
 	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
-	const presented = ctx.params[REAUTH_ASK_PARAM];
-	if (typeof presented === "string" && presented.length > 0) {
-		let ask: Awaited<ReturnType<ReauthAskStore["consume"]>>;
-		try {
-			ask = await askStore.consume(presented, askRequestOf(ctx));
-		} catch (err) {
-			// The same rule the session-liveness read applies: an outage is not
-			// a decision either way.
-			ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
-			redirectError(ctx, "temporarily_unavailable", "session store unavailable");
-			return "answered";
-		}
-		if (ask !== null) {
-			// Strictly after the ask, to the millisecond: an authentication made
-			// before it — even earlier in the same second — is not the one it asked for.
-			if (session.authTime.getTime() > ask.askedAt) return "proceed";
-			redirectError(
-				ctx,
-				"login_required",
-				"re-authentication was requested but the session was not re-established",
-			);
-			return "answered";
-		}
-		// An id that names no ask, names one for another request, or has
-		// expired, is simply not an ask: fall through and evaluate the
-		// request on its merits, which asks again rather than proceeding.
-	}
 	const stale = maxAge !== undefined && nowSeconds - authTimeSeconds > maxAge;
 	if (!prompt.login && !stale) return "proceed";
 	if (prompt.silent) {
@@ -897,56 +910,293 @@ const evaluateReauthentication = async (
 };
 
 /**
- * #481 — `acr_values` (OIDC Core §3.1.2.1) against the acr table: the
- * configured `oauth.authorize.acrValues` less the entries nothing this
- * composition installs can satisfy (the MFA ADR's D15, `../acrValues.mts`).
- * Core's `selectAcr` decides over the `amr` the session vouches for
- * (`requirementSession`, the rule's one reading of a session): the first requested value one of whose alternatives the
- * session holds is the `acr` the code — and so the id_token — carries. None
- * satisfied, or a value this deployment does not carry, is
- * `unmet_authentication_requirements` rather than a token the RP would read
- * as meeting its requirement.
- *
- * Nothing is stepped up to here: `/authorize` consults no `mfaCoordinator`
- * until D17's single decision (the MFA ADR's build order, step 13), so the
- * reach of a step-up is empty and what the session does not meet is unmet —
- * what D20 says an MFA-off deployment answers.
+ * The login trip (#481): the ask is a record in the session store named by
+ * an opaque id on the URL the browser carries (v0.13.0 audit) — a caller
+ * cannot invent an id that exists, the record survives the session
+ * regeneration the login itself performs, and it is bound to this request
+ * so it cannot satisfy another's freshness requirement. A step-up trip
+ * already asked is carried, so the same session is not sent on it twice.
  */
-const resolveAcr = (
+const sendToLogin = async (
 	ctx: AuthorizeContext,
-	session: UserSession | null,
-): { readonly value: string | undefined } | null => {
+	askStore: ReauthAskStore,
+	ask: ReauthAskRecord | null,
+): Promise<void> => {
+	const now = Date.now();
+	const askRequest = askRequestOf(ctx);
+	const askId = await recordAsk(ctx, askStore, {
+		request: askRequest,
+		createdAt: now,
+		loginAskedAt: now,
+		stepUpAskedAt: { ...ask?.stepUpAskedAt },
+	});
+	if (askId === null) return;
+	loginRedirect(ctx.res, ctx.opts.loginUrl(), returnWithAsk(askRequest, askId));
+};
+
+/**
+ * #481 — `acr_values` (OIDC Core §3.1.2.1), parsed. A repeat never reaches
+ * here (`checkSingleValuedParams`). Read strictly, as every space-delimited
+ * request parameter is: a malformed list is the request's fault, not an acr
+ * this deployment lacks. What the values are met by — the table less the
+ * entries nothing installed can satisfy (the MFA ADR's D15,
+ * `../acrValues.mts`), over the `amr` the session vouches for — is
+ * admission's step 6, asked for through `asks.acrValues`.
+ */
+const parseAcrValues = (ctx: AuthorizeContext): readonly string[] | null => {
 	const raw = ctx.params.acr_values;
-	if (raw === undefined) return { value: undefined };
-	// A repeat never reaches here (`checkSingleValuedParams`). Read strictly,
-	// as every space-delimited request parameter is: a malformed list is the
-	// request's fault, not an acr this deployment lacks.
+	if (raw === undefined) return [];
 	const requested = typeof raw === "string" ? readSpaceDelimitedParameter(raw) : [];
 	if (requested === null) {
 		redirectError(ctx, "invalid_request", "acr_values is not a space-delimited list of values");
 		return null;
 	}
-	if (requested.length === 0) return { value: undefined };
-	const table = ctx.opts.oauth.acrValues;
-	const selection = selectAcr(
-		requested,
-		requirementSession(session)?.amr ?? [],
-		table,
-		stepUpReach([]),
-	);
-	if (selection.outcome === "met") return { value: selection.acr };
-	// `Object.hasOwn` rather than a bare read, as `selectAcr` does: the table
-	// may be a plain object a composition handed in, and the value being
-	// looked up is one an unauthenticated caller writes.
-	const unknown = requested.filter((acr) => !Object.hasOwn(table, acr));
+	return requested;
+};
+
+/**
+ * An `unmet` admission (D8): `unmet_authentication_requirements` when it is
+ * the `acr` the request asked for that nothing meets — naming a value this
+ * deployment has not configured when that is why, rather than accepting it
+ * silently — and `login_required` when a requirement is unmet, since only a
+ * new login can change what the requirement decides on.
+ */
+const refuseUnmet = (
+	ctx: AuthorizeContext,
+	requirement: string,
+	requested: readonly string[],
+): void => {
+	if (requirement === "acr") {
+		// `Object.hasOwn` rather than a bare read: the table may be a plain
+		// object a composition handed in, and the value being looked up is one
+		// an unauthenticated caller writes.
+		const table = ctx.opts.oauth.acrValues;
+		const unknown = requested.filter((acr) => !Object.hasOwn(table, acr));
+		redirectError(
+			ctx,
+			"unmet_authentication_requirements",
+			unknown.length > 0
+				? `acr_values not configured on this authorization server: ${unknown.join(" ")}`
+				: `the session's authentication does not satisfy any requested acr: ${requested.join(" ")}`,
+		);
+		return;
+	}
 	redirectError(
 		ctx,
-		"unmet_authentication_requirements",
-		unknown.length > 0
-			? `acr_values not configured on this authorization server: ${unknown.join(" ")}`
-			: `the session's authentication does not satisfy any requested acr: ${requested.join(" ")}`,
+		"login_required",
+		`the session does not meet the ${requirement} requirement; a new login is required`,
 	);
-	return null;
+};
+
+/**
+ * A `step_up` admission (the MFA ADR's D17, amended): the browser is sent to
+ * the requirement's registered page — built from it with `new URL` and
+ * `searchParams`, never by concatenation — with the page's own parameters,
+ * the values a step-up can meet as `acr_values` when the request asked for
+ * an acr, and `redirect_to` naming this request with the ask recorded.
+ *
+ * The ask records the trip under the requirement's name. A session that
+ * comes back not later than that record was already sent on this trip and
+ * is refused rather than sent again — `unmet_authentication_requirements`
+ * when the request's `acr_values` are what is still unmet, `login_required`
+ * when the requirement asks for a new login — while a session established
+ * after the ask (`max_age` ran out during the trip and the user logged in
+ * again) may make one more. `prompt=none` cannot be sent anywhere:
+ * `interaction_required`.
+ */
+const stepUpTrip = async (
+	ctx: AuthorizeContext,
+	admission: Extract<Admission, { outcome: "step_up" }>,
+	prompt: PromptDirective,
+	askStore: ReauthAskStore | undefined,
+	ask: ReauthAskRecord | null,
+): Promise<void> => {
+	const { requirement, page } = admission;
+	const trips = ask?.stepUpAskedAt;
+	const askedAt =
+		trips !== undefined && Object.hasOwn(trips, requirement) ? trips[requirement] : undefined;
+	if (askedAt !== undefined && admission.session.authTime.getTime() <= askedAt) {
+		if (admission.whenStillUnmet === "unmet") {
+			redirectError(
+				ctx,
+				"unmet_authentication_requirements",
+				`the session came back from ${requirement} still not meeting the request`,
+			);
+		} else {
+			redirectError(
+				ctx,
+				"login_required",
+				`the session came back from ${requirement} still not meeting it; a new login is required`,
+			);
+		}
+		return;
+	}
+	if (prompt.silent) {
+		redirectError(
+			ctx,
+			"interaction_required",
+			`prompt=none was requested but the session must step up through ${requirement}`,
+		);
+		return;
+	}
+	if (askStore === undefined) {
+		// As a login trip is refused without a store to record the ask in: a
+		// composition error, not a per-request condition.
+		redirectError(
+			ctx,
+			"invalid_request",
+			"a step-up needs a session store, which this deployment does not wire",
+		);
+		return;
+	}
+	const now = Date.now();
+	const askRequest = askRequestOf(ctx);
+	const askId = await recordAsk(ctx, askStore, {
+		request: askRequest,
+		createdAt: now,
+		loginAskedAt: ask?.loginAskedAt,
+		stepUpAskedAt: { ...trips, [requirement]: now },
+	});
+	if (askId === null) return;
+	const target = new URL(page.url, ctx.opts.issuer);
+	for (const [name, value] of Object.entries(page.params)) target.searchParams.set(name, value);
+	if (admission.acrValues.length > 0) {
+		target.searchParams.set("acr_values", admission.acrValues.join(" "));
+	}
+	target.searchParams.set(REDIRECT_TO_PARAM, returnWithAsk(askRequest, askId));
+	ctx.res.redirect(target.toString());
+};
+
+/**
+ * Regenerates the cookie session, as express-session does when a route asks
+ * for a new id: the old record is destroyed in its store and a fresh,
+ * unauthenticated one takes its place, so nothing of the refused session
+ * survives. A failure is that store's outage. A request whose session cannot
+ * regenerate at all is not express-session's — nothing this endpoint can
+ * drop the authentication of — and fails the same way.
+ */
+const regenerateCookieSession = (
+	req: Request,
+): Promise<{ readonly failed: false } | { readonly failed: true; readonly cause: unknown }> =>
+	new Promise((resolve) => {
+		const session = (req as { session?: { regenerate?: unknown } }).session;
+		if (typeof session?.regenerate !== "function") {
+			resolve({
+				failed: true,
+				cause: new TypeError("the request's session cannot be regenerated"),
+			});
+			return;
+		}
+		(session.regenerate as (callback: (err?: unknown) => void) => void)((err) =>
+			resolve(err == null ? { failed: false } : { failed: true, cause: err }),
+		);
+	});
+
+/**
+ * The one class a new login remedies (D2): `not_live`, `revoked` and
+ * `reauthenticate` — and `unauthenticated`, which the flag check answered
+ * before anything was read. Under `prompt=none` the honest answer is
+ * `login_required` (OIDC Core §3.1.2.6), delivered where the RP is
+ * listening. Otherwise the cookie session is regenerated first (D8, change
+ * 6), so a login page that forwards signed-in users cannot loop on the flag
+ * the refused session left behind; a regeneration that fails is a
+ * session-store write, answered `temporarily_unavailable` and logged once
+ * at error level as `authorize_cookie_session_unavailable`, and the cookie
+ * session is abandoned so express-session does not try that store again on
+ * the way out. Then the login page, with this request to come back to.
+ */
+const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise<void> => {
+	if (prompt.silent) {
+		redirectError(
+			ctx,
+			"login_required",
+			"prompt=none was requested but no end-user session is present",
+		);
+		return;
+	}
+	const regenerated = await regenerateCookieSession(ctx.req);
+	if (regenerated.failed) {
+		ctx.opts.logger.error(
+			{ store: "cookie_session", step: "regenerate", err: loggableError(regenerated.cause) },
+			"authorize_cookie_session_unavailable",
+		);
+		(ctx.req as { session?: unknown }).session = undefined;
+		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+		return;
+	}
+	loginRedirect(
+		ctx.res,
+		ctx.opts.loginUrl(),
+		buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl),
+	);
+};
+
+/**
+ * What the admission decides for this request (D8, the `/authorize` row),
+ * or `null` once it has been answered:
+ *
+ * - `unavailable` → `temporarily_unavailable` on the validated redirect URI
+ *   (change 2: never the login page, whose forwarding of signed-in users
+ *   would loop on an outage);
+ * - `unauthenticated`, `not_live`, `revoked`, `reauthenticate` → a new login
+ *   (`newLogin`);
+ * - `admitted`, `step_up`, `unmet` — the three that carry the session —
+ *   freshness first, on that session: `max_age` and `prompt=login` may send
+ *   the browser to log in, or refuse, before the verdict is acted on, so
+ *   `prompt=none` with a stale `max_age` is `login_required` whatever the
+ *   verdict; then `unmet` is refused, `step_up` is a trip, and `admitted`
+ *   proceeds with the `acr` the session met.
+ */
+const decideOnAdmission = async (
+	ctx: AuthorizeContext,
+	admission: Admission,
+	prompt: PromptDirective,
+	maxAge: number | undefined,
+	requested: readonly string[],
+	askStore: ReauthAskStore | undefined,
+): Promise<{ readonly session: UserSession | null; readonly acr: string | undefined } | null> => {
+	switch (admission.outcome) {
+		case "unavailable":
+			redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+			return null;
+		case "unauthenticated":
+		case "not_live":
+		case "revoked":
+		case "reauthenticate":
+			await newLogin(ctx, prompt);
+			return null;
+		case "admitted":
+		case "step_up":
+		case "unmet": {
+			// The ask is read only when a decision below needs it.
+			const needsAsk = prompt.login || maxAge !== undefined || admission.outcome === "step_up";
+			const ask = needsAsk ? await presentedAsk(ctx, askStore) : null;
+			if (ask === undefined) return null;
+			const reauth = evaluateReauthentication(
+				ctx,
+				prompt,
+				maxAge,
+				admission.session,
+				askStore,
+				ask,
+			);
+			if (reauth === "answered") return null;
+			if (reauth === "login") {
+				// `evaluateReauthentication` refused already when there is no store.
+				await sendToLogin(ctx, askStore as ReauthAskStore, ask);
+				return null;
+			}
+			if (admission.outcome === "unmet") {
+				refuseUnmet(ctx, admission.requirement, requested);
+				return null;
+			}
+			if (admission.outcome === "step_up") {
+				await stepUpTrip(ctx, admission, prompt, askStore, ask);
+				return null;
+			}
+			return { session: admission.session, acr: admission.acr };
+		}
+	}
 };
 
 /**
@@ -1500,6 +1750,17 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	// composition, not per request (`checkCanonicalIssuer` already vouched for
 	// schema-validated deployments at router creation).
 	const issuerOrigin = new URL(opts.issuer).origin;
+	// What admission reads for this endpoint (the session-admission ADR's D1):
+	// the handler's own slots as wired, the resolver, and the vouchable acr
+	// table the router computed once.
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore: opts.userSessionStore,
+		subjectRevocation: opts.subjectRevocation,
+		requirements: requireRequirements("createAuthorizeHandler", opts.requirements),
+		acrTable: opts.oauth.acrValues,
+		logger: opts.logger,
+		auditSink: opts.auditSink,
+	};
 	return async (req: Request, res: Response) => {
 		// #284: `prompt=none` asks for a token *without* user interaction, so
 		// the login redirect below is exactly what it must not get — a hidden
@@ -1527,26 +1788,15 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const wantsSilentAuth =
 			typeof promptRaw === "string" && parseScopeTokens(promptRaw).includes("none");
 
-		// R1b: one liveness read per authenticated request, resolved here so
-		// both the login redirect below and the `prompt=none` refusal further
-		// down answer from the same fact. The `&&` short-circuits, which is
-		// what keeps the anonymous path free of the store read.
-		// The store is read only for a session that claims to be authenticated —
-		// a genuinely anonymous request costs no lookup (R1b).
-		const liveSession = req.session.isAuthenticated
-			? await readLiveSession(req, opts)
-			: { live: false, session: null };
-		const authenticated = Boolean(req.session.isAuthenticated) && liveSession.live;
-
-		if (!authenticated && !wantsSilentAuth) {
-			// `endpoints.login.url` may already carry a query string (e.g.
-			// `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
-			// otherwise — a second `?` would corrupt both parameters.
-			const loginUrl = opts.loginUrl();
-			const joiner = loginUrl.includes("?") ? "&" : "?";
-			return res.redirect(
-				`${loginUrl}${joiner}redirect_to=${encodeURIComponent(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl))}`,
-			);
+		// The cookie's claim, read once (the session-admission ADR's D2): the
+		// flag first, before the client is looked up and with no store read, so
+		// a genuinely anonymous request costs no lookup (#284, R1b). Whether the
+		// session behind the flag is live is admission's to say, once the
+		// client and the parameters are validated below.
+		const claim = cookieClaim(req);
+		if (!claim.authenticated && !wantsSilentAuth) {
+			loginRedirect(res, opts.loginUrl(), buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
+			return;
 		}
 
 		// #397: no early response_type gate. RFC 6749 §4.1.2.1 prefers that once
@@ -1590,14 +1840,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!checkRequestObjectUnsupported(ctx)) return;
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
-		if (prompt.silent && !authenticated) {
-			// A store that could not say whether the session lives says
-			// nothing about the user: `temporarily_unavailable`, not a
-			// `login_required` that tells the RP nobody is signed in.
-			if ("unavailable" in liveSession && liveSession.unavailable === true) {
-				redirectError(ctx, "temporarily_unavailable", "session store unavailable");
-				return;
-			}
+		if (prompt.silent && !claim.authenticated) {
 			// OIDC Core §3.1.2.6. Now that `redirect_uri` is validated this
 			// reaches the RP's own listener rather than a login page it cannot
 			// use.
@@ -1618,45 +1861,29 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// refused here, before a `prompt=login` or `max_age` sends the browser to
 		// log in.
 		if (!checkClaimsParameter(ctx)) return;
-		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
 		if (maxAge === null) return;
-		const askStore = reauthAskStoreFor(req);
-		const reauth = await evaluateReauthentication(
+		const requested = parseAcrValues(ctx);
+		if (requested === null) return;
+		// One admission per request (the session-admission ADR's D8), after the
+		// client and the parameters are validated: the live record, the subject,
+		// the revocation boundary, the registered requirements and the acr the
+		// request asked for, decided in core; what each outcome is answered with
+		// is this endpoint's (`decideOnAdmission`).
+		const admission = await admitSession(admissionDeps, {
+			claim,
+			action: ADMISSION_ACTIONS["oauth.authorize"],
+			...(requested.length > 0 ? { asks: { acrValues: requested } } : {}),
+		});
+		const decided = await decideOnAdmission(
 			ctx,
+			admission,
 			prompt,
 			maxAge.value,
-			liveSession.session,
-			askStore,
+			requested,
+			reauthAskStoreFor(req),
 		);
-		if (reauth === "answered") return;
-		if (reauth === "login") {
-			// The ask is a record in the session store named by an opaque id on
-			// the URL the browser carries (#481, v0.13.0 audit): a caller cannot
-			// invent an id that exists, the record survives the session
-			// regeneration the login itself performs, and it is bound to this
-			// request so it cannot satisfy another's freshness requirement.
-			const askRequest = askRequestOf(ctx);
-			let askId: string;
-			try {
-				// `evaluateReauthentication` refused already when there is no store.
-				askId = await (askStore as ReauthAskStore).ask({
-					askedAt: Date.now(),
-					request: askRequest,
-				});
-			} catch (err) {
-				opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
-				redirectError(ctx, "temporarily_unavailable", "session store unavailable");
-				return;
-			}
-			const back = new URL(askRequest);
-			back.searchParams.set(REAUTH_ASK_PARAM, askId);
-			const loginUrl = opts.loginUrl();
-			const joiner = loginUrl.includes("?") ? "&" : "?";
-			return res.redirect(`${loginUrl}${joiner}redirect_to=${encodeURIComponent(back.toString())}`);
-		}
-		const acr = resolveAcr(ctx, liveSession.session);
-		if (acr === null) return;
+		if (decided === null) return;
 		if (!checkResponseTypeIsCode(ctx)) return;
 		if (!(await checkAuthorizationCodeGrantAllowed(ctx, client))) return;
 		if (!(await checkFirstPartyOrConsentable(ctx, client))) return;
@@ -1711,7 +1938,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			codeChallengeMethod: pkce.method,
 			grantedScope: scopeForPersist,
 			grantedAudience: audience.audienceForPersist,
-			acr: acr.value,
+			acr: decided.acr,
 		});
 		if (!minted) return;
 

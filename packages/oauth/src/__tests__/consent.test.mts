@@ -139,6 +139,19 @@ const makeApp = async (opts: {
 	// what `/oauth/consent` finds — the way express-session persists it.
 	const session: Session = opts.session ?? { isAuthenticated: true, user: { id: "user-1" } };
 	const app = express();
+	// `regenerate`, as express-session's session has it: `/authorize` drops
+	// a refused session's authentication before sending the browser to log
+	// in (the session-admission ADR's D8, change 6). In place, so the object
+	// a test holds sees the fields go; not enumerable, so it compares as its
+	// fields alone.
+	Object.defineProperty(session, "regenerate", {
+		enumerable: false,
+		configurable: true,
+		value: (cb: (err?: unknown) => void) => {
+			for (const key of Object.keys(session)) delete session[key];
+			cb();
+		},
+	});
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Session }).session = session;
 		// What express-session would report as this session's id (#552).
@@ -388,12 +401,19 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 	});
 
-	it("cannot ask a session that names no subject", async () => {
-		const { app } = await makeApp({
+	it("never asks a session that names no subject: such a cookie is not admitted, and the browser is sent to log in (the session-admission ADR's D8, change 3)", async () => {
+		// It used to be refused at the consent step (`access_denied`); admission
+		// refuses the cookie before any step, with a login the remedy.
+		const { app, session, createCode } = await makeApp({
 			consentStore: createMemoryConsentStore(),
 			session: { isAuthenticated: true, user: {} },
 		});
-		expect(atClient(await authorize(app)).get("error")).toBe("access_denied");
+		const res = await authorize(app);
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+		expect(createCode).not.toHaveBeenCalled();
+		// Change 6: the refused session's flag does not survive.
+		expect(session).not.toHaveProperty("isAuthenticated");
 	});
 });
 

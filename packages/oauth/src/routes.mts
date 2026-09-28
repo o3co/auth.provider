@@ -408,11 +408,14 @@ export const createOAuthRouter = async (
 		consentStore,
 		pendingConsentStore,
 		oauth: { ...options, acrValues: acrValues.table },
-		// R1b: `/authorize` re-checks that the express-session's `sid` still
-		// names a live `UserSession` before minting. Optional here for the same
-		// reason the slot itself is: a composition without session-backed login
-		// wires no store, and the endpoint behaves exactly as it did.
+		// The session-admission ADR's D8: `/authorize` reads the cookie's
+		// session through admission with the router's own slots — the durable
+		// store (optional, as the slot is: a composition without session-backed
+		// login wires none), the subject-revocation boundary (change 4: applied
+		// here when it is wired) and the resolver.
 		userSessionStore,
+		subjectRevocation,
+		requirements,
 	});
 
 	/**

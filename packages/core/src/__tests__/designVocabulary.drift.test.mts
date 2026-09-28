@@ -779,12 +779,6 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		why: "the amr and acr the presented refresh token carries, read above as claims.amr and wellFormedAcr",
 	},
 	{
-		file: "packages/oauth/src/routes/authorize.mts",
-		read: "requirementSession(session)?.amr",
-		count: 1,
-		why: "the amr of the requirement rule's input, built by requirementSession",
-	},
-	{
 		file: "packages/session/src/routes/Federation.mts",
 		read: "profile.amr",
 		count: 3,
@@ -845,12 +839,6 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		read: "stored=readEnvelope(sid,raw)",
 		count: 1,
 		why: "the stored envelope, handed (through fromEnvelope) to sessionAfterSecondFactor, which reads it through the D9 readers",
-	},
-	{
-		file: "packages/oauth/src/routes/authorize.mts",
-		read: "table=ctx.opts.oauth.acrValues",
-		count: 1,
-		why: "the configured acr table, handed to selectAcr: configuration, not a session",
 	},
 	{
 		file: "packages/session/src/modules/sessionStoreModule.mts",
