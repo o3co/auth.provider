@@ -932,7 +932,7 @@ const resolveAcr = (
 		requested,
 		requirementSession(session)?.amr ?? [],
 		table,
-		stepUpReach(undefined),
+		stepUpReach([]),
 	);
 	if (selection.outcome === "met") return { value: selection.acr };
 	// `Object.hasOwn` rather than a bare read, as `selectAcr` does: the table

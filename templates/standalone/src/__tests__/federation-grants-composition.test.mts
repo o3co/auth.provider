@@ -42,7 +42,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildModules } from "../buildModules.mjs";
+import { buildModules, withSessionRequirements } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 import { cleanupAllowanceFor, FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS } from "../shutdown.mjs";
 
@@ -149,11 +149,13 @@ const GRANTS_ON: Readonly<Record<string, string>> = {
 
 function resolveConfig(env: Record<string, string>): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, "production");
-	const config = validate(
-		parseFile(envConfPath, { env })
-			.withFallback(parseFile(applicationConfPath, { env }))
-			.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
-		AppConfigSchema,
+	const config = withSessionRequirements(
+		validate(
+			parseFile(envConfPath, { env })
+				.withFallback(parseFile(applicationConfPath, { env }))
+				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+			AppConfigSchema,
+		),
 	);
 	// The key ring has no environment form (a list of { id, key } is HOCON's);
 	// the Redis grant store refuses to construct without one under "required".

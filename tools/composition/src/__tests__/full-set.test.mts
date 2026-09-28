@@ -33,6 +33,13 @@
  * request must receive. `full-set.redis.test.mts` boots the same set on real
  * Redis under `deployment.mode = "multi"`.
  *
+ * The two session requirements a deployment writes (`deployment:requirement-page`,
+ * `deployment:requirement-bare`, in the fixture) are registered, declared and
+ * said at boot here, and refused when the declaration disagrees — the
+ * session-admission ADR's D7 through the template's boot. The step-up and
+ * interruption flows they could start are the consumers' and the MFA
+ * module's suites, not this one.
+ *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins
  * only the part of the #685 rule that is broken, and asserts the rest
@@ -41,6 +48,7 @@
 
 import { createHash, X509Certificate } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
+import { BootError } from "@o3co/auth-provider-core";
 import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
 import {
 	ACCESS_TOKEN_TYPE,
@@ -85,6 +93,7 @@ import {
 	composeFullSet,
 	DPOP_JWK,
 	dpopProof,
+	FIXTURE_REQUIREMENTS,
 	type FullSet,
 	type FullSetOptions,
 	GATEWAY,
@@ -140,6 +149,8 @@ const DEPLOYMENT_MODULES = [
 	"deployment:grant-policy",
 	"deployment:apple-federation-config",
 	"deployment:github-federation-config",
+	"deployment:requirement-page",
+	"deployment:requirement-bare",
 ];
 
 describe("what the full set covers", () => {
@@ -236,6 +247,84 @@ describe("the full set boots together", () => {
 				"logger",
 			);
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Session requirements (the session-admission ADR's D7)
+// ---------------------------------------------------------------------------
+
+/** Boots the full set expecting the planner to refuse it, and hands back the refusal. */
+async function refused(options: FullSetOptions): Promise<BootError> {
+	try {
+		current = await composeFullSet(options);
+	} catch (err) {
+		if (err instanceof BootError) return err;
+		throw err;
+	}
+	throw new Error("the full set booted");
+}
+
+describe("the session requirements a deployment writes", () => {
+	it("are said at boot, once: each registered requirement with its module and its remediations, in registration order", async () => {
+		const { logger } = await boot();
+		const said = logger.lines.filter((line) => line.args[1] === "session_requirements_registered");
+		expect(said).toHaveLength(1);
+		expect(said[0]?.level).toBe("info");
+		expect(said[0]?.args[0]).toEqual({
+			requirements: [
+				{
+					name: "fixture-page",
+					module: "deployment:requirement-page",
+					remediations: ["fixture-page.step_up"],
+				},
+				{ name: "fixture-bare", module: "deployment:requirement-bare", remediations: [] },
+			],
+		});
+	});
+
+	it("are declared: the composition's sessionRequirements.expected names exactly them, beside what the template derived from mfa.mode", async () => {
+		const { config } = await boot();
+		expect(config.sessionRequirements?.expected).toEqual(FIXTURE_REQUIREMENTS);
+	});
+
+	it("refuse the boot when the declaration is the template's own — nothing expected — naming what registered and who consults admission", async () => {
+		const err = await refused({
+			adjust: (config) => ({ ...config, sessionRequirements: { expected: [] } }),
+		});
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.details).toMatchObject({
+			configKey: "sessionRequirements.expected",
+			declared: [],
+			registered: FIXTURE_REQUIREMENTS,
+			consumedBy: expect.arrayContaining(["oauth"]),
+		});
+	});
+
+	it("refuse the boot when a name is declared that nothing registers", async () => {
+		const err = await refused({
+			adjust: (config) => ({
+				...config,
+				sessionRequirements: { expected: [...FIXTURE_REQUIREMENTS, "mfa"] },
+			}),
+		});
+		expect(err.reason).toBe("session-requirements-undeclared");
+		expect(err.details).toMatchObject({
+			declared: [...FIXTURE_REQUIREMENTS, "mfa"],
+			registered: FIXTURE_REQUIREMENTS,
+		});
+	});
+
+	it("refuse the boot under mfa.mode other than off while no requirement named mfa is registered, before the declaration is compared", async () => {
+		const err = await refused({
+			adjust: (config) => ({ ...config, mfa: { mode: "required" } }) as typeof config,
+		});
+		expect(err.reason).toBe("session-requirement-missing");
+		expect(err.details).toMatchObject({
+			configKey: "mfa.mode",
+			mode: "required",
+			requirement: "mfa",
+		});
 	});
 });
 

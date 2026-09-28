@@ -14,12 +14,13 @@ import {
 } from "../synthetic-keys.mjs";
 
 describe("SYNTHETIC_COMPONENT_KEYS", () => {
-	test("contains exactly the 7 synthetic keys", () => {
+	test("contains exactly the 8 synthetic keys", () => {
 		// Per A2-α §6.5 + A5 + D-5: Phase 1 shipped 3; A5 (Phase 7) added
 		// federationRedirectPolicyResolver (4); D-5 added lifecycleRegistrar (5);
 		// the readiness registrar added readinessRegistrar (6); the MFA ADR's D3
-		// added mfaFactorResolver (7).
-		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(7);
+		// added mfaFactorResolver (7); the session-admission ADR's D3 added
+		// sessionRequirementResolver (8).
+		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(8);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationProviders")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenExchangeValidatorResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("grantHandlerResolver")).toBe(true);
@@ -27,6 +28,7 @@ describe("SYNTHETIC_COMPONENT_KEYS", () => {
 		expect(SYNTHETIC_COMPONENT_KEYS.has("lifecycleRegistrar")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("readinessRegistrar")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("mfaFactorResolver")).toBe(true);
+		expect(SYNTHETIC_COMPONENT_KEYS.has("sessionRequirementResolver")).toBe(true);
 	});
 
 	test("is frozen via Object.freeze (own-property additions blocked)", () => {

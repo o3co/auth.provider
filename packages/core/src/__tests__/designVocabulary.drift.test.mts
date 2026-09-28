@@ -155,29 +155,115 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		concept:
-			"the requirement rule — the baseline and acr_values over one session (the MFA ADR's D16)",
-		home: "packages/core/src/mfa/requirement.mts",
-		definition: /(?:function|const)\s+decideMfaRequirement\b/,
+			"session admission — the decision every consumer of a session calls (the session-admission ADR's D1, D2)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+admitSession\b/,
+	},
+	{
+		concept: "session admission — the establishment decision (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+admitPrimary\b/,
+	},
+	{
+		concept: "session admission — resuming an interrupted login (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+resumePrimary\b/,
+	},
+	{
+		concept:
+			"session admission — establishing a federated login without asking (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+establishWithoutAsking\b/,
+	},
+	{
+		concept:
+			"session admission — the one builder a password login has (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+passwordPrimary\b/,
+	},
+	{
+		concept: "session admission — the cookie's claim (the session-admission ADR's D2)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+cookieClaim\b/,
+	},
+	{
+		concept:
+			"session admission — a code record's claim on its first read (the session-admission ADR's D2)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+codeClaimFirstRead\b/,
+	},
+	{
+		concept:
+			"session admission — a code record's claim on its revalidation, the first read's subject required (the session-admission ADR's D2)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+codeClaimRevalidation\b/,
+	},
+	{
+		concept: "session admission — a link transaction's claim (the session-admission ADR's D2)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+linkClaim\b/,
+	},
+	{
+		concept: "session admission — a verified token's claim (the session-admission ADR's D2, D9)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+tokenClaim\b/,
+	},
+	{
+		concept:
+			"what a requirement is asked about a token with no live session (the session-admission ADR's D9)",
+		home: "packages/core/src/user-sessions/authentication.mts",
+		definition: /(?:function|const)\s+requirementSessionFromAmr\b/,
+	},
+	{
+		concept:
+			"the continuation a requirement persists and presents back, as it is checked (the session-admission ADR's D5)",
+		home: "packages/core/src/session-admission/primary.mts",
+		definition: /(?:function|const)\s+checkPrimaryContinuation\b/,
+	},
+	{
+		concept:
+			"session admission — the bundled actions and their grades (the session-admission ADR's D4)",
+		home: "packages/core/src/session-admission/requirement.mts",
+		definition: /(?:function|const)\s+ADMISSION_ACTIONS\b/,
 	},
 	{
 		concept: "the acr table — oauth.authorize.acrValues as it is read (the MFA ADR's D15)",
-		home: "packages/core/src/mfa/requirement.mts",
+		home: "packages/core/src/session-admission/acr.mts",
 		definition: /(?:function|const)\s+readAcrTable\b/,
 	},
 	{
 		concept: "D15's selection of an acr over what a session vouches for",
-		home: "packages/core/src/mfa/requirement.mts",
+		home: "packages/core/src/session-admission/acr.mts",
 		definition: /(?:function|const)\s+selectAcr\b/,
 	},
 	{
+		concept:
+			"what a step-up through the registered requirements can add (the session-admission ADR's D2, D6)",
+		home: "packages/core/src/session-admission/acr.mts",
+		definition: /(?:function|const)\s+stepUpReach\b/,
+	},
+	{
+		concept: "what the composition can put in a session's amr (the MFA ADR's D15)",
+		home: "packages/core/src/session-admission/acr.mts",
+		definition: /(?:function|const)\s+producibleAmr\b/,
+	},
+	{
 		concept: "the acr table less the entries nothing installed can satisfy (the MFA ADR's D15)",
-		home: "packages/core/src/mfa/requirement.mts",
+		home: "packages/core/src/session-admission/acr.mts",
 		definition: /(?:function|const)\s+vouchableAcrTable\b/,
 	},
 	{
 		concept: "mfa.mode as a consumer reads it (the MFA ADR's D19)",
-		home: "packages/core/src/mfa/requirement.mts",
+		home: "packages/core/src/mfa/mode.mts",
 		definition: /(?:function|const)\s+readMfaMode\b/,
+	},
+	{
+		// Kept in the grants boundary's home, which admission imports: moving
+		// it under `session-admission/` would close an import cycle (D10).
+		concept:
+			"the subject-revocation boundary as it is read against an instant (the session-admission ADR's D2, D10)",
+		home: "packages/core/src/federation-grants/effective-status.mts",
+		definition: /(?:function|const)\s+coveredByRevocationBoundary\b/,
 	},
 	{
 		concept: "the amr a verified second factor adds when it adds mfa — mfa (the MFA ADR's D14)",
@@ -403,19 +489,20 @@ const policyEvaluateCalls = (source: string): number =>
 			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
 	).length;
 
-/** The requirement rule's home: the one file that may call it without `requirementSession`. */
-const REQUIREMENT_RULE_HOME = "packages/core/src/mfa/requirement.mts";
+/** Session admission's home: the acr selection is its own step, over the input `requirementSession` builds. */
+const REQUIREMENT_RULE_HOME = "packages/core/src/session-admission/admit.mts";
 
 /**
- * The argument text of every call to the requirement rule — `decideMfaRequirement(`
- * or `selectAcr(` — in `source`, comments removed so a mention is not a call.
- * The arguments run to the matching `)`; a parenthesis inside a string literal
- * would miscount, and no call site passes one.
+ * The argument text of every call to the acr selection — `selectAcr(` — in
+ * `source`, comments removed so a mention is not a call. The arguments run to
+ * the matching `)`; a parenthesis inside a string literal would miscount, and
+ * no call site passes one.
  */
 const requirementRuleCalls = (source: string): string[] => {
 	const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 	const calls: string[] = [];
-	for (const match of code.matchAll(/\b(?:decideMfaRequirement|selectAcr)\s*\(/g)) {
+	// Its definition (`function selectAcr(`) is not a call.
+	for (const match of code.matchAll(/(?<!function\s)\bselectAcr\s*\(/g)) {
 		const start = (match.index ?? 0) + match[0].length;
 		let depth = 1;
 		let end = start;
@@ -430,27 +517,30 @@ const requirementRuleCalls = (source: string): string[] => {
 };
 
 /**
- * A call to the requirement rule that does not build its session input with
- * `requirementSession(` inside its own arguments. The rule reads a session
- * only as the D9 reading makes it (the MFA ADR's step-4 amendment): an input
- * built from the record's own `amr` would, after the upstream split, let an
- * untrusted upstream value meet an `acr`. Building it inline is what makes
- * that checkable here; a value built elsewhere and passed by name is flagged
- * too, so a reviewer sees it.
+ * A call to the acr selection that does not build its `amr` with
+ * `requirementSession(` inside its own arguments. The selection reads a
+ * session only as the D9 reading makes it (the MFA ADR's step-4 amendment):
+ * an input built from the record's own `amr` would, after the upstream
+ * split, let an untrusted upstream value meet an `acr`. Building it inline is
+ * what makes that checkable here — admission's own call is written that way
+ * — and a value built elsewhere and passed by name is flagged too, so a
+ * reviewer sees it.
  */
 const withoutRequirementSession = (source: string): string[] =>
 	requirementRuleCalls(source).filter((args) => !/\brequirementSession\s*\(/.test(args));
 
 /**
  * The files that read a session's own `amr` and `authentication` on purpose
- * (the MFA ADR's D9): the readers themselves, the requirement rule (whose
- * input they build), and the two bundled stores, which copy the record.
- * Their reads are pinned one by one in {@link SESSION_RECORD_READS_ALLOWED}
- * like any other file's; this list only holds the scan to finding them.
+ * (the MFA ADR's D9): the readers themselves, session admission (which
+ * composes a login's `recorded` and reads the `amr` of the input they
+ * build), and the two bundled stores, which copy the record. Their reads are
+ * pinned one by one in {@link SESSION_RECORD_READS_ALLOWED} like any other
+ * file's; this list only holds the scan to finding them.
  */
 const SESSION_RECORD_READERS: ReadonlySet<string> = new Set([
 	"packages/core/src/user-sessions/authentication.mts",
 	REQUIREMENT_RULE_HOME,
+	"packages/core/src/session-admission/primary.mts",
 	"packages/core/src/user-sessions/memory/userSessionStore.mts",
 	"packages/redis/src/userSessionStore.mts",
 ]);
@@ -465,7 +555,6 @@ interface AllowedSessionRecordRead {
 }
 
 const READER_WHY = "the D9 reading itself: how a session was established and what it vouches for";
-const RULE_WHY = "the requirement rule, over the input requirementSession built";
 const MEMORY_STORE_WHY = "the memory store copying the record in and out, and the step-up write";
 const REDIS_STORE_WHY =
 	"the Redis store copying the record to and from its envelope, and the step-up write";
@@ -505,10 +594,85 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: "sessionAfterSecondFactor adds the event's values onto what the session vouches for",
 	},
-	// The requirement rule.
-	{ file: REQUIREMENT_RULE_HOME, read: "session?.authentication", count: 1, why: RULE_WHY },
-	{ file: REQUIREMENT_RULE_HOME, read: "session.authentication", count: 1, why: RULE_WHY },
-	{ file: REQUIREMENT_RULE_HOME, read: "session?.amr", count: 1, why: RULE_WHY },
+	// Session admission.
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: '(presented.carrier==="token"?requirementSessionFromAmr(presented.tokenAmr):requirementSession(session))?.amr',
+		count: 1,
+		why: "the amr of the acr selection's input, built inline by the D9 readers — a token's own amr through requirementSessionFromAmr, a record through requirementSession (D2, step 5) — handed to selectAcr",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "authentication?.amr",
+		count: 1,
+		why: "the same reading, as step 5 built it for the requirements, held by the merge to find the requirement whose reach finishes a reachable entry",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "primary.recorded.amr",
+		count: 1,
+		why: "composeRecorded starts from the amr the login route recorded for the primary — what a route hands in, never a session record",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "amr=primary.recorded.amr",
+		count: 1,
+		why: "the same amr, the base composeAmr composes every completed requirement's additions onto",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "entry.adds.amr",
+		count: 2,
+		why: "what a completed requirement added: held within its requirement's reach by resumePrimary, and composed onto the primary's amr by composeAmr",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "primary.recorded.authentication",
+		count: 1,
+		why: "the authentication the login route recorded for the primary, copied with the composed mfaAt — never a session record",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "read.primary.recorded.authentication",
+		count: 1,
+		why: "resumePrimary's check that a continuation's primary is the password kind — the only login interrupted in this release — before `recorded` is recomposed from that kind; a continuation, never a session record",
+	},
+	{
+		file: "packages/core/src/session-admission/primary.mts",
+		read: "value.amr",
+		count: 5,
+		why: "the establishment checks read a primary's recorded amr and a requirement's additions — what a login route or a completing requirement hands in, never a session record",
+	},
+	{
+		file: "packages/core/src/session-admission/primary.mts",
+		read: "dto.amr",
+		count: 1,
+		why: "additionsFromDto copies what a completed requirement added, as the continuation carries it — never a session record",
+	},
+	{
+		file: "packages/core/src/session-admission/primary.mts",
+		read: "entry.adds.amr",
+		count: 1,
+		why: "continuationOf copies what a completed requirement added into the DTO — never a session record",
+	},
+	{
+		file: "packages/core/src/session-admission/primary.mts",
+		read: "value.authentication",
+		count: 1,
+		why: "the establishment check reads a primary's recorded authentication, what a login route hands in, never a session record",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "requested=asks?.acrValues??[]",
+		count: 1,
+		why: "the acr values the request asked for, handed to selectAcr: a request's, not a session's",
+	},
+	{
+		file: REQUIREMENT_RULE_HOME,
+		read: "claims.amr",
+		count: 1,
+		why: "tokenClaim reads the verified token's amr claim: a token's, minted from vouchedAmr, not a session record's",
+	},
 	// The memory store.
 	{
 		file: "packages/core/src/user-sessions/memory/userSessionStore.mts",
@@ -718,8 +882,7 @@ const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authenticati
  * `generateIdToken`, and the key store's `sign`, which takes the claims
  * both build — see {@link CLAIMS_ONLY_TAKERS}), the amr composer, a store's `create` and the step-up
  * (`recordSecondFactor`, `sessionAfterSecondFactor`, `checkSecondFactorEvent`),
- * the coordinator's primary (`decideAfterPrimary`, `openLoginTransaction`) and
- * the requirement rule (`decideMfaRequirement`, `selectAcr`). A spread into an
+ * and the acr selection (`selectAcr`). A spread into an
  * object handed to one of them copies a record's own `amr` without naming it.
  * `create` is also other factories' name: their spreads are pinned like reads.
  */
@@ -732,9 +895,6 @@ const AMR_TAKERS: ReadonlySet<string> = new Set([
 	"recordSecondFactor",
 	"sessionAfterSecondFactor",
 	"checkSecondFactorEvent",
-	"decideAfterPrimary",
-	"openLoginTransaction",
-	"decideMfaRequirement",
 	"selectAcr",
 ]);
 
@@ -1408,34 +1568,31 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(scope.filter((file) => /(^|\/)__tests__\//.test(file))).toEqual([]);
 	});
 
-	it("reads the requirement rule's calls, and flags one whose session input bypasses requirementSession", () => {
+	it("reads the acr selection's calls, and flags one whose amr bypasses requirementSession", () => {
 		const sample = [
 			"// selectAcr(requested, session.amr, table, reach) — a comment, not a call",
 			"const a = selectAcr(requested, requirementSession(session)?.amr ?? [], table, reach);",
-			"const b = selectAcr(requested, session?.amr ?? [], table, stepUpReach(undefined));",
-			"const c = decideMfaRequirement({ session: requirementSession(s), acrValues, mode, table, secondFactorMethods });",
-			"const d = decideMfaRequirement({ session: { authentication: undefined, amr: s.amr }, acrValues, mode, table, secondFactorMethods });",
+			"const b = selectAcr(requested, session?.amr ?? [], table, stepUpReach([]));",
+			"const c = selectAcr(requested, vouched, table, reach);",
 		].join("\n");
-		expect(requirementRuleCalls(sample)).toHaveLength(4);
+		expect(requirementRuleCalls(sample)).toHaveLength(3);
 		expect(withoutRequirementSession(sample)).toEqual([
-			"requested, session?.amr ?? [], table, stepUpReach(undefined)",
-			"{ session: { authentication: undefined, amr: s.amr }, acrValues, mode, table, secondFactorMethods }",
+			"requested, session?.amr ?? [], table, stepUpReach([])",
+			"requested, vouched, table, reach",
 		]);
 	});
 
-	it("builds the requirement rule's session input with requirementSession at every call site", () => {
-		// Outside the rule's own file (where decideMfaRequirement calls
-		// selectAcr on an input already built) and tests.
-		const home = join(repoRoot, REQUIREMENT_RULE_HOME);
+	it("builds the acr selection's amr with requirementSession at every call site, admission's own included", () => {
+		// Outside tests. Admission's own call is held to it too: the guard has
+		// no home exemption, so the one product caller D2 leaves is checked.
 		const calls = listShippedSources()
-			.filter((file) => file !== home)
 			.map(
 				(file) =>
 					[relative(repoRoot, file).split(sep).join("/"), readFileSync(file, "utf8")] as const,
 			)
 			.filter(([, source]) => requirementRuleCalls(source).length > 0);
-		// Not vacuous: /authorize selects its acr through the rule.
-		expect(calls.map(([rel]) => rel)).toContain("packages/oauth/src/routes/authorize.mts");
+		// Not vacuous: admission selects the acr, and so does /authorize until A3.
+		expect(calls.map(([rel]) => rel)).toContain(REQUIREMENT_RULE_HOME);
 		const offenders = Object.fromEntries(
 			calls
 				.map(([rel, source]) => [rel, withoutRequirementSession(source)] as const)
@@ -1443,7 +1600,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		);
 		expect(
 			offenders,
-			"build the requirement rule's input with requirementSession(session) (core/src/user-sessions/authentication.mts)",
+			"build the acr selection's amr with requirementSession(session) (core/src/user-sessions/authentication.mts)",
 		).toEqual({});
 	});
 

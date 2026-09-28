@@ -53,6 +53,7 @@ import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { HttpMethod, RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import type { PathResolver } from "../modules/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
+import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots (per A2-β §6.2 DefaultBootstrapMap contract)
@@ -105,8 +106,10 @@ declare module "@o3co/auth-provider-core" {
 
 /**
  * The set of contribution kinds used internally by the boot planner.
- * Built-in kinds are the eight listed (the 7 v0.5.0 originals + A5's
- * `federationRedirectPolicies`); the structural escape
+ * Built-in kinds are the twelve listed (the 7 v0.5.0 originals, A5's
+ * `federationRedirectPolicies`, `grantMiddleware`, `tokenBindingMechanisms`,
+ * `discoveryMetadata`, and the session-admission ADR's `sessionRequirements`);
+ * the structural escape
  * `(string & { readonly __consumerKind?: unique symbol })` admits
  * consumer-defined kinds added via `declare module` augmentation of
  * ContributesMap without widening to plain `string`.
@@ -119,6 +122,7 @@ export type ContributionKind =
 	| "federationRedirectPolicies"
 	| "tokenExchangeValidators"
 	| "mfaFactors"
+	| "sessionRequirements"
 	| "auditHooks"
 	| "routes"
 	| "grantPolicyHooks"
@@ -448,6 +452,12 @@ export interface ContributionCollectorMap {
 	 * `mfaFactorResolver` leaves it out.
 	 */
 	readonly mfaFactors?: NameKeyedCollector<MfaFactor | null>;
+	/**
+	 * Collector for `sessionRequirements` contributions (the session-admission
+	 * ADR's D3): the registered copy of each requirement, never `null`, which
+	 * `sessionRequirementResolver` projects in registration order.
+	 */
+	readonly sessionRequirements?: NameKeyedCollector<RegisteredRequirement>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
@@ -639,20 +649,22 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 26 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring)
+// BootErrorReason — 29 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 26 reasons.
+ * exactly 29 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
  * OIDC discovery aggregator
  * (discovery-document-invalid), #363 (component-absence-undeclared —
  * which #375 also folded #277's retired access-token-revocation-unenforceable
  * reason into), and module-factory-not-called (a `modules` entry that is the
- * factory rather than the manifest it builds).
+ * factory rather than the manifest it builds), and the session-admission
+ * ADR's D3 and D7 (session-requirement-kind-guarded,
+ * session-requirements-undeclared, session-requirement-missing).
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -680,10 +692,13 @@ export type BootErrorReason =
 	| "federation-stores-incomplete"
 	| "discovery-document-invalid"
 	| "replica-unsafe-adapter"
-	| "component-absence-undeclared";
+	| "component-absence-undeclared"
+	| "session-requirement-kind-guarded"
+	| "session-requirements-undeclared"
+	| "session-requirement-missing";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 27 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called)
+// Per-reason *Details interfaces — one per BootErrorReason, 30 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1053,6 +1068,60 @@ export interface ComponentAbsenceUndeclaredDetails {
 }
 
 /**
+ * A `sessionRequirements` entry in a module's `overrides` (stage 1), or a
+ * host `contributionKinds` collector for `sessionRequirements` or
+ * `mfaFactors` (`createApp`, before the kinds are merged) — the
+ * session-admission ADR's D3: a requirement is switched off by not
+ * installing it, and the collector the projection and the boot line read is
+ * the planner's. `module` names the overriding module; a host entry is
+ * composition-root data and carries none.
+ */
+export interface SessionRequirementKindGuardedDetails {
+	readonly reason: "session-requirement-kind-guarded";
+	readonly kind: "sessionRequirements" | "mfaFactors";
+	readonly channel: "overrides" | "contributionKinds";
+	readonly module?: string;
+}
+
+/**
+ * A consumer of session admission is installed and `sessionRequirements.expected`
+ * is not the set of registered requirements — absent, or unequal in either
+ * direction (the session-admission ADR's D7).
+ */
+export interface SessionRequirementsUndeclaredDetails {
+	readonly reason: "session-requirements-undeclared";
+	readonly configKey: "sessionRequirements.expected";
+	/** What the configuration declares; `undefined` when it declares nothing. */
+	readonly declared: readonly string[] | undefined;
+	/** What registered, in registration order. */
+	readonly registered: readonly string[];
+	/** The modules that require or read `sessionRequirementResolver`. */
+	readonly consumedBy: readonly string[];
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
+}
+
+/**
+ * `mfa.mode` is not `off` while no requirement named `mfa` is registered
+ * (the session-admission ADR's D7): refused rather than left believing
+ * logins ask for a second factor.
+ */
+export interface SessionRequirementMissingDetails {
+	readonly reason: "session-requirement-missing";
+	readonly configKey: "mfa.mode";
+	readonly mode: string;
+	readonly requirement: "mfa";
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
+}
+
+/**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
@@ -1060,8 +1129,10 @@ export interface ComponentAbsenceUndeclaredDetails {
  * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
  * (federation-stores-incomplete), the OIDC discovery aggregator
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
- * (component-absence-undeclared) and module-factory-not-called — one member
- * per `BootErrorReason`, 26 in all.
+ * (component-absence-undeclared), module-factory-not-called and the
+ * session-admission ADR's three (session-requirement-kind-guarded,
+ * session-requirements-undeclared, session-requirement-missing) — one member
+ * per `BootErrorReason`, 29 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1089,7 +1160,10 @@ export type BootErrorDetails =
 	| FederationStoresIncompleteDetails
 	| DiscoveryDocumentInvalidDetails
 	| ReplicaUnsafeAdapterDetails
-	| ComponentAbsenceUndeclaredDetails;
+	| ComponentAbsenceUndeclaredDetails
+	| SessionRequirementKindGuardedDetails
+	| SessionRequirementsUndeclaredDetails
+	| SessionRequirementMissingDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

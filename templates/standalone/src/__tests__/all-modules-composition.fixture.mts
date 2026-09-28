@@ -73,7 +73,7 @@ import express from "express";
 import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildModules } from "#/buildModules.mjs";
+import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 
@@ -180,7 +180,8 @@ export function resolveConfig(
 		...referenceConfs,
 		resolveLibraryReferenceConfPath(),
 	].reduce((config, path) => config.withFallback(read(path)), read(envConfPath));
-	const resolved = validate(layered, AppConfigSchema);
+	// As `app.mts` does: the posture on session admission, from the parsed mode.
+	const resolved = withSessionRequirements(validate(layered, AppConfigSchema));
 	const federations = resolved.federations as Record<string, Record<string, unknown>>;
 	return {
 		...resolved,

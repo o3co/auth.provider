@@ -120,6 +120,7 @@ a composition root. Listed because a module may `require` them.
 | `federationRedirectPolicyResolver` | `ReadonlyMap<string, FederationRedirectPolicy>` | optional | `session/federations/contributes.mts` | Synthetic key: the assembled per-federation `redirect_to` policies. |
 | `grantHandlerResolver` | `GrantHandlerResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled grant registry, resolved from every module's `contributes.grants`. |
 | `mfaFactorResolver` | `MfaFactorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: every second factor contributed as `contributes.mfaFactors`, by kind. A factory that answered `null` (the factor switched off by its configuration) claims its kind and is absent from the resolver. In place before the `provides` factories run and filled as the contributions register, so a provider (the coordinator) holds it and reads it at request time; a read while the provides factories run refuses the boot. A factor whose `kind` is not its key refuses boot. |
+| `sessionRequirementResolver` | `SessionRequirementResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: every session requirement contributed as `contributes.sessionRequirements`, by name, in registration order (the session-admission ADR's D3) — what every consumer of session admission requires, and what `admitSession` reads the requirements through. Branded by the planner: `admitSession` refuses any other object, and `resolverForTests` (`@o3co/auth-provider-core/testing`) is the one other builder. Neither overridable nor replaceable: an `overrides.sessionRequirements` entry, and a host `contributionKinds` collector for it or for `mfaFactors`, are refused at stage 1 (`session-requirement-kind-guarded`). A composition that installs a consumer declares what it expects in `sessionRequirements.expected`, compared as a set with what registered at the end of stage 4. |
 | `tokenExchangeValidatorResolver` | `TokenExchangeValidatorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled RFC 8693 subject/actor token validators. |
 
 ## Component slots
@@ -149,7 +150,6 @@ a composition root. Listed because a module may `require` them.
 | `keyStore` | `KeyStore` | required | `core/keys/KeyStore.mts` | Signing and verification keys. `sign()` is the seam a KMS/HSM implements without surrendering the private key (#303). |
 | `mfaFactorStore` | `MfaFactorStore` | optional | `core/mfa/factorStore.mts` | Enrolled second factors (the MFA ADR's D7): one record per factor, keyed by subject and id, whose `data` the coordinator seals before it arrives and every store keeps byte for byte without reading. `update` is a compare-and-set on the record's `version`; a store that cannot answer throws, because an outage read as "no factors" would open a first binding. Bundled adapter: memory (`memoryMfaFactorStoreModule`, single replica; a restart empties it, which it warns about). |
 | `mfaTransactionStore` | `MfaTransactionStore` | optional | `core/mfa/transactionStore.mts` | MFA transactions and the subject lock (the MFA ADR's D8, D21). A transaction is the single-use record of one second-factor ceremony, bound to the browser session that started it; every operation a race could split is atomic in the store — `reserveAttempt` spends an attempt before a proof is checked, `takeChallenge` answers a challenge once, `consume` gives the transaction to one verification. The subject state bounds guessable proofs across transactions on the time the caller passes: the consecutive run with its short backoff and hard limit, the weekly budget no success refunds, and the browsers an exempt success trusts against the weekly hold. No Store variant: this is verification state. Bundled adapter: memory (`memoryMfaTransactionStoreModule`, single replica). |
-| `mfaCoordinator` | `MfaCoordinator` | optional | `core/mfa/coordinator.mts` | Not an adapter seam: what the login route and `/authorize` consult about MFA (the MFA ADR's D8) — the `amr` values a step-up can reach, a decision after the primary authentication (none, challenge, enroll), and the login transaction bound to the regenerated session. Declared in core so neither `session` nor `oauth` imports an optional feature; filled by the MFA package. Optional to wire, not optional to decide once a module reading it attaches `MFA_ABSENCE_POLICY` (below). |
 | `mailSender` | `MailSender` | optional | `core/mail/types.mts` | Where multi-factor authentication's one-time codes and security notices leave the provider (the MFA ADR's D5; the boundary section says why it is here). `send` takes a rendered message and resolves only when the relay accepted it; a rejection is never "sent". In core because its implementer and its consumer must not depend on each other. No bundled adapter; `createRecordingMailSender` (`@o3co/auth-provider-core/testing`) stands in for tests. |
 | `oidcFederationConfigs` | `Readonly<Record<string, OidcProviderConfig>>` | optional | `federation-oidc/module.mts` | Config of every generic OpenID Connect federation instance, keyed by federation name; each `oidcFederationModule(<name>)` reads its own entry. `readOidcFederationConfigs` builds it from `config.federations` (#524). |
 | `rateLimiter` | `RateLimiter` | optional | `core/ratelimit/types.mts` | Shared counters for the OAuth endpoints and the login brute-force guard. |
@@ -213,12 +213,11 @@ that safety.
 | `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
 | `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `oauth.deviceAuthorization.store = "unsupported"` |
 
-Declared, and attached by no bundled module yet. The constant fixes the line an
-operator will be told to write once a module that reads the slot attaches it:
-
-| Policy | Declared absent by | For the slot |
-| --- | --- | --- |
-| `MFA_ABSENCE_POLICY` | `mfa.mode = "off"` | `mfaCoordinator` |
+There is no absence policy for MFA: the `mfaCoordinator` slot and
+`MFA_ABSENCE_POLICY` left with the session-admission ADR (D6, D7). What a
+composition expects of session admission is declared by
+`sessionRequirements.expected` instead, and an `mfa.mode` other than `off`
+without a requirement named `mfa` refuses the boot (`session-requirement-missing`).
 
 The subject-revocation pair shares one policy on purpose: two components, one
 capability, so a deployment without them has one thing to declare rather than

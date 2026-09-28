@@ -22,7 +22,7 @@
  * `createApp` function. The orchestrator owns no per-call state: it receives
  * inputs, calls each stage function in order, and forwards the output.
  *
- * Built-in defaults for the eleven built-in contribution kinds are seeded by
+ * Built-in defaults for the twelve built-in contribution kinds are seeded by
  * `mergeWithBuiltins`; consumer-supplied kinds (via `contributionKinds`)
  * overlay on top.
  *
@@ -44,6 +44,7 @@ import type {
 	MfaFactor,
 } from "../modules/manifest/contributes-map.mjs";
 import { createReadinessRegistrar } from "../readiness/registrar.mjs";
+import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
@@ -61,7 +62,7 @@ import type {
 	NameKeyedCollector,
 	RouteCollector,
 } from "./types.mjs";
-import { validateManifests } from "./validate-manifests.mjs";
+import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
 // Public API — createApp (Per A2-β §6.2 / §6.4)
@@ -79,10 +80,12 @@ import { validateManifests } from "./validate-manifests.mjs";
  *   6. assembleApp — mount routes, build AppHandle.
  *
  * Built-in contribution kinds (grants, tokenExchangeValidators, federations,
- * federationRedirectPolicies, mfaFactors, auditHooks, routes,
- * grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
+ * federationRedirectPolicies, mfaFactors, sessionRequirements, auditHooks,
+ * routes, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
  * discoveryMetadata) are seeded by `mergeWithBuiltins`; consumer-supplied
- * kinds overlay on top.
+ * kinds overlay on top — except `sessionRequirements` and `mfaFactors`,
+ * which `createApp` refuses to see replaced before the merge
+ * (`refuseGuardedHostKinds`, `session-requirement-kind-guarded`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
@@ -93,6 +96,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
 ): Promise<AppHandle> {
 	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = options;
+
+	// The session-admission ADR's D3: a host collector for `sessionRequirements`
+	// or `mfaFactors` is refused before anything is merged or validated.
+	refuseGuardedHostKinds(contributionKinds);
 
 	// Merge consumer kinds on top of built-in defaults. Per A2-β §6.2.
 	const merged = mergeWithBuiltins(contributionKinds);
@@ -180,7 +187,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the eleven built-in contribution kinds and overlay any consumer-supplied
+ * Seed the twelve built-in contribution kinds and overlay any consumer-supplied
  * collectors on top.
  *
  * Built-in defaults:
@@ -188,8 +195,8 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  *   handlers and answers every call — `register` / `replace` (throwing
  *   `GrantRegistryError`), `freeze`, `get` and `entries`.
  * - tokenExchangeValidators, federations, federationRedirectPolicies,
- *   mfaFactors: a Map-backed `NameKeyedCollector`, which is the only registry
- *   of its kind. Token-exchange validators are contributed by modules
+ *   mfaFactors, sessionRequirements: a Map-backed `NameKeyedCollector`, which
+ *   is the only registry of its kind. Token-exchange validators are contributed by modules
  *   (`oauth-token-exchange` contributes the self-issued access-token one) and
  *   read back through the `tokenExchangeValidatorResolver` synthetic key.
  * - auditHooks, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
@@ -198,7 +205,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  *
  * @internal
  */
-function mergeWithBuiltins(consumer: ContributionKindMap | undefined): ContributionCollectorMap {
+/** @internal Exported for its test; `createApp` is its one caller. */
+export function mergeWithBuiltins(
+	consumer: ContributionKindMap | undefined,
+): ContributionCollectorMap {
 	// AS-M1 (PR6): explicit type arguments are required for the four kinds
 	// whose contributes-map placeholders were narrowed from `unknown` to
 	// concrete same-package types in v0.5.1. The factories themselves are
@@ -209,6 +219,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		federations: makeMapNameKeyedCollector<FederationProvider>(),
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
 		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
+		sessionRequirements: withoutReplace(makeMapNameKeyedCollector<RegisteredRequirement>()),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
@@ -268,6 +279,24 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
  *
  * @internal
  */
+/**
+ * The `sessionRequirements` collector refuses `replace` outright (the
+ * session-admission ADR's D3): a requirement is switched off by not
+ * installing it, and nothing may swap one from behind the consumers, by any
+ * path the collector offers.
+ * @internal
+ */
+function withoutReplace<T>(collector: NameKeyedCollector<T>): NameKeyedCollector<T> {
+	return {
+		...collector,
+		replace(name: string): void {
+			throw new Error(
+				`NameKeyedCollector: sessionRequirements refuses replace of "${name}": a requirement is switched off by not installing it`,
+			);
+		},
+	};
+}
+
 function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
 	const m = new Map<string, T>();
 	let frozen = false;

@@ -63,6 +63,7 @@ import { BootError } from "./types.mjs";
 export interface ValidateManifestsInput {
 	readonly modules: readonly Module[];
 	readonly bootstrapComponents: BootstrapMap;
+	/** The merged collectors: core's built-ins under the host's. */
 	readonly contributionKinds?: ContributionKindMap;
 	readonly overrideComponents?: Partial<ComponentMap>;
 }
@@ -157,6 +158,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"federationRedirectPolicies",
 	"tokenExchangeValidators",
 	"mfaFactors",
+	"sessionRequirements",
 	"auditHooks",
 	"routes",
 	"grantPolicyHooks",
@@ -494,6 +496,69 @@ function buildMissingRequiredPath(
 	path.push({ module: failingModule.name, requires: missingKey });
 
 	return { rootModule: rootModule.name, path };
+}
+
+// ---------------------------------------------------------------------------
+// After step 3 — The session-requirement kind guard
+// The session-admission ADR's D3.
+// ---------------------------------------------------------------------------
+
+/** The two kinds no composition may replace the collector of, or override an entry of (the session-admission ADR's D3). */
+const GUARDED_KINDS = ["sessionRequirements", "mfaFactors"] as const;
+
+/**
+ * A requirement is switched off by not installing it, and nothing may
+ * quietly remove one from behind the consumers: a module's
+ * `overrides.sessionRequirements` is refused here, at stage 1 —
+ * `session-requirement-kind-guarded`. A host collector for
+ * `sessionRequirements` — or for `mfaFactors`, whose projection the MFA
+ * requirement's reach is recomputed from — is refused under the same reason
+ * by `refuseGuardedHostKinds`, in `createApp` before the kinds are merged.
+ * @internal
+ */
+function checkSessionRequirementKindGuard(modules: readonly NormalisedModule[]): void {
+	// Read off the normalised entries — what the pass applies — not the raw
+	// manifest, whose `overrides` a getter could answer differently twice.
+	for (const m of modules) {
+		if (m.overridesEntries.some((entry) => entry.kind === "sessionRequirements")) {
+			throw new BootError({
+				message:
+					`Module "${m.name}" overrides a sessionRequirements entry, which nothing may: a session ` +
+					"requirement is switched off by not installing it, never replaced from behind the consumers.",
+				reason: "session-requirement-kind-guarded",
+				stage: "validateManifests",
+				details: {
+					reason: "session-requirement-kind-guarded",
+					kind: "sessionRequirements",
+					channel: "overrides",
+					module: m.name,
+				},
+			});
+		}
+	}
+}
+
+/**
+ * The host's `contributionKinds` held to the same rule, in `createApp`
+ * before the kinds are merged and before stage 1 (the session-admission
+ * ADR's D3): a collector for `sessionRequirements` or `mfaFactors` the host
+ * supplies would sit behind the `sessionRequirementResolver` projection and
+ * the `session_requirements_registered` boot line, which read the planner's.
+ */
+export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): void {
+	if (host === undefined) return;
+	for (const kind of GUARDED_KINDS) {
+		if (Object.hasOwn(host, kind)) {
+			throw new BootError({
+				message:
+					`contributionKinds replaces the collector for "${kind}", which nothing may: the ` +
+					"sessionRequirementResolver projection and the session_requirements_registered boot line read the planner's.",
+				reason: "session-requirement-kind-guarded",
+				stage: "validateManifests",
+				details: { reason: "session-requirement-kind-guarded", kind, channel: "contributionKinds" },
+			});
+		}
+	}
 }
 
 /**
@@ -1590,6 +1655,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 				ctx.bootstrapComponents,
 				ctx.overrideComponents,
 			),
+	},
+	{
+		id: "session-requirement-kind-guard",
+		spec: "A2-β §5.1 (after step 3): the session-admission ADR's D3",
+		run: (ctx) => checkSessionRequirementKindGuard(ctx.modules),
 	},
 	{
 		id: "requires-closure",

@@ -66,18 +66,20 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 26 literals (Phase 9 added "grant-policy-without-
+// BootErrorReason — exactly 29 literals (Phase 9 added "grant-policy-without-
 // issuer" for the CP-20 invariant restoration; issue #101 added
 // "federation-stores-incomplete", and "mfa-partial-wiring", which the MFA ADR's
 // D3 removed with the surface it guarded; the OIDC discovery aggregator added
 // "discovery-document-invalid"; #271 added "replica-unsafe-adapter"; #363
 // added "component-absence-undeclared"; #375 folded #277's
 // "access-token-revocation-unenforceable" into it; an uncalled module factory
-// in `modules` added "module-factory-not-called")
+// in `modules` added "module-factory-not-called"; the session-admission ADR's
+// D3 and D7 added "session-requirement-kind-guarded",
+// "session-requirements-undeclared" and "session-requirement-missing")
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 26 reason literals", () => {
+	it("contains exactly the 29 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -105,6 +107,9 @@ describe("BootErrorReason", () => {
 			| "discovery-document-invalid"
 			| "replica-unsafe-adapter"
 			| "component-absence-undeclared"
+			| "session-requirement-kind-guarded"
+			| "session-requirements-undeclared"
+			| "session-requirement-missing"
 		>();
 	});
 });

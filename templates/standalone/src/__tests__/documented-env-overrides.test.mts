@@ -25,7 +25,7 @@ import {
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { buildModules } from "../buildModules.mjs";
+import { buildModules, withSessionRequirements } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 
 /**
@@ -191,8 +191,10 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
-	// The MFA ADR's D19: the one mode this release can honour, and the two
-	// store switches a composition installs MFA's stores from.
+	// The MFA ADR's D19: the mode — `off` until the MFA package exists, and
+	// what `sessionRequirements.expected` is derived from in TypeScript (the
+	// session-admission ADR's D7) — and the two store switches a composition
+	// installs MFA's stores from.
 	MFA_MODE: "off",
 	MFA_FACTOR_STORE_ADAPTER: "redis",
 	MFA_TRANSACTION_STORE_ADAPTER: "redis",
@@ -594,12 +596,21 @@ describe("#288: the shipped config boots with every documented override supplied
 			});
 		}
 
-		it("refuses an MFA_MODE this release cannot honour, naming mfa.mode", () => {
-			for (const mode of ["required", "optional"]) {
-				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, MFA_MODE: mode }), mode).toThrow(
-					/mfa\.mode/,
-				);
+		it("parses each MFA_MODE, and derives sessionRequirements.expected from the parsed mode, never from the variable (the session-admission ADR's D7)", () => {
+			for (const [mode, expected] of [
+				["off", []],
+				["optional", ["mfa"]],
+				["required", ["mfa"]],
+			] as const) {
+				const config = buildResolvedConfig({ ...DOCUMENTED_ENV, MFA_MODE: mode });
+				expect(config.mfa?.mode, mode).toBe(mode);
+				// The key has no default: nothing in the shipped HOCON writes it.
+				expect(config.sessionRequirements, mode).toBeUndefined();
+				expect(withSessionRequirements(config).sessionRequirements, mode).toEqual({
+					expected: [...expected],
+				});
 			}
+			expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
 		});
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS (#272)", () => {

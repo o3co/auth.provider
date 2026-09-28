@@ -46,6 +46,10 @@ export default defineConfig({
 				// test for the FederationGrant union — a revoked or pending grant
 				// with only some of the authorization fields must not compile.
 				"src/federation-grants/__tests__/types.test.mts",
+				// The session-admission ADR (A2): the contract's shapes are asserted
+				// with expectTypeOf, and the fixtures claim the port's types. Paired
+				// with tsconfig.test.json, as #343 requires.
+				"src/session-admission/**/*.test.mts",
 				// #626: which intent fields a store must not drop. Paired with
 				// tsconfig.test.json, which already covers the directory.
 				"src/federation-grants/__tests__/intent-fields.types.test.mts",

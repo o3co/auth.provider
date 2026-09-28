@@ -67,6 +67,9 @@ const PASSWORD = "correct-horse-battery-staple";
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
+	// The posture on session admission `app.mts` derives from `mfa.mode`
+	// (the session-admission ADR's D7): this composition expects none.
+	sessionRequirements: { expected: [] },
 	oauth: {
 		jwt: {
 			issuer: "https://auth.test",

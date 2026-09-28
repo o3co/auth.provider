@@ -25,6 +25,7 @@ import {
 	readAccessTokenRevocationMode,
 	readAcrTable,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	stepUpReach,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -113,7 +114,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	// reaches the conditional-spread factory below (TS does not propagate
 	// the contributes element type through `...(cond ? [fn] : [])`).
 	return defineModule<
-		"config" | "clientRepository" | "codeRepository" | "keyStore" | "grantHandlerResolver",
+		| "config"
+		| "clientRepository"
+		| "codeRepository"
+		| "keyStore"
+		| "grantHandlerResolver"
+		| "sessionRequirementResolver",
 		| "rateLimiter"
 		| "auditSink"
 		| "grantPolicy"
@@ -139,6 +145,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"codeRepository",
 			"keyStore",
 			"grantHandlerResolver", // Amendment 3 (§1.1.3) — synthetic, auto-injected by boot planner
+			"sessionRequirementResolver", // the session-admission ADR's D1: every consumer of admission takes it; here it decides the acr drop (D6), and A3 hands it to the consumers
 		],
 		optional: [
 			"rateLimiter", // Phase 9 Task 4 augmentation — oauth routes degrade gracefully without
@@ -203,6 +210,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						// changing routes.mts. No cast since #626 P1: the slot and the
 						// parameter are the same `FederationProvider`.
 						getFederationProviders: () => deps.federationProviders,
+						requirements: deps.sessionRequirementResolver,
 					});
 					return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
 				},
@@ -228,7 +236,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			discoveryMetadata: [
 				(
 					deps: ProviderDeps<
-						"config" | "clientRepository" | "codeRepository" | "keyStore" | "grantHandlerResolver",
+						| "config"
+						| "clientRepository"
+						| "codeRepository"
+						| "keyStore"
+						| "grantHandlerResolver"
+						| "sessionRequirementResolver",
 						| "rateLimiter"
 						| "auditSink"
 						| "grantPolicy"
@@ -345,6 +358,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							),
 							deps.federationProviders,
 							deps.config,
+							stepUpReach(Array.from(deps.sessionRequirementResolver.entries(), ([, r]) => r)),
 						).table,
 					);
 					return {

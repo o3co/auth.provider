@@ -83,8 +83,27 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 		sessionId: "express-session-1",
 		subject: "user-1",
 		sid: undefined,
-		primary: { method: "pwd", authTimeMs: now - 1_000 },
-		user: { id: "user-1", username: "alice", groups: ["staff"] },
+		continuation: {
+			primary: {
+				subject: "user-1",
+				user: { id: "user-1", username: "alice", groups: ["staff"] },
+				claims: { email: "user-1@example.test" },
+				recorded: {
+					amr: ["pwd"],
+					authentication: {
+						primary: "pwd",
+						federation: undefined,
+						upstreamAmr: undefined,
+						mfaAt: undefined,
+					},
+				},
+				authTimeMs: now - 1_000,
+				redirectTo: "https://app.example/after",
+				request: { ip: "198.51.100.7", userAgent: "contract" },
+			},
+			done: [],
+			interruptedBy: "mfa",
+		},
 		redirectTo: "https://app.example/after",
 		enrollment: "none",
 		emailProof: "not_required",
@@ -121,6 +140,15 @@ export function runMfaTransactionStoreContract(
 	const expiry = options.expiry ?? hostExpiry;
 
 	describe("MfaTransactionStore contract: the transaction", () => {
+		it("refuses a login transaction whose subject or redirectTo is not the continuation's primary's: one record, one login", async () => {
+			const store = await factory();
+			await expect(store.create(TX({ subject: "user-2" }))).rejects.toThrow(RangeError);
+			await expect(store.create(TX({ redirectTo: undefined }))).rejects.toThrow(RangeError);
+			await expect(store.create(TX({ redirectTo: "https://evil.example/" }))).rejects.toThrow(
+				RangeError,
+			);
+		});
+
 		it("returns a created transaction whole, as plain data, its undefined fields named", async () => {
 			const store = await factory();
 			const login = TX();
@@ -128,8 +156,7 @@ export function runMfaTransactionStoreContract(
 				id: "tx-2",
 				purpose: "step_up",
 				sid: "sid-1",
-				primary: undefined,
-				user: undefined,
+				continuation: undefined,
 				redirectTo: undefined,
 				enrollment: "allowed",
 				emailProof: { provedAtMs: Date.now() },
@@ -219,9 +246,37 @@ export function runMfaTransactionStoreContract(
 				["subject not a string", { subject: {} }],
 				["sid not a string", { sid: 7 }],
 				["redirectTo not a string", { redirectTo: ["/"] }],
-				["primary not an object", { primary: "pwd" }],
-				["primary method not a string", { primary: { method: 1, authTimeMs: 1 } }],
-				["primary authTimeMs NaN", { primary: { method: "pwd", authTimeMs: Number.NaN } }],
+				["continuation not an object", { continuation: "pwd" }],
+				["continuation without a primary", { continuation: { done: [] } }],
+				[
+					"continuation whose primary records an mfaAt",
+					{
+						continuation: {
+							...TX().continuation,
+							primary: {
+								...TX().continuation?.primary,
+								recorded: {
+									amr: ["pwd"],
+									authentication: {
+										primary: "pwd",
+										federation: undefined,
+										upstreamAmr: undefined,
+										mfaAt: new Date(),
+									},
+								},
+							},
+						},
+					},
+				],
+				[
+					"continuation whose done adds a primary's marker",
+					{
+						continuation: {
+							...TX().continuation,
+							done: [{ requirement: "mfa", adds: { amr: ["pwd"] } }],
+						},
+					},
+				],
 				["acrValues not a list", { acrValues: "urn:x" }],
 				["acrValues not strings", { acrValues: [1] }],
 			];
@@ -243,6 +298,12 @@ export function runMfaTransactionStoreContract(
 			await store.create({
 				...tx,
 				admin: true,
+				continuation: {
+					...tx.continuation,
+					primary: { ...tx.continuation?.primary, password: "hunter2" },
+					done: [],
+					extra: true,
+				},
 				emailProof: { provedAtMs: 1234, by: "operator" },
 				challenge: { ...CHALLENGE, secret: "123456" },
 				pendingEnrollment: { kind: "totp", state: "sealed", expiresAtMs: 99, secret: "JBSW" },

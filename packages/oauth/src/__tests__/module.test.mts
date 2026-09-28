@@ -1078,3 +1078,11 @@ describe("absence policies (#363, #375)", () => {
 		);
 	});
 });
+
+describe("oauthModule — a consumer of session admission (the session-admission ADR's D1, D6)", () => {
+	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
+		const module = oauthModule({ config: makeValidAppConfig() as never });
+		expect(module.requires).toContain("sessionRequirementResolver");
+		expect(module.requires).toContain("grantHandlerResolver");
+	});
+});

@@ -32,7 +32,7 @@ import { createAdapterFactory, type LifecycleRegistrar } from "#/adapters/Adapte
 import type { Logger } from "#/logging/Logger.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
-import { createApp } from "../create-app.mjs";
+import { createApp, mergeWithBuiltins } from "../create-app.mjs";
 import type {
 	AppHandle,
 	BootstrapMap,
@@ -214,13 +214,18 @@ function makeStubListCollector<V = unknown>() {
 	};
 }
 
-/** Full stub ContributionCollectorMap for tests that do not exercise contribution kinds. */
+/**
+ * Stub ContributionCollectorMap for tests that do not exercise contribution
+ * kinds. `mfaFactors` and `sessionRequirements` are left to the built-in
+ * collectors: a host collector for either is refused by `createApp` before
+ * the kinds are merged (`session-requirement-kind-guarded`, the
+ * session-admission ADR's D3).
+ */
 function makeStubCollectors(): ContributionCollectorMap {
 	return {
 		grants: makeStubNameCollector(),
 		tokenExchangeValidators: makeStubNameCollector(),
 		federations: makeStubNameCollector(),
-		mfaFactors: makeStubNameCollector(),
 		auditHooks: makeStubListCollector(),
 		routes: makeStubRouteCollector(),
 		grantPolicyHooks: makeStubListCollector(),
@@ -720,5 +725,17 @@ describe("createApp — 8. ReadinessRegistrar seeding", () => {
 		});
 
 		expect(handle.readinessProbes).toEqual([]);
+	});
+});
+
+describe("the sessionRequirements collector (the session-admission ADR's D3)", () => {
+	it("refuses replace outright, known name or not: a requirement is switched off by not installing it", () => {
+		const collector = mergeWithBuiltins(undefined).sessionRequirements;
+		expect(collector).toBeDefined();
+		const requirement = { name: "a" } as never;
+		collector?.register("a", requirement);
+		expect(() => collector?.replace("a", requirement)).toThrow(/refuses replace of "a"/);
+		expect(() => collector?.replace("b", requirement)).toThrow(/refuses replace of "b"/);
+		expect(collector?.get("a")).toBe(requirement);
 	});
 });
