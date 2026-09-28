@@ -40,26 +40,33 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
 /**
  * The table this composition vouches for.
  *
- * - `pwd` and `fed` can always be produced.
+ * - `pwd` can always be produced; `fed` once a federation is installed, since
+ *   only a federation callback records it.
  * - No second factor can: `/authorize` consults no `mfaCoordinator` before
  *   D17's single decision (the MFA ADR's build order, step 13), which adds
  *   the coordinator's `secondFactorMethods` here.
  * - A federation installed makes every entry satisfiable: every federation's
  *   upstream `amr` is recorded beside `fed` and counts, as #481 shipped,
  *   until the build order's step 5 lets a federation be untrusted and
- *   narrows this to the trusted ones.
+ *   narrows `trustedFederation` to the trusted ones.
+ *
+ * `federations` is the map a composition installed, read when this runs: at
+ * composition, after every federation's contribution has registered.
  */
 export const vouchableAcrValues = (
 	configured: AcrTable,
 	federations: ReadonlyMap<string, unknown> | undefined,
-): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } =>
-	vouchableAcrTable(
+): { readonly table: AcrTable; readonly dropped: readonly UnsatisfiableAcrValue[] } => {
+	const federationInstalled = federations !== undefined && federations.size > 0;
+	return vouchableAcrTable(
 		configured,
 		producibleAmr({
 			secondFactorMethods: undefined,
-			trustedFederation: federations !== undefined && federations.size > 0,
+			federationInstalled,
+			trustedFederation: federationInstalled,
 		}),
 	);
+};
 
 /**
  * One line per dropped entry, once, at composition: `warn` — the operator

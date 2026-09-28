@@ -52,8 +52,13 @@ export interface PrimaryAuthentication {
 export interface MfaCoordinator {
 	/**
 	 * The `amr` values the installed factors can add: what a step-up can
-	 * reach. Computed lazily — a getter over `mfaFactorResolver`, read at
-	 * request time — because the resolver cannot be read while the
+	 * reach, and what the drop of unsatisfiable `acr` entries counts as
+	 * producible (`../mfa/requirement.mts`). Every value an enabled factor's
+	 * `amrFor` can answer, and `mfa` when — and only when — one of those
+	 * factors adds it (`addsMfa`): the rule adds nothing of its own, so a
+	 * deployment whose only factor is the email code cannot reach
+	 * `urn:o3co:acr:mfa`. Computed lazily — a getter over `mfaFactorResolver`,
+	 * read at request time — because the resolver cannot be read while the
 	 * coordinator is built: the factors register after the `provides`
 	 * factories run, and a read then refuses the boot.
 	 */

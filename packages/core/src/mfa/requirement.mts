@@ -53,7 +53,9 @@ export type MfaMode = "off" | "optional" | "required";
 /**
  * What one `acr` requires (D15): any one of these lists, every value of which
  * the session must carry. `"urn:o3co:acr:phr" = [["hwk"], ["swk"]]` is two
- * alternatives; a plain list in the configuration is one.
+ * alternatives; a plain list in the configuration is one. An alternative that
+ * requires nothing — which `readAcrTable` never builds, but a table built by
+ * hand can hold — is never met: it would vouch for every session.
  */
 export type AcrRequirement = readonly (readonly string[])[];
 
@@ -66,6 +68,14 @@ export type AcrTable = Readonly<Record<string, AcrRequirement>>;
  * and an IdP it trusts may have asked for one already.
  */
 const BASELINE_PRIMARIES: ReadonlySet<string> = new Set([PASSWORD_AMR]);
+
+/**
+ * The primaries the baseline can judge: a password and a federation (D9).
+ * Any other — a casing (`"PWD"`), an empty string, a login method a later
+ * release adds before the rule learns it — is not one it knows, and is
+ * re-authenticated like a primary that cannot be told, never met.
+ */
+const KNOWN_PRIMARIES: ReadonlySet<string> = new Set([PASSWORD_AMR, FEDERATED_AMR]);
 
 const isNonEmptyStringList = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) &&
@@ -148,14 +158,17 @@ export type AcrSelection =
 const NOTHING: ReadonlySet<string> = new Set();
 
 /**
- * What a step-up can add to a session (D16): the values the installed
- * factors add, and `mfa`; nothing without a coordinator.
+ * What a step-up can add to a session (D16): the coordinator's
+ * `secondFactorMethods` — every value an installed factor adds, `mfa` among
+ * them when one of the factors adds it (`MfaFactor.addsMfa`); nothing without
+ * a coordinator. D16's "∪ {mfa}" is the coordinator's to include: a
+ * deployment whose only factor is the email code (O7) cannot reach
+ * `urn:o3co:acr:mfa`, and must not be sent to try.
  */
 export function stepUpReach(
 	secondFactorMethods: ReadonlySet<string> | undefined,
 ): ReadonlySet<string> {
-	if (secondFactorMethods === undefined) return NOTHING;
-	return new Set([...secondFactorMethods, MFA_AMR]);
+	return secondFactorMethods ?? NOTHING;
 }
 
 /**
@@ -164,7 +177,8 @@ export function stepUpReach(
  * listed earlier: an RP that will accept only `phr` asks only for `phr`. An
  * entry is met when one of its alternatives is all held, and is a step-up
  * target when one of its alternatives lacks only what `reach` holds. A value
- * the table does not carry is neither.
+ * the table does not carry is neither, and neither is an alternative that
+ * requires nothing.
  */
 export function selectAcr(
 	requested: readonly string[],
@@ -177,13 +191,18 @@ export function selectAcr(
 	const entryFor = (acr: string): AcrRequirement | undefined =>
 		Object.hasOwn(table, acr) ? table[acr] : undefined;
 	for (const acr of requested) {
-		if (entryFor(acr)?.some((alternative) => alternative.every((value) => held.has(value)))) {
+		if (
+			entryFor(acr)?.some(
+				(alternative) => alternative.length > 0 && alternative.every((value) => held.has(value)),
+			)
+		) {
 			return { outcome: "met", acr };
 		}
 	}
 	const reachable = requested.filter((acr) =>
-		entryFor(acr)?.some((alternative) =>
-			alternative.every((value) => held.has(value) || reach.has(value)),
+		entryFor(acr)?.some(
+			(alternative) =>
+				alternative.length > 0 && alternative.every((value) => held.has(value) || reach.has(value)),
 		),
 	);
 	return reachable.length > 0 ? { outcome: "step_up", acrValues: reachable } : { outcome: "unmet" };
@@ -191,29 +210,37 @@ export function selectAcr(
 
 /**
  * The requirement rule (D16): the baseline, then `acr_values`, over one live
- * session.
+ * session. Both must be met: a met `acr` does not meet the baseline.
  *
- * - **Baseline**, under `required` only: met when the primary is not one the
- *   baseline applies after (a federation), or when a second factor was
- *   verified in the session (`mfaAt`). `session: null` and a primary that
- *   cannot be told are re-authenticated. A password session without one steps
- *   up — or, with nothing to step up with, is unmet.
+ * - **Baseline**, under `required` only: met when the primary is one the
+ *   baseline does not apply after (a federation), or when a second factor was
+ *   verified in the session (`mfaAt`). `session: null`, a primary that cannot
+ *   be told and a primary it does not know (anything but `pwd` and `fed`) are
+ *   re-authenticated — unless no requested value is in the table at all, which
+ *   no login can meet: that is unmet first. A password session without a
+ *   second factor steps up — or, with nothing to step up with, is unmet.
  * - **`acr_values`**: D15's selection over `vouchedAmr`. A step-up needs a
  *   live session to add to: with `session: null` nothing is within reach.
  *
- * Both must be met. A request nothing can meet is unmet whatever the baseline
- * needs; otherwise one step-up is asked for both, since any second factor
- * meets the baseline.
+ * Once the session can be judged, a request no step-up can meet is unmet
+ * whatever the baseline needs; otherwise one step-up is asked for both, since
+ * any second factor meets the baseline.
  */
 export function decideMfaRequirement(input: MfaRequirementInput): MfaRequirementDecision {
 	const { session } = input;
 	let baselineMissing = false;
 	if (input.mode === "required") {
-		if (session === null || session.authentication === undefined) {
-			return { outcome: "reauthenticate" };
+		const primary = session?.authentication?.primary;
+		if (session === null || primary === undefined || !KNOWN_PRIMARIES.has(primary)) {
+			const noneConfigured =
+				input.acrValues.length > 0 &&
+				input.acrValues.every((acr) => !Object.hasOwn(input.table, acr));
+			return noneConfigured
+				? { outcome: "unmet", requirement: "acr" }
+				: { outcome: "reauthenticate" };
 		}
-		const { primary, mfaAt } = session.authentication;
-		baselineMissing = BASELINE_PRIMARIES.has(primary) && mfaAt === undefined;
+		baselineMissing =
+			BASELINE_PRIMARIES.has(primary) && session.authentication?.mfaAt === undefined;
 	}
 	const reach = session === null ? NOTHING : stepUpReach(input.secondFactorMethods);
 	const selection = selectAcr(input.acrValues, session?.amr ?? [], input.table, reach);
@@ -248,22 +275,39 @@ export interface ProducibleAmr {
 	 * assert any value, recorded beside `fed` (D13), so every entry can be met.
 	 */
 	readonly anything: boolean;
-	/** Otherwise: `pwd` and `fed`, the installed factors' values and, with a coordinator, `mfa`. */
+	/**
+	 * Otherwise: `pwd`; `fed` once a federation is installed; and what the
+	 * installed factors add (`stepUpReach`), `mfa` among it when one of them
+	 * adds it.
+	 */
 	readonly values: ReadonlySet<string>;
 }
 
 /**
- * What the composition can produce (D15). `trustedFederation`: a federation
- * whose upstream `amr` counts is installed — every federation, until the
- * build order's step 5 gives each a `trustUpstreamAmr` switch.
+ * What the composition can produce (D15).
+ *
+ * - `federationInstalled`: a federation is installed, so a federation callback
+ *   can write `fed`. Without one, nothing records `fed`.
+ * - `trustedFederation`: one of them is a federation whose upstream `amr`
+ *   counts — every installed federation, until the build order's step 5 gives
+ *   each a `trustUpstreamAmr` switch. A trusted federation that is not
+ *   installed is a `RangeError`.
  */
 export function producibleAmr(installed: {
 	readonly secondFactorMethods: ReadonlySet<string> | undefined;
+	readonly federationInstalled: boolean;
 	readonly trustedFederation: boolean;
 }): ProducibleAmr {
+	if (installed.trustedFederation && !installed.federationInstalled) {
+		throw new RangeError("producibleAmr: a trusted federation must be an installed one");
+	}
 	return {
 		anything: installed.trustedFederation,
-		values: new Set([PASSWORD_AMR, FEDERATED_AMR, ...stepUpReach(installed.secondFactorMethods)]),
+		values: new Set([
+			PASSWORD_AMR,
+			...(installed.federationInstalled ? [FEDERATED_AMR] : []),
+			...stepUpReach(installed.secondFactorMethods),
+		]),
 	};
 }
 
@@ -283,7 +327,8 @@ export interface UnsatisfiableAcrValue {
 /**
  * The table `/authorize` answers `acr_values` from and discovery advertises
  * (D15): the configured one, less every entry no alternative of which
- * `producible` can meet. A dropped entry is answered like one never
+ * `producible` can meet — an alternative that requires nothing never can. A
+ * dropped entry is answered like one never
  * configured — `unmet_authentication_requirements` — and is reported, so the
  * caller can say so once at boot. An entry that stays is kept whole. The
  * table built is new and has no prototype; the configured one is not touched.
@@ -297,7 +342,7 @@ export function vouchableAcrTable(
 	const missing = (alternative: readonly string[]): readonly string[] =>
 		producible.anything ? [] : alternative.filter((value) => !producible.values.has(value));
 	for (const [acr, requirement] of Object.entries(configured)) {
-		const lacking = requirement.map(missing);
+		const lacking = requirement.filter((alternative) => alternative.length > 0).map(missing);
 		if (lacking.some((values) => values.length === 0)) {
 			table[acr] = requirement;
 			continue;
