@@ -156,6 +156,8 @@ const makeApp = async (opts: {
 	sessionStoreFail?: "set" | "get";
 	/** The cookie session's `regenerate` fails, as a store outage makes it. */
 	regenerateFails?: boolean;
+	/** The cookie session has no `regenerate` at all, as a session middleware that is not express-session hands one over. */
+	cannotRegenerate?: boolean;
 	/** Register the requirements without holding their pages to the issuer's origin, as a hand-built resolver may. */
 	anyPageOrigin?: boolean;
 	/** Compose without an express-session store (no ask can be recorded). */
@@ -211,6 +213,7 @@ const makeApp = async (opts: {
 	};
 	const cookieSession = (holder: { session?: unknown }): Session => {
 		const session = state.session;
+		if (opts.cannotRegenerate === true) return session;
 		Object.defineProperty(session, "regenerate", {
 			enumerable: false,
 			configurable: true,
@@ -388,6 +391,34 @@ describe("/authorize on admission — the pinned changes (D8)", () => {
 		expect(codeOf(await authorize(harness.app, baseQuery))).toBe("code-x");
 	});
 
+	it("(4) a boundary that cannot be read is temporarily_unavailable on the redirect URI, named for the revocation store, logged as admission's line", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			subjectRevocation: {
+				kind: "failing",
+				revokeBefore: async () => {},
+				revokedBefore: async () => {
+					throw new Error("redis down");
+				},
+			},
+		});
+		const params = redirectParams(await authorize(harness.app, baseQuery));
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("revocation store unavailable");
+		expect(harness.createCode).not.toHaveBeenCalled();
+		// An outage is not a login: the cookie session is left as it was.
+		expect(harness.regenerated).toBe(0);
+		expect(harness.logger.error).toHaveBeenCalledTimes(1);
+		expect(harness.logger.error).toHaveBeenCalledWith(
+			{
+				store: "revocation_boundary",
+				action: "oauth.authorize",
+				err: expect.objectContaining({ name: "Error" }),
+			},
+			"session_admission_unavailable",
+		);
+	});
+
 	it("(5) a record past its expiresAt is not_live: the login redirect", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record({ expiresAt: minutesAgo(1) })),
@@ -417,6 +448,25 @@ describe("/authorize on admission — the pinned changes (D8)", () => {
 			},
 			"authorize_cookie_session_unavailable",
 		);
+	});
+
+	it("(6) a cookie session that cannot regenerate at all — not express-session's — fails as a regeneration does, and is abandoned", async () => {
+		const harness = await makeApp({ userSessionStore: storeWith(null), cannotRegenerate: true });
+		const params = redirectParams(await authorize(harness.app, baseQuery));
+		// Never the login page: nothing here could drop the refused session's
+		// authentication, so a login page that forwards signed-in users would loop.
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("session store unavailable");
+		expect(harness.createCode).not.toHaveBeenCalled();
+		expect(harness.logger.error).toHaveBeenCalledWith(
+			{
+				store: "cookie_session",
+				step: "regenerate",
+				err: expect.objectContaining({ name: "TypeError" }),
+			},
+			"authorize_cookie_session_unavailable",
+		);
+		expect(harness.sessionAfterResponse()).toBeUndefined();
 	});
 
 	it("(7) a dead session sent with an invalid client is the client's 400 after the lookup, not the login redirect", async () => {
