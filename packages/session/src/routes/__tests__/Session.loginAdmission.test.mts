@@ -35,19 +35,27 @@
  * route with none registered — is `Session.test.mts`'s, unchanged.
  */
 
-import type {
-	Logger,
-	PrimaryAuthentication,
-	PrimaryContinuation,
-	SessionRequirement,
-	UserRepository,
-	UserSessionStore,
+import {
+	type AdmissionDeps,
+	admitPrimary,
+	type Logger,
+	type PrimaryAuthentication,
+	type PrimaryContinuation,
+	passwordPrimary,
+	type SessionRequirement,
+	type UserRepository,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import session, { MemoryStore } from "express-session";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import {
+	type AnswerInterruptionResult,
+	answerInterruption,
+	type InterruptionReporter,
+} from "#/answer-interruption.mjs";
 import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
@@ -161,12 +169,13 @@ interface Setup {
 }
 
 /**
- * The login router behind express-session over a `MemoryStore` whose
- * `destroy` and `set` join `trace` and fail where the setup says; a
- * `UserSessionStore` and a `SubjectSessionIndex` whose writes join it too.
+ * A `MemoryStore` whose `destroy` — express-session's regeneration — and
+ * `set` — a save — join `trace` and fail where `options` says.
  */
-function setup(options: Setup = {}) {
-	const trace = options.trace ?? [];
+function tracedCookieStore(
+	trace: string[],
+	options: Pick<Setup, "regenerateError" | "saveError">,
+): MemoryStore {
 	const cookieStore = new MemoryStore();
 	const destroy = cookieStore.destroy.bind(cookieStore);
 	const set = cookieStore.set.bind(cookieStore);
@@ -186,6 +195,27 @@ function setup(options: Setup = {}) {
 		}
 		set(sid, data, cb);
 	};
+	return cookieStore;
+}
+
+/** express-session over `cookieStore`, as the tests mount it. */
+const cookieSession = (cookieStore: MemoryStore) =>
+	session({
+		name: SESSION_COOKIE,
+		secret: "cookie-secret",
+		resave: false,
+		saveUninitialized: false,
+		store: cookieStore,
+	});
+
+/**
+ * The login router behind express-session over a `MemoryStore` whose
+ * `destroy` and `set` join `trace` and fail where the setup says; a
+ * `UserSessionStore` and a `SubjectSessionIndex` whose writes join it too.
+ */
+function setup(options: Setup = {}) {
+	const trace = options.trace ?? [];
+	const cookieStore = tracedCookieStore(trace, options);
 	const userSessionStore = {
 		kind: "memory",
 		create: vi.fn(async () => {
@@ -211,15 +241,7 @@ function setup(options: Setup = {}) {
 	const logger = options.logger ?? spyLogger();
 
 	const app = express();
-	app.use(
-		session({
-			name: SESSION_COOKIE,
-			secret: "cookie-secret",
-			resave: false,
-			saveUninitialized: false,
-			store: cookieStore,
-		}),
-	);
+	app.use(cookieSession(cookieStore));
 	app.use(
 		"/session",
 		createRouter(express, {
@@ -581,5 +603,160 @@ describe("POST /session/login — a requirement interrupts", () => {
 			store: "cookie_session",
 			step: "save",
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// answerInterruption — the interruption's answer, exported for a requirement's
+// completion (the MFA package's, after `resumePrimary` interrupts again)
+// ---------------------------------------------------------------------------
+
+describe("answerInterruption — the login's interruption answer, exported (the session-admission ADR's D5)", () => {
+	/**
+	 * A route, behind express-session over a traced `MemoryStore`, that has
+	 * `admitPrimary` interrupt through `requirement` and hands the admission to
+	 * `answerInterruption` with a reporter recording what it is told — as a
+	 * requirement's completion route does with what `resumePrimary` answered.
+	 */
+	function helperApp(
+		requirement: SessionRequirement,
+		options: Pick<Setup, "regenerateError" | "saveError" | "trace"> = {},
+	) {
+		const trace = options.trace ?? [];
+		const cookieStore = tracedCookieStore(trace, options);
+		const reported: [string, string, unknown][] = [];
+		const reporter: InterruptionReporter = {
+			storeUnavailable: (store, step, cause) => {
+				reported.push([store, step, cause]);
+			},
+		};
+		const results: AnswerInterruptionResult[] = [];
+		const deps: AdmissionDeps = {
+			userSessionStore: undefined,
+			subjectRevocation: undefined,
+			requirements: resolverForTests([requirement]),
+			acrTable: {},
+			logger: undefined,
+			auditSink: undefined,
+		};
+		const app = express();
+		app.use(cookieSession(cookieStore));
+		app.post("/complete", async (req, res) => {
+			const admission = await admitPrimary(
+				deps,
+				passwordPrimary({
+					subject: ALICE.id,
+					user: ALICE,
+					claims: {},
+					authTime: new Date(),
+					redirectTo: undefined,
+					request: {},
+				}),
+			);
+			if (admission.outcome !== "interrupt") throw new Error("expected an interruption");
+			results.push(await answerInterruption(admission, { req, res, csrf, reporter }));
+		});
+		return { app, trace, reported, results, cookieStore };
+	}
+
+	it("is exported from the package, beside establishSession", async () => {
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		expect(mod.answerInterruption).toBe(answerInterruption);
+	});
+
+	it("regenerates, opens the ceremony with the regenerated session's id, saves, and answers the requirement's 403 with a fresh CSRF token", async () => {
+		const { requirement, trace, opened } = fixture(() => "interrupt");
+		const helper = helperApp(requirement, { trace });
+
+		const res = await request(helper.app).post("/complete");
+
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual(INTERRUPTION.body);
+		expect(routeWrites(trace, 3)).toEqual(["regenerate", "open", "save"]);
+		expect(opened[0]?.sessionId).toBe(cookieSessionId(res));
+		expect(setCookies(res).some((c) => c.startsWith(`${csrf.cookieName}=`))).toBe(true);
+		expect(helper.results).toEqual([{ outcome: "answered" }]);
+		expect(helper.reported).toEqual([]);
+	});
+
+	it("each failure after the regeneration: 503, told to the reporter once, the cookie session dropped — and the outcome names the store and the step", async () => {
+		const down = new Error("store down");
+		const cases = [
+			{
+				label: "the regeneration",
+				requirement: fixture(() => "interrupt").requirement,
+				options: { regenerateError: down },
+				store: "cookie_session",
+				step: "regenerate",
+			},
+			{
+				label: "open",
+				requirement: fixture(
+					() => "interrupt",
+					async () => {
+						throw down;
+					},
+				).requirement,
+				options: {},
+				store: "fixture",
+				step: "open",
+			},
+			{
+				label: "the save",
+				requirement: fixture(() => "interrupt").requirement,
+				options: { saveError: down },
+				store: "cookie_session",
+				step: "save",
+			},
+		] as const;
+		for (const { label, requirement, options, store, step } of cases) {
+			const helper = helperApp(requirement, options);
+
+			const res = await request(helper.app).post("/complete");
+
+			expect(res.status, label).toBe(503);
+			expect(res.body, label).toEqual(SESSION_STORE_UNAVAILABLE);
+			expect(cookieSessionId(res), label).toBeUndefined();
+			expect(
+				setCookies(res).some((c) => c.startsWith(`${csrf.cookieName}=`)),
+				label,
+			).toBe(false);
+			expect(helper.reported, label).toEqual([[store, step, down]]);
+			expect(helper.results, label).toEqual([{ outcome: "unavailable", store, step }]);
+		}
+	});
+
+	it("refuses what is not an interruption admission answered, with a RangeError, before the session is touched", async () => {
+		const trace: string[] = [];
+		const cookieStore = tracedCookieStore(trace, {});
+		const app = express();
+		app.use(cookieSession(cookieStore));
+		const thrown: unknown[] = [];
+		app.post("/complete", async (req, res) => {
+			for (const admission of [
+				{ outcome: "establish" },
+				{ outcome: "interrupt", requirement: "fixture" },
+				undefined,
+			]) {
+				try {
+					await answerInterruption(admission as never, {
+						req,
+						res,
+						csrf,
+						reporter: { storeUnavailable: () => {} },
+					});
+				} catch (err) {
+					thrown.push(err);
+				}
+			}
+			res.status(204).end();
+		});
+
+		const res = await request(app).post("/complete");
+
+		expect(res.status).toBe(204);
+		expect(thrown).toHaveLength(3);
+		for (const err of thrown) expect(err).toBeInstanceOf(RangeError);
+		expect(trace).toEqual([]);
 	});
 });
