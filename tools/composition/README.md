@@ -21,9 +21,10 @@ another's body limit, or a memory store booting under `deployment.mode =
 
 - **What it boots.** The template's composition with every package the
   template does not depend on added the way a deployment adds them to that
-  manifest — the device grant, DPoP, mTLS, token exchange, WebAuthn, and the
-  Apple and GitHub federations — plus the small modules a deployment writes
-  itself (config bridges, a grant policy, a session-to-WebAuthn-subject
+  manifest — the device grant, DPoP, mTLS, token exchange, WebAuthn, the MFA
+  package's TOTP factor (its MFA module is not composed yet, so `mfa.mode`
+  stays `off`), and the Apple and GitHub federations — plus the small modules
+  a deployment writes itself (config bridges, a grant policy, a session-to-WebAuthn-subject
   bridge, and two session requirements — each with the completion route a
   requirement's module contributes, built on the session package's exported
   `establishSession` and `answerInterruption`). The composition, the body and outage helpers and the outage runner
