@@ -271,7 +271,9 @@ export function decideMfaRequirement(input: MfaRequirementInput): MfaRequirement
 		return { outcome: "step_up", requirement: "acr", acrValues: selection.acrValues };
 	}
 	if (!baselineMissing) return { outcome: "met", acr: selection.acr };
-	return input.secondFactorMethods === undefined
+	// A coordinator with no factor enabled can step nothing up, as no
+	// coordinator cannot: a step-up there is one no factor could finish.
+	return input.secondFactorMethods === undefined || input.secondFactorMethods.size === 0
 		? { outcome: "unmet", requirement: "baseline" }
 		: { outcome: "step_up", requirement: "baseline", acrValues: [] };
 }
