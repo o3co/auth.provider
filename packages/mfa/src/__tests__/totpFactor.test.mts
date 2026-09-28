@@ -219,6 +219,8 @@ describe("verifying a TOTP code (F6)", () => {
 			algorithm: "SHA256",
 			digits: 8,
 			period: 60,
+			// A step of its own period: T - 5 counts 30-second steps.
+			lastUsedStep: totpStep(NOW_MS, 60) - 1,
 		});
 		const step = totpStep(NOW_MS, 60);
 		const code = codeAt(step, secret, "SHA256", 8);
