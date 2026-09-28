@@ -910,7 +910,7 @@ describe("POST callback — account linking through a form_post federation (#482
 		// The browser holds an authenticated session for user-1, whose
 		// UserSession is live.
 		harness.store.set("browser", {
-			data: { sid: "s-1", isAuthenticated: true },
+			data: { sid: "s-1", isAuthenticated: true, user: { id: "user-1" } },
 			cookie: { sameSite: "lax", secure: true, httpOnly: true },
 		});
 		(harness.userSessionStore.get as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -934,7 +934,8 @@ describe("POST callback — account linking through a form_post federation (#482
 		const record = harness.records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${transactionId}`) as {
 			federation: { state: string; link?: unknown };
 		};
-		expect(record.federation.link).toEqual({ sid: "s-1" });
+		// The session the start admitted and its subject: the callback's only binding.
+		expect(record.federation.link).toEqual({ sid: "s-1", subject: "user-1" });
 
 		// Apple posts back cross-site: the SameSite=None transaction cookie
 		// travels, the SameSite=Lax application session cookie does not.

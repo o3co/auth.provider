@@ -39,6 +39,7 @@
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import session from "express-session";
 import request from "supertest";
@@ -152,6 +153,7 @@ function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp 
 
 	app.use(
 		createRouter(express, {
+			requirements: resolverForTests([]),
 			config: {} as never,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(

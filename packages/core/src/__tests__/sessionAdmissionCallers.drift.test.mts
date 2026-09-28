@@ -368,7 +368,6 @@ interface AllowedSites {
 
 const UNTIL_A3 = "an oauth consumer, on admission in A3";
 const UNTIL_A4 = "a device-grant or federation-grants consumer, on admission in A4";
-const UNTIL_A5 = "the link flow, on admission in A5";
 const TOKEN_SIDE =
 	"a session read from a token, not a cookie: outside this release, routed through admission by a later record (D9)";
 
@@ -456,12 +455,6 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		file: "packages/federation-grants/src/module.mts",
 		sites: { revokedBefore: 1 },
 		why: `${UNTIL_A4}: the sessions boundary handed to the browser routes (sessionsBoundaryFor)`,
-	},
-	// The link flow, until A5.
-	{
-		file: "packages/session/src/routes/Federation.mts",
-		sites: { get: 1 },
-		why: `${UNTIL_A5}: the link callback's read of the session the start bound`,
 	},
 ];
 

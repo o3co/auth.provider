@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { createRouter } from "../Federation.mjs";
 
@@ -65,6 +66,7 @@ describe("Federation.mts route rewire — federationRedirectPolicyResolver param
 				userSessionStore: {} as never,
 				sessionFederationIndex: stubSessionFederationIndex,
 				federationTokenStore: {} as never,
+				requirements: resolverForTests([]),
 			}),
 		).not.toThrow();
 	});
