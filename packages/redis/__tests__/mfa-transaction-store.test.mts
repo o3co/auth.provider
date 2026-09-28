@@ -30,10 +30,12 @@
  * expiry waits on.
  */
 
-import type {
-	MfaLockoutPolicy,
-	MfaTransaction,
-	MfaTransactionStore,
+import {
+	createMemoryMfaTransactionStore,
+	type MfaLockoutPolicy,
+	type MfaSubjectAttemptReservation,
+	type MfaTransaction,
+	type MfaTransactionStore,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -303,6 +305,190 @@ describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D2
 				/subject state/,
 			);
 		}
+	});
+});
+
+/** A small seeded generator (mulberry32): the same sequence for a seed on every run. */
+const seeded = (seed: number): (() => number) => {
+	let a = seed >>> 0;
+	return () => {
+		a = (a + 0x6d2b79f5) >>> 0;
+		let t = a;
+		t = Math.imul(t ^ (t >>> 15), t | 1);
+		t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+		return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+	};
+};
+
+describe("createRedisMfaTransactionStore — the same answers as core's in-process store (the MFA ADR's D21)", () => {
+	// The contract samples D21's schedule; this walks it. Each seed drives the
+	// same random sequence of reservations, settlements, exempt successes and
+	// clears through core's in-process store and this one, and every answer
+	// must agree — a hold, its kind and its retry to the millisecond. A small
+	// policy reaches every hold within a few hundred steps. Callers' clocks
+	// disagree: time steps back as well as forward, and often not at all, so
+	// two events share an instant — but never to before the walk began, ahead
+	// of both stores' clocks, so neither forgets anything the other still
+	// counts.
+	const SMALL: MfaLockoutPolicy = {
+		threshold: 3,
+		baseSeconds: 60,
+		maxSeconds: 600,
+		memorySeconds: 3_600,
+		weeklyBudget: 6,
+		hardLimit: 12,
+		trustedBrowsers: 2,
+		trustedBrowserDays: 3,
+	};
+	const STEPS_MS = [
+		0,
+		0,
+		0,
+		1,
+		-1,
+		999,
+		-999,
+		MINUTE,
+		-MINUTE,
+		10 * MINUTE,
+		-10 * MINUTE,
+		60 * MINUTE,
+		DAY,
+		3 * DAY,
+	];
+	const OUTCOMES = ["failure", "failure", "success", "void"] as const;
+
+	it.each(Array.from({ length: 16 }, (_, i) => i + 1))(
+		"over a random sequence of D21's operations (seed %i)",
+		async (seed) => {
+			const random = seeded(seed);
+			const choose = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)] as T;
+			const memory = createMemoryMfaTransactionStore();
+			const redis = storeAt(freshPrefix());
+			const serverNow = await serverClock(first)();
+			const start = Math.ceil(Math.max(Date.now(), serverNow) / 1000) * 1000 + 1000;
+			let at = start;
+			/** Each reservation in flight, as each store named it. */
+			const pending: Array<readonly [string, string]> = [];
+			/** Each browser an exempt success trusted, as each store named it. */
+			const browsers: Array<readonly [string, string]> = [];
+			const browserPair = (): readonly [string | undefined, string | undefined] => {
+				const roll = random();
+				if (roll < 0.4 || browsers.length === 0) return [undefined, undefined];
+				if (roll < 0.5) return ["not-a-browser", "not-a-browser"];
+				return choose(browsers);
+			};
+
+			for (let step = 0; step < 400; step += 1) {
+				at = Math.max(start, at + choose(STEPS_MS));
+				const roll = random();
+				if (roll < 0.55) {
+					const [mine, theirs] = browserPair();
+					const expected = await memory.reserveSubjectAttempt("user-1", at, SMALL, mine);
+					const actual = await redis.reserveSubjectAttempt("user-1", at, SMALL, theirs);
+					const shape = (r: MfaSubjectAttemptReservation) =>
+						r.ok ? "ok" : { hold: r.hold, retryAfterMs: r.retryAfterMs };
+					expect(shape(actual), `step ${step}`).toEqual(shape(expected));
+					if (expected.ok && actual.ok) pending.push([expected.reservation, actual.reservation]);
+				} else if (roll < 0.85 && pending.length > 0) {
+					const [mine, theirs] = pending.splice(Math.floor(random() * pending.length), 1)[0] as [
+						string,
+						string,
+					];
+					const outcome = choose(OUTCOMES);
+					await memory.settleSubjectAttempt("user-1", mine, outcome);
+					await redis.settleSubjectAttempt("user-1", theirs, outcome);
+				} else if (roll < 0.97) {
+					const [mine, theirs] = browserPair();
+					const expected = await memory.noteExemptSuccess("user-1", at, SMALL, mine);
+					const actual = await redis.noteExemptSuccess("user-1", at, SMALL, theirs);
+					browsers.push([expected.browser, actual.browser]);
+				} else {
+					await memory.clearSubjectState("user-1");
+					await redis.clearSubjectState("user-1");
+					pending.length = 0;
+				}
+			}
+		},
+	);
+
+	it("reports the weekly hold when it ends at the same instant as the backoff, as core's store does", async () => {
+		// weeklyBudget failures at one instant, under a backoff as long as the
+		// week: both holds end a week later. The port reports the weekly one.
+		const tie: MfaLockoutPolicy = {
+			...POLICY,
+			threshold: 3,
+			baseSeconds: 7 * 86_400,
+			maxSeconds: 7 * 86_400,
+			weeklyBudget: 3,
+		};
+		const t = Math.floor(Date.now() / 1000) * 1000;
+		const answers: MfaSubjectAttemptReservation[] = [];
+		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+			for (let i = 0; i < 3; i++) {
+				const reserved = await store.reserveSubjectAttempt("user-1", t, tie, undefined);
+				if (!reserved.ok) throw new Error("expected a reservation");
+				await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
+			}
+			answers.push(await store.reserveSubjectAttempt("user-1", t + 1, tie, undefined));
+		}
+		expect(answers[1]).toEqual(answers[0]);
+		expect(answers[0]).toEqual({ ok: false, hold: "weekly", retryAfterMs: WEEK - 1 });
+	});
+
+	it("ends an attempt reserved at the very instant of an exempt success, as core's store does", async () => {
+		// "Up to its time" includes the instant itself: threshold - 1 failures
+		// before it and one at it are all ended, so four more failures after it
+		// are still short of a lock.
+		const t = Math.floor(Date.now() / 1000) * 1000;
+		const answers: boolean[] = [];
+		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+			for (let i = 0; i < 4; i++) {
+				const reserved = await store.reserveSubjectAttempt("user-1", t + 10 * i, POLICY, undefined);
+				if (!reserved.ok) throw new Error("expected a reservation");
+				await store.settleSubjectAttempt("user-1", reserved.reservation, "failure");
+			}
+			await store.noteExemptSuccess("user-1", t + 30, POLICY, undefined);
+			for (let i = 0; i < 4; i++) {
+				const next = await store.reserveSubjectAttempt("user-1", t + 40 + i, POLICY, undefined);
+				if (!next.ok) throw new Error("expected a reservation");
+				await store.settleSubjectAttempt("user-1", next.reservation, "failure");
+			}
+			answers.push((await store.reserveSubjectAttempt("user-1", t + 50, POLICY, undefined)).ok);
+		}
+		expect(answers).toEqual([true, true]);
+	});
+
+	it("keeps a trust's window where a later attempt set it when a caller behind extends it, as core's store does", async () => {
+		// An attempt reserved by a caller ahead sets the window of the trust an
+		// exempt success grants; one reserved afterwards by a caller behind
+		// must not pull that window back.
+		const t = Math.floor(Date.now() / 1000) * 1000;
+		const answers: MfaSubjectAttemptReservation[] = [];
+		for (const store of [createMemoryMfaTransactionStore(), storeAt(freshPrefix())]) {
+			const ahead = await store.reserveSubjectAttempt("user-1", t + DAY, POLICY, undefined);
+			if (!ahead.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", ahead.reservation, "failure");
+			const { browser } = await store.noteExemptSuccess("user-1", t, POLICY, undefined);
+			const behind = await store.reserveSubjectAttempt("user-1", t + 1, POLICY, browser);
+			if (!behind.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", behind.reservation, "success");
+			// Fill the week once the behind caller's window would have emptied and
+			// before the ahead caller's does: only a window kept where the ahead
+			// attempt set it still trusts the browser there.
+			const from = t + 1 + WEEK + MINUTE;
+			for (let i = 0; i < 12; i++) {
+				const r = await store.reserveSubjectAttempt("user-1", from + i, POLICY, undefined);
+				if (!r.ok) break;
+				await store.settleSubjectAttempt(
+					"user-1",
+					r.reservation,
+					i % 4 === 3 ? "success" : "failure",
+				);
+			}
+			answers.push(await store.reserveSubjectAttempt("user-1", from + 20, POLICY, browser));
+		}
+		expect(answers.map((answer) => answer.ok)).toEqual([true, true]);
 	});
 });
 
