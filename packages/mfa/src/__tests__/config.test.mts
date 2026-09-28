@@ -248,6 +248,37 @@ describe("the key ring (D11, D20)", () => {
 		).toContain("duplicate");
 	});
 
+	it("refuses one key under two written ids — one AES key cannot be two rotation generations — naming the later entry and quoting neither key nor id (retro review of #721)", () => {
+		const message = refusal(() =>
+			readMfaSettings(
+				valid({
+					encryptionKeys: [
+						{ id: "gen-old", key: KEY_A },
+						{ id: "gen-mid", key: KEY_B },
+						{ id: "gen-new", key: KEY_A },
+					],
+				}),
+			),
+		);
+		expect(message).toContain("mfa.encryptionKeys[2].key");
+		expect(message).toContain("mfa.encryptionKeys[0]");
+		expect(message).toContain("duplicate");
+		for (const secret of [KEY_A, KEY_B, "gen-old", "gen-new"]) {
+			expect(message).not.toContain(secret);
+		}
+		// Two keys of their own, under two ids, are two generations.
+		expect(
+			readMfaSettings(
+				valid({
+					encryptionKeys: [
+						{ id: "gen-old", key: KEY_A },
+						{ id: "gen-new", key: KEY_B },
+					],
+				}),
+			).encryptionKeys.map((entry) => entry.id),
+		).toEqual(["gen-old", "gen-new"]);
+	});
+
 	it("refuses a ring that is not a list of { id?, key }", () => {
 		for (const encryptionKeys of [
 			undefined,
