@@ -202,9 +202,10 @@ function setup(options: Setup = {}) {
 		removeBySubject: vi.fn(async () => {}),
 	};
 	const userRepository = {
-		authenticate: vi.fn(async (username: string, password: string) =>
-			username === "alice" && password === "secret" ? (options.user ?? ALICE) : null,
-		),
+		authenticate: vi.fn(async (username: string, password: string) => {
+			if (username === "directory-down") throw new Error("user directory down");
+			return username === "alice" && password === "secret" ? (options.user ?? ALICE) : null;
+		}),
 		authenticateByToken: vi.fn(async () => null),
 	} as unknown as UserRepository;
 	const logger = options.logger ?? spyLogger();
@@ -373,6 +374,7 @@ describe("POST /session/login — every requirement answers establish", () => {
 
 		expect((await login(app, { password: "wrong" })).status).toBe(401);
 		expect((await login(app, { password: "" })).status).toBe(400);
+		expect((await login(app, { username: "directory-down" })).status).toBe(503);
 		expect(asked).toEqual([]);
 	});
 });
