@@ -1440,13 +1440,23 @@ export const createRouter = (
 							"Linking a federated identity must be started from this site or an origin on session.csrf.trustedOrigins",
 					});
 				}
+				// A Store that cannot link is the composition's fault, not the
+				// session's: said first, before the session is read — a static
+				// fault answers the same whatever the session store is doing.
+				if (typeof userRepository.linkFederatedIdentity !== "function") {
+					return res.status(400).json({
+						error: "link_unsupported",
+						error_description: "The user repository does not support linking federated identities",
+					});
+				}
 				// The session the link is for, read through admission as
 				// `session.link` (the session-admission ADR's D8): graded
 				// `credential_change` — a linked identity is a new way into the
 				// account — so a requirement's recent-authentication rule is
 				// decided here, where a step-up has a page to return to.
+				const claim = cookieClaim(req);
 				const admission = await admitLink(
-					cookieClaim(req),
+					claim,
 					ADMISSION_ACTIONS["session.link"],
 					logger.child({ provider: provider.name }),
 				);
@@ -1456,24 +1466,23 @@ export const createRouter = (
 				if (admission.outcome === "step_up") {
 					return res.status(403).json(stepUpRequired(admission));
 				}
-				if (admission.outcome !== "admitted" || admission.session === null) {
+				if (
+					admission.outcome !== "admitted" ||
+					admission.session === null ||
+					claim.sid === undefined
+				) {
 					return res.status(401).json({
 						error: "login_required",
 						error_description: "Linking a federated identity requires an authenticated session",
 					});
 				}
-				if (typeof userRepository.linkFederatedIdentity !== "function") {
-					return res.status(400).json({
-						error: "link_unsupported",
-						error_description: "The user repository does not support linking federated identities",
-					});
-				}
-				// The session the link is for, and its subject. The callback binds
-				// to them — a form_post callback arrives without the application
-				// session cookie, and a browser that switched accounts in between
-				// must not link to the new one — so they are recorded in the
-				// transaction, not inferred later.
-				link = { sid: admission.session.sid, subject: admission.session.sub };
+				// The session the link is for — the `sid` the record was read by,
+				// the cookie's, not a field of the record — and its subject. The
+				// callback binds to them — a form_post callback arrives without the
+				// application session cookie, and a browser that switched accounts
+				// in between must not link to the new one — so they are recorded in
+				// the transaction, not inferred later.
+				link = { sid: claim.sid, subject: admission.session.sub };
 			}
 
 			const responseMode = resolveFederationResponseMode(provider);

@@ -30,8 +30,10 @@
  * the subject's shape, and one that is not is `500 server_error`, logged
  * once as `webauthn_session_subject_invalid`); `unavailable` is
  * `503 temporarily_unavailable`, logged once by admission; `step_up` is
- * `403 step_up_required` with the requirement and its page; every other
- * outcome sets no subject, and the route answers its own `401`.
+ * `403 step_up_required` with the requirement and its page; a browser that
+ * is not signed in passes on untouched (a bearer bridge's subject stands);
+ * every other outcome clears any subject an earlier middleware set, and the
+ * route answers its own `401`.
  *
  * It requires `userSessionStore`: the cookie path it serves is the
  * store-backed one, so an admitted session is always a record the mapper can
@@ -158,15 +160,26 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 							});
 							return;
 						}
-						// Not signed in, not live, revoked, a requirement not met: no
-						// subject, and the registration route answers its own 401.
-						if (admission.outcome !== "admitted" || admission.session === null) {
+						// Not signed in: this module has nothing to say, and a subject an
+						// earlier middleware set — a bearer-token bridge — stands.
+						if (admission.outcome === "unauthenticated") {
 							next();
 							return;
 						}
-						let answer: unknown;
+						// A cookie session that is not live, is revoked, or a requirement
+						// does not admit: no subject — one an earlier middleware set is
+						// cleared, so a dead session registers nothing — and the
+						// registration route answers its own 401.
+						if (admission.outcome !== "admitted" || admission.session === null) {
+							delete req.webauthnSubject;
+							next();
+							return;
+						}
+						let subject: WebAuthnSubject | undefined;
 						try {
-							answer = subjectFor(admission.session);
+							// The answer is read inside the try: a field that throws when
+							// it is read is the mapper's failure, as a throw of its own is.
+							subject = subjectOf(subjectFor(admission.session));
 						} catch (err) {
 							// The deployment's mapper failed: its fault, not the user's.
 							logger.error(
@@ -176,7 +189,6 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 							refuseInvalidSubject(res);
 							return;
 						}
-						const subject = subjectOf(answer);
 						if (subject === undefined) {
 							// Said without the answer: what it carries may be the very
 							// identifier the handle must not be.
