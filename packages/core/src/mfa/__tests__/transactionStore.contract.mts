@@ -183,14 +183,28 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("lets exactly one of N concurrent creates of one id through", async () => {
+			// Ten transactions every record rule admits — step-ups, so no
+			// continuation ties the subject — under one id: only the store's
+			// insert-only rule can refuse nine of them.
 			const store = await factory();
-			const results = await Promise.allSettled(
-				Array.from({ length: 10 }, (_, i) => store.create(TX({ subject: `user-${i}` }))),
+			const racing = Array.from({ length: 10 }, (_, i) =>
+				TX({
+					purpose: "step_up",
+					sid: `sid-${i}`,
+					continuation: undefined,
+					redirectTo: undefined,
+					subject: `user-${i}`,
+					sessionId: `express-session-${i}`,
+				}),
 			);
+			const results = await Promise.allSettled(racing.map((tx) => store.create(tx)));
 			const created = results.filter((r) => r.status === "fulfilled");
 			expect(created).toHaveLength(1);
+			for (const result of results) {
+				if (result.status === "rejected") expect(result.reason).not.toBeInstanceOf(RangeError);
+			}
 			const winner = results.indexOf(created[0] as PromiseSettledResult<void>);
-			expect((await store.get("tx-1"))?.subject).toBe(`user-${winner}`);
+			expect(await store.get("tx-1")).toStrictEqual(racing[winner]);
 		});
 
 		it("refuses a new transaction whose counters are not a fresh record's, with a RangeError, and records nothing", async () => {
