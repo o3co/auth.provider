@@ -214,17 +214,18 @@ For consumer-driven account flows (signup forms, magic-link, etc.) establishing 
 The registration routes read `req.webauthnSubject`; they do not read a session. `webauthnSessionSubjectModule` sets it from the browser's cookie session, through core's [session admission](../core/src/session-admission/README.md) — the one reading of a live session every consumer shares ([the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md), D8):
 
 ```ts
+import { sessionStoreModule } from "@o3co/auth-provider-session";
 import { webauthnModule, webauthnSessionSubjectModule } from "@o3co/auth-provider-webauthn";
 
 const app = await createApp({
     modules: [
-        webauthnModule,
+        sessionStoreModule, // the cookie session it reads — `session-middleware`
+        webauthnModule,     // the two registration routes it runs before
         webauthnSessionSubjectModule({
             // The user handle for the admitted session: opaque, 1–64 bytes, never an
             // e-mail or a username (SECURITY — `userId` opacity). Synchronous.
             subjectFor: (session) => ({ userId: session.sub }),
         }),
-        sessionStoreModule, // the cookie session it reads (`@o3co/auth-provider-session`)
         // ... the user-session store, the rest of the stack
     ],
     // ...
@@ -232,19 +233,23 @@ const app = await createApp({
 ```
 
 - **What it needs.** It requires `sessionRequirementResolver` and `userSessionStore`: the cookie path it serves is the store-backed one, so an admitted session is always a live record the mapper reads. `subjectRevocation`, `auditSink` and `logger` are taken when they are wired; the first two unwired are declared (`oauth.revocation.subject = "unsupported"`, `audit.sink.type = "none"`), as for every module that takes them. It is a consumer of admission, so the composition declares `sessionRequirements.expected`.
-- **Where it runs.** One route, `webauthn-session-subject` (`WEBAUTHN_SESSION_SUBJECT_ROUTE_ID`), at `/oauth/webauthn/registration`, after `session-middleware` and before both registration routes, on their two `POST`s alone.
+- **Where it runs.** One route, `webauthn-session-subject` (`WEBAUTHN_SESSION_SUBJECT_ROUTE_ID`), at `/oauth/webauthn/registration`, after `session-middleware` and before both registration routes, on their two `POST`s alone. Both sides of that order must be installed: without `webauthnModule`, or without the module that contributes `session-middleware` (`sessionStoreModule` / `sessionStoreModuleFor` in `@o3co/auth-provider-session`), boot refuses with `route-order-target-missing`, naming the missing route; without a `userSessionStore`, with `missing-required-component`.
+- **`subjectFor` is synchronous in this release.** It is called with the live `UserSession` and answers the subject directly; a Promise is refused as an answer of the wrong shape. Accepting a Promise later widens the type and breaks no mapper written now.
 - **What it answers.** It admits the session as `webauthn.register`, graded `credential_change` — a passkey is a new way into the account, so a registered requirement (MFA's recent-authentication rule, when installed) applies:
 
 | Admission | The request |
 | --- | --- |
 | `admitted` | `req.webauthnSubject` is `subjectFor(session)`, copied to `userId`, `userName`, `userDisplayName`; the route runs |
-| `step_up` | `403 {"error":"step_up_required","requirement":"<name>","page":{"url","params"}}` — the requirement's registered page, which the account page sends the user through and then retries |
+| `step_up` | `403 {"error":"step_up_required","error_description":"Registering a passkey requires a step-up first","requirement":"<name>","page":{"url","params"}}` — the requirement's registered page, which the account page sends the user through and then retries; `page.url` is a path or an absolute URL on the issuer's origin, so it is resolved against the authorization server (`new URL(page.url, issuer)`), not the account page's origin |
 | `unavailable` | `503 temporarily_unavailable` "session store unavailable" — the session store, the revocation boundary or a requirement could not answer; logged once by admission as `session_admission_unavailable` (`action: "webauthn.register"`) |
-| anything else — not signed in, not live, past its `expiresAt`, another subject's, revoked, a requirement's `reauthenticate` or `unmet` | no subject; the route answers its `401 unauthorized` |
+| not signed in (`unauthenticated`) | nothing set or cleared: a subject an earlier middleware set — a bearer-token bridge — stands; without one, the route answers its `401 unauthorized` |
+| anything else — not live, past its `expiresAt`, another subject's, revoked, a requirement's `reauthenticate` or `unmet` | no subject — one an earlier middleware set is **cleared**, so a dead cookie session registers nothing — and the route answers its `401 unauthorized` |
 
-A `subjectFor` that throws, or answers anything but an object with a non-empty string `userId` (and string `userName` / `userDisplayName` when present), is the composition's fault: `500 server_error`, logged once at error as `webauthn_session_subject_invalid` with `reason` (`threw`, with the error's projection, or `shape`) — never the answer.
+A `subjectFor` that throws, answers a subject whose fields throw when read, or answers anything but an object with a non-empty string `userId` (and string `userName` / `userDisplayName` when present), is the composition's fault: `500 server_error`, logged once at error as `webauthn_session_subject_invalid` with `reason` (`threw`, with the error's projection, or `shape`) — never the answer.
 
-**Two bridges stay the deployment's own middleware.** A subject taken from a bearer token is not a session this module reads; and a cookie-only composition without a `userSessionStore` cannot install the module (the store is required), so it writes its own bridge too. Either sets `req.webauthnSubject` before the registration routes (a route contribution with `before: ["webauthn-registration-options", "webauthn-registration-verify"]`) and holds itself to the rules below — the opaque handle, and a session strong enough to enroll a credential.
+**Installing the module replaces the deployment's own cookie bridge — remove it.** A bridge that sets `req.webauthnSubject` from `req.session` would otherwise run beside the module. Mounted before it, its subject is cleared for a dead session and replaced for an admitted one, so it does nothing but add a second reading of the cookie; mounted after it, it overwrites what admission decided with an unchecked reading — a revoked session's subject included.
+
+**Two bridges stay the deployment's own middleware.** A subject taken from a bearer token is not a session this module reads, and the module leaves it in place for a request that carries no signed-in cookie; and a cookie-only composition without a `userSessionStore` cannot install the module (the store is required), so it writes its own bridge too. Either sets `req.webauthnSubject` before the registration routes (a route contribution with `before: ["webauthn-registration-options", "webauthn-registration-verify"]`) and holds itself to the rules below — the opaque handle, and a session strong enough to enroll a credential.
 
 ## Endpoints
 
