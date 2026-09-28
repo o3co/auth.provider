@@ -20,11 +20,20 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	type SessionFederationIndex,
+	type SessionRequirement,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	type SubjectRevocation,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
-import { describe, expect, it } from "vitest";
+import {
+	createTestApp,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
+import express from "express";
+import request from "supertest";
+import { describe, expect, it, vi } from "vitest";
 import { sessionModule } from "#/module.mjs";
 
 // ---------------------------------------------------------------------------
@@ -295,5 +304,137 @@ describe("auditSink absence policy (#363)", () => {
 		// makes disagreement impossible by construction.
 		const { AUDIT_SINK_ABSENCE_POLICY } = await import("@o3co/auth-provider-core");
 		expect(sessionModule.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// A consumer of session admission (the session-admission ADR's D1, D8)
+// ---------------------------------------------------------------------------
+
+describe("sessionModule — the link routes are a consumer of session admission", () => {
+	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
+		expect(sessionModule.requires).toContain("sessionRequirementResolver");
+	});
+
+	it("takes subjectRevocation as an optional slot, under the one subject-revocation policy it attaches for subjectSessionIndex", () => {
+		expect(sessionModule.optional).toContain("subjectRevocation");
+		expect(sessionModule.requires).not.toContain("subjectRevocation");
+		// Identity, not shape: the declared-absence guard compares policies per
+		// key, and the two subject-revocation slots are one capability (#406).
+		expect(sessionModule.absencePolicies?.subjectRevocation).toBe(
+			SUBJECT_REVOCATION_ABSENCE_POLICY,
+		);
+		expect(sessionModule.absencePolicies?.subjectSessionIndex).toBe(
+			SUBJECT_REVOCATION_ABSENCE_POLICY,
+		);
+	});
+
+	/**
+	 * The federation-routes factory, called as the planner calls it, its
+	 * router mounted behind a cookie session signed in as user-1 whose record
+	 * is live: what the link start answers says what the factory handed the
+	 * routes.
+	 */
+	async function linkStart(extra: {
+		subjectRevocation?: SubjectRevocation;
+		requirements?: readonly SessionRequirement[];
+	}): Promise<request.Response> {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			federations: {
+				...base.federations,
+				stub: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/session/oauth/federation/stub/callback",
+				},
+			},
+		} as unknown as AppConfig;
+		const record = {
+			sid: "s-1",
+			sub: "user-1",
+			authTime: new Date(Date.now() - 60_000),
+			createdAt: new Date(Date.now() - 60_000),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			claims: {},
+			amr: undefined,
+			authentication: undefined,
+		};
+		const factory = sessionModule.contributes?.routes?.[1] as unknown as (deps: unknown) => {
+			id: string;
+			handler: express.RequestHandler;
+		};
+		const contribution = factory({
+			config,
+			federationProviders: new Map([["stub", stubFederationProvider]]),
+			federationRedirectPolicyResolver: new Map([
+				[
+					"stub",
+					{
+						validateRedirect: () => ({ ok: true as const, value: undefined }),
+						resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
+					},
+				],
+			]),
+			userRepository: {
+				...fakeUserRepository,
+				linkFederatedIdentity: async () => ({ ok: true, user: { id: "user-1" } }),
+			},
+			userSessionStore: { ...makeUserSessionStore(), get: async () => record },
+			federationTokenStore: makeFederationTokenStore(),
+			sessionFederationIndex: makeSessionFederationIndex(),
+			sessionRequirementResolver: resolverForTests(extra.requirements ?? []),
+			...(extra.subjectRevocation ? { subjectRevocation: extra.subjectRevocation } : {}),
+		});
+		expect(contribution.id).toBe("federation-routes");
+		const app = express();
+		app.use((req, _res, next) => {
+			(req as unknown as { session: Record<string, unknown> }).session = {
+				sid: "s-1",
+				isAuthenticated: true,
+				user: { id: "user-1" },
+				save: (cb: (err: unknown) => void) => cb(null),
+			};
+			next();
+		});
+		app.use("/session", contribution.handler);
+		return request(app)
+			.get("/session/oauth/federation/stub?link=1")
+			.set("Sec-Fetch-Site", "same-origin");
+	}
+
+	it("hands the link routes the wired subjectRevocation: (4) a revoked subject's link start is refused", async () => {
+		const subjectRevocation = {
+			kind: "test",
+			revokeBefore: async () => {},
+			revokedBefore: vi.fn(async () => new Date()),
+		} as unknown as SubjectRevocation;
+		const res = await linkStart({ subjectRevocation });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		expect(subjectRevocation.revokedBefore).toHaveBeenCalledWith("user-1");
+	});
+
+	it("admits the same start when no subjectRevocation is wired", async () => {
+		expect((await linkStart({})).status).toBe(302);
+	});
+
+	it("hands the link routes the resolver: a registered requirement's step-up answers the start", async () => {
+		const res = await linkStart({
+			requirements: [
+				{
+					name: "fixture",
+					reach: new Set<string>(),
+					stepUpPage: { url: "/fixture/step-up", params: {} },
+					remediations: [],
+					hintKeys: [],
+					admit: async () => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }),
+				},
+			],
+		});
+		expect(res.status).toBe(403);
+		expect(res.body).toMatchObject({ error: "step_up_required", requirement: "fixture" });
 	});
 });

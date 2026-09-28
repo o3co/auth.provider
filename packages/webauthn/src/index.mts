@@ -27,3 +27,10 @@ export type { WebAuthnSubject } from "./request.mjs";
 // Operator-facing: it is what a `limits` entry on a RateLimiter adapter is
 // keyed by when overriding the per-endpoint spec.
 export { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "./routes/authenticationOptions.mjs";
+// The session-admission ADR's D8: the bridge from the admitted browser session
+// to `req.webauthnSubject`, as a module the deployment installs.
+export {
+	WEBAUTHN_SESSION_SUBJECT_ROUTE_ID,
+	type WebAuthnSessionSubjectOptions,
+	webauthnSessionSubjectModule,
+} from "./sessionSubject.mjs";

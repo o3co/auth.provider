@@ -27,6 +27,7 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -283,6 +284,7 @@ function buildStatelessApp({
 	app.use(
 		createRouter(express, {
 			config: {} as never,
+			requirements: resolverForTests([]),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
@@ -357,6 +359,7 @@ function buildCallbackApp({
 	app.use(
 		createRouter(express, {
 			config: (config ?? {}) as never,
+			requirements: resolverForTests([]),
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
@@ -570,9 +573,14 @@ describe("account linking across federations (#482)", () => {
 		authentication: undefined,
 	};
 	/** The browser already holds an authenticated session for user-1. */
-	const seed = { sid: "s-1", isAuthenticated: true };
-	/** The envelope the start leg wrote: the intent, bound to the session that asked. */
-	const linkEnvelope = { name: "test", state: "s1", codeVerifier: "v1", link: { sid: "s-1" } };
+	const seed = { sid: "s-1", isAuthenticated: true, user: { id: "user-1" } };
+	/** The envelope the start leg wrote: the intent, bound to the session that asked and its subject. */
+	const linkEnvelope = {
+		name: "test",
+		state: "s1",
+		codeVerifier: "v1",
+		link: { sid: "s-1", subject: "user-1" },
+	};
 	const alice = { id: "user-1", username: "alice" };
 
 	type LinkableRepo = UserRepository & {
@@ -618,6 +626,7 @@ describe("account linking across federations (#482)", () => {
 				federation: {},
 				sessionSeed: seed,
 				userRepository: makeUserRepository(),
+				userSessionStore: liveStore(),
 			});
 			const agent = await plantAndGetAgent(app);
 			const res = await agent
@@ -627,12 +636,13 @@ describe("account linking across federations (#482)", () => {
 			expect(res.body.error).toBe("link_unsupported");
 		});
 
-		it("records the intent in the transaction when the session is authenticated and the Store can link", async () => {
+		it("records the intent in the transaction when the session is live and the Store can link", async () => {
 			const { app } = buildCallbackApp({
 				providers,
 				federation: {},
 				sessionSeed: seed,
 				userRepository: linkableRepo(),
+				userSessionStore: liveStore(),
 			});
 			const agent = await plantAndGetAgent(app);
 			const res = await agent
@@ -640,8 +650,8 @@ describe("account linking across federations (#482)", () => {
 				.set("Sec-Fetch-Site", "same-origin");
 			expect(res.status).toBe(302);
 			const inspect = await agent.get("/_inspect");
-			// The intent is bound to the session that asked, not merely recorded.
-			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1" });
+			// The intent is bound to the session that asked and its subject, not merely recorded.
+			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1", subject: "user-1" });
 		});
 
 		describe("a link start must come from this deployment's own pages (v0.13.0 audit)", () => {
@@ -659,6 +669,7 @@ describe("account linking across federations (#482)", () => {
 					federation: {},
 					sessionSeed: seed,
 					userRepository: linkableRepo(),
+					userSessionStore: liveStore(),
 					...(trustedOrigins ? { config: { session: { csrf: { trustedOrigins } } } } : {}),
 				}).app;
 			const start = async (
@@ -1388,15 +1399,17 @@ describe("account linking across federations (#482)", () => {
 
 	// A store the link needs that cannot answer is `503`, logged once at error
 	// level as `federation_link_store_unavailable` with `store`, `step` and the
-	// linking session's `sid`; a best-effort rollback step that fails is one
-	// `federation_cleanup_failed` warn each.
+	// linking session's `sid` — except the read of the session itself, which is
+	// admission's and logged as its `session_admission_unavailable`; a
+	// best-effort rollback step that fails is one `federation_cleanup_failed`
+	// warn each.
 	describe("a store that cannot answer", () => {
 		const down = (what: string) =>
 			vi.fn(async () => {
 				throw new Error(`${what} down`);
 			});
 
-		it("the session read: 503, one error line, and the Store is never asked", async () => {
+		it("the session read: 503, one error line — admission's, which names no sid — and the Store is never asked", async () => {
 			const repo = linkableRepo({ current: null });
 			const logger = spyLogger();
 			const { app } = buildCallbackApp({
@@ -1409,11 +1422,11 @@ describe("account linking across federations (#482)", () => {
 			});
 			const res = await callback(await plantAndGetAgent(app));
 			expect(res.status).toBe(503);
-			expectOutageLogged(logger, "federation_link_store_unavailable", {
+			expectOutageLogged(logger, "session_admission_unavailable", {
 				store: "user_session",
-				step: "get",
-				sid: "s-1",
+				action: "session.link_callback",
 			});
+			expect(logger.error.mock.calls[0]?.[0]).not.toHaveProperty("sid");
 			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
 		});
 
@@ -1532,6 +1545,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
+					requirements: resolverForTests([]),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -1547,6 +1561,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
+					requirements: resolverForTests([]),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -1562,6 +1577,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
+					requirements: resolverForTests([]),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -1577,6 +1593,7 @@ describe("Federation routes", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
+					requirements: resolverForTests([]),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: undefined as never,
@@ -1588,10 +1605,27 @@ describe("Federation routes", () => {
 			).toThrow("federation routes require userRepository");
 		});
 
+		it("throws if requirements is missing (the session-admission ADR's D1)", () => {
+			expect(() =>
+				createRouter(express, {
+					config: {} as never,
+					requirements: undefined as never,
+					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
+					userRepository: makeUserRepository(),
+					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
+					federationTokenStore: makeFederationTokenStore(),
+					providerCallbackUrls: new Map(),
+				}),
+			).toThrow("federation routes require requirements");
+		});
+
 		it("throws if providerCallbackUrls is missing", () => {
 			expect(() =>
 				createRouter(express, {
 					config: {} as never,
+					requirements: resolverForTests([]),
 					federationProviders: new Map(),
 					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
@@ -3327,6 +3361,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		app.use(
 			createRouter(express, {
 				config: {} as never,
+				requirements: resolverForTests([]),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
 				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
@@ -3357,6 +3392,7 @@ describe("a federation route's composition fault is a 500, logged once at error"
 		app.use(
 			createRouter(express, {
 				config: {} as never,
+				requirements: resolverForTests([]),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver:
 					options.policies ?? new Map([["test", makePermissivePolicy()]]),
@@ -3463,9 +3499,9 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 				state: "s1",
 				codeVerifier: "v1",
 				redirectTo: "https://app.example.com/account",
-				link: { sid: "s-1" },
+				link: { sid: "s-1", subject: "user-1" },
 			},
-			sessionSeed: { sid: "s-1", isAuthenticated: true },
+			sessionSeed: { sid: "s-1", isAuthenticated: true, user: { id: "user-1" } },
 			userRepository: {
 				authenticate: vi.fn(async () => null),
 				authenticateByToken: vi.fn(async () => ({ id: "user-1", username: "alice" })),
@@ -3505,6 +3541,7 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 		app.use(
 			createRouter(express, {
 				config: {} as never,
+				requirements: resolverForTests([]),
 				federationProviders: new Map([["test", makeFakeProvider()]]),
 				federationRedirectPolicyResolver: new Map([
 					["test", { ...makePermissivePolicy(), validateRedirect }],

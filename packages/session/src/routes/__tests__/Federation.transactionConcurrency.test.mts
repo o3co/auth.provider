@@ -43,6 +43,7 @@
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -190,6 +191,7 @@ function buildApp() {
 
 	app.use(
 		createRouter(express, {
+			requirements: resolverForTests([]),
 			config: { session: { name: "harness.session" } } as never,
 			federationProviders: new Map<string, FederationProvider>([["apple", apple]]),
 			federationRedirectPolicyResolver: new Map([["apple", makePermissivePolicy()]]) as never,

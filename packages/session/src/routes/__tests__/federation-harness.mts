@@ -28,13 +28,18 @@
  */
 
 import type {
+	AuditSink,
 	FederationProvider,
 	FederationTokenStore,
+	Logger,
 	SessionFederationIndex,
+	SessionRequirementResolver,
+	SubjectRevocation,
 	SubjectSessionIndex,
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { vi } from "vitest";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
@@ -270,11 +275,20 @@ export function buildFederationApp({
 	providerCallbackUrls,
 	userRepository,
 	subjectSessionIndex,
+	requirements,
+	subjectRevocation,
+	auditSink,
+	logger,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls: ReadonlyMap<string, string>;
 	userRepository?: UserRepository;
 	subjectSessionIndex?: SubjectSessionIndex;
+	/** The session requirements the link routes admit through; none by default. */
+	requirements?: SessionRequirementResolver;
+	subjectRevocation?: SubjectRevocation;
+	auditSink?: AuditSink;
+	logger?: Logger;
 }): HarnessApp {
 	const store: HarnessSessionStore = new Map();
 	const records: HarnessRecordStore = new Map();
@@ -295,8 +309,12 @@ export function buildFederationApp({
 			userSessionStore,
 			sessionFederationIndex,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
+			...(subjectRevocation ? { subjectRevocation } : {}),
 			federationTokenStore,
 			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
+			requirements: requirements ?? resolverForTests([]),
+			...(auditSink ? { auditSink } : {}),
+			...(logger ? { logger } : {}),
 		}),
 	);
 

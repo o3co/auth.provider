@@ -191,6 +191,36 @@ describe("the federation transaction store, over an express-session store", () =
 		});
 	});
 
+	it("round-trips a link intent with the session and the subject the start admitted (the session-admission ADR's D8)", async () => {
+		const store = fakeStore();
+		const transactions = createFederationTransactionStore(store);
+		await transactions.set(
+			"tx-1",
+			{ ...envelope, link: { sid: "s-1", subject: "user-1" } },
+			DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
+		);
+		expect((await transactions.get("tx-1"))?.link).toEqual({ sid: "s-1", subject: "user-1" });
+	});
+
+	it("reads a link intent written before the subject was recorded as the sid alone, and drops a subject that is not a non-empty string", async () => {
+		const store = fakeStore();
+		const transactions = createFederationTransactionStore(store);
+		for (const [written, read] of [
+			[{ sid: "s-1" }, { sid: "s-1" }],
+			[{ sid: "s-1", subject: "" }, { sid: "s-1" }],
+			[{ sid: "s-1", subject: 7 }, { sid: "s-1" }],
+		] as const) {
+			await transactions.set(
+				"tx-1",
+				{ ...envelope, link: written as never },
+				DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
+			);
+			const link = (await transactions.get("tx-1"))?.link;
+			expect(link).toEqual(read);
+			expect(link !== undefined && "subject" in link).toBe(false);
+		}
+	});
+
 	it("deletes a record", async () => {
 		const store = fakeStore();
 		const transactions = createFederationTransactionStore(store);
