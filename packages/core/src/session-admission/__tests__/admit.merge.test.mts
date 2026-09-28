@@ -660,6 +660,16 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 		});
 	});
 
+	it("unmet + unmet: acr's — the request first, as the rule answers today", async () => {
+		const refusing: SessionRequirement = {
+			...reaching("hold", []),
+			admit: async () => ({ outcome: "unmet" }),
+		};
+		// `kba` is reached by nothing registered: the request cannot be met.
+		const admission = await ask([refusing, reaching("keys", ["hwk"])], [KBA]);
+		expect(admission).toEqual({ outcome: "unmet", requirement: "acr", session });
+	});
+
 	it("unmet + step_up: the requirement's own unmet, by its name", async () => {
 		const refusing: SessionRequirement = {
 			...reaching("hold", []),
