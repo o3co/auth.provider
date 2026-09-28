@@ -37,6 +37,7 @@ import type {
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
 	Logger,
+	SessionRequirement,
 	SubjectRevocation,
 	UserRepository,
 	UserSession,
@@ -216,12 +217,22 @@ const boot = async (
 		intents: createMemoryFederationGrantIntentStore(),
 	},
 	logger?: Logger,
+	/** A session requirement a module of the composition contributes, and the composition declares. */
+	requirement?: SessionRequirement,
 ) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [
 			federationModule,
 			...federationGrantsModules,
+			...(requirement === undefined
+				? []
+				: [
+						defineModule({
+							name: "test-requirement",
+							contributes: { sessionRequirements: { [requirement.name]: () => requirement } },
+						}),
+					]),
 			defineModule({
 				name: "test-stores",
 				provides: {
@@ -234,6 +245,9 @@ const boot = async (
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
+				...(requirement === undefined
+					? {}
+					: { sessionRequirements: { expected: [requirement.name] } }),
 				federations: {
 					upstream: {
 						enabled: true,
@@ -464,6 +478,34 @@ describe("a grant created end to end, and spent", () => {
 				.set("x-browser", "b-revoked");
 			expect(refused.status).toBe(403);
 			expect(refused.text).toMatch(/sign in again/i);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("hands the browser half the session requirements the composition registered: a step-up at connect is the plain 403", async () => {
+		// The session-admission ADR's D1: the module requires the synthetic key
+		// and hands the planner's resolver to the browser routes, so a
+		// requirement some other module contributes reaches connect.
+		const { handle, app } = await boot(undefined, undefined, {}, undefined, undefined, {
+			name: "fixture",
+			reach: new Set<string>(),
+			stepUpPage: { url: "/step-up", params: {} },
+			remediations: [],
+			hintKeys: [],
+			admit: async ({ action }) =>
+				action.name === "federation_grants.connect"
+					? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
+					: { outcome: "met" },
+		});
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-stepped", new Date());
+			const refused = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-stepped");
+			expect(refused.status).toBe(403);
+			expect(refused.text).toBe("Sign in again to continue.");
 		} finally {
 			await handle.dispose();
 		}

@@ -21,8 +21,8 @@
  *
  * What it finds, by shape and by following the receiver — a literal grep
  * would miss `/authorize`'s aliased store (`const store = opts.userSessionStore`)
- * and the sessions boundary federation grants hand their browser routes
- * (`sessionsBoundaryFor(revocation: Pick<SubjectRevocation, …>)`):
+ * and the device_code grant's boundary read at the poll
+ * (`const revocation = options.subjectRevocation; revocation.revokedBefore(…)`):
  *
  * - `get(` on a receiver typed `UserSessionStore`: a property named
  *   `userSessionStore` on anything; a local, destructured name or parameter
@@ -367,7 +367,6 @@ interface AllowedSites {
 }
 
 const UNTIL_A3 = "an oauth consumer, on admission in A3";
-const UNTIL_A4 = "a device-grant or federation-grants consumer, on admission in A4";
 const TOKEN_SIDE =
 	"a session read from a token, not a cookie: outside this release, routed through admission by a later record (D9)";
 
@@ -439,22 +438,6 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 		file: "packages/core/src/jwt/verify.mts",
 		sites: { revokedBefore: 1 },
 		why: "permanent: the subject-revocation boundary applied to a token by verifyJwt (D9); a token carrier's admission skips the boundary because this reads it",
-	},
-	// Device verification and the federation-grants browser half, until A4.
-	{
-		file: "packages/device-grant/src/verificationEndpoint.mts",
-		sites: { get: 1, revokedBefore: 1 },
-		why: `${UNTIL_A4}: livenessOf's read and its boundary read`,
-	},
-	{
-		file: "packages/federation-grants/src/browserRoutes.mts",
-		sites: { get: 2 },
-		why: `${UNTIL_A4}: judge's read and the callback's re-read before activation`,
-	},
-	{
-		file: "packages/federation-grants/src/module.mts",
-		sites: { revokedBefore: 1 },
-		why: `${UNTIL_A4}: the sessions boundary handed to the browser routes (sessionsBoundaryFor)`,
 	},
 ];
 

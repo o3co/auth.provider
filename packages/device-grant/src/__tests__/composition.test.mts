@@ -1229,17 +1229,20 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 			});
 			expect(res.headers["cache-control"]).toContain("no-store");
 
+			// Admission's one line (the session-admission ADR's D10): the store
+			// and the action, never the sid.
 			const lines = logger.error.mock.calls.filter(
-				(call) => call[1] === "device_verification_session_liveness_unavailable",
+				(call) => call[1] === "session_admission_unavailable",
 			);
 			expect(lines).toHaveLength(1);
 			const line = lines[0]?.[0] as Record<string, unknown>;
 			expect(line).toMatchObject({
 				store: "user_session",
-				step: "get",
-				sid: await sidOf(handle.components),
+				action: "device.approve",
 				err: { name: "Error", code: "ECONNRESET" },
 			});
+			expect(line).not.toHaveProperty("sid");
+			expect(JSON.stringify(line)).not.toContain(await sidOf(handle.components));
 			expect(line.err).not.toBeInstanceOf(Error);
 			expect(logger.error).toHaveBeenCalledTimes(1);
 			expect(logger.warn).not.toHaveBeenCalled();

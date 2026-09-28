@@ -44,6 +44,7 @@ import {
 	generateUserCode,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
@@ -186,6 +187,10 @@ const makeHarness = (
 			rateLimiter,
 			failMode: overrides.failMode ?? "closed",
 			userSessionStore,
+			// No requirement registered: what develop answered, but for the
+			// session-admission ADR's D8 changes (admission.test.mts).
+			requirements: resolverForTests([]),
+			issuer: ISSUER,
 			requireEmailVerified: overrides.requireEmailVerified ?? false,
 			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 			now: clock.now,
@@ -455,7 +460,10 @@ describe("verification endpoint", () => {
 		const { app } = makeHarness({ session: { isAuthenticated: false } });
 		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("login_required");
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "an authenticated end-user session is required to approve a device",
+		});
 	});
 
 	it.each([
@@ -842,8 +850,8 @@ describe("limiter outage — rateLimit.failMode applies here too (#457)", () => 
 	});
 
 	it("still answers 401 and 400 before consulting the limiter at all", async () => {
-		// The outage policy sits where the check sits: after the session and
-		// the action are validated. An anonymous caller during an outage is
+		// The outage policy sits where the check sits: after the action and
+		// the session are validated. An anonymous caller during an outage is
 		// still told to log in, not that the limiter is down.
 		const anonymous = makeHarness({
 			rateLimiter: brokenLimiter(),
@@ -1271,20 +1279,41 @@ describe("the session check, further", () => {
 		});
 	});
 
-	it("warns once, naming the sid, when the session behind the cookie records another subject", async () => {
+	it("warns admission's line once, and audits the sid, when the session behind the cookie records another subject", async () => {
+		// The session-admission ADR's D10: the line names the action and no
+		// identifier; the sid and both subjects are the audit event's.
 		const logger = makeLogger();
+		const { sink, events } = makeSink();
 		const { app } = makeHarness({
 			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
 			logger,
+			auditSink: sink,
 		});
 		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		expect(res.status).toBe(401);
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "the session is no longer active; sign in again",
+		});
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 		expect(logger.warn).toHaveBeenCalledWith(
-			{ sid: "sid-2" },
-			"device_verification_session_subject_mismatch",
+			{ action: "device.lookup" },
+			"session_admission_subject_mismatch",
 		);
 		expect(logger.error).not.toHaveBeenCalled();
+		await settle();
+		expect(events).toEqual([
+			expect.objectContaining({
+				type: "session.admission.subject_mismatch",
+				subject: "user-2",
+				details: {
+					sid: "sid-2",
+					carrier: "cookie",
+					claimedSubject: "user-1",
+					recordSubject: "user-2",
+				},
+			}),
+		]);
 	});
 
 	it("refuses a session that authenticated at or before the subject's sessions boundary", async () => {
@@ -1298,7 +1327,10 @@ describe("the session check, further", () => {
 		const started = await startDevice(app);
 		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
 		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("login_required");
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "the session is no longer active; sign in again",
+		});
 		const pending = await poll(started.body.device_code as string);
 		expect(pending.result).toMatchObject({ status: 400, error: "authorization_pending" });
 	});
@@ -1312,7 +1344,7 @@ describe("the session check, further", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("answers a boundary it cannot read with 503, logged once at error", async () => {
+	it("answers a boundary it cannot read with 503, logged once at error by admission", async () => {
 		const logger = makeLogger();
 		const subjectRevocation: SubjectRevocation = {
 			kind: "broken",
@@ -1330,8 +1362,10 @@ describe("the session check, further", () => {
 		});
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
-		expect(event).toBe("device_verification_session_liveness_unavailable");
-		expect(line).toMatchObject({ store: "revocation_boundary", step: "read" });
+		expect(event).toBe("session_admission_unavailable");
+		expect(line).toMatchObject({ store: "revocation_boundary", action: "device.lookup" });
+		// Never the sid (the session-admission ADR's D10).
+		expect(line).not.toHaveProperty("sid");
 		expect(line.err).not.toBeInstanceOf(Error);
 	});
 
@@ -1354,16 +1388,22 @@ describe("the session check, further", () => {
 	});
 
 	it.each(["lookup", "approve", "deny"] as const)(
-		"answers a session-store outage on %s with 503, before the code is read",
+		"answers a session-store outage on %s with 503, before the code is read, logged once by admission",
 		async (action) => {
 			const store = liveSessionStore();
 			store.get = async () => {
 				throw new Error("redis down");
 			};
-			const { app } = makeHarness({ userSessionStore: store, logger: makeLogger() });
+			const logger = makeLogger();
+			const { app } = makeHarness({ userSessionStore: store, logger });
 			const res = await verify(app, { action, user_code: "BCDF-GHJK" });
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ store: "user_session", action: `device.${action}` }),
+				"session_admission_unavailable",
+			);
 		},
 	);
 
@@ -1377,7 +1417,7 @@ describe("the session check, further", () => {
 			const { app } = makeHarness({ userSessionStore: store });
 			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(503);
 			expect(spy).toHaveBeenCalledTimes(1);
-			expect(spy.mock.calls[0]?.[1]).toBe("device_verification_session_liveness_unavailable");
+			expect(spy.mock.calls[0]?.[1]).toBe("session_admission_unavailable");
 		} finally {
 			spy.mockRestore();
 		}
@@ -1392,8 +1432,8 @@ describe("the session check, further", () => {
 			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(401);
 			expect(spy).toHaveBeenCalledTimes(1);
 			expect(spy).toHaveBeenCalledWith(
-				{ sid: "sid-2" },
-				"device_verification_session_subject_mismatch",
+				{ action: "device.lookup" },
+				"session_admission_subject_mismatch",
 			);
 		} finally {
 			spy.mockRestore();

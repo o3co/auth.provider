@@ -74,6 +74,25 @@ describe("createFederationGrantLog", () => {
 		expect((payload.grantId as string).length).toBe(200);
 	});
 
+	it("binds fields to a logger for a caller that logs through core, sanitised and capped as a line's own", () => {
+		// Session admission writes its own line through the logger it is handed;
+		// the route binds its grant and correlation id to it.
+		const { logger, lines } = createLogSpy();
+		const bound = createFederationGrantLog(logger).bound({
+			grantId: `g-1"\r\nforged: 1${"x".repeat(300)}`,
+			correlationId: "c-1",
+			method: undefined,
+		});
+		bound.error({ store: "user_session" }, "session_admission_unavailable");
+		const payload = payloadOf(lines, "session_admission_unavailable");
+		expect(payload).toEqual({
+			grantId: expect.stringMatching(/^g-1\?\?\?forged: 1x+\.\.\.$/),
+			correlationId: "c-1",
+			store: "user_session",
+		});
+		expect((payload.grantId as string).length).toBe(200);
+	});
+
 	it("keeps what a library put beside an error's message out of the line", () => {
 		// openid-client puts the token answer it refused on the cause chain,
 		// ioredis a refused command's arguments on the error, an HTTP client the

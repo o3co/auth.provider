@@ -40,6 +40,7 @@
 
 import type { AppConfig, ClientRepository } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { createCsrfProtectionFromConfig } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
@@ -102,6 +103,7 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 		clientRepository,
 		deviceCodeStore: store,
 		userSessionStore: liveSessionStore(),
+		sessionRequirementResolver: resolverForTests([]),
 		rateLimiter: createMemoryRateLimiter({
 			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
 			defaultLimit: { limit: 60, windowSeconds: 60 },

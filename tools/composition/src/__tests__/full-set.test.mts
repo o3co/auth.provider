@@ -1058,7 +1058,7 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 				.send({ action: "approve", user_code: started.body.user_code });
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		event: "device_verification_session_liveness_unavailable",
+		event: "session_admission_unavailable",
 	},
 	{
 		module: "dpop",
@@ -1124,7 +1124,7 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 				.send({ action: "approve", user_code: started.body.user_code });
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		event: "device_verification_session_liveness_unavailable",
+		event: "session_admission_unavailable",
 	},
 	{
 		module: "device-grant",

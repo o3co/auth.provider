@@ -59,23 +59,24 @@
  * — it does not make the grant work without it.
  *
  * And so does an enabled grant with no `userSessionStore`. The verification
- * endpoint approves only from a live `UserSession` — the record behind the
- * cookie's `sid`, not the cookie's `isAuthenticated` — because the device
- * token an approval leads to carries no `sid` and no `family_id`, so no
- * logout reaches it afterwards (see `verificationEndpoint.mts`). Without the
- * store that question cannot be asked, and an endpoint that trusted the
- * cookie instead would look guarded and not be — the limiter's argument
- * again. The slot stays optional in the manifest, as it is on `oauthModule`:
- * a deployment that leaves the grant off needs none, and there is nothing
- * to declare.
+ * endpoint admits every action through core's session admission, handed the
+ * `sessionRequirementResolver` this module requires, and so approves only
+ * from a live `UserSession` — the record behind the cookie's `sid`, not the
+ * cookie's `isAuthenticated` — because the device token an approval leads
+ * to carries no `sid` and no `family_id`, so no logout reaches it
+ * afterwards (see `verificationEndpoint.mts`). Without the store that
+ * question cannot be asked, and an endpoint that trusted the cookie instead
+ * would look guarded and not be — the limiter's argument again. The slot
+ * stays optional in the manifest, as it is on `oauthModule`: a deployment
+ * that leaves the grant off needs none, and there is nothing to declare.
  *
  * `subjectRevocation` is read by both halves when it is wired: the
- * verification endpoint refuses a session its sessions boundary covers, and
- * the grant refuses an approval made at or before it (the window between an
- * approval and the poll, which a watermark stamped in between would
- * otherwise not reach — the token minted at the poll postdates it). Optional
- * and undeclared here: `oauthModule`, which every enabled grant is composed
- * with, carries its absence policy.
+ * verification endpoint's admission refuses a session its sessions boundary
+ * covers, and the grant refuses an approval made at or before it (the
+ * window between an approval and the poll, which a watermark stamped in
+ * between would otherwise not reach — the token minted at the poll
+ * postdates it). Optional and undeclared here: `oauthModule`, which every
+ * enabled grant is composed with, carries its absence policy.
  *
  * ### The verification endpoint is a CSRF target, and is guarded as one
  *
@@ -253,7 +254,16 @@ interface DeviceAuthorizationConfigSlice {
 	readonly rateLimit?: unknown;
 }
 
-const REQUIRES = ["config", "clientRepository", "keyStore"] as const;
+const REQUIRES = [
+	"config",
+	"clientRepository",
+	"keyStore",
+	// The synthetic key every consumer of session admission takes (the
+	// session-admission ADR's D1): the verification endpoint admits each
+	// action through it. Always present — the planner fills it — so it
+	// needs no presence check and no absence policy.
+	"sessionRequirementResolver",
+] as const;
 // #484: `replaySeenSet` is what records a client assertion's single-use
 // `jti`. Optional here for the same reason it is optional on the OAuth
 // router — a composition with no `private_key_jwt` client needs none —
@@ -833,12 +843,17 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							// its budget on the subject, so it runs the guard's
 							// check itself rather than the guard as a middleware.
 							failMode: requireFailMode(deps),
-							// The live-session read every action starts with.
+							// What session admission reads for every action: the
+							// live session, and the requirements registered.
 							userSessionStore,
+							requirements: deps.sessionRequirementResolver,
+							// What a step-up page is answered on.
+							issuer: deps.config.oauth.jwt.issuer,
 							// #297, read as `/authorize` reads it: `=== true`, so a
 							// hand-built config that never passed the schema is off.
 							requireEmailVerified: deps.config.oauth?.requireEmailVerified === true,
-							// The sessions boundary, when the composition wires one.
+							// The sessions boundary admission reads, when the
+							// composition wires one.
 							...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 							settings: {
 								verificationUri: requireVerificationUri(slice),

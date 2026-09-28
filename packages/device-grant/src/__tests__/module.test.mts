@@ -39,7 +39,11 @@ import {
 	createSymmetricKeyStore,
 	DeviceCodeStoreError,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
+import {
+	makeValidCoreConfig,
+	makeValidFullSections,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
@@ -423,6 +427,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
+		// The synthetic key the planner fills (the session-admission ADR's D1).
+		sessionRequirementResolver: resolverForTests([]),
 		rateLimiter: createMemoryRateLimiter({
 			limits: {
 				device_verification: { limit: 5, windowSeconds: 300 },
@@ -587,6 +593,49 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			expect(res.body.error).toBe(error);
 		},
 	);
+
+	it("hands the verification route the resolver the planner built: a requirement's step-up reaches approve", async () => {
+		// The session-admission ADR's D1: the module requires the synthetic key
+		// and hands it on; what a requirement answers is what the route answers.
+		const deps = enabledDeps();
+		const app = mountVerificationRoute({
+			...deps,
+			sessionRequirementResolver: resolverForTests([
+				{
+					name: "fixture",
+					reach: new Set<string>(),
+					stepUpPage: { url: "/step-up", params: {} },
+					remediations: [],
+					hintKeys: [],
+					admit: async ({ action }) =>
+						action.name === "device.approve"
+							? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
+							: { outcome: "met" },
+				},
+			]),
+		});
+		const verify = (action: string) =>
+			request(app)
+				.post("/oauth/device/verification")
+				.set("Host", "as.example.test")
+				.set("Origin", "http://as.example.test")
+				.send({ action, user_code: "BCDF-GHJK" });
+		const approve = await verify("approve");
+		expect(approve.status).toBe(403);
+		expect(approve.body).toMatchObject({
+			error: "step_up_required",
+			requirement: "fixture",
+			// Resolved on the issuer the module reads, oauth.jwt.issuer.
+			page: "https://as.example.test/step-up",
+		});
+		expect((await verify("lookup")).status).toBe(404);
+	});
+
+	it("refuses to mount device/verification without the resolver — a hand-built composition cannot run it unasked", () => {
+		const { sessionRequirementResolver: _omitted, ...deps } = enabledDeps();
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(/requirements/);
+	});
 
 	/**
 	 * A logger that keeps every line as a JSON log shipper would write it:

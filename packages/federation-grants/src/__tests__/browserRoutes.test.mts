@@ -39,11 +39,15 @@ import {
 	passwordSessionAuthentication,
 	type RateLimiter,
 	type RateLimitFailMode,
+	type RequirementInput,
+	type RequirementVerdict,
+	type SessionRequirement,
 	type UserSession,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFederationGrantBackground, type FederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
@@ -121,6 +125,10 @@ interface WorldOptions {
 	readonly userRepository?: FederationGrantBrowserRouterOptions["userRepository"];
 	/** Replaces the drain registry: a composition's own, which may fail. */
 	readonly background?: FederationGrantBackground;
+	/** Wires no logger: what the router and admission write goes to core's console logger. */
+	readonly withoutLogger?: boolean;
+	/** The session requirements admission asks (the session-admission ADR's D3); none by default. */
+	readonly requirements?: readonly SessionRequirement[];
 }
 
 function world(options: WorldOptions = {}) {
@@ -172,6 +180,10 @@ function world(options: WorldOptions = {}) {
 		/** Ids the router draws, in order, before it falls back to random ones. */
 		ids: [] as string[],
 		auditFails: false,
+		/** Held until released, by event type: an audit write still in flight when the drain begins. */
+		auditGates: new Map<string, Promise<void>>(),
+		/** Browsers whose requests carry their cookie session without the express session's id. */
+		withoutSessionId: new Set<string>(),
 		authorizerMissing: false,
 		configurationThrows: false,
 	};
@@ -210,7 +222,9 @@ function world(options: WorldOptions = {}) {
 	app.use((req, _res, next) => {
 		const id = req.get("x-browser");
 		if (id !== undefined && browsers.has(id)) {
-			(req as unknown as { sessionID: string }).sessionID = id;
+			if (!state.withoutSessionId.has(id)) {
+				(req as unknown as { sessionID: string }).sessionID = id;
+			}
 			(req as unknown as { session: Browser }).session = browsers.get(id) as Browser;
 		}
 		next();
@@ -233,10 +247,17 @@ function world(options: WorldOptions = {}) {
 					return durable.get(sid) ?? null;
 				},
 			} as never,
-			sessionsBoundary: async () => {
-				if (state.sessionsBoundary instanceof Error) throw state.sessionsBoundary;
-				return state.sessionsBoundary;
+			// The subject's sessions boundary, as admission reads it (the
+			// session-admission ADR's D2, step 4).
+			subjectRevocation: {
+				kind: "test",
+				revokeBefore: async () => undefined,
+				revokedBefore: async () => {
+					if (state.sessionsBoundary instanceof Error) throw state.sessionsBoundary;
+					return state.sessionsBoundary;
+				},
 			},
+			requirements: resolverForTests(options.requirements ?? []),
 			revocationSkewMs: 1000,
 			connections: {
 				get: (name: string) => {
@@ -277,7 +298,7 @@ function world(options: WorldOptions = {}) {
 				"userRepository" in options
 					? options.userRepository
 					: new Directory(state.owners, state.lookups, intercept),
-			logger: spy.logger,
+			...(options.withoutLogger === true ? {} : { logger: spy.logger }),
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
 				options.rateLimiter ??
@@ -289,6 +310,7 @@ function world(options: WorldOptions = {}) {
 			auditSink: {
 				kind: "test",
 				record: async (event) => {
+					await state.auditGates.get(event.type);
 					if (state.auditFails) throw new Error("injected: the audit sink is down");
 					events.push(event);
 				},
@@ -1250,7 +1272,7 @@ describe("what the browser-half mutation pass found", () => {
 		// An inconsistent session — the cookie's user is alice, the durable record
 		// it points at is bob's — is not a session this flow can trust either way.
 		const w = world();
-		const { handle } = await w.lodge();
+		const { handle, grantId } = await w.lodge();
 		w.browsers.set("b-1", { isAuthenticated: true, user: { id: "alice" }, sid: "sid-bob" });
 		w.durable.set("sid-bob", {
 			sid: "sid-bob",
@@ -1262,7 +1284,22 @@ describe("what the browser-half mutation pass found", () => {
 			// A password login's record (the MFA ADR's D9).
 			...passwordSessionAuthentication(),
 		});
-		expect((await w.connect(handle, "b-1")).status).toBe(403);
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(403);
+		expect(response.text).toBe("Sign in again to continue.");
+		// Admission's reading of it (the session-admission ADR's D10): one warn
+		// naming the action — the flow's grant and the request's id bound to it,
+		// no subject or sid — and the audit event naming both subjects.
+		expect(written(await settledLines(w))).toEqual(["warn session_admission_subject_mismatch"]);
+		expect(payloadOf(w.lines, "session_admission_subject_mismatch")).toEqual({
+			grantId,
+			correlationId: response.headers["x-request-id"],
+			action: "federation_grants.connect",
+		});
+		expect(w.events.find((e) => e.type === "session.admission.subject_mismatch")).toMatchObject({
+			subject: "bob",
+			details: { sid: "sid-bob", carrier: "cookie", claimedSubject: "alice", recordSubject: "bob" },
+		});
 	});
 
 	it("will not show a question to another express session carrying the same durable session", async () => {
@@ -2413,7 +2450,6 @@ describe("connect — what an outage logs", () => {
 	it.each([
 		["getIntent", "federation_grant_intent", "get_intent", false],
 		["parkConsent", "federation_grant_intent", "park_consent", true],
-		["userSessionStore.get", "user_session", "get", true],
 		["isCurrentIntent", "federation_grant", "is_current_intent", true],
 	] as const)(
 		"logs %s failing as one error line naming %s / %s",
@@ -2434,18 +2470,34 @@ describe("connect — what an outage logs", () => {
 		},
 	);
 
-	it("names the sessions boundary, and a value from it that is not one", async () => {
+	it("logs the session store that could not answer once, as admission's line (the session-admission ADR's D10), with the grant and the request's id", async () => {
+		const { w, response, grantId } = await connectWith((w) =>
+			w.state.faults.set("userSessionStore.get", 0),
+		);
+		expect(response.status).toBe(503);
+		isPlain(response);
+		expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
+		expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
+			grantId,
+			correlationId: response.headers["x-request-id"],
+			store: "user_session",
+			action: "federation_grants.connect",
+			err: injected("userSessionStore.get"),
+		});
+	});
+
+	it("names the sessions boundary, and a value from it that is not one, in admission's line", async () => {
 		for (const boundary of [new Error("boundary down"), "yesterday"]) {
-			const { w, response } = await connectWith((w) => {
+			const { w, response, grantId } = await connectWith((w) => {
 				w.state.sessionsBoundary = boundary as never;
 			});
 			expect(response.status).toBe(503);
-			expect(written(await settledLines(w))).toEqual([
-				"error federation_grant_connect_unavailable",
-			]);
-			expect(payloadOf(w.lines, "federation_grant_connect_unavailable")).toMatchObject({
+			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
+			expect(payloadOf(w.lines, "session_admission_unavailable")).toMatchObject({
+				grantId,
+				correlationId: response.headers["x-request-id"],
 				store: "revocation_boundary",
-				step: "read",
+				action: "federation_grants.connect",
 				err: { name: boundary instanceof Error ? "Error" : "TypeError" },
 			});
 		}
@@ -2500,20 +2552,32 @@ describe("consent — what an outage logs", () => {
 		});
 	});
 
-	it("logs the judgement that could not be made, which it used to answer in silence", async () => {
-		const w = world();
-		const { challenge, grantId } = await asked(w);
-		w.state.sessionsBoundary = new Error("boundary down");
-		expect((await w.page(challenge, "b-1")).status).toBe(503);
-		expect(written(await settledLines(w))).toEqual(["error federation_grant_consent_unavailable"]);
-		expect(payloadOf(w.lines, "federation_grant_consent_unavailable")).toMatchObject({
-			method: "GET",
-			grantId,
-			store: "revocation_boundary",
-			step: "read",
-			err: { name: "Error", detail: "boundary down" },
-		});
-	});
+	it.each(["GET", "POST"] as const)(
+		"logs the judgement that could not be made on %s, which it used to answer in silence — the session's part as admission's line, with the method",
+		async (method) => {
+			const w = world();
+			const { challenge, grantId } = await asked(w);
+			w.state.sessionsBoundary = new Error("boundary down");
+			const response =
+				method === "GET"
+					? await w.page(challenge, "b-1")
+					: await w.answer({ challenge, decision: "accept" }, "b-1");
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "storage",
+			});
+			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
+			expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
+				method,
+				grantId,
+				correlationId: response.headers["x-request-id"],
+				store: "revocation_boundary",
+				action: "federation_grants.consent",
+				err: expect.objectContaining({ name: "Error", detail: "boundary down" }),
+			});
+		},
+	);
 
 	it("answers a client registry that cannot judge the question as the page's own lookup does, and logs it once", async () => {
 		// The judgement's read fails, on both methods: one answer for one
@@ -2664,7 +2728,6 @@ describe("the callback — what an outage logs", () => {
 			"federation_grant",
 			"is_current_intent",
 		],
-		["the session store, at check 3", "userSessionStore.get", 0, "user_session", "get"],
 		["the activation", "activate", 0, "federation_grant", "activate"],
 		[
 			"the identity lookup",
@@ -2689,6 +2752,28 @@ describe("the callback — what an outage logs", () => {
 				store,
 				step,
 				err: injected(method),
+			});
+		},
+	);
+
+	it.each([
+		["at check 3", 0],
+		["at the re-read", 1],
+	] as const)(
+		"logs the session store that could not answer %s once, as admission's line",
+		async (_label, passes) => {
+			const w = world();
+			const { response, grantId } = await unavailable(w, () =>
+				w.state.faults.set("userSessionStore.get", passes),
+			);
+			expect(returned(response).get("error")).toBe("temporarily_unavailable");
+			expect(written(await settledLines(w))).toEqual(["error session_admission_unavailable"]);
+			expect(payloadOf(w.lines, "session_admission_unavailable")).toEqual({
+				grantId,
+				correlationId: response.headers["x-request-id"],
+				store: "user_session",
+				action: "federation_grants.callback",
+				err: injected("userSessionStore.get"),
 			});
 		},
 	);
@@ -2896,5 +2981,343 @@ describe("the browser throttle, when the limiter is down — what it logs and au
 			tag: "federation_grants_browser",
 			cause: { name: "Error" },
 		});
+	});
+});
+
+/**
+ * A requirement that answers `answer` and records what it was asked. Its page
+ * is set, so a `step_up` is one admission can answer; its reach is empty, as
+ * any requirement's but `mfa` must be in this release.
+ */
+const fixture = (
+	answer: (input: RequirementInput) => RequirementVerdict,
+	asked: RequirementInput[] = [],
+): SessionRequirement => ({
+	name: "fixture",
+	reach: new Set<string>(),
+	stepUpPage: { url: "/step-up", params: {} },
+	remediations: [],
+	hintKeys: [],
+	admit: async (input) => {
+		asked.push(input);
+		return answer(input);
+	},
+});
+
+/** `answer` for `action`, `met` for every other. */
+const on =
+	(action: string, answer: RequirementVerdict) =>
+	(input: RequirementInput): RequirementVerdict =>
+		input.action.name === action ? answer : { outcome: "met" };
+
+const STEP_UP: RequirementVerdict = { outcome: "step_up", whenStillUnmet: "reauthenticate" };
+
+describe("the browser half on session admission (the session-admission ADR's D8)", () => {
+	it("admits connect, the consent read and answered, and the callback twice — each its own action, graded use — on the cookie's claim", async () => {
+		const asked: RequirementInput[] = [];
+		const w = world({ requirements: [fixture(() => ({ outcome: "met" }), asked)] });
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		const challenge = await w.challengeFor(handle, "b-1");
+		expect((await w.page(challenge, "b-1")).status).toBe(200);
+		const answered = await w.answer({ challenge, decision: "accept" }, "b-1");
+		const state = new URL(answered.headers.location as string).searchParams.get("state") ?? "";
+		expect(returned(await callback(w, { state, code: "c" }, "b-1")).has("error")).toBe(false);
+		expect(asked.map((input) => input.action)).toEqual([
+			{ name: "federation_grants.connect", grade: "use" },
+			{ name: "federation_grants.consent", grade: "use" },
+			{ name: "federation_grants.consent", grade: "use" },
+			{ name: "federation_grants.callback", grade: "use" },
+			{ name: "federation_grants.callback", grade: "use" },
+		]);
+		for (const input of asked) {
+			expect(input).toMatchObject({
+				carrier: "cookie",
+				subject: "alice",
+				session: { sid: "sid-b-1", sub: "alice" },
+			});
+		}
+	});
+
+	it("answers a step-up at connect with the plain 403 a dead session gets, and parks nothing", async () => {
+		// Treated as reauthentication_required in this release: the MFA ADR's
+		// step 14 decides whether connect sends the browser on a trip instead.
+		const w = world({ requirements: [fixture(on("federation_grants.connect", STEP_UP))] });
+		const { handle, grantId } = await w.lodge();
+		w.signIn("b-1");
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(403);
+		isPlain(response);
+		expect(response.text).toBe("Sign in again to continue.");
+		expect(response.headers.location).toBeUndefined();
+		expect(w.intents.size).toBe(1);
+		await w.background.drain();
+		expect(w.events.find((e) => e.type === "federation.grant.authorization_failed")).toMatchObject({
+			details: { grantId, outcome: "reauthentication_required" },
+		});
+	});
+
+	it("answers a step-up at the consent 403 reauthentication_required, read or answered, and spends nothing", async () => {
+		const w = world({ requirements: [fixture(on("federation_grants.consent", STEP_UP))] });
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		const challenge = await w.challengeFor(handle, "b-1");
+		const refused = {
+			error: "reauthentication_required",
+			error_description: "sign in again to continue",
+		};
+		const read = await w.page(challenge, "b-1");
+		expect(read.status).toBe(403);
+		expect(read.body).toEqual(refused);
+		const answered = await w.answer({ challenge, decision: "accept" }, "b-1");
+		expect(answered.status).toBe(403);
+		expect(answered.body).toEqual(refused);
+		expect(w.authorized).toEqual([]);
+	});
+
+	it("answers a step-up at the callback — before the exchange or at the re-read — with error=reauthentication_required, and activates nothing", async () => {
+		let callbacks = 0;
+		let steppedUpAt = 1;
+		const w = world({
+			requirements: [
+				fixture((input) => {
+					if (input.action.name !== "federation_grants.callback") return { outcome: "met" };
+					callbacks += 1;
+					return callbacks === steppedUpAt ? STEP_UP : { outcome: "met" };
+				}),
+			],
+		});
+		const a = await approved(w, "b-1");
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"reauthentication_required",
+		);
+		expect(w.state.exchanged).toEqual([]);
+
+		callbacks = 0;
+		steppedUpAt = 2;
+		const b = await approved(w, "b-2");
+		expect(returned(await callback(w, { state: b.state, code: "c" }, "b-2")).get("error")).toBe(
+			"reauthentication_required",
+		);
+		expect(w.state.exchanged).toHaveLength(1);
+		for (const { grantId } of [a, b]) {
+			expect((await w.grants.find(grantId, w.state.now))?.status).toBe("pending");
+		}
+	});
+
+	it.each(["reauthenticate", "unmet"] as const)(
+		"answers a requirement's %s as a session that must sign in again, at every step",
+		async (outcome) => {
+			const at = (action: string) => world({ requirements: [fixture(on(action, { outcome }))] });
+
+			const connecting = at("federation_grants.connect");
+			const lodged = await connecting.lodge();
+			connecting.signIn("b-1");
+			const connected = await connecting.connect(lodged.handle, "b-1");
+			expect(connected.status).toBe(403);
+			expect(connected.text).toBe("Sign in again to continue.");
+
+			const consenting = at("federation_grants.consent");
+			const parked = await consenting.lodge();
+			consenting.signIn("b-1");
+			const challenge = await consenting.challengeFor(parked.handle, "b-1");
+			expect((await consenting.page(challenge, "b-1")).body.error).toBe(
+				"reauthentication_required",
+			);
+
+			const returning = at("federation_grants.callback");
+			const a = await approved(returning, "b-1");
+			expect(
+				returned(await callback(returning, { state: a.state, code: "c" }, "b-1")).get("error"),
+			).toBe("reauthentication_required");
+		},
+	);
+
+	it("answers a requirement that throws as the outage it is, logged once — by admission, with the requirement's name", async () => {
+		const down = (action: string) =>
+			world({
+				requirements: [
+					fixture((input) => {
+						if (input.action.name === action) throw new Error("risk engine down");
+						return { outcome: "met" };
+					}),
+				],
+			});
+
+		const connecting = down("federation_grants.connect");
+		const lodged = await connecting.lodge();
+		connecting.signIn("b-1");
+		const connected = await connecting.connect(lodged.handle, "b-1");
+		expect(connected.status).toBe(503);
+		expect(connected.text).toBe("Temporarily unavailable.");
+		expect(written(await settledLines(connecting))).toEqual([
+			"error session_admission_unavailable",
+		]);
+		expect(payloadOf(connecting.lines, "session_admission_unavailable")).toMatchObject({
+			grantId: lodged.grantId,
+			correlationId: connected.headers["x-request-id"],
+			store: "fixture",
+			action: "federation_grants.connect",
+			err: { name: "Error", detail: "risk engine down" },
+		});
+
+		const consenting = down("federation_grants.consent");
+		const parked = await consenting.lodge();
+		consenting.signIn("b-1");
+		const challenge = await consenting.challengeFor(parked.handle, "b-1");
+		const read = await consenting.page(challenge, "b-1");
+		expect(read.status).toBe(503);
+		expect(read.body).toEqual({ error: "temporarily_unavailable", error_description: "storage" });
+
+		const returning = down("federation_grants.callback");
+		const a = await approved(returning, "b-1");
+		expect(
+			returned(await callback(returning, { state: a.state, code: "c" }, "b-1")).get("error"),
+		).toBe("temporarily_unavailable");
+		expect(written(await settledLines(returning))).toEqual(["error session_admission_unavailable"]);
+	});
+
+	it("refuses a durable session whose expiresAt is not later than now — admission's reading, the one the routes made", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		for (const [browser, offset, status] of [
+			["b-now", 0, 403],
+			["b-later", 1, 303],
+		] as const) {
+			const sid = w.signIn(browser);
+			const durable = w.durable.get(sid) as UserSession;
+			w.durable.set(sid, { ...durable, expiresAt: new Date(w.state.now.getTime() + offset) });
+			expect((await w.connect(handle, browser)).status, browser).toBe(status);
+		}
+	});
+
+	it("tells a browser signed out since — its user gone with it — to sign in again at the callback, not that it is another account", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.browsers.set("b-1", { isAuthenticated: false });
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"reauthentication_required",
+		);
+	});
+
+	it("binds the browser by both halves around admission: the express session's id at connect, the durable sid at the callback", async () => {
+		// Admission reads the session the cookie names; which browser the flow
+		// is bound to stays the routes' own question.
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.withoutSessionId.add("b-1");
+		const unbound = await w.connect(handle, "b-1");
+		expect(unbound.status).toBe(403);
+		expect(unbound.text).toBe("Sign in again to continue.");
+		w.state.withoutSessionId.clear();
+
+		// A new login in the same browser since the consent: a live session
+		// of the same subject, and not the one the flow was bound to.
+		const a = await approved(w, "b-2");
+		w.signIn("b-2-relogin");
+		w.browsers.set("b-2", w.browsers.get("b-2-relogin") as Browser);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-2")).get("error")).toBe(
+			"reauthentication_required",
+		);
+		expect(w.state.exchanged).toEqual([]);
+	});
+
+	it("reads another user's cookie on the bound browser as no challenge at all: 400, and nothing audited", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		const challenge = await w.challengeFor(handle, "b-1");
+		w.browsers.set("b-1", { isAuthenticated: true, user: { id: "mallory" }, sid: "sid-b-1" });
+		const read = await w.page(challenge, "b-1");
+		expect(read.status).toBe(400);
+		expect(read.body).toEqual(noPending);
+		await w.background.drain();
+		expect(w.events.filter((e) => e.type === "federation.grant.authorization_failed")).toEqual([]);
+	});
+
+	it("writes admission's outage line to core's console logger when no logger is wired, the grant bound to it", async () => {
+		// Core's console logger writes through `console`; a child of it too.
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+		try {
+			const w = world({ withoutLogger: true });
+			const { handle, grantId } = await w.lodge();
+			w.signIn("b-1");
+			w.state.faults.set("userSessionStore.get", 0);
+			expect((await w.connect(handle, "b-1")).status).toBe(503);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1]).toBe("session_admission_unavailable");
+			expect(spy.mock.calls[0]?.[0]).toMatchObject({ grantId, store: "user_session" });
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("binds the flow to the admitted record's sid: a store answering a record whose sid is not its key fails closed at the consent", async () => {
+		// The binding's sid is the record admission read, not the cookie's: a
+		// store that answers a record under another sid — a deployment's own
+		// store gone wrong — leaves a challenge no browser can read or answer.
+		const w = world();
+		const { handle } = await w.lodge();
+		const sid = w.signIn("b-1");
+		const durable = w.durable.get(sid) as UserSession;
+		w.durable.set(sid, { ...durable, sid: "sid-somebody-else" });
+		const connected = await w.connect(handle, "b-1");
+		expect(connected.status).toBe(303);
+		const challenge =
+			new URL(connected.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+		const read = await w.page(challenge, "b-1");
+		expect(read.status).toBe(400);
+		expect(read.body).toEqual(noPending);
+		expect((await w.answer({ challenge, decision: "accept" }, "b-1")).status).toBe(400);
+		expect(w.authorized).toEqual([]);
+	});
+
+	it("registers admission's audit write with the drain, as every audit write of this router is", async () => {
+		// A shutdown that has begun waits for the subject-mismatch event
+		// admission writes, as it waits for the route's own.
+		const w = world();
+		const { handle } = await w.lodge();
+		w.browsers.set("b-1", { isAuthenticated: true, user: { id: "alice" }, sid: "sid-bob" });
+		w.durable.set("sid-bob", {
+			sid: "sid-bob",
+			sub: "bob",
+			authTime: w.state.now,
+			createdAt: w.state.now,
+			expiresAt: new Date(w.state.now.getTime() + DAY),
+			claims: {},
+			...passwordSessionAuthentication(),
+		});
+		let release = (): void => undefined;
+		w.state.auditGates.set(
+			"session.admission.subject_mismatch",
+			new Promise<void>((resolve) => {
+				release = resolve;
+			}),
+		);
+		expect((await w.connect(handle, "b-1")).status).toBe(403);
+		let drained = false;
+		const draining = w.background.drain().then(() => {
+			drained = true;
+		});
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(drained).toBe(false);
+		release();
+		await draining;
+		expect(w.events.map((event) => event.type)).toContain("session.admission.subject_mismatch");
+	});
+
+	it("refuses to be built without the subject revocation it reads the sessions boundary through: no boundary is no backstop", () => {
+		expect(() =>
+			createFederationGrantBrowserRouter({ requirements: resolverForTests([]) } as never),
+		).toThrow(/subjectRevocation/);
+	});
+
+	it("refuses to be built without requirements, or with a resolver the planner did not build", () => {
+		expect(() => createFederationGrantBrowserRouter({} as never)).toThrow(/requirements/);
+		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+		expect(() => createFederationGrantBrowserRouter({ requirements: forged } as never)).toThrow(
+			/sessionRequirementResolver the boot planner built/,
+		);
 	});
 });

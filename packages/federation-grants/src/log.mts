@@ -82,6 +82,13 @@ export interface FederationGrantLog {
 	unexpected(site: string, fields: LogFields, error: unknown): void;
 	/** A client lookup that could not be made: core's `client_repository_unavailable`, at error. */
 	clientRepositoryUnavailable(site: string, clientId: unknown, error: unknown): void;
+	/**
+	 * The logger with `fields` bound to every line it writes, sanitised and
+	 * capped as a line's own: for a caller that writes its own lines through
+	 * core — session admission, whose outage line then carries the grant and
+	 * the request's correlation id.
+	 */
+	bound(fields: LogFields): Logger;
 }
 
 /** The line: every string sanitised and capped, `undefined` left out, the cause projected. */
@@ -105,6 +112,7 @@ export function createFederationGrantLog(given: Logger | undefined): FederationG
 			logger.error(payload({ site, ...fields }, [error]), "federation_grants_unexpected_error"),
 		clientRepositoryUnavailable: (site, clientId, error) =>
 			logClientRepositoryUnavailable(logger, { site, step: "find", clientId }, error),
+		bound: (fields) => logger.child(payload(fields, [])),
 	};
 }
 
