@@ -31,8 +31,10 @@ import {
 	type MfaMode,
 	type MfaRequirementDecision,
 	type MfaRequirementSession,
+	producibleAmr,
 	readAcrTable,
 	selectAcr,
+	vouchableAcrTable,
 } from "#/mfa/requirement.mjs";
 import { sessionAuthentication, vouchedAmr } from "#/user-sessions/authentication.mjs";
 
@@ -476,5 +478,109 @@ describe("readAcrTable — `oauth.authorize.acrValues` as the rule reads it", ()
 		const table = readAcrTable({ [PWD]: ["pwd"] });
 		expect(Object.getPrototypeOf(table)).toBeNull();
 		expect("constructor" in table).toBe(false);
+	});
+});
+
+describe("producibleAmr — what something installed can put in a session's amr (D15)", () => {
+	it("is pwd and fed without MFA or a trusted federation", () => {
+		const producible = producibleAmr({ secondFactorMethods: undefined, trustedFederation: false });
+		expect(producible.anything).toBe(false);
+		expect([...producible.values].sort()).toEqual(["fed", "pwd"]);
+	});
+
+	it("adds the installed factors' values and mfa with a coordinator", () => {
+		const producible = producibleAmr({
+			secondFactorMethods: new Set(["email"]),
+			trustedFederation: false,
+		});
+		expect([...producible.values].sort()).toEqual(["email", "fed", "mfa", "pwd"]);
+	});
+
+	it("is anything once a federation whose upstream amr counts is installed", () => {
+		// An upstream IdP may assert any value, and a trusted one is recorded
+		// beside `fed` (D13). Until the upstream split every federation is.
+		expect(
+			producibleAmr({ secondFactorMethods: undefined, trustedFederation: true }).anything,
+		).toBe(true);
+	});
+});
+
+describe("vouchableAcrTable — an entry nothing installed can satisfy is dropped (D15)", () => {
+	const configured = readAcrTable({
+		[PWD]: ["pwd"],
+		"urn:example:fed": ["fed"],
+		[MFA]: ["pwd", "mfa"],
+		[PHR]: [["hwk"], ["swk"]],
+		[KBA]: ["kba"],
+	});
+	const nothingInstalled = producibleAmr({
+		secondFactorMethods: undefined,
+		trustedFederation: false,
+	});
+
+	it("keeps what pwd and fed meet and drops the rest, saying what no module produces", () => {
+		const { table, dropped } = vouchableAcrTable(configured, nothingInstalled);
+		expect(Object.keys(table)).toEqual([PWD, "urn:example:fed"]);
+		expect(dropped).toEqual([
+			{ acr: MFA, unproducible: ["mfa"], forWantOfSecondFactor: true },
+			{ acr: PHR, unproducible: ["hwk", "swk"], forWantOfSecondFactor: true },
+			{ acr: KBA, unproducible: ["kba"], forWantOfSecondFactor: false },
+		]);
+	});
+
+	it("keeps an entry the installed factors meet, and drops one they do not", () => {
+		const totpOnly = producibleAmr({
+			secondFactorMethods: new Set(["otp", "recovery", "mfa"]),
+			trustedFederation: false,
+		});
+		const { table, dropped } = vouchableAcrTable(configured, totpOnly);
+		expect(Object.keys(table)).toEqual([PWD, "urn:example:fed", MFA]);
+		expect(dropped.map((entry) => entry.acr)).toEqual([PHR, KBA]);
+	});
+
+	it("drops nothing when an installed federation's upstream amr counts", () => {
+		const { table, dropped } = vouchableAcrTable(
+			configured,
+			producibleAmr({ secondFactorMethods: undefined, trustedFederation: true }),
+		);
+		expect({ ...table }).toEqual({ ...configured });
+		expect(dropped).toEqual([]);
+	});
+
+	it("keeps an any-of entry whole when one alternative can be met", () => {
+		const { table } = vouchableAcrTable(
+			readAcrTable({ [KBA]: [["kba"], ["pwd"]] }),
+			nothingInstalled,
+		);
+		expect(table[KBA]).toEqual([["kba"], ["pwd"]]);
+	});
+
+	it("drops an any-of entry no alternative of which can be met, each value named once", () => {
+		const { dropped } = vouchableAcrTable(
+			readAcrTable({ [KBA]: [["kba", "hwk"], ["hwk"]] }),
+			nothingInstalled,
+		);
+		// The `hwk` alternative lacks only a value a second factor adds: MFA
+		// installed would meet it, which is what decides the boot line's level.
+		expect(dropped).toEqual([
+			{ acr: KBA, unproducible: ["kba", "hwk"], forWantOfSecondFactor: true },
+		]);
+	});
+
+	it("does not read an entry as wanting only a second factor when a value no factor adds is missing too", () => {
+		const { dropped } = vouchableAcrTable(
+			readAcrTable({ [KBA]: ["kba", "mfa"] }),
+			nothingInstalled,
+		);
+		expect(dropped).toEqual([
+			{ acr: KBA, unproducible: ["kba", "mfa"], forWantOfSecondFactor: false },
+		]);
+	});
+
+	it("builds a new table with no prototype and leaves the configured one as it was", () => {
+		const before = { ...configured };
+		const { table } = vouchableAcrTable(configured, nothingInstalled);
+		expect(Object.getPrototypeOf(table)).toBeNull();
+		expect({ ...configured }).toEqual(before);
 	});
 });
