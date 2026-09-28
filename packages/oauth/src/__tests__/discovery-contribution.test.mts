@@ -30,7 +30,7 @@
  */
 
 import type { AppConfig, OidcDiscoveryContribution } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig, resolverForTests } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { oauthModule } from "../module.mjs";
 
@@ -78,7 +78,12 @@ async function discoveryContribution(
 	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 	// Awaited as the boot planner does: a contribution factory may answer with
 	// a promise, and every kind's declared type says so since #626 P1.
-	return await factory({ config, grantHandlerResolver: grantResolver(), ...deps } as never);
+	return await factory({
+		config,
+		grantHandlerResolver: grantResolver(),
+		sessionRequirementResolver: resolverForTests([]),
+		...deps,
+	} as never);
 }
 
 describe("oauthModule — discoveryMetadata contribution", () => {
@@ -366,6 +371,32 @@ describe("acr_values_supported (#481)", () => {
 			}),
 		);
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
+	});
+
+	it("advertises an entry a registered requirement's reach can meet (the session-admission ADR's D6)", async () => {
+		// The union of every requirement's reach is what a step-up can add;
+		// `otp` and `mfa` through the requirement named mfa, so its entry is
+		// advertised, while `phr` still needs a key nothing reaches.
+		const meta = await discoveryContribution(
+			{
+				sessionRequirementResolver: resolverForTests([
+					{
+						name: "mfa",
+						reach: new Set(["otp", "mfa"]),
+						stepUpPage: { url: "/mfa", params: {} },
+						remediations: ["mfa.step_up"],
+						hintKeys: [],
+						admit: async () => ({ outcome: "met" }),
+					},
+				]),
+			},
+			withAcr({
+				"urn:example:pwd": ["pwd"],
+				"urn:example:mfa": ["pwd", "mfa"],
+				"urn:example:phr": [["hwk"], ["swk"]],
+			}),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
 	});
 
 	it("says nothing when every entry is withheld", async () => {

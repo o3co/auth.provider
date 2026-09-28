@@ -39,7 +39,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -1854,7 +1854,7 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 	const linesFor = (fn: ReturnType<typeof vi.fn>) =>
 		fn.mock.calls.filter((call) => call[1] === EVENT);
 
-	it("says once, object-first, which entries it dropped: info when only a second factor is missing under mfa.mode off", async () => {
+	it("says once, object-first, which entries it dropped: info when only a second factor is missing and no registered requirement reaches one", async () => {
 		const logger = createMockLogger();
 		await makeApp({ oauth: { authorize: { acrValues } }, logger });
 		expect(linesFor(logger.info)).toEqual([
@@ -1869,16 +1869,25 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		}
 	});
 
-	it("warns for every dropped entry once MFA is not off", async () => {
-		// A hand-built configuration: core's schema admits only `off` until a
-		// module honours another mode, but the level is decided on the mode.
+	it("keeps what a registered requirement reaches, and warns for what is still unmet once one reaches a second factor", async () => {
+		// The session-admission ADR's D6: the level is decided on what the
+		// registered requirements reach, never on `mfa.mode`. A requirement
+		// reaching `otp` and `mfa` meets the `mfa` entry; `phr` needs a key no
+		// requirement reaches, which is a warning now that MFA is installed.
 		const logger = createMockLogger();
 		const { router } = await createOAuthRouter(express, {
 			registry: new GrantRegistry(),
-			config: {
-				...makeConfig({ authorize: { acrValues } }),
-				mfa: { mode: "optional" },
-			} as unknown as AppConfig,
+			config: makeConfig({ authorize: { acrValues } }),
+			requirements: resolverForTests([
+				{
+					name: "mfa",
+					reach: new Set(["otp", "mfa"]),
+					stepUpPage: { url: "/mfa", params: {} },
+					remediations: ["mfa.step_up"],
+					hintKeys: [],
+					admit: async () => ({ outcome: "met" }),
+				},
+			]),
 			clientRepository: { findById: async () => null, authenticate: async () => null },
 			codeRepository: {
 				createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
@@ -1892,7 +1901,6 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		expect(router).toBeDefined();
 		expect(linesFor(logger.info)).toEqual([]);
 		expect(linesFor(logger.warn).map((call) => (call[0] as { acr: string }).acr)).toEqual([
-			"urn:example:mfa",
 			"urn:example:phr",
 			"urn:example:kba",
 		]);
@@ -2100,30 +2108,6 @@ describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => 
 	});
 });
 
-describe("/authorize — mfa.mode as the acr table's boot line reads it", () => {
-	it("refuses to compose with an mfa.mode that is given but unusable, rather than read it as off", async () => {
-		// A hand-built configuration: core's schema refuses it at boot too.
-		await expect(
-			createOAuthRouter(express, {
-				registry: new GrantRegistry(),
-				config: {
-					...makeConfig({ authorize: { acrValues: { "urn:example:mfa": ["mfa"] } } }),
-					mfa: { mode: "requried" },
-				} as unknown as AppConfig,
-				clientRepository: { findById: async () => null, authenticate: async () => null },
-				codeRepository: {
-					createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
-					findByCode: async () => null,
-					consumeByCode: async () => null,
-					removeByCode: async () => {},
-				},
-				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-				logger: createMockLogger(),
-			}),
-		).rejects.toThrow(RangeError);
-	});
-});
-
 describe("the acr drop's boot line for an entry with an empty alternative", () => {
 	it("says the entry has an alternative that requires nothing, so an empty unproducible list is not the whole story", () => {
 		// A table built by hand — `readAcrTable` and the schema never build
@@ -2134,8 +2118,9 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 			{ "urn:example:any": [[]], "urn:example:kba": [["kba"]] },
 			undefined,
 			{},
+			new Set(),
 		);
-		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
+		logUnsatisfiableAcrValues(dropped, new Set(), logger);
 		expect(logger.warn.mock.calls).toEqual([
 			[
 				{ acr: "urn:example:any", unproducible: [], emptyAlternative: true },
@@ -2153,8 +2138,13 @@ describe("the acr drop's boot line for an entry with an empty alternative", () =
 		// carries, and the count says how many there were.
 		const lacked = Array.from({ length: 12 }, (_, i) => `x${i}`);
 		const logger = createMockLogger();
-		const { dropped } = vouchableAcrValues({ "urn:example:many": [lacked] }, undefined, {});
-		logUnsatisfiableAcrValues(dropped, { mfa: { mode: "off" } }, logger);
+		const { dropped } = vouchableAcrValues(
+			{ "urn:example:many": [lacked] },
+			undefined,
+			{},
+			new Set(),
+		);
+		logUnsatisfiableAcrValues(dropped, new Set(), logger);
 		expect(logger.warn.mock.calls).toEqual([
 			[
 				{ acr: "urn:example:many", unproducible: lacked.slice(0, 10), unproducibleCount: 12 },
