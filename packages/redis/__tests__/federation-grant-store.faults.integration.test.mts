@@ -328,6 +328,35 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
 	});
 
+	it("still ends a grant whose expiry copy was rewritten into the past: the horizon a revocation honours is the authenticated text's (#627)", async () => {
+		// `expiresAtMs` is a copy outside the envelope. A horizon read from it,
+		// once the copy is moved sixty days back, is in the past, and the script
+		// would answer "a tombstone is not revoked again" — for a grant `find`
+		// still reports as active, whose credential then stays at rest until the
+		// key's own TTL. The read side judges the horizon on the authenticated
+		// text; so does the one write that must always win.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(-60 * DAY).getTime()));
+		expect(await held.revoke("g-1", "operator", at(DAY))).toMatchObject({
+			ok: true,
+			grant: { status: "revoked", revocation: { by: "operator" } },
+		});
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("revoked");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
+		expect(await held.find("g-1", at(DAY))).toMatchObject({ status: "revoked" });
+	});
+
+	it("reads the tombstone's horizon from the text as well: a copy moved into the future revokes nothing for a caller past the real one (#627)", async () => {
+		// The other direction of the same rule. The text says the grant is
+		// retained until thirty days past its expiry; a caller whose clock is
+		// past that is asking to revoke a tombstone, whatever the copy says.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(365 * DAY).getTime()));
+		expect(await held.revoke("g-1", "operator", at(61 * DAY))).toStrictEqual({ ok: false });
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("active");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(1);
+	});
+
 	it("still refuses a revocation for a record whose horizon says it has gone", async () => {
 		// Computable and past is a different thing from not computable: a
 		// tombstone is not revoked again, and the first revocation stays as it

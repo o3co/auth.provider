@@ -1147,6 +1147,26 @@ return {1, redis.call('HGETALL', KEYS[1])}
  * authorized, which has no expiry to be retained from and runs from here.
  */
 const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
+-- The horizon as the read side computes it (#627): from the expiry in the
+-- authenticated authorization text, and never from the expiresAtMs copy
+-- beside it, which anyone able to write the keyspace can move. Moved into the
+-- past, the copy made a live grant read as a tombstone HERE, and refused the
+-- one write meant to end it, while the credential stayed at rest until the
+-- key's own TTL. A pending grant has no text and runs from its intent; a text
+-- that does not parse gives no horizon, which is the retention case below.
+local function fg_revoke_horizon(g)
+  local retention = fg_num(g['retentionMs'])
+  if retention == nil then return nil end
+  if g['status'] == 'pending' then return fg_num(g['intentExpiresAt']) end
+  local text = g['authorization']
+  if text == nil then return nil end
+  local ok, parsed = pcall(cjson.decode, text)
+  if not ok or type(parsed) ~= 'table' then return nil end
+  -- The eleventh element of the canonical text, as the codec lays it out.
+  local expiresAt = fg_num(parsed[11])
+  if expiresAt == nil then return nil end
+  return expiresAt + retention
+end
 local at = tonumber(ARGV[1])
 if at == nil then return {0} end
 local flat = redis.call('HGETALL', KEYS[1])
@@ -1156,10 +1176,11 @@ if g['status'] == 'revoked' then return {0} end
 -- The one write that does not go through the visibility check, because it is
 -- the one that must always win. A horizon that CAN be computed is still
 -- honoured: a tombstone is not revoked again. One that cannot — a record
--- whose retention someone deleted — is not a reason to leave a credential at
--- rest with no way to end it, which is exactly the state an operator reaches
--- for this in (the reviewer, then Copilot).
-local horizon = fg_horizon(g)
+-- whose retention someone deleted, or whose text does not read — is not a
+-- reason to leave a credential at rest with no way to end it, which is
+-- exactly the state an operator reaches for this in (the reviewer, then
+-- Copilot).
+local horizon = fg_revoke_horizon(g)
 if horizon ~= nil and not (at < horizon) then return {0} end
 local version = fg_num(g['version'])
 local wasPending = g['status'] == 'pending'

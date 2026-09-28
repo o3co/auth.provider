@@ -494,7 +494,12 @@ Every write is one guarded script, and a refused one says only that it was
 refused: the record may change again before the caller looks, so the port
 re-reads. Nothing deletes a record because of the time its caller passed —
 what a caller is told is judged on the time it passes, and what Redis reclaims
-is judged by Redis.
+is judged by Redis. The scripts guard on arithmetic copies of the expiry and
+the upstream account kept beside the canonical text; a write that has the
+record in hand refuses when the copies no longer agree with the text, and a
+revocation, which has none and must always win, takes the horizon it honours
+from the text itself (#627), so a copy moved into the past cannot keep a live
+grant from being ended.
 
 The credential is sealed under a key **ring**, in core's `v2` key-ring
 envelope (`sealWithKeyRing`, with this store's purpose `o3co:redis:v2`): the
