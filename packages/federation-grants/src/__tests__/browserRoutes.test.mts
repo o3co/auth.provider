@@ -1269,7 +1269,7 @@ describe("what the browser-half mutation pass found", () => {
 		// An inconsistent session — the cookie's user is alice, the durable record
 		// it points at is bob's — is not a session this flow can trust either way.
 		const w = world();
-		const { handle } = await w.lodge();
+		const { handle, grantId } = await w.lodge();
 		w.browsers.set("b-1", { isAuthenticated: true, user: { id: "alice" }, sid: "sid-bob" });
 		w.durable.set("sid-bob", {
 			sid: "sid-bob",
@@ -1285,9 +1285,12 @@ describe("what the browser-half mutation pass found", () => {
 		expect(response.status).toBe(403);
 		expect(response.text).toBe("Sign in again to continue.");
 		// Admission's reading of it (the session-admission ADR's D10): one warn
-		// naming the action, and the audit event naming both subjects.
+		// naming the action — the flow's grant and the request's id bound to it,
+		// no subject or sid — and the audit event naming both subjects.
 		expect(written(await settledLines(w))).toEqual(["warn session_admission_subject_mismatch"]);
 		expect(payloadOf(w.lines, "session_admission_subject_mismatch")).toEqual({
+			grantId,
+			correlationId: response.headers["x-request-id"],
 			action: "federation_grants.connect",
 		});
 		expect(w.events.find((e) => e.type === "session.admission.subject_mismatch")).toMatchObject({

@@ -107,8 +107,9 @@
  * session the subject index never learnt of, leaves a record the boundary
  * has ended). Then it asks the registered session requirements. The module
  * refuses to boot an enabled grant without a store, and this handler
- * refuses to be built without one or without the resolver, so there is no
- * cookie-only mode and no admission the planner did not build.
+ * refuses to be built without one, or without the resolver the planner
+ * built (core's `checkResolver`), so there is no cookie-only mode and no
+ * admission the planner did not build.
  *
  * What each admission is answered with is this endpoint's, a JSON API a page
  * calls: a new login is the remedy for every session that cannot be used,
@@ -121,8 +122,11 @@
  * the boundary, "the session is no longer active; sign in again" — and a
  * requirement's `reauthenticate` or `unmet` "sign in again to continue": the
  * page has no other remedy to offer a device. A `step_up` is
- * `403 step_up_required` with the `requirement` that asked, on any of the
- * three actions: the MFA requirement never steps up `lookup` or `deny` (a
+ * `403 step_up_required` with the `requirement` that asked and its `page` —
+ * the requirement's registered step-up page as an absolute URL on the
+ * issuer, its params on the query and no return parameter, since the page
+ * that called knows where it returns (the ADR's D8: a browser-facing
+ * consumer answers the page) — on any of the three actions: the MFA requirement never steps up `lookup` or `deny` (a
  * user refuses a phished device request without one, the ADR's D6), but
  * another requirement may. An outage — the store, the boundary, or a
  * requirement that throws — fails closed as `503 temporarily_unavailable`
@@ -192,12 +196,14 @@ import type {
 	RateLimitFailMode,
 	RateLimitOutageLogger,
 	SessionRequirementResolver,
+	StepUpPage,
 	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	ADMISSION_ACTIONS,
 	admitSession,
+	checkResolver,
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
@@ -293,6 +299,18 @@ const admissionLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
 	return adapted;
 };
 
+/**
+ * Where the step-up starts, as the page is sent there: the requirement's
+ * registered page as an absolute URL on the issuer, its params set on the
+ * query (the session-admission ADR's D2, D8). No return parameter: the
+ * deployment's verification page knows where it comes back to.
+ */
+const stepUpUrl = (page: StepUpPage, issuer: string): string => {
+	const url = new URL(page.url, issuer);
+	for (const [name, value] of Object.entries(page.params)) url.searchParams.set(name, value);
+	return url.href;
+};
+
 /** The three descriptions `401 login_required` had before admission, and the one it adds. */
 const NO_SESSION = "an authenticated end-user session is required to approve a device";
 const NO_SID = "session identifier (sid) is required";
@@ -309,6 +327,7 @@ const loginRequired = (description: string) =>
  */
 const refusalOf = (
 	admission: Admission,
+	issuer: string,
 ): { readonly status: number; readonly body: Record<string, unknown> } => {
 	switch (admission.outcome) {
 		case "unavailable":
@@ -323,6 +342,7 @@ const refusalOf = (
 					error: "step_up_required",
 					error_description: "the session must step up before it can do this",
 					requirement: admission.requirement,
+					page: stepUpUrl(admission.page, issuer),
 				},
 			};
 		case "unauthenticated":
@@ -367,6 +387,11 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 */
 	readonly requirements: SessionRequirementResolver;
 	/**
+	 * Required: `oauth.jwt.issuer`, an absolute URL — what a step-up page,
+	 * which may be a path, is answered on (see the file header).
+	 */
+	readonly issuer: string;
+	/**
 	 * `oauth.requireEmailVerified` (#297), resolved. Required rather than
 	 * defaulted, so a composition that mounts this handler by hand states
 	 * whether the gate holds instead of losing it by omission.
@@ -393,13 +418,14 @@ export const createDeviceVerificationHandler = (
 				"the live UserSession behind the cookie's sid before it is answered",
 		);
 	}
-	// Likewise the resolver: a handler built without it would answer every
-	// request 500 when admission refused the missing one.
-	if (typeof options.requirements !== "object" || options.requirements === null) {
+	// Likewise the resolver — missing, or one the planner did not build — and
+	// the issuer: refused here, not answered 500 on every request.
+	const requirements = checkResolver(options.requirements);
+	const issuer = options.issuer;
+	if (typeof issuer !== "string" || !URL.canParse(issuer)) {
 		throw new TypeError(
-			"createDeviceVerificationHandler: requirements is required — the " +
-				"sessionRequirementResolver the boot planner built (resolverForTests in a test); " +
-				"every action is admitted through session admission",
+			"createDeviceVerificationHandler: issuer is required — an absolute URL (oauth.jwt.issuer), " +
+				"on which a step-up page is answered",
 		);
 	}
 	const now = options.now ?? Date.now;
@@ -407,7 +433,7 @@ export const createDeviceVerificationHandler = (
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: options.userSessionStore,
 		subjectRevocation: options.subjectRevocation,
-		requirements: options.requirements,
+		requirements,
 		acrTable: NO_ACR_TABLE,
 		logger: admissionLogger(options.logger),
 		auditSink: options.auditSink,
@@ -452,7 +478,7 @@ export const createDeviceVerificationHandler = (
 		});
 		const session = admission.outcome === "admitted" ? admission.session : null;
 		if (session === null) {
-			const refusal = refusalOf(admission);
+			const refusal = refusalOf(admission, issuer);
 			respond(res, refusal.status, refusal.body);
 			return;
 		}

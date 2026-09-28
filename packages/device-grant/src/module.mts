@@ -847,6 +847,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							// live session, and the requirements registered.
 							userSessionStore,
 							requirements: deps.sessionRequirementResolver,
+							// What a step-up page is answered on.
+							issuer: deps.config.oauth.jwt.issuer,
 							// #297, read as `/authorize` reads it: `=== true`, so a
 							// hand-built config that never passed the schema is off.
 							requireEmailVerified: deps.config.oauth?.requireEmailVerified === true,

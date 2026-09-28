@@ -90,7 +90,8 @@
  * `reason`) and the error's projection; admission's own
  * `session_admission_unavailable`, with the `store` (`user_session`,
  * `revocation_boundary`, or a requirement's name) and the `action`, when the
- * session's part could not be answered. A record of another subject than the
+ * session's part could not be answered — written through this router's
+ * logger bound to the flow's `grantId` and the request's `correlationId`. A record of another subject than the
  * cookie's is admission's warn, `session_admission_subject_mismatch`, and its
  * audit event. A client registry that cannot answer is core's
  * `client_repository_unavailable`, with this route as its `site`. A failure
@@ -108,8 +109,8 @@ import {
 	admitSession,
 	type ClientRepository,
 	type CookieCarrier,
+	checkResolver,
 	checkWithFailMode,
-	consoleLogger,
 	cookieClaim,
 	coveredByRevocationBoundary,
 	type FederatedIdentityLookupResult,
@@ -434,28 +435,30 @@ function clientReturn(intent: FederationGrantIntent, error?: string): string {
 export function createFederationGrantBrowserRouter(
 	options: FederationGrantBrowserRouterOptions,
 ): Router {
-	// As a missing store is refused where the composition is assembled, not
-	// answered on every request: admission refuses a resolver it did not build.
-	if (typeof options.requirements !== "object" || options.requirements === null) {
-		throw new TypeError(
-			"createFederationGrantBrowserRouter: requirements is required — the " +
-				"sessionRequirementResolver the boot planner built (resolverForTests in a test); " +
-				"every step admits the browser's session through session admission",
-		);
-	}
+	// Refused where the composition is assembled, not answered 500 on every
+	// request: a missing resolver, or one the planner did not build.
+	const requirements = checkResolver(options.requirements);
 	const now = options.now ?? (() => new Date());
 	const randomId = options.randomId ?? (() => randomBytes(32).toString("base64url"));
 	const log = createFederationGrantLog(options.logger);
-	/** Admission's dependencies: this router's own slots, clock and logger. */
-	const admission: AdmissionDeps = {
+	/**
+	 * Admission's dependencies for one request of one flow: this router's own
+	 * slots and clock, and its logger bound to the flow's grant and this
+	 * request's correlation id, so the line admission writes for an outage
+	 * carries them as the route's own lines do.
+	 */
+	const admissionFor = (flow: {
+		readonly grantId: string;
+		readonly correlationId: string;
+	}): AdmissionDeps => ({
 		userSessionStore: options.userSessionStore,
 		subjectRevocation: options.subjectRevocation,
-		requirements: options.requirements,
+		requirements,
 		acrTable: NO_ACR_TABLE,
-		logger: options.logger ?? consoleLogger,
+		logger: log.bound(flow),
 		auditSink: options.auditSink,
 		now,
-	};
+	});
 	const router = express.Router();
 
 	/**
@@ -631,7 +634,15 @@ export function createFederationGrantBrowserRouter(
 					);
 					return;
 				}
-				const judged = await judge(options, admission, req, claim, CONNECT, intent, now);
+				const judged = await judge(
+					options,
+					admissionFor({ grantId: intent.grantId, correlationId: requestIdOf(res) }),
+					req,
+					claim,
+					CONNECT,
+					intent,
+					now,
+				);
 				if (!judged.ok) {
 					if (judged.reason === "unavailable" && judged.unanswered !== undefined) {
 						judgementUnavailable(
@@ -739,7 +750,15 @@ export function createFederationGrantBrowserRouter(
 			jsonError(res, 400, "invalid_request", NO_PENDING);
 			return null;
 		}
-		const judged = await judge(options, admission, req, claim, CONSENT, intent, now);
+		const judged = await judge(
+			options,
+			admissionFor({ grantId: intent.grantId, correlationId: requestIdOf(res) }),
+			req,
+			claim,
+			CONSENT,
+			intent,
+			now,
+		);
 		if (!judged.ok) {
 			if (judged.reason === "unavailable" && judged.unanswered !== undefined) {
 				judgementUnavailable(
@@ -1106,7 +1125,8 @@ export function createFederationGrantBrowserRouter(
 				// subject's, and signed in after the subject's sessions boundary.
 				// One claim for both reads: the re-read below admits the same one.
 				const claim = claimOf(req);
-				const session = await sessionHolds(req, claim, transaction);
+				const admission = admissionFor(context);
+				const session = await sessionHolds(admission, req, claim, transaction);
 				if (session !== "ok") {
 					await fail(session === "unavailable" ? "temporarily_unavailable" : session);
 					return;
@@ -1251,7 +1271,7 @@ export function createFederationGrantBrowserRouter(
 				// window (hold the upstream redirect, finish the callback minutes
 				// later) to the gap between these reads and the activation. It does
 				// not close it; that needs write fencing (D13).
-				const again = await sessionHolds(req, claim, transaction);
+				const again = await sessionHolds(admission, req, claim, transaction);
 				if (again !== "ok") {
 					await fail(again === "unavailable" ? "temporarily_unavailable" : again);
 					return;
@@ -1371,6 +1391,7 @@ export function createFederationGrantBrowserRouter(
 	 * is `"unavailable"`, whose line admission wrote.
 	 */
 	async function sessionHolds(
+		admission: AdmissionDeps,
 		req: Request,
 		claim: SessionClaim,
 		transaction: FederationGrantConnectTransaction,
