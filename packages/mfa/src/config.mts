@@ -24,8 +24,8 @@
  *   each key canonical base64 of 32 bytes, named by its id or — an entry
  *   written without one — by its fingerprint, the ring checked by core's sealing
  *   rule under the key it was read from (no empty ring, no duplicate id, every
- *   id within the rule), every refusal naming the entry by index and quoting
- *   neither a key nor an id. The published development sample key is refused
+ *   id within the rule) and refused for one key under two ids, every refusal
+ *   naming the entry by index and quoting neither a key nor an id. The published development sample key is refused
  *   by #473's rule: where the environment the configuration was selected by,
  *   or `NODE_ENV`, is `production` or `staging`, and under
  *   `deployment.mode = "multi"`.
@@ -375,7 +375,27 @@ function readKeyRing(
 		return { id: entry.id ?? keyFingerprint(key), key };
 	});
 	checkSealingKeyRing(ring, RING);
+	refuseRepeatedKey(ring);
 	return { ring, developmentSampleKeyAccepted: refuseSampleKey(ring, config, options) };
+}
+
+/**
+ * One key under two ids — `{ id: "old", key: X }` beside `{ id: "new", key:
+ * X }` — is one AES key posing as two rotation generations: retiring one
+ * would retire nothing. Core's ring rule compares ids alone, so the decoded
+ * keys are compared here, and the later entry is refused, named by its index
+ * and the earlier one's, quoting neither key nor id. Boot-time, over a
+ * handful of entries: no comparison needs to be constant-time.
+ */
+function refuseRepeatedKey(ring: SealingKeyRing): void {
+	ring.forEach((entry, index) => {
+		const earlier = ring.findIndex((other) => other.key.equals(entry.key));
+		if (earlier < index) {
+			throw new RangeError(
+				`${RING}[${index}].key duplicates the key of ${RING}[${earlier}] under another id: one key cannot be two rotation generations — give each entry a key of its own (openssl rand -base64 32)`,
+			);
+		}
+	});
 }
 
 /**
