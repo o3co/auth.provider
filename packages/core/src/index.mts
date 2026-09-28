@@ -562,6 +562,7 @@ export {
 	type ProducibleAmr,
 	producibleAmr,
 	readAcrTable,
+	readMfaMode,
 	selectAcr,
 	stepUpReach,
 	type UnsatisfiableAcrValue,
@@ -857,7 +858,11 @@ export type {
 } from "./token-exchange/validator.mjs";
 // The MFA ADR's D9: how a session was established and what this provider
 // vouches for, read one way by every consumer of a session.
-export { sessionAuthentication, vouchedAmr } from "./user-sessions/authentication.mjs";
+export {
+	requirementSession,
+	sessionAuthentication,
+	vouchedAmr,
+} from "./user-sessions/authentication.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,

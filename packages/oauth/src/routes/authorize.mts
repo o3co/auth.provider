@@ -41,13 +41,13 @@ import {
 	type PublicClient,
 	parseScopeTokens,
 	readSpaceDelimitedParameter,
+	requirementSession,
 	sanitizeErrorText,
 	selectAcr,
 	stepUpReach,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
-	vouchedAmr,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import {
@@ -899,7 +899,7 @@ const evaluateReauthentication = async (
  * configured `oauth.authorize.acrValues` less the entries nothing this
  * composition installs can satisfy (the MFA ADR's D15, `../acrValues.mts`).
  * Core's `selectAcr` decides over the `amr` the session vouches for
- * (`vouchedAmr`): the first requested value one of whose alternatives the
+ * (`requirementSession`, the rule's one reading of a session): the first requested value one of whose alternatives the
  * session holds is the `acr` the code — and so the id_token — carries. None
  * satisfied, or a value this deployment does not carry, is
  * `unmet_authentication_requirements` rather than a token the RP would read
@@ -928,7 +928,7 @@ const resolveAcr = (
 	const table = ctx.opts.oauth.acrValues;
 	const selection = selectAcr(
 		requested,
-		session === null ? [] : vouchedAmr(session),
+		requirementSession(session)?.amr ?? [],
 		table,
 		stepUpReach(undefined),
 	);

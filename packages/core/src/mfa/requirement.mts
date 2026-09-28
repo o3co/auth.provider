@@ -23,8 +23,9 @@
  * page, a `step_up` member, a `403`) is its own.
  *
  * It reads a session only through `sessionAuthentication` and `vouchedAmr`
- * (`../user-sessions/authentication.mts`), so what the provider vouches for
- * is decided in one place, and it holds `acr_values` to the configured table
+ * (`../user-sessions/authentication.mts`): a consumer builds its input with
+ * `requirementSession(session)`, never by hand, so what the provider vouches
+ * for is decided in one place, and it holds `acr_values` to the configured table
  * alone: `acr` is vouched for only as the table defines it — less the entries
  * nothing installed can satisfy, which are dropped at boot
  * (`vouchableAcrTable`), so no deployment advertises an `acr` it can never
@@ -49,6 +50,18 @@ import type { SessionAuthentication } from "../user-sessions/types.mjs";
  * nobody is forced, step-up works; `off` — no MFA.
  */
 export type MfaMode = "off" | "optional" | "required";
+
+/**
+ * `mfa.mode` as a consumer reads it, off any config-shaped value: the mode
+ * when it is one of the three, else `undefined` — absent, or a value core's
+ * schema refuses at boot (a hand-built configuration can still hold one).
+ * What `undefined` means is the caller's to decide: until the flip, core's
+ * schema and reference default it to `"off"` (D19).
+ */
+export function readMfaMode(config: unknown): MfaMode | undefined {
+	const mode = (config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode;
+	return mode === "off" || mode === "optional" || mode === "required" ? mode : undefined;
+}
 
 /**
  * What one `acr` requires (D15): any one of these lists, every value of which
@@ -104,7 +117,11 @@ export function readAcrTable(raw: unknown): AcrTable {
 	return table;
 }
 
-/** What the rule reads about a live session (D9). */
+/**
+ * What the rule reads about a live session (D9). Built by
+ * `requirementSession(session)` (`../user-sessions/authentication.mts`) and
+ * nowhere else in product code.
+ */
 export interface MfaRequirementSession {
 	/** `sessionAuthentication(session)`: `undefined` when its primary cannot be told. */
 	readonly authentication: SessionAuthentication | undefined;

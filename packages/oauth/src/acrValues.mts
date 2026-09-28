@@ -30,6 +30,7 @@ import {
 	auditErrorText,
 	type Logger,
 	producibleAmr,
+	readMfaMode,
 	type UnsatisfiableAcrValue,
 	vouchableAcrTable,
 } from "@o3co/auth-provider-core";
@@ -81,8 +82,9 @@ export const logUnsatisfiableAcrValues = (
 	config: unknown,
 	logger: Logger,
 ): void => {
-	const mode = (config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode;
-	const mfaOff = mode === undefined || mode === "off";
+	// `undefined` — absent, or a value core's schema refuses at boot — reads as
+	// core's default until the flip, `"off"` (D19).
+	const mfaOff = (readMfaMode(config) ?? "off") === "off";
 	for (const entry of dropped) {
 		const unproducible = auditErrorList(entry.unproducible);
 		const fields = {

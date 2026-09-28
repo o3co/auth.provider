@@ -17,8 +17,9 @@
 /**
  * How a session was established and what this provider vouches for, read the
  * one way every consumer of a session reads them (the MFA ADR's D9): the
- * requirement rule (`../mfa/requirement.mts`) and `/authorize` today, `/token`
- * and the `session` grant once the upstream split lands.
+ * requirement rule (`../mfa/requirement.mts`), whose input
+ * `requirementSession` builds, and `/authorize` today; `/token` and the
+ * `session` grant once the upstream split lands.
  *
  * A session is read from its `amr`, because the record has no
  * `authentication` key yet (the build order's step 5 adds it): `fed` means a
@@ -29,6 +30,7 @@
  */
 
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
+import type { MfaRequirementSession } from "../mfa/requirement.mjs";
 import type { SessionAuthentication, UserSession } from "./types.mjs";
 
 /**
@@ -50,4 +52,17 @@ export function sessionAuthentication(session: UserSession): SessionAuthenticati
 /** The `amr` this provider vouches for in `session`, copied: what `acr` is matched against and a token may carry. */
 export function vouchedAmr(session: UserSession): readonly string[] {
 	return [...(session.amr ?? [])];
+}
+
+/**
+ * The requirement rule's input for `session` (the MFA ADR's D16): how it was
+ * established and what it vouches for, through the two readers above — or
+ * `null` when there is no session (no `sid`, or no `UserSessionStore`). Every
+ * consumer builds the rule's input here and nowhere else: one built from the
+ * record's own `amr` would, once the upstream split lands, let a value an
+ * untrusted IdP asserted meet an `acr`.
+ */
+export function requirementSession(session: UserSession | null): MfaRequirementSession | null {
+	if (session === null) return null;
+	return { authentication: sessionAuthentication(session), amr: vouchedAmr(session) };
 }
