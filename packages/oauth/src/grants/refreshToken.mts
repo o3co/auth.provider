@@ -82,8 +82,9 @@ export type RefreshTokenGrantDeps = Pick<
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
 /**
- * The token endpoint's answer to an admission that does not refresh (D9,
- * the brief's addendum), or `undefined` for `admitted`: a session gone, past
+ * The token endpoint's answer to an admission that does not refresh (the
+ * session-admission ADR's D8 and D9, the refresh grant's row), or `undefined`
+ * for `admitted`: a session gone, past
  * its expiry or not the token's subject is `400 invalid_grant`
  * `session_invalid`, as a dead `sid` always was; `unmet` and
  * `reauthenticate` are `400 invalid_grant` naming the requirement — the

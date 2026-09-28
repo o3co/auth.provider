@@ -145,7 +145,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"codeRepository",
 			"keyStore",
 			"grantHandlerResolver", // Amendment 3 (§1.1.3) — synthetic, auto-injected by boot planner
-			"sessionRequirementResolver", // the session-admission ADR's D1: every consumer of admission takes it; here it decides the acr drop (D6), and A3 hands it to the consumers
+			"sessionRequirementResolver", // the session-admission ADR's D1: every consumer of admission takes it; here it decides the acr drop (D6), and /authorize and the consent step read their sessions through it
 		],
 		optional: [
 			"rateLimiter", // Phase 9 Task 4 augmentation — oauth routes degrade gracefully without

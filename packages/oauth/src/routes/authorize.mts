@@ -1747,21 +1747,29 @@ const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Re
  * Creates the `GET /authorize` handler — the RFC 6749 §4.1.1 → §4.1.2
  * authorization-code sequence, one step per concern:
  *
- * 1. authenticate the resource owner (redirect to login) — the #325
- *    rate-limit guard runs before this handler, mounted as sibling
- *    middleware on the route;
+ * 1. the cookie's flag: a browser that is not authenticated is sent to log
+ *    in before anything is looked up — the #325 rate-limit guard runs
+ *    before this handler, mounted as sibling middleware on the route;
  * 2. identify the client and validate `redirect_uri` (§4.1.1; 400 JSON —
  *    no trusted redirect target yet, per A-1);
- * 3. validate the request: `response_type`, the client's registered grant
- *    types (#268), the first-party invariant (#267), the email-verified
- *    gate (#297), PKCE — mandatory, S256 (#273) — `nonce` bounds (IH-16);
- * 4. narrow scope and audience: client allowlist + openid requirement
- *    (IH-6), then policy (C-2), then the RFC 8707 resource check;
- * 5. issue the code and redirect back with `code` + `state` (§4.1.2).
+ * 3. read the request's shape: request objects refused, then `prompt`, the
+ *    single-valued parameters, `claims`, `max_age` and `acr_values`;
+ * 4. admit the session, once, through core's `admitSession` (the
+ *    session-admission ADR's D8): freshness decided first, then the verdict
+ *    — a new login, a step-up trip, a refusal, or on;
+ * 5. validate the rest of the request: `response_type`, the client's
+ *    registered grant types (#268), the first-party invariant (#267), the
+ *    email-verified gate (#297), PKCE — mandatory, S256 (#273) — and `nonce`
+ *    bounds (IH-16);
+ * 6. narrow scope and audience: client allowlist + openid requirement
+ *    (IH-6), consent for a client that is not first-party (#527), then
+ *    policy (C-2), then the RFC 8707 resource check;
+ * 7. issue the code and redirect back with `code` + `state` (§4.1.2).
  *
- * Extracted from the inline `routes.mts` closure in #328 with behavior
- * intentionally identical: same checks, same order, same error responses,
- * same audit payloads.
+ * Extracted from the inline `routes.mts` closure in #328. Session admission
+ * moved the session read to step 4 and changed what a dead, expired, revoked
+ * or subject-less session is answered (the package README's "Session
+ * admission").
  */
 export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHandler => {
 	// #356: the login round-trip target is built from the deployment's

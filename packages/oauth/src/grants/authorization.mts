@@ -791,8 +791,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			// session store is unavailable or the session was deleted between /authorize
 			// and /token, we return a controlled error rather than issuing tokens that
 			// are invisible to logout orchestration.
-			// sid is guaranteed non-null here when deps.userSessionStore is set because
-			// the earlier guard (deps.userSessionStore && !sid) already rejected that case.
+			// sid is guaranteed non-null here when deps.userSessionStore is set: the
+			// first read refused a code without one (admission's `not_live` / `no_sid`).
 			// `userSession` was resolved before token generation (Fix I1: a session
 			// deleted between /authorize and /token must not produce tokens, which
 			// would be orphaned from logout orchestration); the re-check below keeps
