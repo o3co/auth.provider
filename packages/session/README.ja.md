@@ -121,7 +121,7 @@ const handle = await createApp({
 
 ### セッションの確立
 
-ログインの末尾 — ユーザーを検証してからセッションを保存するまで — は一つの関数 `establishSession`（[`src/establish-session.mts`](src/establish-session.mts)）で、`POST /session/login` とフェデレーションのコールバックの両方がこれを呼ぶ。パッケージはこれを export しているので、別の場所でログインを完了させるものも、ルートとまったく同じようにセッションを確立できる（session-admission ADR の D5）。ログインが検証したもの — `User`、クレームのエンベロープ、`authTime`、そして core がその経路のために組み立てた `amr` / `authentication` — を受け取り、次を順に行う: `UserSession` レコードの作成（新しい `sid`、有効期限は `authTime` から `session.maxAge` 後）。配線されていれば `subjectSessionIndex` のエントリー（ベストエフォート: 失敗は報告され、ログインは進む）。再生成の前に呼び出し側が渡すステップ。express session の再生成（session fixation 対策）。再生成の後に呼び出し側が渡すステップ。再生成されたセッションへの `isAuthenticated`、`user`、`sid`、ログインの `redirectTo`。そしてその保存。答えは `sid` を伴う `established` か、ストアとステップを名指しする `unavailable` で、後者をルートは `503 temporarily_unavailable` として答える。
+ログインの末尾 — ユーザーを検証してからセッションを保存するまで — は一つの関数 `establishSession`（[`src/establish-session.mts`](src/establish-session.mts)）で、`POST /session/login` とフェデレーションのコールバックの両方がこれを呼ぶ。パッケージ内部のもので、export はされていない。ログインが検証したもの — `User`、クレームのエンベロープ、`authTime`、そして core がその経路のために組み立てた `amr` / `authentication` — を受け取り、次を順に行う: `UserSession` レコードの作成（新しい `sid`、有効期限は `authTime` から `session.maxAge` 後）。配線されていれば `subjectSessionIndex` のエントリー（ベストエフォート: 失敗は報告され、ログインは進む）。再生成の前に呼び出し側が渡すステップ。express session の再生成（session fixation 対策）。再生成の後に呼び出し側が渡すステップ。再生成されたセッションへの `isAuthenticated`、`user`、`sid`、ログインの `redirectTo`。そしてその保存。答えは `sid` を伴う `established` か、ストアとステップを名指しする `unavailable` で、後者をルートは `503 temporarily_unavailable` として答える。
 
 成り立つこと:
 

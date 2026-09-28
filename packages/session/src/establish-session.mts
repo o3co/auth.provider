@@ -19,11 +19,11 @@
  * route has verified into a `UserSession` record and an authenticated express
  * session, and undoes what it wrote when a store fails along the way. Both
  * login paths call it — `POST /session/login` (`routes/Session.mts`) and the
- * federation callback (`routes/Federation.mts`) — as the session-admission
- * ADR's D5 plans. What only one of them writes beside the record (a
- * federation's index entry, its upstream tokens) is a step the caller
- * supplies; what each of them logs is a reporter the caller supplies, so the
- * two routes' log vocabularies stay their own.
+ * federation callback (`routes/Federation.mts`) — and nothing else does: it
+ * is the package's own, not exported. What only one of them writes beside
+ * the record (a federation's index entry, its upstream tokens) is a step the
+ * caller supplies; what each of them logs is a reporter the caller supplies,
+ * so the two routes' log vocabularies stay their own.
  *
  * The sequence, and the rollback at each point it can fail:
  *
@@ -83,6 +83,11 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
+// The augmentation below extends express-session's `SessionData`. Naming the
+// module in an import keeps it resolvable from the emitted declaration file,
+// so a consumer compiling under `skipLibCheck: false` reads the augmentation
+// as one and not as a stray ambient module.
+import type {} from "express-session";
 import { abandonCookieSession } from "./internal/cookieSession.mjs";
 
 declare module "express-session" {
@@ -219,6 +224,17 @@ const sessionOperation = (
 		}
 	});
 
+/**
+ * Establish the session a login verified: the `UserSession` record, its
+ * subject-index entry, the caller's steps, the express session's
+ * regeneration, its authenticated state and its save — the sequence, and the
+ * rollback at each point it can fail, are in this file's header. Answers
+ * `established` with the record's `sid` (`undefined` without a store), or
+ * `unavailable` naming the store and the step that could not answer, after
+ * everything written was rolled back and — from the regeneration on — the
+ * request's cookie session dropped. The caller answers the response either
+ * way; the reporter it supplied has already been told what to log.
+ */
 export async function establishSession<S extends string = never, T extends string = never>(
 	input: EstablishSessionInput,
 	deps: EstablishSessionDeps<S, T>,

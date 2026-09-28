@@ -310,9 +310,8 @@ The manifest ([`src/module.mts`](src/module.mts)):
 The tail of a login — from the user verified to the session saved — is one
 function, `establishSession`
 ([`src/establish-session.mts`](src/establish-session.mts)), which
-`POST /session/login` and the federation callback both call, and which the
-package exports so that whatever completes a login elsewhere establishes a
-session exactly as the routes do (the session-admission ADR's D5). It takes
+`POST /session/login` and the federation callback both call; it is the
+package's own and not exported. It takes
 what the login verified — the `User`, the claims envelope, `authTime`, and the
 `amr` / `authentication` core composed for the path — and runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session.maxAge` after

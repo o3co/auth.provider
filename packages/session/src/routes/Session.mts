@@ -280,9 +280,10 @@ export const createRouter = (
 	 *
 	 *   - `userSessionStore.delete` — PRIMARY. The record every liveness check
 	 *     resolves; deleting it is what closes the reported gap.
-	 *   - `subjectSessionIndex.removeSid` — symmetry with the login-rollback
-	 *     path above, which already pairs these two. A surviving entry has
-	 *     `revokeAllForSubject` (#296) enumerate a sid that no longer exists.
+	 *   - `subjectSessionIndex.removeSid` — symmetry with the login's rollback
+	 *     (`../establish-session.mts`), which already pairs these two. A
+	 *     surviving entry has `revokeAllForSubject` (#296) enumerate a sid that
+	 *     no longer exists.
 	 *   - `federationTokenStore` / `sessionFederationIndex` `removeBySid` —
 	 *     hygiene rather than containment: once the `UserSession` record is
 	 *     gone the federation-token endpoint cannot resolve the session, so

@@ -42,19 +42,6 @@ export {
 	DEFAULT_CSRF_TTL_SECONDS,
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
-// The tail of a login — the `UserSession` record, the express session's
-// regeneration and its authenticated state — as one function both login
-// paths call (the session-admission ADR's D5). Exported so that whatever
-// completes a login elsewhere establishes a session exactly as the routes do.
-export type {
-	EstablishedRecord,
-	EstablishSessionDeps,
-	EstablishSessionInput,
-	EstablishSessionReporter,
-	EstablishSessionResult,
-	EstablishSessionStep,
-} from "./establish-session.mjs";
-export { establishSession } from "./establish-session.mjs";
 // #279 — federated claims never outrank local ones; see claim-precedence.mts.
 export type { FederatedClaimsNamespace } from "./federations/claim-precedence.mjs";
 export {
