@@ -97,9 +97,14 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 	switch (admission.outcome) {
 		case "admitted":
 			return undefined;
-		case "unauthenticated":
 		case "not_live":
+		// `revoked` and `unauthenticated` never reach here — admission skips
+		// the boundary for a token carrier (verifyJwt applied it), and a
+		// token's claim is authenticated by construction (`tokenClaim`) — and
+		// are listed so the switch stays exhaustive: an outcome left out would
+		// fall off it as `undefined`, which refreshes.
 		case "revoked":
+		case "unauthenticated":
 			return { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
 		case "unmet":
 		case "reauthenticate":

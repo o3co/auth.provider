@@ -1183,10 +1183,13 @@ const decideOnAdmission = async (
 		case "unavailable":
 			redirectError(ctx, "temporarily_unavailable", unavailableDescription(admission.store));
 			return null;
-		case "unauthenticated":
 		case "not_live":
 		case "revoked":
 		case "reauthenticate":
+		// Never reached: a cookie whose flag is not exactly `true` was sent to
+		// log in, or answered `login_required`, before admission. Listed so the
+		// switch stays exhaustive over core's `Admission`.
+		case "unauthenticated":
 			await newLogin(ctx, prompt);
 			return null;
 		case "admitted":

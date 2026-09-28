@@ -160,8 +160,11 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 								"code record is missing session identifier (sid); ensure login wiring records sid at authorize time",
 						}
 					: { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
-			case "unauthenticated":
 			case "revoked":
+			// Never reached: a code's claim is authenticated by construction
+			// (`codeClaimFirstRead`). Listed so `default` is left only the
+			// outcomes `requirementOrOutageRefusal` answers.
+			case "unauthenticated":
 				return { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
 			default:
 				return requirementOrOutageRefusal(admission);

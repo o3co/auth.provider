@@ -264,9 +264,12 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				}
 				return sub;
 			}
-			case "unauthenticated":
 			case "not_live":
 			case "revoked":
+			// Never reached: `pendingFor` refused a cookie whose flag is not
+			// exactly `true` before anything was read. Listed so the switch
+			// stays exhaustive over core's `Admission`.
+			case "unauthenticated":
 				jsonError(res, 401, "login_required", "the session is no longer active");
 				return null;
 			case "reauthenticate":
