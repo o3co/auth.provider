@@ -314,3 +314,31 @@ describe("the refresh grant on admission — a requirement's verdicts (D9)", () 
 		});
 	});
 });
+
+describe("the refresh grant on admission — no requirement registered: D2's reading of the record", () => {
+	// The one change with no requirement registered: admission reads the
+	// record the token's `sid` names as D2's steps 2 and 3 read every record,
+	// where the grant only asked whether one existed. The bundled stores do
+	// not answer an expired record, so they see no difference.
+	const refusedBeforeTheRotation = async (session: UserSession) => {
+		const { handler, rotation } = makeGrant({ userSessionStore: storeWith(session) });
+		expect(await refused(handler, await refreshToken())).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "session_invalid",
+		});
+		expect(rotation.rotate).not.toHaveBeenCalled();
+	};
+
+	it("refuses a record past its expiresAt", async () => {
+		await refusedBeforeTheRotation(record({ expiresAt: minutesAgo(1) }));
+	});
+
+	it("refuses a record whose authTime is not a valid date", async () => {
+		await refusedBeforeTheRotation(record({ authTime: new Date(Number.NaN) }));
+	});
+
+	it("refuses a record whose sub is not the token's", async () => {
+		await refusedBeforeTheRotation(record({ sub: "someone-else" }));
+	});
+});

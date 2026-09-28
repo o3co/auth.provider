@@ -205,7 +205,7 @@ const makeApp = async (opts: {
 	// The cookie session as express-session hands it to a route: one object
 	// per app, `regenerate` replacing it with a fresh, unauthenticated one —
 	// what the middleware does when a route asks for a new id.
-	const state: { session: Session; regenerated: number } = {
+	const state: { session: Session; regenerated: number; afterResponse?: unknown } = {
 		session: { ...(opts.session ?? { isAuthenticated: true, user: { id: SUBJECT }, sid: SID }) },
 		regenerated: 0,
 	};
@@ -239,10 +239,15 @@ const makeApp = async (opts: {
 			cb?.();
 		},
 	};
-	app.use((req, _res, next) => {
+	app.use((req, res, next) => {
 		const holder = req as unknown as { session?: unknown; sessionStore?: unknown };
 		holder.session = cookieSession(holder);
 		if (opts.sessionStore !== false) holder.sessionStore = sessionStore;
+		// What express-session would save when the response ends: the
+		// request's session as the route left it.
+		res.on("finish", () => {
+			state.afterResponse = holder.session;
+		});
 		next();
 	});
 	app.use("/oauth", router);
@@ -257,6 +262,8 @@ const makeApp = async (opts: {
 		get regenerated() {
 			return state.regenerated;
 		},
+		/** The request's session when the response finished: `undefined` once a route abandoned it. */
+		sessionAfterResponse: () => state.afterResponse,
 		/** Replace the session object wholesale, as `/session/login` does when it regenerates. */
 		login(next: Session) {
 			state.session = next;
@@ -931,5 +938,55 @@ describe("/authorize on admission — the trip's own guards", () => {
 		const res = await authorize(harness.app, baseQuery);
 		expect(res.status).toBe(302);
 		expect(new URL(res.headers.location as string).searchParams.has("acr_values")).toBe(false);
+	});
+});
+
+describe("/authorize on admission — what the new order changes, pinned", () => {
+	it("reads the flag as exactly true: a truthy isAuthenticated is sent to log in, with no store read", async () => {
+		const store = storeWith(record());
+		const harness = await makeApp({
+			userSessionStore: store,
+			session: { isAuthenticated: "true", user: { id: SUBJECT }, sid: SID },
+		});
+		loginRedirectTo(await authorize(harness.app, baseQuery));
+		expect(store.get).not.toHaveBeenCalled();
+		expect(harness.createCode).not.toHaveBeenCalled();
+	});
+
+	it("answers a malformed parameter on a prompt=none request with invalid_request, before the dead session is read", async () => {
+		// The session is read once the parameters are parsed: a `prompt=none`
+		// request with a malformed `max_age` is the request's fault first.
+		const store = storeWith(null);
+		const harness = await makeApp({ userSessionStore: store });
+		const params = redirectParams(
+			await authorize(harness.app, { ...baseQuery, prompt: "none", max_age: "soon" }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(store.get).not.toHaveBeenCalled();
+	});
+
+	it("refuses a malformed acr_values before a prompt=login trip", async () => {
+		const harness = await makeApp({ userSessionStore: storeWith(record()) });
+		const params = redirectParams(
+			await authorize(harness.app, { ...baseQuery, prompt: "login", acr_values: "a\tb" }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(harness.records.size).toBe(0);
+	});
+
+	it("records no ask for a reauthenticate verdict: the login it sends to is a new session's", async () => {
+		const harness = await makeApp({
+			userSessionStore: storeWith(record()),
+			requirements: [fixture("fixture", () => ({ outcome: "reauthenticate" }))],
+		});
+		loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "3600" }));
+		expect(harness.records.size).toBe(0);
+	});
+
+	it("abandons the cookie session after a regeneration fails, so express-session writes nothing on the way out", async () => {
+		const harness = await makeApp({ userSessionStore: storeWith(null), regenerateFails: true });
+		const res = await authorize(harness.app, baseQuery);
+		expect(redirectParams(res).get("error")).toBe("temporarily_unavailable");
+		expect(harness.sessionAfterResponse()).toBeUndefined();
 	});
 });

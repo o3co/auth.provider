@@ -363,3 +363,26 @@ describe("/oauth/consent on admission — a requirement's verdicts", () => {
 		expect((await show(app)).status).toBe(503);
 	});
 });
+
+describe("/oauth/consent on admission — the subject is compared after the session is read", () => {
+	// The cookie's subject used to be compared with the parked request's
+	// before the session was read, so a dead session naming another user was
+	// `400` and an outage behind one was `400` too. Admission reads first.
+	it("a dead session naming another user is 401 login_required, not 400", async () => {
+		const { app } = await makeApp({
+			userSessionStore: storeWith(null),
+			session: { isAuthenticated: true, user: { id: "someone-else" }, sid: SID },
+		});
+		expectLoginRequired(await show(app));
+	});
+
+	it("an outage behind a session naming another user is 503, not 400", async () => {
+		const { app } = await makeApp({
+			userSessionStore: storeAnswering(async () => {
+				throw new Error("redis down");
+			}),
+			session: { isAuthenticated: true, user: { id: "someone-else" }, sid: SID },
+		});
+		expect((await show(app)).status).toBe(503);
+	});
+});
