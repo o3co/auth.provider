@@ -52,12 +52,13 @@ import {
 	defaultChallengeCeremonyModule,
 	defineModule,
 	type GrantPolicyHook,
-	type Interruption,
+	type InterruptionAnswer,
 	type Module,
 	memoryChallengeStoreModule,
 	memoryDeviceCodeStoreModule,
 	memoryWebAuthnCredentialStoreModule,
 	type PrimaryAuthentication,
+	type RequirementInterruption,
 	type SessionRequirement,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
@@ -277,20 +278,22 @@ export const FIXTURE_INTERRUPTION = {
 /**
  * Two session requirements a deployment might write, registered under the
  * `sessionRequirements` kind so the full set exercises the kind through the
- * template's boot (the session-admission ADR's D3, D7): one that reaches a
- * value and has a page — the shape of a step-up — and one that reaches
- * nothing. Each admits every use and interrupts the login of the subjects in
+ * template's boot (the session-admission ADR's D3, D7): one with a page — the
+ * shape of a step-up, over an empty reach, since only the MFA requirement
+ * adds vouched values in this release — and one bare. Each admits every use and interrupts the login of the subjects in
  * `interrupt` alone, so the full set's own logins run uninterrupted; the
  * step-up and interruption flows are the consumers' and the MFA module's
  * suites, which name a subject here to start one.
  */
 function requirementModules(interrupt: ReadonlySet<string>): Module[] {
 	const interruption =
-		(answer: Interruption extends { open(sessionId: string): infer R } ? Awaited<R> : never) =>
-		async (primary: PrimaryAuthentication): Promise<"establish" | Interruption> =>
+		(answer: InterruptionAnswer) =>
+		async (primary: PrimaryAuthentication): Promise<"establish" | RequirementInterruption> =>
 			interrupt.has(primary.subject) ? { open: async () => answer } : "establish";
-	const pageReach: ReadonlySet<string> = new Set(["fixture-ok"]);
-	const bareReach: ReadonlySet<string> = new Set();
+	// Neither reaches anything: in this release only the MFA requirement adds
+	// vouched values to a session, and a page may still stand with an empty
+	// reach (a step-up that adds no value).
+	const noReach: ReadonlySet<string> = new Set();
 	return [
 		defineModule({
 			name: "deployment:requirement-page",
@@ -299,7 +302,7 @@ function requirementModules(interrupt: ReadonlySet<string>): Module[] {
 					"fixture-page": (): SessionRequirement => ({
 						name: "fixture-page",
 						get reach() {
-							return pageReach;
+							return noReach;
 						},
 						stepUpPage: { url: "/fixture/step-up", params: { requirement: "fixture-page" } },
 						remediations: ["fixture-page.step_up"],
@@ -317,7 +320,7 @@ function requirementModules(interrupt: ReadonlySet<string>): Module[] {
 					"fixture-bare": (): SessionRequirement => ({
 						name: "fixture-bare",
 						get reach() {
-							return bareReach;
+							return noReach;
 						},
 						stepUpPage: undefined,
 						remediations: [],

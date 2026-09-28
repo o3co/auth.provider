@@ -1181,20 +1181,29 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 		const record = session();
 		const cases: [string, AdmissionDeps, SessionClaim][] = [
 			["a cookie with a record", deps({ userSessionStore: holding(record) }), cookie()],
-			["a cookie without a store", deps(), cookie()],
+			["a cookie without a store", deps({ userSessionStore: undefined }), cookie()],
 			[
 				"a code's first read with a record",
 				deps({ userSessionStore: holding(record) }),
 				codeClaimFirstRead({ sid: "sid-1" }),
 			],
-			["a code's first read without a store", deps(), codeClaimFirstRead({ sid: "sid-1" })],
+			[
+				"a code's first read without a store",
+				deps({ userSessionStore: undefined }),
+				codeClaimFirstRead({ sid: "sid-1" }),
+			],
 			[
 				"a code's revalidation without a store",
-				deps(),
+				deps({ userSessionStore: undefined }),
 				codeClaimRevalidation({ sid: "sid-1" }, "user-1"),
 			],
-			["a token without a sid", deps(), tokenClaim({ sub: "user-1", amr: ["pwd"] })],
+			[
+				"a token without a sid, the store not read",
+				deps(),
+				tokenClaim({ sub: "user-1", amr: ["pwd"] }),
+			],
 		];
+		const subjects: (string | undefined)[] = [];
 		for (const [label, with_, claim] of cases) {
 			seen.length = 0;
 			await admitSession(
@@ -1202,19 +1211,9 @@ describe("step 5 — what a requirement answers is validated at the boundary", (
 				request({ claim }),
 			);
 			expect(seen, label).toHaveLength(1);
+			subjects.push(seen[0]);
 		}
-		expect(
-			await Promise.all(
-				cases.map(async ([, with_, claim]) => {
-					seen.length = 0;
-					await admitSession(
-						{ ...with_, requirements: resolverForTests([watching]) },
-						request({ claim }),
-					);
-					return seen[0];
-				}),
-			),
-		).toEqual(["user-1", "user-1", "user-1", undefined, "user-1", "user-1"]);
+		expect(subjects).toEqual(["user-1", "user-1", "user-1", undefined, "user-1", "user-1"]);
 	});
 });
 

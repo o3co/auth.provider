@@ -187,9 +187,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+cookieClaim\b/,
 	},
 	{
-		concept: "session admission — a code record's claim (the session-admission ADR's D2)",
+		concept:
+			"session admission — a code record's claim on its first read (the session-admission ADR's D2)",
 		home: "packages/core/src/session-admission/admit.mts",
-		definition: /(?:function|const)\s+codeClaim\b/,
+		definition: /(?:function|const)\s+codeClaimFirstRead\b/,
+	},
+	{
+		concept:
+			"session admission — a code record's claim on its revalidation, the first read's subject required (the session-admission ADR's D2)",
+		home: "packages/core/src/session-admission/admit.mts",
+		definition: /(?:function|const)\s+codeClaimRevalidation\b/,
 	},
 	{
 		concept: "session admission — a link transaction's claim (the session-admission ADR's D2)",

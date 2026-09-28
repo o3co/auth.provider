@@ -133,6 +133,7 @@ export function sessionRequirementContract(
 			},
 			authentication: requirementSession(session),
 			carrier: "cookie",
+			subject: session.sub,
 			action: { name: "contract.action", grade },
 			asks: undefined,
 			now: NOW(),
@@ -158,11 +159,25 @@ export function sessionRequirementContract(
 			},
 		},
 		{
-			name: "reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set exactly when reach is not empty, and is valid",
+			name: "reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
 			run: async () => {
 				const registered = registeredRequirement(build(), issuer);
 				sealRegisteredReach(registered);
 				if (registered.stepUpPage !== undefined) checkStepUpPage(registered.stepUpPage, issuer);
+			},
+		},
+		{
+			name: "reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
+			run: async () => {
+				const registered = registeredRequirement(build(), issuer);
+				const reach = sealRegisteredReach(registered);
+				if (registered.name !== MFA_REQUIREMENT_NAME) {
+					assert.equal(
+						reach.size,
+						0,
+						`"${registered.name}" reaches ${[...reach].join(", ")}: only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session in this release`,
+					);
+				}
 			},
 		},
 		{

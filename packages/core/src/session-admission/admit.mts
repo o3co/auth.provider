@@ -21,7 +21,7 @@
  * `admitSession` reads the session — the claim, the live record, the
  * subject, the subject-revocation boundary — asks the registered
  * requirements by the action's grade, selects the `acr`, and merges the two
- * verdicts by D2's table. The claim builders (`cookieClaim`, `codeClaim`,
+ * verdicts by D2's table. The claim builders (`cookieClaim`, `codeClaimFirstRead`, `codeClaimRevalidation`,
  * `linkClaim`, `tokenClaim`) are the one reading of each carrier;
  * `ADMISSION_ACTIONS` names the bundled actions with their grades.
  * `admitPrimary` asks the requirements that interrupt a login and answers
@@ -78,7 +78,6 @@ import {
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type Establishment,
-	type Interruption,
 	type InterruptionAnswer,
 	isHintKey,
 	isHintToken,
@@ -88,6 +87,7 @@ import {
 	type PrimaryContinuation,
 	type RegisteredRequirement,
 	type RequirementInput,
+	type RequirementInterruption,
 	type RequirementVerdict,
 	type SessionClaim,
 	type SessionRequirement,
@@ -195,20 +195,40 @@ export interface CodeCarrier {
 }
 
 /**
- * A code record's claim: authenticated — a code is minted by a session — with
- * the code's `sid`, and no subject on the first read (`CodeData` carries no
- * `sub`); the `authorization_code` grant's second read hands the first
- * read's in `subject`, so the two reads are compared as today.
+ * A code record's claim on its first read: authenticated — a code is minted
+ * by a session — with the code's `sid`, and no subject (`CodeData` carries
+ * no `sub`): the one claim that reaches a record without one (D2, step 3).
  */
-export function codeClaim(code: CodeCarrier, opts?: { readonly subject: string }): SessionClaim {
-	if (!isObject(code)) throw new RangeError("codeClaim: the code record must be an object");
-	if (opts !== undefined && nonEmptyString(opts.subject) === undefined) {
-		throw new RangeError("codeClaim: subject must be a non-empty string when given");
+export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
+	if (!isObject(code)) {
+		throw new RangeError("codeClaimFirstRead: the code record must be an object");
 	}
 	return claim({
 		authenticated: true,
 		sid: nonEmptyString(code.sid),
-		subject: opts?.subject,
+		subject: undefined,
+		carrier: "code",
+	} as SessionClaim);
+}
+
+/**
+ * A code record's claim on the `authorization_code` grant's second read:
+ * the first read's `subject`, required, so the two reads are compared as
+ * today and the comparison cannot be left out by omitting an option.
+ */
+export function codeClaimRevalidation(code: CodeCarrier, subject: string): SessionClaim {
+	if (!isObject(code)) {
+		throw new RangeError("codeClaimRevalidation: the code record must be an object");
+	}
+	if (nonEmptyString(subject) === undefined) {
+		throw new RangeError(
+			"codeClaimRevalidation: the first read's subject must be a non-empty string",
+		);
+	}
+	return claim({
+		authenticated: true,
+		sid: nonEmptyString(code.sid),
+		subject,
 		carrier: "code",
 	} as SessionClaim);
 }
@@ -301,7 +321,7 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): void {
 	if (!isObject(request)) throw new RangeError("admitSession: the request must be an object");
 	if (!isObject(request.claim) || !knownClaims.has(request.claim)) {
 		throw new RangeError(
-			"admitSession: the claim must be one cookieClaim, codeClaim or linkClaim built",
+			"admitSession: the claim must be one a claim builder made — cookieClaim, codeClaimFirstRead, codeClaimRevalidation, linkClaim or tokenClaim",
 		);
 	}
 	const { action: asked } = request;
@@ -487,6 +507,8 @@ export async function admitSession(
 			session: session === null ? null : viewOf(session),
 			authentication,
 			carrier: presented.carrier,
+			// The record's sub when read — step 3 made it the claim's — else the claim's.
+			subject: session === null ? presented.subject : session.sub,
 			action: effective,
 			asks,
 			now,
@@ -739,7 +761,7 @@ const establish = (primary: PrimaryAuthentication): Establishment => {
 	return built as unknown as Establishment;
 };
 
-const isInterruption = (value: unknown): value is Interruption =>
+const isInterruption = (value: unknown): value is RequirementInterruption =>
 	isObject(value) && typeof value.open === "function";
 
 /** The keys an interruption's body may carry (D5): closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
@@ -864,8 +886,9 @@ async function askEvery(
 					if (nonEmptyString(sessionId) === undefined) {
 						throw new RangeError("open: the session id must be a non-empty string");
 					}
+					// The requirement persists what core built (D5).
 					return checkInterruptionAnswer(
-						await interruption.open(sessionId),
+						await interruption.open(sessionId, continuation),
 						name,
 						requirement.hintKeys,
 					);

@@ -478,8 +478,9 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  *
  * - each `reach`, read once (`sealRegisteredReach`): a Set of non-empty
  *   strings, no primary's marker, a second-factor value under the name `mfa`
- *   alone, a page exactly when the reach is not empty — `contribute-factory-failed`,
- *   naming the module and the requirement — and sealed on the registered
+ *   alone, a page when the reach is not empty, and empty under any name but
+ *   `mfa` in this release — `contribute-factory-failed`, naming the module
+ *   and the requirement — and sealed on the registered
  *   copy as a frozen snapshot, which is what the resolver answers from then
  *   on: the `acr` drop and admission read what was checked here;
  * - the name `mfa`, reserved and bound to core's MFA ports: accepted only
@@ -542,7 +543,19 @@ async function checkSessionRequirements(
 		} catch (cause) {
 			return failed(registration, cause);
 		}
-		if (registration.name !== MFA_REQUIREMENT_NAME) continue;
+		if (registration.name !== MFA_REQUIREMENT_NAME) {
+			// In this release only the MFA requirement adds vouched values to a
+			// session: nothing else can record what another requirement reached.
+			if (reach.size > 0) {
+				return failed(
+					registration,
+					new RangeError(
+						`a requirement named "${registration.name}" reaches ${[...reach].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty`,
+					),
+				);
+			}
+			continue;
+		}
 		const blueprint = material.plan.depsBlueprint.get(registration.module);
 		const requires = (blueprint?.requires ?? []) as readonly string[];
 		const missing = MFA_PORTS.filter((port) => !requires.includes(port));

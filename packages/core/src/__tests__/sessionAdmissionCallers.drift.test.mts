@@ -464,7 +464,7 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		expect(home.length).toBeGreaterThan(0);
 		const inHome = counted(home.flatMap(([, s]) => s));
 		// The four builders, and the contract suite's own live input.
-		expect(inHome.claim).toBe(5);
+		expect(inHome.claim).toBe(6);
 		expect(inHome.selectAcr).toBe(1);
 		expect(inHome.get).toBe(1);
 		expect(inHome.revokedBefore).toBe(1);
