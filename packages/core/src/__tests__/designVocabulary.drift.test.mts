@@ -143,6 +143,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+wellFormedAcr\b/,
 	},
 	{
+		concept: "the amr a federated login records — fed (#481, the MFA ADR's D13)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+FEDERATED_AMR\b/,
+	},
+	{
+		concept: "what a verified second factor adds to a session's amr (the MFA ADR's D14)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+composeAmr\b/,
+	},
+	{
 		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,
