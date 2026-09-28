@@ -190,6 +190,13 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
+	// --- multi-factor authentication ----------------------------------
+	// The MFA ADR's D19: the one mode this release can honour, and the two
+	// store switches a composition installs MFA's stores from.
+	MFA_MODE: "off",
+	MFA_FACTOR_STORE_ADAPTER: "redis",
+	MFA_TRANSACTION_STORE_ADAPTER: "redis",
+
 	// --- federation ---------------------------------------------------
 	FEDERATIONS_GOOGLE_ENABLED: "true",
 	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
@@ -227,6 +234,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	// --- endpoints ----------------------------------------------------
 	ENDPOINTS_LOGIN_URL: "/login",
 	ENDPOINTS_CONSENT_URL: "/consent",
+	ENDPOINTS_MFA_URL: "/account/mfa",
 
 	// --- cors ---------------------------------------------------------
 	// #500: a list, in the only shape an environment variable can carry one.
@@ -382,6 +390,11 @@ describe("#288: the shipped config boots with every documented override supplied
 			maxConcurrentFetches: 4,
 			cacheMaxAgeMs: 60000,
 		});
+		// The MFA ADR's D19.
+		expect(config.mfa?.mode).toBe("off");
+		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
+		expect(config.mfaFactorStore?.adapter).toBe("redis");
+		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 		// #500: a comma-separated string becomes a list of origins, trimmed.
 		expect(config.cors?.allowedOrigins).toEqual([
 			"https://app.example.com",
@@ -580,6 +593,14 @@ describe("#288: the shipped config boots with every documented override supplied
 				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, [name]: "" })).toThrow();
 			});
 		}
+
+		it("refuses an MFA_MODE this release cannot honour, naming mfa.mode", () => {
+			for (const mode of ["required", "optional"]) {
+				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, MFA_MODE: mode }), mode).toThrow(
+					/mfa\.mode/,
+				);
+			}
+		});
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS (#272)", () => {
 			// Pinned alongside the boolean cases because it is the same trap

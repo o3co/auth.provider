@@ -19,7 +19,7 @@ import type { AuditSink } from "../../audit/types.mjs";
 import type { OidcDiscoveryContribution } from "../../discovery/types.mjs";
 import type { FederationProvider as ConcreteFederationProvider } from "../../federations/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
-import type { MfaProvider } from "../../mfa/types.mjs";
+import type { MfaFactor as ConcreteMfaFactor } from "../../mfa/factor.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
@@ -44,7 +44,7 @@ export type { Contributed };
 //
 //   GrantHandler                — packages/core/src/grants/types.mts:120 (concrete, AS-M1)
 //   AuditHook                   — AuditSink interface at packages/core/src/audit/types.mts (AS-M1)
-//   MfaFactor                   — MfaProvider interface at packages/core/src/mfa/types.mts (AS-M1)
+//   MfaFactor                   — the second-factor contract at packages/core/src/mfa/factor.mts (MFA ADR D3, D7)
 //   GrantPolicyHookContribution — GrantPolicyHook interface at packages/core/src/policy/types.mts (AS-M1, AS-7 collision rename)
 //   FederationProvider          — packages/core/src/federations/types.mts (#626 P1)
 //   ExchangeTokenValidator      — packages/core/src/token-exchange/validator.mts (#626 P1)
@@ -77,16 +77,12 @@ export type FederationProvider = ConcreteFederationProvider;
 export type ExchangeTokenValidator = ConcreteExchangeTokenValidator;
 
 /**
- * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
- * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
- * `MfaProvider` interface from `packages/core/src/mfa/types.mts`.
- *
- * Unwired. The name is kept, but its contract changes with the
- * multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3, D7):
- * `MfaProvider`, which it aliases today, is deprecated. Do not build an
- * `mfaFactors` contribution on it.
+ * Type produced by an `MfaFactorFactory<Deps>` contribution: the contract a
+ * second factor implements, in `packages/core/src/mfa/factor.mts` (the MFA
+ * ADR's D7). The name survived the #69 surface's removal (D3) with this
+ * meaning.
  */
-export type MfaFactor = MfaProvider;
+export type MfaFactor = ConcreteMfaFactor;
 
 /**
  * Type produced by an `AuditHookFactory<Deps>` contribution. Substituted
@@ -114,7 +110,13 @@ export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProv
 export type ExchangeTokenValidatorFactory<Deps> = (
 	deps: Deps,
 ) => Contributed<ExchangeTokenValidator>;
-export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor>;
+/**
+ * An `mfaFactors` entry. It answers `null` when the factor is switched off by
+ * its configuration, as a `TokenBindingMechanismFactory` does; the kind is
+ * then absent from `mfaFactorResolver`, and still claimed — a second
+ * contribution of it is a duplicate.
+ */
+export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor | null>;
 export type AuditHookFactory<Deps> = (deps: Deps) => Contributed<AuditHook>;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPolicyHookContribution>;
 

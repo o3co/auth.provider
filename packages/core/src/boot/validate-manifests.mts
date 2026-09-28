@@ -921,36 +921,6 @@ function checkGrantPolicyIssuerInvariant(
 }
 
 // ---------------------------------------------------------------------------
-// Step 13.6 — MFA partial-wiring guard
-// Per issue #101, A2-β §6.1 amendment 2026-05.
-// ---------------------------------------------------------------------------
-
-/**
- * If `mfaCoordinator` is provided by any module, both `mfaProviderFactory`
- * and `mfaTransactionStore` MUST also be provided. Otherwise the first MFA
- * flow crashes at runtime with a confusing `Cannot read properties of
- * undefined`.
- *
- * Per issue #101, A2-β amendment 2026-05.
- *
- * @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG.
- */
-export function checkMfaPartialWiring(plannedKeys: ReadonlySet<string>): void {
-	if (!plannedKeys.has("mfaCoordinator")) return;
-	const missing: ("mfaProviderFactory" | "mfaTransactionStore")[] = [];
-	if (!plannedKeys.has("mfaProviderFactory")) missing.push("mfaProviderFactory");
-	if (!plannedKeys.has("mfaTransactionStore")) missing.push("mfaTransactionStore");
-	if (missing.length > 0) {
-		throw new BootError({
-			stage: "validateManifests",
-			reason: "mfa-partial-wiring",
-			message: `mfaCoordinator is provided but ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} missing`,
-			details: { reason: "mfa-partial-wiring", missing },
-		});
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Step 13.7 — Federation stores wiring guard
 // Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
 // ---------------------------------------------------------------------------
@@ -1694,11 +1664,6 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 				ctx.bootstrapComponents,
 				ctx.overrideComponents,
 			),
-	},
-	{
-		id: "mfa-partial-wiring",
-		spec: "issue #101, A2-β §6.1 amendment 2026-05 (step 13.6)",
-		run: (ctx) => checkMfaPartialWiring(ctx.plannedKeys),
 	},
 	{
 		id: "federation-stores-wiring",

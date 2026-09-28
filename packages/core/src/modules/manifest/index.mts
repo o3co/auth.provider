@@ -61,6 +61,7 @@ export type {
 
 export type {
 	GrantHandlerResolver,
+	MfaFactorResolver,
 	TokenExchangeValidatorResolver,
 } from "./synthetic-keys.mjs";
 export { SYNTHETIC_COMPONENT_KEYS } from "./synthetic-keys.mjs";

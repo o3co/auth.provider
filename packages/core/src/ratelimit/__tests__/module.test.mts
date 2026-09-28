@@ -100,6 +100,31 @@ describe("memoryRateLimiterModule", () => {
 		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
 	});
 
+	it("seeds mfa and mfa-email from the MFA section's budgets", async () => {
+		// The MFA routes' flood guard and the per-subject email sends; their
+		// budgets live in the MFA section, and unseeded they ran on 60 per 60 s.
+		const cfg = {
+			memoryRateLimiter: {
+				limits: {},
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 10_000,
+			},
+			mfa: {
+				rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+				factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
+			},
+		};
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		const routes = "mfa:ip:1.2.3.4";
+		expect((await limiter.check(routes, { ip: "1.2.3.4" })).limit).toBe(2);
+		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(true);
+		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(false);
+		const sends = "mfa-email:user:u1";
+		expect((await limiter.check(sends, { userId: "u1" })).limit).toBe(1);
+		expect((await limiter.check(sends, { userId: "u1" })).allowed).toBe(false);
+	});
+
 	it("refuses a seeded budget that is present but unusable, naming the config key and not the limiter", () => {
 		// A configuration someone wrote, never passed through a schema: it
 		// used to be skipped, and the prefix ran on the 60 per 60 s default.
@@ -127,6 +152,14 @@ describe("memoryRateLimiterModule", () => {
 					},
 				},
 				/webauthn\.rateLimit\.authenticationOptions must be/,
+			],
+			[
+				{ mfa: { rateLimit: { routes: { limit: 0, windowSeconds: 300 } } } },
+				/mfa\.rateLimit\.routes must be/,
+			],
+			[
+				{ mfa: { factors: { email: { sendLimit: { limit: 5, windowSeconds: 0 } } } } },
+				/mfa\.factors\.email\.sendLimit must be/,
 			],
 		];
 		for (const [extra, key] of cases) {

@@ -130,7 +130,12 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		const plan = planBoot(validated, bootstrapWithLifecycle, overrideComponents);
 
 		// Stage 3: materializeComponents. Per A2-β §5.3.
-		const material = await materializeComponents(plan, bootstrapWithLifecycle, overrideComponents);
+		const material = await materializeComponents(
+			plan,
+			bootstrapWithLifecycle,
+			overrideComponents,
+			merged,
+		);
 
 		// Stage 4: applyContributions. Per A2-β §5.4.
 		const registry = await applyContributions(material, merged);
@@ -203,7 +208,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		tokenExchangeValidators: makeMapNameKeyedCollector<ExchangeTokenValidator>(),
 		federations: makeMapNameKeyedCollector<FederationProvider>(),
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
-		mfaFactors: makeMapNameKeyedCollector<MfaFactor>(),
+		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),

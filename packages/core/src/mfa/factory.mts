@@ -14,10 +14,70 @@
  * limitations under the License.
  */
 
-import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { MfaProvider, MfaProviderFactory } from "./types.mjs";
+/**
+ * The adapter factories of the two MFA stores, for a composition root that
+ * builds a store by name rather than by installing a module.
+ */
 
-/** @deprecated Unwired, and replaced by the multi-factor design in `packages/core/docs/adr/2026-09-25-multi-factor-authentication.md` (D3); see CHANGELOG. */
-export function createMfaProviderFactory(): MfaProviderFactory {
-	return createAdapterFactory<MfaProvider>("MfaProvider");
+import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import type { Logger } from "../logging/Logger.mjs";
+import { configuredMaxEntries } from "../single-use/max-entries.mjs";
+import type { MfaFactorStore, MfaFactorStoreFactory } from "./factorStore.mjs";
+import { createMemoryMfaFactorStore } from "./memoryFactorStore.mjs";
+import { createMemoryMfaTransactionStore } from "./memoryTransactionStore.mjs";
+import type { MfaTransactionStore, MfaTransactionStoreFactory } from "./transactionStore.mjs";
+
+/**
+ * Says, once per store built, that an in-process factor store forgets every
+ * enrollment at the next restart. Object-first, at warn: it is a deployment
+ * choice, not an outage. It warns under every `deployment.mode`, `single`
+ * included, unlike the replica-safety warning: the loss is at a restart, which
+ * one replica suffers as much as many, and it is the loss D12 guards against.
+ * Shared with `memoryMfaFactorStoreModule`; not on the barrel.
+ * @internal
+ */
+export function warnMfaFactorStoreInMemory(logger: Logger): void {
+	logger.warn({ store: "mfaFactorStore", adapter: "memory" }, "mfa_factor_store_in_memory");
+}
+
+/** An empty {@link MfaFactorStoreFactory}; register builders, or call {@link registerBuiltinMfaFactorStores}. */
+export function createMfaFactorStoreFactory(): MfaFactorStoreFactory {
+	return createAdapterFactory<MfaFactorStore>("MfaFactorStore");
+}
+
+/**
+ * Registers the in-tree builders: `memory`, which warns when it is built.
+ * Throws `AdapterFactoryError` (`duplicate`) when one is already registered.
+ *
+ * @param logger - where the warning goes. Defaults to `consoleLogger`.
+ */
+export function registerBuiltinMfaFactorStores(
+	factory: MfaFactorStoreFactory,
+	logger: Logger = consoleLogger,
+): void {
+	factory.register("memory", () => {
+		warnMfaFactorStoreInMemory(logger);
+		return createMemoryMfaFactorStore();
+	});
+}
+
+/** An empty {@link MfaTransactionStoreFactory}; register builders, or call {@link registerBuiltinMfaTransactionStores}. */
+export function createMfaTransactionStoreFactory(): MfaTransactionStoreFactory {
+	return createAdapterFactory<MfaTransactionStore>("MfaTransactionStore");
+}
+
+/**
+ * Registers the in-tree builders: `memory`, capped at the adapter config's
+ * `maxEntries` (`factory.create({ type: "memory", maxEntries })`, read as
+ * `mfaTransactionStore.memory.maxEntries` is: absent means the default, a
+ * value it cannot use is a `RangeError` naming the key). Throws
+ * `AdapterFactoryError` (`duplicate`) when one is already registered.
+ */
+export function registerBuiltinMfaTransactionStores(factory: MfaTransactionStoreFactory): void {
+	factory.register("memory", (config) =>
+		createMemoryMfaTransactionStore(
+			configuredMaxEntries(config.maxEntries, "MfaTransactionStore memory adapter maxEntries"),
+		),
+	);
 }

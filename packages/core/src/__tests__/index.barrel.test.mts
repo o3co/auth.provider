@@ -171,6 +171,24 @@ describe("core barrel — the sealing leaf", () => {
 	});
 });
 
+describe("core barrel — the unused #69 MFA surface is gone (the MFA ADR's D3)", () => {
+	it("exports none of its values", () => {
+		// The router put three flows' continuations into callbacks a
+		// composition root wrote, its store could not consume atomically, and
+		// its provider had no enrolled instance: nothing in this repository
+		// ever called it. The ports that replace it carry other names.
+		for (const name of [
+			"createMfaRouter",
+			"createMfaProviderFactory",
+			"supportsEnrollment",
+			"supportsRevocation",
+			"checkMfaPartialWiring",
+		]) {
+			expect((core as Record<string, unknown>)[name], name).toBeUndefined();
+		}
+	});
+});
+
 describe("core barrel — the router's terminal error handler", () => {
 	it("re-exports it, for a host that mounts routes of its own beside the router", () => {
 		// The router `createApp` returns ends in it; a host's own routes (a

@@ -237,7 +237,9 @@ export interface Client {
  * A user as returned by a {@link UserRepository}, published by **the Store** —
  * auth.provider's term for the consumer's upstream user service, the system of
  * record for identity, credentials, and email-verification state. auth.provider
- * reads Store-published state and never writes it; `HttpUserRepository` in
+ * reads Store-published state, and causes a write there only through the two
+ * optional relays its own flows need (`UserRepository.linkFederatedIdentity`
+ * and `markMfaEnrolled`); `HttpUserRepository` in
  * `@o3co/auth-provider-foundation` is the shipped client. This doc is the
  * term's definition site (see docs/design-vocabulary.md in the repository —
  * the docs/ tree is not shipped in the npm package).
@@ -254,6 +256,9 @@ export interface Client {
  * only reflects. Issuing the verification token, delivering it, and flipping
  * the state belong to the Store; this library reads the result and binds it
  * into the artifact (responsibility #4).
+ *
+ * `mfaEnrolled` is not a claim: it is the MFA enrollment witness, read by the
+ * MFA coordinator and never stamped on a token.
  *
  * The index signature stays: a Store may carry custom claims beyond these, and
  * a consumer may map them through a custom claim filter.
@@ -279,6 +284,19 @@ export interface User {
 	readonly picture?: string;
 	/** Surfaced as the non-standard `groups` claim under the `groups` scope. */
 	readonly groups?: readonly string[];
+	/**
+	 * The MFA enrollment witness (the MFA ADR's D12): whether this user has
+	 * enrolled a second factor, as the Store answers it on `authenticate`. It
+	 * lives outside the factor store so that losing that store does not read
+	 * as "never enrolled" — which would let whoever holds the password bind
+	 * their own authenticator. Read it through `readMfaEnrollmentWitness`
+	 * only: `true` is a witness; `false` and absence say the subject has not
+	 * enrolled; any other value is malformed, which the coordinator answers
+	 * `503` and never reads as "not enrolled". The provider tells the Store
+	 * through `UserRepository.markMfaEnrolled` where the repository has it; a
+	 * Store that answers no field leaves the witness absent.
+	 */
+	readonly mfaEnrolled?: boolean;
 	readonly [key: string]: unknown;
 }
 

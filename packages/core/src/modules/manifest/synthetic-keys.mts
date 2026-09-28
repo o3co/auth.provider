@@ -18,6 +18,7 @@ import type {
 	ExchangeTokenValidator,
 	FederationProvider,
 	GrantHandler,
+	MfaFactor,
 } from "./contributes-map.mjs";
 
 /**
@@ -25,9 +26,10 @@ import type {
  * to route factories that dispatch by `grant_type` at request time. Per
  * A2-α §6.5 + Amendment 3.
  *
- * The boot planner instantiates this resolver during `applyContributions`
- * (Phase 4 / A2-β §5.4) and freezes the underlying registry; the resolver
- * exposes only `get` and `entries`, no write surface.
+ * The boot planner instantiates this resolver before the `provides`
+ * factories run (it fills in `applyContributions`, Phase 4 / A2-β §5.4) and
+ * freezes the underlying registry; the resolver exposes only `get` and
+ * `entries`, no write surface.
  */
 export interface GrantHandlerResolver {
 	readonly get: (grantType: string) => GrantHandler | undefined;
@@ -41,6 +43,17 @@ export interface GrantHandlerResolver {
 export interface TokenExchangeValidatorResolver {
 	readonly get: (tokenType: string) => ExchangeTokenValidator | undefined;
 	readonly entries: () => IterableIterator<readonly [string, ExchangeTokenValidator]>;
+}
+
+/**
+ * Read-only projection of the boot planner's `mfaFactors` collector: every
+ * contributed second factor by kind (the MFA ADR's D3, D7). A kind whose
+ * factory answered `null` — switched off by its configuration — is absent
+ * from both `get` and `entries`.
+ */
+export interface MfaFactorResolver {
+	readonly get: (kind: string) => MfaFactor | undefined;
+	readonly entries: () => IterableIterator<readonly [string, MfaFactor]>;
 }
 
 /**
@@ -60,6 +73,7 @@ export type { FederationProvider };
  * A5 (Phase 7) added `federationRedirectPolicyResolver` — the synthetic
  * projection for `federationRedirectPolicies` contributions (typed in
  * `@o3co/auth-provider-session/src/federations/contributes.mts`).
+ * `mfaFactorResolver` is the projection for `mfaFactors` (the MFA ADR's D3).
  *
  * Per A2-α §6.5 NORMATIVE constraints. The PRIMARY immutability guard
  * is the TypeScript declared type `ReadonlySet<string>` — `.add()`,
@@ -77,6 +91,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"tokenExchangeValidatorResolver",
 		"grantHandlerResolver",
 		"federationRedirectPolicyResolver",
+		"mfaFactorResolver",
 		// D-5: lifecycleRegistrar is boot-planner-owned (pre-seeded into the
 		// bootstrap map by createApp). Consumer-supplied values via
 		// bootstrapComponents/overrideComponents would create two registrars
@@ -95,7 +110,11 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 // ComponentMap declaration-merge for synthetic resolver slots.
 //
 // The boot planner injects these projections into the working component map
-// at `applyContributions` step 0 (see `boot/apply-contributions.mts`). Without
+// before stage 3 runs the `provides` factories (`prepareSyntheticProjections`
+// in `boot/apply-contributions.mts`), so a provider may require one and hold
+// it; it reads the projection lazily, at request time, because the
+// contributions behind it register only in stage 4 — a read while the
+// provides factories run throws, and the boot is refused. Without
 // declaration-merging them onto ComponentMap, downstream modules cannot
 // declare `requires: ["grantHandlerResolver"]` etc. through the typed
 // `defineModule` surface — `ComponentKey = keyof ComponentMap` would not
@@ -131,5 +150,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly grantHandlerResolver?: GrantHandlerResolver;
 		readonly tokenExchangeValidatorResolver?: TokenExchangeValidatorResolver;
 		readonly federationProviders?: ReadonlyMap<string, FederationProvider>;
+		readonly mfaFactorResolver?: MfaFactorResolver;
 	}
 }

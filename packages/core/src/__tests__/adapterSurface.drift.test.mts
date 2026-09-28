@@ -206,9 +206,24 @@ function absencePoliciesInDoc(): AbsencePolicyInventory {
 	return { attachments: attachments.sort(), declarations };
 }
 
+/**
+ * The doc's second absence table: policies declared in source that no bundled
+ * module attaches yet, `| \`POLICY\` | \`key = "value"\` | … |`. A constant
+ * nothing attaches still names the config line an operator will be told to
+ * write, so it is documented — and held to the source — like the rest.
+ */
+function unattachedPoliciesInDoc(): Record<string, string> {
+	const found: Record<string, string> = {};
+	for (const match of doc.matchAll(/^\| `(\w+_ABSENCE_POLICY)` \| `([^`]+)` \|/gm)) {
+		found[match[1] as string] = match[2] as string;
+	}
+	return found;
+}
+
 describe("adapter-surface absence policies (#458)", () => {
 	const source = absencePoliciesInSource();
 	const documented = absencePoliciesInDoc();
+	const unattached = unattachedPoliciesInDoc();
 
 	it("finds attachments at all — the scan is not vacuously passing", () => {
 		expect(source.attachments.length).toBeGreaterThan(3);
@@ -220,6 +235,12 @@ describe("adapter-surface absence policies (#458)", () => {
 	});
 
 	it("quotes the config line that declares each absence", () => {
-		expect(documented.declarations).toEqual(source.declarations);
+		expect({ ...documented.declarations, ...unattached }).toEqual(source.declarations);
+	});
+
+	it("lists as not yet attached exactly the policies no module attaches", () => {
+		const attached = new Set(source.attachments.map((a) => a.split(" -> ")[1]));
+		const notAttached = Object.keys(source.declarations).filter((p) => !attached.has(p));
+		expect(Object.keys(unattached).sort()).toEqual(notAttached.sort());
 	});
 });

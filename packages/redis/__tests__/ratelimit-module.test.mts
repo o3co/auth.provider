@@ -74,6 +74,38 @@ describe("redisRateLimiterModule", () => {
 		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
 	});
 
+	it("seeds mfa and mfa-email from the MFA section's budgets", async () => {
+		// The same seeds the memory adapter applies, so the budgets hold
+		// whichever adapter a deployment picks.
+		const counts = new Map<string, number>();
+		const client = {
+			async incrementWithTtl(key: string, _ttlSeconds: number) {
+				const next = (counts.get(key) ?? 0) + 1;
+				counts.set(key, next);
+				return next;
+			},
+		};
+		const config = {
+			redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
+			mfa: {
+				rateLimit: { routes: { limit: 2, windowSeconds: 300 } },
+				factors: { email: { sendLimit: { limit: 1, windowSeconds: 3600 } } },
+			},
+		};
+		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
+			config,
+			rateLimiterClient: client,
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		const routes = "mfa:ip:1.2.3.4";
+		expect((await limiter.check(routes, { ip: "1.2.3.4" })).limit).toBe(2);
+		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(true);
+		expect((await limiter.check(routes, { ip: "1.2.3.4" })).allowed).toBe(false);
+		const sends = "mfa-email:user:u1";
+		expect((await limiter.check(sends, { userId: "u1" })).limit).toBe(1);
+		expect((await limiter.check(sends, { userId: "u1" })).allowed).toBe(false);
+	});
+
 	it("refuses a seeded budget that is present but unusable, naming the config key and not the limiter", () => {
 		const provide = (extra: Record<string, unknown>) => () =>
 			redisRateLimiterModule.provides?.rateLimiter?.({
@@ -92,6 +124,14 @@ describe("redisRateLimiterModule", () => {
 			[
 				{ webauthn: { rateLimit: { authenticationOptions: { limit: 0, windowSeconds: 60 } } } },
 				/webauthn\.rateLimit\.authenticationOptions must be/,
+			],
+			[
+				{ mfa: { rateLimit: { routes: { limit: 60, windowSeconds: 1e13 } } } },
+				/mfa\.rateLimit\.routes must be/,
+			],
+			[
+				{ mfa: { factors: { email: { sendLimit: { limit: 0, windowSeconds: 3600 } } } } },
+				/mfa\.factors\.email\.sendLimit must be/,
 			],
 		];
 		for (const [extra, key] of cases) {

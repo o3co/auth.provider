@@ -455,9 +455,9 @@ describe("Session routes — POST /session/login", () => {
 	 * defaults to null, so the shipped default stored any URL on the internet
 	 * under `req.session.redirectTo` — the exact shape #278 removed one route
 	 * over. Nothing in this repository redirects to that key today, but it is
-	 * declared public on `SessionData` and `MfaResumeState`'s `flow: "login"`
-	 * variant designs a consumer for it, so a validated value is what an
-	 * embedder must be handed.
+	 * declared public on `SessionData`, and an MFA login transaction carries it
+	 * back to the page (`MfaTransaction.redirectTo`), so a validated value is
+	 * what an embedder must be handed.
 	 */
 	describe("redirect_to validation (#405)", () => {
 		const reasonOf = (description: unknown): string | undefined =>
