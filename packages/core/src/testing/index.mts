@@ -49,6 +49,11 @@
  * `createApp` / module-based wiring.
  */
 export { GrantRegistry, GrantRegistryError } from "../grants/registry.mjs";
+export {
+	type ContractCase,
+	type RequirementContractInput,
+	sessionRequirementContract,
+} from "../session-admission/testing/requirement.contract.mjs";
 export { resolverForTests } from "../session-admission/testing/resolver.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
 export {
