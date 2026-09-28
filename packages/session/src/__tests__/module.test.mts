@@ -438,3 +438,77 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		expect(res.body).toMatchObject({ error: "step_up_required", requirement: "fixture" });
 	});
 });
+
+describe("sessionModule — the password login is a consumer of session admission (the session-admission ADR's D5)", () => {
+	/**
+	 * The session-routes factory, called as the planner calls it, its router
+	 * mounted behind a cookie session: what a password login answers says
+	 * what the factory handed the route.
+	 */
+	async function passwordLogin(requirements: readonly SessionRequirement[]) {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			session: { ...base.session, secret: "module-test-secret" },
+			deployment: { mode: "single" },
+		} as unknown as AppConfig;
+		const factory = sessionModule.contributes?.routes?.[0] as unknown as (deps: unknown) => {
+			id: string;
+			handler: express.RequestHandler;
+		};
+		const contribution = factory({
+			config,
+			userRepository: {
+				authenticate: async () => ({ id: "user-1", username: "alice" }),
+				authenticateByToken: async () => null,
+			},
+			userSessionStore: makeUserSessionStore(),
+			federationTokenStore: makeFederationTokenStore(),
+			sessionFederationIndex: makeSessionFederationIndex(),
+			sessionRequirementResolver: resolverForTests(requirements),
+		});
+		expect(contribution.id).toBe("session-routes");
+		const app = express();
+		app.use((req, _res, next) => {
+			const fresh = (): Record<string, unknown> => ({
+				regenerate: (cb: (err: unknown) => void) => {
+					(req as unknown as { session: Record<string, unknown> }).session = fresh();
+					(req as unknown as { sessionID: string }).sessionID = "regenerated";
+					cb(null);
+				},
+				save: (cb: (err: unknown) => void) => cb(null),
+			});
+			(req as unknown as { session: Record<string, unknown> }).session = fresh();
+			next();
+		});
+		app.use("/session", contribution.handler);
+		const csrf = await request(app).get("/session/csrf");
+		return request(app)
+			.post("/session/login")
+			.set("Cookie", csrf.headers["set-cookie"] as unknown as string[])
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.send({ username: "alice", password: "secret" });
+	}
+
+	it("hands the login route the resolver: a registered requirement's interruption answers the login", async () => {
+		const res = await passwordLogin([
+			{
+				name: "fixture",
+				reach: new Set<string>(),
+				stepUpPage: undefined,
+				remediations: [],
+				hintKeys: [],
+				admit: async () => ({ outcome: "met" }),
+				admitPrimary: async () => ({
+					open: async () => ({ status: 403, body: { error: "fixture_required" } }),
+				}),
+			},
+		]);
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual({ error: "fixture_required" });
+	});
+
+	it("logs in as before when no requirement is registered", async () => {
+		expect((await passwordLogin([])).status).toBe(200);
+	});
+});
