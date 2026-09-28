@@ -855,7 +855,6 @@ describe("step 5 — the requirements", () => {
 		const with_ = deps({ requirements, logger });
 		for (const action of [
 			{ name: "mfa.step_up", grade: "remediation" } as const,
-			ADMISSION_ACTIONS["mfa.step_up"],
 			{ ...issued },
 			Object.freeze({ ...issued }),
 		]) {
@@ -864,7 +863,7 @@ describe("step 5 — the requirements", () => {
 			});
 		}
 		expect(seen).toEqual(
-			Array.from({ length: 4 }, () => [
+			Array.from({ length: 3 }, () => [
 				"mfa:mfa.step_up:credential_change",
 				"other:mfa.step_up:credential_change",
 			]).flat(),
@@ -1163,7 +1162,6 @@ describe("the actions (D4)", () => {
 			"session.link_callback": "use",
 			"webauthn.register": "credential_change",
 			"mfa.manage": "credential_change",
-			"mfa.step_up": "remediation",
 		});
 		expect(Object.isFrozen(ADMISSION_ACTIONS)).toBe(true);
 		for (const [key, action] of Object.entries(ADMISSION_ACTIONS)) {

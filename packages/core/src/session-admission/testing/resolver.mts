@@ -29,6 +29,7 @@
 
 import { sessionRequirementResolverOver } from "../admit.mjs";
 import {
+	type RegisteredRequirement,
 	registeredRequirement,
 	type SessionRequirement,
 	type SessionRequirementResolver,
@@ -48,7 +49,7 @@ export function resolverForTests(
 	if (!Array.isArray(requirements)) {
 		throw new RangeError("resolverForTests: requirements must be a list");
 	}
-	const byName = new Map<string, SessionRequirement>();
+	const byName = new Map<string, RegisteredRequirement>();
 	for (const candidate of requirements) {
 		// What is wrong is named by the registration itself, as boot reports it.
 		const requirement = registeredRequirement(candidate, options.issuer);

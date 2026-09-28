@@ -609,8 +609,8 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	{
 		file: REQUIREMENT_RULE_HOME,
 		read: "entry.adds.amr",
-		count: 1,
-		why: "what a completed requirement added, composed onto the primary's amr by composeAmr",
+		count: 2,
+		why: "what a completed requirement added: held within its requirement's reach by resumePrimary, and composed onto the primary's amr by composeAmr",
 	},
 	{
 		file: REQUIREMENT_RULE_HOME,

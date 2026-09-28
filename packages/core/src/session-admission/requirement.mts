@@ -299,10 +299,9 @@ const action = <N extends string, G extends AdmissionGrade>(
  * The bundled consumers' actions, each with its grade (D4). A deployment's
  * own route builds `{ name, grade }` for what it does and is treated by its
  * grade; `remediation` is accepted only for a name a registered requirement
- * declared, else treated as `credential_change`. A requirement's remediation
- * may not take the name of a bundled action of another grade
- * (`registeredRequirement`); the one bundled remediation, `mfa.step_up`, is
- * the MFA requirement's own route.
+ * declared, else treated as `credential_change`. The consumers' actions
+ * alone: a remediation (`mfa.step_up`) is a requirement's own route, issued
+ * to it at registration (`registeredRequirement`), and never a member.
  */
 export const ADMISSION_ACTIONS = Object.freeze({
 	"oauth.authorize": action("oauth.authorize", "use"),
@@ -319,7 +318,6 @@ export const ADMISSION_ACTIONS = Object.freeze({
 	"session.link_callback": action("session.link_callback", "use"),
 	"webauthn.register": action("webauthn.register", "credential_change"),
 	"mfa.manage": action("mfa.manage", "credential_change"),
-	"mfa.step_up": action("mfa.step_up", "remediation"),
 });
 
 /** A bundled action's name. */
@@ -330,9 +328,10 @@ const REMEDIATION_ROUTE = /^[a-z][a-z0-9_]*$/;
 
 /**
  * `remediations` as a requirement may declare them (D4): each the
- * requirement's own route, `<name>.<route>`, declared once, and never a
- * bundled action of another grade — that is a consumer's, and a requirement
- * declaring it would make admission skip the requirements for it.
+ * requirement's own route, `<name>.<route>`, declared once. By construction
+ * none collides with a consumer's action or another requirement's: the
+ * route holds no dot, and the name-keyed kind refuses a second requirement
+ * of one name.
  */
 function checkRemediations(name: string, value: unknown, refuse: (what: string) => never): void {
 	if (!isNameList(value)) refuse("remediations must be a list of names");
@@ -343,12 +342,6 @@ function checkRemediations(name: string, value: unknown, refuse: (what: string) 
 		if (route === undefined || !REMEDIATION_ROUTE.test(route)) {
 			refuse(
 				`remediation "${remediation}" is not a route of this requirement's own: a remediation is named "${prefix}<route>", the route a lower-case identifier`,
-			);
-		}
-		const bundled = (ADMISSION_ACTIONS as Record<string, AdmissionAction | undefined>)[remediation];
-		if (bundled !== undefined && bundled.grade !== "remediation") {
-			refuse(
-				`remediation "${remediation}" is a bundled action graded ${bundled.grade} — a consumer's, not a route a requirement owns`,
 			);
 		}
 		if (seen.has(remediation)) refuse(`remediation "${remediation}" is declared twice`);
@@ -368,32 +361,114 @@ const registeredCopies = new WeakSet<SessionRequirement>();
 /** Each registered copy's sealed reach (D3): read once at the end of boot's stage 4, answered afterwards. */
 const sealedReach = new WeakMap<SessionRequirement, ReadonlySet<string>>();
 
-/** A `Set` nothing changes: what a sealed reach is answered as. */
-function frozenSet(values: Iterable<string>): ReadonlySet<string> {
-	const set = new Set(values);
-	const refuse = (): never => {
-		throw new TypeError(
-			"a registered requirement's reach is sealed: it does not change after boot",
-		);
-	};
-	for (const method of ["add", "delete", "clear"] as const) {
-		Object.defineProperty(set, method, { value: refuse, enumerable: false });
+/**
+ * A sealed reach: a read-only view over a private set — `has`, `size` and
+ * iteration, no `add` or `delete` at all. Not a frozen native `Set`, which
+ * still accepts both.
+ */
+class SealedReach implements ReadonlySet<string> {
+	readonly #values: ReadonlySet<string>;
+
+	constructor(values: Iterable<string>) {
+		this.#values = new Set(values);
+		Object.freeze(this);
 	}
-	return Object.freeze(set);
+
+	get size(): number {
+		return this.#values.size;
+	}
+
+	has(value: string): boolean {
+		return this.#values.has(value);
+	}
+
+	keys(): SetIterator<string> {
+		return this.#values.keys();
+	}
+
+	values(): SetIterator<string> {
+		return this.#values.values();
+	}
+
+	entries(): SetIterator<[string, string]> {
+		return this.#values.entries();
+	}
+
+	forEach(
+		callback: (value: string, value2: string, set: ReadonlySet<string>) => void,
+		thisArg?: unknown,
+	): void {
+		for (const value of this.#values) callback.call(thisArg, value, value, this);
+	}
+
+	[Symbol.iterator](): SetIterator<string> {
+		return this.#values.values();
+	}
+
+	get [Symbol.toStringTag](): string {
+		return "SealedReach";
+	}
+
+	// The set algebra `ReadonlySet` declares, each answered over a copy, so
+	// nothing hands the private set out.
+	union<U>(other: ReadonlySetLike<U>): Set<string | U> {
+		return new Set(this.#values).union(other);
+	}
+
+	intersection<U>(other: ReadonlySetLike<U>): Set<string & U> {
+		return new Set(this.#values).intersection(other);
+	}
+
+	difference<U>(other: ReadonlySetLike<U>): Set<string> {
+		return new Set(this.#values).difference(other);
+	}
+
+	symmetricDifference<U>(other: ReadonlySetLike<U>): Set<string | U> {
+		return new Set(this.#values).symmetricDifference(other);
+	}
+
+	isSubsetOf(other: ReadonlySetLike<unknown>): boolean {
+		return this.#values.isSubsetOf(other);
+	}
+
+	isSupersetOf(other: ReadonlySetLike<unknown>): boolean {
+		return this.#values.isSupersetOf(other);
+	}
+
+	isDisjointFrom(other: ReadonlySetLike<unknown>): boolean {
+		return this.#values.isDisjointFrom(other);
+	}
 }
 
-/** Seals `requirement` on `values` when it is a registered copy, and answers the sealed set. */
+/** Seals `requirement` on `values` when it is a registered copy, and answers the sealed view. */
 function seal(requirement: SessionRequirement, values: Iterable<string>): ReadonlySet<string> {
-	const sealed = frozenSet(values);
+	const sealed = new SealedReach(values);
 	if (registeredCopies.has(requirement)) sealedReach.set(requirement, sealed);
 	return sealed;
+}
+
+/** The remediation actions core issued (D4): what D2's step 5 keeps the `remediation` grade for. */
+const issuedActions = new WeakSet<AdmissionAction>();
+
+/** Whether `action` is one core issued to a registered requirement — never a literal, a copy or `ADMISSION_ACTIONS`' own entry. */
+export const isIssuedAction = (action: unknown): action is AdmissionAction =>
+	typeof action === "object" && action !== null && issuedActions.has(action as AdmissionAction);
+
+/**
+ * A requirement as the resolver answers it (D3, D4): the registered copy,
+ * with the remediation actions core issued to it — one branded object per
+ * declared route, keyed by the route (`actions.step_up` for `mfa.step_up`),
+ * which the requirement's own route passes to `admitSession`.
+ */
+export interface RegisteredRequirement extends SessionRequirement {
+	readonly actions: Readonly<Record<string, AdmissionAction>>;
 }
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
  * non-empty `name`, `remediations` the requirement's own routes
- * (`checkRemediations`: `<name>.<route>`, each once, none a bundled action of
- * another grade), a `stepUpPage` that is a page when present
+ * (`checkRemediations`: `<name>.<route>`, each once), a `stepUpPage` that
+ * is a page when present
  * (`checkStepUpPage`, on `issuer`'s origin when one is given), `hintKeys`
  * each a hint name (`isHintKey`), `admit` a function, `admitPrimary` one or
  * absent — and copied: the lists and the page are the copy's own, and a
@@ -402,14 +477,14 @@ function seal(requirement: SessionRequirement, values: Iterable<string>): Readon
  * be a getter over what registers in the same pass (the MFA requirement's,
  * over `mfaFactorResolver`). It is read once, after the pass, by
  * `sealRegisteredReach` at the end of boot's stage 4, and sealed on the
- * copy as a frozen snapshot: what the copy answers from then on, so the
+ * copy as a read-only snapshot: what the copy answers from then on, so the
  * `acr` drop and admission at request time read what boot checked, and a
  * contributor's mutable `Set` changes nothing after boot. Until sealed, the
  * copy answers the value's own. `admit` and `admitPrimary` delegate to the
  * value's. A `RangeError` names what is wrong; the boot planner reports it
  * as the contribution's failure.
  */
-export function registeredRequirement(value: unknown, issuer?: string): SessionRequirement {
+export function registeredRequirement(value: unknown, issuer?: string): RegisteredRequirement {
 	if (!isPlainObject(value)) throw new RangeError("a session requirement must be an object");
 	const name = value.name;
 	if (!isNonEmptyString(name)) {
@@ -434,14 +509,23 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
 	}
 	const source = value as unknown as SessionRequirement;
 	const primaryAsk = source.admitPrimary;
-	const copy: SessionRequirement = Object.freeze({
+	const remediations = Object.freeze([...(value.remediations as readonly string[])]);
+	// The remediation actions, issued here and nowhere else (D4).
+	const actions: Record<string, AdmissionAction> = {};
+	for (const remediation of remediations) {
+		const issued: AdmissionAction = Object.freeze({ name: remediation, grade: "remediation" });
+		issuedActions.add(issued);
+		actions[remediation.slice(name.length + 1)] = issued;
+	}
+	const copy: RegisteredRequirement = Object.freeze({
 		name,
 		get reach() {
 			return sealedReach.get(copy) ?? source.reach;
 		},
 		stepUpPage,
-		remediations: Object.freeze([...(value.remediations as readonly string[])]),
+		remediations,
 		hintKeys: Object.freeze([...(value.hintKeys as readonly string[])]),
+		actions: Object.freeze(actions),
 		admit: (input: RequirementInput) => source.admit(input),
 		...(primaryAsk === undefined
 			? {}
@@ -459,9 +543,10 @@ export function registeredRequirement(value: unknown, issuer?: string): SessionR
  * (`SECOND_FACTOR_AMR`), and a `stepUpPage` exactly when the reach is not
  * empty. The end of boot's stage 4 runs it over every registration
  * (`contribute-factory-failed`, naming the requirement), and the contract
- * suite over a requirement under test. Answers the reach as read, a frozen
- * set of its own — and seals a registered copy on it: the copy answers the
- * snapshot from then on, whatever the contributor's own `Set` does.
+ * suite over a requirement under test. Answers the reach as read, a
+ * read-only view over a set of its own — and seals a registered copy on it:
+ * the copy answers the snapshot from then on, whatever the contributor's own
+ * `Set` does.
  */
 export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySet<string> {
 	const refuse = (what: string): never => {
@@ -517,8 +602,8 @@ export function snapshotReach(requirement: SessionRequirement): ReadonlySet<stri
  */
 export interface SessionRequirementResolver {
 	readonly [resolverBrand]: true;
-	readonly get: (name: string) => SessionRequirement | undefined;
-	readonly entries: () => IterableIterator<readonly [string, SessionRequirement]>;
+	readonly get: (name: string) => RegisteredRequirement | undefined;
+	readonly entries: () => IterableIterator<readonly [string, RegisteredRequirement]>;
 }
 
 // ---------------------------------------------------------------------------

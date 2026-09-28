@@ -82,9 +82,11 @@ import {
 	type InterruptionAnswer,
 	isHintKey,
 	isHintToken,
+	isIssuedAction,
 	type PrimaryAdmission,
 	type PrimaryAuthentication,
 	type PrimaryContinuation,
+	type RegisteredRequirement,
 	type RequirementInput,
 	type RequirementVerdict,
 	type SessionClaim,
@@ -105,8 +107,8 @@ const knownResolvers = new WeakSet<object>();
 
 /** What a resolver is built over: the collector's read side, or a test's list. */
 export interface SessionRequirementSource {
-	get(name: string): SessionRequirement | undefined;
-	entries(): IterableIterator<readonly [string, SessionRequirement]>;
+	get(name: string): RegisteredRequirement | undefined;
+	entries(): IterableIterator<readonly [string, RegisteredRequirement]>;
 }
 
 /**
@@ -271,9 +273,9 @@ const GRADES: ReadonlySet<string> = new Set<AdmissionGrade>([
 	"remediation",
 ]);
 
-/** The `action` field of a log line: a bundled action's name, else `custom` (D10). */
-const actionLabel = (name: string): string =>
-	Object.hasOwn(ADMISSION_ACTIONS, name) ? name : "custom";
+/** The `action` field of a log line: a bundled action's name, or an issued remediation's, else `custom` (D10). */
+const actionLabel = (action: AdmissionAction): string =>
+	Object.hasOwn(ADMISSION_ACTIONS, action.name) || isIssuedAction(action) ? action.name : "custom";
 
 /** The `remediation` names already said to be undeclared, once per process each (D4). */
 const undeclaredRemediations = new Set<string>();
@@ -393,7 +395,7 @@ export async function admitSession(
 	checkRequest(deps, request);
 	const { claim: presented, asks } = request;
 	const now = deps.now === undefined ? new Date() : deps.now();
-	const label = actionLabel(request.action.name);
+	const label = actionLabel(request.action);
 	const logger = deps.logger;
 	const unavailable = (store: string, err: unknown): Admission => {
 		logger?.error(
@@ -470,7 +472,7 @@ export async function admitSession(
 	}
 
 	// Step 5: the requirements, by the action's effective grade — normalised
-	// first (D4): only a declared remediation keeps its grade and skips them.
+	// first (D4): only the issued remediation keeps its grade and skips them.
 	const requirements = [...deps.requirements.entries()];
 	const effective = effectiveAction(requirements, request.action, deps);
 	// A token carrier's authentication is the token's own, whether or not a
@@ -567,18 +569,22 @@ function stepUpVerdict(
 
 /**
  * The action as the requirements see it (D4): `use` and `credential_change`
- * as given; `remediation` only for a name some registered requirement
- * declared, else `credential_change` — the strictest grade — said once per
- * process per name.
+ * as given; `remediation` only for the object core issued to one of these
+ * requirements at registration — a literal, a copy, or `ADMISSION_ACTIONS`'
+ * own entry carries no brand — else `credential_change`, the strictest
+ * grade, said once per process per name.
  */
 function effectiveAction(
-	requirements: readonly (readonly [string, SessionRequirement])[],
+	requirements: readonly (readonly [string, RegisteredRequirement])[],
 	asked: AdmissionAction,
 	deps: AdmissionDeps,
 ): AdmissionAction {
 	if (asked.grade !== "remediation") return { name: asked.name, grade: asked.grade };
-	if (requirements.some(([, r]) => r.remediations.includes(asked.name))) {
-		return { name: asked.name, grade: "remediation" };
+	if (
+		isIssuedAction(asked) &&
+		requirements.some(([, r]) => Object.values(r.actions).includes(asked))
+	) {
+		return asked;
 	}
 	if (!undeclaredRemediations.has(asked.name)) {
 		undeclaredRemediations.add(asked.name);
@@ -591,7 +597,7 @@ interface MergeContext {
 	readonly session: UserSession | null;
 	/** No requested value is in the table: no login can meet the request. */
 	readonly noneConfigured: boolean;
-	readonly requirements: readonly (readonly [string, SessionRequirement])[];
+	readonly requirements: readonly (readonly [string, RegisteredRequirement])[];
 	/** The vouched `amr`. */
 	readonly held: readonly string[];
 	readonly table: AdmissionDeps["acrTable"];
@@ -977,6 +983,19 @@ export async function resumePrimary(
 		),
 		Object.freeze({ requirement: completed.requirement, adds }),
 	]);
+	// Every addition — the earlier completions' as read back, and this one —
+	// is within its requirement's sealed reach (D5): a ceremony adds what its
+	// requirement said it could, and a record from before a reach shrank is
+	// refused rather than composed.
+	for (const entry of done) {
+		const reach = deps.requirements.get(entry.requirement)?.reach;
+		const outside = entry.adds.amr.filter((value) => !reach?.has(value));
+		if (outside.length > 0) {
+			throw new RangeError(
+				`resumePrimary: "${entry.requirement}" adds ${outside.map((value) => `"${value}"`).join(", ")}, which its reach does not name`,
+			);
+		}
+	}
 	return askEvery(deps, composeRecorded(primary, done), continuationOf(primary, done));
 }
 
