@@ -63,6 +63,8 @@ const FACTORS = {
 	withoutWebAuthn: new Set(["otp", "recovery", "mfa"]),
 	/** Email codes alone, which do not add `mfa` (O7). */
 	emailOnly: new Set(["email"]),
+	/** A coordinator with no factor enabled: nothing can step a session up either. */
+	empty: new Set<string>(),
 	/** No coordinator: nothing can step a session up. */
 	none: undefined,
 } as const;
@@ -292,6 +294,13 @@ describe("decideMfaRequirement — the baseline beside acr_values (D16)", () => 
 			mode: "required",
 			session: passwordSession(["pwd"]),
 			factors: "none",
+			expected: { outcome: "unmet", requirement: "baseline" },
+		},
+		{
+			row: "the baseline with a coordinator but no factor enabled is unmet, never a step-up nothing can finish",
+			mode: "required",
+			session: passwordSession(["pwd"]),
+			factors: "empty",
 			expected: { outcome: "unmet", requirement: "baseline" },
 		},
 		{
