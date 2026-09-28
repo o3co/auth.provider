@@ -73,6 +73,8 @@ function harness(
 		readonly subjectSessionIndex?: boolean;
 		readonly steps?: boolean;
 		readonly redirectTo?: string;
+		/** The reporter's calls join the trace where they happen. */
+		readonly traceReporter?: boolean;
 	} = {},
 ) {
 	const trace: string[] = [];
@@ -129,10 +131,17 @@ function harness(
 	});
 	req.session = { id: "stale", regenerate, save };
 
+	// With `traceReporter`, what the reporter is told joins the trace at the
+	// point it was told, so a test reads the outage's place among the rollback
+	// steps — before any of them — and each rollback failure as it happens.
+	const report = (name: string) =>
+		vi.fn((..._args: unknown[]) => {
+			if (shape.traceReporter) trace.push(name);
+		});
 	const reporter = {
-		storeUnavailable: vi.fn(),
-		cleanupFailed: vi.fn(),
-		subjectIndexWriteFailed: vi.fn(),
+		storeUnavailable: report("outage"),
+		cleanupFailed: report("cleanup-failed"),
+		subjectIndexWriteFailed: report("index-write-failed"),
 	} satisfies EstablishSessionReporter<
 		"session_federation_index" | "federation_token",
 		"add" | "remove_by_sid" | "attach" | "delete"
@@ -495,6 +504,54 @@ describe("establishSession", () => {
 				["federation_token", "delete", tokenDown],
 				["user_session", "delete", sessionDown],
 				["subject_session_index", "remove_sid", indexDown],
+			]);
+		});
+
+		it("reports the outage before any rollback step runs — a failure before the regeneration", async () => {
+			const h = harness({ before: new Error("federation index down") }, { traceReporter: true });
+
+			await h.run();
+
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"outage",
+				"delete",
+				"removeSid",
+			]);
+		});
+
+		it("reports the outage before any rollback step runs, and each rollback step that fails as it happens — a failure at the save", async () => {
+			const h = harness(
+				{
+					save: new Error("cookie store down"),
+					afterUndo: new Error("token store down"),
+					delete: new Error("session store down"),
+					removeSid: new Error("subject index down"),
+				},
+				{ traceReporter: true },
+			);
+
+			await h.run();
+
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+				"outage",
+				"after-undo",
+				"cleanup-failed",
+				"before-undo",
+				"delete",
+				"cleanup-failed",
+				"removeSid",
+				"cleanup-failed",
 			]);
 		});
 

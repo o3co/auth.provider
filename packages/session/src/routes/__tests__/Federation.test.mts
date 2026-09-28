@@ -3606,3 +3606,76 @@ describe("a failed code exchange is one object-first warn", () => {
 		}
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Every line the login callback logs once the record is minted carries the
+// `sid` beside the provider — the outage, each rollback warn and the subject
+// index's failure alike — through the logger's child bindings, not through
+// the line's own fields. The spy loggers above fold every child into one
+// logger, so they cannot see a binding that was never made.
+// ---------------------------------------------------------------------------
+
+describe("the federation login callback's lines after the record is minted carry the sid", () => {
+	/** A logger whose children keep their bindings, and whose lines record them. */
+	const bindingLogger = () => {
+		const lines: Array<{
+			level: "warn" | "error";
+			bindings: Record<string, unknown>;
+			event: string;
+		}> = [];
+		const make = (bindings: Record<string, unknown>): Logger => {
+			const record =
+				(level: "warn" | "error") =>
+				(context: Record<string, unknown> | string, event?: string): void => {
+					lines.push({
+						level,
+						bindings,
+						event: typeof context === "string" ? context : (event ?? ""),
+					});
+				};
+			return {
+				trace: () => {},
+				debug: () => {},
+				info: () => {},
+				fatal: () => {},
+				warn: record("warn"),
+				error: record("error"),
+				child: (more) => make({ ...bindings, ...more }),
+			};
+		};
+		return { logger: make({}), lines };
+	};
+
+	it("the outage, each rollback warn and the subject index's failure are bound to the provider and the sid", async () => {
+		const { logger, lines } = bindingLogger();
+		const uss = makeUserSessionStore();
+		uss.delete.mockRejectedValueOnce(new Error("session store down"));
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userSessionStore: uss,
+			subjectSessionIndex: makeSubjectSessionIndex({
+				addSid: vi.fn(async () => {
+					throw new Error("subject index down");
+				}),
+			}),
+			saveInterceptor: failSave(2),
+			logger,
+		});
+
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(503);
+
+		const sid = (uss.create.mock.calls[0][0] as { sid: string }).sid;
+		expect(lines.map((line) => line.event)).toEqual([
+			"subject_session_index_write_failed",
+			"federation_callback_store_unavailable",
+			"federation_cleanup_failed",
+		]);
+		for (const line of lines) {
+			expect(line.bindings).toEqual({ provider: "test", sid });
+		}
+	});
+});
