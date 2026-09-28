@@ -16,11 +16,14 @@
 
 /**
  * The establishment vocabulary as it is checked and copied (the
- * session-admission ADR's D5): a `PrimaryAuthentication` as the login route
- * builds it, the additions a completing requirement presents, and the
+ * session-admission ADR's D5): a `PrimaryAuthentication` as core's builders
+ * make it, the additions a completing requirement presents, and the
  * `PrimaryContinuation` a requirement persists in its own record — the MFA
- * transaction — and presents to `resumePrimary`. Each check answers a frozen
- * deep copy, so what admission asks the requirements about, and what a store
+ * transaction — and presents to `resumePrimary`: an explicitly serialisable
+ * DTO, every instant as epoch milliseconds, built here (`continuationOf`),
+ * checked here (`checkPrimaryContinuation`) and rehydrated here
+ * (`primaryFromDto`, `additionsFromDto`). Each check answers a frozen deep
+ * copy, so what admission asks the requirements about, and what a store
  * records, shares nothing with the caller's object; a value the contract
  * does not admit is a `RangeError` naming what is wrong, and quoting nothing
  * but an `amr` value's marker.
@@ -38,9 +41,12 @@ import type { SessionAuthentication } from "../user-sessions/types.mjs";
 import { SECOND_FACTOR_AMR } from "./acr.mjs";
 import {
 	type CompletedRequirement,
+	type CompletedRequirementDto,
 	MFA_REQUIREMENT_NAME,
 	type PrimaryAdditions,
+	type PrimaryAdditionsDto,
 	type PrimaryAuthentication,
+	type PrimaryAuthenticationDto,
 	type PrimaryContinuation,
 } from "./requirement.mjs";
 
@@ -55,6 +61,10 @@ const isValidDate = (value: unknown): value is Date =>
 
 const isStringList = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string");
+
+/** An instant as a continuation carries it: epoch milliseconds, a safe integer at or after the epoch. */
+const isEpochMs = (value: unknown): value is number =>
+	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
 /** A copy of `user` that shares nothing with it; a value that cannot be copied is refused. */
 function copyUser(
@@ -116,8 +126,37 @@ function copyRecorded(value: unknown, refuse: (what: string) => never): Recorded
 	return Object.freeze({ amr: Object.freeze([...amr]), authentication });
 }
 
+/** The fields a primary and its DTO share, checked and copied; `authTime` is the caller's to add. */
+function copyPrimaryFields(
+	value: Record<string, unknown>,
+	refuse: (what: string) => never,
+): Omit<PrimaryAuthentication, "authTime"> {
+	if (!isNonEmptyString(value.subject)) refuse("subject must be a non-empty string");
+	const user = copyUser(value.user, refuse);
+	const recorded = copyRecorded(value.recorded, refuse);
+	if (value.redirectTo !== undefined && typeof value.redirectTo !== "string") {
+		refuse("redirectTo must be a string or absent");
+	}
+	if (!isPlainObject(value.request)) return refuse("request must be an object");
+	const { ip, userAgent } = value.request;
+	if (ip !== undefined && typeof ip !== "string") refuse("request.ip must be a string or absent");
+	if (userAgent !== undefined && typeof userAgent !== "string") {
+		refuse("request.userAgent must be a string or absent");
+	}
+	return {
+		subject: value.subject as string,
+		user,
+		recorded,
+		redirectTo: value.redirectTo as string | undefined,
+		request: Object.freeze({
+			...(ip === undefined ? {} : { ip: ip as string }),
+			...(userAgent === undefined ? {} : { userAgent: userAgent as string }),
+		}),
+	};
+}
+
 /**
- * `value` as a `PrimaryAuthentication` a login route builds (D5): a
+ * `value` as a `PrimaryAuthentication` core's builders make (D5): a
  * non-empty `subject`; a `user` that can be copied; `recorded` with a
  * non-empty `amr` and an `authentication` whose `mfaAt` is not set — and no
  * second-factor value beside a password primary; a valid `authTime`; a
@@ -129,30 +168,26 @@ export function checkPrimaryAuthentication(value: unknown): PrimaryAuthenticatio
 		throw new RangeError(`PrimaryAuthentication: ${what}`);
 	};
 	if (!isPlainObject(value)) return refuse("must be an object");
-	if (!isNonEmptyString(value.subject)) refuse("subject must be a non-empty string");
-	const user = copyUser(value.user, refuse);
-	const recorded = copyRecorded(value.recorded, refuse);
+	const fields = copyPrimaryFields(value, refuse);
 	if (!isValidDate(value.authTime)) refuse("authTime must be a valid date");
-	if (value.redirectTo !== undefined && typeof value.redirectTo !== "string") {
-		refuse("redirectTo must be a string or absent");
-	}
-	if (!isPlainObject(value.request)) return refuse("request must be an object");
-	const { ip, userAgent } = value.request;
-	if (ip !== undefined && typeof ip !== "string") refuse("request.ip must be a string or absent");
-	if (userAgent !== undefined && typeof userAgent !== "string") {
-		refuse("request.userAgent must be a string or absent");
-	}
-	return Object.freeze({
-		subject: value.subject as string,
-		user,
-		recorded,
-		authTime: new Date((value.authTime as Date).getTime()),
-		redirectTo: value.redirectTo as string | undefined,
-		request: Object.freeze({
-			...(ip === undefined ? {} : { ip: ip as string }),
-			...(userAgent === undefined ? {} : { userAgent: userAgent as string }),
-		}),
-	});
+	return Object.freeze({ ...fields, authTime: new Date((value.authTime as Date).getTime()) });
+}
+
+/** `value` as a `PrimaryAuthenticationDto`: the same, with `authTimeMs` epoch milliseconds. A frozen deep copy. */
+function checkPrimaryAuthenticationDto(value: unknown): PrimaryAuthenticationDto {
+	const refuse = (what: string): never => {
+		throw new RangeError(`PrimaryContinuation: primary ${what}`);
+	};
+	if (!isPlainObject(value)) return refuse("must be an object");
+	const fields = copyPrimaryFields(value, refuse);
+	if (!isEpochMs(value.authTimeMs)) refuse("authTimeMs must be epoch milliseconds");
+	return Object.freeze({ ...fields, authTimeMs: value.authTimeMs as number });
+}
+
+/** A primary rehydrated from its DTO: `authTime` a `Date` at `authTimeMs`. Frozen. */
+export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentication {
+	const { authTimeMs, ...fields } = dto;
+	return Object.freeze({ ...fields, authTime: new Date(authTimeMs) });
 }
 
 /**
@@ -168,6 +203,25 @@ export function checkPrimaryAdditions(requirement: string, value: unknown): Prim
 		throw new RangeError(`requirement "${requirement}" adds ${what}`);
 	};
 	if (!isPlainObject(value)) return refuse("something that is not an object");
+	const amr = checkAddedAmr(requirement, value, refuse);
+	if (value.mfaAt !== undefined && !isValidDate(value.mfaAt)) {
+		refuse("an mfaAt that is not a valid date");
+	}
+	if (requirement !== MFA_REQUIREMENT_NAME && value.mfaAt !== undefined) {
+		refuse("an mfaAt, which only the requirement named mfa may add");
+	}
+	return Object.freeze({
+		amr,
+		...(value.mfaAt === undefined ? {} : { mfaAt: new Date((value.mfaAt as Date).getTime()) }),
+	});
+}
+
+/** The `amr` rules an addition is held to under `requirement`, shared by both forms. */
+function checkAddedAmr(
+	requirement: string,
+	value: Record<string, unknown>,
+	refuse: (what: string) => never,
+): readonly string[] {
 	const amr = value.amr;
 	if (!isStringList(amr) || amr.length === 0 || !amr.every(isNonEmptyString)) {
 		refuse("an amr that is not a non-empty list of non-empty strings");
@@ -181,49 +235,97 @@ export function checkPrimaryAdditions(requirement: string, value: unknown): Prim
 	if (values.every((entry) => entry === MFA_AMR)) {
 		refuse(`"${MFA_AMR}" alone, which comes beside a factor's own amr values`);
 	}
-	if (value.mfaAt !== undefined && !isValidDate(value.mfaAt)) {
-		refuse("an mfaAt that is not a valid date");
+	if (
+		requirement !== MFA_REQUIREMENT_NAME &&
+		values.some((entry) => SECOND_FACTOR_AMR.has(entry))
+	) {
+		refuse("a second-factor amr value, which only the requirement named mfa may add");
 	}
-	if (requirement !== MFA_REQUIREMENT_NAME) {
-		if (values.some((entry) => SECOND_FACTOR_AMR.has(entry))) {
-			refuse("a second-factor amr value, which only the requirement named mfa may add");
-		}
-		if (value.mfaAt !== undefined) {
-			refuse("an mfaAt, which only the requirement named mfa may add");
-		}
+	return Object.freeze([...values]);
+}
+
+/** `value` as a `PrimaryAdditionsDto` under `requirement`: the `amr` rules, and `mfaAtMs` epoch milliseconds, under the name `mfa` alone. */
+function checkPrimaryAdditionsDto(requirement: string, value: unknown): PrimaryAdditionsDto {
+	const refuse = (what: string): never => {
+		throw new RangeError(`requirement "${requirement}" adds ${what}`);
+	};
+	if (!isPlainObject(value)) return refuse("something that is not an object");
+	const amr = checkAddedAmr(requirement, value, refuse);
+	if (value.mfaAtMs !== undefined && !isEpochMs(value.mfaAtMs)) {
+		refuse("an mfaAtMs that is not epoch milliseconds");
+	}
+	if (requirement !== MFA_REQUIREMENT_NAME && value.mfaAtMs !== undefined) {
+		refuse("an mfaAt, which only the requirement named mfa may add");
 	}
 	return Object.freeze({
-		amr: Object.freeze([...values]),
-		...(value.mfaAt === undefined ? {} : { mfaAt: new Date((value.mfaAt as Date).getTime()) }),
+		amr,
+		...(value.mfaAtMs === undefined ? {} : { mfaAtMs: value.mfaAtMs as number }),
 	});
 }
 
-function copyCompleted(value: unknown, refuse: (what: string) => never): CompletedRequirement {
+/** Additions rehydrated from their DTO: `mfaAt` a `Date` at `mfaAtMs`. Frozen. */
+export function additionsFromDto(dto: PrimaryAdditionsDto): PrimaryAdditions {
+	return Object.freeze({
+		amr: Object.freeze([...dto.amr]),
+		...(dto.mfaAtMs === undefined ? {} : { mfaAt: new Date(dto.mfaAtMs) }),
+	});
+}
+
+function copyCompleted(value: unknown, refuse: (what: string) => never): CompletedRequirementDto {
 	if (!isPlainObject(value)) return refuse("done holds an entry that is not an object");
 	if (!isNonEmptyString(value.requirement)) {
 		refuse("done holds an entry whose requirement is not a non-empty string");
 	}
 	return Object.freeze({
 		requirement: value.requirement as string,
-		adds: checkPrimaryAdditions(value.requirement as string, value.adds),
+		adds: checkPrimaryAdditionsDto(value.requirement as string, value.adds),
 	});
 }
 
 /**
- * `value` as a `PrimaryContinuation` (D5): a primary (`checkPrimaryAuthentication`)
- * and `done`, a list of completed requirements each with what it added
- * (`checkPrimaryAdditions`), no name twice. A frozen deep copy: what a
- * requirement's record holds and what `resumePrimary` reads back.
+ * `value` as a `PrimaryContinuation` (D5): a primary DTO
+ * (`checkPrimaryAuthenticationDto`) and `done`, a list of completed
+ * requirements each with what it added (`checkPrimaryAdditionsDto`), no name
+ * twice — every field its type admits, every instant epoch milliseconds. A
+ * frozen deep copy: what a requirement's record holds and what
+ * `resumePrimary` reads back.
  */
 export function checkPrimaryContinuation(value: unknown): PrimaryContinuation {
 	const refuse = (what: string): never => {
 		throw new RangeError(`PrimaryContinuation: ${what}`);
 	};
 	if (!isPlainObject(value)) return refuse("must be an object");
-	const primary = checkPrimaryAuthentication(value.primary);
+	const primary = checkPrimaryAuthenticationDto(value.primary);
 	if (!Array.isArray(value.done)) return refuse("done must be a list");
 	const done = value.done.map((entry) => copyCompleted(entry, refuse));
 	const names = new Set(done.map((entry) => entry.requirement));
 	if (names.size !== done.length) refuse("done names a requirement twice");
 	return Object.freeze({ primary, done: Object.freeze(done) });
+}
+
+/**
+ * The continuation admission answers an interruption with (D5): the
+ * primary as the route built it and every completed requirement's
+ * additions, as the serialisable DTO — every instant as epoch milliseconds.
+ * Frozen.
+ */
+export function continuationOf(
+	primary: PrimaryAuthentication,
+	done: readonly CompletedRequirement[],
+): PrimaryContinuation {
+	const { authTime, ...fields } = primary;
+	return Object.freeze({
+		primary: Object.freeze({ ...fields, authTimeMs: authTime.getTime() }),
+		done: Object.freeze(
+			done.map((entry) =>
+				Object.freeze({
+					requirement: entry.requirement,
+					adds: Object.freeze({
+						amr: Object.freeze([...entry.adds.amr]),
+						...(entry.adds.mfaAt === undefined ? {} : { mfaAtMs: entry.adds.mfaAt.getTime() }),
+					}),
+				}),
+			),
+		),
+	});
 }

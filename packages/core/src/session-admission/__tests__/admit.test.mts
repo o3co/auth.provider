@@ -937,6 +937,35 @@ describe("step 5 — the requirements", () => {
 		]);
 	});
 
+	it("takes a step_up over no session as reauthenticate by the requirement's name, said once per process: step_up always carries a live session", async () => {
+		const { logger, lines } = recordingLogger();
+		const stepping = met("stepping", {
+			reach: new Set(["risk-ok"]),
+			stepUpPage: { url: "/stepping", params: {} },
+			admit: async () => ({ outcome: "step_up", whenStillUnmet: "unmet" }),
+		});
+		const without = deps({
+			userSessionStore: undefined,
+			requirements: resolverForTests([stepping]),
+			logger,
+		});
+		expect(await admitSession(without, request())).toEqual({
+			outcome: "reauthenticate",
+			requirement: "stepping",
+			session: null,
+		});
+		expect(
+			await admitSession(without, request({ claim: tokenClaim({ sub: "user-1", amr: ["pwd"] }) })),
+		).toMatchObject({ outcome: "reauthenticate", session: null });
+		expect(lines).toEqual([
+			{
+				level: "warn",
+				message: "session_admission_step_up_without_session",
+				fields: { requirement: "stepping" },
+			},
+		]);
+	});
+
 	it("reads a requirement's reach live, at request time: a reach that fills after registration counts", async () => {
 		const record = session();
 		let reach = new Set<string>();

@@ -24,9 +24,12 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
+	continuationOf,
+	primaryFromDto,
 } from "#/session-admission/primary.mjs";
 import {
 	MFA_REQUIREMENT_NAME,
@@ -206,12 +209,39 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 	});
 });
 
-describe("checkPrimaryContinuation — what a requirement persists and presents back", () => {
-	it("answers a frozen deep copy of the primary and every completed requirement", () => {
-		const source = {
-			primary: primary(),
+describe("the continuation — what a requirement persists and presents back, as a serialisable DTO", () => {
+	const dto = () => {
+		const { authTime, ...fields } = primary();
+		return { ...fields, authTimeMs: authTime.getTime() };
+	};
+
+	it("continuationOf carries the primary and every completion with epoch milliseconds, so a JSON round trip is exact", () => {
+		const continuation = continuationOf(primary(), [
+			{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+			{ requirement: "risk", adds: { amr: ["risk-ok"] } },
+		]);
+		expect(continuation).toEqual({
+			primary: dto(),
 			done: [
-				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() } },
+				{ requirement: "risk", adds: { amr: ["risk-ok"] } },
+			],
+		});
+		expect(Object.isFrozen(continuation)).toBe(true);
+		expect(Object.isFrozen(continuation.done)).toBe(true);
+		// Every instant of the continuation's own is milliseconds; what the
+		// user snapshot holds is the repository's, JSON as it comes from one.
+		const plain = continuationOf(primary({ user: { id: "user-1", groups: ["staff"] } }), [
+			{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+		]);
+		expect(checkPrimaryContinuation(JSON.parse(JSON.stringify(plain)))).toEqual(plain);
+	});
+
+	it("checkPrimaryContinuation answers a frozen deep copy of the DTO", () => {
+		const source = {
+			primary: dto(),
+			done: [
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAtMs: NOW.getTime() } },
 				{ requirement: "risk", adds: { amr: ["risk-ok"] } },
 			],
 		};
@@ -223,10 +253,22 @@ describe("checkPrimaryContinuation — what a requirement persists and presents 
 		expect(checked.done).toHaveLength(2);
 	});
 
-	it("refuses a continuation whose done names a requirement twice, holds a bad addition, or is not a list", () => {
+	it("rehydrates: the primary's authTime and an addition's mfaAt become dates at their milliseconds", () => {
+		const continuation = continuationOf(primary(), [
+			{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+		]);
+		expect(primaryFromDto(continuation.primary)).toEqual(primary());
+		expect(additionsFromDto(continuation.done[0]?.adds as never)).toEqual({
+			amr: ["otp", "mfa"],
+			mfaAt: NOW,
+		});
+		expect(additionsFromDto({ amr: ["risk-ok"] })).toEqual({ amr: ["risk-ok"] });
+	});
+
+	it("refuses a continuation whose done names a requirement twice, holds a bad addition, an instant that is not epoch milliseconds, or is not a list", () => {
 		expect(() =>
 			checkPrimaryContinuation({
-				primary: primary(),
+				primary: dto(),
 				done: [
 					{ requirement: "mfa", adds: { amr: ["otp"] } },
 					{ requirement: "mfa", adds: { amr: ["hwk"] } },
@@ -235,13 +277,31 @@ describe("checkPrimaryContinuation — what a requirement persists and presents 
 		).toThrow(/twice/);
 		expect(() =>
 			checkPrimaryContinuation({
-				primary: primary(),
+				primary: dto(),
 				done: [{ requirement: "risk", adds: { amr: ["otp"] } }],
 			}),
 		).toThrow(RangeError);
-		expect(() => checkPrimaryContinuation({ primary: primary(), done: {} })).toThrow(RangeError);
 		expect(() =>
-			checkPrimaryContinuation({ primary: primary(), done: [{ adds: { amr: ["x"] } }] }),
+			checkPrimaryContinuation({
+				primary: dto(),
+				done: [{ requirement: "risk", adds: { amr: ["risk-ok"], mfaAtMs: NOW.getTime() } }],
+			}),
+		).toThrow(/only the requirement named mfa/);
+		for (const bad of [NOW, "now", -1, 1.5, Number.NaN]) {
+			expect(() =>
+				checkPrimaryContinuation({
+					primary: dto(),
+					done: [{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAtMs: bad } }],
+				}),
+			).toThrow(RangeError);
+			expect(() =>
+				checkPrimaryContinuation({ primary: { ...dto(), authTimeMs: bad }, done: [] }),
+			).toThrow(RangeError);
+		}
+		expect(() => checkPrimaryContinuation({ primary: primary(), done: [] })).toThrow(RangeError);
+		expect(() => checkPrimaryContinuation({ primary: dto(), done: {} })).toThrow(RangeError);
+		expect(() =>
+			checkPrimaryContinuation({ primary: dto(), done: [{ adds: { amr: ["x"] } }] }),
 		).toThrow(RangeError);
 		expect(() => checkPrimaryContinuation(undefined)).toThrow(RangeError);
 		expect(() => checkPrimaryContinuation({ done: [] })).toThrow(RangeError);

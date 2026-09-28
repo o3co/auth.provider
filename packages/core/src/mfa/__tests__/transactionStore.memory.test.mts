@@ -66,7 +66,7 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => ({
 					mfaAt: undefined,
 				},
 			},
-			authTime: new Date(T0),
+			authTimeMs: T0,
 			redirectTo: undefined,
 			request: {},
 		},

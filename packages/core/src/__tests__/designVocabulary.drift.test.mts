@@ -626,6 +626,18 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 	},
 	{
 		file: "packages/core/src/session-admission/primary.mts",
+		read: "dto.amr",
+		count: 1,
+		why: "additionsFromDto copies what a completed requirement added, as the continuation carries it — never a session record",
+	},
+	{
+		file: "packages/core/src/session-admission/primary.mts",
+		read: "entry.adds.amr",
+		count: 1,
+		why: "continuationOf copies what a completed requirement added into the DTO — never a session record",
+	},
+	{
+		file: "packages/core/src/session-admission/primary.mts",
 		read: "value.authentication",
 		count: 1,
 		why: "the establishment check reads a primary's recorded authentication, what a login route hands in, never a session record",

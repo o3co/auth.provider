@@ -62,9 +62,12 @@ import {
 import type { UserSession } from "../user-sessions/types.mjs";
 import { type AcrSelection, selectAcr, stepUpReach } from "./acr.mjs";
 import {
+	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
+	continuationOf,
+	primaryFromDto,
 } from "./primary.mjs";
 import {
 	type Admission,
@@ -307,6 +310,9 @@ const undeclaredRemediations = new Set<string>();
 
 /** The requirements already said to have stepped up without a page, once per process each (D2, step 5). */
 const pagelessStepUps = new Set<string>();
+
+/** The requirements already said to have stepped up over no session, once per process each (D2, step 5). */
+const sessionlessStepUps = new Set<string>();
 
 // ---------------------------------------------------------------------------
 // admitSession (D2)
@@ -556,11 +562,13 @@ export async function admitSession(
 }
 
 /**
- * A requirement's `step_up` as admission takes it: over no session it is
- * `reauthenticate` — nothing can be stepped up onto no session, and a login
- * can; from a requirement that registered no page it is `unmet` by its
- * name, fail closed, said once per process — nothing could finish the trip;
- * else the registered page.
+ * A requirement's `step_up` as admission takes it: over no session (no
+ * store, or a token carrier without a record) it is `reauthenticate` by its
+ * name, said once per process — nothing can be stepped up onto no session,
+ * and a login can — so `step_up` always carries a live session; from a
+ * requirement that registered no page it is `unmet` by its name, fail
+ * closed, said once per process — nothing could finish the trip; else the
+ * registered page.
  */
 function stepUpVerdict(
 	name: string,
@@ -569,7 +577,13 @@ function stepUpVerdict(
 	session: UserSession | null,
 	deps: AdmissionDeps,
 ): RequirementOutcome {
-	if (session === null) return { outcome: "reauthenticate", requirement: name };
+	if (session === null) {
+		if (!sessionlessStepUps.has(name)) {
+			sessionlessStepUps.add(name);
+			deps.logger?.warn({ requirement: name }, "session_admission_step_up_without_session");
+		}
+		return { outcome: "reauthenticate", requirement: name };
+	}
 	const page = requirement.stepUpPage;
 	if (page === undefined) {
 		if (!pagelessStepUps.has(name)) {
@@ -911,7 +925,7 @@ export async function admitPrimary(
 	if (!isObject(primary) || !knownPrimaries.has(primary)) {
 		throw new RangeError("admitPrimary: the primary must be one passwordPrimary built");
 	}
-	return askEvery(deps, primary, Object.freeze({ primary, done: Object.freeze([]) }));
+	return askEvery(deps, primary, continuationOf(primary, []));
 }
 
 /**
@@ -949,15 +963,17 @@ function composeRecorded(
 
 /**
  * `resumePrimary` (D5): after a requirement's ceremony completes. Refuses,
- * before asking anything, a continuation it cannot read
- * (`checkPrimaryContinuation`), a completion by a name that is not a
- * registered requirement with `admitPrimary` — or one already in `done` —
- * and what the name may not add (`checkPrimaryAdditions`); then appends the
- * completion, composes the session's `recorded` from the primary and every
- * completed requirement's additions, and asks every requirement with
- * `admitPrimary` again, in order, over the composed result: a requirement
- * that already completed sees its own additions and answers `establish`;
- * one that has not may interrupt, with the updated continuation.
+ * before asking anything, a continuation it cannot read — the serialisable
+ * DTO the requirement persisted, every field its type admits, every instant
+ * epoch milliseconds (`checkPrimaryContinuation`), rehydrated here — a
+ * completion by a name that is not a registered requirement with
+ * `admitPrimary` — or one already in `done` — and what the name may not add
+ * (`checkPrimaryAdditions`); then appends the completion, composes the
+ * session's `recorded` from the primary and every completed requirement's
+ * additions, and asks every requirement with `admitPrimary` again, in order,
+ * over the composed result: a requirement that already completed sees its
+ * own additions and answers `establish`; one that has not may interrupt,
+ * with the updated continuation.
  */
 export async function resumePrimary(
 	deps: AdmissionDeps,
@@ -983,15 +999,15 @@ export async function resumePrimary(
 		throw new RangeError(`resumePrimary: "${completed.requirement}" already completed`);
 	}
 	const adds = checkPrimaryAdditions(completed.requirement, completed.adds);
-	const done = Object.freeze([
-		...read.done,
+	// Rehydrated: the continuation carries epoch milliseconds.
+	const primary = primaryFromDto(read.primary);
+	const done: readonly CompletedRequirement[] = Object.freeze([
+		...read.done.map((entry) =>
+			Object.freeze({ requirement: entry.requirement, adds: additionsFromDto(entry.adds) }),
+		),
 		Object.freeze({ requirement: completed.requirement, adds }),
 	]);
-	return askEvery(
-		deps,
-		composeRecorded(read.primary, done),
-		Object.freeze({ primary: read.primary, done }),
-	);
+	return askEvery(deps, composeRecorded(primary, done), continuationOf(primary, done));
 }
 
 /** What a federated login legitimately produces (D5): the federation's own facts, never a `recorded`. */

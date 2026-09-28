@@ -449,20 +449,45 @@ export interface PrimaryAdditions {
 	readonly mfaAt?: Date;
 }
 
-/** One requirement's completed ceremony, as the continuation records it. */
+/** One requirement's completed ceremony, as `resumePrimary` is told of it. */
 export interface CompletedRequirement {
 	readonly requirement: string;
 	readonly adds: PrimaryAdditions;
 }
 
+/** A primary as a continuation carries it: `authTime` as epoch milliseconds, so a JSON round trip through a store is exact. */
+export interface PrimaryAuthenticationDto {
+	readonly subject: string;
+	readonly user: Readonly<Record<string, unknown>>;
+	readonly recorded: RecordedAuthentication;
+	readonly authTimeMs: number;
+	readonly redirectTo: string | undefined;
+	readonly request: { readonly ip?: string; readonly userAgent?: string };
+}
+
+/** What a completed requirement added, as a continuation carries it: `mfaAt` as epoch milliseconds. */
+export interface PrimaryAdditionsDto {
+	readonly amr: readonly string[];
+	readonly mfaAtMs?: number;
+}
+
+/** One requirement's completed ceremony, as a continuation records it. */
+export interface CompletedRequirementDto {
+	readonly requirement: string;
+	readonly adds: PrimaryAdditionsDto;
+}
+
 /**
- * Plain data a requirement persists in its own record and presents to
- * `resumePrimary` when its ceremony completes: the primary as the route built
- * it, and what every completed requirement added so far.
+ * An explicitly serialisable DTO a requirement persists in its own record —
+ * the MFA transaction — and presents to `resumePrimary` when its ceremony
+ * completes: the primary as the route built it, and what every completed
+ * requirement added so far, every instant as epoch milliseconds, so a JSON
+ * round trip through a store is exact. `resumePrimary` rehydrates and
+ * validates it (`checkPrimaryContinuation`) before composing.
  */
 export interface PrimaryContinuation {
-	readonly primary: PrimaryAuthentication;
-	readonly done: readonly CompletedRequirement[];
+	readonly primary: PrimaryAuthenticationDto;
+	readonly done: readonly CompletedRequirementDto[];
 }
 
 /**

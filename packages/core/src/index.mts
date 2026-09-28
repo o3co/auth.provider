@@ -864,9 +864,12 @@ export {
 	tokenClaim,
 } from "./session-admission/admit.mjs";
 export {
+	additionsFromDto,
 	checkPrimaryAdditions,
 	checkPrimaryAuthentication,
 	checkPrimaryContinuation,
+	continuationOf,
+	primaryFromDto,
 } from "./session-admission/primary.mjs";
 export {
 	type Admission,
@@ -876,6 +879,7 @@ export {
 	type AdmissionGrade,
 	type AdmissionRequest,
 	type CompletedRequirement,
+	type CompletedRequirementDto,
 	checkRegisteredReach,
 	checkStepUpPage,
 	type Establishment,
@@ -885,8 +889,10 @@ export {
 	isHintToken,
 	MFA_REQUIREMENT_NAME,
 	type PrimaryAdditions,
+	type PrimaryAdditionsDto,
 	type PrimaryAdmission,
 	type PrimaryAuthentication,
+	type PrimaryAuthenticationDto,
 	type PrimaryContinuation,
 	type RequirementInput,
 	type RequirementSession,

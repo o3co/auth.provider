@@ -96,7 +96,7 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 						mfaAt: undefined,
 					},
 				},
-				authTime: new Date(now - 1_000),
+				authTimeMs: now - 1_000,
 				redirectTo: "https://app.example/after",
 				request: { ip: "198.51.100.7", userAgent: "contract" },
 			},

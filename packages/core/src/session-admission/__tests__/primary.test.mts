@@ -33,6 +33,7 @@ import {
 	passwordPrimary,
 	resumePrimary,
 } from "#/session-admission/admit.mjs";
+import { continuationOf } from "#/session-admission/primary.mjs";
 import type {
 	AdmissionDeps,
 	Interruption,
@@ -203,7 +204,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 		expect(admission).toMatchObject({
 			outcome: "interrupt",
 			requirement: "second",
-			continuation: { primary: primary(), done: [] },
+			continuation: continuationOf(primary(), []),
 		});
 		expect(first.asked[0]).toEqual(primary());
 	});
@@ -365,8 +366,7 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 
 describe("resumePrimary — after a ceremony completes (D5)", () => {
 	const continuation = (over: Partial<PrimaryContinuation> = {}): PrimaryContinuation => ({
-		primary: primary(),
-		done: [],
+		...continuationOf(primary(), []),
 		...over,
 	});
 
@@ -406,13 +406,14 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 		expect(first).toMatchObject({
 			outcome: "interrupt",
 			requirement: "risk",
-			continuation: {
-				primary: primary(),
-				done: [{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }],
-			},
+			continuation: continuationOf(primary(), [
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+			]),
 		});
+		// A persisted continuation is plain data: a JSON round trip resumes it.
+		const persisted = JSON.parse(JSON.stringify(first.continuation)) as PrimaryContinuation;
 		if (first.outcome !== "interrupt") throw new Error("unreachable");
-		const second = await resumePrimary(deps([mfa, risk]), first.continuation, {
+		const second = await resumePrimary(deps([mfa, risk]), persisted, {
 			requirement: "risk",
 			adds: { amr: ["risk-ok"] },
 		});
@@ -461,8 +462,15 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 			["mfa alone", continuation(), { requirement: "mfa", adds: { amr: ["mfa"] } }],
 			[
 				"a name completing twice",
-				continuation({ done: [{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } }] }),
+				continuationOf(primary(), [
+					{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
+				]),
 				{ requirement: "mfa", adds: { amr: ["hwk", "mfa"], mfaAt: NOW } },
+			],
+			[
+				"a continuation carrying a date where milliseconds belong",
+				{ primary: primary(), done: [] } as never,
+				{ requirement: "mfa", adds: { amr: ["otp", "mfa"] } },
 			],
 			[
 				"a continuation without a primary",
