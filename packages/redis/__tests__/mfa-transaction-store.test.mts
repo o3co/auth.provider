@@ -179,6 +179,27 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 		expect(await deadlineOf(key)).toBe(Math.ceil(expiresAtMs));
 	});
 
+	it("answers a transaction past its expiresAtMs on its own clock as absent, though the server still holds it", async () => {
+		// A server whose clock runs behind keeps the key past the deadline; the
+		// store's own clock (`now`, the host's by default) is the transaction's
+		// too, so get, update and consume cannot complete a ceremony past it.
+		const prefix = freshPrefix();
+		const onTime = storeAt(prefix);
+		const ahead = createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() + 11 * MINUTE,
+		});
+		const tx = TX();
+		await onTime.create(tx);
+		expect(await ahead.get("tx-1")).toBeNull();
+		expect(await ahead.update("tx-1", 1, { sends: 1 })).toBeNull();
+		expect(await onTime.get("tx-1")).toStrictEqual(tx);
+		expect(await ahead.consume("tx-1", 1)).toBeNull();
+		// …and it refuses to create one whose expiry is already past on that clock.
+		await expect(ahead.create(TX({ id: "tx-2" }))).rejects.toThrow(RangeError);
+	});
+
 	it("answers a transaction it cannot read back as absent, a consume included", async () => {
 		// A transaction is ten minutes of one ceremony: absence fails closed —
 		// the user starts again from the password — where an outage would
