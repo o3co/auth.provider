@@ -33,7 +33,7 @@ import {
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
@@ -118,6 +118,7 @@ async function buildApp(
 		createClientCredentialsGrant({ config: fullConfig, keyStore }),
 	);
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config: fullConfig,
 		clientRepository: clientRepo,

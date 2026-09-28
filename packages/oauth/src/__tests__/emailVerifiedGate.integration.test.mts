@@ -32,7 +32,7 @@ import {
 	type GrantHandler,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -85,6 +85,7 @@ const makeApp = async (opts: { requireEmailVerified: boolean; user: Record<strin
 	registry.register("authorization_code", okGrant());
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config: makeConfig(opts.requireEmailVerified),
 		clientRepository,

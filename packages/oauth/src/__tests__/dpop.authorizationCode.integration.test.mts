@@ -38,6 +38,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
@@ -111,6 +112,7 @@ function makeDeps(
 	options: { readonly bindConfidentialClientRefreshTokens?: boolean } = {},
 ) {
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config:
 			options.bindConfidentialClientRefreshTokens === undefined
 				? mockConfig

@@ -29,7 +29,7 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
@@ -92,6 +92,7 @@ async function buildApp(config: AppConfig): Promise<express.Express> {
 	const registry = new GrantRegistry();
 	registry.register("client_credentials", createClientCredentialsGrant({ config, keyStore }));
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config,
 		clientRepository: clientRepo,

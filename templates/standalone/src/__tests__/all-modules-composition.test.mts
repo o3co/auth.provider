@@ -918,7 +918,7 @@ const OUTAGES: readonly OutageCase[] = [
 				.send({ grant_type: "session", scope: "openid" });
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		event: "session_grant_store_unavailable",
+		event: "session_admission_unavailable",
 	},
 	{
 		module: "oauth (consent step)",

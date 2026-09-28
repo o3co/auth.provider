@@ -37,7 +37,6 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type FederationTokenStore,
-	type GrantDependencies,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
@@ -45,12 +44,12 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { createSessionGrant } from "#/grants/session.mjs";
+import { createSessionGrant, type SessionGrantDeps } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 
@@ -129,10 +128,15 @@ async function buildApp(userSessionStore: UserSessionStore) {
 	const registry = new GrantRegistry();
 	registry.register(
 		"session",
-		createSessionGrant({ config, keyStore } as unknown as GrantDependencies),
+		createSessionGrant({
+			config,
+			keyStore,
+			sessionRequirementResolver: resolverForTests([]),
+		} as unknown as SessionGrantDeps),
 	);
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config,
 		clientRepository,

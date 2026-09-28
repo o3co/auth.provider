@@ -76,19 +76,40 @@ export const REAUTH_ASK_KEY_PREFIX = "reauth:";
 /** The query parameter naming the ask on the URL the login page returns to. */
 export const REAUTH_ASK_PARAM = "reauth_ask";
 
+/**
+ * One ask per authorization request, accumulating what was asked (the MFA
+ * ADR's D17, amended by the session-admission ADR): the login trip, and a
+ * step-up trip per requirement. Every instant is epoch milliseconds, not
+ * seconds: an authentication must come strictly after the ask, and in whole
+ * seconds a session created earlier in the same second compared equal
+ * (v0.13.0 audit).
+ */
 export interface ReauthAskRecord {
-	/**
-	 * Epoch milliseconds at which this endpoint asked for a re-authentication.
-	 * Milliseconds, not seconds: an authentication must come strictly after the
-	 * ask, and in whole seconds a session created earlier in the same second
-	 * compared equal (v0.13.0 audit).
-	 */
-	readonly askedAt: number;
 	/**
 	 * The canonical authorize request the ask was minted for, without the ask
 	 * parameter itself. A return to a different request finds nothing.
 	 */
 	readonly request: string;
+	/**
+	 * When the first ask of this request was written: kept across the writes
+	 * of its later trips, for the cap the MFA ADR's D17 measures from it. A
+	 * record's window is measured from its last write.
+	 */
+	readonly createdAt: number;
+	/**
+	 * When the browser was sent to the login page — the freshness reference
+	 * for `max_age` and `prompt=login` — or `undefined` when it was not (a
+	 * step-up trip alone). Carried from one record to the next, so a login
+	 * asked before a step-up still stands after it.
+	 */
+	readonly loginAskedAt: number | undefined;
+	/**
+	 * When the browser was sent to each requirement's step-up page, by the
+	 * requirement's name: a session that comes back not later than its entry
+	 * was already sent and is refused rather than sent again, while a second
+	 * requirement's trip is not refused as "already sent" (D17, amended).
+	 */
+	readonly stepUpAskedAt: Readonly<Record<string, number>>;
 }
 
 /**
@@ -115,15 +136,54 @@ export interface ReauthAskStore {
 	consume(id: string, request: string): Promise<ReauthAskRecord | null>;
 }
 
-/** Reject anything that is not the record this module wrote. */
+const isInstant = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value);
+
+/**
+ * When `record` was last written: every write records a stage at the moment
+ * it is written — the login trip `loginAskedAt`, a step-up trip its entry in
+ * `stepUpAskedAt` — so the latest of them, or `createdAt` for a record with
+ * none, is that write. Each write opens a window of its own
+ * (`REAUTH_ASK_TTL_MS`); `createdAt` is kept across them (the MFA ADR's D17).
+ */
+const lastWrittenAt = (record: ReauthAskRecord): number =>
+	Math.max(
+		record.createdAt,
+		record.loginAskedAt ?? Number.NEGATIVE_INFINITY,
+		...Object.values(record.stepUpAskedAt),
+	);
+
+/**
+ * Reject anything that is not the record this module wrote. A record in the
+ * previous shape — `askedAt` and `request`, written before the ask
+ * accumulated trips — reads as a login asked at `askedAt`, so a trip in
+ * flight survives a rolling upgrade.
+ */
 const readRecord = (value: unknown): ReauthAskRecord | null => {
 	if (value == null || typeof value !== "object") return null;
 	const record = (value as { reauth?: unknown }).reauth;
 	if (record == null || typeof record !== "object") return null;
-	const { askedAt, request } = record as Record<string, unknown>;
-	if (typeof askedAt !== "number" || !Number.isFinite(askedAt)) return null;
+	const { askedAt, request, createdAt, loginAskedAt, stepUpAskedAt } = record as Record<
+		string,
+		unknown
+	>;
 	if (typeof request !== "string") return null;
-	return { askedAt, request };
+	if (isInstant(askedAt) && createdAt === undefined) {
+		return { request, createdAt: askedAt, loginAskedAt: askedAt, stepUpAskedAt: {} };
+	}
+	if (!isInstant(createdAt)) return null;
+	if (loginAskedAt !== undefined && !isInstant(loginAskedAt)) return null;
+	if (stepUpAskedAt == null || typeof stepUpAskedAt !== "object" || Array.isArray(stepUpAskedAt)) {
+		return null;
+	}
+	// A copy without a prototype: the keys are requirement names a store
+	// round-tripped, looked up by name.
+	const trips: Record<string, number> = Object.create(null);
+	for (const [name, at] of Object.entries(stepUpAskedAt as Record<string, unknown>)) {
+		if (!isInstant(at)) return null;
+		trips[name] = at;
+	}
+	return { request, createdAt, loginAskedAt, stepUpAskedAt: trips };
 };
 
 /**
@@ -159,7 +219,18 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 							httpOnly: true,
 							path: "/",
 						},
-						reauth: { askedAt: record.askedAt, request: record.request },
+						reauth: {
+							request: record.request,
+							createdAt: record.createdAt,
+							loginAskedAt: record.loginAskedAt,
+							stepUpAskedAt: { ...record.stepUpAskedAt },
+							// For one release: an older replica reads `askedAt` and
+							// `request` alone, so a login ask stays readable to it during a
+							// rolling upgrade; a step-up alone asked for no login and
+							// writes none. Drop it in the release after the one that
+							// ships session admission, when no replica reads it.
+							...(record.loginAskedAt === undefined ? {} : { askedAt: record.loginAskedAt }),
+						},
 					},
 					(err?: unknown) => (err ? reject(err as Error) : resolve()),
 				);
@@ -181,7 +252,7 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 				store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
 			});
 			if (record.request !== request) return null;
-			if (record.askedAt + REAUTH_ASK_TTL_MS <= Date.now()) return null;
+			if (lastWrittenAt(record) + REAUTH_ASK_TTL_MS <= Date.now()) return null;
 			return record;
 		},
 	};

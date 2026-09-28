@@ -44,6 +44,7 @@ import {
 	type KeyStore,
 	type RefreshTokenFamilyStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { CompactEncrypt, compactDecrypt, decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
@@ -94,6 +95,7 @@ async function exchangeCode(keyStore: KeyStore) {
 	});
 	const register = vi.fn(rotation.register);
 	const handler = createAuthorizationGrant({
+		sessionRequirementResolver: resolverForTests([]),
 		config,
 		keyStore,
 		clientRepository: { findById: async () => null, authenticate: async () => null },

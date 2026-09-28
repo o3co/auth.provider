@@ -37,6 +37,7 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -96,6 +97,7 @@ const refreshTokenFamilyRevocation = {
 /** Exchange a code the way a confidential client does: no cookie on the request. */
 async function exchangeCodeWithoutCookie() {
 	const handler = createAuthorizationGrant({
+		sessionRequirementResolver: resolverForTests([]),
 		config,
 		keyStore,
 		clientRepository,

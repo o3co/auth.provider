@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-09-28
+最終更新: 2026-09-29
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -13,6 +13,7 @@
 - [エンドポイント](#エンドポイント)の表にあるルート — device グラントや federation grants など、他のパッケージも `/oauth` 配下にルートをマウントする — と、各ルートが走らせるチェックの順序、ワイヤー上の応答;
 - クライアント認証が要るすべてのエンドポイントでのクライアント認証 — `client_secret_basic`、`client_secret_post`、`private_key_jwt`、ルートが許す場合の public クライアント — を 1 つのミドルウェア `createClientAuthMiddleware` として。[`@o3co/auth-provider-device-grant`](../device-grant/README.md) と [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) もこれを再利用する;
 - 組み込みのグラント: `authorization_code`、`refresh_token`、`client_credentials`、`session`、RFC 7523 jwt-bearer;
+- セッションを使う各コンシューマーが、アドミッションの結果それぞれに何を返すか — リダイレクト、RFC 6749 のエラー、`401` — と、`/authorize` がブラウザーを送り出すステップアップの往復（[セッションアドミッション](#セッションアドミッション) を参照）;
 - ログアウトカスケード（`cascadeLogout`）、OIDC のバックチャネル / フロントチャネルログアウト、そのカスケードの上に core の subject revocation service を配線するモジュール;
 - Client ID Metadata Documents の解決: 取得、その SSRF ガード、キャッシュ;
 - このサーバーのエンドポイントと機能が提供するディスカバリーの一部。
@@ -20,6 +21,7 @@
 **所有しないもの:**
 
 - ポートとレコード（`ClientRepository`、`CodeRepository`、`KeyStore`、`UserSessionStore`、`Client` レコード …）、トークンの発行と検証（`generateToken`、`verifyJwt`）、グラントの契約と `/oauth/token` が振り分けに使うレジストリ、ディスカバリードキュメント本体と `jwks_uri` — core;
+- セッションが先へ進んでよいかどうか — 生存確認の読み取り、サブジェクト、サブジェクト失効の境界、登録済みのセッション要件、`acr` の選択 — core のセッションアドミッション（`admitSession`、[`session-admission/`](../core/src/session-admission/README.md)）。このパッケージはアクションを名指し、結果を対応付ける;
 - ログイン、ブラウザーセッション、フェデレーションのログインルート — `@o3co/auth-provider-session`（`POST /session/logout` もそちらにあり、このパッケージのカスケードは走らせない: [ログアウト](#ログアウト)を参照）;
 - その他のグラントタイプ — token exchange、device code、WebAuthn — それぞれのパッケージが同じ `/oauth/token` に提供する;
 - 上流トークンのオフライン委譲（`/oauth/federation-grants`） — `@o3co/auth-provider-federation-grants`;
@@ -33,8 +35,8 @@
 | モジュール | 提供するもの | 分けている理由 |
 |---|---|---|
 | [`oauthModule`](./src/module.mts) | `/oauth` のルートとディスカバリーの一部。グラントは 1 つも登録しない: `/oauth/token` は core の `grantHandlerResolver` を引いて振り分け、それはインストールされた各モジュールの `grants` 提供で埋まる。 | トークンエンドポイントはどのグラントがインストールされていても同じで、セッションストアが 1 つも無くても動く。 |
-| [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` の absence policy を宣言する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
-| [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config` と `keyStore`（任意で `userSessionStore` と、ストア障害の行を書き出す `logger`）だけである。 |
+| [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer。それぞれ有効化されたときだけ。 | デプロイがグラントの組を選ぶ。これらのルート無しでグラントだけをインストールすることもでき、そのためこのモジュールは独自に `subjectRevocation` と `auditSink` の absence policy を宣言する。セッションを読む 2 つのグラントがそれを通してセッションを読む `sessionRequirementResolver` を要求する。`refresh_token` が有効なときは、トークンファミリーの 2 つのスロットが両方配線されていなければ起動を拒否する（[`refresh_token`](#refresh_token) を参照）。 |
+| [`oauthSessionModule`](./src/oauthSession.mts) | `session` グラント。有効化されたときだけ。 | 別の構成 — ブラウザーセッションから発行するファーストパーティ / BFF — のためのもので、コード系グラントとは独立に有効化され、宣言するのは `config`、`keyStore`、`sessionRequirementResolver` と、任意でアドミッションがその横で読むもの — `userSessionStore`、`subjectRevocation`、`auditSink`、障害の行を書き出す `logger` — だけで、`subjectRevocation` と `auditSink` の absence policy を付ける。 |
 | [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | `cascadeLogout` の上に組んだ core の `subjectRevocationService` コンポーネント。 | セッションカスケードの 6 ストアを要求するが、`oauthModule` のルートはそれを要求しない。`federationGrants.enabled = true` のときは `federationGrantStore` と、grants 境界を持つ `subjectRevocation` も要求し、無ければ boot を拒否する。core ではなくここにあるのは、core が `cascadeLogout` を import するとパッケージの依存方向が逆転するからである。 |
 
 どれも明示的にインストールする: どのモジュールも他のモジュールを登録しない。
@@ -91,6 +93,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 - `oauthModule` は `config`、`clientRepository`、`codeRepository`、`keyStore` と、空でない `endpoints.login.url` を要求する — `/authorize` は未認証のブラウザーをそこへ送るので、無ければ boot が拒否する。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`audit.sink.type = "none"`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
+- `oauthModule` と、グラントを登録するときの `oauthAuthorizationModule` / `oauthSessionModule` は `sessionRequirementResolver` — boot プランナーが埋める core の合成キー — を要求する。したがってそのどれかをインストールする構成は、インストールするセッション要件を `sessionRequirements.expected` で宣言しなければならず（無ければ `[]`）、さもなければ boot が拒否する（core の session-admission ADR、D7）。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。
 - `/oauth` 配下の各モジュールは自分のボディを自分でパースし、モジュールを並べる順は関係しない。`oauthModule` のルーターが JSON とフォームのボディを（Express の既定の上限で）パースするのは、[エンドポイント](#エンドポイント) の表にあるルートのうち、この構成で実際にマウントしたものだけ、それもそれぞれのパスちょうどに対してだけで、その下の長いパスは含まない（[`routes.mts`](src/routes.mts) の `oauthRoutePaths`。ログアウト、federation token、同意のルートは、ストアが配線されたときだけマウントされる）。`/oauth` 配下のそれ以外のパス — device グラント、federation grants、WebAuthn、デプロイ独自のもの、oauth がマウントしないときの `/oauth/logout` や `/oauth/consent`、`/oauth/token/custom` のように oauth のルートの下にあるものを含む — へのリクエストは、ボディを読まれないままそのルートに届き、`/oauth/revoke` のスロットルにも数えられない。そこにルートをマウントして `req.body` を読むモジュールは、自分のパーサーをマウントする。
 
@@ -133,7 +136,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `oauthSessionModule({ config })` — [`oauthSession.mts`](./src/oauthSession.mts)
 - `subjectRevocationServiceModule`（ファクトリではなくモジュールの値） — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
 
-**ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthModule` が解決済みの deps を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。
+**ルーター。** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — 明示的なオプションから `/oauth` ルーターを組み立てる。`oauthModule` が解決済みの deps を渡して呼ぶものであり、ルーターを自分でマウントする composition root 向け。グラントレジストリは生成しない: `registry` は呼び出し元が渡す `get(grantType)` を持つ任意のオブジェクトで、同じ値がそのまま返る。登録済みのグラントタイプが必要な呼び出し元は core の `grantHandlerResolver` を読むこと。`requirements` は必須である: boot プランナーが組み立てた `sessionRequirementResolver` で、`/authorize` と同意ステップはそれを通してセッションを読む。それが無い場合も、プランナーが組み立てていないものが渡された場合も、ルーターは組み立てを拒否する。テストは `@o3co/auth-provider-core/testing` の `resolverForTests` で作る。
 
 **クライアント認証。**
 
@@ -192,11 +195,13 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **新しいファミリーはリフレッシュトークン自身の識別子で登録される。** リフレッシュトークンの `jti` と、その有効期間を測り始める時刻は署名の前に予約される。`refreshTokenFamilyRotation` が配線されていれば、トークンを返す前に、ファミリーがその `jti` で、その時刻に `oauth.refreshToken.expiresIn` を足した時刻 — トークンの `exp` — を期限として登録される。グラントはそれらを署名済みのトークンから読み戻さないので、`KeyStore` がトークンをどんな形で返しても、発行されたリフレッシュトークンがローテーションの記録を持たないことはない。答えられないファミリーストアは `503 temporarily_unavailable` で、`store: "refresh_token_family"` と `step: "register"` を付けて `authorization_grant_store_unavailable` としてログに出す。ローテーションを配線しなければファミリーは登録されず、リプレイ検出は働かない — そうした構成は `refresh_token` グラント無しでしか起動しないので、それらのリフレッシュトークンを引き換えるものは無い。
 
-**`userSessionStore` が配線されているとき、コードは生存中のセッションを名指さなければならない。** トークンのサブジェクトはそのセッションから来て、グラントは [ログアウト](#ログアウト)が見つけられるよう、新しいファミリーとクライアントをそのセッションに結び付ける:
+**`userSessionStore` が配線されているとき、コードは生存中のセッションを名指さなければならない。** トークンのサブジェクトはそのセッションから来て、グラントは [ログアウト](#ログアウト)が見つけられるよう、新しいファミリーとクライアントをそのセッションに結び付ける。セッションは core のアドミッションを通して `oauth.code_exchange` として 2 度読まれる（[セッションアドミッション](#セッションアドミッション)）: 何かに署名する前にコードの `sid` だけから — コードはサブジェクトを持たないので、この読み取りのレコードがそれを与える — そして、ファミリーを結び付ける前にそのサブジェクトとともに再び。2 度目はそれと一致しなければならない:
 
 - `sid` の無いコードは `400 invalid_grant` — ログインの配線が記録しなかった;
-- ストアが解決できない `sid`、またはサブジェクトを持たないセッションは `400 invalid_grant` / `session_invalid`。トークンの発行中に終わったセッションは `400 invalid_grant` / `session_invalidated`;
-- 答えられないストア — セッションの読み取りか、結び付けの書き込み — は `503 temporarily_unavailable`。
+- 1 度目で、ストアが解決できない `sid`、`expiresAt` を過ぎたセッション、サブジェクトを持たないセッション、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`;
+- 2 度目で、トークンの発行中に消えた・期限切れになった・失効した・別のサブジェクトを答えるセッションは `400 invalid_grant` / `session_invalidated` で、warn レベルで `authorization_grant_rejected_session_invalidated_during_token_issuance`、別のサブジェクトなら `…_session_subject_changed_during_token_issuance` としてログに出す（アドミッションはこれを `session.admission.subject_mismatch` としても監査する）;
+- セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant`。ステップアップで満たせるなら `step_up: "<要件>"` を添える;
+- 答えられないストアは `503 temporarily_unavailable`: セッションの読み取りはアドミッションが `session_admission_unavailable` として 1 度だけ、結び付けの書き込みは `authorization_grant_store_unavailable` としてログに出す。
 
 `userSessionStore` が無ければ、サブジェクトはトークンリクエストに伴うブラウザーセッションのユーザーであり、id_token は発行されない。
 
@@ -205,17 +210,17 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 ### `refresh_token`
 
 - **トークンファミリーの 2 つのスロットが必須。** グラントが有効（`oauth.grants.refresh_token.enabled`）なとき、`refreshTokenFamilyRotation` と `refreshTokenFamilyRevocation` が配線されていなければ、モジュールは起動を拒否する — `refresh_token` グラントの `contribute-factory-failed` で、その `cause` が欠けているスロットを名指す。配線するのはファミリーストア（1 レプリカなら core の `memoryRefreshTokenFamilyStoreModule`、または `redisRefreshTokenFamilyStoreModule`）と、core の `defaultRefreshTokenFamilyRotationModule` と `defaultRefreshTokenFamilyRevocationModule`。それらが無いと、リフレッシュトークンはファミリーの記録無しに発行され、ローテーションもリプレイの確認も無しに引き換えられ、`/oauth/revoke` はこのグラントが一度も読まないファミリーに `200` を返していた。トークンファミリーを望まないデプロイはグラントを無効にする。ファミリーストアを配線せずに発行されたリフレッシュトークンはファミリーの記録を持たないので、配線した後は `oauth.refreshToken.unknownFamilyPolicy` がそれらを決める: 既定の `"reject"` はそれらを拒否し（`400 invalid_grant`、`unknown_family`）、そのユーザーは再ログインする。`"accept"` はひとりでに閉じる期間ではない: そうしたトークンを、同じファミリーで `oauth.refreshToken.expiresIn` の全期間を持つ新しいリフレッシュトークンと引き換え、ファミリーの記録はやはり書かない。したがってリフレッシュし続けるクライアントは、期限切れにならず、リプレイの確認も受けないチェーンを持ち続ける。待っても終わらない。`"reject"` に戻せば終わり、その時点でそうしたチェーンを持つ全員がサインアウトされる。
-- **セッションがまだ存在すること。** `userSessionStore` が配線され、リフレッシュトークンが `sid` を持つとき、グラントはセッションを読む: 無ければ `400 invalid_grant`、ストアの障害は `503 temporarily_unavailable`。
+- **セッションがまだ存在し、トークンが登録済みの要件を満たすこと。** 検証済みのリフレッシュトークンは、ローテーションがそれを使い切る前に core のアドミッションを通る（[セッションアドミッション](#セッションアドミッション)）: `userSessionStore` が配線され、トークンが `sid` を持つときはセッションを読む — 無い、`expiresAt` を過ぎた、別のサブジェクトを答えるなら `400 invalid_grant` / `session_invalid`、ストアの障害は `503 temporarily_unavailable` で、アドミッションが `session_admission_unavailable` として 1 度だけログに出す。登録済みのセッション要件には、セッションのではなくトークンが持つ `amr` について尋ねるので、トークンは発行されたときのもので判断される: 要件が受け入れないトークンはそれを名指して `400 invalid_grant` で、ステップアップで満たせるなら `step_up: "<要件>"` を添える — クライアントはユーザーを再認証させる。要件が 1 つも登録されていなければ、D2 によるレコードの読み方を除いて何も変わらない: `expiresAt` を過ぎた・`authTime` が有効な日時でない・`sub` がトークンのものでないレコードは `session_invalid` になる。これまでグラントはレコードがあるかどうかしか尋ねなかった（同梱のストアは期限切れのレコードを返さない）。リフレッシュトークンに対するサブジェクト失効の境界は `verifyJwt` が読むウォーターマーク（下記）であって、セッションのものではない。
 - **ローテーションは何かに署名する前に予約される。** 新しいリフレッシュトークンの `jti` と、その有効期間を測り始める時刻が先に決まり、`RefreshTokenFamilyRotation.rotate` でファミリーストアにコミットされ、そのコミットが成立してから署名される。したがって競合に負けたリクエスト — リプレイ、失効済みファミリー、`reject` 下の未知のファミリー — は署名を 1 つも生まずに返る。署名のたびに課金されるリモート呼び出しになる KMS バックエンドの `SigningKeyProvider` ではこれが効く。発行されるトークンは予約されたとおりの `jti` を持ち、`exp` はストアがコミットした上限 — `RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs` から、その契約が記す前方ドリフトのための 1 秒のマージンを引き、秒に切り捨てたもの — を超えない。したがってリフレッシュトークンが、そのリプレイを捕まえるファミリーレコードより長く生きることはない。有効期間が残らない上限は、期限切れのリフレッシュトークンを載せた `200` ではなく `400 invalid_grant`（"refresh token family has reached its lifetime"）になる。
 - **その順序の代償。** `rotate` がコミットした時点で、提示されたトークンは使用済みになる。その後に署名器が失敗すると — KMS の障害 — 誰もトークンを持たないローテーションが残る: グラントは `503 temporarily_unavailable` を返し、ファミリー ID・使用済みの `jti`・予約された `jti` を付けて `refresh_token_rotation_orphaned` をログに出す。これはストアが実際にローテーションをコミットしたときだけで、`unknownFamilyPolicy` で受け入れた未知のファミリーは通常の署名器の振る舞いのままである（ローテーションを配線していない構成は、このグラントでは起動しない）。クライアントの再試行は古いトークンを提示し、それは今やリプレイとして読まれるので、ファミリーは失効し、ユーザーは再認証する。
 - **リプレイはファミリーを失効させる**（RFC 6819 §5.2.2）。モジュールがローテーションと並べて `refreshTokenFamilyRevocation` を読むのはそのためである。また `iat` がサブジェクトの失効ウォーターマーク以前のリフレッシュトークンは `invalid_grant` になる。
-- **依存先が落ちていて検証できなかったトークンは `invalid_grant` ではなく `503 temporarily_unavailable`** — キーストア（"verification key unavailable"）やサブジェクトのウォーターマーク（"revocation store unavailable"）が答えない場合で、`site: "refresh_token"` 付きの `token_verification_unavailable` としてログに出す。RFC 6749 §5.2 の `invalid_grant` はクライアントにリフレッシュトークンを捨てさせるので、障害にそれで答えると、その間にリフレッシュした全員をログアウトさせてしまう。キーストアが持たない kid は引き続き `invalid_grant`。ファミリーストアやセッションストアの障害も `503` で、ストアと段階（`rotate`、またはリプレイが必要とする `revoke`）を付けて `refresh_token_store_unavailable` としてログに出す。
+- **依存先が落ちていて検証できなかったトークンは `invalid_grant` ではなく `503 temporarily_unavailable`** — キーストア（"verification key unavailable"）やサブジェクトのウォーターマーク（"revocation store unavailable"）が答えない場合で、`site: "refresh_token"` 付きの `token_verification_unavailable` としてログに出す。RFC 6749 §5.2 の `invalid_grant` はクライアントにリフレッシュトークンを捨てさせるので、障害にそれで答えると、その間にリフレッシュした全員をログアウトさせてしまう。キーストアが持たない kid は引き続き `invalid_grant`。ファミリーストアの障害も `503` で、ストアと段階（`rotate`、またはリプレイが必要とする `revoke`）を付けて `refresh_token_store_unavailable` としてログに出す。
 
 ### `session`
 
 認証済みのブラウザーセッションのユーザーにアクセストークンを発行する（ファーストパーティ / BFF 構成）。呼び出し元は `/oauth/token` でクライアントとして認証する。クライアントの `allowedScopes` が上限である。`aud` はクライアントの `allowedAudiences` の最初のエントリー、それが無ければクライアント ID で、`azp` はクライアント ID。リフレッシュトークンは発行しないので、トークンは `family_id` を持たない。`sid` はブラウザーセッションにあれば持つ。
 
-`userSessionStore` が配線されているとき、session グラントはトークンに署名する前に必ず空でない `sid` と生存中の `UserSession` を要求する: セッションが無いか失効していれば `400 invalid_grant`、ストアの障害は `503 temporarily_unavailable`。追跡中のセッションは空でないサブジェクトを持ち、それがブラウザーのユーザーと一致しなければならない — 不正または食い違う ID はトークンに署名する前に拒否される。`userSessionStore` が無ければ、グラントはブラウザーセッションだけを頼りにする。検証済みの DPoP / mTLS バインディングはアクセストークンの `cnf` に保持される: DPoP は `token_type=DPoP`、mTLS は `Bearer` のままで、リソースサーバーは対応する証明を検証しなければならない。
+グラントに渡されたブラウザーセッションは、トークンに署名する前に core のアドミッションを通して `oauth.session_grant` として読まれる（[セッションアドミッション](#セッションアドミッション)）。認証されていない Cookie は `401 unauthorized`、ユーザーを名指さない Cookie はストアの有無にかかわらず `400 invalid_grant`。`userSessionStore` が配線されているとき、Cookie は空でない `sid` を持たなければならず（`400 invalid_grant`、"session identifier (sid) is required"）、それが名指す生存中の `UserSession` のサブジェクトは Cookie のユーザーでなければならない: 無い、`expiresAt` を過ぎた、別のサブジェクトを答える、あるいは（`subjectRevocation` が配線されていれば）サブジェクトのセッションが失効される前に確立されたセッションは `400 invalid_grant` / `session_invalid`、ストアの障害は `503 temporarily_unavailable` で、アドミッションが `session_admission_unavailable` として 1 度だけログに出す。セッションが満たさない登録済みのセッション要件は、それを名指して `400 invalid_grant` で、ステップアップで満たせるなら `step_up: "<要件>"` を添える — RFC 6749 のコードなので既存のクライアントは対応付けを保ち、更新されたクライアントはこのメンバーで動ける。`userSessionStore` が無ければ、グラントはブラウザーセッションだけを頼りにする。検証済みの DPoP / mTLS バインディングはアクセストークンの `cnf` に保持される: DPoP は `token_type=DPoP`、mTLS は `Bearer` のままで、リソースサーバーは対応する証明を検証しなければならない。
 
 ### `client_credentials`
 
@@ -250,7 +255,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **未実装:** その拒否を除く `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
-**`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアもフェイルクローズになるが、それを判定としては扱わない: 対話的なリクエストはこれまでどおりログインページへ送り（ユーザーはそこで行動でき、ログイン経路は自分の障害を自分で報告する）、`prompt=none` のリクエストには `redirect_uri` で `temporarily_unavailable`（"session store unavailable"、RFC 6749 §4.1.2.1）を返す。`login_required` は誰もサインインしていないと RP に告げることになるが、障害にはそれが分からない。どちらの場合も障害は error レベルで 1 行、`authorize_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。
+**`/authorize` はコードを発行する前にアドミッションを通してセッションを読む** — [セッションアドミッション](#セッションアドミッション) を参照: 死んだ・期限切れの・失効した・サブジェクトの無いセッションは、先に Cookie セッションを再生成してからログインへ送られ、答えられないストアはログインページではなく `redirect_uri` で `temporarily_unavailable` になる。
 
 ## ステップアップと再認証 (#481)
 
@@ -264,7 +269,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **`max_age`。** 負でない整数（それ以外は `invalid_request`）。空の `max_age=` は、値の無いパラメーターについて RFC 6749 §3.1 が求めるとおり、省略されたものとして扱う。`auth_time` が `max_age` 秒より古いセッション — `max_age=0` は常に古い — は、未認証のものとまったく同じくリクエストを往復させてログインページへ送られ、加えて 1 つだけ: 要求した時刻が**サーバー側に**記録される。戻ってきたとき、その時刻よりミリ秒単位で厳密に後に認証したセッションが求められた再認証であり、リクエストは進む — `max_age=0` も含めて。これがループを防ぐ。それより前に認証したセッションは、もう一度送り返されるのではなく `login_required` を返される。`prompt=none` では古いセッションは即座に `login_required`: 無言は無言である。id_token の `auth_time` が RP の検証するものであり、常に真実である。
 
-要求は**セッションストア内のレコード**であり、戻り URL が `reauth_ask` として運ぶ不透明な ID で名指される。URL 上のタイムスタンプそのものではない: リクエストからそのまま読む目印は呼び出し元が書けるもので、偽造されれば任意の生存セッションでチェックを満たし、強制するための往復を飛ばせてしまう。レコードは偽造できない（ID は CSPRNG からの 32 バイトで、存在しないものを名指すのは何も名指さないのと同じ）。`/session/login` が行うセッション再生成を越えて残る（セッション上のフィールドでは残らない）。発行元の authorize リクエストに結び付けられるので、あるリクエストに対する未処理の要求が別のリクエストの鮮度要件を満たすことはない。読まれた時点で消費されるので、戻り URL をリプレイすると 2 つ目のコードを発行するのではなく改めて要求する。有効期限は 10 分。理由は [`routes/reauthAsk.mts`](./src/routes/reauthAsk.mts) にある。
+要求は**セッションストア内のレコード**であり、戻り URL が `reauth_ask` として運ぶ不透明な ID で名指される。1 つのリクエストにつき 1 つのレコードが、要求したことを積み上げる — ログインの往復（`loginAskedAt`）と、要件の名前ごとのステップアップの往復（`stepUpAskedAt`、[セッションアドミッション](#セッションアドミッション) を参照）。そうなる前に書かれたレコード（`askedAt`）は、そのときに要求されたログインとして読み、1 リリースの間は、古いレプリカが読めるよう、ログインの要求の横に `askedAt` も書く。レコードの `createdAt` は 1 つのリクエストの往復を通じて保たれ、書き込みのたびに新しい 10 分の期間が始まる。URL 上のタイムスタンプそのものではない: リクエストからそのまま読む目印は呼び出し元が書けるもので、偽造されれば任意の生存セッションでチェックを満たし、強制するための往復を飛ばせてしまう。レコードは偽造できない（ID は CSPRNG からの 32 バイトで、存在しないものを名指すのは何も名指さないのと同じ）。`/session/login` が行うセッション再生成を越えて残る（セッション上のフィールドでは残らない）。発行元の authorize リクエストに結び付けられるので、あるリクエストに対する未処理の要求が別のリクエストの鮮度要件を満たすことはない。読まれた時点で消費されるので、戻り URL をリプレイすると 2 つ目のコードを発行するのではなく改めて要求する。有効期限は 10 分。理由は [`routes/reauthAsk.mts`](./src/routes/reauthAsk.mts) にある。
 
 `max_age` と `prompt=login` には `userSessionStore`（無ければ測る対象の `auth_time` が無い）と、セッションミドルウェアのストア（要求を記録する場所）が要る。どちらかが無い構成は、黙って受け入れるのではなく `invalid_request` を返す。
 
@@ -282,11 +287,27 @@ oauth.authorize.acrValues {
 }
 ```
 
-各キーはこのデプロイが保証する Authentication Context Class Reference で、値はそれを満たすためにセッションが持つべき `amr` の集合 — あるいはそのような集合のリストで、そのどれか 1 つが満たせばよい（上の `urn:example:passkey`: デバイスに縛られたパスキーでも同期されたパスキーでもよい）。要求された値のうちセッションが最初に満たすものが、コードと id_token の `acr` になる。照合するのは core の要件ルール（`selectAcr`）で、相手はセッションが保証する `amr`（`vouchedAmr`）である。どれも満たされない — あるいは表にまったく無い値 — ときは、満たされなかったものを名指して `redirect_uri` で `unmet_authentication_requirements` を返す。黙って受け入れることも、ステップアップのリダイレクトも無い — ログインページにどの要素を追加すべきか伝えられないからである。表が空でなければ、ディスカバリーはキーを `acr_values_supported` として広告する。何も要求しない acr や選択肢は boot で拒否される: どのセッションもそれを満たし、何も保証しないからである。
+各キーはこのデプロイが保証する Authentication Context Class Reference で、値はそれを満たすためにセッションが持つべき `amr` の集合 — あるいはそのような集合のリストで、そのどれか 1 つが満たせばよい（上の `urn:example:passkey`: デバイスに縛られたパスキーでも同期されたパスキーでもよい）。要求された値のうちセッションが最初に満たすものが、コードと id_token の `acr` になる。照合するのは core の要件ルール（`selectAcr`）で、相手はセッションが保証する `amr`（`vouchedAmr`）である。どれも満たされない — あるいは表にまったく無い値 — ときは、満たされなかったものを名指して `redirect_uri` で `unmet_authentication_requirements` を返す。黙って受け入れることは無い。登録済みのセッション要件の 1 つのステップアップで満たせる値 — インストールされれば MFA 要件の第 2 要素 — なら、代わりにその要件のページへの [ステップアップの往復](#セッションアドミッション) になり、満たせる値が `acr_values` として渡る。要件が 1 つも登録されていなければそれは無く、セッションが満たさないものは満たされない。表が空でなければ、ディスカバリーはキーを `acr_values_supported` として広告する。何も要求しない acr や選択肢は boot で拒否される: どのセッションもそれを満たし、何も保証しないからである。
 
 **インストールされたものでは満たせないエントリーは boot で落とす**: `acr_values_supported` から外し、表に無い値と同じく `unmet_authentication_requirements` を返し — たまたまその値を持つセッションに対しても — エントリー（`acr`）と何も生み出さない値（`unproducible`）を添えて `acr_value_unsatisfiable` として一度だけ記録する。行は `warn` だが、第二要素だけが足りず、登録されたどのセッション要件もそれに届かないエントリーは `info` である: 多要素認証をインストールしない構成がそう選んだのであって、`mfa.mode` は関与しない。構成が満たせるもの: `pwd` は常に。フェデレーションがインストールされていれば `fed` — それを記録するのはフェデレーションのコールバックだけだからである。セクションが有効なインストール済みのフェデレーションが上流 IdP の `amr` を信頼していれば（`federations.<name>.trustUpstreamAmr = true`。フェデレーションのコールバックと同じく core の `federationTrustsUpstreamAmr` で読む）任意の値 — そのときコールバックは IdP が主張したものを `fed` の横に記録するからである。信頼しないフェデレーションの IdP はどのエントリーも満たさない。第二要素の値（`otp`、`hwk`、`swk`、`email`、`recovery`）と `mfa` は、登録されたセッション要件がそれに届くあいだ — モジュールが要求する `sessionRequirementResolver` 全体の和集合（セッション許可 ADR の D6）で、MFA モジュールの `mfa` 要件は有効な要素が加えるものに届く。どのリリースもまだそれを出荷していない。したがって信頼するフェデレーションも届く要件も無ければ、上の `mfa` と `passkey` のエントリーは落とされ、フェデレーションが一つも無ければ `fed` を必要とするエントリーも落とされる — どの要件も満たせないので、何が登録されていても warn である。与えられた `trustUpstreamAmr` が真偽値でなければ、合成は拒否される。無効なフェデレーションは誰もサインインさせないので、信頼するものとして数えない。上流の分割より前、あるいは信頼を取り消す前にセッションから発行されたものが運び続けるもの — コードの `acr`、リフレッシュトークンの `amr` と `acr` — は [運用ランブック](../../docs/operator-runbook.md#trusting-an-upstream-idps-amr-and-withdrawing-that-trust) にある。落とす判定はルーターを組むところとディスカバリーを contribute するところで、同じ入力から計算する（`src/acrValues.mts`）。
 
 **再認証を求められたら、どちらのログイン経路も再認証しなければならない。** デプロイが提供するログインページは `prompt=login` / `max_age` と目印を載せた `redirect_to` を受け取る。既に認証済みのブラウザーをそのまま送り返すページは、ループではなく `login_required` を受け取る。`POST /session/login` とフェデレーションコールバックは常に新しい `auth_time` を持つ*新しい*セッションを確立し、それが再認証である。
+
+## セッションアドミッション
+
+ここでセッションに何かをさせるエンドポイントはどれも、core の唯一の判断 `admitSession`（[session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)、[`session-admission/`](../core/src/session-admission/README.md)）を通してセッションを読み、core が組み立てる claim と、自らが名指すアクションを渡す。ここのルートやグラントが、自ら受け入れるセッションのために `UserSessionStore` を他の手段で読むことは無い（core のドリフトガードがそれを保つ）。アドミッションが読むのは、claim、ストアが配線されていればその `sid` が名指す生存中のレコード — サブジェクトを持ち、claim のサブジェクトであり、`expiresAt` を過ぎていないこと — `subjectRevocation` が配線されていればサブジェクト失効の境界（トークンは除く。その境界は `verifyJwt` が読む）、登録済みのセッション要件、そして `/authorize` では要求された `acr_values` である。そのどれかの障害は、ストアとアクションを付けて `session_admission_unavailable` として error レベルで 1 度だけログに出し、`sid` は決して出さない。各コンシューマーが結果ごとに何を返すかは、このパッケージのものである:
+
+| コンシューマー | アクション、claim | 生存していない / 失効 | 満たされない要件 | ステップアップ | 障害 |
+|---|---|---|---|---|---|
+| `/oauth/authorize` | `oauth.authorize`、Cookie | Cookie セッションを再生成してからログインページ（`prompt=none` なら `login_required`） | `login_required`。満たされない `acr_values` は `unmet_authentication_requirements` | 下の往復。`prompt=none` なら `interaction_required` | `redirect_uri` で `temporarily_unavailable` |
+| `/oauth/consent` | `oauth.consent`、Cookie | `401 login_required` | `401 login_required` | `401 login_required` | `503` |
+| `session` グラント | `oauth.session_grant`、グラントに渡された Cookie | `400 invalid_grant` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
+| `authorization_code` グラント | `oauth.code_exchange`、コード、2 度 | `session_invalid`、次に `session_invalidated` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
+| `refresh_token` グラント | `oauth.refresh`、検証済みのトークン | `session_invalid` | `400 invalid_grant` | `step_up` 付きの `400 invalid_grant` | `503` |
+
+`/authorize` はまず Cookie のフラグを、クライアントを引く前に、ストアを読まずに確かめるので、認証されていないブラウザーはこれまでどおりログインページへ行く。セッションを読むのは 1 度だけ、クライアントの参照と `redirect_uri` の確認、リクエストオブジェクトの拒否、`prompt`・単一値パラメーター・`claims`・`max_age`・`acr_values` の解析のあとで、`response_type`・グラントタイプ・ファーストパーティ・メール確認・PKCE・nonce・スコープの確認の前である — したがって、未知のクライアントとともに送られた死んだセッションは、そのクライアントの `400` になる — 判定を実行する前に、判定が運ぶセッションで鮮度（`max_age`、`prompt=login`）を判断するので、`max_age` が古い `prompt=none` は要件が何と言おうと `login_required` である。死んだ・失効した・再認証が必要なセッションをログインへ送る前には Cookie セッションを再生成するので、サインイン済みのユーザーを転送するログインページが、拒否されたセッションに残ったフラグでループすることは無い。再生成に失敗すれば `temporarily_unavailable` で、`authorize_cookie_session_unavailable` としてログに出す。`/oauth/token` は、グラントの `step_up` メンバーをエラー本文の `error` と `error_description` の横に載せる。
+
+**ステップアップの往復。** 登録済みのセッション要件がステップアップで満たされうるとき — あるいは `acr_values` のエントリーが 1 つの要件の到達範囲で満たされうるとき — `/authorize` はブラウザーをその要件の登録済みページへ送る: `new URL(page, issuer)` で組み立て、ページ自身のパラメーター、リクエストが acr を求めたなら到達可能な `acr_values`、そして要求を付けたこのリクエストを名指す `redirect_to` を載せる。[要求](#ステップアップと再認証-481) は往復を要件の名前（`stepUpAskedAt`）で、すでに持っているかもしれないログイン（`loginAskedAt`）の横に記録するので、送り出された時点より後でないまま往復から戻ったセッションは再び送られるのではなく拒否される — 満たされないのがリクエストの `acr_values` なら `unmet_authentication_requirements`、要件が新しいログインを求めるなら `login_required` — 一方、要求のあとに確立されたセッションはもう 1 度往復してよく、2 つ目の要件の往復が 1 つ目のものと取り違えられることも無い。`redirect_to` はこのリクエストを GET の URL として名指す — POST のフォームパラメーターはクエリーとして書かれる。ここのすべての往復とログインへのリダイレクトがそう書く — ページはログインページと同じく、ブラウザーをそこへそのまま戻さなければならない。発行者のオリジンにないページの URL — 登録時に発行者が与えられていれば登録が拒否する — にはけっして送らない: `redirect_uri` で `server_error` を返し、error レベルで `authorize_step_up_page_off_origin` としてログに出す。同梱の要件はまだリリースされていない。最初のものは MFA モジュールである。
 
 ## クライアント認証: `private_key_jwt` (RFC 7523 §2.2)
 
@@ -333,7 +354,7 @@ grant_type=client_credentials
 3. ページは **`GET /oauth/consent?challenge=<id>`**（セッション Cookie、キャッシュ不可）を呼び、`client_id`、`client_id_host`（Client ID Metadata Document から解決したクライアントの場合のみ — 下記参照）、`client_name`、`client_uri`（登録から）、`scopes`（要求されているもの）、`granted_scopes`（ユーザーが既に同意したもの。ページが差分を強調できるように）、`redirect_uri`（ホストを表示すること — コードの送り先）、`expires_in` を受け取る。
 4. ページは `{ "challenge": "<id>", "decision": "accept" | "deny" }`（JSON かフォーム）で **`/oauth/consent` に `POST`** する。`accept` は付与済みと要求中の和集合を記録し、`consent.granted` を出し、保留中の `/authorize` URL への `303` を返す — そこでレコードが見つかり、コードが発行される。`deny` は `consent.denied` を出し、`error=access_denied` と `state` を付けてクライアントの `redirect_uri` への `303` を返す。どちらの場合もチャレンジは消費される。
 
-チャレンジはリクエストを保留したセッションに結び付けられ、ページにはクロスサイトのページが読めないリダイレクト URL 経由でのみ届く。一致する値を持つ POST は同一オリジンのコードが組み立てたものである（シンクロナイザートークンパターンで、セッションがシンクロナイザー）。他者の・リプレイされた・期限切れ（10 分）のチャレンジは `400`。回答は保留レコードを 1 ステップで**消費する**（`PendingConsentStore.consume`）ので、1 つのチャレンジに同時に 2 つの回答 — 複製したタブ、二重送信 — があっても適用されるのはちょうど 1 つで、もう一方には保留中の同意が無いと告げる。`/authorize` での同意ストアの障害は `temporarily_unavailable` であり、コードにもユーザーが対処できる拒否にもならない。`userSessionStore` が配線されていれば、同意の両メソッドはまず `/authorize` と同じく Cookie の裏のセッションがまだ生きているかを確かめる: 失効していれば `401 login_required`、答えられないストアは `503 temporarily_unavailable`（"session store unavailable"）で、error レベルで 1 行、`consent_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。何も表示も記録もせず、保留中のリクエストは保留されたままなので、ストアが戻れば回答を再試行できる。オペレーターはレコードを削除して同意を取り消す（`consentStore.revoke(sub, clientId)`）。次にそのクライアントの `/authorize` が来たら改めて尋ねる。
+チャレンジはリクエストを保留したセッションに結び付けられ、ページにはクロスサイトのページが読めないリダイレクト URL 経由でのみ届く。一致する値を持つ POST は同一オリジンのコードが組み立てたものである（シンクロナイザートークンパターンで、セッションがシンクロナイザー）。他者の・リプレイされた・期限切れ（10 分）のチャレンジは `400`。回答は保留レコードを 1 ステップで**消費する**（`PendingConsentStore.consume`）ので、1 つのチャレンジに同時に 2 つの回答 — 複製したタブ、二重送信 — があっても適用されるのはちょうど 1 つで、もう一方には保留中の同意が無いと告げる。`/authorize` での同意ストアの障害は `temporarily_unavailable` であり、コードにもユーザーが対処できる拒否にもならない。同意の両メソッドは、保留中のリクエストを見つけたあと、`/authorize` と同じく Cookie の裏のセッションを core のアドミッションを通して `oauth.consent` として読む（[セッションアドミッション](#セッションアドミッション)）: ユーザーを名指さない Cookie、`userSessionStore` が配線されているのに `sid` を名指さない Cookie、無い・`expiresAt` を過ぎた・別のサブジェクトを答える・サブジェクトのセッションが失効される前に確立されたセッションは `401 login_required`。満たされない登録済みのセッション要件も同じで、ステップアップも含む — 同意のあとで `/authorize` が改めて判断するからである。答えられないストアは `503 temporarily_unavailable`（"session store unavailable"）で、アドミッションが `session_admission_unavailable` として 1 度だけログに出す。何も表示も記録もせず、保留中のリクエストは保留されたままなので、ストアが戻れば回答を再試行できる。リクエストが保留されたのとは別のサブジェクトの生存中のセッションには、保留中の同意は無いと告げる。オペレーターはレコードを削除して同意を取り消す（`consentStore.revoke(sub, clientId)`）。次にそのクライアントの `/authorize` が来たら改めて尋ねる。
 
 ページが表示するものを登録すること: クライアントレコードの `clientName`（RFC 7591 `client_name`）と `clientUri`（`client_uri`）。ループバックの `redirect_uri` を持つネイティブクライアントは、MCP 認可仕様がページに警告を求めるケースである — `redirect_uri` が応答にあるのはまさにそのためである。
 
@@ -816,7 +837,8 @@ const assertionVerifier = createRegistryAssertionVerifier({
 
 上に述べた不変条件は、それを実装している場所で固定されている。出発点として:
 
-- モジュールの配線と各モジュールの宣言 — [`module.test.mts`](./src/__tests__/module.test.mts)、[`oauthAuthorization.test.mts`](./src/__tests__/oauthAuthorization.test.mts)、[`oauthSession.test.mts`](./src/__tests__/oauthSession.test.mts)、[`subjectRevocationService.module.test.mts`](./src/logout/__tests__/subjectRevocationService.module.test.mts);
+- モジュールの配線と各モジュールの宣言 — [`module.test.mts`](./src/__tests__/module.test.mts)、[`oauthAuthorization.test.mts`](./src/__tests__/oauthAuthorization.test.mts)、[`oauthSession.test.mts`](./src/__tests__/oauthSession.test.mts)、[`subjectRevocationService.module.test.mts`](./src/logout/__tests__/subjectRevocationService.module.test.mts)、そして手で組み立てるすべてのコンシューマーが要求する要件リゾルバー — [`admissionWiring.test.mts`](./src/__tests__/admissionWiring.test.mts);
+- 各コンシューマーのアドミッションを通したセッションの読み取り、それがもたらした変更、ステップアップの往復 — [`authorize.admission.test.mts`](./src/__tests__/authorize.admission.test.mts)、[`consent.admission.test.mts`](./src/__tests__/consent.admission.test.mts)、[`sessionGrant.admission.test.mts`](./src/__tests__/sessionGrant.admission.test.mts)、[`authorizationGrant.admission.test.mts`](./src/__tests__/authorizationGrant.admission.test.mts)、[`refreshToken.admission.test.mts`](./src/__tests__/refreshToken.admission.test.mts)、そして要求のレコード — [`reauthAsk.test.mts`](./src/__tests__/reauthAsk.test.mts);
 - ディスカバリーのゲート — [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts);
 - ログアウトカスケードの順序と失敗の扱い — [`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts)、エンドポイント — [`logout.test.mts`](./src/__tests__/logout.test.mts);
 - イントロスペクションの audience 固定、セッション生存、障害時の答え — [`introspect.audience.test.mts`](./src/__tests__/introspect.audience.test.mts)、[`introspect.sessionLiveness.test.mts`](./src/__tests__/introspect.sessionLiveness.test.mts)、[`introspect.revocationOutage.test.mts`](./src/__tests__/introspect.revocationOutage.test.mts);

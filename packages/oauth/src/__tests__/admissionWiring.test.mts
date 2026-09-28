@@ -1,0 +1,165 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * How `oauth`'s consumers of admission are wired (the session-admission
+ * ADR's D1, D8): every factory a composition can build by hand takes the
+ * branded resolver as a required option — `requirements` on the router, the
+ * slot `sessionRequirementResolver` on the grants, whose deps are the
+ * module's slots by name (#626 P2) — and refuses to build without it, and
+ * every manifest that hands a consumer its slots lists the synthetic key
+ * `sessionRequirementResolver` beside the slots admission reads —
+ * `userSessionStore`, `subjectRevocation`, `auditSink`, `logger`. What each
+ * consumer answers per outcome is its own suite's.
+ */
+
+import {
+	type AppConfig,
+	AUDIT_SINK_ABSENCE_POLICY,
+	type ClientRepository,
+	type CodeRepository,
+	createSymmetricKeyStore,
+	type GrantDependencies,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
+} from "@o3co/auth-provider-core";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import { describe, expect, it } from "vitest";
+import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createSessionGrant } from "#/grants/session.mjs";
+import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { oauthSessionModule } from "#/oauthSession.mjs";
+import { createOAuthRouter } from "#/routes.mjs";
+
+const config = {
+	oauth: {
+		jwt: { issuer: "https://issuer.example", secret: "test-secret" },
+		accessToken: { expiresIn: 300 },
+		refreshToken: { expiresIn: 86400 },
+		grants: {
+			session: { enabled: true },
+			authorization_code: { enabled: true },
+			refresh_token: { enabled: true },
+		},
+	},
+	rateLimit: { failMode: "open" as const },
+	endpoints: { login: { url: "/login" } },
+} as unknown as AppConfig;
+
+const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
+
+const clientRepository: ClientRepository = {
+	findById: async () => null,
+	authenticate: async () => null,
+};
+
+const codeRepository: CodeRepository = {
+	createCode: async () => {
+		throw new Error("unused");
+	},
+	findByCode: async () => null,
+	consumeByCode: async () => null,
+	removeByCode: async () => {},
+};
+
+/** The grant factories' shared slots, without `requirements`. */
+const grantDeps = { config, keyStore } as unknown as GrantDependencies;
+
+describe("the consumers' factories refuse to build without the requirements resolver (D1)", () => {
+	it("createOAuthRouter throws, naming the option", async () => {
+		await expect(
+			createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config,
+				clientRepository,
+				codeRepository,
+				keyStore,
+				// @ts-expect-error — the option is required; the refusal at runtime is the test.
+				requirements: undefined,
+			}),
+		).rejects.toThrow(/requirements/);
+	});
+
+	it("createOAuthRouter builds with resolverForTests", async () => {
+		const { router } = await createOAuthRouter(express, {
+			registry: new GrantRegistry(),
+			config,
+			clientRepository,
+			codeRepository,
+			keyStore,
+			requirements: resolverForTests([]),
+		});
+		expect(router).toBeDefined();
+	});
+
+	it("createSessionGrant throws, naming the option", () => {
+		// @ts-expect-error — the option is required; the refusal at runtime is the test.
+		expect(() => createSessionGrant(grantDeps)).toThrow(/requirements/);
+		expect(() =>
+			createSessionGrant({ ...grantDeps, sessionRequirementResolver: resolverForTests([]) }),
+		).not.toThrow();
+	});
+
+	it("createAuthorizationGrant throws, naming the option", () => {
+		const deps = { ...grantDeps, clientRepository, codeRepository };
+		// @ts-expect-error — the option is required; the refusal at runtime is the test.
+		expect(() => createAuthorizationGrant(deps)).toThrow(/requirements/);
+		expect(() =>
+			createAuthorizationGrant({ ...deps, sessionRequirementResolver: resolverForTests([]) }),
+		).not.toThrow();
+	});
+
+	it("createRefreshTokenGrant throws, naming the option", () => {
+		// @ts-expect-error — the option is required; the refusal at runtime is the test.
+		expect(() => createRefreshTokenGrant(grantDeps)).toThrow(/requirements/);
+		expect(() =>
+			createRefreshTokenGrant({ ...grantDeps, sessionRequirementResolver: resolverForTests([]) }),
+		).not.toThrow();
+	});
+});
+
+describe("the grant manifests declare what admission reads (D1, D8, D10)", () => {
+	it("oauthSessionModule requires sessionRequirementResolver and lists the slots admission reads", () => {
+		const module = oauthSessionModule({ config });
+		expect(module.requires).toContain("sessionRequirementResolver");
+		expect(module.optional).toContain("userSessionStore");
+		expect(module.optional).toContain("subjectRevocation");
+		expect(module.optional).toContain("auditSink");
+		expect(module.optional).toContain("logger");
+		// Optional to wire, not optional to decide: the two slots with a
+		// declared absence carry the same policies every other consumer attaches.
+		expect(module.absencePolicies?.subjectRevocation).toBe(SUBJECT_REVOCATION_ABSENCE_POLICY);
+		expect(module.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
+	});
+
+	it("oauthSessionModule declares nothing when the grant is off", () => {
+		const off = { ...config, oauth: { ...config.oauth, grants: {} } } as unknown as AppConfig;
+		const module = oauthSessionModule({ config: off });
+		expect(module.requires ?? []).not.toContain("sessionRequirementResolver");
+	});
+
+	it("oauthAuthorizationModule requires sessionRequirementResolver and lists the slots admission reads", () => {
+		const module = oauthAuthorizationModule({ config });
+		expect(module.requires).toContain("sessionRequirementResolver");
+		expect(module.optional).toContain("userSessionStore");
+		expect(module.optional).toContain("subjectRevocation");
+		expect(module.optional).toContain("auditSink");
+		expect(module.optional).toContain("logger");
+		expect(module.absencePolicies?.subjectRevocation).toBe(SUBJECT_REVOCATION_ABSENCE_POLICY);
+		expect(module.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
+	});
+});

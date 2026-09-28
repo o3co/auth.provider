@@ -40,7 +40,7 @@ import {
 	type PublicClient,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -120,6 +120,7 @@ const makeApp = async (opts: {
 		opts.pendingConsentStore ?? createMemoryPendingConsentStore();
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config: makeConfig(opts.consentUrl),
 		clientRepository,
@@ -138,6 +139,19 @@ const makeApp = async (opts: {
 	// what `/oauth/consent` finds — the way express-session persists it.
 	const session: Session = opts.session ?? { isAuthenticated: true, user: { id: "user-1" } };
 	const app = express();
+	// `regenerate`, as express-session's session has it: `/authorize` drops
+	// a refused session's authentication before sending the browser to log
+	// in (the session-admission ADR's D8, change 6). In place, so the object
+	// a test holds sees the fields go; not enumerable, so it compares as its
+	// fields alone.
+	Object.defineProperty(session, "regenerate", {
+		enumerable: false,
+		configurable: true,
+		value: (cb: (err?: unknown) => void) => {
+			for (const key of Object.keys(session)) delete session[key];
+			cb();
+		},
+	});
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Session }).session = session;
 		// What express-session would report as this session's id (#552).
@@ -387,12 +401,19 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 	});
 
-	it("cannot ask a session that names no subject", async () => {
-		const { app } = await makeApp({
+	it("never asks a session that names no subject: such a cookie is not admitted, and the browser is sent to log in (the session-admission ADR's D8, change 3)", async () => {
+		// It used to be refused at the consent step (`access_denied`); admission
+		// refuses the cookie before any step, with a login the remedy.
+		const { app, session, createCode } = await makeApp({
 			consentStore: createMemoryConsentStore(),
 			session: { isAuthenticated: true, user: {} },
 		});
-		expect(atClient(await authorize(app)).get("error")).toBe("access_denied");
+		const res = await authorize(app);
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+		expect(createCode).not.toHaveBeenCalled();
+		// Change 6: the refused session's flag does not survive.
+		expect(session).not.toHaveProperty("isAuthenticated");
 	});
 });
 
@@ -720,15 +741,15 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		expect(harness.pending.size).toBe(0);
 	});
 
-	it("refuses an answer from a session that names no subject", async () => {
+	it("refuses an answer from a session that names no subject: 401 login_required, the cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
 		const { app, challenge, session } = await parkedWith({});
 		session.user = {};
 		const res = await request(app)
 			.post("/oauth/consent")
 			.type("form")
 			.send({ challenge, decision: "accept" });
-		expect(res.status).toBe(400);
-		expect(res.body.error_description).toMatch(/names no subject/);
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
 	});
 
 	/**
@@ -764,22 +785,30 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		return harness;
 	};
 
-	/** The outage's one line: error level, the store, the sid and the projection — never a warn. */
+	/**
+	 * The outage's one line, admission's (the session-admission ADR's D10):
+	 * error level, the store, the action and the projection — never the sid,
+	 * never a warn. The consent step's own line is gone.
+	 */
 	const expectLivenessOutageLogged = (logger: ReturnType<typeof createMockLogger>) => {
 		const lines = logger.error.mock.calls.filter(
-			([, event]) => event === "consent_session_liveness_unavailable",
+			([, event]) => event === "session_admission_unavailable",
 		);
 		expect(lines).toEqual([
 			[
-				{ store: "user_session", sid: "sid-1", err: expect.objectContaining({ name: "Error" }) },
-				"consent_session_liveness_unavailable",
+				{
+					store: "user_session",
+					action: "oauth.consent",
+					err: expect.objectContaining({ name: "Error" }),
+				},
+				"session_admission_unavailable",
 			],
 		]);
 		expect(lines[0]?.[0].err).not.toBeInstanceOf(Error);
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"consent_session_liveness_unavailable",
-		);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(
+			logger.error.mock.calls.some(([, event]) => event === "consent_session_liveness_unavailable"),
+		).toBe(false);
 	};
 
 	it("answers the page 503 when the session store cannot answer, not login_required", async () => {
@@ -1120,7 +1149,7 @@ describe("the challenge's bindings, on the edges (#552 review)", () => {
 });
 
 describe("the page and the answer refuse the same requests (#527 audit)", () => {
-	it("does not show the page to a session that names no subject", async () => {
+	it("does not show the page to a session that names no subject: 401 login_required (the session-admission ADR's D8, change 3)", async () => {
 		// A session can keep `isAuthenticated` while its user is cleared; the
 		// POST already refused it, so the GET must not hand it the parked
 		// client, scopes and redirect_uri either.
@@ -1128,8 +1157,8 @@ describe("the page and the answer refuse the same requests (#527 audit)", () => 
 		const challenge = atConsentPage(await authorize(app));
 		session.user = {};
 		const res = await request(app).get("/oauth/consent").query({ challenge });
-		expect(res.status).toBe(400);
-		expect(res.body.error_description).toMatch(/names no subject/);
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
 		expect(res.body).not.toHaveProperty("client_id");
 	});
 

@@ -41,9 +41,10 @@ import {
 	type RefreshTokenFamilyStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { createMockLogger, type MockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	REFUSED_COMMAND_MARKER,
@@ -95,18 +96,21 @@ const failingFamilyStore = (): RefreshTokenFamilyStore => {
 
 const grant = (deps: Partial<GrantDependencies>, logger: MockLogger) =>
 	createRefreshTokenGrant({
+		sessionRequirementResolver: resolverForTests([]),
 		config,
 		keyStore: createSymmetricKeyStore(SECRET),
 		logger,
 		...deps,
-	} as GrantDependencies);
+	} as RefreshTokenGrantDeps);
 
 /** The one error-level line for the outage, with its projection and not the error. */
-const expectLogged = (logger: MockLogger, fields: Record<string, unknown>): void => {
-	const line = logger.error.mock.calls.find(
-		([, event]) => event === "refresh_token_store_unavailable",
-	);
-	expect(line, "an error-level refresh_token_store_unavailable line").toBeDefined();
+const expectLogged = (
+	logger: MockLogger,
+	fields: Record<string, unknown>,
+	event = "refresh_token_store_unavailable",
+): void => {
+	const line = logger.error.mock.calls.find(([, name]) => name === event);
+	expect(line, `an error-level ${event} line`).toBeDefined();
 	expect(line?.[0]).toMatchObject({
 		...fields,
 		err: expect.objectContaining({ name: "ReplyError" }),
@@ -149,7 +153,7 @@ describe("refresh grant — a store outage is logged, not only answered", () => 
 		expectLogged(logger, { store: "refresh_token_family", step: "revoke", familyId: "fam-1" });
 	});
 
-	it("logs a session store that cannot be read", async () => {
+	it("logs a session store that cannot be read — admission's line, once (the session-admission ADR's D10)", async () => {
 		const logger = createMockLogger();
 		const userSessionStore = {
 			kind: "failing",
@@ -167,6 +171,7 @@ describe("refresh grant — a store outage is logged, not only answered", () => 
 			error: "temporarily_unavailable",
 			errorDescription: "session store unavailable",
 		});
-		expectLogged(logger, { store: "user_session" });
+		expectLogged(logger, { store: "user_session" }, "session_admission_unavailable");
+		expect(logger.error).toHaveBeenCalledTimes(1);
 	});
 });

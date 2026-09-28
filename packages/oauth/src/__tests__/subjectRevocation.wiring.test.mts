@@ -37,7 +37,11 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	GrantRegistry,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -125,6 +129,7 @@ describe("#296 — the subject watermark reaches /oauth/introspect", () => {
 		subjectRevocation?: ReturnType<typeof createInMemorySubjectRevocation>,
 	) => {
 		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config: baseConfig,
 			clientRepository,

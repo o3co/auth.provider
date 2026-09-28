@@ -26,7 +26,12 @@ import {
 	memoryAccessTokenDenylistModule,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
-import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import {
+	createTestApp,
+	GrantRegistry,
+	makeValidAppConfig,
+	resolverForTests,
+} from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -87,6 +92,7 @@ async function buildApp(
 	app.use(express.urlencoded({ extended: false }));
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config: mockConfig,
 		clientRepository: mockClientRepository,

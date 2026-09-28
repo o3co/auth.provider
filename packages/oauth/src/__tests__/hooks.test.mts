@@ -27,7 +27,7 @@ import {
 	type RateLimitDecision,
 	type RateLimiter,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -142,6 +142,7 @@ async function buildApp(overrides: {
 	app.use(express.urlencoded({ extended: false }));
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config: overrides.config ?? mockConfig,
 		clientRepository: mockClientRepository,
@@ -499,6 +500,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -598,6 +600,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -635,6 +638,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				},
 			};
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -669,6 +673,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				},
 			};
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -705,6 +710,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -737,6 +743,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			});
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -774,6 +781,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -819,6 +827,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -868,6 +877,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -910,6 +920,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 			const { createAuthorizationGrant } = await import("#/grants/authorization.mjs");
 			const deps = {
+				sessionRequirementResolver: resolverForTests([]),
 				config: mockConfig,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 				codeRepository: codeRepo,
@@ -959,6 +970,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
+				requirements: resolverForTests([]),
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,

@@ -19,6 +19,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
@@ -37,6 +38,7 @@ const mockConfig = {
 } as unknown as GrantDependencies["config"];
 
 const makeDeps = (overrides?: Partial<GrantDependencies>) => ({
+	sessionRequirementResolver: resolverForTests([]),
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
 	...overrides,
@@ -618,7 +620,7 @@ describe("createSessionGrant — sid binds the token to the browser session (R3)
 });
 
 describe("createSessionGrant — a session store that cannot answer is logged, not only answered 503", () => {
-	it("records the client id capped at 200 characters, as every client-id field is", async () => {
+	it("logs no client id at all: admission's line names the store and the action (the session-admission ADR's D10)", async () => {
 		const error = vi.fn();
 		const longId = "c".repeat(256);
 		const handler = createSessionGrant({
@@ -649,10 +651,11 @@ describe("createSessionGrant — a session store that cannot answer is logged, n
 			authenticatedClient: { ...AUTH_CLIENT, clientId: longId },
 		} as unknown as GrantContext);
 		expect(error).toHaveBeenCalledTimes(1);
-		expect(String(error.mock.calls[0]?.[0].clientId).length).toBeLessThanOrEqual(200);
+		expect(error.mock.calls[0]?.[0]).not.toHaveProperty("clientId");
+		expect(JSON.stringify(error.mock.calls)).not.toContain(longId);
 	});
 
-	it("logs it once, at error level, as session_grant_store_unavailable", async () => {
+	it("logs it once, at error level, as admission's session_admission_unavailable — the grant's own line is gone", async () => {
 		const warn = vi.fn();
 		const error = vi.fn();
 		const outage = Object.assign(
@@ -695,11 +698,10 @@ describe("createSessionGrant — a session store that cannot answer is logged, n
 		expect(error).toHaveBeenCalledWith(
 			{
 				store: "user_session",
-				step: "get",
-				clientId: "my-app",
+				action: "oauth.session_grant",
 				err: expect.objectContaining({ name: "ReplyError" }),
 			},
-			"session_grant_store_unavailable",
+			"session_admission_unavailable",
 		);
 		expect(error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 		expect(JSON.stringify(error.mock.calls)).not.toContain("refused-command-marker");

@@ -60,18 +60,25 @@
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import {
+	ADMISSION_ACTIONS,
+	type AdmissionDeps,
 	type AuditSink,
+	admitSession,
 	type ClientRepository,
 	type ConsentStore,
+	cookieClaim,
 	emitAuditEvent,
 	type Logger,
 	logClientRepositoryUnavailable,
 	loggableError,
 	type PendingConsentRecord,
 	type PendingConsentStore,
+	type SessionRequirementResolver,
+	type SubjectRevocation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { requireRequirements, unavailableDescription } from "../admission.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
 
 /** How long a parked `/authorize` request waits for the consent page. */
@@ -104,13 +111,18 @@ export interface ConsentRouterOptions {
 	readonly pendingConsentStore: PendingConsentStore;
 	readonly clientRepository: ClientRepository;
 	/**
-	 * #527 review: the durable session behind the cookie. `/authorize`
-	 * re-reads it before it mints anything, and these endpoints must too —
-	 * a session revoked out of band while the browser still holds its cookie
-	 * and its parked challenge would otherwise record a consent that a later
-	 * login then inherits without ever being asked.
+	 * #527 review: the durable session behind the cookie. `/authorize` reads
+	 * it before it mints anything, and these endpoints must too — a session
+	 * revoked out of band while the browser still holds its cookie and its
+	 * parked challenge would otherwise record a consent that a later login
+	 * then inherits without ever being asked. Read through admission (the
+	 * session-admission ADR's D8), with the boundary and the resolver below.
 	 */
 	readonly userSessionStore?: UserSessionStore;
+	/** The subject-revocation boundary, applied to the live record when wired (D8, change 4). */
+	readonly subjectRevocation?: SubjectRevocation;
+	/** The registered session requirements (D1); required, passed through the router. */
+	readonly requirements: SessionRequirementResolver;
 	readonly auditSink?: AuditSink;
 	readonly logger: Logger;
 }
@@ -143,11 +155,6 @@ const sessionIdOf = (req: Request): string | null => {
 	return typeof id === "string" && id.length > 0 ? id : null;
 };
 
-const subjectOf = (req: Request): string | null => {
-	const id = req.session?.user?.id;
-	return typeof id === "string" && id.length > 0 ? id : null;
-};
-
 export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOptions): Router {
 	const {
 		consentStore,
@@ -156,7 +163,19 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		auditSink,
 		logger,
 		userSessionStore,
+		subjectRevocation,
 	} = opts;
+	// What admission reads for these endpoints (the session-admission ADR's
+	// D1): the router's own slots as wired, and no acr table — consent asks
+	// for no acr.
+	const admissionDeps: AdmissionDeps = {
+		userSessionStore,
+		subjectRevocation,
+		requirements: requireRequirements("createConsentRouter", opts.requirements),
+		acrTable: {},
+		logger,
+		auditSink,
+	};
 
 	/**
 	 * The parked request the presented challenge names, read without spending
@@ -164,14 +183,18 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	 * methods, so the page cannot learn something on GET that the POST would
 	 * then refuse. A record issued to another session is "no pending consent"
 	 * — the challenge is not a bearer token, and the answer does not say
-	 * whether one exists elsewhere.
+	 * whether one exists elsewhere. The cookie's flag is checked here, before
+	 * anything is read; whether the session behind it is live, and whose it
+	 * is, is admission's (`admittedSubject`), once the request is found.
 	 */
 	const pendingFor = async (
 		req: Request,
 		res: Response,
 		challenge: unknown,
-	): Promise<{ readonly record: PendingConsentRecord; readonly sub: string } | null> => {
-		if (!req.session?.isAuthenticated) {
+	): Promise<PendingConsentRecord | null> => {
+		// The flag as every reader reads it (the session-admission ADR's D2):
+		// exactly `true`, never merely truthy.
+		if (req.session?.isAuthenticated !== true) {
 			jsonError(res, 401, "login_required", "no authenticated session");
 			return null;
 		}
@@ -192,54 +215,74 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 			jsonError(res, 400, "invalid_request", NO_PENDING);
 			return null;
 		}
-		// The subject too, here rather than only in the POST (#527 audit). A
-		// session reused across a logout and a login without regeneration would
-		// otherwise show one user another user's client, scopes and
-		// redirect_uri; and a session that still claims authentication but names
-		// no user would be shown a request it can never answer. Both methods
-		// refuse both, from here, so the page learns nothing the answer refuses.
-		const sub = subjectOf(req);
-		if (sub === null) {
-			jsonError(res, 400, "invalid_request", "the session names no subject");
-			return null;
-		}
-		if (sub !== pending.sub) {
-			jsonError(res, 400, "invalid_request", NO_PENDING);
-			return null;
-		}
-		return { record: pending, sub };
+		return pending;
 	};
 
 	/**
-	 * Whether the cookie's session is still the live one, `true` when it is;
-	 * otherwise the refusal has been sent. The same read `/authorize` does
-	 * before it mints a code: a `sid` the store no longer knows is a session
-	 * someone revoked, and an answer given through it is not the user's —
-	 * `401 login_required`.
+	 * The subject of the cookie's session, admitted for `oauth.consent` (the
+	 * session-admission ADR's D4, D8) and the one the request was parked for
+	 * — or `null` after the refusal has been sent. The same reading
+	 * `/authorize` makes before it mints a code: a session the store no
+	 * longer knows, one past its expiry, one whose subject is not the
+	 * cookie's, or one established before the subject's sessions were
+	 * revoked is `401 login_required` — an answer given through it is not
+	 * the user's. So is every requirement's verdict short of `met`, a
+	 * step-up included: this step records consent and returns to
+	 * `/authorize`, which decides again, so there is no trip to send from
+	 * here. An outage is `503 temporarily_unavailable`, not `login_required`:
+	 * the store said nothing about whether the user is signed in, and the
+	 * parked request stays parked for a retry; admission logs it once.
 	 *
-	 * A store that cannot answer fails closed, because the alternative is
-	 * showing or recording a consent on an unknown session — but as an
-	 * outage, `503 temporarily_unavailable`, not `login_required`: the store
-	 * said nothing about whether the user is signed in, and the parked request
-	 * stays parked for a retry. Logged once at error level with the store,
-	 * the `sid` and the projection, as `/authorize` logs its own read.
+	 * The subject too, here rather than only in the POST (#527 audit): a
+	 * session reused across a logout and a login without regeneration would
+	 * otherwise show one user another user's client, scopes and
+	 * redirect_uri. Both methods refuse it from here, so the page learns
+	 * nothing the answer refuses.
 	 */
-	const refuseUnlessLive = async (req: Request, res: Response): Promise<boolean> => {
-		const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
-		if (!userSessionStore || sid === undefined) return true;
-		let live: boolean;
-		try {
-			live = (await userSessionStore.get(sid)) != null;
-		} catch (err) {
-			logger.error(
-				{ store: "user_session", sid, err: loggableError(err) },
-				"consent_session_liveness_unavailable",
-			);
-			jsonError(res, 503, "temporarily_unavailable", "session store unavailable");
-			return false;
+	const admittedSubject = async (
+		req: Request,
+		res: Response,
+		pending: PendingConsentRecord,
+	): Promise<string | null> => {
+		const claim = cookieClaim(req);
+		const admission = await admitSession(admissionDeps, {
+			claim,
+			action: ADMISSION_ACTIONS["oauth.consent"],
+		});
+		switch (admission.outcome) {
+			case "unavailable":
+				jsonError(res, 503, "temporarily_unavailable", unavailableDescription(admission.store));
+				return null;
+			case "admitted": {
+				// The record's subject when one was read — admission made it the
+				// claim's — else the cookie's, which an admitted cookie claim always
+				// names: admission refuses one without it (`not_live`, `no_subject`).
+				const sub = admission.session === null ? claim.subject : admission.session.sub;
+				if (sub !== pending.sub) {
+					jsonError(res, 400, "invalid_request", NO_PENDING);
+					return null;
+				}
+				return sub;
+			}
+			case "not_live":
+			case "revoked":
+			// Never reached: `pendingFor` refused a cookie whose flag is not
+			// exactly `true` before anything was read. Listed so the switch
+			// stays exhaustive over core's `Admission`.
+			case "unauthenticated":
+				jsonError(res, 401, "login_required", "the session is no longer active");
+				return null;
+			case "reauthenticate":
+			case "step_up":
+			case "unmet":
+				jsonError(
+					res,
+					401,
+					"login_required",
+					`the session does not meet the ${admission.requirement} requirement; authorize again`,
+				);
+				return null;
 		}
-		if (!live) jsonError(res, 401, "login_required", "the session is no longer active");
-		return live;
 	};
 
 	/**
@@ -300,10 +343,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	router.all("/consent", express.json(), express.urlencoded({ extended: false }));
 
 	router.get("/consent", async (req, res) => {
-		const found = await pendingFor(req, res, req.query.challenge);
-		if (found === null) return;
-		const pending = found.record;
-		if (!(await refuseUnlessLive(req, res))) return;
+		const pending = await pendingFor(req, res, req.query.challenge);
+		if (pending === null) return;
+		if ((await admittedSubject(req, res, pending)) === null) return;
 		// Registered when the request was parked, gone now: nothing to ask
 		// about, and the parked request is dropped with it.
 		const client = await clientFor(res, pending);
@@ -329,10 +371,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		// Read first, so a malformed answer is refused with the request still
 		// parked; the record is spent only once the answer is one that can be
 		// applied.
-		const found = await pendingFor(req, res, body.challenge);
-		if (found === null) return;
-		const { record: peeked, sub } = found;
-		if (!(await refuseUnlessLive(req, res))) return;
+		const peeked = await pendingFor(req, res, body.challenge);
+		if (peeked === null) return;
+		const sub = await admittedSubject(req, res, peeked);
+		if (sub === null) return;
 		const decision = body.decision;
 		if (decision !== "accept" && decision !== "deny") {
 			return jsonError(res, 400, "invalid_request", "decision must be 'accept' or 'deny'");

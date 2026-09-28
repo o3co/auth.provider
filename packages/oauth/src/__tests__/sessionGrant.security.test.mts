@@ -7,16 +7,15 @@ import {
 	type CodeRepository,
 	createInMemoryUserSessionStore,
 	createSymmetricKeyStore,
-	type GrantDependencies,
 	type TokenBinding,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { decodeJwt } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { createSessionGrant } from "#/grants/session.mjs";
+import { createSessionGrant, type SessionGrantDeps } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import {
@@ -85,12 +84,14 @@ async function buildApp(
 	registry.register(
 		"session",
 		createSessionGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			config,
 			keyStore,
 			userSessionStore: store,
-		} as GrantDependencies),
+		} as SessionGrantDeps),
 	);
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config,
 		keyStore,

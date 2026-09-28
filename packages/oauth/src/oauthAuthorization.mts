@@ -15,6 +15,7 @@
  */
 import {
 	type AppConfig,
+	AUDIT_SINK_ABSENCE_POLICY,
 	defineModule,
 	type GrantHandler,
 	type Module,
@@ -42,8 +43,21 @@ function isExplicitlyEnabled(value: unknown): boolean {
 	return value === true || value === "true";
 }
 
-const REQUIRES = ["config", "clientRepository", "codeRepository", "keyStore"] as const;
+const REQUIRES = [
+	"config",
+	"clientRepository",
+	"codeRepository",
+	"keyStore",
+	// The session-admission ADR's D1: the synthetic key every consumer of
+	// admission takes. The authorization_code grant reads the code's session
+	// through `admitSession` with it, twice; the refresh grant reads the
+	// token's (D9).
+	"sessionRequirementResolver",
+] as const;
 const OPTIONAL = [
+	// D10: the audit sink admission emits `session.admission.subject_mismatch`
+	// through, when wired.
+	"auditSink",
 	// Both grant factories (createAuthorizationGrant / createRefreshTokenGrant)
 	// read these to back refresh-token rotation persistence and CP-18 grant
 	// policy enforcement. Boot planner only injects keys listed here, so
@@ -221,6 +235,9 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 		// hole #406 exists to close, one module over.
 		absencePolicies: {
 			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+			// D10: the same rule for the audit sink admission emits through,
+			// declared here as `oauthModule` declares it, for the same reason.
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
 		contributes: { grants },
 	});

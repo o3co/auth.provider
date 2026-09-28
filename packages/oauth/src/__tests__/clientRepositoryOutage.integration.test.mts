@@ -42,7 +42,7 @@ import {
 	createSymmetricKeyStore,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
@@ -104,6 +104,7 @@ const codeRepository: CodeRepository = {
 async function buildApp(outage: Outage): Promise<{ app: express.Express; logger: MockLogger }> {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config,
 		clientRepository: repositoryWith(outage),

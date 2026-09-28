@@ -28,6 +28,7 @@ import {
 	type SessionRPRegistry,
 	type UserSession,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
@@ -83,6 +84,7 @@ function makeDeps(
 	clientRepository?: ClientRepository,
 ) {
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config: mockConfig,
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {
@@ -198,6 +200,7 @@ describe("createAuthorizationGrant — lifetimes are fixed when it is built", ()
 			oauth: { accessToken: { expiresIn: number }; refreshToken: { expiresIn: number } };
 		};
 		const handler = createAuthorizationGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			config: config as unknown as GrantDependencies["config"],
 		});
@@ -840,6 +843,7 @@ describe("createAuthorizationGrant", () => {
 				}) as unknown as GrantDependencies["config"];
 
 			const makeLegacyDeps = (requireS256: boolean, codeData: Record<string, unknown>) => ({
+				sessionRequirementResolver: resolverForTests([]),
 				config: legacyConfig(requireS256),
 				keyStore: createSymmetricKeyStore("test-secret"),
 				codeRepository: {
@@ -1183,6 +1187,7 @@ describe("createAuthorizationGrant", () => {
 				pkce: Record<string, unknown>,
 				codeData: Record<string, unknown>,
 			) => ({
+				sessionRequirementResolver: resolverForTests([]),
 				config: makePkceConfig(pkce),
 				keyStore: createSymmetricKeyStore("test-secret"),
 				codeRepository: {
@@ -1300,6 +1305,7 @@ describe("createAuthorizationGrant", () => {
 				clientRepository?: ClientRepository,
 			) {
 				return {
+					sessionRequirementResolver: resolverForTests([]),
 					config: mockConfigWithIssuer,
 					keyStore: createSymmetricKeyStore("test-secret"),
 					codeRepository: {
@@ -2887,6 +2893,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 	it("the code store's consume: 503, not the terminal handler's 500", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			...makeDeps(vi.fn().mockRejectedValue(outage())),
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
@@ -2903,9 +2910,10 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 	});
 
-	it("the session read before any token is signed", async () => {
+	it("the session read before any token is signed: admission's line, the grant's own is not written (the session-admission ADR's D10)", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => {
 				throw outage();
@@ -2914,10 +2922,9 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		} as Parameters<typeof createAuthorizationGrant>[0]);
 		const { result } = await exchange(handler);
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
-		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+		expectOutageLine(logger, "session_admission_unavailable", {
 			store: "user_session",
-			step: "get",
-			clientId: "client1",
+			action: "oauth.code_exchange",
 		});
 	});
 
@@ -2925,12 +2932,10 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		const logger = createMockLogger();
 		const longId = "c".repeat(256);
 		const handler = createAuthorizationGrant({
-			...makeDeps(
-				vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode, client_id: longId }),
-			),
-			userSessionStore: sessionStore(async () => {
-				throw outage();
-			}),
+			sessionRequirementResolver: resolverForTests([]),
+			// The grant's own line: the code store's consume. A session store's
+			// outage is admission's line, which names no client.
+			...makeDeps(vi.fn().mockRejectedValue(outage())),
 			logger,
 		} as Parameters<typeof createAuthorizationGrant>[0]);
 		const { result } = await handler.handle({
@@ -2947,12 +2952,14 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 		expect(result).toMatchObject({ status: 503 });
 		const [line] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(typeof line.clientId).toBe("string");
 		expect(String(line.clientId).length).toBeLessThanOrEqual(200);
 	});
 
 	it("the refresh-token family registration", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			refreshTokenFamilyRotation: {
 				register: async () => {
@@ -2971,10 +2978,11 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 	});
 
-	it("the session re-read before the family is linked", async () => {
+	it("the session re-read before the family is linked: admission's line (the session-admission ADR's D10)", async () => {
 		const logger = createMockLogger();
 		let reads = 0;
 		const handler = createAuthorizationGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 			userSessionStore: sessionStore(async () => {
 				reads++;
@@ -2987,15 +2995,16 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		} as Parameters<typeof createAuthorizationGrant>[0]);
 		const { result } = await exchange(handler);
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
-		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+		expectOutageLine(logger, "session_admission_unavailable", {
 			store: "user_session",
-			step: "revalidate",
+			action: "oauth.code_exchange",
 		});
 	});
 
 	it("the client lookup for logout metadata, as client_repository_unavailable", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
+			sessionRequirementResolver: resolverForTests([]),
 			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode }), {
 				findById: vi.fn().mockRejectedValue(outage()),
 				authenticate: vi.fn(),
@@ -3039,6 +3048,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		it(`linking the family to the session: ${store}`, async () => {
 			const logger = createMockLogger();
 			const handler = createAuthorizationGrant({
+				sessionRequirementResolver: resolverForTests([]),
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
 				userSessionStore: sessionStore(async () => liveSession("sid-1")),
 				...stores,

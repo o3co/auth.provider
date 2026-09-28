@@ -43,7 +43,7 @@ import {
 	MAX_CLIENT_ID_LENGTH,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
@@ -97,6 +97,7 @@ const sqlLikeRepository = () => {
 async function buildApp(clientRepository: ClientRepository) {
 	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config,
 		clientRepository,

@@ -36,7 +36,7 @@ import {
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -131,6 +131,7 @@ async function buildApp(
 		);
 	}
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config: fullConfig,
 		clientRepository: clientRepo,

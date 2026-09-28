@@ -40,7 +40,7 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -80,6 +80,7 @@ const codeRepository: CodeRepository = {
 const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 	const unused = {} as never;
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config,
 		clientRepository,
@@ -267,6 +268,7 @@ describe("the OAuth router's body parsing", () => {
 		// /consent while the route itself is not mounted, and a deployment's
 		// own /oauth/consent would receive a body the OAuth router had read.
 		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
 			registry: new GrantRegistry(),
 			config,
 			clientRepository,

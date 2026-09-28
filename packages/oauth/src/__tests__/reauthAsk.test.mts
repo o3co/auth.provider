@@ -28,6 +28,7 @@ import {
 	createReauthAskStore,
 	REAUTH_ASK_KEY_PREFIX,
 	REAUTH_ASK_TTL_MS,
+	type ReauthAskRecord,
 	type ReauthAskSessionStore,
 	reauthAskStoreFor,
 } from "#/routes/reauthAsk.mjs";
@@ -51,12 +52,20 @@ const memoryStore = (): ReauthAskSessionStore & { records: Map<string, unknown> 
 	};
 };
 
+/** An ask as the login trip writes it. */
+const loginAsk = (at: number): ReauthAskRecord => ({
+	request: REQUEST,
+	createdAt: at,
+	loginAskedAt: at,
+	stepUpAskedAt: {},
+});
+
 describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	it("records the ask under a prefix of its own, with the expiry the store reaps on", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
 		const askedAt = Date.now();
-		const id = await store.ask({ askedAt, request: REQUEST });
+		const id = await store.ask(loginAsk(askedAt));
 
 		// 32 bytes of base64url: unguessable, so naming an ask that exists is
 		// itself the proof this server issued it.
@@ -67,18 +76,56 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 		// without a sweeper of ours — the federation transaction's envelope.
 		const record = backing.records.get(key) as { cookie: { expires: Date }; reauth: unknown };
 		expect(record.cookie.expires.getTime()).toBeGreaterThan(Date.now());
-		expect(record.reauth).toEqual({ askedAt, request: REQUEST });
+		expect(record.reauth).toEqual({
+			request: REQUEST,
+			createdAt: askedAt,
+			loginAskedAt: askedAt,
+			stepUpAskedAt: {},
+			// For one release, what an older replica reads.
+			askedAt,
+		});
 	});
 
 	it("hands the record back once and removes it in the same step", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
 		const askedAt = Date.now();
-		const id = await store.ask({ askedAt, request: REQUEST });
+		const id = await store.ask(loginAsk(askedAt));
 
-		expect(await store.consume(id, REQUEST)).toEqual({ askedAt, request: REQUEST });
+		expect(await store.consume(id, REQUEST)).toEqual(loginAsk(askedAt));
 		expect(backing.records.size).toBe(0);
 		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("records a step-up trip per requirement beside the login, and hands both back", async () => {
+		// The MFA ADR's D17, amended: one ask accumulates what was asked — the
+		// login, and each requirement's trip under its name — so a second
+		// requirement's trip is not refused as "already sent".
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const now = Date.now();
+		const record: ReauthAskRecord = {
+			request: REQUEST,
+			createdAt: now,
+			loginAskedAt: undefined,
+			stepUpAskedAt: { mfa: now - 1, "re-consent": now },
+		};
+		const id = await store.ask(record);
+		const read = await store.consume(id, REQUEST);
+		expect(read).toEqual(record);
+		// A copy: what the caller handed in is not what the store keeps.
+		expect(read?.stepUpAskedAt).not.toBe(record.stepUpAskedAt);
+	});
+
+	it("reads a record in the previous shape as a login asked then, so a trip in flight survives an upgrade", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const askedAt = Date.now() - 1000;
+		backing.records.set(`${REAUTH_ASK_KEY_PREFIX}legacy`, {
+			cookie: {},
+			reauth: { askedAt, request: REQUEST },
+		});
+		expect(await store.consume("legacy", REQUEST)).toEqual(loginAsk(askedAt));
 	});
 
 	it("has nothing for an id it never minted", async () => {
@@ -91,19 +138,58 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 		// against a third request until one of them happens to match.
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
-		const id = await store.ask({ askedAt: Date.now(), request: REQUEST });
+		const id = await store.ask(loginAsk(Date.now()));
 
 		expect(await store.consume(id, `${REQUEST}&state=another`)).toBeNull();
 		expect(backing.records.size).toBe(0);
 	});
 
-	it("refuses one that has aged past its window", async () => {
+	it("refuses one whose last write has aged past its window", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
-		const askedAt = Date.now() - REAUTH_ASK_TTL_MS - 1000;
-		const id = await store.ask({ askedAt, request: REQUEST });
+		const old = Date.now() - REAUTH_ASK_TTL_MS - 1000;
+		const id = await store.ask({ ...loginAsk(old), stepUpAskedAt: { fixture: old } });
 
 		expect(await store.consume(id, REQUEST)).toBeNull();
+	});
+
+	it("measures the window from the last write, not from the record's creation, which a chain of trips keeps", async () => {
+		// The MFA ADR's D17: each stage write opens a new window; `createdAt`
+		// is kept across writes, for the cap a later record measures from it.
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const createdAt = Date.now() - REAUTH_ASK_TTL_MS - 1000;
+		const record: ReauthAskRecord = {
+			request: REQUEST,
+			createdAt,
+			loginAskedAt: createdAt,
+			stepUpAskedAt: { fixture: Date.now() },
+		};
+		const id = await store.ask(record);
+
+		expect(await store.consume(id, REQUEST)).toEqual(record);
+	});
+
+	it("writes askedAt beside a login ask, for one release, so an older replica reads the record it would have written", async () => {
+		const backing = memoryStore();
+		const store = createReauthAskStore(backing);
+		const at = Date.now();
+		const withLogin = await store.ask(loginAsk(at));
+		const stepUpOnly = await store.ask({
+			request: REQUEST,
+			createdAt: at,
+			loginAskedAt: undefined,
+			stepUpAskedAt: { fixture: at },
+		});
+		const stored = (id: string) =>
+			(backing.records.get(`${REAUTH_ASK_KEY_PREFIX}${id}`) as { reauth: Record<string, unknown> })
+				.reauth;
+		expect(stored(withLogin).askedAt).toBe(at);
+		// A step-up alone asked for no login: an older replica finds no ask
+		// and evaluates the request on its merits.
+		expect(stored(stepUpOnly)).not.toHaveProperty("askedAt");
+		// And the record reads back without it.
+		expect(await store.consume(withLogin, REQUEST)).toEqual(loginAsk(at));
 	});
 
 	it("refuses anything under its key that is not the record it wrote", async () => {
@@ -112,6 +198,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
 		const key = `${REAUTH_ASK_KEY_PREFIX}planted`;
+		const now = Date.now();
 		for (const planted of [
 			undefined,
 			null,
@@ -123,6 +210,11 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 			{ reauth: { askedAt: "not a number", request: REQUEST } },
 			{ reauth: { askedAt: Number.NaN, request: REQUEST } },
 			{ reauth: { askedAt: 1, request: 42 } },
+			{ reauth: { createdAt: "not a number", request: REQUEST, stepUpAskedAt: {} } },
+			{ reauth: { createdAt: now, request: REQUEST } },
+			{ reauth: { createdAt: now, request: REQUEST, stepUpAskedAt: [] } },
+			{ reauth: { createdAt: now, request: REQUEST, stepUpAskedAt: { mfa: "soon" } } },
+			{ reauth: { createdAt: now, loginAskedAt: "then", request: REQUEST, stepUpAskedAt: {} } },
 		]) {
 			backing.records.set(key, planted);
 			expect(await store.consume("planted", REQUEST), JSON.stringify(planted ?? null)).toBeNull();
@@ -139,10 +231,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 		});
 
 		await expect(
-			createReauthAskStore(failing({ set: (_sid, _rec, cb) => cb?.(boom) })).ask({
-				askedAt: 1,
-				request: REQUEST,
-			}),
+			createReauthAskStore(failing({ set: (_sid, _rec, cb) => cb?.(boom) })).ask(loginAsk(1)),
 		).rejects.toThrow(/unavailable/);
 
 		await expect(
@@ -154,7 +243,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 			...backing,
 			destroy: (_sid, cb) => cb?.(boom),
 		});
-		const id = await destroying.ask({ askedAt: Date.now(), request: REQUEST });
+		const id = await destroying.ask(loginAsk(Date.now()));
 		await expect(destroying.consume(id, REQUEST)).rejects.toThrow(/unavailable/);
 	});
 });

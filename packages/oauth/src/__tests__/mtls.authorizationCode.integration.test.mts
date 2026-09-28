@@ -37,6 +37,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
@@ -98,6 +99,7 @@ const mockClientRepository: ClientRepository = {
 
 function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
 	return {
+		sessionRequirementResolver: resolverForTests([]),
 		config: mockConfig,
 		keyStore: createSymmetricKeyStore("test-secret-mtls-ac"),
 		codeRepository: {

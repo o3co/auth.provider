@@ -148,6 +148,7 @@ const makeApp = async (opts: {
 	};
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry: new GrantRegistry(),
 		config: makeConfig(
 			opts.oauth ?? {},
@@ -197,11 +198,27 @@ const makeApp = async (opts: {
 			cb?.();
 		},
 	};
+	// `regenerate`, as express-session's session has it: the refused session
+	// is replaced by a fresh, unauthenticated one (the session-admission ADR's
+	// D8, change 6). Not enumerable, so a test comparing the session object
+	// sees the fields alone.
+	const withRegenerate = (holder: { session?: unknown }): Record<string, unknown> => {
+		const session = state.session;
+		Object.defineProperty(session, "regenerate", {
+			enumerable: false,
+			configurable: true,
+			value: (cb: (err?: unknown) => void) => {
+				state.session = {};
+				holder.session = withRegenerate(holder);
+				cb();
+			},
+		});
+		return session;
+	};
 	app.use((req, _res, next) => {
-		(req as unknown as { session: Record<string, unknown> }).session = state.session;
-		if (opts.sessionStore !== false) {
-			(req as unknown as { sessionStore: unknown }).sessionStore = sessionStore;
-		}
+		const holder = req as unknown as { session?: unknown; sessionStore?: unknown };
+		holder.session = withRegenerate(holder);
+		if (opts.sessionStore !== false) holder.sessionStore = sessionStore;
 		next();
 	});
 	app.use("/oauth", router);
@@ -616,17 +633,31 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 });
 
 describe("/authorize — policy evaluation edges (C-2)", () => {
-	it("passes subject/requestedScope as undefined when the session user has no id and no scope was sent", async () => {
+	it("never consults the policy for a session whose user has no id: such a cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
+		// A cookie that says authenticated without a user is not a session this
+		// provider wrote. It used to reach the policy with `subject: undefined`
+		// and mint a code; admission refuses it before any read, and the
+		// browser is sent to log in.
 		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
-		const { app } = await makeApp({
+		const { app, createCode } = await makeApp({
 			grantPolicy: { kind: "test", evaluate },
 			session: { isAuthenticated: true, user: {} },
 		});
 		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+		expect(evaluate).not.toHaveBeenCalled();
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("passes requestedScope as undefined when no scope was sent", async () => {
+		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
+		const { app } = await makeApp({ grantPolicy: { kind: "test", evaluate } });
+		const res = await authorize(app, baseQuery);
 		expect(redirectParams(res).get("code")).toBe("code-x");
 		expect(evaluate).toHaveBeenCalledTimes(1);
 		const evaluated = evaluate.mock.calls[0]?.[0] as unknown as Record<string, unknown>;
-		expect(evaluated.subject).toBeUndefined();
+		expect(evaluated.subject).toBe("user-1");
 		expect(evaluated.requestedScope).toBeUndefined();
 	});
 
@@ -809,19 +840,28 @@ describe("/authorize — code issuance failure", () => {
 });
 
 describe("/authorize — success audit subject (authorize.granted)", () => {
-	it("emits authorize.granted with subject undefined when the session user has no string id", async () => {
+	it("emits no authorize.granted for a session whose user has no string id: such a cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
 		const record = vi.fn(async () => {});
-		const { app } = await makeApp({
+		const { app, createCode } = await makeApp({
 			auditSink: { record },
 			session: { isAuthenticated: true, user: {} },
 		});
 		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+		expect(createCode).not.toHaveBeenCalled();
+		expect(record).not.toHaveBeenCalledWith(expect.objectContaining({ type: "authorize.granted" }));
+	});
+
+	it("emits authorize.granted with the admitted session's subject", async () => {
+		const record = vi.fn(async () => {});
+		const { app } = await makeApp({ auditSink: { record } });
+		const res = await authorize(app, baseQuery);
 		expect(redirectParams(res).get("code")).toBe("code-x");
-		expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "authorize.granted" }));
 		const event = record.mock.calls.find(
 			(c) => (c as unknown as [Record<string, unknown>])[0]?.type === "authorize.granted",
 		)?.[0] as unknown as Record<string, unknown>;
-		expect(event.subject).toBeUndefined();
+		expect(event.subject).toBe("user-1");
 		expect(event.clientId).toBe(CLIENT_ID);
 	});
 });
@@ -1138,10 +1178,11 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(store.get).toHaveBeenCalledWith(liveSid);
 	});
 
-	it("does not read the store for a session that records no sid", async () => {
-		// Backward compatibility: a deployment whose login wiring never wrote
-		// `sid` onto the express-session has nothing to check, and refusing it
-		// would revoke authentication from every such deployment.
+	it("sends a session that records no sid to the login page while a store is wired, without reading it", async () => {
+		// The session-admission ADR's D8, change 1: with a store wired, a cookie
+		// that names no record is not a live session — it used to mint a code
+		// without `sid`, which `/token` then refused. Nothing is read: no sid
+		// names a record.
 		const store = liveStore();
 		const { app, createCode } = await makeApp({
 			userSessionStore: store,
@@ -1151,8 +1192,8 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		const res = await authorize(app, baseQuery);
 
 		expect(res.status).toBe(302);
-		expect(new URL(res.headers.location as string).searchParams.get("code")).toBe("code-x");
-		expect(createCode).toHaveBeenCalled();
+		expect(res.headers.location).toContain("/login");
+		expect(createCode).not.toHaveBeenCalled();
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
@@ -1173,7 +1214,7 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("fails closed to the login page when the session store is unreachable", async () => {
+	it("fails closed with temporarily_unavailable on the redirect URI when the session store is unreachable", async () => {
 		const logger = createMockLogger();
 		const createCode = vi.fn();
 		const { app } = await makeApp({
@@ -1185,20 +1226,25 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 			session: { isAuthenticated: true, user: { id: "user-1" }, sid: liveSid },
 		});
 
-		const res = await authorize(app, baseQuery);
+		const params = redirectParams(await authorize(app, baseQuery));
 
-		// The documented fail-closed step: the user can act on a login page,
-		// and the login path reports its own outage.
-		expect(res.status).toBe(302);
-		expect(res.headers.location).toContain("/login");
+		// The session-admission ADR's D8, change 2: an outage is answered on the
+		// validated redirect URI, never with the login page — whose forwarding
+		// of signed-in users would loop on the flag the cookie keeps.
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("session store unavailable");
 		expect(createCode).not.toHaveBeenCalled();
-		// The outage is logged once, at error level, with the store and the
-		// projection — not a warn.
+		// The outage is logged once, at error level, by admission (D10): the
+		// store and the action, the projection — never the sid, not a warn.
 		expect(logger.warn).not.toHaveBeenCalled();
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ store: "user_session", sid: liveSid, err: expect.objectContaining({ name: "Error" }) },
-			"authorize_session_liveness_unavailable",
+			{
+				store: "user_session",
+				action: "oauth.authorize",
+				err: expect.objectContaining({ name: "Error" }),
+			},
+			"session_admission_unavailable",
 		);
 		expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
@@ -1227,8 +1273,12 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ store: "user_session", sid: liveSid, err: expect.objectContaining({ name: "Error" }) },
-			"authorize_session_liveness_unavailable",
+			{
+				store: "user_session",
+				action: "oauth.authorize",
+				err: expect.objectContaining({ name: "Error" }),
+			},
+			"session_admission_unavailable",
 		);
 	});
 

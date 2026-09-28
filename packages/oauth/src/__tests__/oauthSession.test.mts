@@ -77,9 +77,10 @@ describe("oauthSessionModule", () => {
 		}
 	});
 	it("logs a session-store outage on the composition's logger, once, at error", async () => {
-		// The grant writes the outage's one line through `deps.logger`, and the
-		// boot planner hands a module only the slots its manifest names: a
-		// manifest without `logger` answered the 503 and logged nothing.
+		// Admission writes the outage's one line through the grant's
+		// `deps.logger`, and the boot planner hands a module only the slots its
+		// manifest names: a manifest without `logger` answered the 503 and logged
+		// nothing.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -128,10 +129,10 @@ describe("oauthSessionModule", () => {
 			expect(logger.error).toHaveBeenCalledWith(
 				expect.objectContaining({
 					store: "user_session",
-					step: "get",
+					action: "oauth.session_grant",
 					err: expect.objectContaining({ name: "Error" }),
 				}),
-				"session_grant_store_unavailable",
+				"session_admission_unavailable",
 			);
 			expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 			expect(logger.warn).not.toHaveBeenCalled();

@@ -72,6 +72,7 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
+import { requireRequirements, stepUpOf } from "./admission.mjs";
 import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
@@ -267,17 +268,20 @@ export const createOAuthRouter = async (
 		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 		/**
 		 * The registered session requirements (the session-admission ADR's
-		 * D1, D6): what a step-up can add decides which acr entries this
-		 * composition can satisfy (`./acrValues.mts`). `oauthModule` passes the
-		 * synthetic key `sessionRequirementResolver`, which the boot planner has
-		 * filled before any route factory runs; a router built by hand without
-		 * one reaches nothing. Every consumer of admission in this router takes
-		 * it as required in A3.
+		 * D1, D6, D8): what every consumer of admission in this router —
+		 * `/authorize`, the consent step — reads its session through, and what
+		 * a step-up can add, which decides which acr entries this composition
+		 * can satisfy (`./acrValues.mts`). `oauthModule` passes the synthetic
+		 * key `sessionRequirementResolver`, which the boot planner has filled
+		 * before any route factory runs. Required: a router built by hand
+		 * without one is refused here, and one handed a resolver the planner
+		 * (or `resolverForTests`) did not build is refused by `admitSession`.
 		 */
-		requirements?: SessionRequirementResolver;
+		requirements: SessionRequirementResolver;
 		logger?: Logger;
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
+	requireRequirements("createOAuthRouter", requirements);
 	const router = express.Router();
 
 	// #328: every `oauth.*` knob this router consumes is resolved exactly once,
@@ -293,7 +297,7 @@ export const createOAuthRouter = async (
 	// an entry dropped is said once, here, at composition.
 	// What the registered requirements can add to a session by a step-up: read
 	// once here, after every name-keyed contribution registered (D6).
-	const reach = stepUpReach(Array.from(requirements?.entries() ?? [], ([, r]) => r));
+	const reach = stepUpReach(Array.from(requirements.entries(), ([, r]) => r));
 	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config, reach);
 	logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token
@@ -404,11 +408,14 @@ export const createOAuthRouter = async (
 		consentStore,
 		pendingConsentStore,
 		oauth: { ...options, acrValues: acrValues.table },
-		// R1b: `/authorize` re-checks that the express-session's `sid` still
-		// names a live `UserSession` before minting. Optional here for the same
-		// reason the slot itself is: a composition without session-backed login
-		// wires no store, and the endpoint behaves exactly as it did.
+		// The session-admission ADR's D8: `/authorize` reads the cookie's
+		// session through admission with the router's own slots — the durable
+		// store (optional, as the slot is: a composition without session-backed
+		// login wires none), the subject-revocation boundary (change 4: applied
+		// here when it is wired) and the resolver.
 		userSessionStore,
+		subjectRevocation,
+		requirements,
 	});
 
 	/**
@@ -815,6 +822,13 @@ export const createOAuthRouter = async (
 				// passed through by core's policy evaluation, can carry anything.
 				const errorDescription = sanitizeErrorText(result.errorDescription);
 				if (errorDescription) errorBody.error_description = errorDescription;
+				// The session-admission ADR's D8: a grant whose session can be met
+				// by a step-up names the requirement beside `invalid_grant`, so an
+				// updated client can offer it (the MFA ADR's D16 row) — beside
+				// `invalid_grant` alone, the one error it qualifies. A requirement's
+				// name, held to the same character set as `error`.
+				const stepUp = error === "invalid_grant" ? stepUpOf(result) : undefined;
+				if (stepUp !== undefined && isWellFormedErrorCode(stepUp)) errorBody.step_up = stepUp;
 				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
 				// The token endpoint is not a protected resource (RFC 6750 §3 applies to
 				// resource servers, not authorization endpoints), and `clientAuthMw`
@@ -1274,8 +1288,11 @@ export const createOAuthRouter = async (
 				clientRepository,
 				auditSink,
 				logger,
-				// #527 review: the same liveness read `/authorize` performs.
+				// #527 review: the same reading `/authorize` makes, through
+				// admission with the same slots (the session-admission ADR's D8).
 				userSessionStore,
+				subjectRevocation,
+				requirements,
 			}),
 		);
 	}

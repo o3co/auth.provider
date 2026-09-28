@@ -49,7 +49,7 @@ import {
 	loadYamlMap,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { GrantRegistry } from "@o3co/auth-provider-core/testing";
+import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -112,6 +112,7 @@ const makeApp = async (opts: {
 	registry.register("authorization_code", alwaysGrant());
 
 	const { router } = await createOAuthRouter(express, {
+		requirements: resolverForTests([]),
 		registry,
 		config: makeConfig(opts.staleAllowUnmarkedClients ?? false),
 		clientRepository,
@@ -270,6 +271,7 @@ describe("/authorize first-party invariant, through a file-backed registry (#343
 		registry.register("authorization_code", alwaysGrant());
 
 		const { router } = await createOAuthRouter(express, {
+			requirements: resolverForTests([]),
 			registry,
 			config: makeConfig(false),
 			clientRepository,
