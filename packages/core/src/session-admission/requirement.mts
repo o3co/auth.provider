@@ -132,12 +132,23 @@ const RESERVED_PAGE_PARAM = "redirect_to";
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** Whether a page's `url` carries what it may not: a backslash (a browser reads it as a slash), an encoded one, or a control character. */
+const forbiddenInPageUrl = (url: string): boolean =>
+	/[\\]|%5c/i.test(url) ||
+	Array.from(url, (char) => char.charCodeAt(0)).some((code) => code < 0x20 || code === 0x7f);
+
+/** The origin a path is resolved against when no issuer is given: any path must keep it. */
+const PATH_ORIGIN = "https://issuer.invalid";
+
 /**
- * `page` as a requirement may declare it (D3): `url` a path — one `/`, not
- * two — or an absolute `http(s)` URL on `issuer`'s origin (any absolute
- * `http(s)` URL when no issuer is given, which validates the shape alone);
- * `params` a plain object of strings without `redirect_to`. Anything else is
- * a `RangeError` naming what is wrong. Answers a frozen copy.
+ * `page` as a requirement may declare it (D3): `url` a path — resolved
+ * against the issuer as a browser resolves a `Location`, and refused when
+ * that leaves the issuer's origin (`//host`, `/\host`) — or an absolute
+ * `http(s)` URL on `issuer`'s origin (any absolute `http(s)` URL when no
+ * issuer is given, which validates the shape alone); never a backslash, an
+ * encoded backslash or a control character; `params` a plain object of
+ * strings without `redirect_to`. Anything else is a `RangeError` naming
+ * what is wrong. Answers a frozen copy.
  */
 export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 	if (!isPlainObject(page)) throw new RangeError("stepUpPage must be an object");
@@ -145,9 +156,23 @@ export function checkStepUpPage(page: unknown, issuer?: string): StepUpPage {
 	if (typeof url !== "string" || url.length === 0) {
 		throw new RangeError("stepUpPage.url must be a non-empty string");
 	}
+	if (forbiddenInPageUrl(url)) {
+		throw new RangeError(
+			"stepUpPage.url must not carry a backslash, an encoded backslash or a control character",
+		);
+	}
 	if (url.startsWith("/")) {
-		if (url.startsWith("//")) {
-			throw new RangeError("stepUpPage.url must be a path or an absolute URL, not scheme-relative");
+		const base = new URL(issuer ?? PATH_ORIGIN);
+		let resolved: URL;
+		try {
+			resolved = new URL(url, base);
+		} catch {
+			throw new RangeError("stepUpPage.url must be a path or an absolute URL");
+		}
+		if (resolved.origin !== base.origin) {
+			throw new RangeError(
+				"stepUpPage.url must stay on the issuer's origin once resolved: a path, not a scheme-relative URL",
+			);
 		}
 	} else {
 		let parsed: URL;
@@ -331,8 +356,12 @@ const REMEDIATION_ROUTE = /^[a-z][a-z0-9_]*$/;
 
 /**
  * `remediations` as a requirement may declare them (D4): each the
- * requirement's own route, `<name>.<route>`, declared once. By construction
- * none collides with a consumer's action or another requirement's: the
+ * requirement's own route, `<name>.<route>`, declared once, and never a
+ * consumer's action — a consumer's action may share a requirement's
+ * namespace (`mfa.manage` beside the `mfa` requirement, or a requirement
+ * named `oauth`), so any name present in `ADMISSION_ACTIONS` is refused:
+ * registered as a remediation it would skip every requirement for that
+ * action. Another requirement's name is impossible by construction: the
  * route holds no dot, and the name-keyed kind refuses a second requirement
  * of one name.
  */
@@ -345,6 +374,11 @@ function checkRemediations(name: string, value: unknown, refuse: (what: string) 
 		if (route === undefined || !REMEDIATION_ROUTE.test(route)) {
 			refuse(
 				`remediation "${remediation}" is not a route of this requirement's own: a remediation is named "${prefix}<route>", the route a lower-case identifier`,
+			);
+		}
+		if (Object.hasOwn(ADMISSION_ACTIONS, remediation)) {
+			refuse(
+				`remediation "${remediation}" is a consumer's action in ADMISSION_ACTIONS: registered as a remediation it would skip every requirement for that action`,
 			);
 		}
 		if (seen.has(remediation)) refuse(`remediation "${remediation}" is declared twice`);

@@ -203,10 +203,11 @@ export function primaryFromDto(dto: PrimaryAuthenticationDto): PrimaryAuthentica
 }
 
 /**
- * What a completing requirement named `requirement` may add (D5): a
- * non-empty `amr` of non-empty strings, none a primary's marker, `mfa` never
- * alone (it comes beside a factor's own value, D14); `mfaAt` a valid date or
- * absent. A second-factor value, or an `mfaAt`, under any name but `mfa` is
+ * What a completing requirement named `requirement` may add (D5): an `amr`
+ * of non-empty strings — empty when the requirement reaches nothing, which
+ * every one but `mfa` does in this release — none a primary's marker, `mfa`
+ * never alone (it comes beside a factor's own value, D14); `mfaAt` a valid
+ * date or absent, never beside an empty `amr`. A second-factor value, or an `mfaAt`, under any name but `mfa` is
  * refused: a risk score or a re-consent cannot make a session meet
  * `urn:o3co:acr:mfa`. A frozen copy.
  */
@@ -222,6 +223,11 @@ export function checkPrimaryAdditions(requirement: string, value: unknown): Prim
 	if (requirement !== MFA_REQUIREMENT_NAME && value.mfaAt !== undefined) {
 		refuse("an mfaAt, which only the requirement named mfa may add");
 	}
+	if (amr.length === 0 && value.mfaAt !== undefined) {
+		refuse(
+			"an mfaAt beside an empty amr: a completion that adds no value verified no second factor",
+		);
+	}
 	return Object.freeze({
 		amr,
 		...(value.mfaAt === undefined ? {} : { mfaAt: new Date((value.mfaAt as Date).getTime()) }),
@@ -235,8 +241,10 @@ function checkAddedAmr(
 	refuse: (what: string) => never,
 ): readonly string[] {
 	const amr = value.amr;
-	if (!isStringList(amr) || amr.length === 0 || !amr.every(isNonEmptyString)) {
-		refuse("an amr that is not a non-empty list of non-empty strings");
+	// Empty is allowed: a requirement that reaches nothing — every one but
+	// `mfa` in this release — completes its ceremony adding no value.
+	if (!isStringList(amr) || !amr.every(isNonEmptyString)) {
+		refuse("an amr that is not a list of non-empty strings");
 	}
 	const values = amr as readonly string[];
 	for (const entry of values) {
@@ -244,7 +252,7 @@ function checkAddedAmr(
 			refuse(`"${entry}", which marks a primary authentication`);
 		}
 	}
-	if (values.every((entry) => entry === MFA_AMR)) {
+	if (values.length > 0 && values.every((entry) => entry === MFA_AMR)) {
 		refuse(`"${MFA_AMR}" alone, which comes beside a factor's own amr values`);
 	}
 	if (
@@ -268,6 +276,11 @@ function checkPrimaryAdditionsDto(requirement: string, value: unknown): PrimaryA
 	}
 	if (requirement !== MFA_REQUIREMENT_NAME && value.mfaAtMs !== undefined) {
 		refuse("an mfaAt, which only the requirement named mfa may add");
+	}
+	if (amr.length === 0 && value.mfaAtMs !== undefined) {
+		refuse(
+			"an mfaAtMs beside an empty amr: a completion that adds no value verified no second factor",
+		);
 	}
 	return Object.freeze({
 		amr,

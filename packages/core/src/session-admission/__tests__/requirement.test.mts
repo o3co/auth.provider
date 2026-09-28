@@ -145,7 +145,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		]);
 	});
 
-	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once; by construction none is a consumer's action or another requirement's", () => {
+	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, and never a consumer's action, which may share the namespace", () => {
 		expect(
 			resolverForTests([requirement("x", { remediations: ["x.step_up", "x.recover"] })]).get("x")
 				?.remediations,
