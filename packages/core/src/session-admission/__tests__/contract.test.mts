@@ -138,13 +138,21 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 		).toContain(reach);
 	});
 
-	it("remediations that are not names, or repeat", async () => {
-		expect(await failing({ build: () => fixture({ remediations: [""] }) })).toContain(
-			"remediations are non-empty names, each once",
-		);
+	it("remediations that are not names, are not the requirement's own routes, or repeat", async () => {
+		const remediations =
+			"remediations are the requirement's own routes — <name>.<route> — each once, none a bundled action of another grade";
+		expect(await failing({ build: () => fixture({ remediations: [""] }) })).toContain(remediations);
 		expect(await failing({ build: () => fixture({ remediations: ["a", "a"] }) })).toContain(
-			"remediations are non-empty names, each once",
+			remediations,
 		);
+		expect(
+			await failing({ build: () => fixture({ remediations: ["oauth.authorize"] }) }),
+		).toContain(remediations);
+		expect(
+			await failing({
+				build: () => fixture({ remediations: ["fixture-a.step_up", "fixture-a.step_up"] }),
+			}),
+		).toContain(remediations);
 	});
 
 	it("a hint key that is reserved", async () => {

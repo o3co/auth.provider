@@ -22,7 +22,7 @@
  * (`it.each(cases)("$name", ({ run }) => run())`) and nothing here depends
  * on one. What it holds a requirement to: its name is its key, and a
  * fixture is never named `mfa`; its `reach` and `stepUpPage` are what boot
- * accepts (`checkRegisteredReach`, `checkStepUpPage`); its `remediations`
+ * accepts (`sealRegisteredReach`, `checkStepUpPage`); its `remediations`
  * are names, each once; its `hintKeys` are hint names; admission never
  * calls its `admit` with a dead session or for a declared remediation; its
  * `admit` answers a verdict, a `step_up` only with a page registered; an
@@ -37,7 +37,6 @@ import type { UserSession, UserSessionStore } from "../../user-sessions/types.mj
 import { readAcrTable } from "../acr.mjs";
 import { admitPrimary, admitSession, cookieClaim } from "../admit.mjs";
 import {
-	checkRegisteredReach,
 	checkStepUpPage,
 	isHintKey,
 	MFA_REQUIREMENT_NAME,
@@ -45,6 +44,7 @@ import {
 	type RequirementInput,
 	registeredRequirement,
 	type SessionRequirement,
+	sealRegisteredReach,
 } from "../requirement.mjs";
 import { resolverForTests } from "./resolver.mjs";
 
@@ -161,7 +161,7 @@ export function sessionRequirementContract(
 			name: "reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set exactly when reach is not empty, and is valid",
 			run: async () => {
 				const registered = registeredRequirement(build(), issuer);
-				checkRegisteredReach(registered);
+				sealRegisteredReach(registered);
 				if (registered.stepUpPage !== undefined) checkStepUpPage(registered.stepUpPage, issuer);
 			},
 		},

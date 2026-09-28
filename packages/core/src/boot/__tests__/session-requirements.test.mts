@@ -418,6 +418,26 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 		}
 	});
 
+	it("refuses a requirement whose remediation is not its own route — a fixture declaring oauth.authorize — as the contribution's failure, naming the module", async () => {
+		const err = await refusal(
+			boot(
+				[
+					contributing("test:risk", {
+						risk: () => requirement("risk", { remediations: ["oauth.authorize"] }),
+					}),
+				],
+				{ sessionRequirements: { expected: ["risk"] } },
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			module: "test:risk",
+			kind: "sessionRequirements",
+			name: "risk",
+		});
+		expect(err.message).toMatch(/oauth\.authorize/);
+	});
+
 	it("holds the page to the issuer's origin at registration", async () => {
 		const err = await refusal(
 			boot(
@@ -603,7 +623,7 @@ describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
 
 	it("refuses a requirement named mfa that does not declare mfa.step_up", async () => {
 		const err = await refusal(
-			boot([factors, ...stores, mfaModule({ remediations: ["mfa.manage"] })], expected),
+			boot([factors, ...stores, mfaModule({ remediations: ["mfa.other"] })], expected),
 		);
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.message).toMatch(/mfa\.step_up/);

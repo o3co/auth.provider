@@ -121,6 +121,41 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		]);
 	});
 
+	it("holds remediations to the requirement's own routes — <name>.<route>, the route a lower-case identifier — each once, none a bundled action of another grade", () => {
+		expect(
+			resolverForTests([requirement("x", { remediations: ["x.step_up", "x.recover"] })]).get("x")
+				?.remediations,
+		).toEqual(["x.step_up", "x.recover"]);
+		for (const remediations of [
+			["oauth.authorize"],
+			["x"],
+			["x."],
+			["x.Step"],
+			["x.a.b"],
+			["x.step-up"],
+			["y.step_up"],
+			[".step_up"],
+			["x.step_up", "x.step_up"],
+		]) {
+			expect(
+				() => resolverForTests([requirement("x", { remediations })]),
+				JSON.stringify(remediations),
+			).toThrow(RangeError);
+		}
+		// A bundled action of another grade is a consumer's, never a route a requirement owns.
+		expect(() =>
+			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })]),
+		).toThrow(/oauth\.authorize/);
+		expect(() => resolverForTests([requirement("mfa", { remediations: ["mfa.manage"] })])).toThrow(
+			/mfa\.manage/,
+		);
+		// The bundled remediation is the MFA requirement's own route.
+		expect(
+			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })]).get("mfa")
+				?.remediations,
+		).toEqual(["mfa.step_up"]);
+	});
+
 	it("registers a copy, as boot does: the page and the lists are the copy's own, a page getter is read once, and admit delegates", async () => {
 		let reads = 0;
 		const asked: unknown[] = [];
@@ -298,9 +333,22 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect(source.reach).toBe(live);
 	});
 
+	it("accepts an iterable of values that is not a string — an array — answering a Set, and seals a registered copy on it", () => {
+		expect([...sealRegisteredReach(requirement("risk", ["risk-ok", "risk-ok"]))]).toEqual([
+			"risk-ok",
+		]);
+		const registered = registeredRequirement(requirement("risk", ["risk-ok"]));
+		sealRegisteredReach(registered);
+		expect(registered.reach).toBeInstanceOf(Set);
+		expect([...registered.reach]).toEqual(["risk-ok"]);
+	});
+
 	it.each([
-		["not a Set", "otp"],
-		["a list", ["otp"]],
+		["a string", "risk-ok"],
+		["a number", 7],
+		["null", null],
+		["undefined", undefined],
+		["a list holding a reserved value", ["otp"]],
 		["an empty string", new Set([""])],
 		["a non-string", new Set([7])],
 		["a primary's marker", new Set(["pwd"])],

@@ -21,7 +21,10 @@
  * the brand stops accidents, not a deployment that imports the testing
  * entry on purpose. Each requirement is registered as boot registers one
  * (`registeredRequirement`): its shape held to the contract, its page on the
- * issuer's origin when one is given, and what the resolver answers a copy.
+ * issuer's origin when one is given, and what the resolver answers a copy —
+ * its reach sealed as boot seals it (`snapshotReach`: read once when the
+ * resolver is built, a frozen snapshot answered afterwards), without the
+ * reserved-value rule, which the contract suite and boot hold.
  */
 
 import { sessionRequirementResolverOver } from "../admit.mjs";
@@ -29,12 +32,14 @@ import {
 	registeredRequirement,
 	type SessionRequirement,
 	type SessionRequirementResolver,
+	snapshotReach,
 } from "../requirement.mjs";
 
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
  * order given. Two of one name are refused, as boot refuses a duplicate
- * contribution. With `issuer`, each page is held to that origin.
+ * contribution. With `issuer`, each page is held to that origin. Each reach
+ * is read once, here, and the resolver answers that snapshot.
  */
 export function resolverForTests(
 	requirements: readonly SessionRequirement[],
@@ -51,6 +56,7 @@ export function resolverForTests(
 			throw new RangeError(`resolverForTests: two requirements are named "${requirement.name}"`);
 		}
 		byName.set(requirement.name, requirement);
+		snapshotReach(requirement);
 	}
 	return sessionRequirementResolverOver({
 		get: (name) => byName.get(name),
