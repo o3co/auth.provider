@@ -16,7 +16,7 @@
 
 /**
  * Every workspace package booted together on one replica, every store in
- * memory: the standalone template's composition with the seven packages it
+ * memory: the standalone template's composition with the eight packages it
  * does not depend on added to it (`full-set.fixture.mts`), held to the
  * contracts that only exist when all of them meet — the added modules' boot,
  * discovery and each added feature's switch, their flows, their body limits

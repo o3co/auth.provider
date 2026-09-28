@@ -19,11 +19,12 @@
  * `all-modules-composition.fixture.mts`, imported whole) with every workspace
  * package the template does not depend on added the way a deployment adds
  * them to that manifest — the device grant, DPoP, mTLS, token exchange,
- * WebAuthn, and the Apple and GitHub federations.
+ * WebAuthn, the MFA package's TOTP factor, and the Apple and GitHub
+ * federations.
  *
  * What the template's fixture substitutes, this one inherits. What it adds:
  *
- * - The four packages' `reference.conf` files, layered above core's as a
+ * - The five packages' `reference.conf` files, layered above core's as a
  *   deployment layers them, and the settings with no default laid over the
  *   resolved config (each feature's switch, the WebAuthn relying party, the
  *   two federation sections).
@@ -73,6 +74,7 @@ import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-d
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import { appleFederationModule } from "@o3co/auth-provider-federation-apple";
 import { githubFederationModule } from "@o3co/auth-provider-federation-github";
+import { mfaTotpFactorModule } from "@o3co/auth-provider-mfa";
 import { mtlsModule } from "@o3co/auth-provider-mtls";
 import {
 	TOKEN_EXCHANGE_GRANT_TYPE,
@@ -109,6 +111,7 @@ const require = createRequire(import.meta.url);
 const REFERENCE_CONFS = [
 	"@o3co/auth-provider-device-grant/reference.conf",
 	"@o3co/auth-provider-dpop/reference.conf",
+	"@o3co/auth-provider-mfa/reference.conf",
 	"@o3co/auth-provider-mtls/reference.conf",
 	"@o3co/auth-provider-webauthn/reference.conf",
 ].map((specifier) => require.resolve(specifier));
@@ -602,6 +605,10 @@ function addedModules(
 					defaultChallengeCeremonyModule,
 				]
 			: []),
+		// The MFA package's TOTP factor, on by its reference.conf. Its MFA
+		// module, which registers the requirement named mfa, is not installed:
+		// mfa.mode stays off (the MFA ADR's build-order step 8).
+		mfaTotpFactorModule,
 		grantPolicyModule,
 		...requirementModules(interrupt, ceremonies, outage),
 		...federationBridges(config, features, f),
