@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+import type {
+	MfaLockoutPolicy,
+	MfaSubjectAttemptOutcome,
+	MfaSubjectHold,
+} from "@o3co/auth-provider-core";
+
 // ---------------------------------------------------------------------------
 // Backing client contracts for Redis adapters in this package.
 //
@@ -1408,6 +1414,146 @@ export interface MfaFactorStoreClient {
 	removeAll(key: string): Promise<void>;
 }
 
+// --- MfaTransactionStoreClient (the MFA ADR's D8, D21, D25) -----------------
+
+/** What an update writes, as the transaction's hash keeps it. */
+export interface MfaTransactionUpdateInput {
+	/** The version the transaction must still be at, as decimal text. */
+	readonly expectedVersion: string;
+	/**
+	 * The value its `incarnation` field must still hold: the random value
+	 * `create` wrote, so a transaction consumed and created again under the
+	 * same id, at the same version, is never written with a patch that was
+	 * checked against the one before it.
+	 */
+	readonly incarnation: string;
+	/** Fields to write, and the text each is written as. */
+	readonly set: Readonly<Record<string, string>>;
+	/** Fields to remove. */
+	readonly clear: readonly string[];
+}
+
+/**
+ * A subject's lock-state keys (D21). Both carry the subject's hash tag: every
+ * operation on the state is one script over the two.
+ */
+export interface MfaSubjectKeys {
+	/**
+	 * HASH: `seq`, the order counter; `r:<id>` → `<seq>|<atMs>` for each
+	 * attempt in the consecutive run; `p:<id>` → `<seq>` for each reservation
+	 * not yet settled; `t:<digest>` →
+	 * `<createdAtMs>|<trustedUntilMs>|<windowUntilMs or empty>|<order>` for each
+	 * trusted browser.
+	 */
+	readonly lock: string;
+	/** ZSET: the attempts the rolling week counts, each scored by its time. */
+	readonly week: string;
+}
+
+export interface ReserveMfaSubjectAttemptInput {
+	/** The caller's time, which every hold is judged on. */
+	readonly nowMs: number;
+	readonly policy: MfaLockoutPolicy;
+	/** The SHA-256 of the browser value presented, base64url; `undefined` when none was. */
+	readonly browserDigest: string | undefined;
+	/** The id the attempt is recorded under when it is let through. */
+	readonly reservation: string;
+}
+
+export type ReserveMfaSubjectAttemptReply =
+	| { readonly ok: true }
+	| {
+			readonly ok: false;
+			readonly hold: MfaSubjectHold;
+			/** Milliseconds from `nowMs` until an attempt may be reserved; `null` for the hard hold. */
+			readonly retryAfterMs: number | null;
+	  };
+
+export interface NoteMfaExemptSuccessInput {
+	readonly nowMs: number;
+	readonly policy: MfaLockoutPolicy;
+	/** The SHA-256 of the browser value presented, whose trust is renewed rather than added to; `undefined` when none was. */
+	readonly presentedDigest: string | undefined;
+	/** The SHA-256 of the new browser value, the one trusted from now on. */
+	readonly digest: string;
+}
+
+/**
+ * Backing client for the `MfaTransactionStore` adapter (the MFA ADR's D8,
+ * D21, D25).
+ *
+ * Semantic operations, for the reason the other stores' clients give: every
+ * one the port calls atomic is a read, a decision and a write, which Redis
+ * makes one step only as a script (see `makeIoredisClients`). A transaction's
+ * hash is written and read by the adapter; the operations here read its
+ * `version`, `incarnation`, `attempts` and `challenge` fields by name.
+ *
+ * The subject state's decisions — D21's backoff, weekly budget, hard limit
+ * and trusted browsers — are the port's rules, judged on the caller's
+ * `nowMs`; what is reclaimed is judged on the server's clock, never later
+ * than a day after it stops counting (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). A
+ * stored value an operation cannot read is refused with an error, never read
+ * as a state that holds nothing.
+ */
+export interface MfaTransactionStoreClient {
+	/**
+	 * Write the transaction's `fields` into the hash at `key`, and its deadline
+	 * (`PEXPIREAT deadlineMs`), only while no live one is there. Resolves
+	 * whether it wrote.
+	 */
+	create(
+		key: string,
+		fields: Readonly<Record<string, string>>,
+		deadlineMs: number,
+	): Promise<boolean>;
+	/** Every field of the hash at `key` (`HGETALL`); `{}` when there is none. */
+	read(key: string): Promise<Readonly<Record<string, string>>>;
+	/**
+	 * Atomically: while the transaction is at `expectedVersion` and its
+	 * incarnation, write `set`, remove `clear`, add one to `version`, and
+	 * resolve every field as written; `null` otherwise. The deadline stays.
+	 */
+	update(
+		key: string,
+		input: MfaTransactionUpdateInput,
+	): Promise<Readonly<Record<string, string>> | null>;
+	/**
+	 * Atomically: `attempts` + 1 while that is within `max`; past it — or on
+	 * a count that is not a number — the transaction is deleted and the
+	 * attempts it had are answered with `ok: false`. No transaction:
+	 * `{ ok: false, attempts: 0 }`.
+	 */
+	reserveAttempt(
+		key: string,
+		max: number,
+	): Promise<{ readonly ok: boolean; readonly attempts: number }>;
+	/** Atomically: the `challenge` field, removed, while the version is `expectedVersion`; `null` otherwise. */
+	takeChallenge(key: string, expectedVersion: string): Promise<string | null>;
+	/** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
+	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
+	/** D21's `reserveSubjectAttempt`, one script over both keys. */
+	reserveSubjectAttempt(
+		keys: MfaSubjectKeys,
+		input: ReserveMfaSubjectAttemptInput,
+	): Promise<ReserveMfaSubjectAttemptReply>;
+	/** D21's `settleSubjectAttempt`, one script over both keys; a reservation not in flight changes nothing. */
+	settleSubjectAttempt(
+		keys: MfaSubjectKeys,
+		reservation: string,
+		outcome: MfaSubjectAttemptOutcome,
+	): Promise<void>;
+	/** D21's `noteExemptSuccess`, one script over both keys. */
+	noteExemptSuccess(keys: MfaSubjectKeys, input: NoteMfaExemptSuccessInput): Promise<void>;
+	/** Remove both keys. */
+	clearSubjectState(keys: MfaSubjectKeys): Promise<void>;
+	/** Record the email-proof requirement (D25) at `key`, with no TTL. Idempotent. */
+	requireEmailProof(key: string): Promise<void>;
+	/** Whether the requirement is recorded at `key`. */
+	emailProofRequired(key: string): Promise<boolean>;
+	/** Remove the requirement at `key` (`DEL`); resolves whether this call removed it. */
+	consumeEmailProof(key: string): Promise<boolean>;
+}
+
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStoreClient?: ChallengeStoreClient;
@@ -1429,5 +1575,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly federationGrantStoreClient?: FederationGrantStoreClient;
 		readonly federationGrantIntentStoreClient?: FederationGrantIntentStoreClient;
 		readonly mfaFactorStoreClient?: MfaFactorStoreClient;
+		readonly mfaTransactionStoreClient?: MfaTransactionStoreClient;
 	}
 }
