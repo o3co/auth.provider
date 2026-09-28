@@ -239,8 +239,20 @@ interface PrimaryAuthentication {              // moves from `mfa/coordinator.mt
 
 type PrimaryAdmission =
 	| { readonly outcome: "establish"; readonly establishment: Establishment }   // every requirement answered `establish`
-	| { readonly outcome: "interrupt"; readonly requirement: string; open(sessionId: string): Promise<InterruptionAnswer> }
+	| {
+			readonly outcome: "interrupt";
+			readonly requirement: string;
+			/** What the requirement persists in its own record and presents to `resumePrimary` when its ceremony completes. */
+			readonly continuation: PrimaryContinuation;
+			open(sessionId: string): Promise<InterruptionAnswer>;
+	  }
 	| { readonly outcome: "unavailable"; readonly store: string };
+
+/** Plain data: the primary as the route built it, and what every completed requirement added so far. */
+interface PrimaryContinuation {
+	readonly primary: PrimaryAuthentication;
+	readonly done: readonly { readonly requirement: string; readonly adds: { readonly amr: readonly string[]; readonly mfaAt?: Date } }[];
+}
 
 /** Branded and runtime-checked; built by `admitPrimary`, `resumePrimary` and `establishWithoutAsking` alone. `establishSession` requires one. */
 type Establishment = { readonly [establishmentBrand]: true; readonly primary: PrimaryAuthentication };
@@ -260,21 +272,22 @@ interface InterruptionAnswer {
 }
 
 /**
- * After an interruption completes: asks the requirements after `after`, in order; may interrupt again.
- * `after` must be a registered requirement that has `admitPrimary`, else a RangeError. `adds` is what the
- * completing requirement verified; core composes the session's `recorded` from the original primary and it,
- * and refuses a reserved value or `mfaAt` from any requirement but `mfa`.
+ * After an interruption completes: appends what the completing requirement verified to the continuation,
+ * composes the session's `recorded` from the primary and every completed requirement's additions (`composeAmr`,
+ * refusing a reserved value or `mfaAt` under any name but `mfa`), and asks EVERY requirement with `admitPrimary`
+ * again, in order, over the composed result. There is no "after": a requirement that already completed sees its
+ * own additions in `recorded` and answers `establish`; one that has not may interrupt, with the updated continuation.
  */
 resumePrimary(
 	deps: AdmissionDeps,
-	primary: PrimaryAuthentication,
-	opts: { after: string; adds?: { amr: readonly string[]; mfaAt?: Date } },
+	continuation: PrimaryContinuation,
+	completed: { readonly requirement: string; readonly adds: { readonly amr: readonly string[]; readonly mfaAt?: Date } },
 ): Promise<PrimaryAdmission>
 ```
 
-- Requirements with `admitPrimary` are asked in order; the first `Interruption` wins; a throw is `unavailable`, and the route answers `503` with nothing written — the MFA ADR's F1, step 1. Only when every requirement answered `establish` does `admitPrimary` return an `Establishment`, and `establishSession` (extracted in `packages/session` as the MFA ADR's step 7 planned — the two routes' create → index → regenerate → flags → save sequence, one function) takes it as its first argument and writes the session from `establishment.primary` alone, never from a `recorded` the caller passes beside it. A requirement that completes its interruption — MFA after a verified factor — calls `resumePrimary(deps, primary, { after: "mfa", adds })` and establishes only on `establish`; the review found that with two interrupting requirements, whichever is ordered first would otherwise complete the login and the other would never be asked, the order being decided by unrelated module dependencies. `resumePrimary` trusts neither argument: an `after` that is not a registered requirement with `admitPrimary` is refused, so a caller cannot name the last one and skip the rest; and the session's `amr` and `authentication` are composed by core (`composeAmr`, the MFA ADR's D14) from the primary the route built and the completing requirement's `adds`, so a caller cannot hand in a `recorded` that already says `mfaAt`. `Establishment` is checked at runtime through a module-private `WeakSet`, like the resolver and the claims. `tools/composition` pins this with two interrupting fixture requirements.
+- Requirements with `admitPrimary` are asked in order; the first `Interruption` wins; a throw is `unavailable`, and the route answers `503` with nothing written — the MFA ADR's F1, step 1. Only when every requirement answered `establish` does `admitPrimary` return an `Establishment`, and `establishSession` (extracted in `packages/session` as the MFA ADR's step 7 planned — the two routes' create → index → regenerate → flags → save sequence, one function) takes it as its first argument and writes the session from `establishment.primary` alone, never from a `recorded` the caller passes beside it. A requirement that completes its interruption — MFA after a verified factor — presents the continuation it persisted in its own record and what it verified: `resumePrimary(deps, continuation, { requirement: "mfa", adds })`, and establishes only on `establish`; the review found that with two interrupting requirements, whichever is ordered first would otherwise complete the login and the other would never be asked, the order being decided by unrelated module dependencies. `resumePrimary` names no "after" — the reviews found that a name could be forged to skip the rest, and that a second interruption would drop the first's additions — so it re-asks every requirement over the composed result, and the continuation accumulates each completed requirement's additions: a second interruption resumes with the first's `amr` and `mfaAt` still in `recorded`. The session's `amr` and `authentication` are composed by core (`composeAmr`, the MFA ADR's D14) from the primary the route built and the additions, never from a `recorded` a caller hands in, and a reserved value or `mfaAt` under any name but `mfa` is refused. `Establishment` is checked at runtime through a module-private `WeakSet`, like the resolver and the claims. **The trust boundary is stated, not hidden**: a requirement's completion route is installed code, trusted as any module is (a module can just as well `provides` a fake store); what these checks refuse is a mistake — a wrong name, a forgotten addition, a primary rebuilt by hand — and what they keep honest is the contract. `tools/composition` pins the sequence with two interrupting fixture requirements: first interrupts, resumed, second interrupts, resumed with both additions present, established.
 - **Two phases**, because the express session is regenerated between them (the MFA ADR's D8): the route regenerates, leaves the session unauthenticated, calls `open(req.sessionID)`, saves, and answers `status` with `body`. The exhaustive mapping in the route, each case pinned in A6: `unavailable`, a throw from `open` after the regeneration, and a `save` that fails after `open` → `503`, `abandonCookieSession`, no `UserSession`, never `establishSession`; a `save` failure leaves the requirement's record to its own expiry — the MFA transaction to its TTL — since the session id it is bound to will never be presented. The body's shape is closed, so a requirement cannot answer the `user` snapshot to whoever holds the password; that a `403` reveals the password was right is what the MFA ADR's D23 already accepts.
-- **The federation callback, in this release, does not call `admitPrimary`.** Its hook slot is the same shape (the user resolved, nothing written), and the MFA requirement would answer `establish` for a federated primary anyway (the baseline applies after `pwd` only, the MFA ADR's D13). But an interruption there would have to be answered as a navigation — a redirect chosen by the redirect policy, not a `403` body — and the upstream tokens the callback attaches after the session is written would have to travel in the requirement's record, which `MfaTransaction.primary` does not carry. Both are the obligations of a later record ("Outside the first release"); until then, the callback calls `establishSession` with an `Establishment` that core builds for it without asking — `establishWithoutAsking(primary)`, which refuses at runtime any primary whose `recorded.authentication.primary` is not `"fed"` (a federated primary is outside the MFA baseline, the MFA ADR's D13, and every requirement still applies at each use), and whose callers a drift guard pins to that one site. The runtime refusal is what holds outside this repository, where the guard does not reach. Until the callback consults admission, a requirement's `admitPrimary` is never asked for a federated login — only its use-time `admit` applies to the session that results — and a requirement that needs the login hook for federated primaries is the later record's.
+- **The federation callback, in this release, does not call `admitPrimary`.** Its hook slot is the same shape (the user resolved, nothing written), and the MFA requirement would answer `establish` for a federated primary anyway (the baseline applies after `pwd` only, the MFA ADR's D13). But an interruption there would have to be answered as a navigation — a redirect chosen by the redirect policy, not a `403` body — and the upstream tokens the callback attaches after the session is written would have to travel in the requirement's record, which `MfaTransaction.primary` does not carry. Both are the obligations of a later record ("Outside the first release"); until then, the callback calls `establishSession` with an `Establishment` that core builds for it without asking — `establishWithoutAsking(federated)`, which does not take a `PrimaryAuthentication` at all: it takes what a federated login legitimately produces (`subject`, `user`, the federation's name, the upstream `amr` as the IdP surfaced it, whether that federation is trusted, `authTime`, `request`) and composes `recorded` itself through #707's `federatedSessionAuthentication`, so a caller cannot mark an arbitrary `amr` or an `mfaAt` as a federated primary — the seam accepts only a federation's own facts, and a federated primary is outside the MFA baseline (the MFA ADR's D13), every requirement still applying at each use. A drift guard pins its callers to that one site; the shape of its input is what holds outside this repository, where the guard does not reach. Until the callback consults admission, a requirement's `admitPrimary` is never asked for a federated login — only its use-time `admit` applies to the session that results — and a requirement that needs the login hook for federated primaries is the later record's.
 
 The interruption's body is a wire contract the MFA ADR's F1 and F3 wrote before this record: their `mfa_transaction`, `enrollable` and `email_proof` become `transaction`, `hints.enrollable` and `hints.email_proof` (§7), so every requirement's interruption reads the same way to a page.
 
@@ -303,7 +316,7 @@ The MFA requirement, in `packages/mfa`: `name: "mfa"`; `reach` = the coordinator
 | any | credential_change | recent MFA | `met` |
 | `optional` | use | any | `met` |
 
-`admitPrimary` = `decideAfterPrimary` and `openLoginTransaction` behind one `Interruption`; the verified factor's completion calls `resumePrimary` and then `establishSession` (D5). `/authorize`'s D17 ask handling — the trips, the accumulating record, `prompt=none` → `interaction_required` — stays in `oauth`, driven by `Admission` instead of by `decideMfaRequirement`.
+`admitPrimary` = `decideAfterPrimary` and `openLoginTransaction` behind one `Interruption`, answering `establish` outright when the composed `recorded.authentication.mfaAt` is already set (a resumption after its own completion); the transaction persists the continuation, and the verified factor's completion calls `resumePrimary` with it and then `establishSession` (D5). `/authorize`'s D17 ask handling — the trips, the accumulating record, `prompt=none` → `interaction_required` — stays in `oauth`, driven by `Admission` instead of by `decideMfaRequirement`.
 
 ### D7 — A requirement installed is a requirement on; what a composition expects is declared; asking for one that is not installed is refused (re-decides the MFA ADR's O2)
 
