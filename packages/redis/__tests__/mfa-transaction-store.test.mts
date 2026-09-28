@@ -293,6 +293,82 @@ describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D2
 		expect(await first().exists(lock, week)).toBe(0);
 	});
 
+	it("writes nothing on a refused attempt that forgot nothing: a held subject hammered is no write load", async () => {
+		// Each refusal used to re-set both keys' deadlines — a write to the AOF
+		// and every replica per attempt an attacker sends at a held subject.
+		// The deadlines are set as the state changes; a refusal that changed
+		// nothing leaves them where they are. A sentinel deadline shows it.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const t = start();
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const sentinel = t + 365 * DAY;
+		const fail = async (at: number) => {
+			const r = await store.reserveSubjectAttempt("user-1", at, POLICY, undefined);
+			if (!r.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
+		};
+		// The backoff: a run is counted, so the keys carry no TTL.
+		for (let i = 0; i < 5; i++) await fail(t + i);
+		await first().pexpireat(lock, sentinel);
+		await first().pexpireat(week, sentinel);
+		expect(await store.reserveSubjectAttempt("user-1", t + 10, POLICY, undefined)).toMatchObject({
+			ok: false,
+			hold: "backoff",
+		});
+		expect(await deadlineOf(lock)).toBe(sentinel);
+		expect(await deadlineOf(week)).toBe(sentinel);
+		// The weekly hold, with the run ended: the keys carry a deadline.
+		const weeklyPrefix = freshPrefix();
+		const weekly = storeAt(weeklyPrefix);
+		const weeklyLock = `${weeklyPrefix}lock:{${keyPart("user-1")}}`;
+		const weeklyWeek = `${weeklyPrefix}week:{${keyPart("user-1")}}`;
+		// No backoff before the hard limit, so ten failures in a row fill the week.
+		const weekOnly: MfaLockoutPolicy = { ...POLICY, threshold: 100 };
+		let at = t;
+		for (let i = 1; i <= 10; i++) {
+			const r = await weekly.reserveSubjectAttempt("user-1", at, weekOnly, undefined);
+			if (!r.ok) throw new Error("expected a reservation");
+			await weekly.settleSubjectAttempt("user-1", r.reservation, "failure");
+			at += MINUTE;
+		}
+		await weekly.noteExemptSuccess("user-1", at, weekOnly, undefined);
+		expect(await deadlineOf(weeklyLock)).toBeGreaterThan(0);
+		await first().pexpireat(weeklyLock, sentinel);
+		await first().pexpireat(weeklyWeek, sentinel);
+		expect(
+			await weekly.reserveSubjectAttempt("user-1", at + MINUTE, weekOnly, undefined),
+		).toMatchObject({ ok: false, hold: "weekly" });
+		expect(await deadlineOf(weeklyLock)).toBe(sentinel);
+		expect(await deadlineOf(weeklyWeek)).toBe(sentinel);
+	});
+
+	it("sets the deadlines again on a refused attempt that forgot something", async () => {
+		// A caller far behind the server forgets what stopped counting a day
+		// before its own time; the keys' deadlines follow what is left.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const serverNow = await serverClock(first)();
+		const small: MfaLockoutPolicy = { ...POLICY, threshold: 5, hardLimit: 5 };
+		const lock = `${prefix}lock:{${keyPart("user-1")}}`;
+		const week = `${prefix}week:{${keyPart("user-1")}}`;
+		const long = serverNow - 20 * DAY;
+		for (let i = 0; i < 5; i++) {
+			const r = await store.reserveSubjectAttempt("user-1", long + i, small, undefined);
+			if (!r.ok) throw new Error("expected a reservation");
+			await store.settleSubjectAttempt("user-1", r.reservation, "failure");
+		}
+		await first().pexpireat(lock, serverNow + 365 * DAY);
+		expect(
+			await store.reserveSubjectAttempt("user-1", serverNow - 5 * DAY, small, undefined),
+		).toMatchObject({ ok: false, hold: "hard" });
+		// The week's five failures were forgotten; the run, still counted, keeps
+		// the hash without a TTL.
+		expect(await first().exists(week)).toBe(0);
+		expect(await deadlineOf(lock)).toBe(-1);
+	});
+
 	it("drops the keys once nothing in them counts", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
