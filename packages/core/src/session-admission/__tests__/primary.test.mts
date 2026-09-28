@@ -360,7 +360,7 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 		["a hint value that is a URL", answer({ hints: { enrollable: "https://x.test/mfa" } })],
 		["a hint value with a control character", answer({ hints: { enrollable: "a\nb" } })],
 		["a hint that is not a finite number", answer({ hints: { email_proof: Number.NaN } })],
-		["a hint that is an object", answer({ hints: { email_proof: { masked: true } } })],
+		["a hint that is an object", answer({ hints: { email_proof: { masked: true } as never } })],
 		["hints that are not an object", answer({ hints: ["totp"] as never })],
 	])("refuses %s with a RangeError", async (_label, body) => {
 		const admission = await interrupt(async () => body as InterruptionAnswer);
@@ -436,11 +436,11 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 				{ requirement: "mfa", adds: { amr: ["otp", "mfa"], mfaAt: NOW } },
 			]),
 		});
+		if (first.outcome !== "interrupt") throw new Error("unreachable");
 		// A persisted continuation is plain data: a JSON round trip resumes it,
 		// the claims with it.
 		const persisted = JSON.parse(JSON.stringify(first.continuation)) as PrimaryContinuation;
 		expect(persisted.primary.claims).toEqual(facts().claims);
-		if (first.outcome !== "interrupt") throw new Error("unreachable");
 		const second = await resumePrimary(deps([mfa, risk]), persisted, {
 			requirement: "risk",
 			adds: { amr: ["risk-ok"] },

@@ -118,6 +118,7 @@ const recordingSink = (): { readonly sink: AuditSink; readonly events: AuditEven
 	const events: AuditEvent[] = [];
 	return {
 		sink: {
+			kind: "test",
 			record: async (event) => {
 				events.push(event);
 			},
