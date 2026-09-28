@@ -67,7 +67,7 @@ const TX = (id: string, expiresAtMs = T0 + 600_000): MfaTransaction => ({
 					mfaAt: undefined,
 				},
 			},
-			authTime: new Date(T0),
+			authTimeMs: T0,
 			redirectTo: undefined,
 			request: {},
 		},
