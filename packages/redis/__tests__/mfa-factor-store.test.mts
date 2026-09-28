@@ -160,29 +160,47 @@ describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7
 	});
 
 	it("refuses, with a RangeError and writing nothing, a record it could not read back", async () => {
-		// A date that is not one is stored as nothing a reader can turn back
-		// into a Date, and a version that is not a whole number is one no
-		// compare-and-set can ever match.
+		// Whatever a read would refuse — and a read refuses the subject's whole
+		// list — is refused at the write instead: one bad record written would
+		// make every factor of its subject unreadable. A date that is not one
+		// reads back as no Date; a version that is not a whole number is one no
+		// compare-and-set can match; a binding outside D24's three, or a field
+		// that is not the type the record declares, is not a record.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		for (const [name, overrides] of [
 			["createdAt invalid", { createdAt: new Date(Number.NaN) }],
+			["createdAt not a date", { createdAt: 1_700_000_000_000 }],
 			["lastUsedAt invalid", { lastUsedAt: new Date(Number.NaN) }],
+			["lastUsedAt not a date", { lastUsedAt: "2026-09-02" }],
 			["version fractional", { version: 1.5 }],
 			["version negative", { version: -1 }],
 			["version NaN", { version: Number.NaN }],
+			["binding outside the three", { binding: "admin" }],
+			["binding null", { binding: null }],
+			["kind not a string", { kind: 7 }],
+			["data not a string", { data: 7 }],
+			["data missing", { data: undefined }],
+			["label not a string", { label: 7 }],
+			["label null", { label: null }],
+			["id not a string", { id: 7 }],
+			["subject not a string", { subject: 7 }],
 		] as const) {
-			await expect(store.create(RECORD(overrides)), name).rejects.toThrow(RangeError);
+			await expect(store.create(RECORD(overrides as never)), name).rejects.toThrow(RangeError);
 		}
 		expect(await first().keys(`${prefix}*`)).toEqual([]);
 		await store.create(RECORD());
-		await expect(
-			store.update("user-1", "factor-1", 1, {
-				data: "v2.x",
-				label: undefined,
-				lastUsedAt: new Date(Number.NaN),
-			}),
-		).rejects.toThrow(RangeError);
+		for (const [name, next] of [
+			["lastUsedAt invalid", { data: "v2.x", label: undefined, lastUsedAt: new Date(Number.NaN) }],
+			["lastUsedAt not a date", { data: "v2.x", label: undefined, lastUsedAt: 5 }],
+			["data not a string", { data: 7, label: undefined, lastUsedAt: undefined }],
+			["label not a string", { data: "v2.x", label: 7, lastUsedAt: undefined }],
+			["label null", { data: "v2.x", label: null, lastUsedAt: undefined }],
+		] as const) {
+			await expect(store.update("user-1", "factor-1", 1, next as never), name).rejects.toThrow(
+				RangeError,
+			);
+		}
 		expect(await store.list("user-1")).toStrictEqual([RECORD()]);
 	});
 
