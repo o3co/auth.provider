@@ -172,6 +172,15 @@ describe("checkPrimaryAuthentication — a primary as the login route builds it"
 });
 
 describe("checkPrimaryAdditions — what a completing requirement may add", () => {
+	it("accepts a completion that adds nothing — amr [] — which is all a requirement reaching nothing can add, and refuses an mfaAt beside it", () => {
+		expect(checkPrimaryAdditions("consent", { amr: [] })).toEqual({ amr: [] });
+		expect(Object.isFrozen(checkPrimaryAdditions("consent", { amr: [] }).amr)).toBe(true);
+		expect(checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: [] })).toEqual({ amr: [] });
+		expect(() => checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: [], mfaAt: NOW })).toThrow(
+			RangeError,
+		);
+	});
+
 	it("copies what the requirement named mfa adds, mfaAt included", () => {
 		const adds = checkPrimaryAdditions(MFA_REQUIREMENT_NAME, { amr: ["otp", "mfa"], mfaAt: NOW });
 		expect(adds).toEqual({ amr: ["otp", "mfa"], mfaAt: NOW });
@@ -191,7 +200,6 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 
 	it.each([
 		["nothing", undefined],
-		["an empty amr", { amr: [] }],
 		["a value that is not a string", { amr: [7] }],
 		["a primary's marker", { amr: ["pwd"] }],
 		["the federated marker", { amr: ["otp", "fed"] }],
@@ -218,6 +226,20 @@ describe("the continuation — what a requirement persists and presents back, as
 		const { authTime, ...fields } = primary();
 		return { ...fields, authTimeMs: authTime.getTime() };
 	};
+
+	it("reads back a completion that added nothing, and refuses an mfaAtMs beside an empty amr", () => {
+		const read = checkPrimaryContinuation({
+			primary: dto(),
+			done: [{ requirement: "consent", adds: { amr: [] } }],
+		});
+		expect(read.done).toEqual([{ requirement: "consent", adds: { amr: [] } }]);
+		expect(() =>
+			checkPrimaryContinuation({
+				primary: dto(),
+				done: [{ requirement: MFA_REQUIREMENT_NAME, adds: { amr: [], mfaAtMs: 1 } }],
+			}),
+		).toThrow(RangeError);
+	});
 
 	it("continuationOf carries the primary and every completion with epoch milliseconds, so a JSON round trip is exact", () => {
 		const continuation = continuationOf(primary(), [

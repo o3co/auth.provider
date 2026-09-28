@@ -37,8 +37,15 @@ import {
 import type { Logger } from "#/logging/Logger.mjs";
 import type { MfaFactor } from "#/mfa/factor.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
-import { admitSession, cookieClaim } from "#/session-admission/admit.mjs";
+import {
+	admitPrimary,
+	admitSession,
+	cookieClaim,
+	passwordPrimary,
+	resumePrimary,
+} from "#/session-admission/admit.mjs";
 import type {
+	PrimaryContinuation,
 	SessionRequirement,
 	SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";
@@ -315,6 +322,82 @@ describe("the three channels, three refusals (D3)", () => {
 	});
 });
 
+describe("a requirement that reaches nothing completes an interruption with an empty addition (D5)", () => {
+	it("interrupts a login through boot's own resolver, is resumed with amr [] — read back through the persisted DTO — and establishes over pwd alone", async () => {
+		// Two requirements a deployment might write, neither reaching anything
+		// (only mfa does): each interrupts until its own record says the
+		// ceremony completed, which is the requirement's state, not the
+		// primary's — a completion adds nothing to `recorded`.
+		const completed = new Set<string>();
+		const asking = (name: string): SessionRequirement => ({
+			...requirement(name, { remediations: [] }),
+			admitPrimary: async () =>
+				completed.has(name)
+					? "establish"
+					: { open: async () => ({ status: 403, body: { error: `${name}_required` } }) },
+		});
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[
+				contributing("test:consent", { consent: () => asking("consent") }),
+				contributing("test:hold", { hold: () => asking("hold") }),
+				consumer(seen),
+			],
+			{ sessionRequirements: { expected: ["consent", "hold"] } },
+		);
+		try {
+			const deps = {
+				userSessionStore: undefined,
+				subjectRevocation: undefined,
+				requirements: seen.resolver as SessionRequirementResolver,
+				acrTable: readAcrTable({}),
+				logger: undefined,
+				auditSink: undefined,
+			};
+			const facts = {
+				subject: "user-1",
+				user: { id: "user-1" },
+				claims: { email: "user-1@example.test" },
+				authTime: new Date("2026-09-29T00:00:00Z"),
+				redirectTo: undefined,
+				request: {},
+			};
+			const first = await admitPrimary(deps, passwordPrimary(facts));
+			expect(first).toMatchObject({ outcome: "interrupt", requirement: "consent" });
+			if (first.outcome !== "interrupt") throw new Error("unreachable");
+			completed.add("consent");
+			const second = await resumePrimary(deps, first.continuation, {
+				requirement: "consent",
+				adds: { amr: [] },
+			});
+			expect(second).toMatchObject({ outcome: "interrupt", requirement: "hold" });
+			if (second.outcome !== "interrupt") throw new Error("unreachable");
+			expect(second.continuation.done).toEqual([{ requirement: "consent", adds: { amr: [] } }]);
+			// What the second requirement persisted, read back as plain data.
+			const persisted = JSON.parse(JSON.stringify(second.continuation)) as PrimaryContinuation;
+			completed.add("hold");
+			const third = await resumePrimary(deps, persisted, {
+				requirement: "hold",
+				adds: { amr: [] },
+			});
+			expect(third.outcome).toBe("establish");
+			if (third.outcome !== "establish") throw new Error("unreachable");
+			expect(third.establishment.primary.recorded).toEqual({
+				amr: ["pwd"],
+				authentication: {
+					primary: "pwd",
+					federation: undefined,
+					upstreamAmr: undefined,
+					mfaAt: undefined,
+				},
+			});
+			expect(third.establishment.primary.claims).toEqual(facts.claims);
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
 describe("the remediation actions core issues (D4)", () => {
 	it("hands each registered copy one branded action per declared route, which the resolver projects", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
@@ -440,6 +523,22 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 			kind: "sessionRequirements",
 			name: "risk",
 		});
+		expect(err.message).toMatch(/oauth\.authorize/);
+	});
+
+	it("refuses a remediation that is a consumer's action even under the requirement's own namespace — a requirement named oauth declaring oauth.authorize — as the contribution's failure", async () => {
+		const err = await refusal(
+			boot(
+				[
+					contributing("test:oauth", {
+						oauth: () => requirement("oauth", { remediations: ["oauth.authorize"] }),
+					}),
+				],
+				{ sessionRequirements: { expected: ["oauth"] } },
+			),
+		);
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({ module: "test:oauth", name: "oauth" });
 		expect(err.message).toMatch(/oauth\.authorize/);
 	});
 

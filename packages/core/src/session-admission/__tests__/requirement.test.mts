@@ -70,6 +70,29 @@ describe("checkStepUpPage — the deployment's page for a step-up (D2, D3)", () 
 		}
 	});
 
+	it("refuses a path that leaves the issuer's origin once a browser resolves it — a backslash, an encoded backslash, a second slash — and a control character, with or without an issuer", () => {
+		for (const url of [
+			"/\\evil.test/step",
+			"//evil.test/step",
+			"/%5cevil.test",
+			"/%5Cevil.test/step",
+			"\\evil.test/step",
+			"/step\u0000",
+			"/st\nep",
+			"/step\u007f",
+			"/\tstep",
+		]) {
+			expect(() => checkStepUpPage({ url, params: {} }, ISSUER), JSON.stringify(url)).toThrow(
+				RangeError,
+			);
+			expect(() => checkStepUpPage({ url, params: {} }), JSON.stringify(url)).toThrow(RangeError);
+		}
+		// A path resolves to the issuer's origin: kept as given.
+		expect(checkStepUpPage({ url: "/step?next=1#top", params: {} }, ISSUER).url).toBe(
+			"/step?next=1#top",
+		);
+	});
+
 	it("refuses params that carry redirect_to — the consumer's return parameter — or a value that is not a string", () => {
 		expect(() => checkStepUpPage({ url: "/mfa", params: { redirect_to: "/x" } }, ISSUER)).toThrow(
 			/redirect_to/,
@@ -143,11 +166,16 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 				JSON.stringify(remediations),
 			).toThrow(RangeError);
 		}
-		// A consumer's action lives under the consumer's own prefix, which no
-		// requirement is named after in this repository; `ADMISSION_ACTIONS`
-		// holds the consumers' actions alone, so nothing there is matched.
-		expect(Object.keys(ADMISSION_ACTIONS).some((name) => name.startsWith("mfa.step_up"))).toBe(
-			false,
+		// A consumer's action may share a requirement's namespace (`mfa.manage`,
+		// or a requirement named `oauth`): any name in `ADMISSION_ACTIONS` is
+		// refused, since a remediation under it would skip every requirement
+		// for that action.
+		expect(Object.hasOwn(ADMISSION_ACTIONS, "mfa.step_up")).toBe(false);
+		expect(() =>
+			resolverForTests([requirement("oauth", { remediations: ["oauth.authorize"] })]),
+		).toThrow(/oauth\.authorize/);
+		expect(() => resolverForTests([requirement("mfa", { remediations: ["mfa.manage"] })])).toThrow(
+			/mfa\.manage/,
 		);
 		expect(
 			resolverForTests([requirement("mfa", { remediations: ["mfa.step_up"] })]).get("mfa")
