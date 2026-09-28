@@ -1,9 +1,22 @@
 node_modules
 dist
 .git
-.env*
-!.env.example
 Makefile
+# #705: the secrets and the per-deployment configuration that `.gitignore`
+# keeps out of git stay out of the build context as well. The builder stage
+# COPYs `config/` and the runtime image takes it from there, so a
+# `config/clients.yaml` in the working copy — client secrets included — was
+# baked into a layer that travels with every push; the production compose
+# mounts the registry instead. This is `.gitignore`'s secrets section, written
+# with `**/` where it matches at any depth: a `.dockerignore` pattern is
+# anchored at the context root. Keep the two in step; scaffold-assets.test.mts
+# checks that they are.
+**/.env*
+!**/.env.example
+**/*.pem
+**/*.key
+config/clients.yaml
+config/*.local.conf
 # .gitignore, the READMEs and the compose files stay in the context: the
 # `test` image copies them because the shipped suite reads them (#512). The
 # runtime image never copies them, so they cost the context a few kilobytes

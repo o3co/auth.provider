@@ -48,6 +48,61 @@ function boundAddress(server: net.Server): Promise<AddressInfo> {
 	});
 }
 
+/**
+ * An app whose `GET /hold/:name` waits in its handler until the test releases
+ * that name, so a test decides the order in which requests finish.
+ * `inFlight` holds the names whose handlers have not answered yet.
+ */
+function holdingApp() {
+	const gates = new Map<
+		string,
+		{ arrived: PromiseWithResolvers<void>; released: PromiseWithResolvers<void> }
+	>();
+	const gate = (name: string) => {
+		let found = gates.get(name);
+		if (!found) {
+			found = { arrived: Promise.withResolvers(), released: Promise.withResolvers() };
+			gates.set(name, found);
+		}
+		return found;
+	};
+	const inFlight = new Set<string>();
+	const app = express();
+	app.get("/hold/:name", async (req, res) => {
+		const { name } = req.params;
+		inFlight.add(name);
+		gate(name).arrived.resolve();
+		await gate(name).released.promise;
+		inFlight.delete(name);
+		res.status(200).send(name);
+	});
+	return {
+		app,
+		inFlight,
+		arrived: (name: string) => gate(name).arrived.promise,
+		release: (name: string) => gate(name).released.resolve(),
+		releaseAll: () => {
+			for (const { released } of gates.values()) released.resolve();
+		},
+	};
+}
+
+/**
+ * Records, for every `close` of `server`, which held requests it was still
+ * serving. A close that comes too early releases them all, so the test
+ * finishes and reports it instead of waiting on a close that waits on them.
+ */
+function recordCloses(server: http.Server, held: ReturnType<typeof holdingApp>): string[][] {
+	const closes: string[][] = [];
+	const close = server.close.bind(server);
+	server.close = ((callback?: (err?: Error) => void) => {
+		closes.push([...held.inFlight]);
+		held.releaseAll();
+		return close(callback);
+	}) as typeof server.close;
+	return closes;
+}
+
 describe("#556 — supertest's own server listens on the loopback address it dials", () => {
 	it("binds 127.0.0.1, not the dual-stack wildcard", async () => {
 		const server = http.createServer(helloApp());
@@ -96,6 +151,124 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 
 		expect(responses.map((res) => res.status)).toEqual([200, 200]);
 	});
+
+	it("closes an agent's one server after the last request sent over it, not the first (#703)", async () => {
+		// The request built first is the one whose call bound the server. Closing
+		// the server when that one finishes — what supertest 7.2 did, and this
+		// guard with it — resets the connection of a request still on its way:
+		// ECONNRESET on Node 26.
+		const held = holdingApp();
+		const server = http.createServer(held.app);
+		const closes = recordCloses(server, held);
+		const agent = request.agent(server);
+
+		const first = agent.get("/hold/first");
+		const second = agent.get("/hold/second");
+		const both = Promise.all([first, second]);
+		await Promise.all([held.arrived("first"), held.arrived("second")]);
+		held.release("first");
+		await first;
+		held.release("second");
+
+		expect((await both).map((res) => res.text)).toEqual(["first", "second"]);
+		expect(closes).toEqual([[]]);
+		expect(server.listening).toBe(false);
+	});
+
+	it("keeps it open for a request sent while the server is already serving another (#703)", async () => {
+		const held = holdingApp();
+		const server = http.createServer(held.app);
+		const closes = recordCloses(server, held);
+		const agent = request.agent(server);
+
+		// A Test is sent when it is first awaited or `then`ed; the identity
+		// `then` sends each one here, before the test waits for its arrival.
+		const first = agent.get("/hold/first").then((res) => res);
+		await held.arrived("first");
+		const late = agent.get("/hold/late").then((res) => res);
+		await held.arrived("late");
+		held.release("first");
+		await first;
+		held.release("late");
+
+		expect((await late).text).toBe("late");
+		expect(closes).toEqual([[]]);
+		expect(server.listening).toBe(false);
+	});
+
+	it("binds again for a request built before the server was closed, and sent after (#703)", async () => {
+		const agent = request.agent(helloApp());
+
+		const first = agent.get("/hello");
+		const second = agent.get("/hello");
+
+		expect((await first).status).toBe(200);
+		expect((await second).status).toBe(200);
+	});
+
+	it("joins the bind another request made since, for a request built before the server was closed (#703)", async () => {
+		// Built on the first bind, sent while a later request is being served
+		// on the second: it joins that bind — one server, two requests in
+		// flight — and the server closes once, after the last of them.
+		const held = holdingApp();
+		const server = http.createServer(held.app);
+		const closes = recordCloses(server, held);
+		const agent = request.agent(server);
+
+		const early = agent.get("/hold/early");
+		const first = agent.get("/hold/first").then((res) => res);
+		await held.arrived("first");
+		held.release("first");
+		expect((await first).text).toBe("first");
+		expect(server.listening).toBe(false);
+
+		const second = agent.get("/hold/second").then((res) => res);
+		await held.arrived("second");
+		const earlySent = early.then((res) => res);
+		await held.arrived("early");
+		held.release("second");
+		expect((await second).text).toBe("second");
+		expect(server.listening).toBe(true);
+		held.release("early");
+
+		expect((await earlySent).text).toBe("early");
+		expect(closes).toEqual([[], []]);
+		expect(server.listening).toBe(false);
+	});
+
+	it("serves a request built on a bind that failed, once another request has bound the server again (#703)", async () => {
+		// The first `listen` lands on a port another socket holds; the bind
+		// fails, and the request built on it is not sent until a later request
+		// has bound the server on a free port. It joins that bind rather than
+		// failing with the error of the one it was built on.
+		const held: net.Socket[] = [];
+		const squatter = net.createServer((socket) => {
+			held.push(socket);
+		});
+		await new Promise<void>((resolve) => squatter.listen(0, "127.0.0.1", resolve));
+		const { port } = squatter.address() as AddressInfo;
+
+		const server = http.createServer(helloApp());
+		const listen = server.listen.bind(server) as (...args: unknown[]) => net.Server;
+		let steered = false;
+		(server as { listen: (...args: unknown[]) => net.Server }).listen = (requested, ...rest) => {
+			if (steered) return listen(requested, ...rest);
+			steered = true;
+			return listen(port, ...rest);
+		};
+
+		try {
+			const failed = new Promise<void>((resolve) => server.once("error", () => resolve()));
+			const builtOnTheFailedBind = request(server).get("/hello");
+			await failed;
+			expect((await request(server).get("/hello")).status).toBe(200);
+			expect((await builtOnTheFailedBind).status).toBe(200);
+			expect(server.listening).toBe(false);
+		} finally {
+			for (const socket of held) socket.destroy();
+			squatter.close();
+		}
+	}, 5_000);
 
 	it("fails the request, instead of hanging on another socket, when 127.0.0.1:P is taken", async () => {
 		// The collision the kernel produces by chance, produced on purpose: a

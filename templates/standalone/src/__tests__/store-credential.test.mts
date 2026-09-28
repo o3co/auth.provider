@@ -29,7 +29,10 @@
  * without the challenge is still a wrong password.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type OutgoingHttpHeaders, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 import {
@@ -47,7 +50,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 import { repositoriesModule } from "../modules.mjs";
@@ -215,13 +218,36 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 	});
 
 	/**
+	 * The client registry the boot reads, which this test brings itself (#704).
+	 * `CLIENT_PATH`'s default, `./config/clients.yaml`, is per-deployment: the
+	 * scaffold's `.gitignore` keeps it out of the project's repository, so a
+	 * fresh clone — a CI runner, the `test` image — has none. The login below
+	 * names no client, so an empty registry is all it needs.
+	 */
+	let registryDir: string;
+	let clientPath: string;
+	beforeAll(() => {
+		registryDir = mkdtempSync(join(tmpdir(), "store-credential-"));
+		clientPath = join(registryDir, "clients.yaml");
+		writeFileSync(clientPath, "# No clients: the login under test names none.\n");
+	});
+	afterAll(() => {
+		rmSync(registryDir, { recursive: true, force: true });
+	});
+
+	/**
 	 * The shipped config against a Store answering `answer`, booted with the
 	 * production repositories module; then a real browser login — a CSRF pair,
 	 * then the form post.
 	 */
 	const logInAgainst = async (answer: StoreAnswer) => {
 		const { origin, heard } = await recordingStore(answer);
-		const config = resolve({ ...envFor(origin), ...MEMORY_ENV, CLIENT_USER_BEARER_TOKEN: TOKEN });
+		const config = resolve({
+			...envFor(origin),
+			...MEMORY_ENV,
+			CLIENT_PATH: clientPath,
+			CLIENT_USER_BEARER_TOKEN: TOKEN,
+		});
 		const { logger, lines } = capturingLogger();
 		handleRef = await createApp({
 			modules: buildModules(config, {

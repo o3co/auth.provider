@@ -179,6 +179,127 @@ describe("#407 — the production compose matches the topology it documents", ()
 	});
 });
 
+/**
+ * Issue #705 — the per-deployment files are per-deployment everywhere.
+ *
+ * `.gitignore` keeps the secrets and the per-machine configuration out of
+ * git, the client registry among them. The build context did not: the
+ * `Dockerfile` copies `config/`, so a `config/clients.yaml` in the working
+ * copy — client secrets included — was baked into the runtime image, and one
+ * built from a clean checkout had no registry and no way to be given one.
+ */
+describe("#705 — what .gitignore keeps out of git stays out of the image, and production is given it", () => {
+	/**
+	 * `.gitignore`'s "Secrets and per-machine configuration" section: each
+	 * pattern, with files it matches. A pattern without a `/` matches at any
+	 * depth in `.gitignore`, so those carry a nested file too — `.dockerignore`
+	 * anchors every pattern at the context root, where `*` stops at a `/`.
+	 */
+	const PER_DEPLOYMENT: Readonly<Record<string, readonly string[]>> = {
+		".env": [".env", "config/.env"],
+		".env.*": [".env.local", ".env.production", "config/.env.production"],
+		"*.pem": ["jwt-private.pem", "config/jwt-private.pem"],
+		"*.key": ["tls.key", "config/tls.key"],
+		"config/clients.yaml": ["config/clients.yaml"],
+		"config/*.local.conf": ["config/production.local.conf"],
+	};
+
+	/**
+	 * The committed files beside them, which the image does need. `.env.example`
+	 * is what `.gitignore` re-includes, at any depth: the same here.
+	 */
+	const COMMITTED = [
+		".env.example",
+		"config/.env.example",
+		"config/application.conf",
+		"config/development.conf",
+		"config/production.conf",
+		"config/clients.yaml.example",
+	] as const;
+
+	it("checks every pattern of .gitignore's secrets section", () => {
+		const lines = read("/.gitignore").split("\n");
+		const start = lines.indexOf("# Secrets and per-machine configuration");
+		expect(start).not.toBe(-1);
+		const section: string[] = [];
+		for (const line of lines.slice(start + 1)) {
+			if (line.trim() === "") break;
+			if (!line.startsWith("#") && !line.startsWith("!")) section.push(line.trim());
+		}
+		expect(section).toEqual(Object.keys(PER_DEPLOYMENT));
+	});
+
+	it.each(Object.entries(PER_DEPLOYMENT))(
+		"keeps what %s matches out of the build context",
+		(_, files) => {
+			const dockerignore = read("/.dockerignore");
+			for (const file of files) {
+				expect(dockerignoreExcludes(dockerignore, file), `${file} reaches the build context`).toBe(
+					true,
+				);
+			}
+		},
+	);
+
+	it("lets the committed configuration through", () => {
+		const dockerignore = read("/.dockerignore");
+		for (const file of COMMITTED) {
+			expect(dockerignoreExcludes(dockerignore, file), `${file} is excluded`).toBe(false);
+		}
+	});
+
+	it("gives the production compose's process the client registry, read-only, from outside the image", () => {
+		// A compose secret, like the key pair: mounted read-only under
+		// /run/secrets, never part of a layer.
+		const name = "client_registry";
+		expect(composeAppSecrets("/docker-compose.production.yml")).toContain(name);
+		expect(composeSecretFiles("/docker-compose.production.yml").get(name)).toBe(
+			"./config/clients.yaml",
+		);
+		// And the process reads it there, through the real config layers.
+		const config = resolveWith(bootableEnv("/docker-compose.production.yml"));
+		const client = config.repositories.client as { type: string; yaml?: { path?: string } };
+		expect(client.type).toBe("yaml");
+		expect(client.yaml?.path).toBe(`/run/secrets/${name}`);
+	});
+});
+
+/** The secrets a compose file's `app` service mounts. */
+function composeAppSecrets(rel: string): string[] {
+	const lines = read(rel).split("\n");
+	const start = lines.findIndex((line) => /^\s{4}secrets:\s*$/.test(line));
+	const names: string[] = [];
+	if (start === -1) return names;
+	for (const line of lines.slice(start + 1)) {
+		if (line.trim() === "" || /^\s*#/.test(line)) continue;
+		const match = /^\s{6}-\s*(\S+)\s*$/.exec(line);
+		if (!match) break;
+		names.push(match[1] as string);
+	}
+	return names;
+}
+
+/** A compose file's top-level `secrets:`, as each name's `file:`. */
+function composeSecretFiles(rel: string): Map<string, string> {
+	const lines = read(rel).split("\n");
+	const start = lines.findIndex((line) => /^secrets:\s*$/.test(line));
+	const files = new Map<string, string>();
+	if (start === -1) return files;
+	let name: string | undefined;
+	for (const line of lines.slice(start + 1)) {
+		if (line.trim() === "" || /^\s*#/.test(line)) continue;
+		if (!/^\s/.test(line)) break;
+		const entry = /^\s{2}([A-Za-z0-9_-]+):\s*$/.exec(line);
+		if (entry) {
+			name = entry[1];
+			continue;
+		}
+		const file = /^\s{4}file:\s*(\S+)\s*$/.exec(line);
+		if (file && name !== undefined) files.set(name, file[1] as string);
+	}
+	return files;
+}
+
 describe("the compose files put a store and its lifetime-sibling on the same backend", () => {
 	// The production compose set `SESSION_STORAGE_TYPE: redis` and left
 	// `USER_SESSION_STORES_ADAPTER` at its `memory` default. express-session
@@ -389,26 +510,41 @@ function copiedIntoStage(dockerfile: string, stage: string): Set<string> {
 }
 
 /**
- * Whether `.dockerignore` keeps a root-level entry out of the build context.
- * The last matching pattern wins and a leading `!` re-includes; `*` and `?`
- * stop at a `/` while `**` does not — the subset of Docker's matching that
- * root-level file names exercise.
+ * Whether `.dockerignore` keeps a file out of the build context, as Docker
+ * decides it (moby's patternmatcher): patterns are anchored at the context
+ * root, the last matching one wins and a leading `!` re-includes; `*` and `?`
+ * stop at a `/`, `**` does not, and `**` followed by `/` also matches no
+ * directory at all; a pattern that matches one of the file's parent
+ * directories matches the file.
  */
 function dockerignoreExcludes(dockerignore: string, file: string): boolean {
+	const parents = file.split("/").slice(0, -1);
+	const candidates = [file, ...parents.map((_, i) => parents.slice(0, i + 1).join("/"))];
 	let excluded = false;
 	for (const raw of dockerignore.split("\n")) {
 		const line = raw.trim();
 		if (line === "" || line.startsWith("#")) continue;
 		const negated = line.startsWith("!");
-		const pattern = negated ? line.slice(1) : line;
-		// `**` is split out first so the single-`*` rewrite cannot see it.
-		const segment = (s: string): string =>
-			s
-				.replace(/[.+^${}()|[\]\\]/g, "\\$&")
-				.replace(/\*/g, "[^/]*")
-				.replace(/\?/g, "[^/]");
-		const regex = new RegExp(`^${pattern.split("**").map(segment).join(".*")}$`);
-		if (regex.test(file)) excluded = !negated;
+		// Cleaned as Docker cleans a pattern (`filepath.Clean`): a leading `/`
+		// or `./` and a trailing `/` say nothing about what it matches.
+		const pattern = (negated ? line.slice(1) : line).replace(/^(\.?\/)+/, "").replace(/\/+$/, "");
+		let source = "";
+		for (let i = 0; i < pattern.length; ) {
+			if (pattern.startsWith("**/", i)) {
+				source += "(?:.*/)?";
+				i += 3;
+			} else if (pattern.startsWith("**", i)) {
+				source += ".*";
+				i += 2;
+			} else {
+				const char = pattern[i] as string;
+				source +=
+					char === "*" ? "[^/]*" : char === "?" ? "[^/]" : char.replace(/[.+^${}()|[\]\\]/, "\\$&");
+				i += 1;
+			}
+		}
+		const regex = new RegExp(`^${source}$`);
+		if (candidates.some((candidate) => regex.test(candidate))) excluded = !negated;
 	}
 	return excluded;
 }

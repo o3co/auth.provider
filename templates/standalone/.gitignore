@@ -4,6 +4,7 @@
 # the compose files read.
 
 # Secrets and per-machine configuration
+# `.dockerignore` keeps the same out of the image (#705); change both together.
 .env
 .env.*
 !.env.example

@@ -48,6 +48,10 @@ FROM deps AS builder
 USER node
 
 COPY --chown=node:node tsconfig.json ./
+# What `.dockerignore` lets through (#705): the committed configuration layers
+# and the example, never `clients.yaml` or a key. The runtime image copies
+# this directory, so anything per-deployment here would be baked into it; the
+# production compose mounts the client registry instead.
 COPY --chown=node:node config/ ./config/
 COPY --chown=node:node src/ ./src/
 

@@ -15,7 +15,11 @@
 # The pem pair is required: EdDSA is the default and there is no key-material
 # default, so a deployment that generates none fails at boot naming the keys to
 # set. It reaches the container as a compose secret rather than through
-# `config/`, which the image COPYs — see the `secrets:` block below.
+# `config/`, which the image COPYs — see the `secrets:` block below. So does
+# the client registry, `config/clients.yaml` (#705): it is per-deployment, so
+# `.gitignore` keeps it out of git and `.dockerignore` out of the image, and
+# the image carries no registry of its own. Create it from
+# `config/clients.yaml.example` before the first `up`.
 #
 # What this file deliberately does NOT do:
 #
@@ -27,10 +31,10 @@
 # - **Scale out.** This is one replica (DEPLOYMENT_MODE=single). Before
 #   `--scale app=N`, set DEPLOYMENT_MODE=multi and read that same README
 #   section — boot will then refuse any in-memory store that must be shared.
-# - **Invent secrets.** SESSION_SECRET (and any client secrets referenced by
-#   config/clients.yaml) come from `.env`, which is required here — chmod 600
-#   it, keep it out of git (`git local-files` or your secret manager of
-#   choice), and never bake it into the image.
+# - **Invent secrets.** SESSION_SECRET comes from `.env`, which is required
+#   here — chmod 600 it, keep it out of git (`git local-files` or your secret
+#   manager of choice), and never bake it into the image. The client
+#   registry's secrets are yours to write too; give them as bcrypt hashes.
 
 services:
   app:
@@ -80,6 +84,10 @@ services:
       #   chmod 600 jwt-private.pem
       - jwt_private_key
       - jwt_public_key
+      # The client registry (#705), for the same reason: `config/clients.yaml`
+      # is per-deployment and may hold client secrets, so it is kept out of the
+      # image and mounted here. CLIENT_PATH below points the process at it.
+      - client_registry
     environment:
       NODE_ENV: production
       # One replica. Under `single` the replica-safety guard is SILENT by
@@ -111,6 +119,7 @@ services:
       # paths `.env` carries for local runs.
       OAUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
       OAUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      CLIENT_PATH: /run/secrets/client_registry
       # `environment` wins over `env_file`, which is the point here:
       # `.env.example` ships SESSION_SECURE=false / SESSION_NAME=auth.sid so a
       # plain-HTTP local run works, and this file requires that same `.env`.
@@ -189,10 +198,13 @@ volumes:
   redis-data:
 
 secrets:
-  # File-backed, so the pem pair stays on the host and reaches the container
-  # read-only at /run/secrets. Keep both out of git alongside `.env`; a key
-  # committed or COPYed into the image is a key you have to rotate.
+  # File-backed, so the pem pair and the client registry stay on the host and
+  # reach the container read-only at /run/secrets. Keep them out of git
+  # alongside `.env`; a key committed or COPYed into the image is a key you
+  # have to rotate.
   jwt_private_key:
     file: ./jwt-private.pem
   jwt_public_key:
     file: ./jwt-public.pem
+  client_registry:
+    file: ./config/clients.yaml

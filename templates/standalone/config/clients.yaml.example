@@ -1,6 +1,10 @@
 # Example client definitions loaded via loadYamlMap into InMemoryClientRepository.
 # Copy this file to clients.yaml and customize for your deployment.
 #
+# clients.yaml is per-deployment (#705): `.gitignore` keeps it out of git and
+# `.dockerignore` out of the image, and docker-compose.production.yml mounts it
+# as the secret `client_registry`. This example is the committed one.
+#
 # `tokenEndpointAuthMethod` is REQUIRED (RFC 6749 §2.3 / RFC 7591 §2):
 #   - "client_secret_basic": HTTP Basic Authorization header — recommended for confidential clients
 #   - "client_secret_post":  form-encoded body parameters

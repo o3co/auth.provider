@@ -1,2 +1,4 @@
 # Client definitions loaded via loadYamlMap into InMemoryClientRepository.
 # Add client entries here. See clients.yaml.example for format.
+# Per-deployment: `.gitignore` keeps this file out of git and `.dockerignore`
+# out of the image (#705).
