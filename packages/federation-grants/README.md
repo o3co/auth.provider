@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-09-26
+Last updated: 2026-09-29
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -26,7 +26,8 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
 - client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`;
-- the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, `endpoints.login.url`).
+- the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, `endpoints.login.url`);
+- whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 
 **Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
 
@@ -61,7 +62,7 @@ const app = await createApp({
     // Where a client's intent waits for the user's consent and the upstream's answer.
     memoryFederationGrantIntentStoreModule,
     // …and the session modules you already run: the browser half mounts after
-    // `session-middleware` and re-reads the durable session behind the cookie.
+    // `session-middleware` and admits the durable session behind the cookie.
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve, clientRepository, keyStore },
 });
@@ -71,7 +72,7 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store: `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
-Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore`, and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -130,13 +131,22 @@ say what each one means and what to do.
   `federation_grant_consent_unavailable`, `federation_grant_callback_unavailable`,
   with `reason` (what the caller was answered, or `upstream`) and, where a
   store failed, `store` (`federation_grant`, `federation_grant_intent`,
-  `revocation_boundary`, `user_session`, `user_directory`) and `step`. A key
+  `revocation_boundary` — the grants boundary — `user_directory`) and `step`. A key
   missing from the ring is one of these with `reason: "key_unavailable"` and no
   `err`: nothing was thrown. A store or an upstream that did not answer in
   time is `err` "not answered in time; no longer waited for"; a credential
   write retried within the persist budget is one line, with `attempts`. A
   lodging's `connection_not_configured` names the `connection` — a renewal's
   is its grant's.
+- **The browser's session that cannot be judged** — the session store, the
+  subject's sessions boundary, or a session requirement that throws — is the
+  same `503` or redirect, and its one line is session admission's:
+  `session_admission_unavailable` at error, with `store` (`user_session`,
+  `revocation_boundary`, or the requirement's name), `action`
+  (`federation_grants.connect`, `.consent` or `.callback`) and the error's
+  projection. A durable session recorded for another subject than the
+  cookie's is admission's warn, `session_admission_subject_mismatch`, and
+  its audit event, `session.admission.subject_mismatch`.
 - **A client registry that cannot answer** is core's
   `client_repository_unavailable`: `site: "federation_grants"` from client
   authentication on the routes above, `federation_grant_connect` /
@@ -489,6 +499,24 @@ Mounted at `/session/federation-grants`, **after** the session middleware — th
 module declares `after: ["session-middleware"]`, so a composition without it is
 a boot error rather than a flow that reads every signed-in user as signed out.
 
+**The session is admission's.** At every step the browser's session is
+admitted by core's session admission, on the cookie's claim, as the step's own
+action — `federation_grants.connect`, `federation_grants.consent` (the read
+and the answer) and `federation_grants.callback` (check 3, and again, with
+the same claim, just before the activation), each graded `use`. Admission
+reads the durable session behind the cookie — live, the cookie's own
+subject's, not past its `expiresAt` — the subject's sessions boundary through
+`subjectRevocation`, and the registered session requirements. What stays
+here is the flow's own: the intent's subject, the browser binding (the
+express session and the durable `sid` a challenge was issued to), the
+grant's current intent, the client's permission, the connection's pins and
+the grants boundary. Every session admission refuses is one a new login is
+the remedy for, and gets the answer a dead session gets below — including a
+requirement's step-up, in this release: whether these routes send the
+browser on a step-up trip instead is the MFA ADR's step 14 to decide. The
+module requires `sessionRequirementResolver`, so a composition that installs
+it declares `sessionRequirements.expected`.
+
 ### `GET /session/federation-grants/connect?request=<handle>`
 
 Where `connect_uri` sends the browser. A navigation: it answers with redirects
@@ -508,9 +536,12 @@ and plain text, never a JSON body.
    this step with a 500.
 4. Signed in as someone other than the intent's subject: `403`, plain, and no
    redirect anywhere.
-5. The durable session is gone or expired, or authenticated at or before the
-   subject's sessions boundary: `403` "sign in again". `authTime` never
-   changes, so signing in again is the remedy.
+5. Session admission does not admit the session — the durable session is
+   gone or expired, authenticated at or before the subject's sessions
+   boundary, or a session requirement asks for a new login, a step-up, or
+   what it cannot meet: `403` "Sign in again to continue.", plain, and no
+   redirect. `authTime` never changes, so signing in again is the remedy.
+   Admission could not answer: `503`, plain.
 6. The grant no longer names this intent, the client may no longer use the
    connection, or the connection changed since the intent was lodged: `400` /
    `403`, plain.
@@ -568,18 +599,18 @@ nothing else; the grant keeps working.
 | No challenge | 400 | `invalid_request` | `challenge is required` |
 | Unknown, answered, expired, another browser's, stale | 400 | `invalid_request` | one sentence for all of them |
 | `decision` neither `accept` nor `deny` | 400 | `invalid_request` | (nothing is spent) |
-| The session was revoked, or predates the sessions boundary | 403 | `reauthentication_required` | `sign in again to continue` |
+| Session admission does not admit the session: revoked, expired, predating the sessions boundary, or refused by a session requirement (a step-up among them) | 403 | `reauthentication_required` | `sign in again to continue` |
 | The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
 | A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
 | This deployment's own throttle (`federation_grants_browser`) | 429 | `rate_limited` | `provider` |
-| A store, the session store or the boundary could not answer | 503 | `temporarily_unavailable` | `storage` |
+| A store, the session store, the sessions boundary or a session requirement could not answer | 503 | `temporarily_unavailable` | `storage` |
 | The client registry could not answer — judging the question or describing the client | 503 | `temporarily_unavailable` | `client registry unavailable` |
 | The limiter backend is down, under `rateLimit.failMode = "closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
 
 A challenge is not a bearer token: it is answerable only from the browser it
 was issued to, by the same durable session and subject, and every answer
-re-reads that session and the sessions boundary.
+re-admits that session.
 
 ### `GET /session/federation-grants/callback/:connection`
 
@@ -603,8 +634,11 @@ It checks, in this order:
    **revoked there, durably,** if a subject-wide revocation should have ended
    it — the one failure meant to change a record.
 3. **The browser** is the one the flow started in — the same express session
-   and durable session — still live, the intent's subject's, and signed in
-   after the subject's sessions boundary.
+   and durable session — and session admission admits that session: still
+   live, the intent's subject's, signed in after the subject's sessions
+   boundary, and met by every registered session requirement. A session it
+   refuses is `reauthentication_required`; one it cannot judge,
+   `temporarily_unavailable`.
 4. **The upstream's answer**, validated by the adapter's
    `exchangeDelegatedCode`: PKCE, the id_token's signature, issuer, audience,
    expiry and nonce, `iss` forwarded (RFC 9207), the resource sent at the token
@@ -733,8 +767,9 @@ It checks, in this order:
    only scope-tokens count. An omitted `scope` means as requested; one that
    names no scope-token is not an answer; an upstream that granted more is
    refused, because a token cannot be narrowed after the fact.
-8. **Activation**, immediately after re-reading the session, the sessions
-   boundary, the current-intent pointer and the grants boundary. It replaces
+8. **Activation**, immediately after admitting the session again — a second
+   admission with the same claim — and re-reading the current-intent pointer
+   and the grants boundary. It replaces
    the authorization and the credentials together, and clears with them the
    ineligibility marker and the stamp of a refresh the upstream refused for
    the user's absence (#616); a renewal refused at any check above leaves all
