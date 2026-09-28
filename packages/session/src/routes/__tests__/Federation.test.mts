@@ -3071,6 +3071,59 @@ describe("amr on federated sessions (#481, the MFA ADR's D9 and D13)", () => {
 		}
 	});
 
+	it("decides trust by the name the callback resolved the provider by, even when one provider is installed under two names", async () => {
+		// One adapter instance registered as two federations, only one of
+		// them trusted: whichever name the callback came in on is the switch
+		// that applies — never the one registered last for the same object.
+		const shared = makeFakeProvider({
+			exchangeCode: vi.fn(async () => ({
+				issuer: "https://idp.example.com",
+				sub: "external-42",
+				accessToken: "at",
+				expiresAt: null,
+				amr: ["hwk", "mfa"],
+			})),
+		});
+		const loginOn = async (name: string) => {
+			const uss = makeUserSessionStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([
+					["trusted", shared],
+					["untrusted", shared],
+				]),
+				// The adapter's own name is "test": the routes look its callback URL
+				// and redirect policy up by it.
+				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
+				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
+				federation: { name, state: "s1", codeVerifier: "v1" },
+				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+				userSessionStore: uss,
+				config: {
+					federations: {
+						trusted: { enabled: true, trustUpstreamAmr: true },
+						untrusted: { enabled: true },
+					},
+				},
+			});
+			const res = await (await plantAndGetAgent(app)).get(
+				`/oauth/federation/${name}/callback?state=s1&code=c1`,
+			);
+			expect(res.status).toBe(302);
+			return (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+				amr?: unknown;
+				authentication?: { federation?: unknown; upstreamAmr?: unknown };
+			};
+		};
+		const trusted = await loginOn("trusted");
+		expect(trusted.amr).toEqual(["hwk", "mfa", "fed"]);
+		expect(trusted.authentication?.federation).toBe("trusted");
+		expect(trusted.authentication?.upstreamAmr).toBeUndefined();
+		const untrusted = await loginOn("untrusted");
+		expect(untrusted.amr).toEqual(["fed"]);
+		expect(untrusted.authentication?.federation).toBe("untrusted");
+		expect(untrusted.authentication?.upstreamAmr).toEqual(["hwk", "mfa"]);
+	});
+
 	it("refuses to build the routes when a federation's trustUpstreamAmr is given but unusable", () => {
 		expect(() =>
 			buildCallbackApp({

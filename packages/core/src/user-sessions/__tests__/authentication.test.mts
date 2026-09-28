@@ -306,20 +306,50 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (
 		).toBe(false);
 	});
 
-	it("reads the switch beside enabled in the nested shape too, never inside the type's section", () => {
-		expect(
-			federationTrustsUpstreamAmr(
-				config({ enabled: true, type: "google", google: { trustUpstreamAmr: true } }),
-				"google",
-			),
-		).toBe(false);
+	it("reads the switch beside enabled in the nested shape too", () => {
 		expect(
 			federationTrustsUpstreamAmr(
 				config({ enabled: true, type: "google", trustUpstreamAmr: true, google: {} }),
 				"google",
 			),
 		).toBe(true);
+		expect(
+			federationTrustsUpstreamAmr(
+				config({ enabled: true, type: "google", google: { clientId: "x" } }),
+				"google",
+			),
+		).toBe(false);
 	});
+
+	it.each([
+		[
+			"a typed sub-section",
+			{ okta: { enabled: true, type: "oidc", oidc: { trustUpstreamAmr: true } } },
+			"okta",
+			"federations.okta.oidc.trustUpstreamAmr",
+		],
+		[
+			"a typed sub-section, saying false",
+			{ okta: { enabled: true, type: "oidc", oidc: { trustUpstreamAmr: false } } },
+			"okta",
+			"federations.okta.oidc.trustUpstreamAmr",
+		],
+		[
+			"the sub-section a shorthand key names",
+			{ google: { enabled: true, google: { trustUpstreamAmr: true } } },
+			"google",
+			"federations.google.google.trustUpstreamAmr",
+		],
+	])(
+		"refuses the switch inside %s, saying it belongs beside enabled, rather than ignore it",
+		(_label, federations, name, placed) => {
+			// Ignored there, an operator who wrote it would believe the IdP
+			// trusted — or, writing false, distrusted — when neither holds.
+			expect(() => federationTrustsUpstreamAmr({ federations }, name)).toThrow(
+				new RangeError(`${placed} belongs beside enabled, as federations.${name}.trustUpstreamAmr`),
+			);
+		},
+	);
 
 	it.each([
 		["a string", "true"],

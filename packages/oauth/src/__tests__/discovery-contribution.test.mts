@@ -415,6 +415,20 @@ describe("acr_values_supported (#481)", () => {
 		expect(untrusted.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
+	it("does not count an installed federation whose section is disabled as trusted", async () => {
+		// Installed, but its section switched off: nothing signs a user in
+		// through it, so nothing it could assert can meet an entry.
+		const config = {
+			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
+			federations: { google: { enabled: false, trustUpstreamAmr: true } },
+		} as unknown as AppConfig;
+		const meta = await discoveryContribution(
+			{ federationProviders: new Map([["google", {}]]) },
+			config,
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
+	});
+
 	it("does not count a trusted federation that is not installed", async () => {
 		// The switch names a configured section; only an installed federation
 		// can write a session.

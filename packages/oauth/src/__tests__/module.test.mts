@@ -29,7 +29,9 @@ import {
 	type FederationTokenStore,
 	jwksModule,
 	memoryAccessTokenDenylistModule,
+	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
+	memorySessionStoresModule,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -431,13 +433,35 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		expect(lines(logger.warn)).toEqual([]);
 	});
 
-	it("advertises every entry, and drops none, while an installed federation trusts its upstream amr", async () => {
-		const { body, logger, lines } = await boot([googleFederationModule], {
-			google: { trustUpstreamAmr: true },
+	/**
+	 * What an enabled federation needs beside it (boot refuses one without
+	 * them): the session stores, the federation-token store and family
+	 * revocation.
+	 */
+	const federationStores = [
+		memorySessionStoresModule,
+		memoryFederationTokenStoreModule,
+		memoryRefreshTokenFamilyStoreModule,
+		defaultRefreshTokenFamilyRevocationModule,
+	];
+
+	it("advertises every entry, and drops none, while an installed, enabled federation trusts its upstream amr", async () => {
+		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
+			google: { enabled: true, trustUpstreamAmr: true },
 		});
 		expect(body.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
 		expect(lines(logger.info)).toEqual([]);
 		expect(lines(logger.warn)).toEqual([]);
+	});
+
+	it("counts no installed federation whose section is disabled as trusted: nothing can sign a user in through it", async () => {
+		const { body, logger, lines } = await boot([googleFederationModule], {
+			google: { enabled: false, trustUpstreamAmr: true },
+		});
+		expect(body.acr_values_supported).toEqual(["urn:example:pwd"]);
+		expect(lines(logger.info)).toEqual([
+			[{ acr: "urn:example:mfa", unproducible: ["mfa"] }, "acr_value_unsatisfiable"],
+		]);
 	});
 
 	it("refuses to compose when a federation's trustUpstreamAmr is given but unusable", async () => {
