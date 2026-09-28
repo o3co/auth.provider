@@ -428,7 +428,7 @@ export function runSecondFactorUpdateContract(
 			expect(await store.get("sf-1")).toStrictEqual(expected);
 		});
 
-		it("is monotonic: amr never loses a value, mfa is never repeated, and mfaAt only moves forward", async () => {
+		it("keeps every vouched value, never repeats mfa, and takes the later mfaAt, each no later than the recording store's clock", async () => {
 			const store = await capable();
 			await store.create(INPUT({ sid: "sf-mono", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
 			const first = at(10_000);

@@ -221,10 +221,13 @@ export interface SupportsSecondFactorUpdate {
 	 * Record that a second factor was verified in the live session `sid`, and
 	 * answer the session as it is now stored.
 	 *
-	 * Monotonic: `amr` becomes what the session vouches for followed by
-	 * `event.amr`, in insertion order, each value once; `mfaAt` becomes the
-	 * later of the two; nothing else changes — `authTime` (a step-up never
-	 * moves it, D18) and the session's lifetime included. A session written
+	 * `amr` becomes what the session vouches for followed by `event.amr`, in
+	 * insertion order, each value once — no vouched value is lost. `mfaAt`
+	 * becomes the later of the stored one and the event's, each no later than
+	 * the recording store's clock: monotonic on that clock, so one a replica
+	 * whose clock ran ahead recorded comes back to it. Nothing else changes —
+	 * `authTime` (a step-up never moves it, D18) and the session's lifetime
+	 * included. A session written
 	 * before `authentication` existed is split first
 	 * (`sessionAfterSecondFactor`), so a value an untrusted upstream IdP
 	 * asserted never becomes a vouched one.
