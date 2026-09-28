@@ -364,10 +364,12 @@ export const createRouter = (
 	// counts, read once, here, at composition — where a switch that is given
 	// but unusable refuses to build the routes — by the reading the `acr`
 	// drop uses, so what a session records and what `/authorize` advertises
-	// cannot disagree. Keyed by the provider the callback resolves.
-	const trustsUpstreamAmr = new Map<FederationProvider, boolean>(
-		[...federationProviders].map(([name, provider]) => [
-			provider,
+	// cannot disagree. Keyed by the name the federation is installed under,
+	// which is the name the callback resolves it by: one adapter installed
+	// under two names takes each name's switch, not the last one read.
+	const trustsUpstreamAmr = new Map<string, boolean>(
+		[...federationProviders.keys()].map((name) => [
+			name,
 			federationTrustsUpstreamAmr(config, name),
 		]),
 	);
@@ -1065,11 +1067,13 @@ export const createRouter = (
 				expiresAt,
 				claims,
 				// The MFA ADR's D9 and D13: `fed`, with a trusted IdP's values
-				// beside it, or an untrusted one's kept apart for the record.
+				// beside it, or an untrusted one's kept apart for the record —
+				// decided, and recorded, under the name this callback resolved
+				// the provider by (`fed.name`, checked equal to the path's).
 				...federatedSessionAuthentication({
-					federation: provider.name,
+					federation: fed.name,
 					upstreamAmr: upstreamAmrOf(profile),
-					trusted: trustsUpstreamAmr.get(provider) === true,
+					trusted: trustsUpstreamAmr.get(fed.name) === true,
 				}),
 			});
 		} catch (err) {

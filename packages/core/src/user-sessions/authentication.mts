@@ -309,7 +309,8 @@ export function requirementSession(session: UserSession | null): MfaRequirementS
 /**
  * Whether federation `name`'s upstream IdP's `amr` counts (the MFA ADR's
  * D13): `federations.<name>.trustUpstreamAmr`, beside `enabled` in both of a
- * section's shapes. `true` records what the IdP asserted in the session's
+ * section's shapes — the switch written inside the nested shape's
+ * sub-section is a `RangeError` saying so. `true` records what the IdP asserted in the session's
  * `amr` beside `fed`, where tokens carry it and `acr` is matched against it;
  * absent or `false` keeps it apart, for the record only. A value that is
  * given but is neither is a `RangeError` naming the key and quoting nothing
@@ -328,6 +329,21 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
 	if (!Object.hasOwn(federations, name)) return false;
 	const section = (federations as Record<string, unknown>)[name];
 	if (typeof section !== "object" || section === null) return false;
+	// The nested shape's sub-section — keyed by `type`, or by the name when a
+	// shorthand has none (session's `extractFederationSection`) — holds the
+	// adapter's own settings. The switch there would be ignored, so an
+	// operator who wrote it would believe the IdP trusted, or distrusted, when
+	// neither holds: refused, saying where it belongs.
+	const type =
+		typeof (section as { type?: unknown }).type === "string"
+			? (section as { type: string }).type
+			: name;
+	const sub = Object.hasOwn(section, type) ? (section as Record<string, unknown>)[type] : undefined;
+	if (typeof sub === "object" && sub !== null && Object.hasOwn(sub, "trustUpstreamAmr")) {
+		throw new RangeError(
+			`federations.${name}.${type}.trustUpstreamAmr belongs beside enabled, as federations.${name}.trustUpstreamAmr`,
+		);
+	}
 	const trust = Object.hasOwn(section, "trustUpstreamAmr")
 		? (section as { trustUpstreamAmr?: unknown }).trustUpstreamAmr
 		: undefined;

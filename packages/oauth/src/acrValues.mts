@@ -40,6 +40,24 @@ import {
 export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
 
 /**
+ * Whether `federations.<name>.enabled` is `true` — the switch the session
+ * routes and the template install a federation's routes by. An own key only:
+ * the name is a federation's, looked up in the operator's table.
+ */
+const federationEnabled = (config: unknown, name: string): boolean => {
+	const federations = (config as { federations?: unknown } | null | undefined)?.federations;
+	if (typeof federations !== "object" || federations === null) return false;
+	if (!Object.hasOwn(federations, name)) return false;
+	const section = (federations as Record<string, unknown>)[name];
+	return (
+		typeof section === "object" &&
+		section !== null &&
+		Object.hasOwn(section, "enabled") &&
+		(section as { enabled?: unknown }).enabled === true
+	);
+};
+
+/**
  * The table this composition vouches for.
  *
  * - `pwd` can always be produced; `fed` once a federation is installed, since
@@ -47,9 +65,9 @@ export const ACR_VALUE_UNSATISFIABLE = "acr_value_unsatisfiable";
  * - No second factor can: `/authorize` consults no `mfaCoordinator` before
  *   D17's single decision (the MFA ADR's build order, step 13), which adds
  *   the coordinator's `secondFactorMethods` here.
- * - An installed federation that trusts its upstream IdP's `amr`
- *   (`federations.<name>.trustUpstreamAmr`, D13) makes every entry
- *   satisfiable: the federation callback records what that IdP asserts
+ * - An installed federation whose section is enabled and trusts its
+ *   upstream IdP's `amr` (`federations.<name>.trustUpstreamAmr`, D13) makes
+ *   every entry satisfiable: the federation callback records what that IdP asserts
  *   beside `fed`, where it counts. One that does not adds `fed` alone — the
  *   callback keeps its IdP's values apart, and they meet no `acr`.
  *
@@ -67,7 +85,12 @@ export const vouchableAcrValues = (
 	const installed = [...(federations?.keys() ?? [])];
 	// Every installed federation's switch is read, not only up to the first
 	// trusted one: an unusable switch refuses the composition wherever it is.
-	const trusted = installed.map((name) => federationTrustsUpstreamAmr(config, name));
+	// Only an enabled section's counts: an installed federation whose section
+	// is switched off signs nobody in, so nothing its IdP asserts can meet an
+	// entry.
+	const trusted = installed.map(
+		(name) => federationTrustsUpstreamAmr(config, name) && federationEnabled(config, name),
+	);
 	return vouchableAcrTable(
 		configured,
 		producibleAmr({
