@@ -136,6 +136,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-oauth-token-exchange": ["oauth-token-exchange"],
 	"@o3co/auth-provider-webauthn": [
 		"webauthn",
+		"webauthn-session-subject",
 		"core-webauthn-credential-store-memory",
 		"core-challenge-store-memory",
 		"core-default-challenge-ceremony",
@@ -145,7 +146,6 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 /** The modules a deployment writes itself, beside the packages' (see the fixture). */
 const DEPLOYMENT_MODULES = [
 	"deployment:webauthn-config",
-	"deployment:webauthn-subject",
 	"deployment:grant-policy",
 	"deployment:apple-federation-config",
 	"deployment:github-federation-config",
@@ -240,7 +240,14 @@ describe("the full set boots together", () => {
 					0,
 		);
 		expect(answering.map((m) => m.name).sort()).toEqual(
-			["device-grant", "dpop", "mtls", "oauth-token-exchange", "webauthn"].sort(),
+			[
+				"device-grant",
+				"dpop",
+				"mtls",
+				"oauth-token-exchange",
+				"webauthn",
+				"webauthn-session-subject",
+			].sort(),
 		);
 		for (const module of answering) {
 			expect([...(module.requires ?? []), ...(module.optional ?? [])], module.name).toContain(
@@ -622,7 +629,7 @@ describe("every added module's primary route answers in the one app", () => {
 		expect(res.body).toMatchObject({ rpId: "auth.test", challenge: expect.any(String) });
 	});
 
-	it("WebAuthn: registration options for the signed-in user, through the deployment's subject bridge", async () => {
+	it("WebAuthn: registration options for the signed-in user, through the package's session-subject module", async () => {
 		const { app } = await boot();
 		const { agent, header, token } = await signedIn(app);
 		const res = await agent

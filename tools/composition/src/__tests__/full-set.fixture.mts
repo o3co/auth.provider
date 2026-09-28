@@ -35,9 +35,10 @@
  * - mTLS runs in-process on its `header` source from a loopback peer — the
  *   shape a TLS-terminating proxy in front of the provider gives it — with the
  *   mTLS package's test certificate.
- * - WebAuthn registration reads `req.webauthnSubject`, which the package leaves
- *   to middleware the deployment writes; the fixture's stand-in sets it from
- *   the authenticated browser session.
+ * - WebAuthn registration reads `req.webauthnSubject`, which the package's
+ *   `webauthnSessionSubjectModule` sets from the admitted browser session
+ *   (the session-admission ADR's D8); the deployment writes the mapper, here
+ *   the session's opaque subject.
  *
  * The fakes are shared by every boot in a file and put back as they were made
  * before each one (`resettable`, from the template's fixture).
@@ -79,8 +80,11 @@ import {
 	ISSUER,
 	resettable,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import { webauthnConfigSchema, webauthnModule } from "@o3co/auth-provider-webauthn";
-import type { RequestHandler } from "express";
+import {
+	webauthnConfigSchema,
+	webauthnModule,
+	webauthnSessionSubjectModule,
+} from "@o3co/auth-provider-webauthn";
 import {
 	createFakeGithub,
 	type FakeGithub,
@@ -229,37 +233,12 @@ const grantPolicyModule = defineModule({
 });
 
 /**
- * A test stand-in for the deployment's bridge from its session to
- * `req.webauthnSubject`, which WebAuthn's registration routes require and no
- * package sets: the signed-in user's opaque id, for a session that says it is
- * authenticated. It is not what a deployment should write: it does not check
- * that the session is still live or has not been revoked (the user-session
- * store), and it requires no step-up — recent authentication or MFA — which
- * the WebAuthn README asks a real deployment to demand before enrolling a
- * credential.
+ * The WebAuthn README's session bridge: the package's module, which admits the
+ * browser's session as `webauthn.register`, with the deployment's mapper — the
+ * template's subjects are opaque (`u-alice`), so the subject is the handle.
  */
-const webauthnSubjectModule = defineModule({
-	name: "deployment:webauthn-subject",
-	contributes: {
-		routes: [
-			() => ({
-				id: "deployment-webauthn-subject",
-				mountPath: "/oauth/webauthn/registration",
-				after: ["session-middleware"],
-				before: ["webauthn-registration-options", "webauthn-registration-verify"],
-				handler: ((req, _res, next) => {
-					// express-session's `req.session`, read without its type package.
-					const session = (req as { session?: unknown }).session as
-						| { isAuthenticated?: boolean; user?: { id?: unknown } }
-						| undefined;
-					if (session?.isAuthenticated === true && typeof session.user?.id === "string") {
-						req.webauthnSubject = { userId: session.user.id };
-					}
-					next();
-				}) as RequestHandler,
-			}),
-		],
-	},
+const webauthnSubjectModule = webauthnSessionSubjectModule({
+	subjectFor: (session) => ({ userId: session.sub }),
 });
 
 /** The fixture's two session requirements, in registration order (see `requirementModules`). */
