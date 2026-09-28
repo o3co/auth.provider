@@ -1467,4 +1467,28 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			"cookie store down",
 		);
 	});
+
+	it("the subject index's write: the login succeeds, and the one error line names the sid the record was created with", async () => {
+		const logger = spyLogger();
+		const store = makeUserSessionStore();
+		const { app } = buildApp({
+			userSessionStore: store,
+			subjectSessionIndex: makeSubjectSessionIndex({
+				addSid: vi.fn().mockRejectedValue(new Error("subject index down")),
+			}),
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(200);
+		const created = store.sessions[0] as { sid: string };
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe("subject_session_index_write_failed");
+		expect(context).toMatchObject({ sub: "u-1", sid: created.sid });
+		expect(context.err).not.toBeInstanceOf(Error);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
 });

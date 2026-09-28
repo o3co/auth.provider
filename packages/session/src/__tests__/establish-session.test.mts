@@ -1,0 +1,596 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * `establishSession` — the tail of a login both routes share: its sequence,
+ * what it hands each write, and the rollback ladder at every point it can
+ * fail, driven by stores and steps that fail where a test says.
+ */
+
+import {
+	passwordSessionAuthentication,
+	type SubjectSessionIndex,
+	type User,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
+import type { Request } from "express";
+import { describe, expect, it, vi } from "vitest";
+import {
+	type EstablishSessionReporter,
+	type EstablishSessionStep,
+	establishSession,
+} from "#/establish-session.mjs";
+
+const TTL_MS = 3_600_000;
+const user: User = { id: "u-1", username: "alice", email: "alice@example.com" };
+const authTime = new Date("2026-09-28T09:00:00.000Z");
+const claims = { email: "alice@example.com" };
+
+type Failures = {
+	readonly create?: Error;
+	readonly addSid?: Error;
+	readonly delete?: Error;
+	readonly removeSid?: Error;
+	readonly regenerate?: Error;
+	readonly save?: Error;
+	/** Thrown synchronously by `regenerate`, before its callback — never handed to it. */
+	readonly regenerateThrows?: Error;
+	/** Thrown synchronously by `save`, as a store serialising the record does. */
+	readonly saveThrows?: Error;
+	readonly before?: Error;
+	readonly beforeUndo?: Error;
+	readonly after?: Error;
+	readonly afterUndo?: Error;
+};
+
+type FakeSession = Record<string, unknown> & {
+	regenerate(cb: (err: unknown) => void): void;
+	save(cb: (err: unknown) => void): void;
+};
+
+/**
+ * Every collaborator a login's tail touches, each writing its name to `trace`
+ * as it runs and failing where `fail` says — so a test reads the whole
+ * sequence, and the whole rollback, off one list.
+ */
+function harness(
+	fail: Failures = {},
+	shape: {
+		readonly userSessionStore?: boolean;
+		readonly subjectSessionIndex?: boolean;
+		readonly steps?: boolean;
+		readonly redirectTo?: string;
+		/** The reporter's calls join the trace where they happen. */
+		readonly traceReporter?: boolean;
+	} = {},
+) {
+	const trace: string[] = [];
+	const step = (name: string, error: Error | undefined) =>
+		vi.fn(async () => {
+			trace.push(name);
+			if (error) throw error;
+		});
+
+	const userSessionStore = {
+		kind: "memory",
+		create: step("create", fail.create),
+		get: vi.fn(async () => null),
+		delete: step("delete", fail.delete),
+	} as unknown as UserSessionStore & { create: ReturnType<typeof vi.fn> };
+	const subjectSessionIndex = {
+		kind: "memory",
+		addSid: step("addSid", fail.addSid),
+		listSids: vi.fn(async () => []),
+		removeSid: step("removeSid", fail.removeSid),
+		removeBySubject: vi.fn(async () => {}),
+	} as unknown as SubjectSessionIndex & { addSid: ReturnType<typeof vi.fn> };
+
+	const before: EstablishSessionStep<"session_federation_index", "add" | "remove_by_sid"> = {
+		store: "session_federation_index",
+		step: "add",
+		run: step("before", fail.before),
+		undo: { step: "remove_by_sid", run: step("before-undo", fail.beforeUndo) },
+	};
+	const after: EstablishSessionStep<"federation_token", "attach" | "delete"> = {
+		store: "federation_token",
+		step: "attach",
+		run: step("after", fail.after),
+		undo: { step: "delete", run: step("after-undo", fail.afterUndo) },
+	};
+
+	// The express session: `regenerate` swaps in a fresh bag, as express-session
+	// does, so a test can tell the flags landed on the new one and not the old.
+	const req: { session: FakeSession | undefined } = { session: undefined };
+	const save = vi.fn((cb: (err: unknown) => void) => {
+		trace.push("save");
+		if (fail.saveThrows) throw fail.saveThrows;
+		cb(fail.save ?? null);
+	});
+	const regenerate = vi.fn((cb: (err: unknown) => void) => {
+		trace.push("regenerate");
+		if (fail.regenerateThrows) throw fail.regenerateThrows;
+		if (fail.regenerate) {
+			cb(fail.regenerate);
+			return;
+		}
+		req.session = { id: "fresh", regenerate, save };
+		cb(null);
+	});
+	req.session = { id: "stale", regenerate, save };
+
+	// With `traceReporter`, what the reporter is told joins the trace at the
+	// point it was told, so a test reads the outage's place among the rollback
+	// steps — before any of them — and each rollback failure as it happens.
+	const report = (name: string) =>
+		vi.fn((..._args: unknown[]) => {
+			if (shape.traceReporter) trace.push(name);
+		});
+	const reporter = {
+		storeUnavailable: report("outage"),
+		cleanupFailed: report("cleanup-failed"),
+		subjectIndexWriteFailed: report("index-write-failed"),
+	} satisfies EstablishSessionReporter<
+		"session_federation_index" | "federation_token",
+		"add" | "remove_by_sid" | "attach" | "delete"
+	>;
+	const reporterFactory = vi.fn((_record: { sid: string | undefined; sub: string }) => {
+		trace.push("reporter");
+		return reporter;
+	});
+
+	const run = () =>
+		establishSession(
+			{
+				user,
+				claims,
+				authTime,
+				recorded: passwordSessionAuthentication(),
+				...(shape.redirectTo === undefined ? {} : { redirectTo: shape.redirectTo }),
+			},
+			{
+				req: req as unknown as Request,
+				...(shape.userSessionStore === false ? {} : { userSessionStore }),
+				...(shape.subjectSessionIndex === false ? {} : { subjectSessionIndex }),
+				sessionTtlMs: TTL_MS,
+				...(shape.steps === false ? {} : { beforeRegenerate: [before], afterRegenerate: [after] }),
+				reporter: reporterFactory,
+			},
+		);
+
+	return {
+		run,
+		trace,
+		req,
+		userSessionStore,
+		subjectSessionIndex,
+		before,
+		after,
+		reporter,
+		reporterFactory,
+	};
+}
+
+/** The `sid` the harness's store was handed. */
+const createdSid = (h: ReturnType<typeof harness>): string =>
+	(h.userSessionStore.create.mock.calls[0][0] as { sid: string }).sid;
+
+describe("establishSession", () => {
+	describe("the sequence", () => {
+		it("creates the record, indexes it, runs the caller's step, regenerates, runs the other step, writes the flags and saves — in that order", async () => {
+			const h = harness();
+
+			const result = await h.run();
+
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+			]);
+			expect(result).toEqual({ outcome: "established", sid: createdSid(h) });
+			expect(h.reporter.storeUnavailable).not.toHaveBeenCalled();
+			expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
+			expect(h.reporter.subjectIndexWriteFailed).not.toHaveBeenCalled();
+		});
+
+		it("hands the record to the store as the input describes it, and the same sid and expiry to the index and the caller's steps", async () => {
+			const h = harness();
+
+			await h.run();
+
+			const sid = createdSid(h);
+			const expiresAt = new Date(authTime.getTime() + TTL_MS);
+			expect(h.userSessionStore.create).toHaveBeenCalledWith({
+				sid,
+				sub: "u-1",
+				authTime,
+				expiresAt,
+				claims,
+				...passwordSessionAuthentication(),
+			});
+			expect(h.subjectSessionIndex.addSid).toHaveBeenCalledWith("u-1", sid, expiresAt);
+			expect(h.before.run).toHaveBeenCalledWith({ sid, sub: "u-1", expiresAt });
+			expect(h.after.run).toHaveBeenCalledWith({ sid, sub: "u-1", expiresAt });
+		});
+
+		it("builds the reporter once, with the sid and the subject, before anything is written", async () => {
+			const h = harness();
+
+			await h.run();
+
+			expect(h.reporterFactory).toHaveBeenCalledTimes(1);
+			expect(h.reporterFactory).toHaveBeenCalledWith({ sid: createdSid(h), sub: "u-1" });
+			expect(h.trace.indexOf("reporter")).toBeLessThan(h.trace.indexOf("create"));
+		});
+
+		it("writes the flags onto the regenerated session, with redirectTo only when the login carried one", async () => {
+			const withRedirect = harness({}, { redirectTo: "https://app.example.com/welcome" });
+			await withRedirect.run();
+			expect(withRedirect.req.session).toMatchObject({
+				id: "fresh",
+				isAuthenticated: true,
+				user,
+				sid: createdSid(withRedirect),
+				redirectTo: "https://app.example.com/welcome",
+			});
+
+			const without = harness();
+			await without.run();
+			expect(without.req.session).toMatchObject({ id: "fresh", isAuthenticated: true });
+			expect(without.req.session).not.toHaveProperty("redirectTo");
+		});
+
+		it("without a UserSessionStore: no record, no index entry, no caller's step — the express session alone", async () => {
+			const h = harness({}, { userSessionStore: false });
+
+			const result = await h.run();
+
+			expect(h.trace).toEqual(["reporter", "regenerate", "save"]);
+			expect(result).toEqual({ outcome: "established", sid: undefined });
+			expect(h.reporterFactory).toHaveBeenCalledWith({ sid: undefined, sub: "u-1" });
+			expect(h.req.session).toMatchObject({ id: "fresh", isAuthenticated: true, user });
+			expect(h.req.session).not.toHaveProperty("sid");
+		});
+
+		it("without a SubjectSessionIndex: no index write, and no index removal on rollback", async () => {
+			const h = harness(
+				{ regenerate: new Error("cookie store down") },
+				{ subjectSessionIndex: false },
+			);
+
+			await h.run();
+
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"before",
+				"regenerate",
+				"before-undo",
+				"delete",
+			]);
+		});
+
+		it("reports a failed index write and lets the login proceed", async () => {
+			const indexDown = new Error("index store down");
+			const h = harness({ addSid: indexDown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "established", sid: createdSid(h) });
+			expect(h.reporter.subjectIndexWriteFailed).toHaveBeenCalledExactlyOnceWith(indexDown);
+			expect(h.reporter.storeUnavailable).not.toHaveBeenCalled();
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+			]);
+		});
+	});
+
+	describe("the rollback ladder — each point a store can fail", () => {
+		it("the record's create: reported, nothing else written, nothing undone, and the cookie session kept", async () => {
+			const down = new Error("session store down");
+			const h = harness({ create: down });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "user_session", step: "create" });
+			expect(h.trace).toEqual(["reporter", "create"]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"user_session",
+				"create",
+				down,
+			);
+			expect(h.reporter.cleanupFailed).not.toHaveBeenCalled();
+			expect(h.req.session).toMatchObject({ id: "stale" });
+		});
+
+		it("the caller's step before the regeneration: not undone itself; the record and its index entry are; the cookie session kept", async () => {
+			const down = new Error("federation index down");
+			const h = harness({ before: down });
+
+			const result = await h.run();
+
+			expect(result).toEqual({
+				outcome: "unavailable",
+				store: "session_federation_index",
+				step: "add",
+			});
+			expect(h.trace).toEqual(["reporter", "create", "addSid", "before", "delete", "removeSid"]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"session_federation_index",
+				"add",
+				down,
+			);
+			expect(h.req.session).toMatchObject({ id: "stale" });
+		});
+
+		it("the regeneration: the caller's step undone first, then the record, then its index entry; the cookie session dropped", async () => {
+			const down = new Error("cookie store down");
+			const h = harness({ regenerate: down });
+
+			const result = await h.run();
+
+			expect(result).toEqual({
+				outcome: "unavailable",
+				store: "cookie_session",
+				step: "regenerate",
+			});
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"cookie_session",
+				"regenerate",
+				down,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("the caller's step after the regeneration: not undone itself; the earlier step, the record and its index entry are; the cookie session dropped", async () => {
+			const down = new Error("token store down");
+			const h = harness({ after: down });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "federation_token", step: "attach" });
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"federation_token",
+				"attach",
+				down,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("the save: every write undone in reverse order, the index entry last; the cookie session dropped", async () => {
+			const down = new Error("cookie store down");
+			const h = harness({ save: down });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+				"after-undo",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"cookie_session",
+				"save",
+				down,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("a save that throws synchronously — a store serialising the record throws there — is the store's failure: the full ladder, and the cookie session dropped", async () => {
+			const thrown = new TypeError("Do not know how to serialize a BigInt");
+			const h = harness({ saveThrows: thrown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+				"after-undo",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"cookie_session",
+				"save",
+				thrown,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("a regenerate that throws synchronously is the store's failure too: the ladder, and the cookie session dropped", async () => {
+			const thrown = new Error("cookie store threw");
+			const h = harness({ regenerateThrows: thrown });
+
+			const result = await h.run();
+
+			expect(result).toEqual({
+				outcome: "unavailable",
+				store: "cookie_session",
+				step: "regenerate",
+			});
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"before-undo",
+				"delete",
+				"removeSid",
+			]);
+			expect(h.reporter.storeUnavailable).toHaveBeenCalledExactlyOnceWith(
+				"cookie_session",
+				"regenerate",
+				thrown,
+			);
+			expect(h.req.session).toBeUndefined();
+		});
+
+		it("a rollback step that fails is reported, in order, and the rest still run", async () => {
+			const tokenDown = new Error("token store down");
+			const sessionDown = new Error("session store down");
+			const indexDown = new Error("subject index down");
+			const h = harness({
+				save: new Error("cookie store down"),
+				afterUndo: tokenDown,
+				delete: sessionDown,
+				removeSid: indexDown,
+			});
+
+			const result = await h.run();
+
+			expect(result).toEqual({ outcome: "unavailable", store: "cookie_session", step: "save" });
+			expect(h.trace.slice(-4)).toEqual(["after-undo", "before-undo", "delete", "removeSid"]);
+			expect(h.reporter.cleanupFailed.mock.calls).toEqual([
+				["federation_token", "delete", tokenDown],
+				["user_session", "delete", sessionDown],
+				["subject_session_index", "remove_sid", indexDown],
+			]);
+		});
+
+		it("reports the outage before any rollback step runs — a failure before the regeneration", async () => {
+			const h = harness({ before: new Error("federation index down") }, { traceReporter: true });
+
+			await h.run();
+
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"outage",
+				"delete",
+				"removeSid",
+			]);
+		});
+
+		it("reports the outage before any rollback step runs, and each rollback step that fails as it happens — a failure at the save", async () => {
+			const h = harness(
+				{
+					save: new Error("cookie store down"),
+					afterUndo: new Error("token store down"),
+					delete: new Error("session store down"),
+					removeSid: new Error("subject index down"),
+				},
+				{ traceReporter: true },
+			);
+
+			await h.run();
+
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"before",
+				"regenerate",
+				"after",
+				"save",
+				"outage",
+				"after-undo",
+				"cleanup-failed",
+				"before-undo",
+				"delete",
+				"cleanup-failed",
+				"removeSid",
+				"cleanup-failed",
+			]);
+		});
+
+		it("a step that declares no undo is left as it is", async () => {
+			const h = harness({ regenerate: new Error("cookie store down") }, { steps: false });
+			const stepWithoutUndo: EstablishSessionStep<"session_federation_index", "add"> = {
+				store: "session_federation_index",
+				step: "add",
+				run: vi.fn(async () => {
+					h.trace.push("plain");
+				}),
+			};
+
+			const result = await establishSession(
+				{ user, claims, authTime, recorded: passwordSessionAuthentication() },
+				{
+					req: h.req as unknown as Request,
+					userSessionStore: h.userSessionStore,
+					subjectSessionIndex: h.subjectSessionIndex,
+					sessionTtlMs: TTL_MS,
+					beforeRegenerate: [stepWithoutUndo],
+					reporter: h.reporterFactory,
+				},
+			);
+
+			expect(result).toEqual({
+				outcome: "unavailable",
+				store: "cookie_session",
+				step: "regenerate",
+			});
+			expect(h.trace).toEqual([
+				"reporter",
+				"create",
+				"addSid",
+				"plain",
+				"regenerate",
+				"delete",
+				"removeSid",
+			]);
+		});
+	});
+});
