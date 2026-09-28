@@ -1330,15 +1330,23 @@ async function runScript(
 	return reply;
 }
 
-/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
-function deviceCodeRecordOf(flat: unknown): DeviceCodeRecordFields {
+/**
+ * `HGETALL`'s flat `[field, value, …]` reply — as a script returns it — as
+ * the hash's fields. Anything but a list is no fields. The one reading of
+ * that reply, shared by every store here that has a script answer a hash.
+ */
+const hashFields = (flat: unknown): Record<string, string> => {
 	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
 	const fields: Record<string, string> = {};
 	for (let i = 0; i + 1 < pairs.length; i += 2) {
 		fields[pairs[i] as string] = pairs[i + 1] as string;
 	}
-	return fields as unknown as DeviceCodeRecordFields;
-}
+	return fields;
+};
+
+/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
+const deviceCodeRecordOf = (flat: unknown): DeviceCodeRecordFields =>
+	hashFields(flat) as unknown as DeviceCodeRecordFields;
 
 /**
  * Module-level flag tracking whether the script is currently expected to be
@@ -2054,14 +2062,8 @@ const fgNumber = (value: number): string =>
 	Number.isFinite(value) ? value.toFixed(0) : String(value);
 
 /** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
-const fgFields = (flat: unknown): FederationGrantHashFields => {
-	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
-	const fields: Record<string, string> = {};
-	for (let i = 0; i + 1 < pairs.length; i += 2) {
-		fields[pairs[i] as string] = pairs[i + 1] as string;
-	}
-	return fields as unknown as FederationGrantHashFields;
-};
+const fgFields = (flat: unknown): FederationGrantHashFields =>
+	hashFields(flat) as unknown as FederationGrantHashFields;
 
 /**
  * A write's reply: `[1, fields]` when it happened, `[0]` when it was refused.
@@ -3116,16 +3118,6 @@ const MFA_SUBJECT_RESERVE = defineScript(LUA_MFA_SUBJECT_RESERVE);
 const MFA_SUBJECT_SETTLE = defineScript(LUA_MFA_SUBJECT_SETTLE);
 const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
 
-/** `HGETALL`'s flat `[field, value, …]` reply, as a script returns it, as fields. */
-const flatFields = (flat: unknown): Record<string, string> => {
-	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
-	const fields: Record<string, string> = {};
-	for (let i = 0; i + 1 < pairs.length; i += 2) {
-		fields[pairs[i] as string] = pairs[i + 1] as string;
-	}
-	return fields;
-};
-
 const HOLDS: ReadonlySet<unknown> = new Set(["backoff", "weekly", "hard"]);
 
 /**
@@ -3161,7 +3153,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 					...input.clear,
 				],
 			);
-			return Array.isArray(reply) ? flatFields(reply) : null;
+			return Array.isArray(reply) ? hashFields(reply) : null;
 		},
 		async reserveAttempt(key, max) {
 			const reply = await runScript(io, MFA_TX_RESERVE_ATTEMPT, [key], [String(max)]);
@@ -3174,7 +3166,7 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 		},
 		async consume(key, expectedVersion) {
 			const reply = await runScript(io, MFA_TX_CONSUME, [key], [expectedVersion]);
-			return Array.isArray(reply) ? flatFields(reply) : null;
+			return Array.isArray(reply) ? hashFields(reply) : null;
 		},
 		async reserveSubjectAttempt(keys, input) {
 			const { policy } = input;
