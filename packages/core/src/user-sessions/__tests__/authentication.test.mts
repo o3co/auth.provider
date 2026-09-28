@@ -25,6 +25,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	federationTrustsUpstreamAmr,
 	requirementSession,
 	sessionAuthentication,
 	vouchedAmr,
@@ -118,5 +119,68 @@ describe("requirementSession — the requirement rule's input, built only throug
 
 	it("is null for no session: no sid, or no store", () => {
 		expect(requirementSession(null)).toBeNull();
+	});
+});
+
+describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (D13)", () => {
+	const config = (entry: unknown) => ({ federations: { google: entry } });
+
+	it("is false by default: an upstream IdP's word is not this provider's", () => {
+		expect(federationTrustsUpstreamAmr(config({ enabled: true }), "google")).toBe(false);
+		expect(federationTrustsUpstreamAmr({ federations: {} }, "google")).toBe(false);
+		expect(federationTrustsUpstreamAmr({}, "google")).toBe(false);
+		expect(federationTrustsUpstreamAmr(undefined, "google")).toBe(false);
+	});
+
+	it("is true only for a federation configured with trustUpstreamAmr = true", () => {
+		expect(
+			federationTrustsUpstreamAmr(config({ enabled: true, trustUpstreamAmr: true }), "google"),
+		).toBe(true);
+		expect(
+			federationTrustsUpstreamAmr(config({ enabled: true, trustUpstreamAmr: false }), "google"),
+		).toBe(false);
+		// Another federation's switch is not this one's.
+		expect(
+			federationTrustsUpstreamAmr(
+				{ federations: { github: { trustUpstreamAmr: true } } },
+				"google",
+			),
+		).toBe(false);
+	});
+
+	it("reads the switch beside enabled in the nested shape too, never inside the type's section", () => {
+		expect(
+			federationTrustsUpstreamAmr(
+				config({ enabled: true, type: "google", google: { trustUpstreamAmr: true } }),
+				"google",
+			),
+		).toBe(false);
+		expect(
+			federationTrustsUpstreamAmr(
+				config({ enabled: true, type: "google", trustUpstreamAmr: true, google: {} }),
+				"google",
+			),
+		).toBe(true);
+	});
+
+	it.each([
+		["a string", "true"],
+		["a number", 1],
+		["null", null],
+		["an object", {}],
+	])(
+		"refuses a value that is %s, naming the key, rather than read it as either answer",
+		(_label, value) => {
+			// A configured value that is given but unusable fails at boot; core's
+			// schema coerces the spellings an environment variable delivers first.
+			expect(() =>
+				federationTrustsUpstreamAmr(config({ enabled: true, trustUpstreamAmr: value }), "google"),
+			).toThrow(new RangeError("federations.google.trustUpstreamAmr must be true or false"));
+		},
+	);
+
+	it("reads no inherited key: a federation named like an Object.prototype member has no switch", () => {
+		expect(federationTrustsUpstreamAmr({ federations: {} }, "constructor")).toBe(false);
+		expect(federationTrustsUpstreamAmr({ federations: {} }, "__proto__")).toBe(false);
 	});
 });

@@ -381,12 +381,49 @@ describe("acr_values_supported (#481)", () => {
 		);
 	});
 
-	it("advertises every entry while a federation is installed: an upstream IdP may assert any value", async () => {
+	it("withholds an entry only an upstream IdP could meet while no installed federation trusts its amr (the MFA ADR's D13)", async () => {
+		// An untrusted IdP's `amr` is kept apart from the session's and counts
+		// for no `acr`, so only `fed` itself is what a federation adds.
 		const meta = await discoveryContribution(
 			{ federationProviders: new Map([["google", {}]]) },
-			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
+			withAcr({
+				"urn:example:pwd": ["pwd"],
+				"urn:example:fed": ["fed"],
+				"urn:example:phr": [["hwk"], ["swk"]],
+			}),
 		);
-		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:phr"]);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:fed"]);
+	});
+
+	it("advertises every entry while an installed federation trusts its upstream amr: that IdP may assert any value", async () => {
+		const trusting = (trustUpstreamAmr: boolean): AppConfig => {
+			const config = withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] });
+			return {
+				...config,
+				federations: { google: { enabled: true, trustUpstreamAmr } },
+			} as unknown as AppConfig;
+		};
+		const trusted = await discoveryContribution(
+			{ federationProviders: new Map([["google", {}]]) },
+			trusting(true),
+		);
+		expect(trusted.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:phr"]);
+		const untrusted = await discoveryContribution(
+			{ federationProviders: new Map([["google", {}]]) },
+			trusting(false),
+		);
+		expect(untrusted.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
+	});
+
+	it("does not count a trusted federation that is not installed", async () => {
+		// The switch names a configured section; only an installed federation
+		// can write a session.
+		const config = {
+			...withAcr({ "urn:example:pwd": ["pwd"], "urn:example:phr": [["hwk"], ["swk"]] }),
+			federations: { google: { enabled: false, trustUpstreamAmr: true } },
+		} as unknown as AppConfig;
+		const meta = await discoveryContribution({ federationProviders: new Map() }, config);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
 	it("says nothing when there is no table — an acr_values request is then unmet", async () => {

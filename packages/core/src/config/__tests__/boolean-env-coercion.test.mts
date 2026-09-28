@@ -87,6 +87,21 @@ const ENV_OVERRIDABLE_BOOLEANS = [
 				>
 			).enabled,
 	},
+	{
+		// The MFA ADR's D13: whether a federation's upstream `amr` counts.
+		key: "federations.<name>.trustUpstreamAmr",
+		envVar: "FEDERATIONS_GOOGLE_TRUST_UPSTREAM_AMR",
+		set: (config: Record<string, unknown>, value: unknown) => {
+			config.federations = { google: { enabled: true, trustUpstreamAmr: value } };
+		},
+		read: (parsed: Record<string, unknown>) =>
+			(
+				(parsed.federations as Record<string, Record<string, unknown>>).google as Record<
+					string,
+					unknown
+				>
+			).trustUpstreamAmr,
+	},
 ] as const;
 
 /**
