@@ -134,3 +134,36 @@ describe("the federation callback's login establishes without asking (D5)", () =
 		expect(session).not.toHaveProperty("redirectTo");
 	});
 });
+
+describe("the federation callback's login — a user core cannot copy into the primary", () => {
+	it("answers 500 with nothing written, as the password login does: no record, no index entry, no tokens, no authenticated session", async () => {
+		const harness = buildFederationApp({
+			providers: new Map([["test", provider]]),
+			providerCallbackUrls: new Map([["test", CALLBACK_URL]]),
+			// `establishWithoutAsking` holds a structured-clone copy of the user:
+			// a function cannot be copied.
+			userRepository: makeUserRepository({
+				id: "user-1",
+				username: "alice",
+				greet: () => "hello",
+			}),
+		});
+		harness.store.set("browser", {
+			data: { federation: { name: "test", state: "st-1", codeVerifier: "cv-1" } },
+			cookie: { sameSite: "lax", secure: false, httpOnly: true },
+		});
+
+		const res = await request(harness.app)
+			.get("/oauth/federation/test/callback?state=st-1&code=c-1")
+			.set("Cookie", "sid=browser");
+
+		expect(res.status).toBe(500);
+		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
+		expect(harness.sessionFederationIndex.addFederation).not.toHaveBeenCalled();
+		expect(harness.federationTokenStore.attach).not.toHaveBeenCalled();
+		const session = harness.store.get("browser")?.data ?? {};
+		for (const field of ["isAuthenticated", "user", "sid"]) {
+			expect(session, field).not.toHaveProperty(field);
+		}
+	});
+});

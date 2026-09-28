@@ -397,7 +397,10 @@ primary alone: the subject, the `User`, the claims envelope, `authTime`, the
 `amr` / `authentication` core composed, and the `redirectTo`; nothing a
 caller passes beside it. Anything that is not an `Establishment` core built —
 an object shaped like one, a copy of one — is a `RangeError` before anything
-is written. It runs, in order: the
+is written. On both paths core copies the `User` into the primary with
+`structuredClone`, so a Store's `toJSON` is not applied and a value that
+cannot be copied (a function) refuses the login with nothing written (`500`):
+a `UserRepository` returns plain data. It runs, in order: the
 `UserSession` record's create (a fresh `sid`; expiry `session.maxAge` after
 `authTime`); the `subjectSessionIndex` entry when that is wired (best-effort:
 a failure is reported and the login proceeds); the caller's steps before the
@@ -1163,7 +1166,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
 | [`src/routes/__tests__/Federation.linkAdmission.test.mts`](src/routes/__tests__/Federation.linkAdmission.test.mts) | the link start and callback on session admission: each outcome's answer, the subject recorded beside the `sid`, what a requirement is asked, the pre-upgrade transaction |
-| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, and the record is what core composes |
+| [`src/routes/__tests__/Federation.loginEstablishment.test.mts`](src/routes/__tests__/Federation.loginEstablishment.test.mts) | the callback's login established without asking: a requirement that would interrupt a password login does not interrupt it, the record is what core composes, and a user core cannot copy is refused with nothing written |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
 | [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts; the request helpers are pinned in core ([`core/src/federations/__tests__/`](../core/src/federations/__tests__/)) |
 
