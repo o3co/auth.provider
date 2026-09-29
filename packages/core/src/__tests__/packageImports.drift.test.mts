@@ -21,8 +21,9 @@
  * at run time one package depends on another only through a slot whose
  * contract lives in core.
  *
- * What it reads, with TypeScript's parser, in the `src/` of every workspace
- * but the compositions: `import` and `export … from`, value and type-only
+ * What it reads, with TypeScript's parser, in every source under the `src/`
+ * of every workspace but the compositions — declaration files included:
+ * `import` and `export … from`, value and type-only
  * alike; `import("…")` in a type position and as a call; `require(…)`,
  * `require.resolve(…)` and `import.meta.resolve(…)`; `import … =
  * require(…)`; and `declare module "…"`, which augments a package it must
@@ -43,8 +44,9 @@
  *   ship: a test may import another workspace package, but only one its
  *   package declares (`devDependencies`, or a runtime dependency), so the
  *   install that runs it has it.
- * - **Everything** names a workspace package through its published entry —
- *   the package's name or a subpath its `exports` lists — and no relative
+ * - **Everything** names a workspace package — its own included — through
+ *   its published entry: the package's name or a subpath its `exports`
+ *   lists. And no relative
  *   specifier leaves its workspace: another package's source is reached
  *   through its entry or not at all.
  * - **package.json** agrees: a package's runtime dependencies on workspace
@@ -309,7 +311,11 @@ function isRequireLike(callee: ts.Expression): boolean {
 	);
 }
 
-/** Every source file under `dir`, relative to the repository. */
+/**
+ * Every source file under `dir`, relative to the repository — declaration
+ * files (`.d.ts`, `.d.mts`, `.d.cts`) included: one can import or augment a
+ * package as surely as a module can.
+ */
 function sourcesUnder(dir: string): string[] {
 	const files: string[] = [];
 	let entries: Dirent[];
@@ -322,9 +328,7 @@ function sourcesUnder(dir: string): string[] {
 		if (["node_modules", "dist", "coverage"].includes(entry.name)) continue;
 		const path = `${dir}/${entry.name}`;
 		if (entry.isDirectory()) files.push(...sourcesUnder(path));
-		else if (/\.[cm]?[jt]s$/.test(entry.name) && !/\.d\.[cm]?ts$/.test(entry.name)) {
-			files.push(path);
-		}
+		else if (/\.[cm]?[jt]s$/.test(entry.name)) files.push(path);
 	}
 	return files;
 }
@@ -490,10 +494,10 @@ describe("a package imports only core (#728)", () => {
 		expect(HOLES).toEqual([]);
 	});
 
-	it("names a workspace package only through its published entry", () => {
+	it("names a workspace package only through its published entry, its own included", () => {
 		const unpublished = FOUND.flatMap((found) => {
 			const named = workspaceOf(found.specifier);
-			if (named === undefined || named.workspace === found.workspace) return [];
+			if (named === undefined) return [];
 			return named.workspace.exports.includes(named.subpath)
 				? []
 				: [`${found.file}:${found.line}: ${found.specifier}`];
