@@ -206,17 +206,33 @@ browser session; `m2m` has no login for a second factor to interrupt.
   in `standalone`'s `clients.yaml.example`: the hosted providers' split, which
   belongs in the client registry (D1).
 
-## Relation to #728's B5
+## The adapter section (#728's B5)
 
-#728 decides where a composition root selects its adapters: a section the
-root owns, `standalone { adapters { … } }` (B5), with environment variable
-names derived from the path (B9). That decision stands, and this record does
-not change it: `standalone` implements B5 as decided, and a second template
-follows the same rule with a section named after itself
-(`m2m { adapters { … } }`).
+#728's B5, as amended on 2026-09-29
+([decision](https://github.com/o3co/auth.provider/issues/728#issuecomment-5891849965)),
+puts adapter selection in a top-level section the composition root owns, with
+the same name in every template:
 
-The consequence — the same setting under a different variable in each template
-(`STANDALONE_ADAPTERS_*`, `M2M_ADAPTERS_*`) — was raised on #728
-([comment](https://github.com/o3co/auth.provider/issues/728#issuecomment-5890344702)),
-with a proposal for one section every template shares
-(`composition { adapters { … } }`). If #728 amends B5, this record follows it.
+```hocon
+adapters {
+  rateLimiter = "redis"   # ADAPTERS_RATE_LIMITER
+}
+```
+
+Environment variable names follow the path (B9), so a setting has one
+variable in every template that has it, and the runbook and `.env.example`
+need one table. Once #728 lands, each template's composition root reads this
+section alone, with its own schema, before it chooses modules; until then the
+templates read the selection keys in core's schema, as `standalone` does
+today. `adapters` is a reserved section name: no module may be named
+`adapters` (`moduleNames.drift` can hold that), and B8's notice of sections
+no module owns leaves it out.
+
+Rejected:
+
+- **A section named after the template** (`standalone { adapters { … } }`, B5
+  as first decided): it gives the same setting a different variable in each
+  template (`STANDALONE_ADAPTERS_*`, `M2M_ADAPTERS_*`).
+- **A shared wrapper** (`composition { adapters { … } }`, proposed on #728):
+  under B7 a module's `enabled` is its own key, so the composition root owns
+  nothing but adapter selection and needs no namespace of its own.
