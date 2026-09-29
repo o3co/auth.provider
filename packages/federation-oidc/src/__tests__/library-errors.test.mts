@@ -15,14 +15,13 @@
  */
 
 /**
- * What core's `loggableError` makes of the errors this adapter's library
- * actually throws, when the token endpoint answers something it cannot use.
- * The routes log exactly this projection (the session callback, oauth's
- * federation token route), so it is judged here against the real
- * openid-client / oauth4webapi rather than a hand-built copy of their shapes:
- * whatever an upstream wrote into the answer must not reach a log line, and
- * what an operator needs to tell the failures apart — the status, the content
- * type, the OAuth error and its description — must.
+ * What core's `loggableError` makes of the errors openid-client and
+ * oauth4webapi really throw when the token endpoint answers something unusable.
+ * The routes log exactly this projection (session callback, oauth's federation
+ * token route), so it is judged against the real libraries: whatever an
+ * upstream wrote into the answer must not reach a log line, and what an
+ * operator needs to tell the failures apart (status, content type, OAuth error
+ * and its description) must.
  */
 
 import { generateKeyPairSync } from "node:crypto";
