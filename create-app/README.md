@@ -36,7 +36,8 @@ npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-na
 
 `--template` names the template to copy, `standalone` by default. The
 templates are the directories under [`templates/`](../templates) that hold a
-`package.json`, and the CLI refuses any other name, listing the ones it has.
+`package.json` (not a symbolic link, not dot-named), and the CLI refuses any
+other name, listing the ones it has.
 What each template is for is in its own README; how the set is drawn — a
 template per composition shape, not per feature — is in the
 [composition templates ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md).
@@ -113,13 +114,18 @@ run `pnpm install` in the project once and commit the result.
 
 The package's `prebuild` and `prepack` scripts run
 [`scripts/copy-templates.mjs`](scripts/copy-templates.mjs), which copies
-every template — each directory under `templates/` with a `package.json` —
-into `create-app/templates/<name>` (git-ignored; `node_modules/` and `dist/`
-excluded) and writes `create-app/templates/versions.json`, the current version
+every template into `create-app/templates/<name>` (git-ignored; `node_modules/`
+and `dist/` excluded; the destination is rebuilt whole, so a template removed
+from the repository does not linger) and writes `create-app/templates/versions.json`, the current version
 of every published `@o3co/auth-provider-*` package. The tarball ships both
 (`files: ["dist", "templates"]`), and `scaffold()` reads them from there. A
 scaffold is therefore the template as it was when this package was built,
 pinned to the library versions of that same build.
+What a template is — a directory under `templates/`, not a symbolic link and
+not dot-named, holding a `package.json`, named in lowercase kebab-case — is
+defined once, in [`scripts/templates.mjs`](scripts/templates.mjs), which the
+copy and CI's build of every template both use; the scaffolder's
+`availableTemplates()` reads the copy by the same rule.
 [`published-package.test.mts`](src/__tests__/published-package.test.mts)
 packs the package and holds the tarball to the repository: it must ship every
 template, and each must scaffold from it.
@@ -142,11 +148,12 @@ Both forms must be non-empty, not `.` or `..`, and ≤ 214 characters.
 `--dir <value>` must match the unscoped pattern above (same constraints).
 
 `--template <name>` must be the name of a bundled template, exactly; a path is
-never one.
+never one. A template's name is lowercase kebab-case (`^[a-z0-9][a-z0-9-]*$`);
+the build refuses a template named otherwise.
 
 ## Known Limitations
 
-- The bundled template's `README.md` / `README.ja.md` carry the upstream title `@o3co/auth-provider-standalone`. When generating a scoped project, that title will not match your `package.json` name; edit it manually if it matters for your use case.
+- Each bundled template's `README.md` / `README.ja.md` carry its upstream title, such as `@o3co/auth-provider-standalone`. When generating a scoped project, that title will not match your `package.json` name; edit it manually if it matters for your use case.
 - The template's README links into this repository with relative paths (`../../docs/…`, `../../packages/…`). Those resolve in the monorepo and not in a scaffolded project, where there is no `docs/` or `packages/` beside it; read them on GitHub instead.
 
 ## Generated Structure
@@ -162,8 +169,9 @@ the composition, which is the host process, and what the scaffold owns.
 The module exports the functions the CLI is built from; their signatures are
 in [`src/index.mts`](src/index.mts).
 
-- `scaffold(targetDir, projectName, template?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`). Throws, before writing anything, if no template is bundled or `template` is not one of them; and throws if a `workspace:*` dependency has no entry in `versions.json`.
+- `scaffold(targetDir, projectName, template?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`). Throws, before writing anything, with `templateRefusal`'s message; and throws if a `workspace:*` dependency has no entry in `versions.json`.
 - `availableTemplates(templatesRoot?)` — the bundled templates' names, sorted.
+- `templateRefusal(template, templates)` — why `template` cannot be scaffolded (none bundled, or not one of them), or `undefined`.
 - `generateLockfile(targetDir)` — step 7. Returns `{ ok: true, command }` or `{ ok: false, reason }` rather than throwing.
 - `main()` — the CLI: reads `process.argv`, and exits non-zero on an invalid argument, an unknown template or an existing directory.
 - `isValidProjectName(name)` / `isValidDirName(name)` — the [Validation Rules](#validation-rules).

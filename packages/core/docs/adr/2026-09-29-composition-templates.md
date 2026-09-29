@@ -6,35 +6,44 @@ Accepted (2026-09-29). `create-app` scaffolds from a named template
 (`--template <name>`, `standalone` by default) and ships every template the
 repository holds; CI builds, tests and images every one of them against the
 packed tarballs. The second template, `m2m`, is designed here and lands
-after [#728](https://github.com/o3co/auth.provider/issues/728) and the
-headless-composition fixes ([#TRACKING](https://github.com/o3co/auth.provider/issues/TRACKING)).
+after [#728](https://github.com/o3co/auth.provider/issues/728) and
+[#752](https://github.com/o3co/auth.provider/issues/752) (a
+composition with no authorization-code grant still carries a browser
+surface); [#751](https://github.com/o3co/auth.provider/issues/751)
+tracks the steps.
+
+- Written against: `develop` at `bb180ae5f`. Every "today" below was checked
+  there, and the umbrella repository (o3co/auth) at its `develop`.
 
 ## Context
 
 The repository has one composition root, `templates/standalone`. It depends on
-most packages and chooses among them with configuration switches: the
-federations, federation grants, the session and code stores, the rate
-limiter, the consent store. It is what `create-app` copies, and the only
-composition CI tests the way a scaffold is used — against the packed
-tarballs, in its image, and under the umbrella E2E.
+eight of the sixteen workspace packages (core, oauth, session, redis,
+foundation, federation-google, federation-oidc, federation-grants) and chooses
+among what they provide with configuration switches: the federations,
+federation grants, the session and code stores, the rate limiter, the consent
+store. It is what `create-app` copies, and the only composition CI tests the
+way a scaffold is used — against the packed tarballs, in its image, and under
+the umbrella E2E.
 
 Two things follow from there being one.
 
-**No composition smaller than the whole is ever booted as a deployment.**
-`tools/composition` boots the union of every package. In the union, a slot one
-module requires is often filled by a module that happens to be there, so a
-dependency nobody declared stays invisible until a deployment leaves that
-neighbour out. The standalone's Redis branch shipped unable to boot for that
-reason (`missing-required-component` for two client slots, CHANGELOG, "The
-scaffold's Redis branch boots again"): only the module choice was tested, not
-whether the choice could be satisfied. The packages' READMEs make claims about
-smaller compositions — the oauth README says login and the browser session are
-a package of their own "because an API-only deployment issues tokens without
-them" — that no composition in the repository exercises.
-Checked against the code, that one does not hold today: `oauthModule` requires
-a code repository and a login URL, mounts `/authorize` and `/userinfo`
-unconditionally, and discovery requires the OpenID Connect fields
-(`packages/oauth/src/module.mts`, `packages/oauth/src/routes.mts`,
+**Only one shape of deployment is ever booted.** `tools/composition` boots the
+standalone's composition with every other package added to it. In a
+composition that large, a slot one module requires is often filled by a module
+that happens to be there, so a dependency nobody declared stays invisible
+until a deployment leaves that neighbour out. And a combination nobody boots
+is not known to boot: the standalone's own Redis branch shipped unable to
+(`missing-required-component` for two client slots; CHANGELOG, "The
+scaffold's Redis branch boots again"), because its suite checked which modules
+the branch selects and not whether the selection could be satisfied. The
+packages' READMEs make claims about smaller compositions — the oauth README
+says login and the browser session are a package of their own "because an
+API-only deployment issues tokens without them" — that no composition in the
+repository exercises. Checked against the code, that one does not hold today:
+`oauthModule` requires a code repository and a login URL, mounts `/authorize`
+and `/userinfo` unconditionally, and discovery requires the OpenID Connect
+fields (`packages/oauth/src/module.mts`, `packages/oauth/src/routes.mts`,
 `packages/core/src/discovery/buildDocument.mts`).
 
 **A template is the worked answer to "how do I wire this".** Where a feature
@@ -83,7 +92,7 @@ What is **not** a template:
 
 | Varies | Where it lives |
 | --- | --- |
-| A feature or grant (device grant, MFA, passkeys, consent, a federation, DPoP, mTLS, token exchange) | A switch in the template whose shape it belongs to |
+| A feature or grant (device grant, MFA, passkeys, consent, a federation, DPoP, mTLS, JWT bearer, token exchange) | A switch in each template whose shape it belongs to, once that template installs its package (the standalone installs none of the device grant, WebAuthn, DPoP, mTLS and token exchange today) |
 | Scale and storage (one replica or several, memory or Redis) | Configuration: `deployment.mode` and the adapter selection |
 | The kind of client (web, single-page through a back end, native) | The client registration |
 
@@ -97,13 +106,22 @@ by the template's own suite (the MFA ADR's step 20 tests MFA on and off).
   and `tests/docker-compose.yml` in o3co/auth), and the documentation and
   `create-app`'s default name it.
 - **`m2m`** — the headless token service: `client_credentials` with client
-  secrets and `private_key_jwt`, RFC 7523 JWT bearer (over a static issuer
-  registry the template wires from its configuration), RFC 8693 token exchange,
+  secrets and `private_key_jwt`, RFC 7523 JWT bearer, RFC 8693 token exchange,
   DPoP and mTLS behind switches, introspection, revocation and the JWKS. It has
   no session package, no `express-session`, no login URL and no code store.
-  Its suite asserts the absence as well as the presence: `/oauth/authorize`,
-  `/oauth/userinfo` and `/session/*` answer `404`, and no response sets a
+  JWT bearer resolves each assertion's subject to a user, so with it switched
+  on `m2m` also needs the user service (`foundation`'s HTTP user repository),
+  as `standalone` does. Its suite asserts the absence as well as the presence:
+  `/oauth/authorize` and `/session/*` answer `404`, and no response sets a
   cookie.
+
+JWT bearer is a switch of both shapes (D1). A browser-facing deployment uses
+it too: auth.proxy's injection mode exchanges an external credential for a
+token with it, at the same provider that serves its session grant, and the
+umbrella E2E leaves that exchange out today because `standalone` wires no
+assertion verifier. The module that builds the verifier over a static issuer
+registry from the configuration is written once and shared by the templates
+(D4).
 
 Two templates asked for by their use — "a simple web deployment", "an admin
 API" — are the same two shapes: the first is `standalone` on one replica with
@@ -112,7 +130,11 @@ in-memory stores; the second is `m2m` when its callers are machines, and
 
 ### D3. What a template is, and what holds every template to account
 
-A template is a directory under `templates/` with a `package.json`.
+A template is a directory under `templates/` — not a symbolic link, not
+dot-named — holding a `package.json`, and named in lowercase kebab-case (the
+name is a CLI argument and, in CI, a Docker image tag). The rule is written
+once, in `create-app/scripts/templates.mjs`; the build refuses a template that
+breaks the naming rule, and a `templates/` holding none.
 
 - `create-app` ships every template (`scripts/copy-templates.mjs`) and
   scaffolds the one named by `--template`, `standalone` by default. A name is
@@ -120,21 +142,29 @@ A template is a directory under `templates/` with a `package.json`.
   `published-package.test.mts` packs the package and requires the tarball to
   carry exactly the repository's templates, each of which must scaffold from
   it.
-- CI's publish-readiness job builds and tests every template against the
-  packed tarballs, and builds each one's base image and installs its
-  dependency set on it.
+- CI's publish-readiness job reads the list from the same module, builds and
+  tests every template against the packed tarballs, and builds each one's base
+  image and installs its dependency set on it.
 - Dependabot watches `templates/*` and bumps a base image in one pull request
-  across every template (`group-by: dependency-name`).
+  across every template (`group-by: dependency-name`). Grouping applies to
+  version updates only: a security update arrives as one pull request per
+  template, and the drift test of D4 fails each until the same bump is applied
+  to the other templates in it.
 
 ### D4. Files the templates share are copied, and held identical
 
 A template is copied into a project and owned by its operator from then on, so
 it cannot import its host process from a package without the operator losing
-the ability to read it. The files that are not a choice of the template — the
+the ability to read it. The files that are not a choice of the template are
+therefore copied into each template, and a drift test that lands with the
+second template requires them to be byte-identical. The candidates are the
 host process (`listen`, `logger`, `metrics`, `routes`, `shutdown`), the
-`Dockerfile`, `.dockerignore`, `.gitignore`, `tsconfig.json` and the vitest
-configuration — are therefore copied into each template, and a drift test that
-lands with the second template requires them to be byte-identical.
+`Dockerfile`, `.dockerignore`, `.gitignore`, `tsconfig.json`, the vitest
+configuration, and the JWT-bearer verifier module (D2). A candidate that reads
+a template's own settings is made neutral before it is shared: `shutdown.mts`
+sizes its drain from `federationGrants` (`cleanupAllowanceFor`), which the
+browser-facing composition hands it instead — as #728 also asks, since a
+composition root reads no package's key.
 
 Rejected:
 
@@ -151,10 +181,12 @@ Rejected:
 
 The drift tests in core that walk `templates/standalone/src` by name
 (`errorText`, `designVocabulary`, `mfaEnrollmentWitness`,
-`auditEventInventory`, `campaignVocabulary`) walk every `templates/*/src` when
-the second template lands, each first shown to miss it. The guards that list
-workspaces explicitly (`logErrorProjection`'s source roots, `packageImports`'s
-compositions) name it.
+`sessionAdmissionCallers`, `auditEventInventory`, `campaignVocabulary`) walk
+every `templates/*/src` when the second template lands, each first shown to
+miss it; `reference-env-names` reads every template's `config/`, not only
+`templates/standalone/config`. The guards that list workspaces explicitly
+(`logErrorProjection`'s source roots, `packageImports`'s compositions) name
+it.
 
 ### D6. Relation to the MFA ADR
 
@@ -182,4 +214,6 @@ browser session; `m2m` has no login for a second factor to interrupt.
   after the template gives each template different environment variable names
   for the same setting (B9 derives them from the path). A section every
   template shares — for example `composition { adapters { … } }` — keeps one
-  name per setting across templates. Raised on #728 for the owner's decision.
+  name per setting across templates, and one fixed name is also one core can
+  leave out of B8's boot-time notice of sections nothing owns. Raised on #728
+  for the owner's decision.

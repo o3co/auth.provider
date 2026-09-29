@@ -35,8 +35,9 @@ npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-na
 ```
 
 `--template` はコピーするテンプレートを指定します（デフォルトは `standalone`）。
-テンプレートは [`templates/`](../templates) 配下で `package.json` を持つディレクトリで、
-それ以外の名前は、使えるテンプレートの一覧を示して拒否されます。各テンプレートが
+テンプレートは [`templates/`](../templates) 配下で `package.json` を持つディレクトリ
+（シンボリックリンクでも、ドットで始まる名前でもないもの）で、それ以外の名前は、
+使えるテンプレートの一覧を示して拒否されます。各テンプレートが
 何のためにあるかはそれぞれの README に、テンプレートの分け方 — 機能ごとではなく
 コンポジションの形ごとに 1 つ — は
 [コンポジションテンプレートの ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md) にあります。
@@ -113,12 +114,18 @@ lockfile をテンプレートに同梱することはできません: 手順 5 
 
 パッケージの `prebuild` と `prepack` スクリプトが
 [`scripts/copy-templates.mjs`](scripts/copy-templates.mjs) を実行し、
-すべてのテンプレート — `templates/` 配下で `package.json` を持つディレクトリ — を
-`create-app/templates/<name>` にコピーし（git 管理外。`node_modules/` と `dist/` は除外）、`create-app/templates/versions.json` —
+すべてのテンプレートを `create-app/templates/<name>` にコピーし（git 管理外。
+`node_modules/` と `dist/` は除外。コピー先は丸ごと作り直すので、リポジトリから
+消したテンプレートは残らない）、`create-app/templates/versions.json` —
 公開される `@o3co/auth-provider-*` 全パッケージの現在のバージョン — を書き出します。
 tarball には両方が入り（`files: ["dist", "templates"]`）、`scaffold()` はそこから
 読みます。したがってスキャフォールドされるのは、このパッケージをビルドした時点の
 テンプレートで、同じビルド時点のライブラリバージョンに固定されます。
+テンプレートとは何か — `templates/` 配下のディレクトリで、シンボリックリンクでも
+ドットで始まる名前でもなく、`package.json` を持ち、小文字のケバブケースで名付けられた
+もの — は [`scripts/templates.mjs`](scripts/templates.mjs) の 1 か所で定義され、
+コピーと CI の全テンプレートのビルドの両方がそれを使います。スキャフォルダーの
+`availableTemplates()` は同じ規則でコピーを読みます。
 [`published-package.test.mts`](src/__tests__/published-package.test.mts) は
 パッケージを pack し、tarball がリポジトリのテンプレートをすべて含み、それぞれが
 そこからスキャフォールドできることを確かめます。
@@ -141,11 +148,12 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 `--dir <value>` はスコープなしのパターンと同じ制約です。
 
 `--template <name>` は内包するテンプレートの名前と完全に一致する必要があります。パスは
-テンプレート名になりません。
+テンプレート名になりません。テンプレート名は小文字のケバブケース（`^[a-z0-9][a-z0-9-]*$`）で、
+それ以外の名前のテンプレートはビルドが拒否します。
 
 ## 既知の制約
 
-- 内包されているテンプレートの `README.md` / `README.ja.md` の見出しは上流の `@o3co/auth-provider-standalone` のままです。スコープ付きでプロジェクトを生成した場合、この見出しは `package.json` の名前と一致しません。必要に応じて手動で修正してください。
+- 内包されている各テンプレートの `README.md` / `README.ja.md` の見出しは上流の名前（たとえば `@o3co/auth-provider-standalone`）のままです。スコープ付きでプロジェクトを生成した場合、この見出しは `package.json` の名前と一致しません。必要に応じて手動で修正してください。
 - テンプレートの README は、このリポジトリ内を相対パス（`../../docs/…`、`../../packages/…`）でリンクしています。これはモノレポ内では解決しますが、横に `docs/` も `packages/` もないスキャフォールド先のプロジェクトでは解決しません。GitHub 上で参照してください。
 
 ## 生成される構造
@@ -161,8 +169,9 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 モジュールは CLI を構成する関数を export しています。シグネチャは
 [`src/index.mts`](src/index.mts) にあります。
 
-- `scaffold(targetDir, projectName, template?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。テンプレートが 1 つも内包されていない場合、または `template` がそのどれでもない場合は、何も書かずに例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
+- `scaffold(targetDir, projectName, template?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。コピーできないときは何も書かずに `templateRefusal` のメッセージで例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
 - `availableTemplates(templatesRoot?)` — 内包するテンプレートの名前（ソート済み）。
+- `templateRefusal(template, templates)` — `template` からスキャフォールドできない理由（1 つも内包されていない、またはそのどれでもない）。できるときは `undefined`。
 - `generateLockfile(targetDir)` — 手順 7。例外を投げず、`{ ok: true, command }` か `{ ok: false, reason }` を返す。
 - `main()` — CLI 本体。`process.argv` を読み、不正な引数、未知のテンプレート、既存のディレクトリに対しては非ゼロで終了する。
 - `isValidProjectName(name)` / `isValidDirName(name)` — [バリデーションルール](#バリデーションルール)。
