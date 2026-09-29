@@ -72,8 +72,10 @@ second definition it was never shown; a drift guard can.
 ## Provenance identifiers
 
 Identifiers from past development campaigns (`IH-16`, `D-6`, `Wave 5d`, …) are
-not vocabulary rows, and the code does not cite them: a comment states its
-rationale in place, and a design decision is cited by its ADR.
+not vocabulary rows. New code does not cite them: a comment states its
+rationale in place, and a design decision is cited by its ADR. A few remain in
+string literals, directives' reasons and configuration comments; #763 tracks
+removing them.
 
 ## What does not belong here
 
