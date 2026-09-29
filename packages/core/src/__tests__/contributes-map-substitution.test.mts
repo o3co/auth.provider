@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { z } from "zod";
 import type { AuditSink } from "../audit/types.mjs";
 import type { FederationProvider as ConcreteFederationProvider } from "../federations/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../grants/types.mjs";
@@ -28,9 +29,11 @@ import type {
 	GrantPolicyHookContribution,
 	MfaFactor,
 	MfaFactorFactory,
+	RateLimitBudgetFactory,
 } from "../modules/manifest/contributes-map.mjs";
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import type { GrantPolicyHook } from "../policy/types.mjs";
+import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../token-exchange/validator.mjs";
 
 // Every contribution kind carries its concrete type from registration to
@@ -112,6 +115,88 @@ describe("#626 P1: the two contracts core owns now", () => {
 				federations: {
 					// @ts-expect-error — no `buildAuthorizationUrl`, no `exchangeCode`
 					acme: () => ({ name: "acme", scope: [] }),
+				},
+			},
+		});
+		expect(true).toBe(true);
+	});
+});
+
+describe("#728: rate-limit budgets and declared federation contributions", () => {
+	const provider = {
+		name: "acme",
+		scope: ["openid"],
+		buildAuthorizationUrl: () => new URL("https://idp.example/authorize"),
+		exchangeCode: async () => ({ issuer: "https://idp.example", sub: "1", expiresAt: null }),
+	};
+
+	it("a rateLimitBudgets factory answers the limiter's spec, or null when its setting is off", () => {
+		expectTypeOf<ReturnType<RateLimitBudgetFactory<unknown>>>().toEqualTypeOf<
+			Contributed<RateLimitSpec | null>
+		>();
+		defineModule({
+			name: "acme-budgets",
+			requires: ["config"],
+			contributes: {
+				rateLimitBudgets: {
+					"acme-login": (deps) => {
+						expectTypeOf(deps.config).not.toBeUnknown();
+						return { limit: 5, windowSeconds: 60 };
+					},
+					"acme-off": () => null,
+				},
+			},
+		});
+		expect(true).toBe(true);
+	});
+
+	it("refuses a budget that is not a spec", () => {
+		defineModule({
+			name: "acme-half-budget",
+			contributes: {
+				rateLimitBudgets: {
+					// @ts-expect-error — no `windowSeconds`
+					"acme-login": () => ({ limit: 5 }),
+				},
+			},
+		});
+		expect(true).toBe(true);
+	});
+
+	it("a federation contribution may declare the type it handles and its entry schema beside its factory", () => {
+		defineModule({
+			name: "acme-federation-declared",
+			requires: ["config"],
+			contributes: {
+				federations: {
+					corp: {
+						type: "acme",
+						entrySchema: z.object({ clientId: z.string() }),
+						factory: (deps) => {
+							// The factory's deps are the module's, as a bare factory's are.
+							expectTypeOf(deps.config).not.toBeUnknown();
+							return provider;
+						},
+					},
+				},
+			},
+		});
+		expect(true).toBe(true);
+	});
+
+	it("refuses a declared federation contribution whose factory builds no provider, or that names no type", () => {
+		defineModule({
+			name: "acme-federation-declared-wrong",
+			contributes: {
+				federations: {
+					corp: {
+						type: "acme",
+						entrySchema: z.object({}),
+						// @ts-expect-error — no `buildAuthorizationUrl`, no `exchangeCode`
+						factory: () => ({ name: "corp", scope: [] }),
+					},
+					// @ts-expect-error — a declaration names the type it handles
+					other: { entrySchema: z.object({}), factory: () => provider },
 				},
 			},
 		});

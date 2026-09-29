@@ -1,11 +1,21 @@
 import { expect, expectTypeOf, test } from "vitest";
-import type { AuditHookFactory, ContributesMap, GrantFactory } from "../contributes-map.mjs";
+import type { z } from "zod";
+import type { RateLimitSpec } from "../../../ratelimit/types.mjs";
+import type { Contributed } from "../contributed.mjs";
+import type {
+	AuditHookFactory,
+	ContributesMap,
+	FederationContribution,
+	FederationFactory,
+	GrantFactory,
+	RateLimitBudgetFactory,
+} from "../contributes-map.mjs";
 import type { ProviderDeps } from "../provider.mjs";
 
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements", () => {
+test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements + rateLimitBudgets", () => {
 	// Per A2-α §4.1 baseline declares 7 kinds. A5 (Phase 7) adds
 	// `federationRedirectPolicies` via `declare module` augmentation in the
 	// session package. Wave 2 Phase 1 retro (Phase 2 DPoP spec §11.1) adds
@@ -18,7 +28,8 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 	// `/.well-known/openid-configuration` document, which core synthesizes.
 	// The session-admission ADR's D3 adds `sessionRequirements` as the 11th:
 	// the requirements every consumer of a browser session asks through
-	// admission.
+	// admission. #728 adds `rateLimitBudgets` as the 12th: the budgets each
+	// module owns for its rate-limit prefixes.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
@@ -32,6 +43,7 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 		| "tokenBindingMechanisms"
 		| "discoveryMetadata"
 		| "sessionRequirements"
+		| "rateLimitBudgets"
 	>();
 });
 
@@ -73,4 +85,31 @@ test("grantMiddleware is list-shaped (factory array)", () => {
 	const _withFn: GMField = [_fn];
 	expect(Array.isArray(_arr)).toBe(true);
 	expect(Array.isArray(_withFn)).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// #728: a module's rate-limit budgets, and what a federation contribution
+// declares it handles
+// ---------------------------------------------------------------------------
+
+test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null", () => {
+	type Field = NonNullable<ContributesMap<LocalDeps>["rateLimitBudgets"]>;
+	expectTypeOf<Field>().toEqualTypeOf<{
+		readonly [prefix: string]: RateLimitBudgetFactory<LocalDeps>;
+	}>();
+	expectTypeOf<RateLimitBudgetFactory<LocalDeps>>().toEqualTypeOf<
+		(deps: LocalDeps) => Contributed<RateLimitSpec | null>
+	>();
+});
+
+test("a federations entry is a factory, or a contribution declaring the type it handles and its entry schema", () => {
+	type Entry = NonNullable<ContributesMap<LocalDeps>["federations"]>[string];
+	expectTypeOf<Entry>().toEqualTypeOf<
+		FederationFactory<LocalDeps> | FederationContribution<LocalDeps>
+	>();
+	expectTypeOf<FederationContribution<LocalDeps>>().branded.toEqualTypeOf<{
+		readonly type: string;
+		readonly entrySchema: z.ZodType;
+		readonly factory: FederationFactory<LocalDeps>;
+	}>();
 });
