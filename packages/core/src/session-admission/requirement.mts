@@ -773,9 +773,14 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
  * over a requirement under test. Answers the reach as read, a read-only
  * view over a set of its own — and seals a registered copy on it: the copy
  * answers the snapshot from then on, whatever the contributor's own `Set`
- * does. A reach it refuses is not sealed.
+ * does. A reach it refuses is not sealed. `remedy`, when given, is appended
+ * to the refusal of a non-empty reach under a name but `mfa` — what the
+ * caller can do about it: `resolverForTests` names its `allowAnyReach`.
  */
-export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySet<string> {
+export function sealRegisteredReach(
+	requirement: SessionRequirement,
+	remedy?: string,
+): ReadonlySet<string> {
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${requirement.name}": ${what}`);
 	};
@@ -800,7 +805,7 @@ export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySe
 	}
 	if (read.size > 0 && requirement.name !== MFA_REQUIREMENT_NAME) {
 		refuse(
-			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty`,
+			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty${remedy === undefined ? "" : ` — ${remedy}`}`,
 		);
 	}
 	return seal(requirement, read);

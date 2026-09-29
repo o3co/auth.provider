@@ -40,6 +40,9 @@ import {
 	snapshotReach,
 } from "../requirement.mjs";
 
+/** What a test that meets the one-reacher rule can do about it. */
+const ALLOW_ANY_REACH_REMEDY = "pass allowAnyReach for a test of admission's own mechanics";
+
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
  * order given. Two of one name are refused, as boot refuses a duplicate
@@ -66,7 +69,7 @@ export function resolverForTests(
 			snapshotReach(requirement);
 			continue;
 		}
-		sealRegisteredReach(requirement);
+		sealRegisteredReach(requirement, ALLOW_ANY_REACH_REMEDY);
 	}
 	return sessionRequirementResolverOver({
 		get: (name) => byName.get(name),
