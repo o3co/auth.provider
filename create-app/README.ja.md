@@ -1,35 +1,48 @@
 # @o3co/create-auth-provider
 
-最終更新: 2026-09-24
+最終更新: 2026-09-29
 
-auth.provider 用の CLI スキャフォルダーです。内包する standalone テンプレートから新しいサーバープロジェクトを生成します。
+auth.provider 用の CLI スキャフォルダーです。内包するテンプレートの 1 つから新しいサーバープロジェクトを生成します。
 
 ## 責務と役割
 
-**役割。** リポジトリ内のテンプレート
-[`templates/standalone`](../templates/standalone) を、独立した新しいプロジェクトに
-変換する `npx` の入口です。運用者のマシン上で一度だけ実行されます。生成された
+**役割。** リポジトリ内の [`templates/`](../templates) にあるテンプレート
+（それぞれがデプロイ可能なコンポジションルート）の 1 つを、独立した新しい
+プロジェクトに変換する `npx` の入口です。運用者のマシン上で一度だけ実行されます。生成された
 プロジェクトはこのパッケージを import せず、このパッケージも `packages/*` の
 ライブラリを一切 import しません。
 
-**担うもの。** プロジェクト名とディレクトリ名の検証、テンプレートのコピー、生成された
+**担うもの。** プロジェクト名・ディレクトリ名・テンプレート名の検証、選んだテンプレートのコピー、生成された
 `package.json` の書き換え（名前、`workspace:*` → 公開バージョン）、プロジェクトの
 `pnpm-workspace.yaml` の書き出し、そして一度きりの `pnpm-lock.yaml` の解決。
 
 **担わないもの。** 生成されるプロジェクトの中身 — ソース、設定、Dockerfile、
-テスト — はテンプレートのものです（このパッケージではなく `templates/standalone` を
-編集してください）。実行時の振る舞いは `@o3co/auth-provider-core` と、テンプレートが
+テスト — はテンプレートのものです（このパッケージではなく `templates/<name>` を
+編集してください）。どのテンプレートがあり、それぞれ何のためにあるかは
+[コンポジションテンプレートの ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md)
+のものです。実行時の振る舞いは `@o3co/auth-provider-core` と、テンプレートが
 依存するライブラリのものです。
 
 **別パッケージである理由。** `bin` 付きで単独公開されるため、provider をインストール
 せずに `npx` で実行できます。公開 tarball にはモノレポが含まれないので、このパッケージは
-テンプレートのコピーと、固定するライブラリのバージョンを自前で持ちます
+すべてのテンプレートのコピーと、それらが固定するライブラリのバージョンを自前で持ちます
 （[テンプレートの同梱方法](#テンプレートの同梱方法)）。
 
 ## 使い方
 
 ```bash
-npx @o3co/create-auth-provider <project-name> [--dir <dir-name>] [--no-lockfile]
+npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]
+```
+
+`--template` はコピーするテンプレートを指定します（デフォルトは `standalone`）。
+テンプレートは [`templates/`](../templates) 配下で `package.json` を持つディレクトリで、
+それ以外の名前は、使えるテンプレートの一覧を示して拒否されます。各テンプレートが
+何のためにあるかはそれぞれの README に、テンプレートの分け方 — 機能ごとではなく
+コンポジションの形ごとに 1 つ — は
+[コンポジションテンプレートの ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md) にあります。
+
+```bash
+npx @o3co/create-auth-provider my-auth-server --template standalone
 ```
 
 `<project-name>` はスコープ付き npm 名 (`@scope/pkg`) とスコープなしの名前 (`pkg`) のどちらでも指定できます。
@@ -75,8 +88,8 @@ CLI は最後のメッセージで次に `pnpm run debug` を実行するよう�
 
 1. `<project-name>` を検証する（[バリデーションルール](#バリデーションルール) 参照）。
 2. 生成先ディレクトリ名を決定する: `--dir <value>` が指定されていればその値、そうでなければスコープ付き名のパッケージ部分、最終的には入力値そのもの。
-3. 生成先ディレクトリを `<cwd>/<dir-name>` として解決し、すでに存在する場合はエラーで終了する。
-4. 内包するテンプレートを生成先ディレクトリにコピーし（`node_modules/` と `dist/` は除外）、`.gitignore` を復元する（npm は公開パッケージから `.gitignore` という名前のファイルを落とすため、tarball には `gitignore` として入っている）。
+3. `--template`（デフォルト `standalone`）が内包するテンプレートの名前であることを確かめ、生成先ディレクトリを `<cwd>/<dir-name>` として解決し、すでに存在する場合はエラーで終了する。
+4. 指定したテンプレートを生成先ディレクトリにコピーし（`node_modules/` と `dist/` は除外）、`.gitignore` を復元する（npm は公開パッケージから `.gitignore` という名前のファイルを落とすため、tarball には `gitignore` として入っている）。
 5. 生成されたディレクトリの `package.json` を書き換える:
    - `name` を `<project-name>` そのままに設定する（スコープを保持）。
    - `"private": true` は意図的に残す: スキャフォールドされた ID プロバイダーが誤って公開できてはならないため。本当に公開するつもりなら自分でこのフィールドを削除する。
@@ -100,12 +113,15 @@ lockfile をテンプレートに同梱することはできません: 手順 5 
 
 パッケージの `prebuild` と `prepack` スクリプトが
 [`scripts/copy-templates.mjs`](scripts/copy-templates.mjs) を実行し、
-`templates/standalone` を `create-app/templates/standalone` にコピーし（git 管理外。
-`node_modules/` と `dist/` は除外）、`create-app/templates/versions.json` —
+すべてのテンプレート — `templates/` 配下で `package.json` を持つディレクトリ — を
+`create-app/templates/<name>` にコピーし（git 管理外。`node_modules/` と `dist/` は除外）、`create-app/templates/versions.json` —
 公開される `@o3co/auth-provider-*` 全パッケージの現在のバージョン — を書き出します。
 tarball には両方が入り（`files: ["dist", "templates"]`）、`scaffold()` はそこから
 読みます。したがってスキャフォールドされるのは、このパッケージをビルドした時点の
 テンプレートで、同じビルド時点のライブラリバージョンに固定されます。
+[`published-package.test.mts`](src/__tests__/published-package.test.mts) は
+パッケージを pack し、tarball がリポジトリのテンプレートをすべて含み、それぞれが
+そこからスキャフォールドできることを確かめます。
 
 CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 実行します。`packages/` 配下の公開パッケージが `copy-templates.mjs` のバージョン
@@ -124,6 +140,9 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 
 `--dir <value>` はスコープなしのパターンと同じ制約です。
 
+`--template <name>` は内包するテンプレートの名前と完全に一致する必要があります。パスは
+テンプレート名になりません。
+
 ## 既知の制約
 
 - 内包されているテンプレートの `README.md` / `README.ja.md` の見出しは上流の `@o3co/auth-provider-standalone` のままです。スコープ付きでプロジェクトを生成した場合、この見出しは `package.json` の名前と一致しません。必要に応じて手動で修正してください。
@@ -131,8 +150,8 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 
 ## 生成される構造
 
-生成されるプロジェクトは [`templates/standalone`](../templates/standalone) の
-完全なコピー（`node_modules/` と `dist/` を除く）に、`pnpm-workspace.yaml`（手順 6）と、
+生成されるプロジェクトは、選んだテンプレート（たとえば
+[`templates/standalone`](../templates/standalone)）の完全なコピー（`node_modules/` と `dist/` を除く）に、`pnpm-workspace.yaml`（手順 6）と、
 `--no-lockfile` を指定せず lockfile の手順が失敗しなかった場合は `pnpm-lock.yaml`（手順 7）を加えたものです。どの
 ファイルがモジュール構成で、どれがホストプロセスで、スキャフォールドが何を
 持つかは、テンプレートの README に記述されています。
@@ -142,12 +161,14 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 モジュールは CLI を構成する関数を export しています。シグネチャは
 [`src/index.mts`](src/index.mts) にあります。
 
-- `scaffold(targetDir, projectName)` — 手順 4〜6。内包するテンプレートがない場合、または `workspace:*` 依存が `versions.json` に見つからない場合は例外を投げる。
+- `scaffold(targetDir, projectName, template?)` — 手順 4〜6。`template`（デフォルトは `DEFAULT_TEMPLATE` = `"standalone"`）からコピーする。テンプレートが 1 つも内包されていない場合、または `template` がそのどれでもない場合は、何も書かずに例外を投げる。`workspace:*` 依存が `versions.json` に見つからない場合も例外を投げる。
+- `availableTemplates(templatesRoot?)` — 内包するテンプレートの名前（ソート済み）。
 - `generateLockfile(targetDir)` — 手順 7。例外を投げず、`{ ok: true, command }` か `{ ok: false, reason }` を返す。
-- `main()` — CLI 本体。`process.argv` を読み、不正な引数や既存のディレクトリに対しては非ゼロで終了する。
+- `main()` — CLI 本体。`process.argv` を読み、不正な引数、未知のテンプレート、既存のディレクトリに対しては非ゼロで終了する。
 - `isValidProjectName(name)` / `isValidDirName(name)` — [バリデーションルール](#バリデーションルール)。
 
 ## 関連
 
-- [`@o3co/auth-provider-standalone`](../templates/standalone) — このツールが生成元とするテンプレート
+- [`templates/`](../templates) — このツールが生成元とするテンプレート。[`@o3co/auth-provider-standalone`](../templates/standalone) がデフォルト
+- [コンポジションテンプレートの ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md) — テンプレートをこう分ける理由
 - [`@o3co/auth-provider-core`](../packages/core) — コアアプリケーションファクトリ
