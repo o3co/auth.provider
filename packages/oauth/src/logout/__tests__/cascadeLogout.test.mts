@@ -291,7 +291,7 @@ describe("cascadeLogout", () => {
 		}
 	});
 
-	it("Step 2 federationTokenStore.removeBySid failure → outcome: failed, step:2 (no longer best-effort standalone)", async () => {
+	it("Step 2 federationTokenStore.removeBySid failure → outcome: failed, step:2, halting before step 4", async () => {
 		const fts = makeFedStore({
 			removeBySid: vi.fn().mockRejectedValue(new Error("net")),
 		});
