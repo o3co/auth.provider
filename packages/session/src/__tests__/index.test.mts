@@ -75,6 +75,13 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		}
 	});
 
+	it("exports what a composition needs to provide the csrfTokenSigner slot without the session store's module", async () => {
+		// sessionModule requires the slot; a composition that mounts its own
+		// cookie session signs with the session secret as the store's module does.
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		expect(typeof mod.createSessionCsrfTokenSigner).toBe("function");
+	});
+
 	it("exports loginCompletionModule, which provides the loginCompletion slot alone", async () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		const loaded = mod.loginCompletionModule as { name?: unknown; provides?: object } | undefined;
