@@ -116,6 +116,7 @@ import {
 	checkWithFailMode,
 	cookieClaim,
 	coveredByRevocationBoundary,
+	describeAdmissionOutage,
 	describeIssuerRejection,
 	type FederatedIdentityLookupResult,
 	type FederationGrantAcquisitionConnection,
@@ -311,6 +312,13 @@ type Judgement =
 			 * the session's part, whose line admission wrote.
 			 */
 			readonly unanswered?: Unanswered;
+			/**
+			 * When it was the session's part: the store admission named — its
+			 * own (`user_session`, `revocation_boundary`) or a requirement's
+			 * name — which the consent describes as every consumer of admission
+			 * does (core's `describeAdmissionOutage`).
+			 */
+			readonly admissionStore?: string;
 	  };
 
 /** Each step of the browser half as admission is asked about it: its own name, graded `use` (the session-admission ADR's D4). */
@@ -327,17 +335,22 @@ const NO_ACR_TABLE: AdmissionDeps["acrTable"] = Object.freeze({});
  * expired, another subject's, covered by the sessions boundary, or one a
  * requirement asks to sign in again, meet what it cannot, or step up (a
  * trip is the MFA ADR's step 14 to decide; until then a step-up here is a
- * new login); or `"unavailable"`, an outage admission has logged.
+ * new login); or an outage admission has logged, with the store it named.
  */
 async function admittedSession(
 	deps: AdmissionDeps,
 	claim: SessionClaim,
 	action: AdmissionAction,
-): Promise<UserSession | null | "unavailable"> {
+): Promise<UserSession | null | { readonly unavailable: string }> {
 	const admission = await admitSession(deps, { claim, action });
-	if (admission.outcome === "unavailable") return "unavailable";
+	if (admission.outcome === "unavailable") return { unavailable: admission.store };
 	return admission.outcome === "admitted" ? admission.session : null;
 }
+
+/** Whether the session's part was an outage, rather than a record or a refusal. */
+const isAdmissionOutage = (
+	part: UserSession | null | { readonly unavailable: string },
+): part is { readonly unavailable: string } => part !== null && "unavailable" in part;
 
 /**
  * Whether THIS browser may go on with THIS intent now: the cookie names the
@@ -372,7 +385,9 @@ async function judge(
 	// dated after it: `authTime` never changes, so signing in again is the
 	// remedy, and the distinct error lets the page say so.
 	const session = await admittedSession(admission, claim, action);
-	if (session === "unavailable") return { ok: false, status: 503, reason: "unavailable" };
+	if (isAdmissionOutage(session)) {
+		return { ok: false, status: 503, reason: "unavailable", admissionStore: session.unavailable };
+	}
 	if (session === null) return { ok: false, status: 403, reason: "reauthentication_required" };
 
 	// Which question is being asked, so that a failure names what could not answer.
@@ -820,12 +835,20 @@ export function createFederationGrantBrowserRouter(
 				jsonError(res, 403, "reauthentication_required", "sign in again to continue");
 			} else if (judged.reason === "unavailable") {
 				// One answer for one outage: a client registry that cannot judge the
-				// question is what the page's own lookup of it answers.
+				// question is what the page's own lookup of it answers, and the
+				// session's part is described as every consumer of admission
+				// describes it — by the store it named (core's
+				// `describeAdmissionOutage`), in this route's envelope. The
+				// route's own stores are `storage`.
 				jsonError(
 					res,
 					503,
 					"temporarily_unavailable",
-					judged.unanswered?.store === "client" ? "client registry unavailable" : "storage",
+					judged.admissionStore !== undefined
+						? describeAdmissionOutage(judged.admissionStore)
+						: judged.unanswered?.store === "client"
+							? "client registry unavailable"
+							: "storage",
 				);
 			} else if (judged.reason === "connection_not_permitted") {
 				jsonError(res, 403, "access_denied", "connection_not_permitted");
@@ -1452,7 +1475,7 @@ export function createFederationGrantBrowserRouter(
 			return "reauthentication_required";
 		}
 		const session = await admittedSession(admission, claim, CALLBACK);
-		if (session === "unavailable") return "unavailable";
+		if (isAdmissionOutage(session)) return "unavailable";
 		return session === null ? "reauthentication_required" : "ok";
 	}
 
