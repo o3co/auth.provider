@@ -30,7 +30,7 @@ import { assertSecureEndpoint, endpointForMessage } from "../endpointUrl.mjs";
 import { readFailure, requestFailure, StoreCredentialRefusedError } from "./storeErrors.mjs";
 import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
-/** The Store answered 409 to a link request: the identity is already someone else's (#482). */
+/** The Store answered 409 to a link request: the identity is already someone else's. */
 const CONFLICT = Symbol("conflict");
 
 /**
@@ -38,7 +38,7 @@ const CONFLICT = Symbol("conflict");
  *
  * A `User` record is a few hundred bytes; 1 MiB is generous for one carrying
  * custom claims and small enough that a hostile or broken Store cannot walk the
- * process out of memory one login at a time (#285).
+ * process out of memory one login at a time.
  */
 export const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 
@@ -50,19 +50,12 @@ export const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
 /**
- * Runtime guard for the upstream user-service response. The previous
- * `(await res.json()) as User` was a compile-time cast only — a malformed
- * upstream payload (`{ status: "ok" }`, schema migration, tampered
- * response) silently produced a `User` with `undefined` required fields,
- * leaking `sub: undefined` into the authentication flow.
- *
- * The guard accepts any object with string `id` and `username`,
- * preserving the index-signature `[key: string]: unknown` extras that
- * `User` allows. Empty strings pass — bcrypt compare and downstream
- * gates prevent empty-credential authentication in practice; tightening
- * to `.min(1)` is a Phase F follow-up if needed.
- *
- * Per TS-2 (Wave 5g).
+ * Runtime guard for the Store's user response, so a malformed payload cannot
+ * become a `User` with `undefined` required fields and leak `sub: undefined`
+ * into authentication. Accepts any object with string `id` and `username`,
+ * keeping the extras `User`'s index signature allows. Empty strings pass:
+ * bcrypt compare and downstream gates prevent empty-credential authentication
+ * in practice.
  */
 function isUser(v: unknown): v is User {
 	if (typeof v !== "object" || v === null) return false;
@@ -71,13 +64,13 @@ function isUser(v: unknown): v is User {
 }
 
 /**
- * What the Store declares it can place (#613): identities issued under one
- * registration — the federation's name, the issuer and the client, exactly as
- * a federation-grant connection is configured — given at least these claims
- * from the verified id_token. The synchronous probe D7 check 5 asks at boot
- * cannot reach the Store, so the operator relays the Store's own claim here;
- * boot then holds every connection to it. `requiredClaims = []` is a strategy
- * on the registration and the `sub` alone.
+ * What the Store declares it can place: identities issued under one
+ * registration (the federation's name, the issuer and the client, exactly as
+ * a federation-grant connection is configured), given at least these claims
+ * from the verified id_token. The boot probe is synchronous and cannot reach
+ * the Store, so the operator relays the Store's own claim here; boot then
+ * holds every connection to it. `requiredClaims = []` is a strategy on the
+ * registration and the `sub` alone.
  */
 export interface FederatedIdentityLookupCoverage {
 	readonly provider: string;
@@ -214,18 +207,15 @@ const B64TOKEN = /^[A-Za-z0-9\-._~+/]+=*$/;
 const BEARER_TOKEN_FIELD = "bearerToken";
 
 /**
- * The credential presented to the Store, checked (#285's rule: at
- * construction, so a deployment that would send an unusable one fails at
- * boot) and turned into the `Authorization` value; `undefined` when none is
- * configured, which sends no `Authorization` header at all.
+ * The credential presented to the Store, checked at construction (so an
+ * unusable one fails at boot) and turned into the `Authorization` value;
+ * `undefined` when none is configured, which sends no `Authorization` header.
  *
- * The shape is refused here and not left to `fetch`: a header value `fetch`
- * refuses is one it QUOTES in the `TypeError` it throws, on the request path,
- * where the session routes log what is thrown. The strength is core's
- * shared-secret floor (`MIN_SECRET_ENTROPY_BYTES`, measured on the decoded
- * length as `SESSION_SECRET` is): whoever holds this token speaks to the Store
- * as auth.provider — resolves an identity to its user, links one to any user.
- * No message quotes the value.
+ * The shape is refused here, not left to `fetch`, which QUOTES a header value
+ * it refuses in the `TypeError` it throws, where the session routes log it.
+ * The strength is core's shared-secret floor (`MIN_SECRET_ENTROPY_BYTES`, on
+ * the decoded length): whoever holds this token speaks to the Store as
+ * auth.provider. No message quotes the value.
  */
 function bearerAuthorization(value: unknown): string | undefined {
 	if (value === undefined) return undefined;
@@ -262,17 +252,13 @@ function isPositiveIntegerWithin(value: unknown, bound: number): value is number
 }
 
 /**
- * Releases a response body we are not going to read.
+ * Releases a response body we are not going to read. Left unconsumed, undici
+ * holds the socket until the response is garbage collected instead of
+ * returning it to the keep-alive pool: a slow leak on the failure path.
  *
- * Without this an error or 401 leaves the body unconsumed, and undici holds the
- * socket until the response is garbage collected rather than returning it to
- * the keep-alive pool — a slow leak on the failure path, which is exactly the
- * path a struggling deployment spends its time on.
- *
- * Deliberately not awaited: cancelling is a signal to the transport, and how
- * long the peer takes to act on it is the peer's business. Awaiting would hand
- * a hostile Store a second way to stall the caller — the one the request
- * deadline exists to close — and some interceptors never settle it at all.
+ * Deliberately not awaited: that would hand a hostile Store a second way to
+ * stall the caller, the one the request deadline exists to close, and some
+ * interceptors never settle it at all.
  */
 function discardBody(res: Response): void {
 	res.body?.cancel().catch(() => {
@@ -281,18 +267,12 @@ function discardBody(res: Response): void {
 }
 
 /**
- * Reads at most `limit` bytes of `res` and returns them as text, throwing once
- * the limit is passed.
- *
- * `Content-Length` is checked first so an honest oversized response is refused
- * before a byte of it is read, but the streaming count is the load-bearing
- * half: a hostile Store simply omits the header (or lies), and chunked transfer
- * encoding has none to omit.
- *
- * Everything it throws is the adapter's own: the cap, the deadline's
- * rejection, or — for a stream that broke mid-read — what `unreadable` makes
- * of the transport's error, which is never passed on as it is. `endpoint` is
- * how its messages name the Store: origin and path (`endpointForMessage`).
+ * Reads at most `limit` bytes of `res` as text, throwing once it is passed.
+ * `Content-Length` refuses an honest oversized response before a byte is read,
+ * but the streaming count is the load-bearing half: a hostile Store omits the
+ * header or lies, and chunked encoding has none. Everything it throws is the
+ * adapter's own (the cap, the deadline's rejection, what `unreadable` makes of
+ * a transport error mid-read), never the transport's error as it is.
  */
 async function readBodyCapped(
 	res: Response,
@@ -348,17 +328,12 @@ async function readBodyCapped(
 }
 
 /**
- * Whether `err` is the abort our own deadline raised on the `fetch` itself —
- * the case where the response headers never arrive.
- *
- * A deliberately shallow check. An aborted `fetch` rejects with the
- * `AbortError` directly; the wrapping that `fetch` does apply is for network
- * failures, which are not aborts. If some runtime did wrap one, the request
- * still fails — as a `StoreTransportError` ("could not be reached") instead of
- * a `TimeoutError`, a misnamed failure rather than a missed one, and not worth
- * an untestable `cause` walk.
- * A stalled *body* is not covered here at all: that is the deadline race in
- * `readBodyCapped`, which does not depend on abort semantics.
+ * Whether `err` is the abort our own deadline raised on the `fetch` itself,
+ * where the response headers never arrive. Deliberately shallow: an aborted
+ * `fetch` rejects with the `AbortError` directly. A runtime that wrapped one
+ * would still fail the request, as a `StoreTransportError` rather than a
+ * `TimeoutError`: misnamed, not missed. A stalled *body* is the deadline race
+ * in `readBodyCapped`.
  */
 function isAbortError(err: unknown): boolean {
 	// Optional chaining rather than a `typeof` guard: it covers `null`,
@@ -369,41 +344,19 @@ function isAbortError(err: unknown): boolean {
 }
 
 /**
- * `UserRepository` backed by "the Store" — the upstream user service defined
+ * `UserRepository` backed by "the Store", the upstream user service defined
  * on core's `User` doc (`@o3co/auth-provider-core`, `src/repositories/types.mts`).
+ * See README, The wire contract and Constructor validation.
  *
  * Every endpoint receives a plaintext credential or a verified identity, so
- * each is validated at **construction**: a deployment configured with an
- * `http://` Store URL fails at boot rather than leaking the first user's
- * password (#285). `http://` is accepted for loopback hosts only — see
- * `src/endpointUrl.mts` for the carve-out and its rationale.
- *
- * No request follows a redirect, so a URL that passed that check is the only
- * place its body is ever sent and the only one whose answer is taken: a `3xx`
- * from the Store is an upstream failure, thrown like any other unexpected
- * status, and its `Location` is never contacted.
- *
- * With `bearerToken` configured, every request — authentication, linking and
- * the identity lookup alike — carries `Authorization: Bearer <token>`, so the
- * Store can refuse a caller that is not this deployment; without it, no
- * request carries an `Authorization` header. The Store says it refused THIS
- * deployment by answering `401` or `403` with a `Bearer` challenge (RFC 6750
- * §3), and that answer, while a token was sent, throws a
- * {@link StoreCredentialRefusedError} on every request — never "no such user"
- * or a refused link, which is what either status without the challenge still
- * means.
- *
- * A transport's own error is never thrown: undici's parser errors quote the
- * bytes they rejected, and a peer that reflects the request puts the
- * `Authorization` header — or a password — there. A request that cannot be
- * made, or an answer that cannot be read, throws a `StoreTransportError`
- * (`src/repositories/storeErrors.mts`): a fixed message naming the endpoint
- * and what failed, at most an allowlisted transport code, no cause.
- *
- * Every message names an endpoint by its origin and path alone
- * (`endpointForMessage`, `src/endpointUrl.mts`): a Store URL may carry a
- * query string, and a query may carry a credential, while every caller logs
- * what this throws.
+ * each is validated at **construction** (`src/endpointUrl.mts`), and no
+ * request follows a redirect. With `bearerToken`, every request carries
+ * `Authorization: Bearer <token>`, and a `401` or `403` with a `Bearer`
+ * challenge throws a {@link StoreCredentialRefusedError}. A transport's own
+ * error is never thrown, because it may quote the request: a failure throws a
+ * `StoreTransportError` with a fixed message, at most an allowlisted transport
+ * code, and no cause. Every message names an endpoint by origin and path
+ * alone.
  */
 export class HttpUserRepository implements UserRepository {
 	/**
@@ -420,7 +373,7 @@ export class HttpUserRepository implements UserRepository {
 	private findSubjectByFederatedIdentityUrl?: string;
 	private readonly coverage: readonly FederatedIdentityLookupCoverage[];
 	/**
-	 * #482 — see {@link UserRepository.linkFederatedIdentity}. Present only when
+	 * See {@link UserRepository.linkFederatedIdentity}. Present only when
 	 * `linkFederatedIdentityUrl` is configured, which is how the federation routes
 	 * know to refuse `?link=1` up front instead of at the callback.
 	 */
@@ -429,7 +382,7 @@ export class HttpUserRepository implements UserRepository {
 		identity: FederatedIdentityLink,
 	) => Promise<LinkFederatedIdentityResult>;
 	/**
-	 * #613 — see {@link UserRepository.supportsFederatedIdentityLookup}. Present
+	 * See {@link UserRepository.supportsFederatedIdentityLookup}. Present
 	 * together with the lookup, only when `findSubjectByFederatedIdentityUrl` is
 	 * configured: absent, a deployment that requires the lookup is refused at
 	 * boot by the method's name, which is the message that says what to set.
@@ -439,7 +392,7 @@ export class HttpUserRepository implements UserRepository {
 		registration: FederatedIdentityRegistration,
 		identityClaims: readonly string[],
 	) => boolean;
-	/** #613 — see {@link UserRepository.findSubjectByFederatedIdentity}. Present with the probe. */
+	/** See {@link UserRepository.findSubjectByFederatedIdentity}. Present with the probe. */
 	readonly findSubjectByFederatedIdentity?: (
 		identity: FederatedIdentityLookup,
 	) => Promise<FederatedIdentityLookupResult>;
@@ -456,11 +409,11 @@ export class HttpUserRepository implements UserRepository {
 	}: {
 		authenticateUrl: string;
 		authenticateByTokenUrl: string;
-		/** #482: optional; the Store's link endpoint. Same https rule as the other two. */
+		/** Optional; the Store's link endpoint. Same https rule as the other two. */
 		linkFederatedIdentityUrl?: string;
-		/** #613: optional; the Store's identity lookup. Same https rule; carries a verified identity. */
+		/** Optional; the Store's identity lookup. Same https rule; carries a verified identity. */
 		findSubjectByFederatedIdentityUrl?: string;
-		/** #613: which registrations the Store's lookup covers. Needs the URL; `[]` covers none. */
+		/** Which registrations the Store's lookup covers. Needs the URL; `[]` covers none. */
 		federatedIdentityLookupCoverage?: readonly FederatedIdentityLookupCoverage[];
 		/**
 		 * Optional; sent to the Store on every request as `Authorization: Bearer
@@ -532,11 +485,10 @@ export class HttpUserRepository implements UserRepository {
 	 * Throws {@link StoreCredentialRefusedError} when a non-`2xx` answer is the
 	 * Store refusing this deployment's credential: a `401` or `403` with a
 	 * `Bearer` challenge, to a request that carried the token. Read before any
-	 * other reading of the status — without it a token the Store does not
-	 * accept is every login "no such user" and every link "refused", with
-	 * nothing logged. Without a token sent, a challenge is not about one, and a
-	 * Store whose stack challenges every refusal keeps the wire meaning it has
-	 * always had.
+	 * other reading of the status; otherwise a token the Store does not accept
+	 * is every login "no such user" and every link "refused", with nothing
+	 * logged. Without a token sent, a challenge is not about one, and the
+	 * status keeps its usual wire meaning.
 	 */
 	private assertCredentialAccepted(res: Response, endpoint: string): void {
 		if (
@@ -558,8 +510,8 @@ export class HttpUserRepository implements UserRepository {
 	}
 
 	/**
-	 * POST `{ userId, provider, sub, token, claims }` to the Store's link endpoint
-	 * (#482). A `2xx` `User` is the linked account; `401` / `403` is the Store's
+	 * POST `{ userId, provider, sub, token, claims }` to the Store's link
+	 * endpoint. A `2xx` `User` is the linked account; `401` / `403` is the Store's
 	 * refusal (policy — an unverified or relay address, one identity per
 	 * provider, …); `409` says the identity is already someone else's.
 	 */
@@ -588,7 +540,7 @@ export class HttpUserRepository implements UserRepository {
 
 	/**
 	 * POST `{ provider, issuer, clientId, sub, claims }` to the Store's lookup
-	 * (#613) and read one of the port's three answers. Answered locally, with
+	 * and read one of the port's three answers. Answered locally, with
 	 * no request, where the declaration already decides: a registration nobody
 	 * declared is `registration_not_covered`, and a declared one arriving
 	 * without a claim its strategy needs is `identity_not_resolvable`. Every
@@ -617,16 +569,14 @@ export class HttpUserRepository implements UserRepository {
 
 	/**
 	 * The lookup's transport: the same deadline, cap and abort as {@link post},
-	 * and like it never follows a redirect — the body carries a verified
-	 * identity, and a `Location` is not a configured endpoint. None of
-	 * {@link post}'s readings, though. A `401`/`403` is not "nobody", a `409` is
-	 * not a conflict, a `404` is not an absence: only a `2xx` carrying one of the
-	 * three answers is an answer, and everything else throws — as an outage,
-	 * which is what a lookup that could not be made is — a `401` or `403` with a
-	 * `Bearer` challenge, to a request that carried the token, as the refused
-	 * credential it is. What is thrown names the endpoint by origin and path — and, for an answer
-	 * with a status, the status; for a transport failure, at most its code — and
-	 * never the body, the identity, a status text or an underlying cause.
+	 * and like it never follows a redirect (the body carries a verified identity,
+	 * and a `Location` is not a configured endpoint). None of {@link post}'s
+	 * readings: only a `2xx` carrying one of the three answers is an answer.
+	 * Everything else throws as an outage, except a `401` or `403` with a
+	 * `Bearer` challenge to a request that carried the token, which throws as the
+	 * refused credential it is. What is thrown names the endpoint by origin and
+	 * path, plus the status for an answer or at most the code for a transport
+	 * failure, and never the body, the identity, a status text or a cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		// What every message names: origin and path, never the query.

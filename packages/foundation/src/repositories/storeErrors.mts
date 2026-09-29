@@ -26,24 +26,16 @@ import { endpointForMessage } from "../endpointUrl.mjs";
 
 /**
  * The Store refused the credential this deployment presented: a `401` or a
- * `403` carrying a `Bearer` challenge (RFC 6750 §3 — `invalid_token`,
- * `insufficient_scope`) to a request that sent `bearerToken`. An outage, not
- * an answer about the user: thrown, so every caller answers it as it answers
- * any Store failure.
+ * `403` carrying a `Bearer` challenge (RFC 6750 §3) to a request that sent
+ * `bearerToken`. An outage, not an answer about the user. See README, The
+ * wire contract.
  *
- * `name` is part of the contract. A caller that does not depend on this
- * package recognises the refusal by it — an operator reading the
- * federation-grants callback's `federation_grant_callback_unavailable` line
- * finds it as the projected error's `name`. The message names the endpoint —
- * its origin and path, never a query or fragment, however it is handed one —
- * the status and the option to check; never the token, and nothing the Store
- * wrote.
- *
- * The Store's status is `storeStatus`, never `status` or `statusCode`: those
- * are what Express's finalhandler, http-errors and the standalone's terminal
- * handler read as the status to ANSWER with, and a 4xx there is taken for a
- * client error — the Store's 401 would reach the browser as its own, and go
- * unlogged.
+ * `name` and `storeStatus` are part of the contract. The message names the
+ * endpoint's origin and path, the status and the option to check; never the
+ * token, and nothing the Store wrote. Not `status` or `statusCode`: Express's
+ * finalhandler, http-errors and the standalone's terminal handler read those
+ * as the status to ANSWER with, so the Store's 401 would reach the browser as
+ * its own, unlogged.
  */
 export class StoreCredentialRefusedError extends Error {
 	readonly storeStatus: 401 | 403;
@@ -84,17 +76,15 @@ export type StoreTransportFailure =
 	| "unreadable";
 
 /**
- * The Store could not be reached, or what it answered could not be read — a
- * transport failure rather than an answer. Thrown so every caller answers it
- * as it answers any Store failure; `name` is part of the contract (the
- * federation-grants callback's outage line carries it as the projected
- * error's `name`), as are `reason` and `code`.
+ * The Store could not be reached, or what it answered could not be read: a
+ * transport failure rather than an answer, thrown so every caller answers it
+ * as it answers any Store failure. `name`, `reason` and `code` are part of the
+ * contract.
  *
  * Built only from what an operator can act on: a fixed message naming the
- * endpoint and the failure, and `code` — a transport code from the allowlist
- * below, when there is one. Never a `cause`: the transport's own error may
- * quote what was sent or received. And no `status` (see
- * {@link StoreCredentialRefusedError}).
+ * endpoint and the failure, and `code`, an allowlisted transport code when
+ * there is one. Never a `cause`: the transport's own error may quote what was
+ * sent or received. And no `status` (see {@link StoreCredentialRefusedError}).
  */
 export class StoreTransportError extends Error {
 	readonly reason: StoreTransportFailure;
@@ -189,15 +179,13 @@ const CLOSED_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Which failure a rejected request is, read by the error's name and code
- * only. A head the transport cannot take — an `HTTPParserError` (an `HPE_*`
- * code where the runtime sets one), `UND_ERR_HEADERS_OVERFLOW` — is
- * `malformed_response`. A connection closed or reset under the request —
- * undici's `UND_ERR_SOCKET` ("other side closed"), `ECONNRESET`, `EPIPE` — is
- * `connection_closed`, whatever the socket had read: undici counts bytes over
- * the socket's life, and fetch reuses keep-alive connections, so a pooled
- * connection closed between two requests has read an entire earlier answer.
- * Anything else is `unreachable`.
+ * Which failure a rejected request is, read by the error's name and code only.
+ * A head the transport cannot take (`HTTPParserError`, an `HPE_*` code,
+ * `UND_ERR_HEADERS_OVERFLOW`) is `malformed_response`. A connection closed or
+ * reset under the request (`CLOSED_CODES`) is `connection_closed`, whatever the
+ * socket had read: undici counts bytes over the socket's life, and a pooled
+ * keep-alive connection closed between two requests has read an entire
+ * earlier answer. Anything else is `unreachable`.
  */
 function requestFailureReason(
 	err: unknown,

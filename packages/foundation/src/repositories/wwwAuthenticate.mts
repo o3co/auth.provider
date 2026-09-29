@@ -25,27 +25,23 @@
  */
 
 /**
- * A quoted-string (RFC 9110 §5.6.4), escapes included — and one left
- * unterminated runs to the end of the value, so what follows its opening
- * quote is its content, never a challenge. Each character is consumed once
- * (a backslash with the character after it, when there is one), so a value
- * of escaped quotes with no closing one costs a scan: matching up to a
- * closing quote that never comes retried from every quote, which a 64 KiB
- * value turned into seconds per answer.
+ * A quoted-string (RFC 9110 §5.6.4), escapes included; one left unterminated
+ * runs to the end of the value, so what follows its opening quote is its
+ * content, never a challenge. Each character is consumed once (a backslash
+ * with the character after it, when there is one), so a value of escaped
+ * quotes with no closing one costs one scan rather than a retry from every
+ * quote, which on a 64 KiB value takes seconds per answer.
  */
 const QUOTED_STRING = /"(?:[^"\\]|\\[\s\S]?)*(?:"|$)/g;
 
 /**
  * An auth-scheme `Bearer`, case-insensitive (RFC 9110 §11.1), where a
- * challenge begins — the value's start or after a comma — and followed by the
- * value's end, a comma, or whitespace that does not lead to `=` (which would
- * make `bearer` a parameter's name, not a scheme: `bearer  = 1` is one).
- *
- * The whitespace after the scheme is taken whole, once: the lookahead
- * captures the entire run and the backreference consumes exactly it, and a
- * lookahead is never re-entered, so a long run followed by `=` is not
- * retried from every shorter run. `(?<=[ \t])` then requires that the run
- * was not empty, so `bearerish` is not the scheme.
+ * challenge begins (the value's start or after a comma), followed by the
+ * value's end, a comma, or whitespace that does not lead to `=` (then `bearer`
+ * is a parameter's name, as in `bearer  = 1`). The lookahead captures the
+ * whole whitespace run and the backreference consumes exactly it, so a long
+ * run followed by `=` is not retried from every shorter run; `(?<=[ \t])`
+ * requires the run was not empty, so `bearerish` is not the scheme.
  */
 const BEARER_CHALLENGE = /(?:^|,)[ \t]*bearer(?=([ \t]*))\1(?:$|,|(?<=[ \t])(?!=))/i;
 
