@@ -19,6 +19,10 @@
  * D22): the key ring `mfa.encryptionKeys` and the TOTP factor's
  * `mfa.factors.totp`.
  *
+ * - The MFA module's settings (`readMfaSettings`) read no factor's section:
+ *   `mfa.factors.totp` is the TOTP factor's module's alone
+ *   (`readMfaTotpSettings`), so a composition without that module is never
+ *   refused over it.
  * - The ring is refused empty, with a key that is not canonical base64 of 32
  *   bytes, with a duplicate id (core's sealing rules, under the key it was
  *   read from), and — #473's rule — with the published development sample key
@@ -112,7 +116,7 @@ afterEach(() => {
 });
 
 describe("the MFA settings this package reads", () => {
-	it("reads the ring in order — the first seals — and the TOTP parameters", () => {
+	it("reads the ring in order — the first seals — the transaction's keys and the lock, and no factor's section", () => {
 		const settings = readMfaSettings(
 			valid({
 				encryptionKeys: [
@@ -124,7 +128,8 @@ describe("the MFA settings this package reads", () => {
 		expect(settings.encryptionKeys.map((entry) => entry.id)).toEqual(["k2", "k1"]);
 		expect(settings.encryptionKeys[0]?.key.equals(Buffer.from(KEY_B, "base64"))).toBe(true);
 		expect(settings.encryptionKeys[1]?.key.equals(Buffer.from(KEY_A, "base64"))).toBe(true);
-		expect(settings.totp).toEqual({
+		expect(settings).not.toHaveProperty("totp");
+		expect(readMfaTotpSettings(valid())).toEqual({
 			enabled: true,
 			algorithm: "SHA1",
 			digits: 6,
@@ -474,9 +479,6 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		const off = readMfaTotpSettings({ ...withTotp({ enabled: false }), oauth: noHost });
 		expect(off.enabled).toBe(false);
 		expect(off.issuer).toBeUndefined();
-		expect(readMfaSettings({ ...withTotp({ enabled: false }), oauth: noHost }).totp.enabled).toBe(
-			false,
-		);
 		// Written, it is kept, and still held to its rule.
 		expect(
 			readMfaTotpSettings({ ...withTotp({ enabled: false, issuer: "Example" }), oauth: noHost })
@@ -528,10 +530,19 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		);
 	});
 
-	it("is read by readMfaSettings too, with the same refusals", () => {
-		expect(refusal(() => readMfaSettings(withTotp({ digits: 9 })))).toContain(
-			"mfa.factors.totp.digits",
-		);
+	it("is not read by readMfaSettings: the MFA module's settings read no factor's section, which is its factor module's", () => {
+		const noHost = { jwt: { issuer: "https://[2001:db8::1]" } };
+		for (const config of [
+			withTotp({ digits: 9 }),
+			withTotp({ issuer: "a:b" }),
+			withTotp({ enabled: "yes" }),
+			{ ...withTotp({}), oauth: noHost },
+			valid({ factors: undefined }),
+		]) {
+			const settings = readMfaSettings(config);
+			expect(settings, JSON.stringify(config.mfa)).not.toHaveProperty("totp");
+			expect(settings.encryptionKeys).toHaveLength(1);
+		}
 	});
 });
 

@@ -411,6 +411,59 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 // The development sample key
 // ---------------------------------------------------------------------------
 
+describe("the factors' sections are the factors' modules' to read (the module review of 2026-09-29)", () => {
+	/** An issuer with no host a TOTP issuer could default to: an IPv6 literal would put a colon in the otpauth label. */
+	const NO_TOTP_HOST = "https://[2001:db8::1]";
+	const withIssuer = (config: ReturnType<typeof configFor>, issuer: string) =>
+		({ ...config, oauth: { ...config.oauth, jwt: { ...config.oauth.jwt, issuer } } }) as never;
+
+	it("boots without the TOTP factor's module over another package's counting factor, though no TOTP issuer could be derived: a composition without TOTP is never refused over it", async () => {
+		const { handle } = await boot({
+			config: withIssuer(configFor("required"), NO_TOTP_HOST),
+			withoutTotpModule: true,
+			extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
+		});
+		expect(
+			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+		).toEqual(["hwk", "mfa", "swk"]);
+	});
+
+	it("boots optional without the TOTP factor's module and without any factor, over the same configuration", async () => {
+		const { handle } = await boot({
+			config: withIssuer(configFor("optional"), NO_TOTP_HOST),
+			withoutTotpModule: true,
+		});
+		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
+	});
+
+	it("boots without the TOTP factor's module whatever mfa.factors.totp holds, or without it", async () => {
+		const totp = mfaSection("required").factors.totp;
+		for (const factors of [
+			{ totp: { ...totp, digits: 9 } },
+			{ totp: { ...totp, issuer: "a:b" } },
+			{ totp: { enabled: "yes" } },
+			undefined,
+		]) {
+			await boot({
+				config: configFor("required", { factors }),
+				withoutTotpModule: true,
+				extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
+			});
+		}
+	});
+
+	it("leaves the refusal to the TOTP factor's module when it is installed: the same issuer refuses the boot there, naming MFA_TOTP_ISSUER", async () => {
+		const err = await refusal({ config: withIssuer(configFor("required"), NO_TOTP_HOST) });
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			kind: "mfaFactors",
+			name: "totp",
+			module: "mfa-totp-factor",
+		});
+		expect((err.cause as Error).message).toContain("MFA_TOTP_ISSUER");
+	});
+});
+
 describe("the development sample key (D11, #473's rule)", () => {
 	const sample = () =>
 		configFor("required", { encryptionKeys: [{ key: MFA_DEVELOPMENT_SAMPLE_KEY }] });
