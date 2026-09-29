@@ -42,6 +42,7 @@ import {
 	BootError,
 	type ClientRepository,
 	type CodeRepository,
+	checkOAuthTokenSettings,
 	createApp,
 	createSymmetricKeyStore,
 	defineModule,
@@ -129,6 +130,22 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 			"bindConfidentialClientRefreshTokens",
 		]) {
 			expect(Object.keys(settings), member).not.toContain(member);
+		}
+	});
+
+	it("never outlasts the lifetimes core resolves from the same configuration, so a reader's check answers it", () => {
+		// Every reader holds a slot to the configured lifetimes; this provider
+		// resolves its lifetimes with the resolvers that check compares with.
+		const alias = (): AppConfig => {
+			const base = fixture();
+			return {
+				...base,
+				oauth: { ...base.oauth, accessToken: { expiresIn: 7200 } },
+			} as AppConfig;
+		};
+		for (const config of [fixture(), everySwitchOn(), alias()]) {
+			const settings = oauthTokenSettingsFrom(config);
+			expect(checkOAuthTokenSettings(settings, config)).toBe(settings);
 		}
 	});
 

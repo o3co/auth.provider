@@ -24,8 +24,9 @@
  * the subject revocation boundary outlasts the configured lifetimes. Those
  * modules cannot read the slot, so a grant minting on a longer slot lifetime
  * would outlive the record that revokes its token. Boot refuses the pair,
- * naming the member and both values. A lifetime no longer than the
- * configuration's boots, and so does a value a module provides.
+ * naming the member and both values; a host map at stage 1, before any
+ * provider runs, and a value a module provides where a reader first reads it.
+ * A lifetime no longer than the configuration's boots.
  */
 
 import { describe, expect, it } from "vitest";
@@ -126,8 +127,10 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 		}
 	});
 
-	it("does not hold a module's value to it: a provider derives the slot from its own section", async () => {
-		const handle = await createApp({
+	it("refuses a slot a module provides that outlasts the configuration's, where a reader reads it", async () => {
+		// Not oauthModule, whose provider resolves its lifetimes from the same
+		// configuration: another module, advertising a longer refresh token.
+		const booting = createApp({
 			modules: [
 				defineModule({
 					name: "test:token-settings-provider",
@@ -135,10 +138,14 @@ describe("a host-filled oauthTokenSettings is held to the configuration's lifeti
 						oauthTokenSettings: () =>
 							createTestOAuthTokenSettings({ refreshTokenExpiresIn: CONFIGURED_REFRESH * 2 }),
 					},
+					lifecycle: { oauthTokenSettings: { eager: true } },
 				}),
 			],
 			bootstrapComponents: { config: config(), pathResolver: (p: string) => p } as never,
 		});
-		await handle.dispose();
+		await expect(booting).rejects.toThrow(RangeError);
+		await expect(booting).rejects.toThrow(
+			/oauthTokenSettings\.refreshTokenExpiresIn.*172800.*86400/,
+		);
 	});
 });
