@@ -297,6 +297,39 @@ describe("/authorize — unauthenticated session", () => {
 		);
 	});
 
+	it.each([
+		["a fragment alone", "/login#x", /^\/login\?redirect_to=([^#]*)#x$/],
+		["a query and a fragment", "/login?tenant=x#y", /^\/login\?tenant=x&redirect_to=([^#]*)#y$/],
+		[
+			"a question mark inside the fragment alone",
+			"/login#a?b",
+			/^\/login\?redirect_to=([^#]*)#a\?b$/,
+		],
+		[
+			"an absolute URL with a query and a fragment",
+			"https://login.example/signin?tenant=x#y",
+			/^https:\/\/login\.example\/signin\?tenant=x&redirect_to=([^#]*)#y$/,
+		],
+	])(
+		"adds redirect_to to the login URL's query, before its fragment, when it carries %s",
+		async (_label, loginUrl, shape) => {
+			const { app } = await makeApp({ session: { isAuthenticated: false }, loginUrl });
+			const res = await authorize(app, baseQuery);
+			expect(res.status).toBe(302);
+			const location = res.headers.location as string;
+			const encoded = shape.exec(location)?.[1];
+			expect(encoded, location).toBeDefined();
+			// The target encoded whole, as encodeURIComponent writes it — not as a
+			// form, which would write a space as `+`.
+			const target = decodeURIComponent(encoded as string);
+			expect(encoded).toBe(encodeURIComponent(target));
+			expect(target.startsWith("https://issuer.example/oauth/authorize?")).toBe(true);
+			expect(new URL(location, "https://login.invalid").searchParams.getAll("redirect_to")).toEqual(
+				[target],
+			);
+		},
+	);
+
 	it("builds redirect_to from the configured origin, not the Host header (#356)", async () => {
 		const { app } = await makeApp({ session: { isAuthenticated: false } });
 		const res = await request(app)
