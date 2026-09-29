@@ -34,6 +34,10 @@ When you change what a directory does, what it depends on or an invariant it kee
 
 In `packages/core/src`, `boot/`, `federation-grants/`, `federations/`, `grants/`, `modules/manifest/`, `repositories/`, `session-admission/` and `user-sessions/` have a README of their own; every other directory directly under `src/` is described by `packages/core/src/README.md`, and every other nested directory by the README that describes its parent. `README.md` is the source of truth; a `README.ja.md` carries the same facts.
 
+## Source comments
+
+A comment states what holds now: the invariant, the constraint or the security reason the code alone does not show. It carries no history: no issue or pull request number (`#728`, `PR6`), no plan's phase (`Phase G`), no label of a review finding or of an item in a design record (`D-6`, `A2-β`), and nothing about what the code used to do. That belongs in the commit, the issue and the CHANGELOG. A specification's section (`RFC 6749 §4.1.3`) is not history, and neither is a design record named by its file (`See ADR 2026-09-28-session-admission.`). [`packages/core/src/__tests__/processReferences.drift.test.mts`](packages/core/src/__tests__/processReferences.drift.test.mts) fails on a reference in product code beyond the ones it lists, and the list may only shrink.
+
 ## Extension surface: four axes
 
 A package changes what the provider does in one of four ways, and each has its own mechanism ([#710](https://github.com/o3co/auth.provider/issues/710)). Most of the defects #710 found in the extension surface are code on the wrong axis: a policy wired by hand into every consumer, or a single slot where two owners need to add to one decision.
