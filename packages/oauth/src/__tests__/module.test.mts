@@ -28,6 +28,7 @@ import {
 	type FederationProvider,
 	type FederationTokenStore,
 	jwksModule,
+	type Module,
 	memoryAccessTokenDenylistModule,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
@@ -1164,6 +1165,89 @@ describe("absence policies (#363, #375)", () => {
 		expect(manifest.absencePolicies?.accessTokenDenylist).toBe(
 			ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		);
+	});
+});
+
+describe("oauthModule — the login trip is the loginEntry slot when a module provides it (#728)", () => {
+	const CLIENT = "client1";
+	const REDIRECT = "https://rp.example/cb";
+	const clientsWithOne = defineModule({
+		name: "test:client-repository-with-one",
+		provides: {
+			clientRepository: (): ClientRepository => ({
+				findById: async (id) =>
+					id === CLIENT
+						? ({
+								clientId: CLIENT,
+								tokenEndpointAuthMethod: "client_secret_basic",
+								allowedRedirectUris: [REDIRECT],
+								allowedScopes: ["read"],
+								defaultScopes: ["read"],
+								firstParty: true,
+							} as never)
+						: null,
+				authenticate: async () => null,
+			}),
+		},
+	});
+
+	it("takes loginEntry as an optional slot: a composition without the session module boots", () => {
+		const module = oauthModule({ config: makeValidAppConfig() as never });
+		expect(module.optional).toContain("loginEntry");
+		expect(module.requires).not.toContain("loginEntry");
+	});
+
+	const loginTrip = async (modules: readonly Module[]): Promise<string> => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientsWithOne,
+				codeRepositoryModule,
+				keyStoreModule,
+				...modules,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		try {
+			const app = express();
+			app.use(handle.router);
+			const res = await request(app)
+				.get("/oauth/authorize")
+				.query({ client_id: CLIENT, redirect_uri: REDIRECT, response_type: "code" });
+			expect(res.status).toBe(302);
+			return res.headers.location as string;
+		} finally {
+			await handle.dispose();
+		}
+	};
+
+	it("sends a browser that is not signed in through the entry a module provides", async () => {
+		const asked: string[] = [];
+		const location = await loginTrip([
+			defineModule({
+				name: "test:login-entry",
+				provides: {
+					loginEntry: () =>
+						Object.freeze({
+							url: "/sign-in",
+							urlFor: (returnTo: string) => {
+								asked.push(returnTo);
+								return `/sign-in?back=${encodeURIComponent(returnTo)}`;
+							},
+						}),
+				},
+			}),
+		]);
+		expect(asked).toHaveLength(1);
+		expect(location).toBe(`/sign-in?back=${encodeURIComponent(asked[0] as string)}`);
+	});
+
+	it("reads endpoints.login.url, as before, when no module provides one", async () => {
+		const location = await loginTrip([]);
+		expect(location.startsWith("/login?redirect_to=")).toBe(true);
 	});
 });
 

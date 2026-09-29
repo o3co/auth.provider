@@ -42,6 +42,7 @@ import {
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
+	type LoginEntry,
 	livenessSidOf,
 	loggableError,
 	ownedConfirmation,
@@ -80,7 +81,7 @@ import {
 } from "./clients/clientIdMetadataDocument.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
-import { createAuthorizeHandler } from "./routes/authorize.mjs";
+import { createAuthorizeHandler, loginTripFromConfig } from "./routes/authorize.mjs";
 import { createConsentRouter } from "./routes/consent.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
@@ -192,6 +193,7 @@ export const createOAuthRouter = async (
 		replaySeenSet,
 		consentStore,
 		pendingConsentStore,
+		loginEntry,
 		clientIdMetadataDocuments: clientIdMetadataDocumentSeams = {},
 		getFederationProviders = () => undefined,
 		requirements,
@@ -247,6 +249,13 @@ export const createOAuthRouter = async (
 		 * module provides both, and this router refuses one without the other.
 		 */
 		pendingConsentStore?: PendingConsentStore;
+		/**
+		 * #728: the deployment's login page and its `redirect_to` protocol —
+		 * the `loginEntry` slot the session module provides. Optional: the
+		 * oauth module boots without the session module, and `/authorize` then
+		 * reads `endpoints.login.url` per request, as it always did.
+		 */
+		loginEntry?: LoginEntry;
 		/**
 		 * #529: the seams of the Client ID Metadata Document fetch (`fetch`,
 		 * `lookup`, `now`), for tests. Everything else about the feature comes
@@ -402,7 +411,9 @@ export const createOAuthRouter = async (
 		auditSink,
 		logger,
 		issuer: canonicalIssuer,
-		loginUrl: () => config.endpoints.login.url,
+		// #728: the session module's login entry when a module provides it;
+		// otherwise the login page read from the configuration per request.
+		login: loginEntry ?? loginTripFromConfig(() => config.endpoints.login.url),
 		// #527: the consent page, read like the login page. The default lives
 		// in HOCON; a hand-built config without the key falls back the same way.
 		consentUrl: () => config.endpoints.consent?.url ?? "/consent",

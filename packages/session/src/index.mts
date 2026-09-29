@@ -30,7 +30,10 @@ export {
 } from "./answer-interruption.mjs";
 // #272 — CSRF protection for the state-changing session routes. Exported so a
 // composition root can issue tokens from its own login page, or mount the same
-// guard on routes this package does not own.
+// guard on routes this package does not own. Another package reaches the guard
+// through the `csrfGuard` slot the session module provides (#728);
+// `createSessionCsrfGuard` builds that slot's value, for a composition that
+// provides it without the module.
 export type {
 	CsrfCookieAttributes,
 	CsrfGuardOptions,
@@ -46,6 +49,7 @@ export {
 	createCsrfIssueHandler,
 	createCsrfProtection,
 	createCsrfProtectionFromConfig,
+	createSessionCsrfGuard,
 	DEFAULT_CSRF_BODY_FIELD,
 	DEFAULT_CSRF_COOKIE_NAME,
 	DEFAULT_CSRF_HEADER_NAME,
@@ -115,6 +119,10 @@ export {
 	mintFederationTransactionId,
 } from "./federations/transaction.mjs";
 export type { FederationResult } from "./federations/types.mjs";
+// #728 — the login page and its `redirect_to` protocol, the `loginEntry` slot
+// `sessionModule` provides; exported so a composition that provides the slot
+// without the module builds it the same way.
+export { createLoginEntry, loginEntryFromConfig } from "./login-entry.mjs";
 // The federation adapter port — `FederationProvider`, `FederationProfile`,
 // the capability interfaces and their guards, and the response-mode
 // helpers — is exported by `@o3co/auth-provider-core` since #626 P1 and is
@@ -122,6 +130,9 @@ export type { FederationResult } from "./federations/types.mjs";
 // toolkit (`codeChallenge`, `callbackUrlForExchange`, `resolveClientSecret`).
 // `FederationResult` above stays because only this router answers with one.
 export { sessionModule } from "./module.mjs";
+// #728 — the `loginCompletion` slot, over the deployment's `csrfGuard`: its own
+// module, loaded beside `sessionModule` where a requirement completes a login.
+export { loginCompletionModule } from "./modules/loginCompletionModule.mjs";
 export {
 	type SessionStoreModuleConfig,
 	sessionStoreModule,

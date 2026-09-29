@@ -37,6 +37,8 @@ const RULES = {
 	url: "url is the login page it was built for",
 	redirectTo: "urlFor adds redirect_to naming the target, once and whole",
 	page: "urlFor keeps the page: its path and its own query, with nothing of the target read as either",
+	fragment: "urlFor adds redirect_to to a page's query before its fragment, and keeps the fragment",
+	refused: "a page whose own query already carries redirect_to is refused when the entry is built",
 	frozen: "the login entry is frozen",
 } as const;
 
@@ -112,6 +114,8 @@ describe("loginEntryContract — the double", () => {
 			RULES.url,
 			RULES.redirectTo,
 			RULES.page,
+			RULES.fragment,
+			RULES.refused,
 			RULES.frozen,
 		]);
 	});
@@ -137,6 +141,13 @@ describe("createTestLoginEntry", () => {
 		expect(createTestLoginEntry("/login?tenant=acme").urlFor(target)).toBe(
 			`/login?tenant=acme&redirect_to=${encodeURIComponent(target)}`,
 		);
+		expect(createTestLoginEntry("/login?tenant=acme#x").urlFor(target)).toBe(
+			`/login?tenant=acme&redirect_to=${encodeURIComponent(target)}#x`,
+		);
+	});
+
+	it("refuses a page whose own query carries redirect_to", () => {
+		expect(() => createTestLoginEntry("/login?redirect_to=x")).toThrow(/redirect_to/);
 	});
 });
 
@@ -174,6 +185,33 @@ describe("loginEntryContract — each way an entry can break it", () => {
 			),
 		).toContain(RULES.redirectTo);
 		expect(await failing((url) => entry(url, () => url))).toContain(RULES.redirectTo);
+	});
+
+	it("redirect_to appended after the page's fragment, where the page never reads it", async () => {
+		expect(
+			await failing((url) =>
+				entry(
+					url,
+					(target) =>
+						`${url}${url.includes("?") ? "&" : "?"}redirect_to=${encodeURIComponent(target)}`,
+				),
+			),
+		).toContain(RULES.fragment);
+	});
+
+	it("an entry built for a page that already carries redirect_to", async () => {
+		expect(
+			await failing((url) => {
+				const fragmentAt = url.indexOf("#");
+				const page = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
+				const fragment = fragmentAt === -1 ? "" : url.slice(fragmentAt);
+				const joiner = page.includes("?") ? "&" : "?";
+				return entry(
+					url,
+					(target) => `${page}${joiner}redirect_to=${encodeURIComponent(target)}${fragment}`,
+				);
+			}),
+		).toEqual([RULES.refused]);
 	});
 
 	it("an entry a reader could change under the others", async () => {

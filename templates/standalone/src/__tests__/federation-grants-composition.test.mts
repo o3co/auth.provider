@@ -271,6 +271,14 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		// not express's 404.
 		expect((await request(app).post("/oauth/federation-grants/g/status")).status).toBe(401);
 		expect(handleRef.components.subjectRevocationService).toBeDefined();
+		// The connect flow's login trip is the session module's loginEntry
+		// (#728), built from the configured login page: the URL connect sends
+		// a browser that is not signed in to.
+		const page = config.endpoints.login.url;
+		const back = "https://auth.example/session/federation-grants/connect?request=h";
+		expect(handleRef.components.loginEntry?.urlFor(back)).toBe(
+			`${page}${page.includes("?") ? "&" : "?"}redirect_to=${encodeURIComponent(back)}`,
+		);
 	});
 
 	it("selects the Redis stores under the all-Redis environment, provides their clients, and boots under multi", async () => {

@@ -441,6 +441,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+decodeSealingKey\b/,
 	},
 	{
+		concept: "the login page's URL rule — a page carrying redirect_to (#728, #750)",
+		home: "packages/core/src/browser-session/login-page.mts",
+		definition: /(?:function|const)\s+loginPageCarriesReturn\b/,
+	},
+	{
+		concept: "the login page's URL rule — redirect_to added (#728, #750)",
+		home: "packages/core/src/browser-session/login-page.mts",
+		definition: /(?:function|const)\s+loginPageUrlFor\b/,
+	},
+	{
 		concept: "an MFA transaction's binding — the one comparison (#742)",
 		home: "packages/core/src/mfa/transactionStore.mts",
 		definition: /(?:function|const)\s+isMfaTransactionBoundTo\b/,

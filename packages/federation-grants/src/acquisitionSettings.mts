@@ -30,6 +30,7 @@ import type {
 	FederationGrantAcquisitionConnection,
 	FederationGrantConnection,
 	FederationGrantIntentStore,
+	LoginEntry,
 	UserRepository,
 } from "@o3co/auth-provider-core";
 
@@ -41,8 +42,12 @@ export type FederationGrantIdentityLookup = "required" | "unsupported";
 export interface FederationGrantAcquisitionSettings {
 	/** The deployment's consent page, as configured: a path, or an absolute URL on {@link origin}. */
 	readonly consentUrl: string;
-	/** Where connect sends a browser that is not signed in: `endpoints.login.url`. */
-	readonly loginUrl: string;
+	/**
+	 * Where connect sends a browser that is not signed in, and how it comes
+	 * back: the `loginEntry` slot the session module provides (#728), over
+	 * `endpoints.login.url`.
+	 */
+	readonly login: LoginEntry;
 	readonly identityLookup: FederationGrantIdentityLookup;
 	/** The provider's browser-facing origin — the issuer's — never a request header. */
 	readonly origin: string;
@@ -50,8 +55,8 @@ export interface FederationGrantAcquisitionSettings {
 	readonly connections: ReadonlyMap<string, FederationGrantAcquisitionConnection>;
 }
 
-const refuse = (message: string): never => {
-	throw new Error(`federationGrantsModule: ${message}`);
+const refuse = (message: string, options?: ErrorOptions): never => {
+	throw new Error(`federationGrantsModule: ${message}`, options);
 };
 
 const issuerOrigin = (config: unknown): string => {
@@ -123,21 +128,35 @@ const consentUrl = (config: unknown, origin: string): string => {
 };
 
 /**
- * The login page connect sends a browser that is not signed in to. Core's
- * schema leaves `endpoints.login.url` optional and only `oauthModule` requires
- * it, so a deployment that enables grants without that module would boot and
+ * The login page connect sends a browser that is not signed in to: the
+ * `loginEntry` slot, which the session module provides from
+ * `endpoints.login.url` (#728). Optional in the manifest, so a deployment that
+ * leaves grants off owes nothing; required here, once they are on.
+ *
+ * Core's schema takes an empty page and only `oauthModule` requires one, so a
+ * deployment that enables grants without that module could otherwise boot and
  * then answer every such browser with a 500 — the first page of the flow, and
- * the one a user reaches most often.
+ * the one a user reaches most often. The session module builds the entry with
+ * no page and it fails where the page is read: here, at boot.
  */
-const loginUrl = (config: unknown): string => {
-	const written = (config as { endpoints?: { login?: { url?: unknown } } })?.endpoints?.login?.url;
-	if (typeof written !== "string" || written === "") {
+const loginEntry = (entry: LoginEntry | undefined): LoginEntry => {
+	if (entry === undefined) {
+		return refuse(
+			"federation grants are enabled and no loginEntry is installed. The connect flow sends a " +
+				"browser that is not signed in to the login page, and back to the link it came from, " +
+				"through the loginEntry slot the session module (sessionModule) provides",
+		);
+	}
+	try {
+		void entry.url;
+	} catch (error) {
 		return refuse(
 			"endpoints.login.url must be configured: the connect flow sends a browser that is not " +
 				"signed in to the login page, and back to the link it came from",
+			{ cause: error },
 		);
 	}
-	return written;
+	return entry;
 };
 
 const identityLookup = (config: unknown): FederationGrantIdentityLookup => {
@@ -185,11 +204,12 @@ const acquisitionConnection = (
 export function resolveFederationGrantAcquisitionSettings(
 	config: unknown,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
+	login: LoginEntry | undefined,
 ): FederationGrantAcquisitionSettings {
 	const origin = issuerOrigin(config);
 	const settings: FederationGrantAcquisitionSettings = {
 		consentUrl: consentUrl(config, origin),
-		loginUrl: loginUrl(config),
+		login: loginEntry(login),
 		identityLookup: identityLookup(config),
 		origin,
 		connections: new Map(

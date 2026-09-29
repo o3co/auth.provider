@@ -61,7 +61,11 @@ import { setupServer } from "msw/node";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
-import { ACQUISITION_ENDPOINTS, callbackUrlFor } from "./acquisitionFixture.mjs";
+import {
+	ACQUISITION_LOGIN_PAGE,
+	acquisitionLoginEntry,
+	callbackUrlFor,
+} from "./acquisitionFixture.mjs";
 
 /**
  * The bundled repository, with a lookup that covers this deployment's one
@@ -257,7 +261,6 @@ const boot = async (
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				audit: { sink: { type: "none" } },
-				endpoints: ACQUISITION_ENDPOINTS,
 				federationGrants: {
 					enabled: true,
 					consent: { url: "/consent/grants" },
@@ -278,6 +281,9 @@ const boot = async (
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
+			// The login page, which the session module provides in a real
+			// composition (#728).
+			loginEntry: acquisitionLoginEntry(),
 			sessionRPRegistry: {},
 			sessionFamilyIndex: {},
 			sessionFederationIndex: {},
@@ -458,7 +464,7 @@ describe("a grant created end to end, and spent", () => {
 			const anonymous = await request(app).get(`${connect.pathname}${connect.search}`);
 			expect(anonymous.status).toBe(303);
 			const login = new URL(anonymous.headers.location as string, ISSUER);
-			expect(login.pathname).toBe(ACQUISITION_ENDPOINTS.login.url);
+			expect(login.pathname).toBe(ACQUISITION_LOGIN_PAGE);
 			expect(login.searchParams.get("redirect_to")).toBe(connect.href);
 		} finally {
 			await handle.dispose();

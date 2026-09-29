@@ -20,6 +20,8 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
+	LOGIN_RETURN_PARAMETER,
+	loginPageCarriesReturn,
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
@@ -31,33 +33,21 @@ import express from "express";
 import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
-import { REDIRECT_TO_PARAM } from "./routes/authorize.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
 /**
- * Whether `url` — a path or an absolute URL — carries `redirect_to` in its own
- * query, read as `/authorize`'s login redirect writes it: the text before any
- * `#`, after the first `?` — so a fragment is never mistaken for the query,
- * and a URL `URL` could not parse is held to the rule all the same. The name
- * is matched as `URLSearchParams.has` matches it — exactly, after decoding, so
- * `redirect%5Fto` and a `redirect_to` with no value count.
- */
-const carriesRedirectTo = (url: string): boolean => {
-	const page = url.split("#", 1)[0] ?? "";
-	const queryAt = page.indexOf("?");
-	return queryAt !== -1 && new URLSearchParams(page.slice(queryAt + 1)).has(REDIRECT_TO_PARAM);
-};
-
-/**
  * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
- * unconditionally reads `config.endpoints.login.url` to build the redirect
- * for unauthenticated requests. Core's `CoreConfigSchema` requires a string
- * there; this module additionally requires it non-empty — an empty one names
- * no page — and without a `redirect_to` of its own: `/authorize` adds
- * `redirect_to`, naming the request to come back to (core's `LoginEntry`
- * contract), and a login URL that carried one would send two, a page reading
- * the first sending the user to the preconfigured target, not the one the
- * provider asked for.
+ * reads `config.endpoints.login.url` to build the redirect for
+ * unauthenticated requests when no module provides the `loginEntry` slot,
+ * and the session module builds that slot from the same key (#728). Core's
+ * `CoreConfigSchema` requires a string there; this module additionally
+ * requires it non-empty — an empty one names no page — and keeps both rules
+ * when `loginEntry` is provided, since the slot is built from the same key:
+ * without a `redirect_to` of its own, as `/authorize` adds `redirect_to`,
+ * naming the request to come back to (core's `LoginEntry` contract), and a
+ * login URL that carried one would send two, a page reading the first
+ * sending the user to the preconfigured target, not the one the provider
+ * asked for.
  *
  * Composed via `composeConfigSchema` at validate-manifests step 13, so boot
  * fails with `BootError(reason: "config-validation-failed")`, the issue at
@@ -69,8 +59,8 @@ const oauthConfigSchema = z.object({
 			url: z
 				.string()
 				.min(1)
-				.refine((url) => !carriesRedirectTo(url), {
-					message: `endpoints.login.url must not carry a "${REDIRECT_TO_PARAM}" query parameter of its own: the provider adds "${REDIRECT_TO_PARAM}" when it sends a browser to the login page, naming the request to come back to`,
+				.refine((url) => !loginPageCarriesReturn(url), {
+					message: `endpoints.login.url must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own: the provider adds "${LOGIN_RETURN_PARAMETER}" when it sends a browser to the login page, naming the request to come back to`,
 				}),
 		}),
 	}),
@@ -149,6 +139,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "pendingConsentStore"
 		| "federationProviders"
 		| "replaySeenSet"
+		| "loginEntry"
 		| "logger"
 	>({
 		name: "oauth",
@@ -177,6 +168,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"pendingConsentStore", // #552 — where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
 			"replaySeenSet", // #484 — jti single-use for private_key_jwt client assertions; server_error on that path when absent
+			"loginEntry", // #728 — the login page /authorize sends a browser to, which the session module provides; endpoints.login.url is read when absent
 			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
 		],
 		// #363/#375: optional to wire, not optional to decide. `auditSink`
@@ -217,6 +209,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						replaySeenSet: deps.replaySeenSet,
 						consentStore: deps.consentStore,
 						pendingConsentStore: deps.pendingConsentStore,
+						...(deps.loginEntry === undefined ? {} : { loginEntry: deps.loginEntry }),
 						logger: deps.logger ?? consoleLogger,
 						// Theme E structural fix: typed deps replace the v0.4.x lazy
 						// () => ctx.federationProviders closure. The closure re-wraps the

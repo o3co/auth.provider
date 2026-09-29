@@ -23,28 +23,35 @@
  */
 
 import { createMemoryFederationGrantIntentStore, defineModule } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
 
 /** Merged into `federationGrants`. */
 export const ACQUISITION_GRANT_SETTINGS = { consent: { url: "/consent/grants" } } as const;
 
-/** The config root's `endpoints`: where connect sends a browser that is not signed in. */
-export const ACQUISITION_ENDPOINTS = { login: { url: "/login" } } as const;
+/** The login page connect sends a browser that is not signed in to. */
+export const ACQUISITION_LOGIN_PAGE = "/login";
+
+/**
+ * The `loginEntry` slot (#728) for {@link ACQUISITION_LOGIN_PAGE}: the session
+ * module provides it in a real composition; core's double stands in for it.
+ */
+export const acquisitionLoginEntry = () => createTestLoginEntry(ACQUISITION_LOGIN_PAGE);
 
 /** A connection's `callbackURL` on the test issuer's origin. */
 export const callbackUrlFor = (connection: string): string =>
 	`${new URL(ISSUER).origin}/session/federation-grants/callback/${connection}`;
 
 /**
- * Merged into `bootstrapComponents`. The Store covers every registration and
+ * Merged into `bootstrapComponents`, with the login entry. The Store covers every registration and
  * establishes "linked to nobody" — a test composition's answer, not a
  * production one: a real Store says `unlinked` only after it has looked
  * everywhere a link could be (#611).
  */
 export const acquisitionComponents = () => ({
 	federationGrantIntentStore: createMemoryFederationGrantIntentStore(),
+	loginEntry: acquisitionLoginEntry(),
 	userRepository: {
 		authenticate: async () => null,
 		authenticateByToken: async () => null,

@@ -37,7 +37,10 @@ import type { Request, RequestHandler, Response } from "express";
  * the federation-grants connect flow — redirects it to `urlFor(returnTo)`.
  */
 export interface LoginEntry {
-	/** The login page: a path or an absolute URL, which may carry a query of its own. */
+	/**
+	 * The login page: a path or an absolute URL, which may carry a query and a
+	 * fragment of its own, but not `redirect_to` — `urlFor` adds it.
+	 */
 	readonly url: string;
 	/**
 	 * The login page with `redirect_to` naming `returnTo` — where the browser
@@ -88,9 +91,11 @@ export type NavigationVerdict =
  *
  * The token's signing key is derived from the session cookie's secret,
  * which the session store's module owns, while the session module provides
- * the guard: the key reaches the guard's provider as `csrfTokenSigner`, the
- * signer the owner of the secret provides (#728) — never as the secret or
- * the key itself.
+ * the guard (#728): the key is to reach the guard's provider as
+ * `csrfTokenSigner`, the signer the owner of the secret provides — never as
+ * the secret or the key itself. Until the session store's configuration
+ * becomes a section of its own, the session module still derives it from the
+ * `session` section the two modules share.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -187,7 +192,7 @@ declare module "@o3co/auth-provider-core" {
 		 * provider.
 		 */
 		readonly csrfTokenSigner?: CsrfTokenSigner;
-		/** The session cookie's attributes (#728): provided by the module that owns the session cookie. */
+		/** The session cookie's attributes (#728): provided by the session store's module, which owns the session cookie. */
 		readonly sessionCookiePolicy?: SessionCookiePolicy;
 	}
 }

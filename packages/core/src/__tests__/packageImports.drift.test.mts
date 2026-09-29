@@ -88,7 +88,7 @@ const COMPOSITIONS: Readonly<Record<string, string>> = {
  * `<importing workspace> -> <package imported>`, each with every name
  * imported through it — `type X` for a type-only import. The list may only
  * shrink: nothing may be added to it, and an entry, or a name, whose import
- * is gone fails until it is removed. These are the four edges AGENTS.md
+ * is gone fails until it is removed. These are the three edges AGENTS.md
  * names, the federation adapters' one per adapter.
  */
 const TOLERATED_EDGES: Readonly<Record<string, readonly string[]>> = {
@@ -98,13 +98,6 @@ const TOLERATED_EDGES: Readonly<Record<string, readonly string[]>> = {
 	// federation-grants → oauth: the grant routes authenticate their client
 	// the same way.
 	"packages/federation-grants -> @o3co/auth-provider-oauth": ["createClientAuthMiddleware"],
-	// device-grant → session: device verification's CSRF guard is the
-	// session package's.
-	"packages/device-grant -> @o3co/auth-provider-session": [
-		"createCsrfGuard",
-		"createCsrfProtectionFromConfig",
-		"type SessionCsrfConfigSlice",
-	],
 	// The federation adapters → session: each contributes the session
 	// package's redirect policy beside its federation, and the OIDC adapter
 	// reads its entries with the session package's section reader.

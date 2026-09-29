@@ -43,15 +43,21 @@
  * 2. **A strict same-origin `Origin` / `Referer` check** with its own trust
  *    list (`session.csrf.trustedOrigins`), independent of the CORS list.
  *
- * The composed rule is in {@link createCsrfGuard}.
+ * The composed rule is in {@link createCsrfGuard}. {@link createSessionCsrfGuard}
+ * is the same rule as core's `CsrfGuard` — the `csrfGuard` slot the session
+ * module provides (#728, #710 C4) — beside the navigation rule a flow's
+ * start is held to ({@link checkNavigationOrigin}).
  */
 
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 import {
 	auditErrorText,
+	type CsrfGuard,
+	type CsrfVerdict,
 	consoleLogger,
 	errorEnvelope,
 	type Logger,
+	type NavigationVerdict,
 } from "@o3co/auth-provider-core";
 import type { CookieOptions, NextFunction, Request, RequestHandler, Response } from "express";
 import { readCookie } from "./internal/cookies.mjs";
@@ -337,8 +343,8 @@ export const createCsrfGuard = ({
 	logger = consoleLogger,
 }: CsrfGuardOptions): RequestHandler => {
 	return (req: Request, res: Response, next: NextFunction): void => {
-		const originVerdict = checkRequestOrigin(req, trustedOrigins);
-		if (originVerdict === "foreign") {
+		const verdict = judgeRequest(req, csrf, trustedOrigins);
+		if (verdict.outcome === "refused" && verdict.reason === "foreign_origin") {
 			const rawOrigin = req.headers?.origin;
 			const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
 			// Both are the caller's: sanitised and capped (`auditErrorText`).
@@ -349,26 +355,114 @@ export const createCsrfGuard = ({
 			res.status(403).json(errorEnvelope("access_denied", "CSRF origin check failed"));
 			return;
 		}
-		if (originVerdict === "absent") {
-			const tokenVerdict = csrf.verify(req);
-			if (tokenVerdict !== "valid") {
-				logger.warn(
-					{ verdict: tokenVerdict, path: auditErrorText(req.path) },
-					"csrf_token_rejected",
+		if (verdict.outcome === "refused") {
+			logger.warn(
+				{
+					verdict: verdict.reason === "token_absent" ? "absent" : "invalid",
+					path: auditErrorText(req.path),
+				},
+				"csrf_token_rejected",
+			);
+			res
+				.status(403)
+				.json(
+					errorEnvelope(
+						"access_denied",
+						`CSRF check failed: send a same-origin Origin or Referer header, or a double-submit CSRF token (the ${csrf.cookieName} cookie echoed in the ${csrf.headerName} header)`,
+					),
 				);
-				res
-					.status(403)
-					.json(
-						errorEnvelope(
-							"access_denied",
-							`CSRF check failed: send a same-origin Origin or Referer header, or a double-submit CSRF token (the ${csrf.cookieName} cookie echoed in the ${csrf.headerName} header)`,
-						),
-					);
-				return;
-			}
+			return;
 		}
 		next();
 	};
+};
+
+/**
+ * The acceptance rule of {@link createCsrfGuard} as a verdict: a foreign
+ * origin refused, this origin or a trusted one accepted, and with neither the
+ * double-submit token deciding. Reads the request alone and never throws.
+ */
+const judgeRequest = (
+	req: Request,
+	csrf: Pick<CsrfProtection, "verify">,
+	trustedOrigins: readonly string[],
+): CsrfVerdict => {
+	const origin = checkRequestOrigin(req, trustedOrigins);
+	if (origin === "foreign") return { outcome: "refused", reason: "foreign_origin" };
+	if (origin !== "absent") return { outcome: "accepted" };
+	const token = csrf.verify(req);
+	if (token === "valid") return { outcome: "accepted" };
+	return { outcome: "refused", reason: token === "absent" ? "token_absent" : "token_invalid" };
+};
+
+/**
+ * Whether a navigation that starts a state-changing flow — the account-link
+ * start, a GET a page navigates to — carries positive evidence that the user
+ * asked for it on this deployment's own pages (v0.13.0 audit).
+ *
+ * Fetch Metadata answers first where the browser sends it: `same-origin` is a
+ * page of this origin, `none` a typed URL or a bookmark — no page sent the
+ * browser — and `cross-site` is refused. `same-site` is not enough on its own:
+ * it is the registrable domain, so a user-controlled sibling such as
+ * `blog.example.com` sends it too. That, an absent header (a browser predating
+ * Fetch Metadata still carries the SameSite=Lax cookie on a cross-site
+ * navigation) and a value this code does not know all fall to the origin the
+ * request names, held to the same rule as a request that changes state: this
+ * origin or one on `trustedOrigins`. A GET navigation sends no `Origin`, so
+ * that is the `Referer` — and a missing one is refused, because the navigating
+ * page chooses its own referrer policy. A token never counts: a navigation
+ * carries none.
+ */
+export const checkNavigationOrigin = (
+	req: Request,
+	trustedOrigins: readonly string[] = [],
+): NavigationVerdict => {
+	const site = req.get("sec-fetch-site");
+	if (site === "same-origin" || site === "none") return { outcome: "accepted" };
+	if (site === "cross-site") return { outcome: "refused", reason: "cross_site" };
+	const verdict = checkRequestOrigin(req, trustedOrigins);
+	if (verdict === "absent") return { outcome: "refused", reason: "origin_absent" };
+	if (verdict === "foreign") return { outcome: "refused", reason: "foreign_origin" };
+	return { outcome: "accepted" };
+};
+
+/**
+ * The session package's CSRF policy as core's `CsrfGuard` — the `csrfGuard`
+ * slot the session module provides (#728, #710 C4), so that device
+ * verification and every other state-changing browser route outside this
+ * package runs the one policy `/session/login` runs instead of rebuilding it
+ * from the session configuration.
+ *
+ * - `check` is {@link createCsrfGuard}'s rule as a verdict, and `middleware`
+ *   is {@link createCsrfGuard} itself: the same `403 access_denied`, and the
+ *   same `csrf_origin_rejected` / `csrf_token_rejected` warn line on
+ *   `logger`.
+ * - `checkNavigation` is {@link checkNavigationOrigin} over the same trust
+ *   list: the rule the account-link start is held to.
+ * - `issue` sets a fresh token as `csrf` does — `csrf`'s cookie, which the
+ *   session module names from the session cookie and gives its attributes.
+ *
+ * The token's signing key is `csrf`'s. The session module builds `csrf` from
+ * `session.secret` (`createCsrfProtectionFromConfig`), which the session
+ * store's module owns; the key is to reach the guard through a narrow slot
+ * the session store provides (`csrfTokenSigner`) before the session store's
+ * configuration becomes a section of its own (#728).
+ */
+export const createSessionCsrfGuard = ({
+	csrf,
+	trustedOrigins = [],
+	logger = consoleLogger,
+}: CsrfGuardOptions): CsrfGuard => {
+	const trusted = Object.freeze([...trustedOrigins]);
+	return Object.freeze({
+		cookieName: csrf.cookieName,
+		headerName: csrf.headerName,
+		bodyField: csrf.bodyField,
+		check: (req: Request): CsrfVerdict => judgeRequest(req, csrf, trusted),
+		checkNavigation: (req: Request): NavigationVerdict => checkNavigationOrigin(req, trusted),
+		middleware: createCsrfGuard({ csrf, trustedOrigins: trusted, logger }),
+		issue: (res: Response): string => csrf.issue(res),
+	});
 };
 
 /**

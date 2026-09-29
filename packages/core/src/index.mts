@@ -170,6 +170,13 @@ export {
 	type ReplicaSafetyModuleRef,
 	replicaUnsafeReason,
 } from "./boot/index.mjs";
+// The login page's URL rule: the one home of what /authorize's fallback and
+// the session package's loginEntry do to a login page (#728, #750).
+export {
+	LOGIN_RETURN_PARAMETER,
+	loginPageCarriesReturn,
+	loginPageUrlFor,
+} from "./browser-session/login-page.mjs";
 // #728: what the session package owns of the browser session that other
 // packages use — the login page, the one CSRF policy (#710), the session
 // cookie's attributes — each through a slot rather than the session's

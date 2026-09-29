@@ -78,8 +78,12 @@ export interface InterruptionReporter {
 export interface AnswerInterruptionDeps {
 	readonly req: Request;
 	readonly res: Response;
-	/** Issues the fresh CSRF token the `403` carries. */
-	readonly csrf: CsrfProtection;
+	/**
+	 * Issues the fresh CSRF token the `403` carries: the login route's
+	 * `CsrfProtection`, or the deployment's `csrfGuard` — `issue` is all
+	 * that is read.
+	 */
+	readonly csrf: Pick<CsrfProtection, "issue">;
 	readonly reporter: InterruptionReporter;
 }
 

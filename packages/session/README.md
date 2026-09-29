@@ -39,9 +39,13 @@ responsibilities:
 **Owns:**
 
 - the `/session` routes and their answers; the CSRF policy for them
-  (`session.csrf.*`, and the exported guard `@o3co/auth-provider-device-grant`
-  reuses); the login rate-limit guard's wiring (`rateLimit.login`); the redirect
+  (`session.csrf.*`), which other packages run through the `csrfGuard` slot;
+  the login rate-limit guard's wiring (`rateLimit.login`); the redirect
   allowlists (`session.redirectAllowlist`, `federations.<name>.redirectAllowlist`);
+- what the modules provide other packages through slots whose contracts
+  are core's ([#728](https://github.com/o3co/auth.provider/issues/728)):
+  `csrfGuard`, `loginEntry` and `loginCompletion`, and `sessionCookiePolicy`
+  — [below](#what-the-modules-provide-other-packages);
 - how a federation is driven: `state`, PKCE and `nonce`, the `form_post`
   transaction and its cookie, claim precedence, the `amr` a login records, and
   what a callback writes to the stores;
@@ -105,10 +109,14 @@ router's federation parts (claim precedence, consented scope, the transaction
 store, the redirect policy); [`src/modules/`](src/modules/) and
 [`src/store/`](src/store/) the browser session store;
 [`src/internal/`](src/internal/) cookie reading and the claims read off a
-`User`; [`src/csrf.mts`](src/csrf.mts) the CSRF rule; and
+`User`; [`src/csrf.mts`](src/csrf.mts) the CSRF rule;
 [`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) the allowlist rule
-the login and federation routes share. What each file does is in its header
-comment.
+the login and federation routes share; and
+[`src/login-entry.mts`](src/login-entry.mts),
+[`src/login-completion.mts`](src/login-completion.mts) and
+[`src/session-cookie-policy.mts`](src/session-cookie-policy.mts) what the
+modules provide other packages beside the CSRF guard. What each file does is
+in its header comment.
 
 ## Install
 
@@ -153,6 +161,30 @@ const handle = await createApp({
 The standalone template's
 [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) is the
 complete composition.
+
+### What the modules provide other packages
+
+A package imports only core
+([#728](https://github.com/o3co/auth.provider/issues/728)), so what another
+package needs of the browser session reaches it through a slot whose contract
+is core's ([`core/src/browser-session/types.mts`](../core/src/browser-session/types.mts),
+[`core/src/session-admission/login-completion.mts`](../core/src/session-admission/login-completion.mts)).
+Each provider runs core's contract suite in this package's tests.
+
+| Slot | Provided by | What it is | Read by |
+| --- | --- | --- | --- |
+| `csrfGuard` | `sessionModule` | The [CSRF policy](#csrf-on-the-state-changing-routes) `POST /session/login` runs: `check` and `middleware` for a request that changes state — the same `403 access_denied` and log line — `checkNavigation` for a navigation that starts a flow (the [account-link start](#account-linking-across-federations-482)'s rule), and `issue`. The token's form field is `csrf_token`. | Device verification, once the grant is enabled |
+| `loginEntry` | `sessionModule` | The login page, `endpoints.login.url`, and `urlFor(returnTo)`, which adds `redirect_to` to the page's own query, before any fragment. A page whose query already carries `redirect_to` is refused when the entry is built, as `/authorize`'s own fallback refuses it. Built when no page is configured, and failing where the page is read. | `/authorize` when a module provides it; the federation-grants connect flow, once grants are enabled |
+| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#establishing-the-session) and [`answerInterruption`](#when-a-requirement-interrupts-the-login) over the session stores and the `csrfGuard` the module requires, and `session.maxAge`. Its own module, loaded beside `sessionModule`: an interruption's token is the deployment's `csrfGuard`'s, whoever filled the slot, and `sessionModule` cannot require the slot it fills. | A requirement's completion (the MFA package's) |
+| `sessionCookiePolicy` | the session store's module | The session cookie's name, `secure`, `sameSite`, domain and lifetime, as express-session is given them. Refused wherever it would break core's contract: where the store refuses the cookie, with the store's message — a `__Host-` name that is not secure or that names a domain — and where the store does not yet — a name that is not a cookie name, a `__Secure-` name or a `SameSite=None` cookie that is not secure, a lifetime out of range. | Nothing bundled yet |
+
+The CSRF token's key is derived from `session.secret`, which the session
+store's module owns. While `session` is one section both modules read, the
+session module derives it there, as its routes do; before the session store's
+configuration becomes a section of its own, the key is to reach the guard
+through a narrow slot the session store provides, so the secret never leaves
+its owner. A composition that provides `csrfGuard` without `sessionModule`
+builds it with `createSessionCsrfGuard`.
 
 ## Browser session store
 
@@ -378,10 +410,12 @@ above), so each caller logs in its own vocabulary, and answers what it sent
 (`answered`, or `unavailable` with the store and the step). Anything that is
 not an interruption `admitPrimary` or `resumePrimary` answered — core's
 `isInterruptAdmission`, so a copy of one or an object shaped like one too —
-is a `RangeError` before the session is touched. A completion route builds its
-`CsrfProtection` with `createCsrfProtectionFromConfig(config.session)`: the
-token is signed, not stored, so it and the login router's accept each
-other's.
+is a `RangeError` before the session is touched. A requirement's completion
+reaches it through the `loginCompletion` slot, whose answer carries a token
+from the deployment's `csrfGuard`; a caller of the function hands it
+anything with `issue` — the login route's `CsrfProtection`, or a `csrfGuard`.
+The token is signed, not stored, so every guard built from one configuration
+accepts the others'.
 
 ### Establishing the session
 
@@ -512,11 +546,12 @@ subdomain able to write the parent-domain cookie still cannot forge one.
 Cross-origin login UIs list their origin on `session.csrf.trustedOrigins`;
 `cors.allowedOrigins` grants no CSRF trust.
 
-`checkRequestOrigin`, `createCsrfProtection`, `createCsrfProtectionFromConfig`,
-`createCsrfGuard` and `createCsrfIssueHandler` are exported
-([`src/csrf.mts`](src/csrf.mts)) for compositions that mount their own login
-page or protect their own routes; `@o3co/auth-provider-device-grant` guards its
-verification page with them.
+Another package runs this policy through the `csrfGuard` slot `sessionModule`
+provides — device verification mounts its `middleware` — rather than importing
+it. `checkRequestOrigin`, `createCsrfProtection`, `createCsrfProtectionFromConfig`,
+`createCsrfGuard`, `createCsrfIssueHandler` and `createSessionCsrfGuard` are
+exported ([`src/csrf.mts`](src/csrf.mts)) for compositions that mount their own
+login page or protect their own routes.
 
 ### What a session records about the authentication
 
@@ -1162,6 +1197,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
 | [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
+| [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts), [`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts), [`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts), [`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | what the modules provide other packages: each keeps core's contract, the modules provide it, the guard answers and logs as `/session/login`'s does and accepts the tokens `GET /session/csrf` hands out, the login entry is built without a page and fails where it is read, and the cookie policy refuses what the store refuses and whatever else would break the contract, over every combination of the cookie's attributes |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | the login tail: what it writes (the establishment's primary alone, and a forged establishment refused), its sequence, what it hands each write, and the rollback at every point it can fail |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | the password login on session admission: what a requirement is asked, each outcome's answer, the interruption's two phases and the answer to each failure after the regeneration; `answerInterruption` on its own — its answer, its reporter and outcome at each failure, and what it refuses |

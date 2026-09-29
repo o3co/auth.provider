@@ -34,6 +34,7 @@ import {
 	type FederatedIdentityLookupResult,
 	type FederationGrantAcquisitionConnection,
 	InMemoryUserRepository,
+	type LoginEntry,
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
 	passwordSessionAuthentication,
@@ -44,7 +45,7 @@ import {
 	type SessionRequirement,
 	type UserSession,
 } from "@o3co/auth-provider-core";
-import { resolverForTests } from "@o3co/auth-provider-core/testing";
+import { createTestLoginEntry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -131,6 +132,8 @@ interface WorldOptions {
 	readonly requirements?: readonly SessionRequirement[];
 	/** The router's `issuer`; {@link ISSUER} by default. */
 	readonly issuer?: string;
+	/** The `loginEntry` slot (#728): core's double for `/login` by default. */
+	readonly login?: LoginEntry;
 }
 
 function world(options: WorldOptions = {}) {
@@ -289,7 +292,7 @@ function world(options: WorldOptions = {}) {
 						}
 					: undefined,
 			consentUrl: "/consent/grants",
-			loginUrl: () => "/login",
+			login: options.login ?? createTestLoginEntry("/login"),
 			issuer: options.issuer ?? ISSUER,
 			grantsBoundary: async () => {
 				if (state.grantsBoundary instanceof Error) throw state.grantsBoundary;
@@ -432,6 +435,48 @@ describe("GET /session/federation-grants/connect — the start a client sends th
 		expect(back.searchParams.get("request")).toBe(handle);
 		// Nothing was parked for a browser that has not signed in.
 		expect(w.intents.size).toBe(1);
+	});
+
+	it("builds that trip with the loginEntry it is handed (#728)", async () => {
+		// The login page and its `redirect_to` protocol are the session
+		// module's: the router asks the entry, and builds no URL of its own.
+		const asked: string[] = [];
+		const w = world({
+			login: Object.freeze({
+				url: "/sign-in?tenant=a",
+				urlFor: (returnTo: string) => {
+					asked.push(returnTo);
+					return `/sign-in?tenant=a&back=${encodeURIComponent(returnTo)}`;
+				},
+			}),
+		});
+		const { handle } = await w.lodge();
+		const response = await w.connect(handle);
+		expect(response.status).toBe(303);
+		expect(asked).toHaveLength(1);
+		expect(response.headers.location).toBe(
+			`/sign-in?tenant=a&back=${encodeURIComponent(asked[0] as string)}`,
+		);
+		expect(new URL(asked[0] as string).searchParams.get("request")).toBe(handle);
+	});
+
+	it("sends a login page with a fragment its redirect_to in the page's query, before the fragment (#728)", async () => {
+		// The connect flow used to append `?redirect_to=…` after the page's
+		// fragment, where the page never read it. Through the entry it follows
+		// core's login-page rule, as `/authorize` does.
+		const w = world({ login: createTestLoginEntry("/login?tenant=a#pane") });
+		const { handle } = await w.lodge();
+		const response = await w.connect(handle);
+		expect(response.status).toBe(303);
+		const sent = response.headers.location as string;
+		expect(sent.endsWith("#pane")).toBe(true);
+		const location = new URL(sent, ISSUER);
+		expect(location.pathname).toBe("/login");
+		expect(location.hash).toBe("#pane");
+		expect(location.searchParams.get("tenant")).toBe("a");
+		expect(location.searchParams.getAll("redirect_to")).toHaveLength(1);
+		const back = new URL(location.searchParams.get("redirect_to") ?? "");
+		expect(back.searchParams.get("request")).toBe(handle);
 	});
 
 	it("parks one challenge for the subject's own browser, and sends it to the consent page", async () => {

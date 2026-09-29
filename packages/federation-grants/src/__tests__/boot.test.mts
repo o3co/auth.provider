@@ -23,7 +23,12 @@
  * finds out from the first request has already told a user it was set up.
  */
 
-import type { BootstrapMap, ClientRepository, FederationProvider } from "@o3co/auth-provider-core";
+import type {
+	BootstrapMap,
+	ClientRepository,
+	FederationProvider,
+	LoginEntry,
+} from "@o3co/auth-provider-core";
 import {
 	BootError,
 	createApp,
@@ -37,7 +42,6 @@ import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import {
-	ACQUISITION_ENDPOINTS,
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
@@ -166,9 +170,34 @@ interface Setup {
 	readonly userRepository?: "with-lookup" | "without-lookup" | "bundled";
 	/** Slice 6: the durable sessions the connect flow re-reads. */
 	readonly withUserSessionStore?: boolean;
-	/** Slice 6: where connect sends a browser that is not signed in. */
-	readonly withLoginUrl?: boolean;
+	/**
+	 * Slice 6: where connect sends a browser that is not signed in — the
+	 * `loginEntry` slot (#728); `"unconfigured"`, the entry the session module
+	 * provides when `endpoints.login.url` names no page.
+	 */
+	readonly withLoginEntry?: boolean | "unconfigured";
 }
+
+/**
+ * The login entry the session module provides when `endpoints.login.url`
+ * names no page: built, and failing where the page is read.
+ */
+const UNCONFIGURED_LOGIN_ENTRY: LoginEntry = Object.freeze(
+	Object.defineProperties({} as LoginEntry, {
+		url: {
+			get: () => {
+				throw new Error("endpoints.login.url is not configured");
+			},
+			enumerable: true,
+		},
+		urlFor: {
+			value: () => {
+				throw new Error("endpoints.login.url is not configured");
+			},
+			enumerable: true,
+		},
+	}),
+);
 
 const boot = (setup: Setup) => {
 	const full = makeValidFullSections();
@@ -193,7 +222,6 @@ const boot = (setup: Setup) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
-				...(setup.withLoginUrl === false ? {} : { endpoints: ACQUISITION_ENDPOINTS }),
 				federationGrants: {
 					enabled: setup.enabled ?? true,
 					connections: setup.connections ?? { calendar: CONNECTION },
@@ -204,9 +232,15 @@ const boot = (setup: Setup) => {
 			pathResolver: (s: string) => s,
 			clientRepository,
 			...(() => {
-				const { federationGrantIntentStore, userRepository } = acquisitionComponents();
+				const { federationGrantIntentStore, userRepository, loginEntry } = acquisitionComponents();
 				return {
 					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
+					...(setup.withLoginEntry === false
+						? {}
+						: {
+								loginEntry:
+									setup.withLoginEntry === "unconfigured" ? UNCONFIGURED_LOGIN_ENTRY : loginEntry,
+							}),
 					userRepository:
 						setup.userRepository === "without-lookup"
 							? { authenticate: async () => null, authenticateByToken: async () => null }
@@ -419,10 +453,28 @@ describe("what creating a grant needs (slice 6)", () => {
 	});
 
 	it("refuses a deployment with no login page to send a browser that is not signed in to", async () => {
-		// Core's schema leaves it optional and only oauthModule requires it; this
-		// composition has no oauthModule, which is what used to boot and then
-		// answer every such browser with a 500.
-		await expect(boot({ withLoginUrl: false })).rejects.toThrow(/endpoints\.login\.url/);
+		// Core's schema takes an empty page and only oauthModule requires one;
+		// this composition has no oauthModule, which is what used to boot and
+		// then answer every such browser with a 500. The page is the session
+		// module's `loginEntry` (#728), which is built without one and fails
+		// where it is read: here, at boot.
+		await expect(boot({ withLoginEntry: "unconfigured" })).rejects.toThrow(
+			/endpoints\.login\.url must be configured/,
+		);
+	});
+
+	it("refuses a deployment with no loginEntry, naming the component", async () => {
+		// Connect sends a browser that is not signed in to the login page
+		// through the `loginEntry` slot the session module provides (#728);
+		// enabled without it, the flow's first page would answer a 500.
+		await expect(boot({ withLoginEntry: false })).rejects.toThrow(
+			/federation grants are enabled and no loginEntry is installed/,
+		);
+	});
+
+	it("boots disabled without a loginEntry: a deployment that leaves grants off owes nothing", async () => {
+		const handle = await boot({ enabled: false, withLoginEntry: false });
+		await handle.dispose();
 	});
 
 	it("refuses a deployment with nowhere to lodge an intent", async () => {

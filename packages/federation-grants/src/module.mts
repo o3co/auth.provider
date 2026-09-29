@@ -122,6 +122,9 @@ const OPTIONAL = [
 	"federationGrantIntentStore",
 	"userRepository",
 	"userSessionStore",
+	// The login page connect sends a browser that is not signed in to, which
+	// the session module provides (#728): required once grants are enabled.
+	"loginEntry",
 ] as const;
 
 /**
@@ -418,7 +421,11 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 				// connection on the provider's own origin, somewhere to lodge an
 				// intent, and — unless the deployment records that it has none —
 				// the lookup D7 check 5 asks.
-				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
+				const acquisition = resolveFederationGrantAcquisitionSettings(
+					deps.config,
+					connections,
+					deps.loginEntry,
+				);
 				const intentStore = requireFederationGrantIntentStore(deps.federationGrantIntentStore);
 				requireFederationGrantIdentityLookup(
 					acquisition.identityLookup,
@@ -476,7 +483,11 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					federationGrantStore: store,
 				});
 				const connections = resolveFederationGrantConnections(deps.config);
-				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
+				const acquisition = resolveFederationGrantAcquisitionSettings(
+					deps.config,
+					connections,
+					deps.loginEntry,
+				);
 				const limits = resolveFederationGrantRetrievalLimits(deps.config);
 				return {
 					id: "federation-grants-browser",
@@ -497,7 +508,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						connections: acquisition.connections,
 						authorizerFor: authorizerFor(deps),
 						consentUrl: acquisition.consentUrl,
-						loginUrl: () => acquisition.loginUrl,
+						login: acquisition.login,
 						issuer: deps.config.oauth.jwt.issuer,
 						rateLimiter: requireLimiter(deps),
 						failMode: requireFailMode(deps),

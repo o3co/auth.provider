@@ -32,16 +32,23 @@
  *      refuses any other media type itself, so the rule does not depend on
  *      what else is mounted under `/oauth` — composition.test.mts boots it
  *      beside `oauthModule` in both orders.
- *   2. The same CSRF guard `/session/login` runs (#272): a foreign `Origin` /
+ *   2. The same CSRF guard `/session/login` runs (#272), as the `csrfGuard`
+ *      slot the session module provides (#728): a foreign `Origin` /
  *      `Referer` is refused outright, same-origin or `session.csrf.trustedOrigins`
  *      is accepted, and a request with no origin signal at all must carry the
  *      session's signed double-submit token. One policy, not a second one.
+ *      The tests fill the slot with the session package's guard, built as
+ *      the session module builds it, so what the route answers and logs is
+ *      what it answered and logged when it built the guard itself.
  */
 
-import type { AppConfig, ClientRepository } from "@o3co/auth-provider-core";
+import type { AppConfig, ClientRepository, Logger } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
-import { createCsrfProtectionFromConfig } from "@o3co/auth-provider-session";
+import {
+	createCsrfProtectionFromConfig,
+	createSessionCsrfGuard,
+} from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -60,7 +67,7 @@ const clientRepository: ClientRepository = {
 	authenticate: async () => null,
 };
 
-/** The `session.*` slice the guard is built from — the same one `/session/login` reads. */
+/** The `session.*` slice the session module builds the guard from — the same one `/session/login` reads. */
 const SESSION_SLICE = {
 	secret: "test-session-secret.at-least-32-bytes.ok",
 	name: "auth.session",
@@ -77,9 +84,15 @@ const makeLogger = () => ({
 	debug: vi.fn(),
 });
 
-const makeDeps = (overrides: { session?: unknown } = {}) => {
+const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 	const store = createMemoryDeviceCodeStore();
 	const logger = makeLogger();
+	// The slot's guard, on the logger the route's other lines go to.
+	const csrfGuard = createSessionCsrfGuard({
+		csrf: createCsrfProtectionFromConfig(SESSION_SLICE),
+		trustedOrigins: SESSION_SLICE.csrf.trustedOrigins,
+		logger: logger as unknown as Logger,
+	});
 	const deps = {
 		config: {
 			oauth: {
@@ -98,7 +111,6 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 				},
 			},
 			rateLimit: { failMode: "open" },
-			...("session" in overrides ? { session: overrides.session } : { session: SESSION_SLICE }),
 		},
 		clientRepository,
 		deviceCodeStore: store,
@@ -109,6 +121,11 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		}),
 		logger,
+		...("csrfGuard" in overrides
+			? overrides.csrfGuard === undefined
+				? {}
+				: { csrfGuard: overrides.csrfGuard }
+			: { csrfGuard }),
 	};
 	return { deps, store, logger };
 };
@@ -293,26 +310,12 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		expect(await isStillPending(store)).toBe(true);
 	});
 
-	it("refuses to mount the route without the session config slice it builds the guard from", () => {
-		// No slice, no signing key for the token arm and no cookie name to
-		// read: the guard cannot be built. Fail where the operator can see it.
-		const { deps } = makeDeps({ session: undefined });
+	it("refuses to mount the enabled route without a csrfGuard, naming the component", () => {
+		// No guard, no CSRF defence on a route that authorises on the session
+		// cookie: fail where the operator can see it, not on the first forged
+		// approval.
+		const { deps } = makeDeps({ csrfGuard: undefined });
 		const factory = verificationRouteFor(deps);
-		expect(() => factory(deps)).toThrow(/session/);
-	});
-
-	it.each([
-		["name", { ...SESSION_SLICE, name: undefined }, /session\.name/],
-		["secure", { ...SESSION_SLICE, secure: "false" }, /session\.secure/],
-		["sameSite", { ...SESSION_SLICE, sameSite: "loose" }, /session\.sameSite/],
-		["secret", { ...SESSION_SLICE, secret: "" }, /session\.secret/],
-	])("refuses a session slice whose %s the guard would misuse", (_field, session, expected) => {
-		// `createCsrfProtectionFromConfig` reads secret, name, secure and
-		// sameSite. A slice that has the secret but not the rest would mint a
-		// cookie called `undefined.csrf` with attributes nobody chose; the
-		// refusal names the field so the operator knows what to add.
-		const { deps } = makeDeps({ session });
-		const factory = verificationRouteFor(deps);
-		expect(() => factory(deps)).toThrow(expected);
+		expect(() => factory(deps)).toThrow(/requires a csrfGuard component/);
 	});
 });

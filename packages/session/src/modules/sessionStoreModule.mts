@@ -19,6 +19,7 @@ import {
 } from "@o3co/auth-provider-core";
 import session from "express-session";
 import { guardCookieSession } from "../internal/cookieSession.mjs";
+import { assertHostPrefixKept, sessionCookiePolicyFrom } from "../session-cookie-policy.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
 
 /**
@@ -61,6 +62,14 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 		// fall back to consoleLogger when the composition wires no logger slot.
 		optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
 		...(replicaSafety === undefined ? {} : { replicaSafety }),
+		// The session cookie's attributes (#728), for a module that sets a
+		// cookie of its own beside the session's or sizes what must outlive a
+		// session: this module owns the cookie, and the others require the
+		// slot instead of reading `session.*`. The attributes express-session
+		// is given below; the signing secret is not among them.
+		provides: {
+			sessionCookiePolicy: (deps) => sessionCookiePolicyFrom((deps.config as AppConfig).session),
+		},
 		contributes: {
 			routes: [
 				async (deps) => {
@@ -90,14 +99,9 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
-					if (
-						config.session.name.startsWith("__Host-") &&
-						(config.session.secure !== true || config.session.domain !== null)
-					) {
-						throw new Error(
-							"session.name with __Host- prefix requires session.secure=true and session.domain=null",
-						);
-					}
+					// The cookie's one rule, shared with the sessionCookiePolicy the
+					// module provides, so the two cannot disagree about it.
+					assertHostPrefixKept(config.session);
 					const store = await factory.create({
 						type: storageSlice.type,
 						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),

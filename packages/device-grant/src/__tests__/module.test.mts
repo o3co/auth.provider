@@ -25,6 +25,7 @@ import type {
 	AppConfig,
 	BootstrapMap,
 	ClientRepository,
+	CsrfGuard,
 	DeviceCodeStore,
 	Module,
 	RateLimiter,
@@ -40,6 +41,7 @@ import {
 	DeviceCodeStoreError,
 } from "@o3co/auth-provider-core";
 import {
+	createTestCsrfGuard,
 	makeValidCoreConfig,
 	makeValidFullSections,
 	resolverForTests,
@@ -118,6 +120,7 @@ interface Overrides {
 	readonly withStore?: boolean;
 	readonly withRateLimiter?: boolean;
 	readonly withUserSessionStore?: boolean;
+	readonly withCsrfGuard?: boolean;
 	/** Drop the `audit.sink.type = "none"` declaration the fixture carries. */
 	readonly withoutAuditDeclaration?: boolean;
 }
@@ -128,10 +131,6 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	return {
 		config: {
 			...core,
-			// The verification route's CSRF guard is built from `session.*`, the
-			// same slice `/session/login` reads; enabling the grant without it
-			// is a boot refusal, so the fixture carries the standard one.
-			session: full.session,
 			// The device_authorization guard reads the product-wide outage
 			// policy, `rateLimit.failMode`, like every other guarded route.
 			rateLimit: full.rateLimit,
@@ -156,6 +155,9 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 		...(overrides.withUserSessionStore === false
 			? {}
 			: { userSessionStore: createInMemoryUserSessionStore() }),
+		// The verification route's CSRF guard is the `csrfGuard` slot (#728),
+		// which the session module provides: core's double stands in for it.
+		...(overrides.withCsrfGuard === false ? {} : { csrfGuard: createTestCsrfGuard() }),
 		...(overrides.withRateLimiter === false
 			? {}
 			: {
@@ -246,6 +248,30 @@ describe("deviceGrantModule — boot", () => {
 		await expect(
 			boot({ deviceAuthorization: ENABLED, withUserSessionStore: false }),
 		).rejects.toThrow(/enabled = true requires a userSessionStore component/);
+	});
+
+	it("refuses to boot enabled without a csrfGuard, naming the component", async () => {
+		// POST /oauth/device/verification authorises on the session cookie, the
+		// credential a browser attaches to a request another site made (RFC 8628
+		// §5.4), and runs the one CSRF policy the session module provides as the
+		// `csrfGuard` slot (#728). Enabled without it, the endpoint would be
+		// mounted with no CSRF defence, so boot is refused, as without a limiter.
+		await expect(boot({ deviceAuthorization: ENABLED, withCsrfGuard: false })).rejects.toThrow(
+			/enabled = true requires a csrfGuard component/,
+		);
+	});
+
+	it("boots disabled without a csrfGuard", async () => {
+		// The slot is optional in the manifest: a deployment that installs the
+		// package and leaves the grant off mounts no verification route.
+		const handle = await boot({ withCsrfGuard: false });
+		await handle.dispose();
+	});
+
+	it("takes csrfGuard as an optional slot, and imports nothing of the session package", () => {
+		const installed = deviceGrantModule({ config: makeBoot({}).config as AppConfig });
+		expect(installed.optional).toContain("csrfGuard");
+		expect(installed.requires).not.toContain("csrfGuard");
 	});
 
 	it("boots disabled without a userSessionStore", async () => {
@@ -421,12 +447,13 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 					rateLimit: { limit: 5, windowSeconds: 300 },
 				},
 			},
-			session: makeValidFullSections().session,
 			rateLimit: makeValidFullSections().rateLimit,
 		},
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
+		// The `csrfGuard` slot (#728): core's double, which accepts this origin.
+		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
 		sessionRequirementResolver: resolverForTests([]),
 		rateLimiter: createMemoryRateLimiter({
@@ -555,6 +582,29 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		app.use(route.mountPath, route.handler);
 		return app;
 	};
+
+	it("runs the csrfGuard it is handed in front of the whole route, and reads no session.* (#728)", async () => {
+		// The guard is the slot's, not one rebuilt from the session's
+		// configuration: `enabledDeps` carries no `session` section, and a
+		// guard that refuses everything refuses a request the handler would
+		// otherwise answer, whatever its action.
+		const refusing: CsrfGuard = Object.freeze({
+			...createTestCsrfGuard(),
+			middleware: (_req: express.Request, res: express.Response) => {
+				res.status(403).json({ error: "access_denied", error_description: "refused by the slot" });
+			},
+		});
+		const deps = { ...enabledDeps(), csrfGuard: refusing };
+		expect("session" in (deps.config as Record<string, unknown>)).toBe(false);
+		const app = mountVerificationRoute(deps);
+		for (const action of ["lookup", "approve", "deny"]) {
+			const res = await request(app)
+				.post("/oauth/device/verification")
+				.send({ action, user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(403);
+			expect(res.body.error_description).toBe("refused by the slot");
+		}
+	});
 
 	/** A limiter whose backend is down: every check rejects, as a Redis client would. */
 	const brokenLimiter: RateLimiter = {
@@ -1471,7 +1521,6 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 					rateLimit: { limit: 5, windowSeconds: 300 },
 				},
 			},
-			session: makeValidFullSections().session,
 			rateLimit: makeValidFullSections().rateLimit,
 		},
 		clientRepository: jwtRepository,

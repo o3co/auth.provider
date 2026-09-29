@@ -60,7 +60,6 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import {
-	ACQUISITION_ENDPOINTS,
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
@@ -155,7 +154,6 @@ const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 		},
 		rateLimit: { ...full.rateLimit, failMode: "closed" },
 		audit: { sink: { type: "none" } },
-		endpoints: ACQUISITION_ENDPOINTS,
 		federationGrants: {
 			enabled: true,
 			allowKeepOnSubjectRevocation: allowKeep,

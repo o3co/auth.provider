@@ -17,14 +17,22 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	type CsrfGuard,
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
+	type Logger,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import {
+	createCsrfProtectionFromConfig,
+	createSessionCsrfGuard,
+	type SessionCsrfConfigSlice,
+} from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
+import { loginEntryFromConfig } from "./login-entry.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
@@ -67,6 +75,32 @@ function deriveProviderCallbackUrls(
 }
 
 /**
+ * The session's CSRF guard, as the session routes build theirs: the signed
+ * double-submit token of `createCsrfProtectionFromConfig` over `session.*` —
+ * the key derived from `session.secret`, the cookie named
+ * `<session.name>.csrf` with the session cookie's attributes — and
+ * `session.csrf.trustedOrigins`.
+ *
+ * The `csrfGuard` slot's value. The session routes build their own
+ * `CsrfProtection` (`routes/Session.mts`); it accepts this guard's tokens,
+ * as the token is signed, not stored.
+ *
+ * The key is to reach the guard through the session store's
+ * `csrfTokenSigner` slot before the session store's configuration becomes a
+ * section of its own (#728) — here and in the session routes, together;
+ * until then `session` is one section, read by both modules, and nothing
+ * changes owner.
+ */
+const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
+	const session = config.session as unknown as SessionCsrfConfigSlice;
+	return createSessionCsrfGuard({
+		csrf: createCsrfProtectionFromConfig(session),
+		trustedOrigins: session.csrf?.trustedOrigins ?? [],
+		logger,
+	});
+};
+
+/**
  * Const Module for the session and federation route surface.
  *
  * Per A2-γ §3.4 + Amendment 5 (§1.1.5) + Amendment 6 (§1.1.6).
@@ -101,6 +135,12 @@ function deriveProviderCallbackUrls(
  *     `federations.<name>` contributions).
  *   - "federationRedirectPolicyResolver" — synthetic per A5 §7 (planner-derived
  *     from `federationRedirectPolicies.<name>` contributions).
+ *
+ * `provides` (#728) — what other packages need of the browser session,
+ * through slots whose contracts are core's, so that none imports this
+ * package: `csrfGuard` (the guard these routes run) and `loginEntry` (the
+ * login page and its `redirect_to` protocol). `loginCompletion` is the
+ * login-completion module's (`modules/loginCompletionModule.mts`).
  *
  * `providerCallbackUrls` is derived from `config.federations` inside the
  * federation-routes lambda — a route-local config projection, not a synthetic
@@ -161,6 +201,24 @@ export const sessionModule = defineModule<
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY,
 		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+	},
+	// What this module owns of the browser session that other packages use,
+	// as slots whose contracts are core's (#728): a package imports only core,
+	// and requires the slot instead of rebuilding the policy from the session
+	// configuration.
+	provides: {
+		// The one CSRF policy (#710 C4): the guard `/session/login` runs, over
+		// the same key, cookie and trust list — so a token `GET /session/csrf`
+		// hands out is accepted wherever the slot is mounted (`csrfGuardOf`).
+		csrfGuard: (deps) => csrfGuardOf(deps.config as AppConfig, deps.logger ?? consoleLogger),
+		// The login page (`endpoints.login.url`) and the `redirect_to` protocol
+		// `/authorize` and the federation-grants connect flow send a browser
+		// there by. Built with no page configured, failing where it is read.
+		loginEntry: (deps) => loginEntryFromConfig(deps.config),
+		// `loginCompletion` is the login-completion module's
+		// (`modules/loginCompletionModule.mts`): it answers with the
+		// deployment's `csrfGuard`, a slot this module fills and so cannot
+		// require.
 	},
 	contributes: {
 		routes: [

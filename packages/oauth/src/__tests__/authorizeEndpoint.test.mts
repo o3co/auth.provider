@@ -34,6 +34,7 @@ import {
 	type FederationProvider,
 	type GrantPolicyHook,
 	type Logger,
+	type LoginEntry,
 	type PublicClient,
 	type SessionAuthentication,
 	type UserSession,
@@ -103,6 +104,8 @@ const makeApp = async (opts: {
 	oauth?: Record<string, unknown>;
 	/** `endpoints.login.url`; default `/login`. */
 	loginUrl?: string;
+	/** The `loginEntry` slot (#728), when a module provides it. */
+	loginEntry?: LoginEntry;
 	grantPolicy?: GrantPolicyHook;
 	auditSink?: AuditSink;
 	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
@@ -165,6 +168,7 @@ const makeApp = async (opts: {
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.loginEntry ? { loginEntry: opts.loginEntry } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),
 		...(opts.federation
 			? {
@@ -264,7 +268,39 @@ const redirectParams = (res: request.Response): URLSearchParams => {
 	return location.searchParams;
 };
 
+/**
+ * A `loginEntry` (#728) that records every target it is asked for and sends
+ * the browser to `/sign-in`, under a parameter of its own — so a trip built
+ * from it cannot be mistaken for one built from `endpoints.login.url`.
+ */
+const recordingLoginEntry = (): { readonly asked: string[]; readonly entry: LoginEntry } => {
+	const asked: string[] = [];
+	return {
+		asked,
+		entry: Object.freeze({
+			url: "/sign-in",
+			urlFor: (returnTo: string) => {
+				asked.push(returnTo);
+				return `/sign-in?back=${encodeURIComponent(returnTo)}`;
+			},
+		}),
+	};
+};
+
 describe("/authorize — unauthenticated session", () => {
+	it("sends the login trip through the loginEntry a module provides, to come back to the same request (#728)", async () => {
+		const { asked, entry } = recordingLoginEntry();
+		const { app } = await makeApp({ session: { isAuthenticated: false }, loginEntry: entry });
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(asked).toHaveLength(1);
+		const target = asked[0] as string;
+		expect(res.headers.location).toBe(`/sign-in?back=${encodeURIComponent(target)}`);
+		// The request to come back to is the one `endpoints.login.url`'s trip names.
+		expect(target.startsWith("https://issuer.example/oauth/authorize?")).toBe(true);
+		expect(target).toContain(`client_id=${CLIENT_ID}`);
+	});
+
 	it("redirects to the configured login page, round-tripping the original URL", async () => {
 		const { app } = await makeApp({ session: { isAuthenticated: false } });
 		const res = await authorize(app, baseQuery);
@@ -1238,6 +1274,19 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
+	it("sends a session that records no sid through the loginEntry a module provides (#728)", async () => {
+		const { asked, entry } = recordingLoginEntry();
+		const { app } = await makeApp({
+			userSessionStore: liveStore(),
+			session: { isAuthenticated: true, user: { id: "user-1" } },
+			loginEntry: entry,
+		});
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(asked).toHaveLength(1);
+		expect(res.headers.location).toBe(`/sign-in?back=${encodeURIComponent(asked[0] as string)}`);
+	});
+
 	it("does not read the store for a genuinely unauthenticated request", async () => {
 		// The #284 property this fix must not cost: an unauthenticated request
 		// answers before touching any repository, so an unauthenticated
@@ -1422,6 +1471,20 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(askId.length).toBeGreaterThanOrEqual(43);
 			expect([...harness.records.keys()]).toEqual([`reauth:${askId}`]);
 			expect(harness.session).not.toHaveProperty("reauthAskedAt");
+		});
+
+		it("sends a session older than max_age through the loginEntry a module provides, naming the ask (#728)", async () => {
+			const { asked, entry } = recordingLoginEntry();
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(5)),
+				loginEntry: entry,
+			});
+			const res = await authorize(harness.app, { ...baseQuery, max_age: "60" });
+			expect(res.status).toBe(302);
+			expect(asked).toHaveLength(1);
+			expect(res.headers.location).toBe(`/sign-in?back=${encodeURIComponent(asked[0] as string)}`);
+			expect(new URL(asked[0] as string).searchParams.get("reauth_ask")).toBeTruthy();
 		});
 
 		it("max_age=0 always re-authenticates", async () => {

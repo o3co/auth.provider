@@ -23,7 +23,9 @@ import {
 	type FederatedIdentityRegistration,
 	type FederationGrantConnection,
 	InMemoryUserRepository,
+	type LoginEntry,
 } from "@o3co/auth-provider-core";
+import { createTestLoginEntry } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import {
 	requireFederationGrantIdentityLookup,
@@ -53,10 +55,32 @@ const resolve = (
 	resolveFederationGrantAcquisitionSettings(
 		{
 			oauth: { jwt: { issuer } },
-			endpoints: { login: { url: "/login" } },
 			federationGrants: grants,
 		},
 		new Map(connections.map((entry) => [entry.name, entry])),
+		createTestLoginEntry("/login"),
+	);
+
+/**
+ * The login entry the session module provides when `endpoints.login.url`
+ * names no page: built, and failing where the page is read.
+ */
+const unconfiguredLoginEntry = (): LoginEntry =>
+	Object.freeze(
+		Object.defineProperties({} as LoginEntry, {
+			url: {
+				get: () => {
+					throw new Error("endpoints.login.url is not configured");
+				},
+				enumerable: true,
+			},
+			urlFor: {
+				value: () => {
+					throw new Error("endpoints.login.url is not configured");
+				},
+				enumerable: true,
+			},
+		}),
 	);
 
 describe("resolveFederationGrantAcquisitionSettings", () => {
@@ -102,21 +126,50 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 	});
 
 	it("refuses a deployment with no login page: connect sends a browser that is not signed in there", () => {
-		expect(resolve({ consent: { url: "/c" } }).loginUrl).toBe("/login");
-		for (const endpoints of [undefined, {}, { login: {} }, { login: { url: "" } }]) {
-			expect(
-				() =>
-					resolveFederationGrantAcquisitionSettings(
-						{
-							oauth: { jwt: { issuer: ISSUER } },
-							endpoints,
-							federationGrants: { consent: { url: "/c" } },
-						},
-						new Map(),
-					),
-				JSON.stringify(endpoints),
-			).toThrow(/endpoints\.login\.url/);
+		// The page is the `loginEntry` slot (#728), which the session module
+		// provides from `endpoints.login.url`.
+		expect(resolve({ consent: { url: "/c" } }).login.urlFor("/back")).toBe(
+			"/login?redirect_to=%2Fback",
+		);
+		const withEntry = (entry: LoginEntry | undefined) => () =>
+			resolveFederationGrantAcquisitionSettings(
+				{ oauth: { jwt: { issuer: ISSUER } }, federationGrants: { consent: { url: "/c" } } },
+				new Map(),
+				entry,
+			);
+		expect(withEntry(undefined)).toThrow(
+			/federation grants are enabled and no loginEntry is installed/,
+		);
+		expect(withEntry(unconfiguredLoginEntry())).toThrow(/endpoints\.login\.url must be configured/);
+	});
+
+	it("keeps what the login entry threw as the refusal's cause", () => {
+		const thrown = new Error("the entry's own reason");
+		const entry = Object.freeze(
+			Object.defineProperties({} as LoginEntry, {
+				url: {
+					get: () => {
+						throw thrown;
+					},
+					enumerable: true,
+				},
+				urlFor: { value: () => "/login", enumerable: true },
+			}),
+		);
+		let refusal: unknown;
+		try {
+			resolveFederationGrantAcquisitionSettings(
+				{ oauth: { jwt: { issuer: ISSUER } }, federationGrants: { consent: { url: "/c" } } },
+				new Map(),
+				entry,
+			);
+		} catch (error) {
+			refusal = error;
 		}
+		expect((refusal as Error | undefined)?.message).toMatch(
+			/endpoints\.login\.url must be configured/,
+		);
+		expect((refusal as Error | undefined)?.cause).toBe(thrown);
 	});
 
 	it("refuses an issuer it cannot take an origin from", () => {
@@ -125,6 +178,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			resolveFederationGrantAcquisitionSettings(
 				{ oauth: { jwt: {} }, federationGrants: { consent: { url: "/c" } } },
 				new Map(),
+				createTestLoginEntry("/login"),
 			),
 		).toThrow(/oauth\.jwt\.issuer must be configured/);
 		expect(() => resolve({ consent: { url: "/c" } }, [], "auth.example.test")).toThrow(
