@@ -507,7 +507,7 @@ describe("sessionModule — the password login is a consumer of session admissio
 		expect(res.body).toEqual({ error: "fixture_required" });
 	});
 
-	it("logs in as before when no requirement is registered", async () => {
+	it("logs in when no requirement is registered", async () => {
 		expect((await passwordLogin([])).status).toBe(200);
 	});
 });

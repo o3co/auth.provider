@@ -290,7 +290,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		expect(recordedLink(harness)).toBeUndefined();
 	});
 
-	it("refuses a signed-in cookie with no sid, as it did", async () => {
+	it("refuses a signed-in cookie with no sid, reading no store", async () => {
 		const harness = setup();
 		plant(harness, { isAuthenticated: true, user: { id: SUBJECT } });
 		const res = await start(harness);
@@ -299,7 +299,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		expect(harness.userSessionStore.get).not.toHaveBeenCalled();
 	});
 
-	it("(3) refuses a signed-in cookie without user.id before any store is read", async () => {
+	it("refuses a signed-in cookie without user.id before any store is read", async () => {
 		const harness = setup();
 		plant(harness, { sid: SID, isAuthenticated: true });
 		const res = await start(harness);
@@ -318,7 +318,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		expect(recordedLink(harness)).toBeUndefined();
 	});
 
-	it("(5) refuses a record past its expiresAt", async () => {
+	it("refuses a record past its expiresAt", async () => {
 		const harness = setup({ record: live({ expiresAt: new Date(Date.now() - 1000) }) });
 		plant(harness, SIGNED_IN);
 		const res = await start(harness);
@@ -342,7 +342,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		});
 	});
 
-	it("(4) refuses a session the subject-revocation boundary covers, when subjectRevocation is wired", async () => {
+	it("refuses a session the subject-revocation boundary covers, when subjectRevocation is wired", async () => {
 		const boundary = revocation(new Date());
 		const harness = setup({ subjectRevocation: boundary });
 		plant(harness, SIGNED_IN);
@@ -353,7 +353,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		expect(recordedLink(harness)).toBeUndefined();
 	});
 
-	it("(4) admits a session established after the boundary", async () => {
+	it("admits a session established after the boundary", async () => {
 		const harness = setup({ subjectRevocation: revocation(new Date(Date.now() - 3_600_000)) });
 		plant(harness, SIGNED_IN);
 		expect((await start(harness)).status).toBe(302);

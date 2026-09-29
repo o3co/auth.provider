@@ -331,7 +331,7 @@ describe("Session routes — POST /session/login", () => {
 			expect(capturedSession.current?.sid).toBe(saved.sid);
 		});
 
-		it("does not crash and does not create a UserSession when userSessionStore is not wired (backward compat)", async () => {
+		it("logs in when userSessionStore is not wired", async () => {
 			const { app } = buildApp({
 				userRepository: {
 					authenticate: vi.fn().mockResolvedValue({ id: "u-no-store", username: "bob" }),
