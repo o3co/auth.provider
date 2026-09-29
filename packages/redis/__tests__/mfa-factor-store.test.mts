@@ -229,6 +229,69 @@ describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7
 		await expect(store.list("user-1")).rejects.toThrow(/MfaFactorStore/);
 	});
 
+	it("refuses to list a record whose dates are no instant a Date holds as written — beyond ±8.64e15 ms, or a fraction of one — rather than answer an Invalid Date or another instant", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = `${prefix}{${keyPart("user-1")}}`;
+		const field = keyPart("factor-1");
+		const fixed = (createdAt: number): string =>
+			JSON.stringify({ id: "factor-1", subject: "user-1", kind: "totp", binding: null, createdAt });
+		const mutable = (lastUsedAt: number | null): string =>
+			JSON.stringify({ data: "v2.x", label: null, lastUsedAt });
+		for (const [name, value] of [
+			["createdAt past the Date range", `1\n${fixed(8_640_000_000_000_001)}\n${mutable(null)}`],
+			["createdAt before it", `1\n${fixed(-8_640_000_000_000_001)}\n${mutable(null)}`],
+			["createdAt a fraction", `1\n${fixed(1.5)}\n${mutable(null)}`],
+			["lastUsedAt past the Date range", `1\n${fixed(1)}\n${mutable(1e300)}`],
+			["lastUsedAt a fraction", `1\n${fixed(1)}\n${mutable(0.25)}`],
+		] as const) {
+			await first().hset(key, field, value);
+			await expect(store.list("user-1"), name).rejects.toThrow(/MfaFactorStore/);
+		}
+		// Whole instants at the edges of the range read.
+		await first().hset(
+			key,
+			field,
+			`1\n${fixed(-8_640_000_000_000_000)}\n${mutable(8_640_000_000_000_000)}`,
+		);
+		const [read] = await store.list("user-1");
+		expect(read?.createdAt.getTime()).toBe(-8_640_000_000_000_000);
+		expect(read?.lastUsedAt?.getTime()).toBe(8_640_000_000_000_000);
+	});
+
+	it("refuses, with a RangeError and writing nothing, a date whose time value is no instant a read would take back", async () => {
+		// A Date's own time value is always one; what the adapter reads is
+		// `getTime()`, which an object passed off as a Date can answer as it likes.
+		const lying = (ms: number): Date => {
+			const date = new Date(0);
+			Object.defineProperty(date, "getTime", { value: () => ms });
+			return date;
+		};
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		for (const ms of [8_640_000_000_000_001, -8_640_000_000_000_001, 1.5]) {
+			await expect(store.create(RECORD({ createdAt: lying(ms) })), String(ms)).rejects.toThrow(
+				RangeError,
+			);
+			await expect(store.create(RECORD({ lastUsedAt: lying(ms) })), String(ms)).rejects.toThrow(
+				RangeError,
+			);
+		}
+		expect(await first().keys(`${prefix}*`)).toEqual([]);
+		await store.create(RECORD());
+		for (const ms of [8_640_000_000_000_001, 1.5]) {
+			await expect(
+				store.update("user-1", "factor-1", 1, {
+					data: "v2.x",
+					label: undefined,
+					lastUsedAt: lying(ms),
+				}),
+				String(ms),
+			).rejects.toThrow(RangeError);
+		}
+		expect(await store.list("user-1")).toStrictEqual([RECORD()]);
+	});
+
 	it("answers null to an update of a value that is not exactly three lines, and leaves it as it was: the compare-and-set never rewrites a record it would have to cut", async () => {
 		// MfaFactorStoreClient.update's contract. A fourth line — even an empty
 		// one — is a record this adapter did not write; carrying over the first
