@@ -38,7 +38,7 @@ import { createAppleClientSecret } from "./client-secret.mjs";
 
 // ComponentMap slot declaration-merge: exposes appleFederationConfig as a typed
 // DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config (per A5 §10.1 const-Module pattern).
+// app config.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly appleFederationConfig?: AppleProviderConfig;
@@ -74,13 +74,10 @@ export function isPrivateRelayEmail(email: string): boolean {
 
 /**
  * Read a claim Apple sends as either a boolean or the *string* `"true"` /
- * `"false"`.
- *
- * `email_verified` and `is_private_email` both arrive either way depending on
- * the response. `Boolean("false")` is `true`, so a coercion here would report
- * an unverified address as verified — the normalisation is not cosmetic.
+ * `"false"` (`email_verified`, `is_private_email`). `Boolean("false")` is
+ * `true`, so a coercion would report an unverified address as verified.
  * Anything that is neither shape reads as absent, because absence is not
- * `false` (#297).
+ * `false`.
  */
 const normalizeBooleanClaim = (value: unknown): boolean | undefined => {
 	if (typeof value === "boolean") return value;
@@ -93,18 +90,14 @@ const normalizeBooleanClaim = (value: unknown): boolean | undefined => {
  * Read the display name out of the `user` field Apple POSTs on the *first*
  * authorization only.
  *
- * The value is a JSON string relayed through the user agent, so it is parsed
- * defensively and never allowed to fail a login: a malformed or unexpectedly
- * shaped body yields no name, not an error. It is also unsigned — the route
- * layer's `state` check binds it to this session and nothing more — so what
- * comes back is self-asserted and reaches the claims envelope only under the
- * ordinary promotion rules.
- *
- * #498: each part is bounded by {@link APPLE_NAME_PART_MAX_LENGTH}. `name`
- * is promotable, so an unbounded part would let tens of kilobytes of
- * attacker-supplied text into the claims envelope and the session store; a
- * part over the cap is dropped whole rather than truncated, because a
- * truncated one is still the attacker's text.
+ * A JSON string relayed through the user agent: parsed defensively, a
+ * malformed or oddly shaped body yields no name, never a failed login. It is
+ * unsigned — the `state` check binds it to this session and nothing more —
+ * so it is self-asserted and reaches the claims envelope only under the
+ * ordinary promotion rules. `name` is promotable, so each part is bounded by
+ * {@link APPLE_NAME_PART_MAX_LENGTH} to keep attacker text out of the claims
+ * envelope and session store; a part over the cap is dropped whole, because
+ * a truncated one is still the attacker's text.
  */
 const parseUserName = (raw: string | undefined): string | undefined => {
 	if (typeof raw !== "string" || raw.length === 0) return undefined;
@@ -127,7 +120,7 @@ const parseUserName = (raw: string | undefined): string | undefined => {
 
 /**
  * The longest `firstName` / `lastName` the unsigned `user` body may
- * contribute to the display name, in UTF-16 code units (#498). Generous
+ * contribute to the display name, in UTF-16 code units. Generous
  * for any real name; a part beyond it is dropped, not truncated.
  */
 export const APPLE_NAME_PART_MAX_LENGTH = 128;
@@ -223,7 +216,7 @@ function resolveSecretSource(config: AppleProviderConfig): FederationClientSecre
 	// `createAppleClientSecret` names whichever piece is missing. `privateKey`
 	// is read through to the caller's config at every resolve rather than
 	// copied now, so a rotation the caller exposes as a getter or a re-read
-	// file reaches the signer through this path too (#498).
+	// file reaches the signer through this path too.
 	return createAppleClientSecret({
 		teamId: config.teamId as string,
 		clientId: config.clientId,
@@ -245,7 +238,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	// Apple's return URL is checked here, at boot, because every way it can be
 	// wrong produces the same opaque `invalid_request` from the authorization
 	// endpoint at the worst possible moment — the first login attempt. The
-	// value the flow actually sends is held to this one below (#498).
+	// value the flow actually sends is held to this one below.
 	let callbackUrl: URL;
 	try {
 		callbackUrl = new URL(config.callbackURL);
@@ -262,23 +255,19 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	// `https` is necessary and not sufficient: Apple refuses a loopback return
 	// URL whatever its scheme, so `https://localhost/cb` clears the check above
 	// and still fails upstream. `isLoopbackHostname` is the repo's one
-	// definition of that vocabulary (#364, `core/src/net/loopback.mts`) — the
-	// same predicate `checkRedirectShape` uses to carve `http://` *in* for local
-	// development, used here to carve loopback *out*. `localhost` is a separate
-	// name from the IP literals and the predicate covers both, along with the
-	// whole 127.0.0.0/8 block and bracketed `[::1]` as `URL.hostname` reports it.
+	// definition (`core/src/net/loopback.mts`), covering `localhost`, the whole
+	// 127.0.0.0/8 block and bracketed `[::1]` as `URL.hostname` reports it.
 	if (isLoopbackHostname(callbackUrl.hostname)) {
 		throw new Error(
 			`Apple federation "apple" refuses a loopback callbackURL (${config.callbackURL}) — Apple rejects localhost, 127.0.0.0/8 and [::1] return URLs even over https, so local development needs a tunnel or a dev hostname holding a certificate`,
 		);
 	}
 
-	// #498: the guard above validated `config.callbackURL`, but the
-	// `redirect_uri` the flow sends is what the session module derived from
+	// The guard above validated `config.callbackURL`, but the `redirect_uri`
+	// the flow sends is what the session module derived from
 	// `config.federations.<name>.callbackURL`. In every shipped composition
-	// they are one value; this makes a composition where they drift fail
-	// loudly at the first request instead of sending Apple a return URL
-	// nobody validated.
+	// they are one value; a composition where they drift fails loudly at the
+	// first request instead of sending Apple a return URL nobody validated.
 	const requireConfiguredCallback = (redirectUri: string): string => {
 		if (redirectUri !== config.callbackURL) {
 			throw new Error(
@@ -292,14 +281,9 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 
 	// ServerMetadata constructed locally — no discovery call. Apple's endpoints
 	// are stable, and Apple publishes no `userinfo_endpoint` and no
-	// `end_session_endpoint`, so neither appears here.
-	//
-	// `jwks_uri` names where Apple publishes the keys the id_token is verified
-	// against, and `id_token_signing_alg_values_supported` pins RS256 — what
-	// Apple signs with — so the library refuses `none` / `HS256` confusion.
-	// Neither does anything on its own: openid-client 6 skips the id_token
-	// signature on the code flow unless `enableNonRepudiationChecks` is on,
-	// which `verifying` below applies to every configuration built here (#542).
+	// `end_session_endpoint`. The RS256 pin (what Apple signs with) refuses
+	// `none` / `HS256` confusion; it and `jwks_uri` take effect only through
+	// `verifying` below.
 	const serverMetadata: oidc.ServerMetadata = {
 		issuer: APPLE_ISSUER,
 		authorization_endpoint: "https://appleid.apple.com/auth/authorize",
@@ -309,14 +293,12 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	};
 
 	/**
-	 * #542: every configuration this provider builds verifies the id_token's
-	 * signature against `jwks_uri`. openid-client 6 does not on the code flow
-	 * unless told to — it treats the token endpoint's TLS as proof enough — so
-	 * the RS256 pin above was inert and `jwks_uri` was never fetched. Apple
-	 * publishes no userinfo endpoint: the id_token is the only source of
-	 * identity, and its signature the only check between the token endpoint's
-	 * TLS and the account. Applied per configuration, because the token one is
-	 * rebuilt on every call.
+	 * Every configuration this provider builds verifies the id_token's signature
+	 * against `jwks_uri`: on the code flow openid-client 6 skips it unless told
+	 * to, treating the token endpoint's TLS as proof enough. Apple publishes no
+	 * userinfo endpoint, so the id_token is the only source of identity and its
+	 * signature the only check between that TLS and the account. Applied per
+	 * configuration, because the token one is rebuilt on every call.
 	 */
 	const verifying = (configuration: oidc.Configuration): oidc.Configuration => {
 		if (config.fetch) {
@@ -332,12 +314,9 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 
 	/**
 	 * A configuration for one token-endpoint call, with the secret resolved now.
-	 *
-	 * Rebuilt per call rather than once at construction because the secret
-	 * rotates: freezing it into a Configuration is exactly the bug that makes a
-	 * deployment stop authenticating six months after it was set up. Apple
-	 * requires `client_secret_post`, which is stated rather than inherited from
-	 * the library's default.
+	 * Rebuilt per call because the secret rotates: one frozen into a
+	 * Configuration stops authenticating six months after setup. Apple requires
+	 * `client_secret_post`, stated rather than inherited from the library default.
 	 */
 	const tokenConfiguration = async (): Promise<oidc.Configuration> => {
 		const secret = await resolveClientSecret(clientSecret);
@@ -396,12 +375,10 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			const nonce = requireNonce(params.nonce);
 
 			// openid-client's authorizationCodeGrant expects the full callback URL.
-			// Apple POSTs the parameters rather than putting them in a redirect, so
-			// there is no such URL to hand it — it is synthesized from the
-			// registered return URL plus the code, exactly as the Google adapter
-			// does for a query-mode callback. #597: an RFC 9207 `iss` in the posted
-			// body goes with it, so that one Apple does send is compared with
-			// APPLE_ISSUER.
+			// Apple POSTs the parameters instead, so the URL is synthesized from the
+			// registered return URL plus the code, as the Google adapter does for a
+			// query-mode callback. An RFC 9207 `iss` in the posted body goes with it,
+			// so one Apple does send is compared with APPLE_ISSUER.
 			const callbackUrl = callbackUrlForExchange({
 				redirectUri: requireConfiguredCallback(params.redirectUri),
 				code: params.code,
@@ -421,7 +398,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 
 			// Apple publishes no userinfo endpoint: the verified id_token is the
 			// only source of identity, so there is no UserInfo/id_token binding to
-			// make (PB-5 does not apply) and nothing to fetch.
+			// make and nothing to fetch.
 			const claims = tokens.claims();
 			const sub = claims?.sub;
 			if (typeof sub !== "string" || sub.length === 0) {
@@ -444,7 +421,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				// else — never in the id_token, and never again on a later login.
 				name: parseUserName(params.callbackParams?.user),
 				// The tokens as Apple stated them: the lifetime as sent or none,
-				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
+				// the scope as sent (what it granted, RFC 6749 §5.1), and the
 				// token type — core's one reading for every adapter.
 				...federationTokenSnapshot(tokens, obtainedAt),
 			};
@@ -464,18 +441,13 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 		},
 
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
-			// Apple publishes no OIDC end_session_endpoint — the same situation
-			// the Google module documents, minus Google's fallback: there is no
-			// appleid.apple.com logout URL to send a browser to. So an operator
-			// either supplies an endpoint, or the request resolves to the
-			// deployment's own post-logout page, or it fails loudly rather than
-			// redirecting somewhere invented.
-			//
-			// "The deployment's own post-logout page" holds because of the
-			// caller's side of the contract (core's `EndSessionRequest`): the
-			// postLogoutRedirectUri handed here is one already matched against
-			// the client's registered postLogoutRedirectUris, or none — `oauth`'s
-			// logout routes check it first.
+			// Apple publishes no OIDC end_session_endpoint and, unlike Google, no
+			// logout URL to send a browser to. So an operator-supplied endpoint,
+			// else the deployment's own post-logout page, else a loud failure
+			// rather than a redirect somewhere invented. The postLogoutRedirectUri
+			// handed here is already matched against the client's registered
+			// postLogoutRedirectUris, or absent (core's `EndSessionRequest`
+			// contract; `oauth`'s logout routes check it first).
 			if (config.endSessionEndpoint) {
 				let url: URL;
 				try {
@@ -528,13 +500,11 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 /**
  * Const Module for the Sign in with Apple federation integration.
  *
- * Contributes both `federations.apple` (FederationProvider — upstream OIDC
- * protocol) and `federationRedirectPolicies.apple` (FederationRedirectPolicy
- * — consumer redirect URL policy), the pairing A5 §6 requires.
- *
- * Config arrives through the `appleFederationConfig` ComponentMap slot (per
- * A5 §10.1 const-Module pattern). Single-tenant, as the Google and GitHub
- * modules are: the federation is registered under the name "apple".
+ * Contributes `federations.apple` (the upstream OIDC provider) and
+ * `federationRedirectPolicies.apple` (the consumer redirect URL policy),
+ * which must be contributed together. Config arrives through the
+ * `appleFederationConfig` ComponentMap slot. Single-tenant, as the Google and
+ * GitHub modules are: registered under the name "apple".
  */
 export const appleFederationModule = defineModule({
 	name: "federation-apple",
