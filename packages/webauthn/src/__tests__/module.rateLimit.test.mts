@@ -178,7 +178,7 @@ const hit = (app: express.Express) =>
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("webauthn authentication/options rate limit (#281) — shared limiter", () => {
+describe("webauthn authentication/options rate limit — shared limiter", () => {
 	it("runs on the wired `rateLimiter` component and 429s past the limit", async () => {
 		const limiter = createMemoryRateLimiter({
 			limits: { [WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: { limit: 2, windowSeconds: 60 } },
@@ -393,7 +393,7 @@ describe("webauthn authentication/options rate limit — the slot and the seeded
 	});
 });
 
-describe("webauthn authentication/options rate limit (#281) — mandatory fallback", () => {
+describe("webauthn authentication/options rate limit — mandatory fallback", () => {
 	it("still throttles when no `rateLimiter` component is wired", async () => {
 		const { handle, app } = await bootApp(makeWebAuthnConfig(2), []);
 
@@ -445,7 +445,7 @@ describe("webauthn authentication/options rate limit (#281) — mandatory fallba
 	});
 });
 
-describe("webauthn authentication/options rate limit (#281) — limiter outage", () => {
+describe("webauthn authentication/options rate limit — limiter outage", () => {
 	it("forwards the auditSink so an outage emits rate_limit.unavailable, and applies failMode", async () => {
 		const { sink, events } = spyAuditSink();
 		const brokenLimiter: RateLimiter = {
@@ -511,7 +511,7 @@ describe("webauthn authentication/options rate limit (#281) — limiter outage",
 // `rateLimiter`: `"multi"` refuses to boot, `"single"` is silent, unset warns.
 // ---------------------------------------------------------------------------
 
-describe("webauthn authentication/options rate limit (#474) — fallback under deployment.mode", () => {
+describe("webauthn authentication/options rate limit — fallback under deployment.mode", () => {
 	it('refuses to boot under "multi" with no shared limiter, naming the route as replica-unsafe', async () => {
 		// The route factory throws; the planner wraps a factory throw as
 		// `contribute-factory-failed` and carries the module's own BootError as

@@ -153,7 +153,7 @@ const happyPathModules = [
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("webauthnModule boot integration (Wave 1 T31)", () => {
+describe("webauthnModule boot integration", () => {
 	it("boots successfully when webauthnConfig is provided and materialises the webauthn grant", async () => {
 		const handle = await createApp({
 			modules: happyPathModules,
@@ -232,7 +232,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	 * scope ceiling (client_credentials falls back to `client.allowedScopes`), so
 	 * without a policy it would issue whatever scope the caller requests.
 	 */
-	it("H-2 fail-fast: boot throws when webauthnModule wired without grantPolicy", async () => {
+	it("boot throws when webauthnModule is wired without grantPolicy", async () => {
 		// All deps present EXCEPT grantPolicy.
 		const modulesWithoutPolicy = [
 			webauthnModule,
@@ -253,7 +253,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		).rejects.toThrow(/webauthn grant requires `grantPolicy`/);
 	});
 
-	it("H-2 fail-fast: the refusal says how to fill the slot, and names only packages that exist", async () => {
+	it("the missing-grantPolicy refusal says how to fill the slot, and names only packages that exist", async () => {
 		const error = await createApp({
 			modules: [
 				webauthnModule,
@@ -304,7 +304,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		expect(message).toContain("GrantPolicyHook");
 	});
 
-	it("H-2 fail-fast: the second way the refusal names — bootstrapComponents.grantPolicy — boots", async () => {
+	it("boots with grantPolicy in bootstrapComponents, the second way the refusal names", async () => {
 		// The first (`provides`) is how every other test here wires the policy.
 		const policy: GrantPolicyHook = {
 			kind: "test-bootstrap-policy",
@@ -338,7 +338,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	 * This boots with a spy policy and resource indicators on, and checks the
 	 * resolved component and that the booted handler is live.
 	 */
-	it("C1 regression: grantPolicy.evaluate is called when wired + resourceIndicator.enabled=true", async () => {
+	it("resolves a wired grantPolicy as the booted component under resourceIndicator.enabled=true, and boots a live webauthn grant handler", async () => {
 		const CREDENTIAL_ID = "dGVzdC1jcmVkZW50aWFsLWlk";
 		const CHALLENGE = "test-challenge-for-policy-gate";
 
@@ -514,7 +514,7 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
  * parses only its own routes' bodies. Without it, `req.body` is `undefined`.
  * These tests mount `handle.router` on a bare express app and POST JSON.
  */
-describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
+describe("webauthnModule body parser integration", () => {
 	it("POST /oauth/webauthn/authentication/options parses JSON body via router-level parser (no global parser on host app)", async () => {
 		const handle = await createApp({
 			modules: happyPathModules,
@@ -588,7 +588,7 @@ describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 	});
 });
 
-describe("auditSink absence policy (#363)", () => {
+describe("auditSink absence policy", () => {
 	it("carries the shared AUDIT_SINK_ABSENCE_POLICY constant, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
 		// policies for one key disagree, and sharing the one constant is what

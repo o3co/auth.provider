@@ -72,7 +72,7 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	});
 
 	// The enumeration escape hatch and the endpoint's own throttle.
-	describe("authentication/options security knobs (#281)", () => {
+	describe("authentication/options security knobs", () => {
 		it("allowCredentialsForKnownUser is required — there is no implicit fallback", () => {
 			expect(webauthnConfigSchema.safeParse(without("allowCredentialsForKnownUser")).success).toBe(
 				false,
@@ -186,7 +186,7 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	});
 
 	// The URL-parse-based origin gate must reject textual-prefix bypasses.
-	describe("origin secure-context gate (M-1 / I2)", () => {
+	describe("origin secure-context gate", () => {
 		const { origin: _origin, ...okBase } = VALID;
 		const accepts = [
 			"https://example.com",
@@ -299,7 +299,7 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	// only `https:` and loopback `http:` through the secure-context gate above,
 	// the "one RP shared by the web origin and the Android app" deployment the
 	// README describes could not be expressed in configuration at all.
-	describe("Android apk-key-hash origins (#497)", () => {
+	describe("Android apk-key-hash origins", () => {
 		const { origin: _origin, ...okBase } = VALID;
 		// A real Credential Manager origin is the SHA-256 of the app's signing
 		// certificate, base64url-encoded — 43 characters, unpadded.
@@ -379,7 +379,7 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	});
 });
 
-describe("topOrigin — the origins this RP may be framed by (#554 audit)", () => {
+describe("topOrigin — the origins this RP may be framed by", () => {
 	const base = VALID;
 
 	it("is optional, and absent means this RP expects not to be framed", () => {

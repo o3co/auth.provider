@@ -160,7 +160,7 @@ describe("POST /oauth/webauthn/authentication/options (spec §2.4)", () => {
 // Account enumeration via allowCredentials
 // ---------------------------------------------------------------------------
 
-describe("POST /oauth/webauthn/authentication/options — enumeration resistance (#281)", () => {
+describe("POST /oauth/webauthn/authentication/options — enumeration resistance", () => {
 	it("never derives allowCredentials from a body-supplied userId by default", async () => {
 		const credentialStore = await seededCredentialStore();
 		const { app } = buildApp(createMemoryChallengeStore(), credentialStore);
@@ -258,7 +258,7 @@ describe("POST /oauth/webauthn/authentication/options — enumeration resistance
 // Unbounded user IDs
 // ---------------------------------------------------------------------------
 
-describe("POST /oauth/webauthn/authentication/options — userId bounds (#281)", () => {
+describe("POST /oauth/webauthn/authentication/options — userId bounds", () => {
 	const post = (app: express.Express, body: unknown) =>
 		supertest(app)
 			.post("/oauth/webauthn/authentication/options")

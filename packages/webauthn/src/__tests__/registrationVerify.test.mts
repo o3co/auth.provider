@@ -375,7 +375,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	// -------------------------------------------------------------------------
 	// Test 10: Duplicate credential ID — different user
 	// -------------------------------------------------------------------------
-	it("400 credential_id_conflict when credential ID already registered to a different user (Codex Round 4 P2)", async () => {
+	it("400 credential_id_conflict when credential ID already registered to a different user", async () => {
 		// A colliding credential ID — distinct from STUB_MATERIAL.credentialId to
 		// keep this test fully isolated from other tests.
 		const COLLISION_CRED_ID = "Q09MTElTSU9OX0NSRURfSUQ";

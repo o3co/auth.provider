@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { WEBAUTHN_ALGORITHM_IDS } from "#/index.mjs";
 
-describe("WEBAUTHN_ALGORITHM_IDS on the barrel (v0.13.0 audit)", () => {
+describe("WEBAUTHN_ALGORITHM_IDS on the barrel", () => {
 	it("is exported, since the README names it as the statement of the pin", () => {
 		expect([...WEBAUTHN_ALGORITHM_IDS]).toEqual([-8, -7, -257]);
 	});

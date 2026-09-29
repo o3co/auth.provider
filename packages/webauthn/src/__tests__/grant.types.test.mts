@@ -52,7 +52,7 @@ const OPTIONAL = [
 ] as const;
 type ModuleDeps = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("the webauthn grant declares the slots it reads (#626 P2)", () => {
+describe("the webauthn grant declares the slots it reads", () => {
 	it("pins the module's declared slots, so the key-set check below cannot drift from them", () => {
 		expect([...(webauthnModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(webauthnModule.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());

@@ -286,14 +286,14 @@ describe("createWebAuthnGrant — the lifetimes it mints with", () => {
 // The allowlist gate (deny by absence)
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — refresh_token allowlist gate (#480)", () => {
+describe("createWebAuthnGrant — refresh_token allowlist gate", () => {
 	it("issues a refresh_token when the client's allowedGrantTypes names refresh_token", async () => {
 		const tokens = await issue(await makeDeps(), makeCtx(makeClient()));
 
 		expect(typeof tokens.refresh_token).toBe("string");
 	});
 
-	it("stamps the passkey's amr on the refresh token, so the refresh grant carries it (#481 audit)", async () => {
+	it("stamps the passkey's amr on the refresh token, as on the access token", async () => {
 		// The access token carries `amr: ["hwk"]`; the refresh grant mirrors
 		// `amr` from the presented refresh token, so a refresh token without it
 		// would hand the first refreshed access token no `hwk`.
@@ -341,7 +341,7 @@ describe("createWebAuthnGrant — refresh_token allowlist gate (#480)", () => {
 // Redemption preconditions — every gate refreshToken.mts applies
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — the issued refresh token is redeemable (#480)", () => {
+describe("createWebAuthnGrant — the issued refresh token is redeemable", () => {
 	it("verifies as an rt+jwt bound to the issuing client, subject and scope", async () => {
 		const tokens = await issue(
 			await makeDeps(),
@@ -403,7 +403,7 @@ describe("createWebAuthnGrant — the issued refresh token is redeemable (#480)"
 // Family registration, rotation and replay detection
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => {
+describe("createWebAuthnGrant — refresh-token family lifecycle", () => {
 	it("registers the family under the minted refresh token's own jti, expiring exactly at its exp", async () => {
 		const register = vi.fn(async () => {});
 		const rotation: RefreshTokenFamilyRotation = {
@@ -429,7 +429,7 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		expect((payload.exp as number) - (payload.iat as number)).toBe(REFRESH_TOKEN_TTL);
 	});
 
-	it("registers the family before anything is signed, so a family store that cannot answer costs no signature (#449)", async () => {
+	it("registers the family before anything is signed, so a family store that cannot answer costs no signature", async () => {
 		// The refresh token's identity — its `jti` and the instant its lifetime
 		// is measured from — is reserved first and registered with the family
 		// store; tokens are signed only once that holds, as the refresh grant
@@ -554,7 +554,7 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 // DPoP binding
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
+describe("createWebAuthnGrant — DPoP-bound refresh tokens", () => {
 	it("binds the refresh token to the proof key for a public client", async () => {
 		const tokens = await issue(
 			await makeDeps(),
@@ -579,7 +579,7 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		expect(decodePayload(tokens.refresh_token as string).cnf).toBeUndefined();
 	});
 
-	it("binds a confidential client's refresh token when the deployment opts in (#275)", async () => {
+	it("binds a confidential client's refresh token when the deployment opts in", async () => {
 		const tokens = await issue(
 			await makeDeps({ config: makeConfig({ bindConfidentialClientRefreshTokens: true }) }),
 			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
@@ -590,7 +590,7 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
 	});
 
-	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so, whatever oauthTokenSettings the composition holds (#728)", async () => {
+	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so, though the composition holds oauthTokenSettings", async () => {
 		// The setting applies across every binding mechanism, so it is core's;
 		// the slot carries none, and the grant reads core's reader.
 		const base = makeConfig() as unknown as { oauth: Record<string, unknown> };
@@ -623,7 +623,7 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		}
 	});
 
-	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
+	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's", async () => {
 		const tokens = await issue(
 			await makeDeps({
 				oauthTokenSettings: createTestOAuthTokenSettings({
@@ -657,7 +657,7 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 // test above still passed.
 // ---------------------------------------------------------------------------
 
-describe("webauthnModule — refresh-token family wiring (#480)", () => {
+describe("webauthnModule — refresh-token family wiring", () => {
 	it("declares refreshTokenFamilyRotation as an optional slot", () => {
 		expect(webauthnModule.optional).toContain("refreshTokenFamilyRotation");
 	});
