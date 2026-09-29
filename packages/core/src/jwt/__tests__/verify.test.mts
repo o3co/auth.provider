@@ -149,7 +149,7 @@ describe("verifyJwt — the id_token typ", () => {
 });
 
 describe("verifyJwt", () => {
-	it("Test 1 — rejects alg=none JWT with reason=alg", async () => {
+	it("rejects alg=none JWT with reason=alg", async () => {
 		const keyStore = makeKeyStore();
 		const headerB64 = Buffer.from(
 			JSON.stringify({ alg: "none", typ: "at+jwt", kid: TEST_KID }),
@@ -170,7 +170,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 2 — rejects JWT signed with unexpected alg with reason=alg", async () => {
+	it("rejects JWT signed with unexpected alg with reason=alg", async () => {
 		// Asymmetric keystore expects RS256; sign with HS256 token to test
 		// algorithm-confusion rejection.
 		const { privateKey, publicKey } = await generateKeyPair("RS256", {
@@ -189,7 +189,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 3 — rejects JWT with wrong iss with reason=iss", async () => {
+	it("rejects JWT with wrong iss with reason=iss", async () => {
 		const keyStore = makeKeyStore();
 		const jwt = await signValidAccessToken({ iss: "https://wrong-issuer.example.com" }, keyStore);
 		await expect(verifyJwt(jwt, keyStore, baseOptions)).rejects.toMatchObject({
@@ -198,7 +198,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 4 — rejects JWT with aud not containing expected with reason=aud", async () => {
+	it("rejects JWT with aud not containing expected with reason=aud", async () => {
 		const keyStore = makeKeyStore();
 		const jwt = await signValidAccessToken({ aud: "other-client" }, keyStore);
 		await expect(verifyJwt(jwt, keyStore, baseOptions)).rejects.toMatchObject({
@@ -207,7 +207,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 5 — rejects JWT with wrong typ when legacyTypAccept=false with reason=typ", async () => {
+	it("rejects JWT with wrong typ when legacyTypAccept=false with reason=typ", async () => {
 		const keyStore = makeKeyStore();
 		// Token typ=rt+jwt verified as access_token (expected at+jwt) — strict mode
 		const jwt = await signValidAccessToken({ typ: "rt+jwt" }, keyStore);
@@ -219,7 +219,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 6 — accepts JWT with undefined typ when legacyTypAccept=true and emits jwt_verify_legacy_typ warning", async () => {
+	it("accepts JWT with undefined typ when legacyTypAccept=true and emits jwt_verify_legacy_typ warning", async () => {
 		const keyStore = makeKeyStore();
 		const logger = makeMockLogger();
 		const jwt = await signValidAccessToken({ typ: undefined }, keyStore);
@@ -235,7 +235,7 @@ describe("verifyJwt", () => {
 		);
 	});
 
-	it("Test 7 — rejects JWT with undefined typ when legacyTypAccept=false with reason=typ", async () => {
+	it("rejects JWT with undefined typ when legacyTypAccept=false with reason=typ", async () => {
 		const keyStore = makeKeyStore();
 		const jwt = await signValidAccessToken({ typ: undefined }, keyStore);
 		await expect(
@@ -246,7 +246,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 8 — rejects JWT with valid signature but unknown kid with reason=kid_unknown", async () => {
+	it("rejects JWT with valid signature but unknown kid with reason=kid_unknown", async () => {
 		const keyStore = makeKeyStore();
 		// Sign with the same secret but advertise an unknown kid in the header
 		const secretKey = createSecretKey(Buffer.from(TEST_SECRET));
@@ -265,7 +265,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 7b — rejects typ-less token with contradicting legacy payload.type even when legacyTypAccept=true (reason=typ)", async () => {
+	it("rejects typ-less token with contradicting legacy payload.type even when legacyTypAccept=true (reason=typ)", async () => {
 		// legacyTypAccept=true must not accept a cross-type token whose legacy
 		// `payload.type` disagrees with the expected JwtType. Example: a
 		// typ-less RT (payload.type=refresh) presented as an access token at
@@ -295,7 +295,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 8b — distinguishes expired kid from unknown kid (reason=kid_expired)", async () => {
+	it("distinguishes expired kid from unknown kid (reason=kid_expired)", async () => {
 		// Expired and unknown kids
 		// represent different operator-vs-attacker signals. The verifier must
 		// surface them as separate reasons so SIEM rules can page differently.
@@ -324,7 +324,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 9 — rejects JWT with iat in future beyond clock skew with reason=not_yet_valid", async () => {
+	it("rejects JWT with iat in future beyond clock skew with reason=not_yet_valid", async () => {
 		const keyStore = makeKeyStore();
 		const futureIat = Math.floor(Date.now() / 1000) + 400; // > 300s skew
 		const futureExp = futureIat + 300;
@@ -335,7 +335,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 10 — rejects expired JWT with reason=expired", async () => {
+	it("rejects expired JWT with reason=expired", async () => {
 		const keyStore = makeKeyStore();
 		const pastIat = Math.floor(Date.now() / 1000) - 700;
 		const pastExp = Math.floor(Date.now() / 1000) - 400;
@@ -346,7 +346,7 @@ describe("verifyJwt", () => {
 		});
 	});
 
-	it("Test 11 — returns VerifiedJwt with payload, header, and type for valid JWT", async () => {
+	it("returns VerifiedJwt with payload, header, and type for valid JWT", async () => {
 		const keyStore = makeKeyStore();
 		const jwt = await signValidAccessToken({}, keyStore);
 		const result = await verifyJwt(jwt, keyStore, baseOptions);
@@ -359,7 +359,7 @@ describe("verifyJwt", () => {
 		expect(result.header.kid).toBe(TEST_KID);
 	});
 
-	it("Test 12b — when expectedIssuer is empty, accepts token regardless of iss and emits jwt_verify_iss_skipped warning", async () => {
+	it("when expectedIssuer is empty, accepts token regardless of iss and emits jwt_verify_iss_skipped warning", async () => {
 		// Test fixtures + partial-config dev roots produce tokens without a
 		// matching iss claim. Empty-string expectedIssuer is the explicit
 		// opt-out. The verifier MUST log this and proceed.
@@ -380,7 +380,7 @@ describe("verifyJwt", () => {
 		);
 	});
 
-	it("Test 12a — when expectedAudience is undefined, accepts token regardless of aud and emits jwt_verify_aud_skipped warning", async () => {
+	it("when expectedAudience is undefined, accepts token regardless of aud and emits jwt_verify_aud_skipped warning", async () => {
 		// Bearer-as-credential routes (introspect Bearer / userinfo /
 		// id_token_hint logout) cannot determine the calling client identity
 		// before verification, so they explicitly omit `expectedAudience`.
@@ -401,7 +401,7 @@ describe("verifyJwt", () => {
 		);
 	});
 
-	it("Test 12 — rejects azp mismatch with reason=azp", async () => {
+	it("rejects azp mismatch with reason=azp", async () => {
 		const keyStore = makeKeyStore();
 		// Refresh-token verification path: typ=rt+jwt + azp claim binds RT to client
 		const jwt = await signValidAccessToken({ typ: "rt+jwt", azp: "other-client" }, keyStore);

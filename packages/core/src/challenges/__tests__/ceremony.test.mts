@@ -99,7 +99,7 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 		await expect(ceremony.consume("scope-A", "system-err")).rejects.toBe(innerError);
 	});
 
-	it("concurrency property (N=30): exactly 1 'consumed', remaining are 'replayed' or 'unknown' (per §6.1 propagation gap)", async () => {
+	it("concurrency property (N=30): exactly 1 'consumed', remaining are 'replayed' or 'unknown' (the consume → markSeen gap)", async () => {
 		// Assert single winner + zero false accepts ONLY.
 		// Do NOT assert exact replayed/unknown split — timing-dependent.
 		const { store, ceremony } = makeCeremonyWithMemoryBackends();

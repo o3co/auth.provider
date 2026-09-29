@@ -495,7 +495,7 @@ describe("createApp's router answers an error that escaped a route", () => {
 		await handle.dispose();
 	});
 
-	it("leaves a request no route answered to the host, as before", async () => {
+	it("leaves a request no route answered to the host", async () => {
 		const logger = spyLogger();
 		const { handle } = await boot(logger);
 		const app = express();

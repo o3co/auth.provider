@@ -211,7 +211,7 @@ describe("signingKey.local schema - HS256 rotation", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("accepts HS256 without previousSecrets (optional field — backward compatible)", () => {
+	it("accepts HS256 without previousSecrets, an optional field", () => {
 		const result = jwtSchema.safeParse({
 			issuer: "https://auth.test",
 			signingKey: {

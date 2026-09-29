@@ -573,7 +573,7 @@ describe("applyContributions — defence-in-depth: missing required dep", () => 
 // 10. Consumer-defined kinds: step 2 / step 3 routing by collector.kind
 // ---------------------------------------------------------------------------
 
-describe("applyContributions — consumer-defined kinds (spec §5.4)", () => {
+describe("applyContributions — consumer-defined kinds, routed by collector.kind", () => {
 	it("routes consumer-defined name-keyed kinds to register via collector.kind discriminant", async () => {
 		// "myCustomKind" is not in the built-in NAME_KEYED_KINDS set, so routing
 		// must rely on collector.kind === "name-keyed".

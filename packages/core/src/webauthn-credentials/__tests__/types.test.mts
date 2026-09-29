@@ -20,7 +20,7 @@ import type {
 	WebAuthnCredentialStore,
 } from "../types.mjs";
 
-describe("WebAuthnCredentialStore types (spec §2.3.1)", () => {
+describe("WebAuthnCredentialStore types", () => {
 	it("declares the contract operations", () => {
 		expectTypeOf<WebAuthnCredentialStore["registerCredential"]>().toEqualTypeOf<
 			(record: WebAuthnCredential) => Promise<void>

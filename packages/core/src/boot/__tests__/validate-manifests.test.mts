@@ -1055,7 +1055,7 @@ describe("validateManifests — happy path", () => {
 // Consumer-defined kinds — collector.kind discriminant dispatch
 // ---------------------------------------------------------------------------
 
-describe("validateManifests — consumer-defined kinds (spec §5.4 + §5.1 step 6/11)", () => {
+describe("validateManifests — consumer-defined kinds (steps 6 and 11)", () => {
 	it("step 6: duplicate-check applies to consumer-defined name-keyed kinds", () => {
 		const m1 = defineModule({
 			name: "c1",

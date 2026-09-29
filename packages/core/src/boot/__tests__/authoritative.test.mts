@@ -256,7 +256,7 @@ describe("ModuleSpec.authoritative", () => {
 		}
 	});
 
-	it("allows an override of a key the loaded module provides without naming it authoritative, as before", async () => {
+	it("allows an override of a key the loaded module provides without naming it authoritative", async () => {
 		const seen: { settings?: OAuthTokenSettings } = {};
 		const handle = await createApp({
 			modules: [plainOwner, reader(seen)],

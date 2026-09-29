@@ -220,7 +220,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 // Scenario 2: missing-required-component failure diagnostic
 // ---------------------------------------------------------------------------
 
-describe("integration — Scenario 2: spec §12 worked-example failure diagnostic", () => {
+describe("integration — Scenario 2: missing-required-component failure diagnostic", () => {
 	it("throws BootError with missing-required-component for a slot that is never provided", async () => {
 		// The path assertions below depend on these module names. Stubs are
 		// typed `as never`, as in Scenario 1.
