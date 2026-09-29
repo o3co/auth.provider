@@ -42,6 +42,7 @@ import { createApp } from "../../index.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 import type { BootstrapMap } from "../types.mjs";
 
 // ---------------------------------------------------------------------------
@@ -191,6 +192,33 @@ describe("tokenBindingMechanisms — core synthesis", () => {
 				makeObserverModule({}),
 			],
 			bootstrapComponents: makeBoot("strict-mutual-exclusion"),
+		});
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const res = await request(app).post("/oauth/token").send({});
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
+
+		await handle.dispose();
+	});
+
+	it("reads the dispatch policy from the oauthTokenSettings the composition holds, over the configuration (#728)", async () => {
+		// The configuration says intent-explicit; the slot the oauth module
+		// provides says strict-mutual-exclusion, and the slot is what is read.
+		const handle = await createApp({
+			modules: [
+				contributingModule("dpop", () => dpopMech),
+				contributingModule("mtls", () => mtlsMech),
+				makeObserverModule({}),
+			],
+			bootstrapComponents: {
+				...makeBoot("intent-explicit"),
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					tokenBinding: { dispatchPolicy: "strict-mutual-exclusion" },
+				}),
+			} as BootstrapMap,
 		});
 		const app = express();
 		app.use(express.json());
