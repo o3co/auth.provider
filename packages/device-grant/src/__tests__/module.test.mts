@@ -341,7 +341,32 @@ describe("deviceGrantModule — boot", () => {
 				modules: [deviceGrantModule({ config: handedToFactory })],
 				bootstrapComponents,
 			}),
-		).rejects.toThrow(/the same config/);
+		).rejects.toThrow(/read oauth\.deviceAuthorization\.enabled before boot/);
+	});
+
+	it("refuses a switch read before boot without its schema: an environment string is on at boot, and off in the factory", async () => {
+		// The two phases (#728): a composition root reads the switch before
+		// boot, and boot parses the configuration it resolved. Read without the
+		// schema core declares for it, `"true"` from an environment variable is
+		// not `true`, and the factory builds the grant off.
+		const bootstrapComponents = makeBoot({ deviceAuthorization: ENABLED });
+		const config = bootstrapComponents.config as AppConfig;
+		const readUnparsed = {
+			...config,
+			oauth: { ...config.oauth, deviceAuthorization: { ...ENABLED, enabled: "true" } },
+		} as unknown as AppConfig;
+		await expect(
+			createApp({
+				modules: [deviceGrantModule({ config: readUnparsed })],
+				bootstrapComponents: {
+					...bootstrapComponents,
+					config: {
+						...config,
+						oauth: { ...config.oauth, deviceAuthorization: { ...ENABLED, enabled: "true" } },
+					} as unknown as AppConfig,
+				},
+			}),
+		).rejects.toThrow(/read oauth\.deviceAuthorization\.enabled before boot/);
 	});
 
 	it("names the disagreement, not a missing store, when the booted config declares the store absent", async () => {
@@ -364,7 +389,7 @@ describe("deviceGrantModule — boot", () => {
 				modules: [deviceGrantModule({ config: handedToFactory })],
 				bootstrapComponents,
 			}),
-		).rejects.toThrow(/the same config/);
+		).rejects.toThrow(/read oauth\.deviceAuthorization\.enabled before boot/);
 	});
 
 	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
