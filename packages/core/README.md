@@ -233,7 +233,7 @@ A key several modules read has one owner, and the others receive it through a sl
 
 - `oauthTokenSettings`, what other modules read of the oauth module's token settings — [`src/token-settings/types.mts`](src/token-settings/types.mts).
 - `loginCompletion`, the tail of a login (`establishSession`, `answerInterruption`) a requirement's completion finishes with instead of importing the session package — [`src/session-admission/login-completion.mts`](src/session-admission/login-completion.mts).
-- `loginEntry`, `csrfGuard` and `cookiePolicy`: the login page with its `redirect_to` protocol, the one policy for whether a browser's request may change state, and the session cookie's attributes — [`src/browser-session/types.mts`](src/browser-session/types.mts).
+- `loginEntry`, `csrfGuard` and `sessionCookiePolicy`: the login page with its `redirect_to` protocol, the one policy for whether a browser's request may change state, and the session cookie's attributes — [`src/browser-session/types.mts`](src/browser-session/types.mts).
 - `httpSettings` (`trustProxy`, the CORS origins) and `deploymentMode` (`single`, `multi` or `unset`, which core is to fill itself) — [`src/deployment/types.mts`](src/deployment/types.mts).
 - `RateLimiter.failMode`, the limiter's own outage policy — [`src/ratelimit/types.mts`](src/ratelimit/types.mts).
 

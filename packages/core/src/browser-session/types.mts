@@ -19,7 +19,7 @@
  * use, as three slots whose contracts are core's (#728): the login page a
  * browser that is not signed in is sent to (`loginEntry`), the one policy
  * for whether a browser's request may change state (`csrfGuard`, #710),
- * and the session cookie's attributes (`cookiePolicy`). The session package
+ * and the session cookie's attributes (`sessionCookiePolicy`). The session package
  * owns the configuration behind them; another package requires the slot
  * rather than reading that configuration or rebuilding the policy from it.
  *
@@ -147,6 +147,6 @@ declare module "@o3co/auth-provider-core" {
 		/** The one browser-origin / CSRF policy (#728, #710): provided by the session module. */
 		readonly csrfGuard?: CsrfGuard;
 		/** The session cookie's attributes (#728): provided by the module that owns the session cookie. */
-		readonly cookiePolicy?: SessionCookiePolicy;
+		readonly sessionCookiePolicy?: SessionCookiePolicy;
 	}
 }

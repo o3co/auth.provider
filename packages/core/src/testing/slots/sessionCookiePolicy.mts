@@ -15,13 +15,15 @@
  */
 
 /**
- * The contract suite of the `cookiePolicy` slot (#728) and its test double.
+ * The contract suite of the `sessionCookiePolicy` slot (#728) and its test
+ * double.
  * `sessionCookiePolicyContract(input)` holds the policy to what the session
  * configuration and the session store module hold the cookie to today: a
  * name that is an RFC 6265 token, `sameSite` of the three and `secure` a
- * boolean, a domain that is a non-empty string or absent, a `__Host-` name
- * only secure and host-only, a lifetime of whole milliseconds within the
- * one-year ceiling — and the whole frozen. `createTestSessionCookiePolicy`
+ * boolean, a domain that is a non-empty string or absent, what a browser
+ * keeps — a cookie sent cross-site (`sameSite: "none"`) and a `__Secure-`
+ * name only secure, a `__Host-` name only secure and host-only — a lifetime
+ * of whole milliseconds within the one-year ceiling, and the whole frozen. `createTestSessionCookiePolicy`
  * answers the fixture configuration's session cookie with any attribute
  * replaced; it checks nothing. Published on
  * `@o3co/auth-provider-core/testing`.
@@ -43,7 +45,7 @@ const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 const SAME_SITE: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
 
-/** The cases of the `cookiePolicy` contract over the policy `input` builds. */
+/** The cases of the `sessionCookiePolicy` contract over the policy `input` builds. */
 export function sessionCookiePolicyContract(
 	input: SessionCookiePolicyContractInput,
 ): readonly ContractCase[] {
@@ -81,10 +83,30 @@ export function sessionCookiePolicyContract(
 			},
 		},
 		{
-			name: "a __Host- name is secure and host-only",
+			name: "a cookie sent cross-site (sameSite none) is secure",
+			run: async () => {
+				const { sameSite, secure } = build();
+				if (sameSite !== "none") return;
+				assert.equal(
+					secure,
+					true,
+					"a SameSite=None cookie that is not secure is refused by the browser",
+				);
+			},
+		},
+		{
+			name: "a __Host- name is secure and host-only, and a __Secure- name secure",
 			run: async () => {
 				const { name, secure, domain } = build();
-				if (typeof name !== "string" || !name.startsWith("__Host-")) return;
+				if (typeof name !== "string") return;
+				if (name.startsWith("__Secure-")) {
+					assert.equal(
+						secure,
+						true,
+						"a __Secure- cookie that is not secure is dropped by the browser",
+					);
+				}
+				if (!name.startsWith("__Host-")) return;
 				assert.equal(secure, true, "a __Host- cookie that is not secure is dropped by the browser");
 				assert.equal(
 					domain,

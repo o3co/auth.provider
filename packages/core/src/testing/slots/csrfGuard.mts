@@ -65,7 +65,6 @@ import type {
 	SessionCookiePolicy,
 } from "../../browser-session/types.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
-import { createTestSessionCookiePolicy } from "./cookiePolicy.mjs";
 import {
 	CONTRACT_ORIGIN,
 	type FakeResponseRecord,
@@ -73,6 +72,7 @@ import {
 	fakeResponse,
 	runMiddleware,
 } from "./fake-http.mjs";
+import { createTestSessionCookiePolicy } from "./sessionCookiePolicy.mjs";
 
 export interface CsrfGuardContractInput {
 	/** A fresh guard for each case, serving `https://idp.contract.test`. */

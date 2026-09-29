@@ -83,14 +83,6 @@ export {
 	createRecordingMailSender,
 	type RecordingMailSender,
 } from "./recordingMailSender.mjs";
-// The slots through which modules share what one of them owns (#728): each
-// slot's contract suite, and a test double a consumer's tests fill the slot
-// with instead of importing the owner's package.
-export {
-	createTestSessionCookiePolicy,
-	type SessionCookiePolicyContractInput,
-	sessionCookiePolicyContract,
-} from "./slots/cookiePolicy.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,
@@ -132,4 +124,12 @@ export {
 	type TestRateLimiter,
 	type TestRateLimiterOptions,
 } from "./slots/rateLimiter.mjs";
+// The slots through which modules share what one of them owns (#728): each
+// slot's contract suite, and a test double a consumer's tests fill the slot
+// with instead of importing the owner's package.
+export {
+	createTestSessionCookiePolicy,
+	type SessionCookiePolicyContractInput,
+	sessionCookiePolicyContract,
+} from "./slots/sessionCookiePolicy.mjs";
 export type { TestInspect } from "./test-inspect.mjs";
