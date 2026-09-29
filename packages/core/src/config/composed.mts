@@ -51,8 +51,13 @@ import { type AppConfig, CoreConfigSchema, fullSectionsSchema } from "./applicat
  */
 export const TransitionalConfigSchema = CoreConfigSchema.extend(fullSectionsSchema.partial().shape);
 
-/** An object literal's kind of object: its prototype is `Object.prototype`, or it has none. */
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+/**
+ * An object literal's kind of object: its prototype is `Object.prototype`, or
+ * it has none. Configuration is merged, copied and written only through
+ * these; anything else — a list, a `URL`, an instance a transform built — is
+ * a value, taken whole.
+ */
+export function isPlainConfigObject(value: unknown): value is Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const prototype: unknown = Object.getPrototypeOf(value);
 	return prototype === Object.prototype || prototype === null;
@@ -68,11 +73,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 export function overlayConfig(under: unknown, over: unknown): unknown {
 	if (over === undefined) return under;
-	if (!isPlainObject(under) || !isPlainObject(over)) return over;
+	if (!isPlainConfigObject(under) || !isPlainConfigObject(over)) return over;
 	const merged: Record<string, unknown> = {};
-	for (const key of Object.keys(under)) define(merged, key, under[key]);
+	for (const key of Object.keys(under)) defineConfigKey(merged, key, under[key]);
 	for (const key of Object.keys(over)) {
-		define(
+		defineConfigKey(
 			merged,
 			key,
 			Object.hasOwn(under, key) ? overlayConfig(under[key], over[key]) : over[key],
@@ -81,8 +86,12 @@ export function overlayConfig(under: unknown, over: unknown): unknown {
 	return merged;
 }
 
-/** Defined, not assigned: a key named `__proto__` stays a key. */
-function define(target: Record<string, unknown>, key: string, value: unknown): void {
+/** `target[key] = value`, defined rather than assigned: a key named `__proto__` stays a key. */
+export function defineConfigKey(
+	target: Record<string, unknown>,
+	key: string,
+	value: unknown,
+): void {
 	Object.defineProperty(target, key, {
 		value,
 		enumerable: true,
@@ -92,7 +101,9 @@ function define(target: Record<string, unknown>, key: string, value: unknown): v
 }
 
 /** A Zod issue path as the operator writes it: its keys joined with dots. */
-const operatorPath = (path: readonly PropertyKey[]): string => path.map(String).join(".");
+export function operatorPath(path: readonly PropertyKey[]): string {
+	return path.map(String).join(".");
+}
 
 /**
  * What a composition root reads before it knows its modules (#728,

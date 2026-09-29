@@ -32,7 +32,13 @@
 
 import type { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
-import { overlayConfig, TransitionalConfigSchema } from "../config/composed.mjs";
+import {
+	defineConfigKey,
+	isPlainConfigObject,
+	operatorPath,
+	overlayConfig,
+	TransitionalConfigSchema,
+} from "../config/composed.mjs";
 import {
 	findRelocatedKeys,
 	type RelocatedPath,
@@ -1609,13 +1615,6 @@ function checkLifecycleClosure(modules: readonly NormalisedModule[]): void {
 // Per A2-β §5.1 step 13.
 // ---------------------------------------------------------------------------
 
-/** An object literal's kind of object: its prototype is `Object.prototype`, or it has none. */
-function isPlainConfigObject(value: unknown): value is Record<string, unknown> {
-	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-	const prototype: unknown = Object.getPrototypeOf(value);
-	return prototype === Object.prototype || prototype === null;
-}
-
 /**
  * Issues as the operator reads them: each path joined with dots, the whole
  * configuration named as such.
@@ -1722,11 +1721,6 @@ function sectionSegmentsOf(m: Module): readonly string[] {
 	return m.section?.at === undefined ? [m.name] : m.section.at.split(".");
 }
 
-/** A Zod issue path as the operator writes it: its keys joined with dots. */
-function operatorPath(path: readonly PropertyKey[]): string {
-	return path.map(String).join(".");
-}
-
 /**
  * A parsed section as every factory of its module receives it: plain data —
  * arrays, and objects whose prototype is `Object.prototype` or `null` —
@@ -1821,16 +1815,10 @@ function writeConfigPath(
 		target !== undefined && Object.getPrototypeOf(target) === null
 			? Object.setPrototypeOf({}, null)
 			: {};
-	const define = (name: string, defined: unknown) =>
-		// Defined, not assigned: a key named `__proto__` stays a key.
-		Object.defineProperty(copy, name, {
-			value: defined,
-			enumerable: true,
-			writable: true,
-			configurable: true,
-		});
-	if (target !== undefined) for (const name of Object.keys(target)) define(name, target[name]);
-	define(key, below.written);
+	if (target !== undefined) {
+		for (const name of Object.keys(target)) defineConfigKey(copy, name, target[name]);
+	}
+	defineConfigKey(copy, key, below.written);
 	return { written: copy };
 }
 
