@@ -128,4 +128,76 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 			expect(() => resolveSubjectRevocationHorizonMs(broken), JSON.stringify(broken)).toThrow();
 		}
 	});
+
+	describe("from the slots (#728)", () => {
+		const tokenSettings = (over: Record<string, unknown> = {}) =>
+			({
+				accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 7_200 },
+				refreshTokenExpiresIn: 3_600,
+				...over,
+			}) as never;
+		const sessionCookie = (maxAgeMs: unknown) => ({ maxAgeMs }) as never;
+
+		it("reads each lifetime from the slot that carries it, in place of the configuration's", () => {
+			// The configuration says a day of refresh token; the slot says an
+			// hour, and two hours of access token. The slot is what was minted.
+			const horizon = resolveSubjectRevocationHorizonMs(config(), {
+				tokenSettings: tokenSettings(),
+				sessionCookie: sessionCookie(60_000),
+			});
+			expect(horizon).toBeGreaterThan(7_200_000);
+			expect(horizon).toBeLessThan(86_400_000);
+		});
+
+		it("holds a slot's lifetime to the rule the configuration's is held to, naming the slot", () => {
+			// A slot built by hand meets no schema either. Read through `??`, a
+			// zero or a string went straight into the arithmetic and sized the
+			// boundary from nothing — or from NaN, which retains nothing.
+			const cases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(0) }],
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(-1) }],
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(Number.NaN) }],
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie("12h") }],
+				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(undefined) }],
+				[
+					"oauthTokenSettings.refreshTokenExpiresIn",
+					{ tokenSettings: tokenSettings({ refreshTokenExpiresIn: 0 }) },
+				],
+				[
+					"oauthTokenSettings.refreshTokenExpiresIn",
+					{ tokenSettings: tokenSettings({ refreshTokenExpiresIn: "soon" }) },
+				],
+				[
+					"oauthTokenSettings.refreshTokenExpiresIn",
+					{ tokenSettings: tokenSettings({ refreshTokenExpiresIn: undefined }) },
+				],
+				[
+					"oauthTokenSettings.accessTokenLifetime.maxExpiresIn",
+					{
+						tokenSettings: tokenSettings({
+							accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 0 },
+						}),
+					},
+				],
+				[
+					"oauthTokenSettings.accessTokenLifetime.maxExpiresIn",
+					{
+						tokenSettings: tokenSettings({
+							accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 1.5 },
+						}),
+					},
+				],
+				[
+					"oauthTokenSettings.accessTokenLifetime.maxExpiresIn",
+					{ tokenSettings: tokenSettings({ accessTokenLifetime: undefined }) },
+				],
+			];
+			for (const [path, from] of cases) {
+				const call = () => resolveSubjectRevocationHorizonMs(config(), from);
+				const label = `${path} from ${JSON.stringify(from)}`;
+				expect(call, label).toThrow(RangeError);
+				expect(call, label).toThrow(path);
+			}
+		});
+	});
 });
