@@ -15,17 +15,10 @@
  */
 
 /**
- * Tests for POST /oauth/webauthn/registration/verify endpoint (spec §2.4).
- *
- * Uses supertest + express for HTTP-level testing. Memory adapters from
- * @o3co/auth-provider-core are used for ChallengeStore, ReplaySeenSet, and
- * WebAuthnCredentialStore — no hand-rolled stubs for adapters.
- *
- * verifyWebAuthnAttestation is mocked via vi.mock (same strategy as T25
- * internal.verification.test.mts) to exercise the endpoint's error-mapping
- * logic without requiring real WebAuthn ceremony fixtures.
- *
- * Cross-refs: Plan T28 / spec §2.4 / S7 multi-origin
+ * Tests for the POST /oauth/webauthn/registration/verify endpoint, over
+ * supertest + express with core's memory adapters for ChallengeStore,
+ * ReplaySeenSet and WebAuthnCredentialStore. verifyWebAuthnAttestation is
+ * mocked, so the endpoint's error mapping runs without real ceremony fixtures.
  */
 
 import {
@@ -380,7 +373,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 10: Duplicate credential ID — different user (Codex Round 4 P2)
+	// Test 10: Duplicate credential ID — different user
 	// -------------------------------------------------------------------------
 	it("400 credential_id_conflict when credential ID already registered to a different user (Codex Round 4 P2)", async () => {
 		// A colliding credential ID — distinct from STUB_MATERIAL.credentialId to
@@ -432,10 +425,10 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 11: Duplicate credential ID — same user re-registering (Codex Round 4 P2)
+	// Test 11: Duplicate credential ID — same user re-registering
 	// -------------------------------------------------------------------------
 	it("400 credential_id_conflict when same user attempts to re-register the same credential ID (no silent re-upsert)", async () => {
-		// Wave 1 strict policy: no silent re-upsert, not even same-user.
+		// Strict policy: no silent re-upsert, not even same-user.
 		// Re-roll requires explicit deletion (DELETE /credentials/{id}) first.
 		const SAME_USER_CRED_ID = "U0FNRV9VU0VSX0NSRUQ";
 
@@ -485,7 +478,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 12: Non-duplicate adapter error is an outage (Round 6 M3 regression guard)
+	// Test 12: Non-duplicate adapter error is an outage
 	// -------------------------------------------------------------------------
 	it("503 (not silent 200) when registerCredential throws a non-duplicate adapter error", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
@@ -495,8 +488,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 		// Simulate a transient backing-store failure (Redis ECONNRESET, SQL timeout, etc.)
 		// The route MUST NOT swallow this: it is the store's outage, answered 503
-		// (routes.storeOutage.test.mts pins the log line). A future refactor that
-		// catches-all-and-200s is the regression this test guards.
+		// (routes.storeOutage.test.mts pins the log line).
 		vi.spyOn(deps.credentialStore, "registerCredential").mockRejectedValueOnce(
 			new Error("transient backing store failure"),
 		);

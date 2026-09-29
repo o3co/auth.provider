@@ -16,25 +16,16 @@
 
 /**
  * The RFC 8707 `resource` the WebAuthn grant hands `grantPolicy`, on the real
- * path: nothing between the assertion and the policy is mocked.
+ * path: a software authenticator signs over a challenge from the module's own
+ * options route, `@simplewebauthn/server` verifies it, and the grant handler is
+ * the one `createApp` registered from `webauthnModule`. Only the policy is a spy.
  *
- * A software authenticator (a P-256 key made here) signs an assertion over a
- * challenge that the module's own `POST /oauth/webauthn/authentication/options`
- * issued; `@simplewebauthn/server` verifies it; the grant handler is the one
- * `createApp` registered from `webauthnModule`, with the challenge ceremony,
- * the credential store and the policy slot wired the way a composition wires
- * them. Only the policy is a spy, because what it receives is the assertion.
- *
- * The request is the JSON body `/oauth/token` hands a grant. A passkey request
- * is always JSON: `assertion` is an object, and the token route reads forms
- * with `extended: false`, which cannot carry one. A repeated `resource` with a
- * blank entry therefore arrives as `["", "https://rs.example"]` — the same
- * array `resource=&resource=https://rs.example` becomes on a form.
- *
- * The reading of that array is core's `extractResourceParam`, the one the
- * oauth grants and `/authorize` use: the empty entries are dropped, and an
- * all-empty parameter means none was requested. This grant used to carry its
- * own copy, which kept them and forwarded a blank resource to the policy.
+ * A passkey request is always JSON (`assertion` is an object, and the token
+ * route reads forms with `extended: false`), so a repeated `resource` with a
+ * blank entry arrives as `["", "https://rs.example"]`, the same array that
+ * `resource=&resource=https://rs.example` becomes on a form. The grant reads it
+ * with core's `extractResourceParam`, as the oauth grants and `/authorize` do:
+ * empty entries are dropped, and an all-empty parameter means none was requested.
  */
 
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
@@ -70,14 +61,11 @@ const USER_ID = "user-resource-indicator";
 // ---------------------------------------------------------------------------
 
 /**
- * A platform authenticator reduced to what an assertion needs: one ES256 key,
- * its credential id, and a sign counter.
- *
- * The public key is handed to the store as the COSE_Key an attestation would
- * have carried (RFC 9053 §7.1.1, EC2): `{1: 2, 3: -7, -1: 1, -2: x, -3: y}`,
- * CBOR-encoded by hand because it is five fixed entries. The signature is
- * ECDSA over `authenticatorData ‖ SHA-256(clientDataJSON)` (WebAuthn §6.3.3),
- * in the DER form an authenticator returns.
+ * A platform authenticator reduced to one ES256 key, its credential id, and a
+ * sign counter. The public key is the COSE_Key an attestation would have carried
+ * (RFC 9053 §7.1.1, EC2: `{1: 2, 3: -7, -1: 1, -2: x, -3: y}`), CBOR-encoded by
+ * hand. The signature is DER ECDSA over
+ * `authenticatorData ‖ SHA-256(clientDataJSON)` (WebAuthn §6.3.3).
  */
 function createSoftwareAuthenticator() {
 	const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -161,7 +149,7 @@ async function boot(
 	options: { readonly flagIn?: "configuration" | "slot" | "configuration-over-slot-off" } = {},
 ) {
 	// `slot`: the configuration leaves resource indicators off, and the
-	// `oauthTokenSettings` the composition holds turns them on (#728).
+	// `oauthTokenSettings` the composition holds turns them on.
 	// `configuration-over-slot-off`: the other way round — the configuration
 	// turns them on, and the slot the composition holds leaves them off.
 	const inSlot = options.flagIn === "slot";

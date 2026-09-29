@@ -15,17 +15,13 @@
  */
 
 /**
- * Issue #281 — `POST /oauth/webauthn/authentication/options` is guarded by a
- * real rate limiter.
+ * `POST /oauth/webauthn/authentication/options` is unauthenticated and drives a
+ * challenge-store write per request, so it is guarded by a real rate limiter.
  *
- * Before this, the route carried comments claiming rate limiting was "composed
- * externally at module-wiring time" and nothing composed it: the endpoint was
- * unauthenticated, unthrottled, and drove a challenge-store write per request.
- *
- * These tests exercise the guard through the boot planner (`createApp` →
- * `handle.router`) rather than by calling the route factory directly, because
- * the defect was in the WIRING: a handler-level test passes whether or not the
- * module mounts anything in front of it.
+ * The guard is exercised through the boot planner (`createApp` →
+ * `handle.router`), not the route factory: what is under test is the WIRING,
+ * and a handler-level test passes whether or not the module mounts anything in
+ * front of the handler.
  */
 
 import {
@@ -147,8 +143,8 @@ async function bootApp(
 	};
 	// With a deployment mode declared, the memory stores this fixture wires
 	// stand in for shared ones: the case under test is the route's own
-	// fallback (#474), not the stores the replica-safety guard already refuses
-	// by manifest (#455). The stubs keep the providers and drop the declaration
+	// fallback, not the stores the replica-safety guard already refuses by
+	// manifest. The stubs keep the providers and drop the declaration
 	// — and the core name the guard would still recognise.
 	const storeModules: readonly Module[] = [
 		memoryChallengeStoreModule,
@@ -252,9 +248,8 @@ describe("webauthn authentication/options rate limit — the configured budget o
 	 * The composition a scaled deployment has: the bundled limiter module in
 	 * the `rateLimiter` slot, its own `limits` silent about this route, and the
 	 * route's budget where the package documents it,
-	 * `webauthn.rateLimit.authenticationOptions`. The per-process fallback
-	 * took that budget; the shared limiter was never told it, and served its
-	 * `defaultLimit` (60 per 60 s) on an unauthenticated route.
+	 * `webauthn.rateLimit.authenticationOptions`. The shared limiter must apply
+	 * that budget, not its `defaultLimit` (60 per 60 s).
 	 */
 	const composed = (explicit: Record<string, unknown> = {}) => ({
 		webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
@@ -314,9 +309,9 @@ describe("webauthn authentication/options rate limit — the slot and the seeded
 	 * config's `webauthn.rateLimit.authenticationOptions`; the route's
 	 * per-process fallback and its headers read the `webauthnConfig` slot. A
 	 * composition that hard-codes the slot (`webauthnConfigSchema.parse({…})`)
-	 * without the config key had the route run on the limiter's default, and
-	 * one whose key differs from the slot had the limiter apply the key. Boot
-	 * says so, once, naming both values and the key to set.
+	 * without the config key runs the route on the limiter's default, and one
+	 * whose key differs from the slot has the limiter apply the key. Boot warns
+	 * once, naming both values and the key to set.
 	 */
 	const EVENT = "webauthn_authentication_options_budget_mismatch";
 	const sharedLimiter = () =>
@@ -511,11 +506,9 @@ describe("webauthn authentication/options rate limit (#281) — limiter outage",
 });
 
 // ---------------------------------------------------------------------------
-// #474 — the per-process fallback sat outside the replica guard. Under
-// `deployment.mode = "multi"` a composition wiring no shared `rateLimiter` got
-// the warning and a limiter whose buckets were per replica — the flood and
-// enumeration budget on this route multiplied by the replica count. Under
-// `"multi"` boot refuses instead; `"single"` is silent; unset keeps the warning.
+// The per-process fallback keeps its buckets per replica, which multiplies this
+// route's flood and enumeration budget by the replica count. With no shared
+// `rateLimiter`: `"multi"` refuses to boot, `"single"` is silent, unset warns.
 // ---------------------------------------------------------------------------
 
 describe("webauthn authentication/options rate limit (#474) — fallback under deployment.mode", () => {

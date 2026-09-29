@@ -16,19 +16,15 @@
 
 /**
  * The three ceremony routes answer a store that cannot answer as an outage.
- *
- * Every store call they make — the credential list behind `excludeCredentials`
+ * Every store call they make (the credential list behind `excludeCredentials`
  * and `allowCredentials`, the challenge write, the ceremony's consume, the
- * credential insert — used to reach the terminal handler unwrapped: a `500`
- * logged as an unhandled error, never as the outage it was. Each is now `503
- * temporarily_unavailable`, logged once at error level as
- * `webauthn_ceremony_store_unavailable` with the route's `site`, the `store`,
- * the `step` and the error's projection. A duplicate credential is still the
- * client's `400 credential_id_conflict`.
+ * credential insert) that throws is `503 temporarily_unavailable`, logged once
+ * at error level as `webauthn_ceremony_store_unavailable` with the route's
+ * `site`, the `store`, the `step` and the error's projection. A duplicate
+ * credential is still the client's `400 credential_id_conflict`.
  *
- * Booted through `createApp`, as a composition is: `webauthnModule`, core's
- * memory stores and default ceremony, and the deployment's logger as the
- * `logger` component — with one store method replaced by one that throws.
+ * Booted through `createApp`, as a composition is, with one store method
+ * replaced by one that throws.
  */
 
 import {
