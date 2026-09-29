@@ -61,7 +61,14 @@ export interface RequirementContractInput {
 	readonly key: string;
 	/** Whether the requirement under test is a fixture: a fixture is never named `mfa`. */
 	readonly fixture: boolean;
-	/** The issuer its page is held to; the page's shape alone when absent. */
+	/**
+	 * The issuer its page is registered on: held to the issuer's origin and
+	 * resolved on it, as boot registers it on `oauth.jwt.issuer`. When absent,
+	 * an absolute page is held to its shape alone and resolved on itself, and
+	 * a path page is refused — registration has nothing to resolve it on — so
+	 * every case that registers the requirement fails: pass the issuer for a
+	 * requirement whose page is a path.
+	 */
 	readonly issuer?: string;
 	/** A fresh requirement for each case, so no case sees another's state. */
 	readonly build: () => SessionRequirement;

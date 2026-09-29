@@ -551,7 +551,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		expect("add" in sealed).toBe(false);
 	});
 
-	it("holds the page to the issuer given, and to its shape alone when none is", () => {
+	it("holds the page to the issuer given, and an absolute page to its shape alone — resolved on itself — when none is", () => {
 		const paged = requirement("x", {
 			reach: new Set(["otp"]),
 			stepUpPage: { url: "https://other.test/x", params: {} },

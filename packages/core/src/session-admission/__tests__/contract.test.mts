@@ -273,7 +273,7 @@ describe("sessionRequirementContract — the paths a fixture's shape takes", () 
 		for (const { name, run } of cases) await expect(run(), name).resolves.toBeUndefined();
 	});
 
-	it("passes every case with no issuer given, the page held to its shape alone", async () => {
+	it("passes every case with no issuer given, for a requirement that registers no step-up page", async () => {
 		for (const { name, run } of sessionRequirementContract(input({ issuer: undefined }))) {
 			await expect(run(), name).resolves.toBeUndefined();
 		}
