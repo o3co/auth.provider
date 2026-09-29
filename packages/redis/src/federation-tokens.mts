@@ -91,9 +91,9 @@ export interface RedisFederationTokenStoreOptions {
 	 */
 	environment?: string;
 	/**
-	 * `deployment.mode` from the application config. `"multi"` refuses
-	 * `allow-plaintext` in every environment; the module reads it off its
-	 * config, a direct caller passes it here.
+	 * The replica count, as core's `deploymentMode` slot holds it. `"multi"`
+	 * refuses `allow-plaintext` in every environment; the module passes the
+	 * slot's value, a direct caller passes it here.
 	 */
 	deploymentMode?: string;
 	/**
@@ -540,17 +540,18 @@ export interface RedisFederationTokenStoreModuleOptions {
  * `encryptionKey` (canonical base64), which operators set through
  * `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
  *
- * The `allow-plaintext` guard reads `deployment.mode` off the config and the
- * selected environment off `options`, since only the composition root knows
- * how it chose its config file. Its notice goes to the optional `logger` slot
- * (`consoleLogger` when empty).
+ * The `allow-plaintext` guard reads the replica count from the
+ * `deploymentMode` slot core fills — required, since `multi` refuses
+ * plaintext — and the selected environment off `options`, since only the
+ * composition root knows how it chose its config file. Its notice goes to the
+ * optional `logger` slot (`consoleLogger` when empty).
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},
 ) {
 	return defineModule({
 		name: "redis-federation-token-store",
-		requires: ["federationTokenStoreClient", "config"] as const,
+		requires: ["federationTokenStoreClient", "config", "deploymentMode"] as const,
 		optional: ["logger"] as const,
 		configSchema: redisFederationTokenStoreConfigSchema,
 		provides: {
@@ -563,7 +564,6 @@ export function redisFederationTokenStoreModuleFor(
 						encryptionKey?: string;
 						scanFallback: boolean;
 					};
-					deployment?: { mode?: string };
 				};
 				const cfg = config.redisFederationTokenStore;
 				return redisFederationTokenStoreBuilder(
@@ -574,7 +574,7 @@ export function redisFederationTokenStoreModuleFor(
 						ttl: cfg.ttl,
 						scanFallback: cfg.scanFallback,
 						environment: options.environment,
-						deploymentMode: config.deployment?.mode,
+						deploymentMode: deps.deploymentMode,
 					},
 					deps.logger !== undefined ? { logger: deps.logger } : {},
 				);
@@ -585,7 +585,7 @@ export function redisFederationTokenStoreModuleFor(
 
 /**
  * The module with no environment named: the plaintext guard reads `NODE_ENV`
- * and `deployment.mode`. A composition root that selects its config by another
- * name builds its own with {@link redisFederationTokenStoreModuleFor}.
+ * and the `deploymentMode` slot. A composition root that selects its config by
+ * another name builds its own with {@link redisFederationTokenStoreModuleFor}.
  */
 export const redisFederationTokenStoreModule = redisFederationTokenStoreModuleFor();
