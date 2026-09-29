@@ -41,6 +41,8 @@ export {
 } from "./replica-safety.mjs";
 export type {
 	AppHandle,
+	AuthoritativeComponentOverriddenDetails,
+	AuthoritativeWithoutProvidesDetails,
 	BootErrorDetails,
 	BootErrorReason,
 	BootStage,

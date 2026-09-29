@@ -99,7 +99,12 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
 export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
 ): Promise<AppHandle> {
-	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = options;
+	const { modules, contributionKinds } = options;
+	// Each host map is read once, here: stage 1 checks what later stages use,
+	// so a map that answers differently on a later read (a Proxy, a getter)
+	// cannot have one answer checked and another materialised.
+	const bootstrapComponents = snapshotHostMap(options.bootstrapComponents);
+	const overrideComponents = snapshotHostMap(options.overrideComponents);
 
 	// The session-admission ADR's D3: a host collector for `sessionRequirements`
 	// or `mfaFactors` is refused before anything is merged or validated.
@@ -184,6 +189,34 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		);
 		throw err;
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Internal: snapshotHostMap
+// ---------------------------------------------------------------------------
+
+/**
+ * A plain copy of a host map's own enumerable keys and their values, each
+ * read once. Every key is defined, not assigned, so an own `__proto__` stays a
+ * key (stage 1 refuses it, naming the map) rather than becoming the copy's
+ * prototype — and its value is not read, so an accessor there never runs. Anything that is not an object is handed on as it is, for stage
+ * 1 to judge.
+ */
+function snapshotHostMap<T>(map: T): T {
+	if (map === null || typeof map !== "object") return map;
+	const copy: Record<string, unknown> = {};
+	const source = map as Record<string, unknown>;
+	for (const key of Object.keys(source)) {
+		Object.defineProperty(copy, key, {
+			// Stage 1 refuses an own `__proto__` whatever it holds, so its value
+			// is never read: an accessor there does not run.
+			value: key === "__proto__" ? undefined : source[key],
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+	}
+	return copy as T;
 }
 
 // ---------------------------------------------------------------------------
