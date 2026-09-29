@@ -147,6 +147,12 @@ module `sessionCookiePolicy`.
 `csrfTokenSigner`, `oauthTokenSettings`, `httpSettings` and `deploymentMode` are
 declared ahead of their providers, and their readers still read the
 configuration.
+A settings slot is authoritative for its owner: the owner names it in
+`authoritative`, and while the owner is loaded no composition may substitute
+it — boot refuses an `overrideComponents` entry for it
+(`authoritative-component-overridden`), since the owner's own code reads its
+section and a second source would split what its readers see; a composition
+without the owner fills the slot itself.
 
 | Slot | Type | Wiring | Declared in | Purpose |
 | --- | --- | --- | --- | --- |

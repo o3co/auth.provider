@@ -54,7 +54,7 @@ A package changes what the provider does in one of four ways, and each has its o
 - An adapter's optional extra beyond its port: a capability.
 - A pure predicate with one home: a shared helper (below).
 
-The adapter axis is "one implementation per composition", not only a port's: a key one module owns and others read is a slot too — a settings slot (`oauthTokenSettings`, `httpSettings`, `sessionCookiePolicy`, `deploymentMode`), filled once by its owner and read through its contract in core ([#728](https://github.com/o3co/auth.provider/issues/728)).
+The adapter axis is "one implementation per composition", not only a port's: a key one module owns and others read is a slot too — a settings slot (`oauthTokenSettings`, `httpSettings`, `sessionCookiePolicy`, `deploymentMode`), filled once by its owner, which names it `authoritative` so no composition substitutes it while the owner is loaded, and read through its contract in core ([#728](https://github.com/o3co/auth.provider/issues/728)).
 
 Two more things can look like an axis and are not one:
 
