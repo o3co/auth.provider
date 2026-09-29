@@ -444,7 +444,13 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		expect(Object.isFrozen(ADMISSION_INFRASTRUCTURE_STORES)).toBe(true);
 		for (const name of ADMISSION_INFRASTRUCTURE_STORES) {
 			expect(() => resolverForTests([requirement(name)]), name).toThrow(RangeError);
-			expect(() => resolverForTests([requirement(name)]), name).toThrow(/outage/);
+			// Worded by the two names, not by a constant core does not export.
+			expect(() => resolverForTests([requirement(name)]), name).toThrow(
+				/the name is one admission gives an outage of its own stores \(user_session, revocation_boundary\)/,
+			);
+			expect(() => resolverForTests([requirement(name)]), name).not.toThrow(
+				/ADMISSION_INFRASTRUCTURE_STORES/,
+			);
 		}
 		// A name that only shares a prefix is another name.
 		expect(
