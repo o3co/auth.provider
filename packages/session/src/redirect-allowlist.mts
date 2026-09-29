@@ -19,106 +19,35 @@ import type { FederationResult } from "./federations/types.mjs";
 
 /**
  * The one place a consumer-supplied `redirect_to` is checked against the
- * deployment's policy.
+ * deployment's policy. Both entry points (the federation start and
+ * `POST /session/login`) build their validator here, so the rule cannot hold
+ * on one and not the other.
  *
- * ## Why an allowlist, and why it fails closed
+ * Fail closed: an absent allowlist is the empty allowlist, and no
+ * `redirect_to` is accepted. There is no "any http(s) URL" fallback — that
+ * is the open redirect this module exists to prevent.
  *
- * The pre-#278 rule was "any absolute http(s) URL, narrowed to `sessionDomain`
- * **if one is configured**". `sessionDomain` is optional and defaults to
- * absent, so the shipped default admitted every http(s) URL on the internet.
- * `/session/oauth/federation/:name?redirect_to=…` therefore let anyone hand a
- * victim a link that authenticated at the real IdP and then landed the browser
- * on an attacker's page — the textbook open redirect, and here with a freshly
- * minted session behind it.
+ * Exact match on the normalized form (`new URL(x).href`): scheme and host
+ * case, the default port, `..` and percent-encoding are insignificant; path,
+ * query, fragment and port are significant. No prefix, wildcard or subdomain
+ * matching — every such relaxation has turned out to be an open redirect. A
+ * target with dynamic query parameters must become a fixed path, with the
+ * variable part carried in the session.
  *
- * So the allowlist is the authority, and an **absent allowlist is the empty
- * allowlist**: no `redirect_to` value is accepted at all. Nothing falls back to
- * "any http(s) URL", because a fallback is exactly how the permissive branch
- * survived being written down as a rule. A deployment that never accepts
- * `redirect_to` needs no configuration and keeps working; one that does must
- * say which targets it means.
+ * `http://` is accepted only for loopback hosts (core's
+ * `isLoopbackHostname`, as `checkSecureEndpoint` and `checkCanonicalIssuer`
+ * use): native clients (RFC 8252 §7.3) and local development cannot get
+ * certificates, and loopback traffic never leaves the machine. The carve-out
+ * is about the scheme only; the port still matches exactly.
  *
- * ## Why this lives at the package root rather than under `federations/`
- *
- * #278 fixed the federation entry point. `POST /session/login` kept the
- * pre-#278 rule verbatim and went on storing any absolute http(s) URL under
- * `req.session.redirectTo` (#405) — the same vulnerability, one route over,
- * left behind because the rule had been written down in a place the login
- * route had no reason to import from. Both routes now build their policy from
- * this module, so the rule cannot hold on one entry point and not the other.
- * `federations/redirect-policy.mjs` re-exports the public names unchanged; it
- * adds `resolveCallbackRedirect`, which is federation-specific.
- *
- * ## Exact match
- *
- * A candidate matches when its **normalized** form equals an entry's. The
- * normalization is `new URL(x).href`, so scheme and host case, the default
- * port, `..` segments and percent-encoding are insignificant, and everything
- * else — path, query, fragment, port — is significant. There is no prefix,
- * suffix, wildcard or subdomain matching: `https://app.example.com/dashboard`
- * does not admit `…/dashboard?next=//evil.com`, and an entry does not admit
- * its own siblings. That is deliberately strict, because every relaxation of
- * redirect matching that has ever shipped anywhere has turned out to be an
- * open redirect in a costume.
- *
- * The consequence for operators is that a target carrying dynamic query
- * parameters cannot be allowlisted as a family; it has to become a fixed path
- * with the variable part carried in the session instead.
- *
- * ## The loopback carve-out
- *
- * `http://` is accepted for **loopback hosts only** — `localhost`, anything in
- * `127.0.0.0/8`, and `[::1]` — matching `checkSecureEndpoint`
- * (`@o3co/auth-provider-foundation`, #285) and `checkCanonicalIssuer`
- * (`@o3co/auth-provider-core`). Native clients redirect to a loopback listener
- * (RFC 8252 §7.3) and local development serves the consumer app over plain
- * HTTP; neither can obtain a certificate, and traffic to a loopback address
- * never leaves the machine, so there is nothing on that path to eavesdrop on.
- * Any other host must use `https://` — including a private-range address or a
- * container-network service name, which do cross a network the deployment does
- * not control end to end.
- *
- * The carve-out is about the **scheme**, not the matching: a loopback entry is
- * still matched exactly, port included. RFC 8252 §7.3's port-agnostic loopback
- * comparison is deliberately **not** implemented — `redirect_to` here is the
- * consumer app's landing page, whose port a development or native setup knows
- * in advance, so a port wildcard would widen the surface to buy nothing.
- *
- * ## The cookie domain
- *
- * The session cookie domain (`session.domain`, surfaced to a federation config
- * as `sessionDomain`) was, before #278, the only constraint on a redirect
- * target. It survives as a **narrowing** check on the allowlist itself,
- * applied when the policy is constructed: an entry outside the configured
- * domain is refused at boot rather than sitting in the config looking
- * effective. Dropping it instead would have silently widened what existing
- * deployments accept, which a security fix must not do. Loopback entries are
- * exempt, because a native client's `http://127.0.0.1:PORT` can never be
- * inside a cookie domain and is precisely the case the carve-out exists for —
- * applying the domain check to it would make the carve-out unreachable for
- * every deployment that sets a cookie domain.
- *
- * An operator who genuinely needs a cross-domain redirect target unsets the
- * cookie domain, which is then an explicit decision rather than a silent one.
- *
- * ## Where the loopback rule lives
- *
- * `isLoopbackHostname` is imported from `@o3co/auth-provider-core`
- * (`net/loopback`, #364) — the same definition `checkSecureEndpoint`
- * (`@o3co/auth-provider-foundation`, #285) runs on — and re-exported here
- * unchanged, because this package's public API surfaces it. An earlier
- * revision kept a local copy instead (on the correct observation that
- * `session` must not grow a dependency edge to `foundation`), and the copies
- * drifted within one commit; `core`, which both packages already depend on,
- * is the vocabulary home #292 established. The rejection vocabulary below
- * still follows `checkSecureEndpoint`'s (`<reason>` token plus an
- * operator-facing sentence that states the actual rule) rather than
- * inventing a dialect.
+ * The session cookie domain narrows the allowlist at construction: a
+ * non-loopback entry outside it is refused at boot rather than sitting in the
+ * config looking effective. A cross-domain target requires unsetting the
+ * cookie domain, an explicit decision.
  */
 
-// Re-exported unchanged: `@o3co/auth-provider-session`'s index surfaces the
-// predicate as public API. The definition lives in core (#364) — see the
-// module comment's "Where the loopback rule lives".
+// Re-exported unchanged: this package's index surfaces it as public API; the
+// definition is core's.
 export { isLoopbackHostname };
 
 /** The longest `redirect_to` accepted, checked before the value is parsed. */
@@ -155,22 +84,11 @@ export type RedirectRejection =
 	| "not-allowlisted";
 
 /**
- * Operator-facing explanation for each rejection reason.
- *
- * Every message states the **actual** rule rather than a simplification of it —
- * in particular both scheme messages name the loopback carve-out, because
- * "must use https" would contradict a policy that does accept `http://` on
- * loopback and send someone hunting for a certificate they do not need.
- *
- * `allowlistConfigKey` is the config path the reader has to edit. It is a
- * parameter because the same rule now guards two entry points configured in
- * two places (#405): pointing a login-flow operator at a federation key would
- * send them to edit a section that has no effect on the request they are
- * debugging.
- *
- * The text is written in printable ASCII without `"` and `\`: a refused
- * request gets it as its `error_description`, which RFC 6749 Appendix A.8
- * limits to those characters.
+ * Operator-facing explanation for each rejection reason. Each states the
+ * actual rule (the scheme messages name the loopback carve-out).
+ * `allowlistConfigKey` names the config path to edit, since the two entry
+ * points are configured in different places. Printable ASCII without `"` or
+ * `\`: it becomes an `error_description` (RFC 6749 Appendix A.8).
  */
 export function describeRedirectRejection(
 	reason: RedirectRejection,
@@ -264,18 +182,12 @@ function isInsideSessionDomain(hostname: string, sessionDomain: string): boolean
 /**
  * What a redirect allowlist is built from.
  *
- *   - `redirectAllowlist`: the exact URLs a `redirect_to` may name. Absent or
- *     empty means *nothing* is accepted — see the module comment.
- *   - `sessionDomain`: the session cookie domain; every non-loopback allowlist
- *     entry must be inside it, checked when the policy is built. `null` and
- *     `""` mean the same thing as absent — `session.domain` is nullable in the
- *     application config and optional in a federation config, and a policy that
- *     read those two spellings differently would apply the narrowing check to
- *     one caller and not the other.
- *   - `allowlistConfigKey`: the config path named back to an operator on a
- *     refusal (e.g. `session.redirectAllowlist`).
- *   - `factoryName`: prefix for the boot-time entry-rejection message, so the
- *     line names the builder that refused to start.
+ *   - `redirectAllowlist`: the exact URLs a `redirect_to` may name; absent or
+ *     empty accepts nothing.
+ *   - `sessionDomain`: every non-loopback entry must be inside it. `null` and
+ *     `""` mean absent, so both config spellings behave alike.
+ *   - `allowlistConfigKey`: the config path named back on a refusal.
+ *   - `factoryName`: prefix for the boot-time entry-rejection message.
  */
 export interface RedirectAllowlistOptions {
 	readonly redirectAllowlist?: readonly string[] | undefined;
@@ -295,17 +207,10 @@ export interface RedirectAllowlistValidator {
 }
 
 /**
- * Builds the set of normalized allowlist entries, refusing any entry that
- * could never legitimately match.
- *
- * Entry validation is eager, and it throws rather than dropping the entry:
- * an operator who lists a target and sees redirects refused anyway has no way
- * to tell a typo from a policy they misunderstood, and a silently dead
- * allowlist entry is how a deployment ends up believing it is configured.
- *
- * The offending entry is identified by **index, not value**: an entry may
- * embed credentials (that is one of the things being refused) and this message
- * lands in boot logs. The index plus the reason is enough to find it.
+ * Normalizes the allowlist, throwing on any entry that could never
+ * legitimately match: a silently dead entry leaves a deployment believing it
+ * is configured. Entries are named by index, not value, since an entry may
+ * embed credentials and the message lands in boot logs.
  */
 function normalizeAllowlist(
 	entries: readonly string[] | undefined,

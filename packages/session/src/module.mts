@@ -45,18 +45,9 @@ const sessionConfigSchema = fullSectionsSchema.pick({
 });
 
 /**
- * Boot-time projection of `config.federations` to a `name → callbackURL` map.
- *
- * Per A2-γ §3.4 + §3.5: the v0.4.x sessionModule.init() body derived this Map
- * from the same flat / nested config shape that `extractFederationSection`
- * normalizes. After the const-Module conversion the derivation moves into the
- * federation-routes contribution lambda so the construction is colocated with
- * the consumer.
- *
- * Throws when an enabled federation is missing `callbackURL` — this is the
- * same fail-fast invariant the v0.4.x module enforced. Surfacing the error
- * at boot (not at request time) is intentional: a missing callback URL is a
- * deployment misconfiguration, not a per-request condition.
+ * Boot-time projection of `config.federations` to a `name → callbackURL`
+ * map. Throws when an enabled federation has no `callbackURL`: a deployment
+ * misconfiguration fails at boot, not per request.
  */
 function deriveProviderCallbackUrls(
 	federations: Record<string, unknown>,
@@ -75,21 +66,14 @@ function deriveProviderCallbackUrls(
 }
 
 /**
- * The session's CSRF guard, as the session routes build theirs: the signed
- * double-submit token of `createCsrfProtectionFromConfig` over `session.*` —
- * the key derived from `session.secret`, the cookie named
- * `<session.name>.csrf` with the session cookie's attributes — and
- * `session.csrf.trustedOrigins`.
- *
- * The `csrfGuard` slot's value. The session routes build their own
- * `CsrfProtection` (`routes/Session.mts`); it accepts this guard's tokens,
- * as the token is signed, not stored.
- *
- * The key is to reach the guard through the session store's
- * `csrfTokenSigner` slot before the session store's configuration becomes a
- * section of its own (#728) — here and in the session routes, together;
- * until then `session` is one section, read by both modules, and nothing
- * changes owner.
+ * The `csrfGuard` slot's value: the signed double-submit token of
+ * `createCsrfProtectionFromConfig` over `session.*` (key from
+ * `session.secret`, cookie `<session.name>.csrf`) plus
+ * `session.csrf.trustedOrigins`. The session routes build their own
+ * `CsrfProtection`, which accepts this guard's tokens because the token is
+ * signed, not stored. Should the session store's configuration become a
+ * section of its own, move the key behind its `csrfTokenSigner` slot here and
+ * in the session routes together.
  */
 const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
 	const session = config.session as unknown as SessionCsrfConfigSlice;
@@ -101,56 +85,25 @@ const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
 };
 
 /**
- * Const Module for the session and federation route surface.
+ * The session and federation route surface, as a pre-built `Module` (pass it
+ * to the manifest directly; its dependencies come from sibling modules).
  *
- * Per A2-γ §3.4 + Amendment 5 (§1.1.5) + Amendment 6 (§1.1.6).
- *
- * Replaces the v0.4.x `sessionModule(opts: SessionModuleOptions): Module`
- * factory. Caller surface:
- *
- *   import { sessionModule } from "@o3co/auth-provider-session";
- *   // pass directly to the manifest list — `sessionModule` is a
- *   // pre-built `Module` value, not a factory; dependencies
- *   // (`userRepository`, `userSessionStore`, etc.) flow in through
- *   // sibling `defineModule(...)` modules that produce them.
- *
- * Two route contributions, both mounted at `/session` (intentional named-route
- * bundle per Codex Session 06 Q6):
+ * Routes, both under `/session`:
  *   - "session-routes"    — GET /session/csrf, POST /session/login,
  *                           POST /session/logout
- *   - "federation-routes" — GET  /session/oauth/federation/:name (+ callback)
+ *   - "federation-routes" — GET /session/oauth/federation/:name (+ callback)
  *
- * `requires` (Amendment 5):
- *   - "config", "userRepository" — bootstrap / DI
- *   - "sessionRequirementResolver" — synthetic (the session-admission ADR's
- *     D1): the password login asks the requirements through `admitPrimary`
- *     before anything is written (D5), the federation link routes read their
- *     session through admission, and every consumer of admission takes the
- *     resolver.
- *   - "userSessionStore", "federationTokenStore", "sessionFederationIndex" —
- *     three sibling stores actually consumed by these routes (NOT the four-store
- *     superset; `sessionRPRegistry` and `sessionFamilyIndex` are the oauth
- *     package's concerns).
- *   - "federationProviders" — synthetic (planner-derived from per-federation
- *     `federations.<name>` contributions).
- *   - "federationRedirectPolicyResolver" — synthetic per A5 §7 (planner-derived
- *     from `federationRedirectPolicies.<name>` contributions).
+ * `requires`: `config` and `userRepository`; the three stores these routes
+ * use (`userSessionStore`, `federationTokenStore`, `sessionFederationIndex`);
+ * and the planner-derived `federationProviders`,
+ * `federationRedirectPolicyResolver` and `sessionRequirementResolver`
+ * (password login and the federation link routes go through admission).
  *
- * `provides` (#728) — what other packages need of the browser session,
- * through slots whose contracts are core's, so that none imports this
- * package: `csrfGuard` (the guard these routes run) and `loginEntry` (the
- * login page and its `redirect_to` protocol). `loginCompletion` is the
- * login-completion module's (`modules/loginCompletionModule.mts`).
- *
- * `providerCallbackUrls` is derived from `config.federations` inside the
- * federation-routes lambda — a route-local config projection, not a synthetic
- * key. Per A2-γ §11.5 synthetic keys are reserved for planner projections of
- * contribution kinds; callback URLs are config-driven and have no contribution
- * surface, so route-local derivation is the correct level (verified Codex
- * 2026-05-01).
- *
- * Theme B (one responsibility), Theme D (immutable const shape, no ctx mutation),
- * Theme E (typed deps replace lazy ctx closures + factory option indirection).
+ * `provides` what other packages need of the browser session through
+ * core-owned slot contracts, so none imports this package: `csrfGuard` and
+ * `loginEntry`. `providerCallbackUrls` is derived from config inside the
+ * federation-routes lambda rather than being a synthetic key, since it has no
+ * contribution surface.
  */
 export const sessionModule = defineModule<
 	| "config"
@@ -175,41 +128,31 @@ export const sessionModule = defineModule<
 		"federationRedirectPolicyResolver",
 		"sessionRequirementResolver",
 	],
-	// `rateLimiter` is optional so a composition that installs no limiter module
-	// still boots; the session router falls back to a private in-memory limiter
-	// and warns that the login guard is per-process (#270).
-	// `auditSink` is optional for the same reason the oauth module treats it so:
-	// no events are emitted when absent (#325 — the login guard now emits
-	// `rate_limit.unavailable` on a limiter outage, like the OAuth endpoints).
-	// #296: `subjectSessionIndex` is optional so a composition that has not
-	// adopted subject-level revocation still boots; `revokeAllForSubject` then
-	// reports the capability as unavailable rather than silently doing nothing.
-	// `subjectRevocation` is the boundary the link routes' admission reads
-	// against the live session (the session-admission ADR's D8): optional, as
-	// it is on every consumer, and its absence decided, below.
+	// All optional so a composition without them still boots: without
+	// `rateLimiter` the router uses a per-process in-memory limiter (and
+	// warns); without `auditSink` no events are emitted; without
+	// `subjectSessionIndex`, `revokeAllForSubject` reports the capability as
+	// unavailable; `subjectRevocation` is the boundary the link routes'
+	// admission reads when wired.
 	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex", "subjectRevocation"],
-	// #363: `auditSink` is optional to wire, not optional to decide — an
-	// unfilled slot must be declared with audit.sink.type = "none" or boot
-	// refuses. Same shared policy as the oauth and webauthn modules.
-	// #406: subject-level revocation is optional to wire, not optional to
-	// decide. Its absence must be declared with
-	// oauth.revocation.subject = "unsupported", or a credential change
-	// silently invalidates nothing that was already issued. One constant on
-	// both keys: the declared-absence check requires every module's policy on
-	// a key to agree, and the two slots are one capability.
+	// Optional to wire, not optional to decide: an unfilled `auditSink` must be
+	// declared (`audit.sink.type = "none"`), and absent subject-level
+	// revocation must be declared (`oauth.revocation.subject = "unsupported"`),
+	// or a credential change would silently invalidate nothing. One constant on
+	// both revocation keys: every module's policy on a key must agree, and the
+	// two slots are one capability.
 	absencePolicies: {
 		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY,
 		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 	},
 	// What this module owns of the browser session that other packages use,
-	// as slots whose contracts are core's (#728): a package imports only core,
-	// and requires the slot instead of rebuilding the policy from the session
-	// configuration.
+	// as slots whose contracts are core's: a package imports only core and
+	// requires the slot instead of rebuilding the policy from configuration.
 	provides: {
-		// The one CSRF policy (#710 C4): the guard `/session/login` runs, over
-		// the same key, cookie and trust list — so a token `GET /session/csrf`
-		// hands out is accepted wherever the slot is mounted (`csrfGuardOf`).
+		// The one CSRF policy: the guard `/session/login` runs, over the same
+		// key, cookie and trust list, so a token `GET /session/csrf` hands out is
+		// accepted wherever the slot is mounted (`csrfGuardOf`).
 		csrfGuard: (deps) => csrfGuardOf(deps.config as AppConfig, deps.logger ?? consoleLogger),
 		// The login page (`endpoints.login.url`) and the `redirect_to` protocol
 		// `/authorize` and the federation-grants connect flow send a browser
@@ -242,9 +185,8 @@ export const sessionModule = defineModule<
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						sessionTtlMs: config.session.maxAge,
 						logger: deps.logger ?? consoleLogger,
-						// The session-admission ADR's D5: a password login asks the
-						// registered requirements through admitPrimary before
-						// anything is written — the resolver, read at request time.
+						// A password login asks the registered requirements through
+						// admitPrimary before anything is written; read per request.
 						requirements: deps.sessionRequirementResolver,
 					}),
 				};
@@ -263,16 +205,14 @@ export const sessionModule = defineModule<
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
-						// The session-admission ADR's D8: the link flow admits its
-						// session with these — the resolver, read at request time,
-						// and the boundary when it is wired.
+						// The link flow admits its session with these: the resolver,
+						// read per request, and the boundary when it is wired.
 						requirements: deps.sessionRequirementResolver,
 						...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: config.session.maxAge,
-						// #494: named after the deployment's own session cookie, the
-						// way the CSRF cookie is, so an operator reading `Set-Cookie`
-						// can tell whose it is.
+						// Named after the deployment's session cookie, as the CSRF
+						// cookie is, so an operator reading `Set-Cookie` can tell whose.
 						federationTransactionCookieName: deriveFederationTransactionCookieName(
 							config.session.name,
 						),

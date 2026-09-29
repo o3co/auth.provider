@@ -15,75 +15,34 @@
  */
 
 /**
- * The tail of a login, as one function. `establishSession` turns the
- * `Establishment` core's session admission built — the capability to
- * establish, which only `admitPrimary`, `resumePrimary` and
- * `establishWithoutAsking` make (the session-admission ADR's D5) — into a
- * `UserSession` record and an authenticated express session, and undoes what
- * it wrote when a store fails along the way. It writes from
- * `establishment.primary` alone — the subject, the user, the claims,
- * `authTime`, the `amr` / `authentication` core composed, the `redirectTo` —
- * and nothing a caller passes beside it: what a session vouches for is what
- * admission established. Both login paths call it — `POST /session/login`
- * (`routes/Session.mts`) and the federation callback
- * (`routes/Federation.mts`) — and it is exported so a requirement's
- * completion (the MFA package's, after `resumePrimary`) finishes a login the
- * same way. What only one caller writes beside the record (a federation's
- * index entry, its upstream tokens) is a step it supplies; what each caller
- * logs is a reporter it supplies, so their log vocabularies stay their own.
+ * The tail of a login. `establishSession` turns an `Establishment` built by
+ * core's session admission (`admitPrimary`, `resumePrimary`,
+ * `establishWithoutAsking`) into a `UserSession` record and an authenticated
+ * express session, rolling back what it wrote when a store fails. It writes
+ * from `establishment.primary` alone, never from what a caller passes beside
+ * it: what a session vouches for is what admission established. Both login
+ * routes use it, and it is exported so a requirement's completion (e.g. MFA)
+ * finishes a login the same way; callers supply their extra writes (steps)
+ * and their log vocabulary (reporter).
  *
- * Anything that is not an `Establishment` core built — an object shaped like
- * one, a copy of one — is a `RangeError` before anything is written: the
- * caller's fault, never an outage.
+ * Sequence:
+ * 1. `UserSessionStore.create` (a failure has nothing to undo);
+ * 2. `SubjectSessionIndex.addSid`, best effort, at the earliest point the
+ *    session exists: a missing entry is a live session a credential change
+ *    never finds, while an orphan costs only a redundant cascade;
+ * 3. the caller's `beforeRegenerate` steps;
+ * 4. `req.session.regenerate`, against session fixation;
+ * 5. the caller's `afterRegenerate` steps;
+ * 6. the authenticated state, on the regenerated session;
+ * 7. `req.session.save` before the route answers, so a store that cannot
+ *    save is a `503`, never a `200` for a session the next request would not
+ *    find.
  *
- * The sequence, and the rollback at each point it can fail:
- *
- * 1. `UserSessionStore.create`. A `sid` is minted, the reporter is built with
- *    it before anything is written, and the record carries the primary's
- *    claims, `authTime`, `expiresAt` (`authTime` plus the session lifetime)
- *    and its `amr` / `authentication`. Fails: reported as `user_session` /
- *    `create`; nothing to undo.
- * 2. `SubjectSessionIndex.addSid`, when wired — best-effort: a failure is
- *    reported (`subjectIndexWriteFailed`) and the login proceeds. Written
- *    here, at the earliest point the session exists, because the two failure
- *    modes are not symmetric: a missing entry is a live session a credential
- *    change will never find, while an orphan entry costs one redundant
- *    cascade that `cascadeLogout` absorbs. Every rollback below removes it.
- * 3. The caller's `beforeRegenerate` steps, in order. One that fails is
- *    reported under its own store and step; the steps before it are undone,
- *    then the record, then its index entry.
- * 4. `req.session.regenerate` — session fixation: a fresh session id before
- *    any authenticated state is written. Fails: reported as `cookie_session`
- *    / `regenerate`; the steps undone in reverse, the record, its index
- *    entry; and the request's cookie session dropped.
- * 5. The caller's `afterRegenerate` steps, in order — what needs the
- *    regenerated session to exist first. One that fails: as 3, and the cookie
- *    session dropped.
- * 6. `isAuthenticated`, the primary's `user`, `sid` (when there is a record)
- *    and the primary's `redirectTo` (when it carries one) on the regenerated
- *    session.
- * 7. `req.session.save`, before the route answers: a store that cannot save
- *    it is the route's `503`, never a `200` for a session the next request
- *    would not find. Fails: as 5.
- *
- * Every rollback is best-effort: a step that fails is reported
- * (`cleanupFailed`) and the next one runs; the login's own answer stands. A
- * caller's step is undone only when its `run` completed, and only through
- * the `undo` it declares; the caller's steps are undone in reverse order,
- * then the record, and the index entry last, on every ladder. From the
- * regeneration on, a failure drops the request's cookie session
- * (`abandonCookieSession`): express-session generated a fresh session for
- * the request, and it must be neither saved against the store that failed
- * nor named by a cookie. Before the regeneration nothing of the cookie
- * session was touched, so it is left as it was.
- *
- * Without a `UserSessionStore` — a composition that authenticates the express
- * session alone, which `POST /session/login` keeps accepting — no record is
- * created, nothing is indexed, no caller's step runs (they write beside a
- * record), and the sequence is the regeneration, the flags and the save.
- *
- * The CSRF token, the `200` and the redirect stay with the routes: this
- * function answers an outcome, never a response.
+ * Rollback is best effort and ordered: completed caller steps in reverse,
+ * then the record, then its index entry. From step 4 on, a failure also
+ * drops the request's cookie session, which must be neither saved against
+ * the failed store nor named by a cookie. Without a `UserSessionStore` only
+ * steps 4, 6 and 7 run. The CSRF token and the response stay with the routes.
  */
 
 import { randomUUID } from "node:crypto";
@@ -192,17 +151,13 @@ export type EstablishSessionResult<S extends string = never, T extends string = 
 	  };
 
 /**
- * Establish the session admission established: from `establishment.primary`
- * alone, the `UserSession` record, its subject-index entry, the caller's
- * steps, the express session's regeneration, its authenticated state and its
- * save — the sequence, and the rollback at each point it can fail, are in
- * this file's header. Answers `established` with the record's `sid`
- * (`undefined` without a store), or `unavailable` naming the store and the
- * step that could not answer, after everything written was rolled back and —
- * from the regeneration on — the request's cookie session dropped. The
- * caller answers the response either way; the reporter it supplied has
- * already been told what to log. Rejects with a `RangeError`, before anything
- * is written, when `establishment` is not one core built.
+ * Establish the session admission established (sequence and rollback in this
+ * file's header). Answers `established` with the record's `sid` (`undefined`
+ * without a store), or `unavailable` naming the store and step that failed,
+ * after rolling back; the reporter has already been told what to log.
+ *
+ * @throws RangeError, before anything is written, when `establishment` was not
+ * built by core.
  */
 export async function establishSession<S extends string = never, T extends string = never>(
 	establishment: Establishment,

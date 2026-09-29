@@ -16,21 +16,15 @@
 
 /**
  * The federation routes. `GET /oauth/federation/:name` starts a federation
- * (state, PKCE, nonce; the `form_post` transaction and its cookie). The
- * callback — `GET` for a `query` federation, `POST` for a `form_post` one —
+ * (state, PKCE, nonce; for `form_post`, a transaction record and its cookie).
+ * The callback — `GET` for a `query` federation, `POST` for `form_post` —
  * checks the envelope, exchanges the code, resolves the identity through
- * `UserRepository`, links it to the live session for a `?link=1` start, or
- * establishes a session through `establishSession`
- * (`../establish-session.mts`), the tail it shares with `POST /session/login`,
- * from the establishment core builds without asking the session requirements
- * (`establishWithoutAsking`, the session-admission ADR's D5), adding the
- * federation's index entry and upstream tokens as the steps of its own; then
- * redirects as the federation's redirect policy answers. The link
- * flow reads its session through core's session admission (the
- * session-admission ADR's D8): the start as `session.link` over the cookie,
- * recording the admitted `sid` and subject in the transaction, the callback
- * as `session.link_callback` over that transaction. The package README says
- * what each leg does and what a store's outage answers.
+ * `UserRepository`, then either links it to the live session (`?link=1`) or
+ * establishes a session via `establishSession`, from an establishment core
+ * builds without asking the requirements (`establishWithoutAsking`), and
+ * redirects per the federation's redirect policy. The link flow reads its
+ * session through admission: `session.link` at the start, and
+ * `session.link_callback` over the `sid` and subject the start recorded.
  */
 
 import { randomBytes } from "node:crypto";
@@ -95,26 +89,21 @@ import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 
 declare module "express-session" {
 	interface SessionData {
-		/** Ephemeral federation state stored during the OAuth 2 redirect leg of a
-		 *  `"query"` federation. Deleted by the callback handler immediately after
-		 *  the CSRF check (reuse prevention).
-		 *
-		 *  A `"form_post"` federation does NOT use this field: its callback is a
-		 *  cross-site POST that the session cookie does not accompany, so its
-		 *  envelope lives in a federation transaction record instead (#494). */
+		/** Ephemeral state for a `"query"` federation's redirect leg, deleted by
+		 *  the callback right after the state check (reuse prevention). A
+		 *  `"form_post"` federation keeps it in a transaction record instead: its
+		 *  cross-site POST callback does not carry the session cookie. */
 		federation?: {
 			name: string;
 			state: string;
 			codeVerifier: string;
-			/** PB-4 nonce: bound to the upstream id_token via openid-client `expectedNonce`.
-			 *  Optional so OAuth-only providers (GitHub OAuth Apps) can omit it without
-			 *  breaking the shared session shape. */
+			/** Bound to the upstream id_token via openid-client `expectedNonce`;
+			 *  optional so OAuth-only providers can omit it. */
 			nonce?: string;
 			redirectTo?: string;
-			/** #482: the browser asked to link this federation's identity to the
-			 *  account of the session `sid` it held then (`?link=1`), rather than
-			 *  to log in — with that session's subject, as admission let it link
-			 *  (the session-admission ADR's D8). */
+			/** A `?link=1` start: link this federation's identity to the account
+			 *  of the session it came from (its `sid` and the subject admission
+			 *  allowed), rather than log in. */
 			link?: LinkIntent;
 		};
 	}
@@ -126,14 +115,11 @@ const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
 const NO_ACR_TABLE = Object.freeze({});
 
 /**
- * What the link start answers a requirement's step-up with (the
- * session-admission ADR's D8): `403 step_up_required`, the requirement that
- * asked, and its page — the start is a browser navigation, and the page the
- * link was started from can send the user through the step-up and start it
- * again. The page is the one every consumer answers: as registered, resolved
- * then on the issuer — not on the account page's origin — its params on the
- * query, and no return parameter: the page that probed the start knows
- * where it comes back to.
+ * The link start's answer to a step-up: `403 step_up_required` with the
+ * requirement and its registered page. The start is a browser navigation, so
+ * the page it came from can send the user through the step-up and start
+ * again; no return parameter is added, since that page knows where it
+ * returns to.
  */
 const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>) => ({
 	error: "step_up_required",
@@ -143,12 +129,10 @@ const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>) =
 });
 
 /**
- * #481 — what the upstream IdP asserted about its own login: the profile's
- * `amr`, when the provider surfaces the id_token's there and it is a string
- * array; else nothing. Whether it counts is the federation's
- * `trustUpstreamAmr` (the MFA ADR's D13): core's
- * `federatedSessionAuthentication` records it beside `fed` for a trusted
- * federation, and apart from the session's `amr` otherwise.
+ * The upstream IdP's own `amr` (when the provider surfaces the id_token's as
+ * a string array), else nothing. Whether it counts is the federation's
+ * `trustUpstreamAmr`: core records it beside `fed` for a trusted federation
+ * and apart from the session's `amr` otherwise.
  */
 const upstreamAmrOf = (profile: Readonly<Record<string, unknown>>): readonly string[] =>
 	Array.isArray(profile.amr) && profile.amr.every((v) => typeof v === "string")
@@ -156,18 +140,11 @@ const upstreamAmrOf = (profile: Readonly<Record<string, unknown>>): readonly str
 		: [];
 
 /**
- * What goes in the record's `tokenType` for what an adapter answered (#645).
- *
- * The upstream's own spelling, verbatim — including a value that is not a
- * token type at all, because the route that discloses the token reads an
- * ABSENT field as `Bearer` and refuses everything else. Erasing an unusable
- * value would turn "the upstream said something this provider cannot hand on"
- * into "the upstream said nothing", which is the one reading that answers 200.
- *
- * A value that is not a string is recorded as `""`: the field holds a string,
- * so it cannot be kept as it was, and `""` is a value the disclosure point
- * already refuses. It says the adapter named something unusable without
- * inventing what. Only an adapter that named nothing is recorded as nothing.
+ * The record's `tokenType` for what an adapter answered: the upstream's
+ * spelling verbatim, even when it is not a token type, because the
+ * disclosing route reads only an absent field as `Bearer` — erasing an
+ * unusable value would turn a refusal into a 200. A non-string is recorded
+ * as `""`, which that route also refuses.
  */
 const recordedTokenType = (named: unknown): string | undefined => {
 	if (named === undefined) return undefined;
@@ -175,13 +152,9 @@ const recordedTokenType = (named: unknown): string | undefined => {
 };
 
 /**
- * The session cookie name assumed when the caller passes neither
- * `federationTransactionCookieName` nor a config carrying `session.name`.
- *
- * It matches `reference.conf`'s default, minus the `__Host-` prefix that
- * {@link deriveFederationTransactionCookieName} would strip anyway. A
- * deployment reaches this only through a hand-built `AppConfig`; the module
- * wiring always passes the real name.
+ * The session cookie name assumed when neither
+ * `federationTransactionCookieName` nor `config.session.name` is given (a
+ * hand-built config only): `reference.conf`'s default without `__Host-`.
  */
 const FALLBACK_SESSION_COOKIE_NAME = "auth.session";
 
@@ -204,14 +177,9 @@ const readCsrfTrustedOrigins = (config: unknown): readonly string[] => {
 
 /**
  * Narrow a callback's parameter bag (`req.query` or `req.body`) to its string
- * entries.
- *
- * Both sources are attacker-shapeable: a repeated query parameter arrives as
- * an array, and a form body can carry nested objects. Dropping every
- * non-string here means the handler downstream compares `state` against a
- * string or against `undefined` — never against an array that might satisfy a
- * loose comparison — and that an adapter reading `callbackParams` is handed
- * flat strings rather than arbitrary parsed JSON.
+ * entries. Both are attacker-shapeable (repeats arrive as arrays, bodies can
+ * nest), so `state` is only ever compared with a string or `undefined`, and
+ * adapters get flat strings.
  */
 const readCallbackParams = (source: unknown): Readonly<Record<string, string>> => {
 	if (source == null || typeof source !== "object") return {};
@@ -226,7 +194,7 @@ const readCallbackParams = (source: unknown): Readonly<Record<string, string>> =
  * The stores the federation routes read or write, as their log lines name
  * them. `cookie_session` is the express-session store behind `req.session`;
  * `federation_transaction` is a `form_post` federation's transaction record,
- * kept in that same store under a key of its own (#494).
+ * kept in that same store under a key of its own.
  */
 type FederationStore =
 	| "user_repository"
@@ -263,11 +231,9 @@ type FederationOutageEvent =
 
 /**
  * A store a federation route cannot do without could not answer: the
- * server's outage, never a verdict on the user or the IdP. One line at error
- * level — the event naming the leg, `store` which store, `step` the
- * operation — with the error's projection, never the error: a store's error
- * can carry what it was sent (under `allow-plaintext`, a token record). The
- * caller answers `503 temporarily_unavailable`.
+ * server's outage, never a verdict on the user or the IdP. One error line
+ * named for the leg, with `store`, `step` and the error's projection — never
+ * the error, which can carry a token record. The caller answers `503`.
  */
 const logStoreUnavailable = (
 	log: Logger,
@@ -368,25 +334,22 @@ export const createRouter = (
 		userRepository: UserRepository;
 		userSessionStore: UserSessionStore;
 		/**
-		 * Subject-keyed index of live sessions (#296). Optional: a deployment
-		 * that has not wired it simply has no subject-level revocation, which
-		 * `revokeAllForSubject` reports rather than hiding.
+		 * Subject-keyed index of live sessions. Optional: without it there is no
+		 * subject-level revocation, which `revokeAllForSubject` reports.
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
 		/**
-		 * The subject-revocation boundary the link flow's admission reads
-		 * against the live session (the session-admission ADR's D2, step 4).
-		 * Optional, as the slot is: without it a session established before its
-		 * subject's sessions were revoked can link until it expires.
+		 * The subject-revocation boundary the link flow's admission reads.
+		 * Optional: without it a session established before its subject's
+		 * sessions were revoked can link until it expires.
 		 */
 		subjectRevocation?: SubjectRevocation;
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
 		/**
-		 * How long a `form_post` federation's transaction may sit unconsumed
-		 * (#494). Bounds the transaction cookie's `Max-Age` and the stored
-		 * record's expiry together.
+		 * How long a `form_post` federation's transaction may sit unconsumed;
+		 * bounds the cookie's `Max-Age` and the record's expiry together.
 		 */
 		federationTransactionTtlMs?: number;
 		/**
@@ -398,17 +361,14 @@ export const createRouter = (
 		 */
 		federationTransactionCookieName?: string;
 		/**
-		 * The registered session requirements (the session-admission ADR's
-		 * D1): the synthetic key `sessionRequirementResolver`, which
-		 * `sessionModule` passes, or `resolverForTests` in a test. Required:
-		 * the link routes admit their session through it, and a missing
-		 * resolver, or one the boot planner did not build, is refused here, at
-		 * construction (core's `checkResolver`).
+		 * The registered session requirements the link routes admit through.
+		 * Required: a missing resolver, or one the boot planner did not build,
+		 * is refused at construction.
 		 */
 		requirements: SessionRequirementResolver;
 		/**
-		 * #482: `federation.identity.linked` / `federation.identity.link_refused`;
-		 * admission's `session.admission.subject_mismatch`. Optional, like every sink.
+		 * Receives `federation.identity.linked` / `federation.identity.link_refused`
+		 * and admission's `session.admission.subject_mismatch`. Optional.
 		 */
 		auditSink?: AuditSink;
 		logger?: Logger;
@@ -424,9 +384,8 @@ export const createRouter = (
 	const router = express.Router();
 
 	/**
-	 * The link flow's one reading of a session (the session-admission ADR's
-	 * D1, D8): admission, with this router's slots. `log` is the leg's
-	 * logger; an outage is logged there, once, by admission.
+	 * The link flow's one reading of a session: admission, with this router's
+	 * slots. An outage is logged on `log`, once, by admission.
 	 */
 	const admitLink = (claim: SessionClaim, action: AdmissionAction, log: Logger) =>
 		admitSession(
@@ -441,13 +400,10 @@ export const createRouter = (
 			{ claim, action },
 		);
 
-	// The MFA ADR's D13: whether each installed federation's upstream `amr`
-	// counts, read once, here, at composition — where a switch that is given
-	// but unusable refuses to build the routes — by the reading the `acr`
-	// drop uses, so what a session records and what `/authorize` advertises
-	// cannot disagree. Keyed by the name the federation is installed under,
-	// which is the name the callback resolves it by: one adapter installed
-	// under two names takes each name's switch, not the last one read.
+	// Whether each installed federation's upstream `amr` counts, read once at
+	// composition (an unusable switch refuses to build the routes) by the same
+	// reading the `acr` table uses, so a session's record and `/authorize`'s
+	// advertisement agree. Keyed by the installed name the callback resolves by.
 	const trustsUpstreamAmr = new Map<string, boolean>(
 		[...federationProviders.keys()].map((name) => [
 			name,
@@ -462,14 +418,9 @@ export const createRouter = (
 
 	/**
 	 * The federation transaction store, over the express-session store the
-	 * deployment already runs (#494).
-	 *
-	 * Taken off the request rather than injected because that is where the
-	 * store the session middleware mounted actually is, and a second wiring of
-	 * the same store is a second thing that can point somewhere else. A request
-	 * that reaches here without one has no session middleware in front of it,
-	 * which is a composition error rather than a per-request condition — the
-	 * `form_post` start leg refuses rather than silently proceeding.
+	 * session middleware mounted (taken off the request, not injected, so it
+	 * cannot point elsewhere). Absent means no session middleware — a
+	 * composition error the `form_post` start refuses.
 	 */
 	const transactionStore = (req: Request): FederationTransactionStore | undefined => {
 		const store = (req as unknown as { sessionStore?: unknown }).sessionStore;
@@ -487,13 +438,8 @@ export const createRouter = (
 
 	/**
 	 * The path the transaction cookie is scoped to: the provider's callback
-	 * route and nothing else.
-	 *
-	 * Derived from `providerCallbackUrls`, the authoritative map, so the cookie
-	 * is offered to exactly the URL the IdP was told to POST to. A cookie that
-	 * is `SameSite=None` is offered on every cross-site request to a matching
-	 * path, so the narrower that path, the less of the deployment is reachable
-	 * carrying it.
+	 * route only. A `SameSite=None` cookie rides every cross-site request to a
+	 * matching path, so the narrower the better.
 	 */
 	const transactionCookiePath = (provider: FederationProvider): string | undefined => {
 		const callbackUrl = providerCallbackUrls.get(provider.name);
@@ -530,38 +476,16 @@ export const createRouter = (
 	};
 
 	/**
-	 * The callback leg, shared verbatim by the GET and the POST route (#479).
-	 *
-	 * `params` is the callback's parameter set — the query string for a
-	 * `"query"` federation, the `application/x-www-form-urlencoded` body for a
-	 * `"form_post"` one. That substitution is the entire difference: the same
-	 * `session.federation` lookup, the same `state` comparison, the same
-	 * delete-then-save reuse prevention before any async work, the same PKCE
-	 * verifier and nonce read from the session rather than from the request,
-	 * and the same rollback ladder run either way.
-	 *
-	 * Factored out rather than copied precisely because it is the security
-	 * boundary: two handlers would be two places for the CSRF check to drift.
-	 */
-	/**
-	 * #482: link a federated identity to the account the browser is already
-	 * signed in as, without minting a new session.
-	 *
-	 * Reached only through an explicit `?link=1` start, whose envelope the
-	 * callback verified exactly as a login's (`state`, PKCE, `nonce`). The
-	 * identity `<provider>:<sub>` was resolved just before; the rules are: nobody
-	 * → ask the Store; someone else → `409`, the Store is not asked (linking never
-	 * merges accounts); this account → nothing to link. In every accepted case
-	 * the federation is attached to the *live* session — its index entry and
-	 * upstream tokens under the current `sid` — and the browser is redirected as
-	 * after a login. No `UserSession` is created and the express session is not
-	 * regenerated, so the session's claims envelope stays what it was.
-	 *
-	 * The session is read through admission as `session.link_callback` over
-	 * the transaction's `sid` and subject (`linkClaim`, the session-admission
-	 * ADR's D8): liveness, the subject, the revocation boundary, the
-	 * requirements. A step-up is `login_required` here — the callback comes
-	 * from the IdP and has no page to return to; the start decided it.
+	 * Link a federated identity to the account the browser is signed in as,
+	 * without minting a session. Reached only from an explicit `?link=1` start
+	 * whose envelope was verified like a login's. An identity resolving to
+	 * nobody asks the Store to link; to someone else is `409` (linking never
+	 * merges accounts); to this account links nothing new. The federation is
+	 * then attached to the live session (index entry and upstream tokens under
+	 * the current `sid`); no `UserSession` is created and the session is not
+	 * regenerated. The session is admitted as `session.link_callback`; a
+	 * step-up is `login_required`, since the IdP's callback has no page to
+	 * return to.
 	 */
 	const completeLink = async (
 		provider: FederationProvider,
@@ -574,15 +498,11 @@ export const createRouter = (
 		res: Response,
 		log: Logger,
 	): Promise<unknown> => {
-		// The link belongs to the session that asked for it — the one the start
-		// leg recorded in the transaction — not to whichever session the browser
-		// holds now. A "query" federation's envelope lives in that session, so
-		// the two are one; a "form_post" callback is a cross-site POST that the
-		// application session cookie (SameSite=Lax) does not accompany, so
-		// `req.session` is a fresh one there and the recorded sid is the only
-		// binding. A request that does carry an authenticated session — read as
-		// every reader reads the cookie, its claim — must be that same one:
-		// switching accounts in between links nothing.
+		// The link belongs to the session the start recorded, not whichever
+		// session the browser holds now: a `form_post` callback arrives without
+		// the session cookie (SameSite=Lax), so the recorded `sid` is the only
+		// binding. A request that does carry an authenticated session must carry
+		// that same one — switching accounts in between links nothing.
 		const currentSid = link.sid;
 		const cookie = cookieClaim(req);
 		if (cookie.authenticated && cookie.sid !== currentSid) {
@@ -596,10 +516,8 @@ export const createRouter = (
 				error: "login_required",
 				error_description: "Linking a federated identity requires a live session",
 			});
-		// A transaction a start wrote before it recorded the subject — one in
-		// flight across the upgrade — binds its callback by the sid alone, and
-		// the link claim is the sid and the subject together: the user starts
-		// the link again.
+		// A transaction recorded without a subject cannot form the link claim
+		// (the sid and subject together): the user starts the link again.
 		if (typeof link.subject !== "string" || link.subject.length === 0) return notLive();
 		const admission = await admitLink(
 			linkClaim({ sid: currentSid, subject: link.subject }),
@@ -716,20 +634,15 @@ export const createRouter = (
 					refreshToken: profile.refreshToken,
 					idToken: profile.idToken,
 					expiresAt: profile.expiresAt,
-					// #647 — what the user just consented to. `scope` moves with the
-					// token, `grantedScope` is the ceiling a later refresh is bounded
-					// by (RFC 6749 §6) and never moves. They start equal.
+					// The consented scope: `scope` moves with the token;
+					// `grantedScope` is the ceiling a refresh is bounded by (RFC 6749
+					// §6) and never moves. They start equal.
 					scope: consented,
 					grantedScope: consented,
-					// #645 — how the upstream said this token is presented. Recorded
-					// rather than judged here: a login does not need the access token,
-					// so a type this provider cannot hand on must not cost the user
-					// their sign-in. The route that discloses it is where that is
-					// decided. `undefined` only when the adapter named nothing at all
-					// — an adapter written before the field; every bundled one names
-					// it — and written as a key either way, because `FederationTokens`
-					// requires it: a store copying the record field by field cannot
-					// forget a field the type makes it name.
+					// Recorded, not judged: a login does not need the access token,
+					// so a type this provider cannot hand on must not cost the
+					// sign-in; the disclosing route decides. Always written as a key,
+					// since `FederationTokens` requires it.
 					tokenType,
 				});
 			}
@@ -742,15 +655,11 @@ export const createRouter = (
 				err,
 				linkContext,
 			);
-			// Best-effort rollback, as the login path does. The transaction is
-			// consumed and the Store's link stands — the identity is the
-			// account's, and the next login through this federation lands on it —
-			// so what must not be left behind is a half-attached federation on the
-			// live session: the token record first, then the index entry. A
-			// federation the session was already attached to before this link is
-			// left attached, as it was. Nothing is rolled back either when the
-			// index could not even be read: nothing was written, and whether the
-			// session carried the federation is what that read would have said.
+			// Best-effort rollback. The Store's link stands (the identity is the
+			// account's), but a half-attached federation must not be left on the
+			// live session: token record first, then index entry — unless the
+			// session already carried the federation, or the index could not even
+			// be read (then nothing was written).
 			if (listed && !hadFederation) {
 				await cleanUp(
 					log,
@@ -786,6 +695,12 @@ export const createRouter = (
 		return res.redirect(redirect.value);
 	};
 
+	/**
+	 * The callback leg, shared by the GET and POST routes; only the parameter
+	 * source differs (query string for `"query"`, form body for
+	 * `"form_post"`). One handler because it is the security boundary: two
+	 * copies would be two places for the state check to drift.
+	 */
 	const runCallback = async (
 		provider: FederationProvider,
 		params: Readonly<Record<string, string>>,
@@ -799,30 +714,20 @@ export const createRouter = (
 
 		const responseMode = resolveFederationResponseMode(provider);
 
-		// Where this federation's ephemeral state lives.
-		//
-		// A `"query"` federation keeps it in the session, exactly as it always
-		// has: that callback is a same-site top-level GET, the session cookie is
-		// sent with it, and nothing about Google or GitHub changes here.
-		//
-		// A `"form_post"` federation keeps it in a transaction record addressed
-		// by its own cookie (#494), because that callback is a cross-site POST
-		// which a `SameSite=Lax` session cookie does not accompany. The
-		// transaction cookie is what binds the callback to the browser that
-		// started the flow — the property the session cookie used to provide —
-		// so a caller who cannot present it is refused before `state` is read at
-		// all. A stolen `state` alone is therefore still worth nothing.
+		// Where the ephemeral state lives: a `"query"` federation's in the
+		// session (its callback is a same-site top-level GET carrying the
+		// session cookie); a `"form_post"` federation's in a transaction record
+		// addressed by its own cookie, because a cross-site POST does not carry
+		// a `SameSite=Lax` session cookie. Without that cookie the callback is
+		// refused before `state` is read, so a stolen `state` alone is worthless.
 		let fed: FederationTransactionEnvelope | undefined;
 		let transactions: FederationTransactionStore | undefined;
 		let transactionId: string | undefined;
 
 		/**
-		 * Consume the transaction: drop the cookie and the stored record.
-		 *
-		 * Returns the store's error rather than throwing, so a caller on a
-		 * refusal path can clean up best-effort while a caller about to do
-		 * irreversible work can fail closed on it. A no-op for a `"query"`
-		 * federation, which has no transaction to consume.
+		 * Consume the transaction (cookie and record). Returns the store's error
+		 * rather than throwing, so a refusal path can clean up best effort while
+		 * irreversible work fails closed. A no-op for a `"query"` federation.
 		 */
 		const consumeTransaction = async (): Promise<unknown> => {
 			if (!transactions || transactionId === undefined) return null;
@@ -838,12 +743,10 @@ export const createRouter = (
 		};
 
 		/**
-		 * Consume the transaction on a path that is refusing anyway: best
-		 * effort, so a delete that fails is one `federation_cleanup_failed`
-		 * warn and the refusal stands. The transaction lives in the cookie
-		 * session's store, so after a failure the request's cookie session is
-		 * dropped too, and express-session does not write to that store again
-		 * as the response ends (`../internal/cookieSession.mts`).
+		 * Consume the transaction on a path that is refusing anyway: a failed
+		 * delete is one `federation_cleanup_failed` warn, and the request's
+		 * cookie session is dropped so express-session does not write to that
+		 * store again.
 		 */
 		const discardTransaction = async (): Promise<void> => {
 			const discardErr = await consumeTransaction();
@@ -857,12 +760,10 @@ export const createRouter = (
 		};
 
 		/**
-		 * The cookie session's store — the express session, or a `form_post`
-		 * transaction kept in the same store — could not answer: log the
-		 * outage first, then (when asked) discard the transaction best-effort,
-		 * so a cleanup warn never precedes its cause; drop the request's cookie
-		 * session so express-session does not write to that store again as the
-		 * response ends, and answer `503`.
+		 * The cookie session's store (or a transaction in it) could not answer:
+		 * log the outage first, then optionally discard the transaction (so a
+		 * cleanup warn never precedes its cause), drop the cookie session, and
+		 * answer `503`.
 		 */
 		const refuseCookieStoreOutage = async (
 			store: "cookie_session" | "federation_transaction",
@@ -906,55 +807,19 @@ export const createRouter = (
 			});
 		}
 
-		// When a refusal spends the ephemeral state, and when it does not (#502).
+		// A refusal spends the transaction when the request made a claim about
+		// it (presented a `state`, right or wrong: one guess is all there is),
+		// and leaves it alone when it made none. The `form_post` transaction
+		// cookie is `SameSite=None`, so it rides any cross-site request (an
+		// `<img>` GET included); if a parameterless request spent it, a third
+		// party could kill a victim's in-flight flow.
 		//
-		// The rule: **a refusal spends the transaction when the request made a
-		// claim about it, and leaves it alone when it made none.** A `state` is
-		// that claim. Presenting one — right or wrong — is an attempt on this
-		// transaction, and an attempt that failed must not get a second try, so
-		// the record is spent. Presenting no `state` at all claims nothing, and
-		// must therefore cost nothing.
-		//
-		// This is not pedantry. The transaction cookie is `SameSite=None` by
-		// necessity, so it accompanies *any* cross-site request to the callback
-		// path — an `<img>` tag's GET included. While every refusal consumed the
-		// transaction, one parameterless cross-site request deleted a victim's
-		// in-flight flow and their genuine callback then failed (#502).
-		//
-		// Applied across the callback's refusals. The column is the `form_post`
-		// *transaction*, because `consumeTransaction` is a no-op for a `query`
-		// federation — see below.
-		//
-		// | refusal                                    | spends the transaction? |
-		// | ------------------------------------------ | ---------- |
-		// | unknown provider (404)                     | no — no transaction is ever read |
-		// | wrong method for the response mode (405)   | no — refused before the cookie is read |
-		// | no transaction cookie or no store (400)    | nothing to spend |
-		// | transaction lookup failed (503)            | best-effort — the record was presented and cannot be trusted intact |
-		// | no `state` in the callback (400)           | **no** — the claim was never made |
-		// | `state` present and wrong (400)            | yes — a guess, and one guess is all there is |
-		// | envelope absent or names another provider  | yes — same, judged against the record |
-		// | anything after the `state` match           | already spent, before any async work |
-		//
-		// A `query` federation keeps its envelope in the session instead, and
-		// retires it only on the path that matched `state` — so there a wrong
-		// `state` leaves the envelope in place. That asymmetry is deliberate,
-		// not an oversight: the session cookie is `SameSite=Lax` and *is* sent on
-		// a top-level cross-site GET, so retiring the envelope on a mismatch
-		// would hand any third party, with one navigation, exactly the
-		// availability bug #502 reports against the transaction — in the one
-		// branch that never had it. What burning it there would defend against
-		// is not a real attack anyway: `state` is 128 bits from the CSPRNG, so
-		// an unlimited number of guesses is worth no more than one.
-		//
-		// The `form_post` branch pays that cost knowingly. Its record is
-		// short-lived and dedicated, losing one costs a retry rather than a
-		// session, and an attacker who *does* hold the transaction cookie — which
-		// `SameSite=None` hands to any cross-site request — gets a single
-		// judged attempt against a live record rather than a standing one.
-		//
-		// The "no `state`" row is the one both branches share, because there the
-		// request claimed nothing either way.
+		// A `query` federation's envelope lives in the session and is retired
+		// only after `state` matches, so a wrong `state` leaves it in place: the
+		// `SameSite=Lax` session cookie rides a top-level cross-site GET, so
+		// retiring on a mismatch would hand any third party that same
+		// availability attack. Unlimited guesses at a 128-bit CSPRNG `state` are
+		// worth no more than one.
 		if (typeof params.state !== "string" || params.state.length === 0) {
 			return res.status(400).json({
 				error: "invalid_request",
@@ -977,41 +842,16 @@ export const createRouter = (
 		// `exchangeCode` throws.
 		const { codeVerifier, redirectTo, nonce } = fed;
 
-		// What this retirement does and does not guarantee (#502).
-		//
-		// It is a read followed by a delete, and those are two round trips. The
-		// express-session `Store` API is `get` / `set` / `destroy` — there is no
-		// compare-and-delete on it, and no atomic read-and-consume can be
-		// composed from the three. So:
-		//
-		// - **Guaranteed:** a callback that arrives after an earlier one has
-		//   completed its delete finds no record and is refused. That is the
-		//   replay this bounds — a `code` and `state` lifted from a proxy log,
-		//   the browser's own back button, a retried request.
-		// - **Not guaranteed:** callbacks that overlap. Two that both read the
-		//   record before either deletes it both pass the `state` comparison and
-		//   both reach `exchangeCode`. `MemoryStore` answers synchronously and so
-		//   happens to serialise them; a store with network latency does not.
-		//   `Federation.transactionConcurrency.test.mts` pins this rather than
-		//   leaving it to be discovered.
-		// - **What actually bounds the overlap:** the IdP. An authorization code
-		//   is single-use at the IdP, racing callbacks necessarily carry the same
-		//   one, and so at most one exchange succeeds however many get this far.
-		//   PKCE binds that exchange to the verifier held in the record.
-		//
-		// `DeviceCodeStore` (#298) *is* an atomic read-and-consume, and the
-		// difference is which API each has to work over: it owns its adapter and
-		// can push the consume into one Redis round trip, while this record
-		// deliberately shares the session store rather than adding a component
-		// slot of its own — one that would need declaring in `AppConfigSchema`
-		// and configuring in every deployment. Buying strict atomicity here means
-		// paying that, for a property the IdP already provides.
-		//
-		// Fail-closed either way: if the ephemeral state cannot be retired at
-		// all, it stays readable indefinitely, so the flow stops with the
-		// store's outage (503) rather than continuing — an attacker who could
-		// force the delete to fail and then replay would otherwise face no reuse
-		// prevention whatsoever.
+		// Retirement is a read then a delete: the express-session Store API has
+		// no atomic read-and-consume. A callback after an earlier one's delete
+		// is refused (a replayed `code`/`state`, the back button, a retry), but
+		// overlapping callbacks can both reach `exchangeCode`
+		// (`Federation.transactionConcurrency.test.mts` pins this). The IdP
+		// bounds that: an authorization code is single-use, and PKCE binds it to
+		// the verifier in the record. A dedicated atomic store would need its
+		// own component slot in every deployment, for a property the IdP already
+		// provides. If the state cannot be retired at all, fail closed (503): a
+		// forced delete failure plus a replay would otherwise face no reuse check.
 		if (responseMode === "form_post") {
 			const consumeErr = await consumeTransaction();
 			if (consumeErr) {
@@ -1027,8 +867,8 @@ export const createRouter = (
 			}
 		}
 
-		// Fix 4: validate code query parameter early — missing/empty code must be a 400
-		// rather than propagating an empty string downstream to the IdP (→ 502).
+		// A missing or empty `code` is a 400, not an empty string sent to the IdP
+		// (which would surface as a 502).
 		const codeParam = params.code;
 		if (typeof codeParam !== "string" || codeParam.length === 0) {
 			return res.status(400).json({
@@ -1050,12 +890,9 @@ export const createRouter = (
 			});
 		}
 
-		// #479: what the adapter sees of the callback, minus `code` and `state`.
-		// Both are removed rather than passed through twice: `code` reaches the
-		// adapter in its own field, `state` is the value this route has already
-		// compared against the session and the adapter has no business
-		// re-deriving, and a generic bag that still carried them would offer a
-		// second, unchecked place to read a credential from.
+		// What the adapter sees of the callback, minus `code` (passed in its own
+		// field) and `state` (already checked here): a generic bag carrying them
+		// would be a second, unchecked place to read a credential from.
 		const { code: _code, state: _state, ...adapterCallbackParams } = params;
 
 		let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
@@ -1064,25 +901,19 @@ export const createRouter = (
 				code: codeParam,
 				codeVerifier,
 				redirectUri: callbackUrl,
-				// PB-4: thread the session-stored nonce so OIDC adapters bind the returned
-				// id_token via openid-client `expectedNonce`. Adapters that ignore nonce
-				// (OAuth-only) accept undefined gracefully.
+				// The session-stored nonce, so OIDC adapters bind the id_token via
+				// `expectedNonce`; OAuth-only adapters ignore it.
 				nonce,
-				// #479: the remaining callback parameters, so an adapter can read
-				// identity an IdP delivers beside the token response — Apple's
-				// first-authorization `user` body. Unsigned and relayed through the
-				// user agent: `mapClaims` decides what to make of it and claim
-				// precedence decides where the result may land. #595: the RFC 9207
-				// `iss` response parameter reaches the OIDC adapter this way too.
+				// The remaining callback parameters, so an adapter can read identity
+				// an IdP delivers beside the token response (Apple's first-login
+				// `user` body — unsigned, so `mapClaims` and claim precedence decide
+				// what it may affect) or RFC 9207's `iss`.
 				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {
-			// The upstream refused or could not answer: its verdict or its
-			// outage, not this server's, so a warn. The adapter's library puts
-			// the token response it refused on the error's cause chain — the
-			// access and refresh tokens included — so the log gets the
-			// projection, never the error. `provider` rides on `log`'s binding:
-			// the registered federation's name, not the path's text.
+			// The upstream's verdict or outage, not this server's: a warn. The
+			// error's cause chain can hold the refused token response, so only its
+			// projection is logged.
 			log.warn({ err: loggableError(err) }, "federation_callback_exchange_failed");
 			return res.status(502).json({
 				error: "exchange_failed",
@@ -1111,8 +942,8 @@ export const createRouter = (
 			);
 			return res.status(503).json(USER_DIRECTORY_UNAVAILABLE);
 		}
-		// #482: an explicit link request completes here, or is refused here. It
-		// never falls through to the login path below: a link is not a login.
+		// An explicit link request completes or is refused here; it never falls
+		// through to the login path below: a link is not a login.
 		if (fed.link !== undefined) {
 			return completeLink(
 				provider,
@@ -1137,33 +968,21 @@ export const createRouter = (
 		// Build claims. The local record is authoritative; the provider's mapped
 		// claims may fill a promotable field it left absent, and are otherwise
 		// recorded under `claims.federated[<provider>]` rather than merged into
-		// the envelope this deployment authorizes on (#279).
+		// the envelope this deployment authorizes on.
 		const claims = mergeFederatedClaims({
 			localClaims: extractUserClaims(user),
 			providerName: provider.name,
 			mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
 		});
 
-		// The tail of the login — the `UserSession` record, its subject-index
-		// entry, the express session's regeneration, its authenticated state and
-		// its save — is `establishSession`'s (`../establish-session.mts`), shared
-		// with `POST /session/login`. What this callback writes beside the record
-		// are its two steps: the federation's index entry before the regeneration
-		// and the upstream tokens after it, each undone in reverse when a later
-		// write fails. A store that could not answer is `503`, logged in this
-		// router's vocabulary through the reporter —
-		// `federation_callback_store_unavailable` for the write that failed,
-		// `federation_cleanup_failed` for a rollback step that did.
-		//
-		// A4 §5.2: the federation linkage is a sibling-store write, and per A4
-		// §6.1 it is NOT atomic with the record's create: a failed `addFederation`
-		// rolls the orphan `UserSession` back, and the user logs in again to
-		// re-establish the link. A compound atomic call was rejected — it would
-		// re-couple the stores (Theme B).
-		//
-		// Session fixation: the express session is regenerated after the record
-		// and its index entry exist (so there is a sid to restore) and before the
-		// tokens are attached or any session field is written.
+		// `establishSession` writes the login's tail. This callback adds two
+		// steps — the federation's index entry before the regeneration and the
+		// upstream tokens after it, each undone in reverse when a later write
+		// fails — and logs in this router's vocabulary. The index entry is not
+		// atomic with the record: a failed `addFederation` rolls the record back
+		// and the user logs in again (an atomic compound call would re-couple
+		// the stores). Regeneration comes after the record and index exist and
+		// before tokens or session fields are written.
 		const accessToken = profile.accessToken;
 		const attachTokens: ReadonlyArray<EstablishSessionStep<FederationStore, FederationStoreStep>> =
 			accessToken
@@ -1182,11 +1001,10 @@ export const createRouter = (
 									refreshToken: profile.refreshToken,
 									idToken: profile.idToken,
 									expiresAt: profile.expiresAt,
-									// #647 — as above: the consented scope, and the ceiling it sets.
+									// As above: the consented scope, and the ceiling it sets.
 									scope: consented,
 									grantedScope: consented,
-									// #645 — as above: what the upstream named, recorded and not
-									// judged. The disclosure point owns that decision.
+									// As above: recorded, not judged; the disclosing route decides.
 									tokenType: recordedTokenType(profile.tokenType),
 								});
 							},
@@ -1198,17 +1016,12 @@ export const createRouter = (
 					]
 				: [];
 
-		// The session-admission ADR's D5: the callback does not consult
-		// admission in this release — an interruption here would have to be a
-		// navigation, and the upstream tokens would have to travel in the
-		// requirement's record — so core builds its establishment without
-		// asking, from the federation's own facts. `recorded` is core's
-		// (`federatedSessionAuthentication`, the MFA ADR's D9 and D13): `fed`,
-		// with a trusted IdP's values beside it, or an untrusted one's kept
-		// apart for the record — decided under the name this callback resolved
-		// the provider by (`fed.name`, checked equal to the path's). No
-		// `redirectTo`: the callback redirects by its policy, below, and never
-		// wrote one on the session.
+		// The callback does not consult admission: an interruption here would
+		// have to be a navigation carrying the upstream tokens. Core builds the
+		// establishment without asking, from the federation's facts; `recorded`
+		// is core's (`fed`, with a trusted IdP's `amr` beside it or an untrusted
+		// one's kept apart), keyed by `fed.name`. No `redirectTo`: the callback
+		// redirects by its policy below.
 		const establishment = establishWithoutAsking({
 			subject: user.id,
 			user,
@@ -1262,7 +1075,7 @@ export const createRouter = (
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
-		// Resolve redirect URL via policy (Theme B: redirect concerns separated from IdP protocol)
+		// Resolve the redirect URL via the federation's redirect policy.
 		const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
 		if (!callbackPolicy) {
 			logMisconfigured(log, "no_redirect_policy");
@@ -1280,16 +1093,9 @@ export const createRouter = (
 	};
 
 	/**
-	 * Bind {@link runCallback} to a parameter source.
-	 *
-	 * Each binding is gated on the provider's response mode, so a federation
-	 * has exactly one callback method and the other answers `405`. An IdP that
-	 * answers in the query string has no reason to POST here, so every
-	 * federation that predates #479 keeps exactly the GET surface it had; an
-	 * IdP that answers with a form post has no reason to GET here, and letting
-	 * it through was how a third party reached the transaction with an `<img>`
-	 * tag (#502). Either way the stray method is refused rather than parsed as
-	 * a callback.
+	 * Bind {@link runCallback} to a parameter source, gated on the provider's
+	 * response mode: each federation has exactly one callback method, and the
+	 * other answers `405` rather than being parsed as a callback.
 	 */
 	const callbackHandler =
 		(source: "query" | "body") =>
@@ -1320,12 +1126,10 @@ export const createRouter = (
 					});
 			}
 
-			// #502: and the mirror of it. A form_post IdP only ever POSTs here, so
-			// a GET is a misconfiguration or a probe — but the probe arrives
-			// carrying the victim's `SameSite=None` transaction cookie, because
-			// that is what `SameSite=None` means. Refusing the method before the
-			// cookie is read is what keeps a third party's `<img>` tag from
-			// reaching the transaction at all.
+			// A form_post IdP only POSTs here; a GET is a misconfiguration or a
+			// probe carrying the victim's `SameSite=None` transaction cookie.
+			// Refused before the cookie is read, so a third party's `<img>` never
+			// reaches the transaction.
 			if (source === "query" && providerResponseMode === "form_post") {
 				return res
 					.status(405)
@@ -1401,27 +1205,20 @@ export const createRouter = (
 				redirectTo = redirect_to;
 			}
 
-			// #479: how this IdP will deliver the authorization response. Absent
-			// (every federation written before Sign in with Apple) means "query",
-			// so nothing below changes for them.
-			// #482: `link=1` asks to link this federation's identity to the account
-			// the browser is already signed in as. Explicit on purpose — a session
-			// cookie plus a stray identity is the login-CSRF shape, so signing in
-			// with another provider never links by itself — and refused here, before
-			// the browser is sent anywhere, when it cannot succeed.
+			// `link=1` asks to link this federation's identity to the signed-in
+			// account. Explicit because a session cookie plus a stray identity is
+			// the login-CSRF shape: signing in with another provider never links
+			// by itself. Refused here, before any redirect, when it cannot succeed.
 			const wantsLink = req.query.link === "1" || req.query.link === "true";
 			let link: LinkIntent | undefined;
 			if (wantsLink) {
-				// A link changes an existing account, so it must be the user asking,
-				// not a page that navigated them here. The start is a GET and the
-				// session cookie is SameSite=Lax, which a top-level cross-site
-				// navigation carries; paired with a login CSRF at the IdP, a forced
-				// `?link=1` would link the attacker's identity to the victim's
-				// account (v0.13.0 audit). What counts as evidence is the navigation
-				// rule of the session's CSRF policy (`checkNavigationOrigin`, the
-				// `csrfGuard` slot's `checkNavigation`). An ordinary login start is
-				// not held to this: an RP on another domain starting a federated
-				// login is the normal shape.
+				// A link changes an existing account, so the user must be the one
+				// asking: a top-level cross-site navigation carries the SameSite=Lax
+				// cookie, and a forced `?link=1` paired with a login CSRF at the IdP
+				// would link the attacker's identity to the victim's account. The
+				// evidence is the session CSRF policy's navigation rule
+				// (`checkNavigationOrigin`). An ordinary login start is not held to
+				// this: cross-domain RPs starting a login is normal.
 				if (checkNavigationOrigin(req, linkTrustedOrigins).outcome !== "accepted") {
 					logger.warn(
 						{
@@ -1447,11 +1244,9 @@ export const createRouter = (
 						error_description: "The user repository does not support linking federated identities",
 					});
 				}
-				// The session the link is for, read through admission as
-				// `session.link` (the session-admission ADR's D8): graded
-				// `credential_change` — a linked identity is a new way into the
-				// account — so a requirement's recent-authentication rule is
-				// decided here, where a step-up has a page to return to.
+				// Admitted as `session.link`, graded `credential_change` (a linked
+				// identity is a new way into the account), so a recent-authentication
+				// rule is decided here, where a step-up has a page to return to.
 				const claim = cookieClaim(req);
 				const admission = await admitLink(
 					claim,
@@ -1474,31 +1269,23 @@ export const createRouter = (
 						error_description: "Linking a federated identity requires an authenticated session",
 					});
 				}
-				// The session the link is for — the `sid` the record was read by,
-				// the cookie's, not a field of the record — and its subject. The
-				// callback binds to them — a form_post callback arrives without the
-				// application session cookie, and a browser that switched accounts
-				// in between must not link to the new one — so they are recorded in
-				// the transaction, not inferred later.
+				// Recorded in the transaction, not inferred later: the cookie's `sid`
+				// and the admitted subject. A form_post callback arrives without the
+				// session cookie, and a browser that switched accounts must not link
+				// to the new one.
 				link = { sid: claim.sid, subject: admission.session.sub };
 			}
 
 			const responseMode = resolveFederationResponseMode(provider);
 
-			// Generate CSRF state, PKCE code verifier, and OIDC nonce.
-			// PB-4: nonce is generated for every provider; OIDC adapters forward it to the IdP
-			// (then verify via openid-client `expectedNonce`). OAuth-only adapters ignore it.
+			// CSRF state, PKCE verifier and OIDC nonce. The nonce is generated for
+			// every provider; OAuth-only adapters ignore it.
 			const state = randomBytes(16).toString("base64url");
 			const codeVerifier = generateCodeVerifier();
 			const nonce = randomBytes(16).toString("base64url");
 
-			// providerCallbackUrls is the authoritative map of per-provider callback URLs,
-			// populated by module wiring from config.federations.<name>.callbackURL.
-			//
-			// Read before the ephemeral state is persisted: a form_post start
-			// scopes its transaction cookie to this URL's path, and there is
-			// nothing to be gained by persisting state for a provider whose
-			// callback URL is missing.
+			// The authoritative callback URL map, from config. Read before any
+			// state is persisted: a form_post start scopes its cookie to this path.
 			const callbackUrl = providerCallbackUrls.get(provider.name);
 			if (!callbackUrl) {
 				logMisconfigured(logger, "no_callback_url", { provider: provider.name });
@@ -1519,19 +1306,12 @@ export const createRouter = (
 				...(link === undefined ? {} : { link }),
 			};
 
-			// #494: a form_post callback arrives as a cross-site POST from the
-			// IdP's origin, and a SameSite=Lax cookie is not sent on one. The
-			// ephemeral state therefore travels as a transaction of its own — an
-			// opaque id in a short-lived, path-scoped, SameSite=None cookie, and
-			// the envelope in a store record keyed by it.
-			//
-			// The application session cookie is not touched, by this branch or
-			// any other. This route is unauthenticated and a SameSite=Lax cookie
-			// IS sent on a top-level GET, so anything the start leg changed about
-			// that cookie would be changeable by any third party who could make a
-			// browser follow a link here — permanently, since express-session
-			// serialises `req.session.cookie` into the store and rebuilds it from
-			// there on every later request.
+			// A form_post callback is a cross-site POST, which does not carry a
+			// SameSite=Lax cookie, so its state travels as a transaction: an opaque
+			// id in a short-lived, path-scoped SameSite=None cookie, with the
+			// envelope in a store record. The application session cookie is never
+			// touched here: this route is unauthenticated and reachable through any
+			// third-party link, and express-session persists `req.session.cookie`.
 			if (responseMode === "form_post") {
 				const transactions = transactionStore(req);
 				const cookiePath = transactionCookiePath(provider);
@@ -1611,11 +1391,9 @@ export const createRouter = (
 				nonce,
 			});
 
-			// #479: the route writes `response_mode`, not the adapter — one place
-			// for the parameter, and it stays paired with the POST callback and the
-			// cookie relaxation above, which are the route's to decide. Nothing is
-			// appended for the default mode, so a query-mode federation's
-			// authorization URL is byte-for-byte what its adapter returned.
+			// The route, not the adapter, writes `response_mode`, keeping it paired
+			// with the POST callback and the cookie decisions. Nothing is appended
+			// for query mode, so that URL is exactly what the adapter returned.
 			if (responseMode !== "query") {
 				authUrl.searchParams.set("response_mode", responseMode);
 			}
@@ -1625,12 +1403,10 @@ export const createRouter = (
 
 		// ------------------------------------------------------------------
 		// GET  /oauth/federation/:name/callback  — query-mode callback
-		// POST /oauth/federation/:name/callback  — form_post-mode callback (#479)
+		// POST /oauth/federation/:name/callback  — form_post-mode callback
 		//
-		// One handler, two parameter sources. The POST route is mounted
-		// unconditionally and refuses (405) any federation that did not declare
-		// `responseMode: "form_post"`, so the decision stays per federation and
-		// visible in one place rather than spread across route registration.
+		// Both are always mounted; `callbackHandler` refuses (405) the method a
+		// federation's response mode does not use.
 		// ------------------------------------------------------------------
 		.get("/oauth/federation/:name/callback", callbackHandler("query"))
 		.post("/oauth/federation/:name/callback", callbackHandler("body"));
