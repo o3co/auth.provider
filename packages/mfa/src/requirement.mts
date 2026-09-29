@@ -29,9 +29,10 @@
  *   `enrollable` and `email_proof`, what a first binding's answer carries.
  * - **`admit`** is D6's table for the `use` grade under `mfa.mode`:
  *   `optional` is met; under `required` a token is judged on its own `amr`
- *   (O3) — a primary that cannot be told is re-authenticated, `fed` or a
- *   second-factor value is met, a password alone is unmet — whether or not a
- *   record was read, the record being only the live view (D2 step 5, D9);
+ *   (O3) — `fed`, or a factor's own second-factor value (a passkey's `hwk`
+ *   with no primary's marker among them), is met, a password alone is unmet,
+ *   anything else is re-authenticated — whether or not a record was read,
+ *   the record being only the live view (D2 step 5, D9);
  *   otherwise no session is re-authenticated, `device.lookup` and
  *   `device.deny` are met on any live session, `fed` is met, a primary the
  *   baseline does not know is re-authenticated, `mfaAt` is met, and a
@@ -115,12 +116,21 @@ function reachOf(factors: MfaFactorResolver): ReadonlySet<string> {
 export function createMfaRequirement(options: MfaRequirementOptions): SessionRequirement {
 	const { mode, factors, factorStore, transactions, stepUpPage } = options;
 
-	/** A token, judged on its own `amr` (O3): the record read beside it is only the live view. */
+	/**
+	 * A token, judged on its own `amr` (O3; D6's token rows) — the record read
+	 * beside it is only the live view: a federation's is met; one carrying a
+	 * factor's own second-factor value is met, whatever its primary — the
+	 * WebAuthn grant's `["hwk"]` has none; a password's alone is unmet; any
+	 * other — none at all, an unknown value, `mfa` alone — is unknown and sent
+	 * to log in again. `mfa` names no factor: core never lets it stand without
+	 * a factor's own value, so it meets nothing by itself.
+	 */
 	const admitToken = ({ authentication }: RequirementInput): RequirementVerdict => {
 		const primary = authentication?.authentication?.primary;
 		if (primary === FEDERATED_AMR) return MET;
-		if (primary !== PASSWORD_AMR) return REAUTHENTICATE;
-		return authentication?.amr.some((value) => SECOND_FACTOR_AMR.has(value)) ? MET : UNMET;
+		const amr = authentication?.amr ?? [];
+		if (amr.some((value) => value !== MFA_AMR && SECOND_FACTOR_AMR.has(value))) return MET;
+		return primary === PASSWORD_AMR ? UNMET : REAUTHENTICATE;
 	};
 
 	/** A session a cookie, a code or a link carries: the baseline over its record. */
