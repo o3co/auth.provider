@@ -136,9 +136,12 @@ change observable behavior for traffic that works today?*
 | What happened | Mechanism | Home |
 | --- | --- | --- |
 | Key removed outright | `withRemovedKeys(sectionPath, table, schema)` — fails boot naming key, release, and remedy | `core/src/config/removed-keys.mts` |
+| Key moved to another path (#728) | the owning module's `section.relocatedFrom` — `config-path-relocated` fails boot naming the old path, the new one and the environment variable bound to it; the path's defaults move with it, and its old `${?VAR}` binding may stay behind, without a default, as a tombstone | the module's manifest; detection and message in `core/src/config/removed-keys.mts` |
 | A VALUE removed from a live key | shrink the `z.enum` — Zod's `invalid_enum_value` names the survivors | in place (e.g. `legacyRtPolicy`) |
 | Key moved to a new shape | bespoke preprocess with a migration pointer, not a removal notice | `LEGACY_JWT_FIELDS` |
 | Key ignored (warn path) | warn-once keyed on the config object | `INERT_PKCE_KEYS` (`@o3co/auth-provider-oauth`) |
+
+A moved key always fails boot: ignoring it drops the operator's setting for the default at the new path. The relocation rows are a bridge for the 0.x line and are deleted at 1.0.0 — `relocatedPaths.drift.test.mts` fails the cut that writes a `## [1.0.0]` section while any remain.
 
 `removedIn` strings follow R5/R6 above: neutral phase markers on HEAD,
 replaced with the actual tag at release-cut. Note `withRemovedKeys` wraps
