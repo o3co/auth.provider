@@ -19,9 +19,9 @@
  * `mfaModules` — the TOTP factor's module beside it — with the id of the MFA
  * routes' contribution, the TOTP factor's module on its own, the schema of
  * the `mfa` keys this package reads, and the published development sample
- * key a development configuration may carry (the MFA ADR's D1, D11, and the
- * step-8 plan's public exports). The requirement, the transactions, the
- * sealing, the TOTP primitive and the settings reader are the package's own.
+ * key a development configuration may carry (the MFA ADR's D1 and D11). The
+ * requirement, the transactions, the sealing, the TOTP primitive and the
+ * settings reader are the package's own.
  */
 
 import { describe, expect, it } from "vitest";

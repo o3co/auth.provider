@@ -91,7 +91,10 @@ export function spyLogger(): SpyLogger {
 export const events = (logger: SpyLogger, level: "info" | "warn" | "error"): string[] =>
 	logger[level].mock.calls.map((call) => call[1] as string);
 
-/** D21's lock as D19 defaults it. */
+/**
+ * `mfa.lockout` at its defaults (ADR 2026-09-25-multi-factor-authentication,
+ * D19 and D21).
+ */
 export const LOCKOUT = {
 	threshold: 5,
 	baseSeconds: 900,

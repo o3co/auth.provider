@@ -32,7 +32,7 @@ import { createTotpFactor, TOTP_FACTOR_KIND } from "./factor.mjs";
 /** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
-	// #728: the package's `config/reference.conf` holds this section's
+	// The package's `config/reference.conf` holds this section's
 	// defaults. Its schema checks nothing yet: the factor's factory reads the
 	// section itself (`readMfaTotpSettings`) and refuses what it cannot use as
 	// that factory's failure; the schema takes over when the section moves
@@ -43,7 +43,7 @@ export const mfaTotpFactorModule = defineModule({
 		at: "mfa.factors.totp",
 	},
 	requires: ["config"] as const,
-	// #728: the issuer an unset TOTP issuer defaults to the host of, which the
+	// The issuer an unset TOTP issuer defaults to the host of, which the
 	// oauth module provides; `oauth.jwt.issuer` when no module does.
 	optional: ["oauthTokenSettings"] as const,
 	contributes: {
@@ -51,7 +51,7 @@ export const mfaTotpFactorModule = defineModule({
 			[TOTP_FACTOR_KIND]: ({ config, oauthTokenSettings }) => {
 				const settings = readMfaTotpSettings(
 					config,
-					// The slot whole, checked first (#728): its issuer is then
+					// The slot whole, checked first: its issuer is then
 					// always one, so the configuration's is read only without it.
 					oauthTokenSettings === undefined
 						? {}
