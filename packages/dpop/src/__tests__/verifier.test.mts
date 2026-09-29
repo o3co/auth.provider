@@ -835,7 +835,7 @@ describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.
 	});
 });
 
-describe("createDPoPMechanism — the issuer is required at construction (#292)", () => {
+describe("createDPoPMechanism — the issuer is required at construction", () => {
 	it("throws when no issuer is configured", () => {
 		expect(() =>
 			createDPoPMechanism({
@@ -874,7 +874,7 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 // Server-provided nonce (RFC 9449 §8 / §9)
 // ---------------------------------------------------------------------------
 
-describe("createDPoPMechanism — server-provided nonce (#530)", () => {
+describe("createDPoPMechanism — server-provided nonce", () => {
 	let t = 1_700_000_000_000;
 	const issuer = createDPoPNonceIssuer({
 		secret: "a-dpop-nonce-secret-of-at-least-32-bytes!!",

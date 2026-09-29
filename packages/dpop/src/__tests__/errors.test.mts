@@ -34,13 +34,13 @@ describe("DPoPError", () => {
 		expect(err.detail).toBeUndefined();
 	});
 
-	it("matches Phase 1 hasOAuthErrorCode pattern (snake_case code)", () => {
+	it("carries a snake_case code", () => {
 		const err = new DPoPError("missing_claim", "no htm");
 		expect(/^[a-z][a-z0-9_]*$/.test(err.code)).toBe(true);
 	});
 });
 
-describe("DPoPError states its own retry instruction (v0.13.0 audit)", () => {
+describe("DPoPError states its own retry instruction", () => {
 	it("carries one for the nonce refusals, and none for a verdict on the proof", () => {
 		for (const reason of ["nonce_required", "nonce_invalid"] as const) {
 			expect(new DPoPError(reason, "m").retryInstruction, reason).toMatch(/DPoP-Nonce/);

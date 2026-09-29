@@ -25,7 +25,7 @@ import { createDPoPNonceIssuer } from "#/nonce.mjs";
  */
 const SECRET = "a-dpop-nonce-secret-of-at-least-32-bytes!!";
 
-describe("createDPoPNonceIssuer (#530)", () => {
+describe("createDPoPNonceIssuer", () => {
 	it("issues a nonce it verifies, and one from the previous bucket still counts", () => {
 		// Aligned to a bucket start (3_333_334 * 300 s), so the arithmetic below
 		// crosses boundaries exactly where the comments say it does.
