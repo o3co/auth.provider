@@ -620,7 +620,10 @@ const redisFederationTokenStoreConfigSchema = z.object({
 			encryptionKey: z.string().optional(),
 			// #291 migration flag — see `RedisFederationTokenStoreOptions.scanFallback`
 			// for what it costs while on and when to turn it off. Read from the
-			// string a `${?VAR}` carries (#288, #728).
+			// string a `${?VAR}` carries (#288, #728): an exported-but-empty
+			// variable reads as `false` under the house rule, turning the
+			// migration safety net off, where before #728 it was refused — set it
+			// to `true` or `false`, never empty.
 			scanFallback: coerceBooleanFromEnv.default(true),
 		})
 		.default({

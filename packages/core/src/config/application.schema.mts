@@ -1934,6 +1934,10 @@ export const fullSectionsSchema = z.object({
 			encryptionKey: z.string().optional(),
 			// `coerceBooleanFromEnv` for the #288 reason: a `${?VAR}` an operator's
 			// file sets it from arrives as a string (#728: no bridge coerces it).
+			// Under the house rule an exported-but-empty variable reads as
+			// `false` — which, for this flag, turns off #291's migration safety
+			// net, whose default is `true`. Before #728 the bridge refused an
+			// empty value; set the variable to `true` or `false`, never empty.
 			scanFallback: coerceBooleanFromEnv.optional(),
 		})
 		.optional(),
