@@ -48,8 +48,8 @@ export interface ClientCertificate {
  * intermediate chain's DER entries. Uses `node:crypto`'s `X509Certificate`:
  * RFC 8705 §7.5 asks for an established X.509 library, not a custom parser.
  *
- * Throws a plain `Error` on parse failure; the call site in `extractor.mts`
- * wraps it into `MtlsError("cert_decode_failed", …)`.
+ * Throws a plain `Error` on parse failure. No product code calls it; only its
+ * tests do.
  */
 export const parseDerToCertificate = (
 	der: Uint8Array,
