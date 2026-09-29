@@ -1796,20 +1796,24 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 
 	for (const m of modules) if (m.configSchema) participants.push({ module: m.name });
 
-	const base = TransitionalConfigSchema.safeParse(raw);
+	// Each parse through `parseSection`: a schema that throws instead of
+	// answering — an async refinement, a transform or a getter that throws —
+	// is one more issue naming whose schema it was, not an error escaping
+	// stage 1.
+	const base = parseSection(TransitionalConfigSchema, raw, "core's configuration schema");
 	// The modules' schemas read the base's output. Without one there is
 	// nothing for them to read: over what was written they would refuse the
 	// environment strings the base coerces, errors nobody made.
-	if (!base.success) issues.push(...base.error.issues);
-	const overlaid = base.success ? overlayConfig(raw, base.data) : raw;
+	if ("issues" in base) issues.push(...(base.issues as z.core.$ZodIssue[]));
+	const overlaid = "data" in base ? overlayConfig(raw, base.data) : raw;
 
 	let composed = overlaid;
 	const outputs: { readonly module: string; readonly data: unknown }[] = [];
-	for (const m of base.success ? modules : []) {
+	for (const m of "data" in base ? modules : []) {
 		if (!m.configSchema) continue;
-		const result = m.configSchema.safeParse(overlaid);
-		if (!result.success) {
-			issues.push(...result.error.issues);
+		const result = parseSection(m.configSchema, overlaid, `module "${m.name}"'s configSchema`);
+		if ("issues" in result) {
+			issues.push(...(result.issues as z.core.$ZodIssue[]));
 			continue;
 		}
 		outputs.push({ module: m.name, data: result.data });
@@ -1967,15 +1971,17 @@ function frozenSection(value: unknown, copies = new Map<object, unknown>()): unk
 }
 
 /**
- * Parse one section with its schema. A schema that throws instead of
- * answering — an async refinement (Zod cannot finish it synchronously), or a
- * transform that throws — is one more issue at the section's own path, so it
- * refuses boot the way a refused value does, naming the path, rather than
- * escaping stage 1 as a bare error.
+ * Parse `value` with one schema of the composed parse — core's base, a
+ * module's `configSchema` or a module's section — synchronously. A schema
+ * that throws instead of answering — an async refinement (Zod cannot finish
+ * it synchronously), or a transform or a getter that throws — is one more
+ * issue at the root of what it parsed, naming `subject`, so it refuses boot
+ * the way a refused value does rather than escaping stage 1 as a bare error.
  */
 function parseSection(
 	schema: z.ZodType,
 	value: unknown,
+	subject = "the section's schema",
 ): { readonly data: unknown } | { readonly issues: readonly z.ZodIssue[] } {
 	try {
 		const result = schema.safeParse(value);
@@ -1986,7 +1992,7 @@ function parseSection(
 				{
 					code: "custom",
 					path: [],
-					message: `the section's schema threw instead of answering, so it could not be parsed synchronously: ${failureSummary(thrown)}`,
+					message: `${subject} threw instead of answering, so it could not be parsed synchronously: ${failureSummary(thrown)}`,
 				} as z.ZodIssue,
 			],
 		};

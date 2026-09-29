@@ -37,6 +37,7 @@
  */
 
 import type { z } from "zod";
+import { loggableError, uncappedDetail } from "../logging/loggableError.mjs";
 import { type AppConfig, CoreConfigSchema, fullSectionsSchema } from "./application.schema.mjs";
 import { pickConfigSchema } from "./schema-path.mjs";
 
@@ -116,6 +117,18 @@ export function defineConfigKey(
 	});
 }
 
+/**
+ * A thrown value as a refusal names it, by `loggableError`'s rules (boot's
+ * `failureSummary`): its name and its message as the projection reads it,
+ * or its kind alone for a thrown value that is not an Error.
+ */
+function thrownSummary(thrown: unknown): string {
+	const projected = loggableError(thrown);
+	if (projected.thrown !== undefined) return `a thrown ${projected.thrown}`;
+	const message = uncappedDetail(thrown);
+	return message === undefined || message === "" ? projected.name : `${projected.name}: ${message}`;
+}
+
 /** A Zod issue path as the operator writes it: its keys joined with dots. */
 export function operatorPath(path: readonly PropertyKey[]): string {
 	return path.map(String).join(".");
@@ -154,7 +167,18 @@ export function operatorPath(path: readonly PropertyKey[]): string {
  * output type, every mirrored section optional, is not one they accept.
  */
 export function readTransitionalConfig(raw: unknown, reads: readonly string[]): AppConfig {
-	const result = pickConfigSchema(TransitionalConfigSchema, reads).safeParse(raw);
+	const picked = pickConfigSchema(TransitionalConfigSchema, reads);
+	let result: ReturnType<typeof picked.safeParse>;
+	try {
+		result = picked.safeParse(raw);
+	} catch (thrown) {
+		// A read that throws — a getter on a hand-built configuration — is a
+		// refusal like any other, not an error escaping the reader.
+		throw new RangeError(
+			`Config validation failed — core's configuration schema threw instead of answering, so it could not be parsed synchronously: ${thrownSummary(thrown)}`,
+			{ cause: thrown },
+		);
+	}
 	if (!result.success) {
 		const issues = result.error.issues as readonly z.core.$ZodIssue[];
 		throw new RangeError(
