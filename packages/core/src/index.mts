@@ -164,6 +164,16 @@ export {
 	type ReplicaSafetyModuleRef,
 	replicaUnsafeReason,
 } from "./boot/index.mjs";
+// #728: what the session package owns of the browser session that other
+// packages use — the login page, the one CSRF policy (#710), the session
+// cookie's attributes — each through a slot rather than the session's
+// configuration.
+export type {
+	CsrfGuard,
+	CsrfVerdict,
+	LoginEntry,
+	SessionCookiePolicy,
+} from "./browser-session/types.mjs";
 // Configuration
 export {
 	type AccessTokenConfig,

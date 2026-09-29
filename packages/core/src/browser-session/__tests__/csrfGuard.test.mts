@@ -53,10 +53,10 @@ const TRUSTED = "https://login.contract.test";
 /** The names of the cases the guards `build` makes fail. */
 const failing = async (
 	build: CsrfGuardContractInput["build"],
-	trustedOrigin: string | undefined = TRUSTED,
+	trusting: Pick<CsrfGuardContractInput, "trustedOrigin"> = { trustedOrigin: TRUSTED },
 ): Promise<string[]> => {
 	const failed: string[] = [];
-	for (const { name, run } of csrfGuardContract({ build, trustedOrigin })) {
+	for (const { name, run } of csrfGuardContract({ build, ...trusting })) {
 		try {
 			await run();
 		} catch {
@@ -171,7 +171,7 @@ describe("csrfGuardContract — the double", () => {
 	});
 
 	it("keeps them trusting no origin but its own", async () => {
-		expect(await failing(() => createTestCsrfGuard(), undefined)).toEqual([]);
+		expect(await failing(() => createTestCsrfGuard(), {})).toEqual([]);
 	});
 });
 

@@ -87,11 +87,27 @@ export {
 // slot's contract suite, and a test double a consumer's tests fill the slot
 // with instead of importing the owner's package.
 export {
+	createTestSessionCookiePolicy,
+	type SessionCookiePolicyContractInput,
+	sessionCookiePolicyContract,
+} from "./slots/cookiePolicy.mjs";
+export {
+	type CsrfGuardContractInput,
+	createTestCsrfGuard,
+	csrfGuardContract,
+	type TestCsrfGuardOptions,
+} from "./slots/csrfGuard.mjs";
+export {
 	createRecordingLoginCompletion,
 	type LoginCompletionContractInput,
 	loginCompletionContract,
 	type RecordingLoginCompletion,
 } from "./slots/loginCompletion.mjs";
+export {
+	createTestLoginEntry,
+	type LoginEntryContractInput,
+	loginEntryContract,
+} from "./slots/loginEntry.mjs";
 export {
 	createTestOAuthTokenSettings,
 	type OAuthTokenSettingsContractInput,
