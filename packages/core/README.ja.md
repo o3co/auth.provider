@@ -476,7 +476,7 @@ const userRepo = new InMemoryUserRepository(users);
 - Factory: `createRateLimiterFactory()`。`registerBuiltinRateLimiters()` が登録するのは `"memory"` だけ。`"redis"` バックエンドは `@o3co/auth-provider-redis`（`redisRateLimiterBuilder`、または宣言的な `redisRateLimiterModule`）にあり、ここで登録されないことを `ratelimit/__tests__/factory.test.mts` が検査している
 - deny 時には core が 429 + `Retry-After` で応答。判定の `reason` を RFC 6749 の文字の範囲で `error_description` とし、ないとき・空のとき・文字列でないときは `Rate limit exceeded` とする
 - 同梱の 2 つのリミッターは、それぞれの設定セクションにあるエンドポイントごとの予算を seed する（`resolveSeededLimitSpecs`、[`src/ratelimit/seededSpecs.mts`](src/ratelimit/seededSpecs.mts)）。その中に MFA のプレフィックス `mfa`（`MFA_RATE_LIMIT_PREFIX`、`mfa.rateLimit.routes` から）と `mfa-email`（`MFA_EMAIL_RATE_LIMIT_PREFIX`、`mfa.factors.email.sendLimit` から）がある — [`src/ratelimit/mfaSpec.mts`](src/ratelimit/mfaSpec.mts)。プレフィックスに対するオペレーター自身の `limits` の項目が優先する。与えられていないキーは何も seed しない。与えられたが使えないキーは、そのキーを名指しする `RangeError` で起動を拒否する
-- プレフィックスを所有するモジュールは、その予算を `rateLimitBudgets` の contribution として寄与できる（[#728](https://github.com/o3co/auth.provider/issues/728)）。core はそれらを `rateLimitBudgetResolver` のビューに合成し、2 つのモジュールが同じプレフィックスを寄与すると拒否する。同梱のどちらのリミッターもまだそのビューを読まず、適用されるのは上の seed のままである
+- プレフィックスを所有するモジュールは、その予算を `rateLimitBudgets` の contribution として寄与できる（[#728](https://github.com/o3co/auth.provider/issues/728)）。core はそれらを `rateLimitBudgetResolver` のビューに合成し、2 つのモジュールが同じプレフィックスを寄与すること、リミッターのキーが持てないプレフィックス、ホスト独自のコレクターを拒否する。予算はパース済みの数値である（環境変数の文字列は拒否される）。`null` を返した予算のプレフィックスは、リミッターの `defaultLimit` に従う。同梱のどちらのリミッターもまだそのビューを読まず、適用されるのは上の seed のままである
 
 #### リフレッシュトークンファミリー（RFC 6819 §5.2.2.3 の replay 検出）
 
