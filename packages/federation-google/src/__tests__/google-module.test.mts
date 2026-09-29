@@ -17,8 +17,8 @@ import { describe, expect, it } from "vitest";
 import { googleFederationModule } from "../google.mjs";
 
 describe("googleFederationModule const Module", () => {
-	it("has the canonical module name 'federation:google'", () => {
-		expect(googleFederationModule.name).toBe("federation:google");
+	it("has the canonical module name 'federation-google'", () => {
+		expect(googleFederationModule.name).toBe("federation-google");
 	});
 
 	it("requires googleFederationConfig", () => {

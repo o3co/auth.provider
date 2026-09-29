@@ -92,7 +92,7 @@ function flattenAdapterConfig(
  * own KeyStore via a different module of the same shape.
  */
 export const keyStoreModule: Module = defineModule({
-	name: "standalone:key-store",
+	name: "key-store",
 	requires: ["config"] as const,
 	provides: {
 		keyStore: async ({ config }) => {
@@ -114,7 +114,7 @@ export const keyStoreModule: Module = defineModule({
  * a slot collision. Same pattern as the Wave-5d userSessionStores split.
  */
 export const repositoriesModule: Module = defineModule({
-	name: "standalone:repositories",
+	name: "repositories",
 	requires: ["config"] as const,
 	// D-5 / OR-2 / IH-11: forward `lifecycleRegistrar` into the repository
 	// factories so client/user adapters can register disposal callbacks
@@ -159,7 +159,7 @@ export const repositoriesModule: Module = defineModule({
  * `oauth.code.adapter`.
  */
 export const inMemoryCodeRepositoryModule: Module = defineModule({
-	name: "standalone:in-memory-code-repository",
+	name: "standalone-in-memory-code-repository",
 	// #455: the replica-safety guard reads this off the manifest. Before it
 	// did, this module booted under `deployment.mode = "multi"` — the guard
 	// keyed on core's module names and had never heard of this one.
@@ -207,10 +207,11 @@ export const inMemoryCodeRepositoryModule: Module = defineModule({
  * review on PR #121).
  */
 export const inMemorySessionStoresModule: Module = defineModule({
-	name: "standalone:in-memory-session-stores",
+	name: "standalone-in-memory-session-stores",
 	// #455: the replica-safety guard reads this off the manifest. Before it
 	// did, `DEPLOYMENT_MODE=multi` with `USER_SESSION_STORES_ADAPTER=memory`
-	// booted — the guard keyed on core's `memorySessionStores`, and this
+	// booted — the guard keyed on the name of core's session stores module
+	// (`memorySessionStores` then, `core-session-stores-memory` now), and this
 	// module provides the same six slots under a name it had never heard of.
 	replicaSafety: {
 		unsafe: true,
@@ -264,7 +265,7 @@ export const inMemorySessionStoresModule: Module = defineModule({
  * where its "dev/test only" boot warning lives.
  */
 export const inMemoryFederationTokenStoreModule: Module = defineModule({
-	name: "standalone:in-memory-federation-token-store",
+	name: "standalone-in-memory-federation-token-store",
 	// #455: read by the replica-safety guard. Before the split this module
 	// carried one name for both adapters, so no name could have carried it.
 	replicaSafety: {
@@ -319,7 +320,7 @@ export const inMemoryFederationTokenStoreModule: Module = defineModule({
  * exist, rather than producing a deployment with no audit trail (#304).
  */
 export const auditSinkModule: Module = defineModule({
-	name: "standalone:audit-sink",
+	name: "audit-sink",
 	requires: ["config"] as const,
 	provides: {
 		auditSink: async ({ config }) => {
@@ -348,7 +349,7 @@ export const auditSinkModule: Module = defineModule({
  * New code should use the two split modules directly.
  */
 export const storesModule: Module = defineModule({
-	name: "standalone:stores",
+	name: "stores",
 	// #455: everything this bundle provides lives in process memory, so a
 	// composition still on it is refused under `deployment.mode = "multi"`
 	// like the split modules it stands in for.
@@ -409,7 +410,7 @@ export const storesModule: Module = defineModule({
  * ioredis socket for memory-only compositions.
  */
 export const standaloneRedisClientsModule: Module = defineModule({
-	name: "standalone:redis-clients",
+	name: "redis-clients",
 	requires: ["config"] as const,
 	optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"] as const,
 	provides: {
@@ -841,7 +842,7 @@ function optionalAccessType(
  * works by filling in the config file.
  */
 export const googleFederationConfigModule: Module = defineModule({
-	name: "standalone:google-federation-config",
+	name: "google-federation-config",
 	requires: ["config"] as const,
 	provides: {
 		googleFederationConfig: ({ config }): GoogleProviderConfig => {
@@ -909,7 +910,7 @@ export const googleFederationConfigModule: Module = defineModule({
  * exists.
  */
 export const oidcFederationConfigModule: Module = defineModule({
-	name: "standalone:oidc-federation-config",
+	name: "oidc-federation-config",
 	requires: ["config"] as const,
 	provides: {
 		oidcFederationConfigs: ({ config }) =>

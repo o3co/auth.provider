@@ -278,7 +278,7 @@ describe("#287: the template's audit sink", () => {
 			});
 			const providers = modules.filter((m) => Object.keys(m.provides ?? {}).includes("auditSink"));
 			expect(providers).toHaveLength(1);
-			expect(providers[0]?.name).toBe("standalone:audit-sink");
+			expect(providers[0]?.name).toBe("audit-sink");
 		});
 
 		it("the shipped application.conf selects a sink, and never 'none'", () => {
@@ -301,7 +301,7 @@ describe("#287: the template's audit sink", () => {
 			// so `emitAuditEvent` returned without recording anything.
 			const logger = fakeLogger();
 			const spyAuditModule = defineModule({
-				name: "standalone:audit-sink",
+				name: "audit-sink",
 				provides: { auditSink: () => createLoggerAuditSink(logger) },
 			});
 			const handle = await createApp({

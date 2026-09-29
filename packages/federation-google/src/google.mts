@@ -356,7 +356,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
  * Per A5 §10.1.
  */
 export const googleFederationModule = defineModule({
-	name: "federation:google",
+	name: "federation-google",
 	requires: ["googleFederationConfig"] as const,
 	contributes: {
 		federations: {

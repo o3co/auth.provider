@@ -80,7 +80,7 @@ const INSTALL_COMMAND = "npm install redis@^6.2.1 connect-redis@^10.0.0";
  *
  * What a message is for comes first: the names and the install command, then
  * the explanation. createApp prefixes the route factory's error with
- * `Module "sessionStoreModule" route factory failed: `, and a log line keeps
+ * `Module "session-store" route factory failed: `, and a log line keeps
  * 256 characters of a message (core's LOGGED_STRING_MAX_LENGTH); the install
  * command and what failed are inside them for every combination
  * (`redisStoreLibraries.test.mts`).

@@ -389,8 +389,8 @@ describe("standalone smoke test", () => {
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
 		const moduleNames = modules.map((m) => m.name);
-		expect(moduleNames).not.toContain("federation:google");
-		expect(moduleNames).not.toContain("standalone:google-federation-config");
+		expect(moduleNames).not.toContain("federation-google");
+		expect(moduleNames).not.toContain("google-federation-config");
 
 		const handle = await createApp({
 			modules,
@@ -415,7 +415,7 @@ describe("standalone smoke test", () => {
 			const names = modules.map((m) => m.name);
 			// Wave 5d: single shared ioredis client module (was per-purpose
 			// `standalone:refresh-token-family-client` in PR1).
-			expect(names).toContain("standalone:redis-clients");
+			expect(names).toContain("redis-clients");
 			expect(names).toContain("redis-refresh-token-family-store");
 			expect(names).not.toContain("core-refresh-token-family-store-memory");
 		});
@@ -428,7 +428,7 @@ describe("standalone smoke test", () => {
 			});
 			const names = modules.map((m) => m.name);
 			expect(names).toContain("core-refresh-token-family-store-memory");
-			expect(names).not.toContain("standalone:redis-clients");
+			expect(names).not.toContain("redis-clients");
 			expect(names).not.toContain("redis-refresh-token-family-store");
 		});
 
@@ -457,7 +457,7 @@ describe("standalone smoke test", () => {
 			expect(names).toContain("redis-rate-limiter");
 			expect(names).not.toContain("core-rate-limiter-memory");
 			// Adapter = redis pulls in the shared redis-clients module too.
-			expect(names).toContain("standalone:redis-clients");
+			expect(names).toContain("redis-clients");
 		});
 
 		it("buildModules switches to redisSessionStoresModule when userSessionStores.adapter = 'redis'", () => {
@@ -471,9 +471,9 @@ describe("standalone smoke test", () => {
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 			});
 			const names = modules.map((m) => m.name);
-			expect(names).toContain("redisSessionStores");
-			expect(names).not.toContain("standalone:stores");
-			expect(names).toContain("standalone:redis-clients");
+			expect(names).toContain("redis-session-stores");
+			expect(names).not.toContain("stores");
+			expect(names).toContain("redis-clients");
 		});
 
 		// #321's `redisSessionStoresModule` requires the two subject-level client
@@ -486,7 +486,7 @@ describe("standalone smoke test", () => {
 		// selection is satisfiable. This pins the invariant the shared clients
 		// module exists for: every `*Client` slot any selected module requires
 		// is one it provides.
-		it("standalone:redis-clients provides every *Client slot the Redis branches require", () => {
+		it("redis-clients provides every *Client slot the Redis branches require", () => {
 			const allRedisConfig = {
 				...config,
 				userSessionStores: { adapter: "redis" as const },
@@ -502,7 +502,7 @@ describe("standalone smoke test", () => {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 			});
-			const clients = modules.find((m) => m.name === "standalone:redis-clients");
+			const clients = modules.find((m) => m.name === "redis-clients");
 			expect(clients).toBeDefined();
 			const provided = new Set(Object.keys(clients?.provides ?? {}));
 			const requiredClientSlots = new Set(
@@ -559,7 +559,7 @@ describe("standalone smoke test", () => {
 			// The Redis branch must also pull in the shared ioredis socket, or the
 			// `accessTokenDenylistClient` slot has no provider and boot fails on a
 			// missing component instead of on the thing the operator changed.
-			expect(names).toContain("standalone:redis-clients");
+			expect(names).toContain("redis-clients");
 		});
 
 		it("the shipped application.conf selects the replica-safe adapter", () => {
@@ -602,7 +602,7 @@ describe("standalone smoke test", () => {
 				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 			});
 			const names = modules.map((m) => m.name);
-			expect(names).toContain("standalone:in-memory-code-repository");
+			expect(names).toContain("standalone-in-memory-code-repository");
 			expect(names).not.toContain("redis-code-repository");
 		});
 
@@ -618,10 +618,10 @@ describe("standalone smoke test", () => {
 			});
 			const names = modules.map((m) => m.name);
 			expect(names).toContain("redis-code-repository");
-			expect(names).not.toContain("standalone:in-memory-code-repository");
+			expect(names).not.toContain("standalone-in-memory-code-repository");
 			// adapter = "redis" pulls in the shared ioredis socket so the
 			// `codeRepositoryClient` slot is satisfied.
-			expect(names).toContain("standalone:redis-clients");
+			expect(names).toContain("redis-clients");
 		});
 
 		it("buildModules honors legacy repositories.code.type='redis' with one object-first deprecation warn when oauth.code.adapter is absent", () => {
@@ -682,7 +682,7 @@ describe("standalone smoke test", () => {
 				Object.keys(m.provides ?? {}).includes("codeRepository"),
 			);
 			expect(codeRepoProviders).toHaveLength(1);
-			expect(codeRepoProviders[0]?.name).toBe("standalone:in-memory-code-repository");
+			expect(codeRepoProviders[0]?.name).toBe("standalone-in-memory-code-repository");
 		});
 	});
 

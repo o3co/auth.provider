@@ -388,7 +388,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
  * Per A5 §10.2.
  */
 export const githubFederationModule = defineModule({
-	name: "federation:github",
+	name: "federation-github",
 	requires: ["githubFederationConfig"] as const,
 	contributes: {
 		federations: {
