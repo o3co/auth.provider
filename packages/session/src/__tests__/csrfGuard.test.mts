@@ -54,7 +54,7 @@ import {
 	createSessionCsrfGuard,
 	type SessionCsrfConfigSlice,
 } from "#/csrf.mjs";
-import { sessionModule } from "#/module.mjs";
+import { csrfGuardOf, sessionModule } from "#/module.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
 
 const TRUSTED = "https://app.contract.test";
@@ -245,6 +245,19 @@ const boot = async (seen: { guard?: CsrfGuard }): Promise<express.Express> => {
 	app.use(handle.router);
 	return app;
 };
+
+describe("the session module builds one guard per configuration", () => {
+	it("hands the csrfGuard slot and loginCompletion the same guard, and another configuration another", () => {
+		// The slot's provider and loginCompletion's both build the guard through
+		// `csrfGuardOf`; one policy is one object, whichever reads it.
+		const config = makeValidAppConfig() as AppConfig;
+		const logger = spyLogger() as unknown as Logger;
+		const first = csrfGuardOf(config, logger);
+		expect(csrfGuardOf(config, logger)).toBe(first);
+		expect(csrfGuardOf(makeValidAppConfig() as AppConfig, logger)).not.toBe(first);
+		expect(csrfGuardOf(config, spyLogger() as unknown as Logger)).not.toBe(first);
+	});
+});
 
 describe("the session module provides csrfGuard", () => {
 	it("hands a module that requires it a guard that keeps the contract", async () => {
