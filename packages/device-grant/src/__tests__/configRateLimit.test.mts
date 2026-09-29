@@ -34,7 +34,7 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { deviceGrantConfigSchema } from "#/module.mjs";
 
-const REFERENCE_CONF = fileURLToPath(new URL("../reference.conf", import.meta.url));
+const REFERENCE_CONF = fileURLToPath(new URL("../../config/reference.conf", import.meta.url));
 
 describe("oauth.deviceAuthorization.rateLimit — schema boundary", () => {
 	it("defaults to RFC 8628 §5.1's five attempts per five minutes", () => {

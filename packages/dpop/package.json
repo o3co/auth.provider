@@ -14,11 +14,11 @@
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
 		},
-		"./reference.conf": "./src/reference.conf"
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
-		"src/reference.conf",
+		"config",
 		"README.md"
 	],
 	"repository": {
@@ -53,6 +53,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/ts.hocon": "^1.13.0",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
 		"@vitest/coverage-v8": "^5.0.0",

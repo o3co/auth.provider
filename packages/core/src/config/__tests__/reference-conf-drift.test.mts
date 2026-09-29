@@ -169,9 +169,9 @@ describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
 		expect(confPaths.map((path) => relative(REPO_ROOT, path))).toEqual(
 			expect.arrayContaining([
 				"packages/core/config/reference.conf",
-				"packages/device-grant/src/reference.conf",
-				"packages/dpop/src/reference.conf",
-				"packages/mtls/src/reference.conf",
+				"packages/device-grant/config/reference.conf",
+				"packages/dpop/config/reference.conf",
+				"packages/mtls/config/reference.conf",
 				"packages/webauthn/config/reference.conf",
 			]),
 		);
