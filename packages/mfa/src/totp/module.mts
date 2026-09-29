@@ -43,10 +43,16 @@ export const mfaTotpFactorModule = defineModule({
 		at: "mfa.factors.totp",
 	},
 	requires: ["config"] as const,
+	// #728: the issuer an unset TOTP issuer defaults to the host of, which the
+	// oauth module provides; `oauth.jwt.issuer` when no module does.
+	optional: ["oauthTokenSettings"] as const,
 	contributes: {
 		mfaFactors: {
-			[TOTP_FACTOR_KIND]: ({ config }) => {
-				const settings = readMfaTotpSettings(config);
+			[TOTP_FACTOR_KIND]: ({ config, oauthTokenSettings }) => {
+				const settings = readMfaTotpSettings(
+					config,
+					oauthTokenSettings === undefined ? {} : { issuer: oauthTokenSettings.issuer },
+				);
 				return settings.enabled ? createTotpFactor(settings) : null;
 			},
 		},
