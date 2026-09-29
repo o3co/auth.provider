@@ -421,7 +421,9 @@ describe("device verification on session admission (the session-admission ADR's 
 				issuer: ISSUER,
 				requireEmailVerified: false,
 			} as never),
-		).toThrow(/sessionRequirementResolver the boot planner built/);
+		).toThrow(
+			/^createDeviceVerificationHandler: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
 	});
 
 	it("refuses to be built without an issuer to resolve a step-up page on", () => {
@@ -487,6 +489,6 @@ describe("device verification on session admission (the session-admission ADR's 
 				userSessionStore: liveSessionStore(),
 				requireEmailVerified: false,
 			} as never),
-		).toThrow(/requirements/);
+		).toThrow(/^createDeviceVerificationHandler: requirements is required/);
 	});
 });

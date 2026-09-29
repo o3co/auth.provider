@@ -1619,7 +1619,26 @@ describe("Federation routes", () => {
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
 				}),
-			).toThrow("federation routes require requirements");
+			).toThrow(/^federation routes: requirements is required/);
+		});
+
+		it("throws if requirements is a resolver the planner did not build: a forged one never reaches a link", () => {
+			const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+			expect(() =>
+				createRouter(express, {
+					config: {} as never,
+					requirements: forged as never,
+					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
+					userRepository: makeUserRepository(),
+					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
+					federationTokenStore: makeFederationTokenStore(),
+					providerCallbackUrls: new Map(),
+				}),
+			).toThrow(
+				/^federation routes: requirements must be the sessionRequirementResolver the boot planner built/,
+			);
 		});
 
 		it("throws if providerCallbackUrls is missing", () => {

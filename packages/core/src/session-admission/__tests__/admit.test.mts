@@ -27,6 +27,7 @@ import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
 	admitSession,
+	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
@@ -287,6 +288,22 @@ describe("what admitSession refuses before it reads anything (a caller's fault i
 		await expect(
 			admitSession(deps({ requirements: undefined as never }), request()),
 		).rejects.toThrow(RangeError);
+	});
+
+	it("is the one construction-time check a consumer factory built by hand runs: checkResolver names the factory for a resolver missing or forged, and answers the one it built", () => {
+		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+		for (const missing of [undefined, null]) {
+			expect(() => checkResolver(missing, "createThing"), String(missing)).toThrow(RangeError);
+			expect(() => checkResolver(missing, "createThing"), String(missing)).toThrow(
+				/^createThing: requirements is required — the sessionRequirementResolver the boot planner built/,
+			);
+		}
+		expect(() => checkResolver(forged, "createThing")).toThrow(RangeError);
+		expect(() => checkResolver(forged, "createThing")).toThrow(
+			/^createThing: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
+		const built = resolverForTests([]);
+		expect(checkResolver(built, "createThing")).toBe(built);
 	});
 
 	it("refuses an action that is not a name with one of the three grades — before a store is read or a requirement asked, never as a skipped requirement", async () => {

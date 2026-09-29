@@ -3327,11 +3327,13 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 		}
 	});
 
-	it("refuses to be built without requirements, or with a resolver the planner did not build", () => {
-		expect(() => createFederationGrantBrowserRouter({} as never)).toThrow(/requirements/);
+	it("refuses to be built without requirements, or with a resolver the planner did not build, naming the factory", () => {
+		expect(() => createFederationGrantBrowserRouter({} as never)).toThrow(
+			/^createFederationGrantBrowserRouter: requirements is required/,
+		);
 		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
 		expect(() => createFederationGrantBrowserRouter({ requirements: forged } as never)).toThrow(
-			/sessionRequirementResolver the boot planner built/,
+			/^createFederationGrantBrowserRouter: requirements must be the sessionRequirementResolver the boot planner built/,
 		);
 	});
 });

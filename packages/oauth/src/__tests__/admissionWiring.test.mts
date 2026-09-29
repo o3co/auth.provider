@@ -34,6 +34,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantDependencies,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
+	type SessionRequirementResolver,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry, resolverForTests } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -129,6 +130,41 @@ describe("the consumers' factories refuse to build without the requirements reso
 		expect(() =>
 			createRefreshTokenGrant({ ...grantDeps, sessionRequirementResolver: resolverForTests([]) }),
 		).not.toThrow();
+	});
+
+	it("each refuses a resolver the planner did not build at construction, naming the factory — core's checkResolver, the one check every consumer factory runs", async () => {
+		const forged = {
+			get: () => undefined,
+			entries: () => [][Symbol.iterator](),
+		} as unknown as SessionRequirementResolver;
+		const refusal = (factory: string) =>
+			new RegExp(
+				`^${factory}: requirements must be the sessionRequirementResolver the boot planner built`,
+			);
+		await expect(
+			createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config,
+				clientRepository,
+				codeRepository,
+				keyStore,
+				requirements: forged,
+			}),
+		).rejects.toThrow(refusal("createOAuthRouter"));
+		expect(() => createSessionGrant({ ...grantDeps, sessionRequirementResolver: forged })).toThrow(
+			refusal("createSessionGrant"),
+		);
+		expect(() =>
+			createAuthorizationGrant({
+				...grantDeps,
+				clientRepository,
+				codeRepository,
+				sessionRequirementResolver: forged,
+			}),
+		).toThrow(refusal("createAuthorizationGrant"));
+		expect(() =>
+			createRefreshTokenGrant({ ...grantDeps, sessionRequirementResolver: forged }),
+		).toThrow(refusal("createRefreshTokenGrant"));
 	});
 });
 
