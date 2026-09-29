@@ -116,6 +116,15 @@ export const dpopConfigSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
+ * The `oauth.dpop` section as the module declares it (#728): its schema, the
+ * package's `config/reference.conf` that holds its defaults, and the path it
+ * sits at until it moves under the module's name. `configSchema` keeps
+ * composing the same schema with core's until then, so the section is
+ * parsed from what it already kept.
+ */
+const DPOP_SECTION_SCHEMA = dpopConfigSchema.shape.oauth.shape.dpop;
+
+/**
  * Declarative manifest for the DPoP package.
  *
  * When `config.oauth.dpop.enabled` is `false` (the secure default), the
@@ -143,9 +152,18 @@ export const dpopConfigSchema = z.object({
  * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
  * for the cross-mechanism design rationale.
  */
-export const dpopModule = defineModule<"config", "logger" | "replaySeenSet">({
+export const dpopModule = defineModule<
+	"config",
+	"logger" | "replaySeenSet",
+	typeof DPOP_SECTION_SCHEMA
+>({
 	name: "dpop",
 	configSchema: dpopConfigSchema,
+	section: {
+		schema: DPOP_SECTION_SCHEMA,
+		reference: new URL("../config/reference.conf", import.meta.url),
+		at: "oauth.dpop",
+	},
 	requires: ["config"],
 	optional: ["logger", "replaySeenSet"],
 	contributes: {

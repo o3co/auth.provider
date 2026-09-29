@@ -87,9 +87,11 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * import.meta.url)` from a file directly under `src/` (and so `dist/`),
 	 * `"../../config/reference.conf"` from one a directory further down.
 	 *
-	 * Declared, not yet read: boot does not layer the references beneath the
-	 * configuration yet, so the composition root still layers them itself.
-	 * The loader that will is what resolves and reads this URL.
+	 * Boot does not read it: `moduleReferences(modules)` collects the
+	 * references of the modules a composition loads, core's own at the
+	 * bottom, for the composition root to layer beneath its own files. The
+	 * package's tests hold the file to the sections of the modules that
+	 * declare it (`referenceConfProblems`, on the testing entry).
 	 */
 	readonly reference?: URL;
 	/**

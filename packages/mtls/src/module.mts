@@ -189,6 +189,15 @@ export const mtlsConfigSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
+ * The `oauth.mtls` section as the module declares it (#728): its schema, the
+ * package's `config/reference.conf` that holds its defaults, and the path it
+ * sits at until it moves under the module's name. `configSchema` keeps
+ * composing the same schema with core's until then, so the section is
+ * parsed from what it already kept.
+ */
+const MTLS_SECTION_SCHEMA = mtlsConfigSchema.shape.oauth.shape.mtls;
+
+/**
  * Declarative manifest for the mTLS package.
  *
  * When `config.oauth.mtls.enabled` is `false` (the secure default), the
@@ -230,9 +239,14 @@ export const mtlsConfigSchema = z.object({
  * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
  * for the cross-mechanism design rationale.
  */
-export const mtlsModule = defineModule<"config", "logger">({
+export const mtlsModule = defineModule<"config", "logger", typeof MTLS_SECTION_SCHEMA>({
 	name: "mtls",
 	configSchema: mtlsConfigSchema,
+	section: {
+		schema: MTLS_SECTION_SCHEMA,
+		reference: new URL("../config/reference.conf", import.meta.url),
+		at: "oauth.mtls",
+	},
 	requires: ["config"],
 	optional: ["logger"],
 	contributes: {

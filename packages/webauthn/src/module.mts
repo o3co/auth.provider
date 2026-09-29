@@ -74,6 +74,7 @@ import {
 	readConfiguredRateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import { z } from "zod";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "./grant.mjs";
 import {
 	createAuthenticationOptionsHandler,
@@ -81,6 +82,17 @@ import {
 } from "./routes/authenticationOptions.mjs";
 import { createRegistrationOptionsHandler } from "./routes/registrationOptions.mjs";
 import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs";
+
+/**
+ * The `webauthn` section as the module declares it (#728): the package's
+ * `config/reference.conf`, which holds its defaults, and the path it sits at.
+ * Its schema checks nothing yet: the module reads the section through the
+ * `webauthnConfig` slot, which the deployment fills from it with
+ * `webauthnConfigSchema` (or hard-codes), and a check here would refuse at
+ * boot what that slot accepts today. The schema takes over when the section
+ * moves under the module's name.
+ */
+const WEBAUTHN_SECTION_SCHEMA = z.unknown();
 
 /**
  * Declarative manifest for the WebAuthn passkey module.
@@ -112,9 +124,15 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore",
-	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation"
+	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation",
+	typeof WEBAUTHN_SECTION_SCHEMA
 >({
 	name: "webauthn",
+	section: {
+		schema: WEBAUTHN_SECTION_SCHEMA,
+		reference: new URL("../config/reference.conf", import.meta.url),
+		at: "webauthn",
+	},
 	requires: [
 		"webauthnConfig",
 		"webauthnCredentialStore",
