@@ -687,13 +687,13 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 33 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added four)
+// BootErrorReason — 34 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added five)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 33 reasons.
+ * exactly 34 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
  * OIDC discovery aggregator
@@ -703,8 +703,9 @@ export type BootStage =
  * factory rather than the manifest it builds), and the session-admission
  * ADR's D3 and D7 (session-requirement-kind-guarded,
  * session-requirements-undeclared, session-requirement-missing), and #728's
- * module sections (reserved-component-key, module-section-path-invalid) and
- * contribution kinds (contribution-kind-guarded, contribution-malformed).
+ * module sections (reserved-component-key, module-section-path-invalid),
+ * contribution kinds (contribution-kind-guarded, contribution-malformed) and
+ * relocated paths (config-path-relocated).
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -739,10 +740,11 @@ export type BootErrorReason =
 	| "reserved-component-key"
 	| "module-section-path-invalid"
 	| "contribution-kind-guarded"
-	| "contribution-malformed";
+	| "contribution-malformed"
+	| "config-path-relocated";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 33 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
+// Per-reason *Details interfaces — one per BootErrorReason, 34 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
 // ---------------------------------------------------------------------------
 
 /**
@@ -936,15 +938,49 @@ export interface ReservedComponentKeyDetails {
 }
 
 /**
- * A manifest's `section.at` that is not a dot-separated path of non-empty
- * keys (#728): `""`, `"a..b"`, `".a"`, `"a."` — or not a string at all. Such
- * a path names no section anyone wrote.
+ * A manifest's section path it cannot have written (#728): an `at` that is
+ * not a dot-separated path of non-empty keys (`""`, `"a..b"`, `".a"`, `"a."`,
+ * or not a string at all) — `at` names it — or a `relocatedFrom` that is
+ * neither a list of such paths nor a map from such paths to paths inside the
+ * section (`""` for the section itself), or whose old path is, or holds, a
+ * loaded module's section — `relocatedFrom` names the entry, or the value
+ * when it is neither form, and `problem` says what is wrong with it.
  */
-export interface ModuleSectionPathInvalidDetails {
-	readonly reason: "module-section-path-invalid";
-	readonly module: string;
-	/** The `at` the manifest wrote. */
-	readonly at: unknown;
+export type ModuleSectionPathInvalidDetails =
+	| {
+			readonly reason: "module-section-path-invalid";
+			readonly module: string;
+			/** The `at` the manifest wrote. */
+			readonly at: unknown;
+	  }
+	| {
+			readonly reason: "module-section-path-invalid";
+			readonly module: string;
+			/** The old path (a list entry or a map key), or the whole value when it is neither form. */
+			readonly relocatedFrom: unknown;
+			readonly problem: string;
+	  };
+
+/**
+ * A configuration handed to `createApp` still sets keys at paths a loaded
+ * module's section moved from (#728 B10; `section.relocatedFrom`), found
+ * before the configuration is parsed. Each key: the module whose section it
+ * moved to, the dot path the operator wrote, the one it is written at now
+ * (`null` for a key removed rather than moved), and the environment variable
+ * bound to the new path (#728 B9's naming) — absent for a removed key, and
+ * for a new path under a transitional section path nothing binds yet. A
+ * bridge for the 0.x line, removed at the first major release — the
+ * relocated-paths drift test fails the cut that forgets.
+ */
+export interface ConfigPathRelocatedDetails {
+	readonly reason: "config-path-relocated";
+	readonly relocated: readonly {
+		readonly module: string;
+		readonly from: string;
+		/** The dot path it moved to; `null` for a key removed rather than moved. */
+		readonly to: string | null;
+		readonly environmentVariable?: string;
+	}[];
 }
 
 /**
@@ -1246,10 +1282,10 @@ export interface SessionRequirementMissingDetails {
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
  * (component-absence-undeclared), module-factory-not-called and the
  * session-admission ADR's three (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing) and #728's four
+ * session-requirements-undeclared, session-requirement-missing) and #728's five
  * (reserved-component-key, module-section-path-invalid, contribution-kind-guarded,
- * contribution-malformed) — one member per
- * `BootErrorReason`, 33 in all.
+ * contribution-malformed, config-path-relocated) — one member per
+ * `BootErrorReason`, 34 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1284,7 +1320,8 @@ export type BootErrorDetails =
 	| ReservedComponentKeyDetails
 	| ModuleSectionPathInvalidDetails
 	| ContributionKindGuardedDetails
-	| ContributionMalformedDetails;
+	| ContributionMalformedDetails
+	| ConfigPathRelocatedDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

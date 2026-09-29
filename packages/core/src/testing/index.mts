@@ -90,6 +90,7 @@ export {
 	type ReferenceConfCheck,
 	referenceConfProblems,
 } from "./referenceConf.mjs";
+export { assertRelocationTombstone, type RelocationTombstone } from "./relocationTombstone.mjs";
 export {
 	type CsrfGuardContractInput,
 	createTestCsrfGuard,
