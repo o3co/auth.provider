@@ -15,12 +15,9 @@
  */
 
 /**
- * Coverage for mTLS cnf-claim propagation in the authorization_code grant —
- * Wave 2 Phase 3 §9.1 (mTLS-specific). Parallel to
- * `dpop.authorizationCode.integration.test.mts` which now also includes
- * inverted mTLS regression cases — this file covers the mTLS-only path.
- *
- * Pattern: direct grant handler invocation (mirrors authorization.test.mts).
+ * mTLS cnf-claim propagation in the authorization_code grant, the mTLS-only
+ * path, parallel to `dpop.authorizationCode.integration.test.mts`. Invokes
+ * the grant handler directly, as authorization.test.mts does.
  *
  * Key behavioral contracts:
  *   - AT carries `cnf.x5t#S256` whenever ctx.tokenBinding.kind === "mtls"
@@ -55,7 +52,7 @@ const validCode = codeRecord({
 	code: "code-x",
 	client_id: CLIENT_ID,
 	redirect_uri: RP_URI,
-	// #273: PKCE is mandatory, so a redeemable code always carries an
+	// PKCE is mandatory, so a redeemable code always carries an
 	// S256 challenge and the token request presents the matching verifier.
 	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	code_challenge_method: "S256",
@@ -65,7 +62,7 @@ const validPublicCode = codeRecord({
 	code: "code-x",
 	client_id: PUBLIC_CLIENT_ID,
 	redirect_uri: RP_URI,
-	// #273: PKCE is mandatory, so a redeemable code always carries an
+	// PKCE is mandatory, so a redeemable code always carries an
 	// S256 challenge and the token request presents the matching verifier.
 	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	code_challenge_method: "S256",

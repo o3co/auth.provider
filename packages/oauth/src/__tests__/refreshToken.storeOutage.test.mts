@@ -15,14 +15,11 @@
  */
 
 /**
- * Every store outage the refresh grant answers `503` is logged.
- *
- * The grant answered a family store that threw — on the rotation, or on the
- * fallback revocation a replay needs — and a session store that threw with
- * `503 temporarily_unavailable` and no log line at all: an operator saw
- * refreshes failing and nothing saying why. Each is now an error-level
+ * Every store outage the refresh grant answers `503` is logged: a family
+ * store that throws (on the rotation, or on the fallback revocation a replay
+ * needs) and a session store that throws. Each is an error-level
  * `refresh_token_store_unavailable` line carrying the store, the step and
- * the error's projection — never the error, which can carry what the store
+ * the error's projection, never the error, which can carry what the store
  * was sent.
  *
  * Driven through the real grant with core's real rotation over a store that
@@ -132,8 +129,8 @@ describe("refresh grant — a store outage is logged, not only answered", () => 
 	});
 
 	it("logs a family store that fails the revocation a replay needs", async () => {
-		// A rotation written before replays were revoked in the same write
-		// reports a bare `replayed`, so the grant revokes the family itself.
+		// A rotation that does not revoke replays in the same write reports a
+		// bare `replayed`, so the grant revokes the family itself.
 		const logger = createMockLogger();
 		const refreshTokenFamilyRotation: RefreshTokenFamilyRotation = {
 			register: async () => {},

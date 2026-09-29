@@ -15,21 +15,16 @@
  */
 
 /**
- * Coverage for mTLS cnf-claim propagation in the client_credentials grant —
- * Wave 2 Phase 3 §9.1 (mTLS-specific, parallel to `dpop.clientCredentials`).
- *
- * Uses a fake `TokenBindingMechanism` whose `extract` returns a fixed mTLS
- * binding so the test is decoupled from the real mTLS extractor + PKI chain
- * validation (those are exercised independently in `@o3co/auth-provider-mtls`).
- * Full HTTP path exercises tokenBindingMw → ctx.tokenBinding → grant →
- * token-issuance.
+ * mTLS cnf-claim propagation in the client_credentials grant, over the full
+ * HTTP path (tokenBindingMw → ctx.tokenBinding → grant → token issuance).
+ * A fake `TokenBindingMechanism` returns a fixed mTLS binding; the real
+ * extractor and PKI chain validation are tested in `@o3co/auth-provider-mtls`.
  *
  * Key behavioral contracts:
  *   - AT carries `cnf.x5t#S256` when an mTLS mechanism extracted a cert
- *   - token_type stays "Bearer" — mTLS never sets "DPoP" (RFC 8705 §3)
+ *   - token_type stays "Bearer": mTLS never sets "DPoP" (RFC 8705 §3)
  *   - client_credentials never issues a refresh_token regardless of binding
- *     (RFC 6749 §4.4.3) — pins that the mTLS RT-binding work in §9.2 does
- *     NOT regress this grant-level prohibition.
+ *     (RFC 6749 §4.4.3)
  */
 
 import {
@@ -84,7 +79,7 @@ const clientRepo = new InMemoryClientRepository(
 				tokenEndpointAuthMethod: "client_secret_basic" as const,
 				allowedRedirectUris: [],
 				allowedScopes: ["read"],
-				// #396: the old implicit omitted-scope grant, now declared.
+				// An omitted scope is granted these, never the allowlist.
 				defaultScopes: ["read"],
 				allowedAudiences: ["https://api.example"],
 				allowedGrantTypes: ["client_credentials"],
@@ -193,12 +188,8 @@ describe("mTLS cnf-claim propagation — client_credentials grant (§9.1)", () =
 
 	describe("refresh_token absence (RFC 6749 §4.4.3 — pins grant-level prohibition)", () => {
 		it("refresh_token is NOT issued for client_credentials even with mTLS binding", async () => {
-			// The Phase 3 RT-binding gate (`bindRefreshToken` in
-			// `authorization.mts`) is irrelevant here: client_credentials
-			// itself never emits a refresh_token. This test is the explicit
-			// regression guard that the mTLS RT-binding work in §9.2 does
-			// NOT accidentally turn on RTs for grants that should never have
-			// them.
+			// The RT-binding gate (`bindRefreshToken` in `authorization.mts`)
+			// must not turn on refresh tokens for a grant that never emits one.
 			const app = await buildApp([makeMtlsMechanism("NO-RT-MTLS-THUMB")]);
 
 			const res = await request(app)

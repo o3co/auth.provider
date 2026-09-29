@@ -15,13 +15,10 @@
  */
 
 /**
- * Issue #268 — `allowedGrantTypes` was consulted only by `client_credentials`
- * and the WebAuthn grant, so a client registered for one grant could exercise
- * every other one and the registration's restriction was silently void.
- *
- * These tests pin the central enforcement: once at `/oauth/token` dispatch, so
- * every grant — including one registered later through `GrantFactory` — inherits
- * it, and once at `/authorize`.
+ * Central `allowedGrantTypes` enforcement, so a client registered for one
+ * grant cannot exercise another: once at `/oauth/token` dispatch, so every
+ * grant (including one registered later through `GrantFactory`) inherits it,
+ * and once at `/authorize`.
  */
 
 import {
@@ -68,9 +65,9 @@ const alwaysGrant = (): GrantHandler => ({
 });
 
 /**
- * The same stub, but declaring `requiresExplicitGrantAllowlist` (#326) —
- * the contract `client_credentials` and the WebAuthn grant ship with. These
- * tests never reach `handle` on the absent-allowlist path; that is the point.
+ * The same stub, but declaring `requiresExplicitGrantAllowlist`, the contract
+ * `client_credentials` and the WebAuthn grant ship with. These tests never
+ * reach `handle` on the absent-allowlist path; that is the point.
  */
 const strictGrant = (): GrantHandler => ({
 	requiresExplicitGrantAllowlist: true,
@@ -158,8 +155,6 @@ const tokenRequest = (app: express.Express, grantType: string) =>
 
 describe("allowedGrantTypes — central /oauth/token enforcement (#268)", () => {
 	it("refuses a grant the client did not register for", async () => {
-		// The bug: a client provisioned for client_credentials only could still
-		// redeem refresh tokens and authorization codes.
 		const app = await makeApp(["client_credentials"]);
 		const res = await tokenRequest(app, "refresh_token");
 		expect(res.status).toBe(400);
@@ -302,21 +297,18 @@ describe("allowedGrantTypes — /authorize enforcement (#268)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #311 — deployment-wide deny-by-absence
+// Deployment-wide deny-by-absence
 // ---------------------------------------------------------------------------
 
 /*
- * #268 had to keep absence meaning "unrestricted": the grants that ignored
- * `allowedGrantTypes` predate it, so denying on absence would have revoked
- * every grant from every registration written before the field existed. The
- * consequence is that the secure posture is opt-in *per registration*, and an
- * operator who wants deny-by-default has to guarantee that every registration,
- * now and in future, carries the field. Nothing enforced that.
+ * Absence means "unrestricted" by default, since denying on absence would
+ * revoke every grant from every registration written before the field existed.
+ * The secure posture is then opt-in *per registration*, and deny-by-default
+ * would need every registration, now and in future, to carry the field.
  *
  * `oauth.requireGrantTypeAllowlist` is the deployment-level statement, off by
- * default so #268's migration story is untouched. It is read once at router
- * composition, so both of #268's enforcement points inherit it rather than
- * each re-reading config.
+ * default. It is read once at router composition, so both enforcement points
+ * inherit it rather than each re-reading config.
  */
 describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)", () => {
 	const authorize = (app: express.Express) =>
@@ -370,7 +362,7 @@ describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)",
 		expect(error).not.toBe("unauthorized_client");
 	});
 
-	// #268's migration story is the default, and it must stay the default.
+	// Absence meaning "unrestricted" is the default, and it must stay so.
 	it("leaves an undeclared client unrestricted when the flag is off", async () => {
 		const app = await makeApp(undefined, { requireGrantTypeAllowlist: false });
 		expect((await tokenRequest(app, "refresh_token")).status).toBe(200);
@@ -381,7 +373,7 @@ describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)",
 		expect((await tokenRequest(app, "refresh_token")).status).toBe(200);
 	});
 
-	// #326's per-grant rule is independent: it denies by absence whatever this
+	// The per-grant rule is independent: it denies by absence whatever this
 	// flag says, so turning the flag off must not loosen it.
 	it("does not loosen a requiresExplicitGrantAllowlist grant when the flag is off", async () => {
 		const app = await makeApp(undefined, { requireGrantTypeAllowlist: false });

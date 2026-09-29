@@ -15,13 +15,13 @@
  */
 
 /**
- * `GET /authorize` — error and edge paths of the RFC 6749 §4.1 sequence
- * (#328). The endpoint's happy paths and per-invariant gates already have
- * suites (firstPartyAuthorize, emailVerifiedGate, resourceIndicator.stage2,
- * hooks); this file pins the request-boundary failures those suites step
- * over: the A-1 400-JSON phase before `redirect_uri` is trusted, the
- * malformed-parameter rejects (response_type, nonce, PKCE), the policy /
- * repository failure modes, and the unauthenticated login redirect.
+ * `GET /authorize` — error and edge paths of the RFC 6749 §4.1 sequence. The
+ * happy paths and per-invariant gates have their own suites
+ * (firstPartyAuthorize, emailVerifiedGate, resourceIndicator.stage2, hooks);
+ * this file pins the request-boundary failures they step over: the 400-JSON
+ * phase before `redirect_uri` is trusted, the malformed-parameter rejects
+ * (response_type, nonce, PKCE), the policy / repository failure modes, and
+ * the unauthenticated login redirect.
  */
 
 import crypto from "node:crypto";
@@ -55,9 +55,9 @@ import { createMockLogger } from "./_helpers/mockLogger.mjs";
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
 
-// #273: PKCE/S256 is mandatory for every client, so every request that is
-// meant to get PAST the PKCE gate has to carry a challenge. `baseQuery`
-// carries one; the PKCE suites below override or drop it deliberately.
+// PKCE/S256 is mandatory for every client, so a request meant to get past
+// the PKCE gate carries a challenge. `baseQuery` carries one; the PKCE suites
+// below override or drop it deliberately.
 const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
@@ -72,7 +72,7 @@ const makeConfig = (
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
 			// `dual` so requests without `openid` reach the branch under test
-			// instead of tripping the IH-6 gate first.
+			// instead of tripping the `openid` scope gate first.
 			oidcMode: "dual",
 			grants: {},
 			...oauthOverrides,
@@ -94,21 +94,21 @@ const makeApp = async (opts: {
 	createCode?: ReturnType<typeof vi.fn>;
 	/** Session object the request carries; default authenticated user-1. */
 	session?: Record<string, unknown>;
-	/** #481: pass `false` to compose without an express-session store. */
+	/** Pass `false` to compose without an express-session store. */
 	sessionStore?: false;
-	/** #481: share one ask store between two apps. */
+	/** Share one ask store between two apps. */
 	sessionStoreRecords?: Map<string, unknown>;
-	/** #481: make the ask store fail on one operation. */
+	/** Make the ask store fail on one operation. */
 	sessionStoreFail?: "set" | "get";
 	/** Merged into `config.oauth`. */
 	oauth?: Record<string, unknown>;
 	/** `endpoints.login.url`; default `/login`. */
 	loginUrl?: string;
-	/** The `loginEntry` slot (#728), when a module provides it. */
+	/** The `loginEntry` slot, when a module provides it. */
 	loginEntry?: LoginEntry;
 	grantPolicy?: GrantPolicyHook;
 	auditSink?: AuditSink;
-	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
+	/** The session store `/authorize` re-checks a live `sid` against. */
 	userSessionStore?: UserSessionStore;
 	logger?: Logger;
 	/**
@@ -123,7 +123,7 @@ const makeApp = async (opts: {
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [REDIRECT_URI],
 		allowedScopes: ["read"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// What an omitted `scope` grants: nothing is granted implicitly.
 		defaultScopes: ["read"],
 		firstParty: true,
 		...(opts.client ?? {}),
@@ -185,7 +185,7 @@ const makeApp = async (opts: {
 	const state: { session: Record<string, unknown> } = {
 		session: { ...(opts.session ?? { isAuthenticated: true, user: { id: "user-1" } }) },
 	};
-	// The express-session store the middleware would have mounted. #481's
+	// The express-session store the middleware would have mounted. The
 	// re-authentication ask is a record in it, under a prefix of its own.
 	const records = opts.sessionStoreRecords ?? new Map<string, unknown>();
 	const storeDown = new Error("session store unavailable");
@@ -203,9 +203,9 @@ const makeApp = async (opts: {
 		},
 	};
 	// `regenerate`, as express-session's session has it: the refused session
-	// is replaced by a fresh, unauthenticated one (the session-admission ADR's
-	// D8, change 6). Not enumerable, so a test comparing the session object
-	// sees the fields alone.
+	// is replaced by a fresh, unauthenticated one (ADR
+	// 2026-09-28-session-admission, D8, change 6). Not enumerable, so a test
+	// comparing the session object sees the fields alone.
 	const withRegenerate = (holder: { session?: unknown }): Record<string, unknown> => {
 		const session = state.session;
 		Object.defineProperty(session, "regenerate", {
@@ -260,7 +260,7 @@ const withoutPkce = (extra: Query = {}): Query => {
 const authorize = (app: express.Express, query: Query) =>
 	request(app).get("/oauth/authorize").query(query);
 
-/** Parses the error redirect this endpoint answers with past A-1 validation. */
+/** Parses the error redirect this endpoint answers once `redirect_uri` is trusted. */
 const redirectParams = (res: request.Response): URLSearchParams => {
 	expect(res.status).toBe(302);
 	const location = new URL(res.headers.location as string);
@@ -269,7 +269,7 @@ const redirectParams = (res: request.Response): URLSearchParams => {
 };
 
 /**
- * A `loginEntry` (#728) that records every target it is asked for and sends
+ * A `loginEntry` that records every target it is asked for and sends
  * the browser to `/sign-in`, under a parameter of its own — so a trip built
  * from it cannot be mistaken for one built from `endpoints.login.url`.
  */
@@ -308,8 +308,8 @@ describe("/authorize — unauthenticated session", () => {
 		const location = res.headers.location as string;
 		expect(location.startsWith("/login?redirect_to=")).toBe(true);
 		const redirectTo = decodeURIComponent(location.split("redirect_to=")[1] as string);
-		// #356: the target's origin is the configured issuer — a fixed value
-		// the login page's redirect allowlist can pin exactly.
+		// The target's origin is the configured issuer — a fixed value the
+		// login page's redirect allowlist can pin exactly.
 		expect(redirectTo.startsWith("https://issuer.example/oauth/authorize?")).toBe(true);
 		expect(redirectTo).toContain(`client_id=${CLIENT_ID}`);
 	});
@@ -383,7 +383,7 @@ describe("/authorize — unauthenticated session", () => {
 		const { app } = await makeApp({ session: { isAuthenticated: false } });
 		// The deployment shape the attack needs: Express trusting its proxy
 		// hop, so `req.protocol` / `req.get("host")` follow whatever forwarded
-		// headers the client sent. The fix never reads them.
+		// headers the client sent. The endpoint never reads them.
 		app.set("trust proxy", true);
 		const res = await request(app)
 			.get("/oauth/authorize")
@@ -453,8 +453,8 @@ describe("/authorize — redirect_uri matching (#483, RFC 8252 §7.3)", () => {
 	// A native app receives the authorization response on a loopback listener
 	// whose port the OS assigns at run time, so the registration cannot name
 	// it. The port — and only the port — is therefore ignored when BOTH sides
-	// are `http:` on a loopback IP literal. Everything else stays the exact
-	// string comparison it has always been.
+	// are `http:` on a loopback IP literal. Everything else is an exact string
+	// comparison.
 	const attempt = async (registered: string, presented: string) => {
 		const { app, createCode } = await makeApp({ client: { allowedRedirectUris: [registered] } });
 		const res = await authorize(app, { ...baseQuery, redirect_uri: presented });
@@ -532,8 +532,8 @@ describe("/authorize — scope semantics (#396)", () => {
 	});
 
 	it("redirects invalid_scope when scope is omitted and no defaultScopes are declared", async () => {
-		// #396 deny-by-absence: the old behavior granted the client's ENTIRE
-		// allowlist, making "forgot to send scope" the maximum grant.
+		// Deny by absence: "forgot to send scope" must not grant the client's
+		// entire allowlist.
 		const { app } = await makeApp({ client: { defaultScopes: undefined } });
 		const res = await authorize(app, baseQuery);
 		const params = redirectParams(res);
@@ -545,7 +545,7 @@ describe("/authorize — scope semantics (#396)", () => {
 		// Narrowing is for a scope this client may not have (§3.3). A malformed
 		// one is a different answer (§4.1.2.1 invalid_scope: "malformed"):
 		// "read\tbogus" is not the scope "read" with a typo beside it, and
-		// narrowing it to nothing issued a code for a request nobody made.
+		// narrowing it to nothing would issue a code for a request nobody made.
 		const { app, createCode } = await makeApp({});
 		for (const scope of ["read\tbogus", 'read "x"', "\t"]) {
 			const params = redirectParams(await authorize(app, { ...baseQuery, scope }));
@@ -569,7 +569,7 @@ describe("/authorize — scope semantics (#396)", () => {
 });
 
 describe("/authorize — response_type validation", () => {
-	// #397: once the client and redirect_uri validate, the refusal travels via
+	// Once the client and redirect_uri validate, the refusal travels via
 	// redirect (RFC 6749 §4.1.2.1) — the user lands back in the app instead of
 	// on a JSON wall. 400 JSON remains for the cases where no redirect target
 	// could be validated (next test).
@@ -676,9 +676,9 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 	});
 
 	it("rejects a repeated method (array) as a repeat — it must not resolve as absent", async () => {
-		// Reading a repeat as absence meant falling through to RFC 7636 §4.3's
-		// `plain`, which an `allowPlainPkce` client could then use to downgrade
-		// its own S256 request. See SINGLE_VALUED_QUERY_PARAMS.
+		// Reading a repeat as absence would fall through to RFC 7636 §4.3's
+		// `plain`, which an `allowPlainPkce` client could use to downgrade its
+		// own S256 request. See SINGLE_VALUED_QUERY_PARAMS.
 		const { app } = await makeApp({});
 		const res = await authorize(app, {
 			...baseQuery,
@@ -712,9 +712,8 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 describe("/authorize — policy evaluation edges (C-2)", () => {
 	it("never consults the policy for a session whose user has no id: such a cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
 		// A cookie that says authenticated without a user is not a session this
-		// provider wrote. It used to reach the policy with `subject: undefined`
-		// and mint a code; admission refuses it before any read, and the
-		// browser is sent to log in.
+		// provider wrote: admission refuses it before any read, and the browser
+		// is sent to log in.
 		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
 		const { app, createCode } = await makeApp({
 			grantPolicy: { kind: "test", evaluate },
@@ -874,7 +873,7 @@ describe("/authorize — policy evaluation edges (C-2)", () => {
 
 describe("/authorize — resource indicator without allowedAudiences (RFC 8707)", () => {
 	it("cannot derive an audience for a foreign resource and rejects invalid_target", async () => {
-		// The client record predates `allowedAudiences`; the derivation bound
+		// The client record has no `allowedAudiences`; the derivation bound
 		// falls back to the client id alone, which cannot represent the
 		// requested resource.
 		const { app } = await makeApp({
@@ -945,9 +944,8 @@ describe("/authorize — success audit subject (authorize.granted)", () => {
 
 describe("/authorize — rejection audit vocabulary (authorize.rejected, #329)", () => {
 	it("emits authorize.rejected when the client is not registered for the code grant", async () => {
-		// The rejection used to reuse the token endpoint's
-		// `token.issued.failure`; /authorize rejections carry their own name
-		// so the success/failure pair names one operation.
+		// /authorize rejections carry their own name, not the token endpoint's
+		// `token.issued.failure`, so the success/failure pair names one operation.
 		const record = vi.fn(async () => {});
 		const { app } = await makeApp({
 			auditSink: { record },
@@ -966,20 +964,13 @@ describe("/authorize — rejection audit vocabulary (authorize.rejected, #329)",
 });
 
 /*
- * #284 — "the OIDC surface is narrower than the OIDC-provider claim".
- *
- * Three separate defects behind that sentence, and they are not the same kind:
- *
- *  - `request` / `request_uri` were silently ignored. That is the security one:
- *    a signed request object exists to make the parameters tamper-proof, so an
- *    AS that processes the query string instead hands an attacker exactly what
- *    the object was there to prevent, while the RP believes it was honoured.
- *  - The discovery document *claimed* `request_uri` support by omission — OIDC
- *    Discovery defaults `request_uri_parameter_supported` to `true`.
- *  - `prompt=none` returned the login page, so silent renewal in a hidden
- *    iframe timed out rather than receiving `login_required`.
- *
- * POST was a plain missing MUST (OIDC Core §3.1.2.1).
+ * OIDC parameters are honoured or refused, never ignored:
+ *  - `request` / `request_uri` are refused. A signed request object makes the
+ *    parameters tamper-proof; processing the query string instead hands an
+ *    attacker what the object prevents, while the RP believes it was honoured.
+ *  - `prompt=none` without a session answers `login_required` at the
+ *    redirect_uri, so silent renewal in a hidden iframe does not time out.
+ *  - POST is a MUST (OIDC Core §3.1.2.1).
  */
 
 const authorizePost = (app: express.Express, body: Query) =>
@@ -1004,8 +995,8 @@ describe("/authorize — request objects are refused, not ignored (#284)", () =>
 	});
 
 	it("refuses before minting anything", async () => {
-		// The failure mode was issuing a code for the query parameters while
-		// the RP believed its signed object had been used.
+		// No code is issued for the query parameters while the RP believes its
+		// signed object was used.
 		const createCode = vi.fn();
 		const { app } = await makeApp({ createCode });
 		await authorize(app, { ...baseQuery, request_uri: "https://rp.example/req.jwt" });
@@ -1167,16 +1158,12 @@ describe("/authorize — POST is supported (#284)", () => {
 });
 
 /**
- * R1b — a session whose `sid` is dead is not an authenticated session.
- *
- * `/authorize` used to gate on `req.session.isAuthenticated` alone, so a
- * cookie whose `UserSession` had been deleted (by `/oauth/logout`'s cascade,
- * by a store restart, by an out-of-band delete) still minted authorization
- * codes carrying the dead `sid`. `/token` then refused every one of them with
- * `invalid_grant`, and the browser looped without ever being shown a login
- * page — for up to `session.maxAge`. This is the robust half of the fix: it
- * is the same read `/token` already performs later, moved to the point where
- * the answer can still be "log in again".
+ * A session whose `sid` is dead (its `UserSession` deleted by logout's
+ * cascade, a store restart or an out-of-band delete) is not an authenticated
+ * session. A code carrying the dead `sid` is refused at `/token` with
+ * `invalid_grant`, looping the browser without a login page, so `/authorize`
+ * performs the same read `/token` does, where the answer can still be "log in
+ * again".
  */
 describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 	const liveSid = "sid-live";
@@ -1216,8 +1203,8 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 
 		const res = await authorize(app, baseQuery);
 
-		// Byte-identical to the existing unauthenticated branch: same login
-		// URL, same round-tripped `redirect_to`.
+		// Identical to the unauthenticated branch: same login URL, same
+		// round-tripped `redirect_to`.
 		expect(res.status).toBe(302);
 		const location = res.headers.location as string;
 		expect(location.startsWith("/login?redirect_to=")).toBe(true);
@@ -1257,8 +1244,7 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 
 	it("sends a session that records no sid to the login page while a store is wired, without reading it", async () => {
 		// The session-admission ADR's D8, change 1: with a store wired, a cookie
-		// that names no record is not a live session — it used to mint a code
-		// without `sid`, which `/token` then refused. Nothing is read: no sid
+		// that names no record is not a live session. Nothing is read: no sid
 		// names a record.
 		const store = liveStore();
 		const { app, createCode } = await makeApp({
@@ -1288,9 +1274,9 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 	});
 
 	it("does not read the store for a genuinely unauthenticated request", async () => {
-		// The #284 property this fix must not cost: an unauthenticated request
-		// answers before touching any repository, so an unauthenticated
-		// endpoint cannot be turned into one lookup per hit.
+		// An unauthenticated request answers before touching any repository,
+		// so an unauthenticated endpoint cannot be turned into one lookup per
+		// hit.
 		const store = liveStore();
 		const { app } = await makeApp({
 			userSessionStore: store,
@@ -1389,7 +1375,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 	const SID = "sid-1";
 	const session = { isAuthenticated: true, sid: SID, user: { id: "user-1" } };
 	// A `Date`, or a thunk when a test needs the authentication to change
-	// between two requests — which is what a login round trip is (#481).
+	// between two requests — which is what a login round trip is.
 	// `authentication` absent: a session written before the MFA ADR's D9,
 	// which the readers split as they read it.
 	const storeWith = (
@@ -1541,11 +1527,10 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 		});
 
 		it("ignores a marker the caller writes — the ask is a record only this server can name", async () => {
-			// `reauth_after` was read straight from the request, so
-			// `max_age=60&reauth_after=0` satisfied "authenticated at or after the
-			// ask" for any live session and skipped the round trip the parameter
-			// exists to force. Neither the old parameter nor an invented ask id
-			// decides anything now.
+			// A marker read from the request would let `max_age=60&reauth_after=0`
+			// satisfy "authenticated at or after the ask" for any live session and
+			// skip the round trip the parameter exists to force. Neither
+			// `reauth_after` nor an invented ask id decides anything.
 			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
 			for (const forged of [
 				{ max_age: "60", reauth_after: "0" },
@@ -1652,10 +1637,9 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 		});
 
 		it("does not count an authentication earlier in the same second as the ask (v0.13.0 audit)", async () => {
-			// The ask and `auth_time` were both compared in whole seconds with
-			// `>=`, so a session authenticated at …:00.200 satisfied an ask made at
-			// …:00.800 — `prompt=login` honoured without re-authenticating, for a
-			// session created in the same wall-clock second.
+			// Compared in whole seconds with `>=`, a session authenticated at
+			// …:00.200 would satisfy an ask made at …:00.800 — `prompt=login`
+			// honoured without re-authenticating, within one wall-clock second.
 			vi.useFakeTimers({ toFake: ["Date"] });
 			try {
 				vi.setSystemTime(new Date("2026-09-13T12:00:00.800Z"));
@@ -1823,11 +1807,9 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 
 		it("refuses a prototype key as an acr instead of crashing on Object.prototype", async () => {
 			// `table[acr]` on a plain object resolves `constructor` to `Object`
-			// — truthy, and with no `.every` — so the request became an
-			// unhandled TypeError and a 500 from the error handler, on a route
-			// whose whole contract is that a post-validation error travels by
-			// redirect to the client. The same shape the replica-safety table
-			// was moved to a `Map` for.
+			// — truthy, with no `.every` — so the request would throw and answer
+			// 500, on a route whose contract is that a post-validation error
+			// travels by redirect to the client.
 			const { app } = await makeApp({
 				session,
 				oauth: { authorize: { acrValues } },
@@ -1990,7 +1972,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				createCode,
 			});
 			await authorize(app, baseQuery);
-			// Named, holding `undefined` (#626): the code record says "no acr"
+			// Named, holding `undefined`: the code record says "no acr"
 			// rather than leaving the field out.
 			expect(createCode.mock.calls[0]?.[0]).toHaveProperty("acr", undefined);
 		});
@@ -2163,7 +2145,8 @@ describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => 
 			// OIDC Core §5.5.1.1 lets an RP ask for `acr` here, essential or not;
 			// this server vouches for an acr only through `acr_values` and its
 			// table. Ignoring the request would hand back a token the RP reads as
-			// having honoured it — #284's rule for a security-relevant parameter.
+			// having honoured it; a security-relevant parameter is refused, never
+			// ignored.
 			const createCode = vi.fn(async () => ({
 				code: "code-x",
 				client_id: CLIENT_ID,

@@ -19,16 +19,13 @@
  * under the identity of the refresh token it serves: the family record's
  * active `jti` is the token's `jti`, and its expiry is the token's `exp`.
  *
- * The grant used to learn that identity by decoding the token it had just
- * signed, and to skip the registration — and serve the token anyway — when
- * the decode did not yield a string `jti` and a numeric `exp`. A token served
- * with no family record has no rotation record either, so every replay of it
- * reads as a first use (RFC 6819 §5.2.2.3). Before the refresh lifetime was
- * read when the grant is built, a configuration without one reached that
- * skip; since then, a `KeyStore` whose `sign` returns anything other than a
- * compact JWS over the claims it was handed does. Here that is a signer that
- * nests the signed token in an encrypted JWT (RFC 7519 §5.2), which is still
- * the token this grant minted, but not one it can read back unverified.
+ * A token served with no family record has no rotation record either, so
+ * every replay of it reads as a first use (RFC 6819 §5.2.2.3). Registration
+ * must therefore not depend on reading the signed token back: a `KeyStore`'s
+ * `sign` may return something other than a compact JWS over the claims it was
+ * handed. Here that is a signer that nests the signed token in an encrypted
+ * JWT (RFC 7519 §5.2), still the token this grant minted, but not one it can
+ * read back unverified.
  *
  * Driven through the real grant and core's real family store and rotation;
  * only `register` is spied, and it calls the real one.

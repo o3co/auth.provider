@@ -15,26 +15,18 @@
  */
 
 /**
- * #459 — a denylist backend outage reaches the token-accepting surfaces as
- * the outage it is, not as a revocation.
+ * A denylist backend outage reaches the token-accepting surfaces as the
+ * outage it is, not as a revocation. `verifyJwt` fails closed when
+ * `denylist.has(jti)` throws, with `reason: "revocation_unavailable"` as for
+ * the subject watermark, so a backend blip and a revoked token
+ * (`reason=revoked`) are told apart at the endpoints a resource server asks.
  *
- * `verifyJwt` fails closed when `denylist.has(jti)` throws — right — but it
- * reported that as `reason: "revoked"`, so the audit line for a Redis blip and
- * for a genuinely revoked token was the same `jwt_verify_rejected
- * reason=revoked`, for every token on every replica until the backend came
- * back. #408 split the outage from the finding for the subject watermark and
- * named it `revocation_unavailable`; this pins the denylist on the same reason
- * at the endpoints a resource server actually asks.
- *
- * The wire answer is `503 temporarily_unavailable`, at introspection and at
- * userinfo alike, for either store. #408 and #459 kept both on a verdict —
- * `active: false`, `401 invalid_token` — on the theory that introspection has
- * no outage slot and a protected resource's refusal costs the caller nothing.
- * Both verdicts describe the token (RFC 7662 §2.2 "not active", RFC 6750 §3.1
- * "expired, revoked, malformed, or invalid"), and both send the client to
- * replace a credential that may be perfectly good, which meets the same outage
- * at the token endpoint. HTTP's `503` vouches for nothing and is still
- * fail-closed. The refresh grant has no denylist slot at all
+ * The wire answer is `503 temporarily_unavailable`, at introspection and
+ * userinfo alike, for either store. A verdict (`active: false`, `401
+ * invalid_token`) describes the token (RFC 7662 §2.2 "not active", RFC 6750
+ * §3.1 "expired, revoked, malformed, or invalid") and sends the client to
+ * replace a credential that may be perfectly good; `503` vouches for nothing
+ * and is still fail-closed. The refresh grant has no denylist slot
  * (`GrantDependencies`), so there is no token-endpoint counterpart to pin.
  */
 
@@ -210,7 +202,7 @@ describe("#459 — a denylist outage at /oauth/introspect", () => {
 	});
 
 	it("keeps Cache-Control: no-store and Pragma: no-cache on the refusal", async () => {
-		// #293 item 2: an intermediary must not cache a liveness answer, and an
+		// An intermediary must not cache a liveness answer, and an
 		// outage answer least of all — it would keep serving `active: false`
 		// after the backend came back.
 		const app = await buildApp({ denylist: outageDenylist() });
@@ -220,11 +212,10 @@ describe("#459 — a denylist outage at /oauth/introspect", () => {
 	});
 
 	it("logs jwt_verify_rejected with reason=revocation_unavailable, not revoked", async () => {
-		// The operator-facing half of the issue: `emitRejection` logs the
-		// reason and not the message, so before #459 a Redis blip and a real
-		// revocation were the same line. Introspection is where a resource
-		// server's "is this token good?" lands, so it is where that line is
-		// read.
+		// `emitRejection` logs the reason and not the message, so the reason is
+		// what tells a backend blip from a real revocation. Introspection is
+		// where a resource server's "is this token good?" lands, so it is where
+		// that line is read.
 		const logger = spyLogger();
 		const app = await buildApp({ denylist: outageDenylist(), logger });
 		await introspectAsClient(app, await mintAT("j-4"));

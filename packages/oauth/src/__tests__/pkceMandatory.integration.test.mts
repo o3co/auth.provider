@@ -15,18 +15,10 @@
  */
 
 /**
- * Issue #273 — PKCE is mandatory, S256-only, and decided by ONE resolved
- * policy object that `/authorize` and `/token` both read.
- *
- * Pre-#273 the two endpoints disagreed: `/authorize` mandated PKCE/S256 for
- * public clients but let a confidential client omit PKCE entirely or pick
- * `plain` (the default `supportedMethods` was `["S256","plain"]`), while
- * `/token` applied a *different* rule derived from the legacy `requireS256`
- * boolean. A code could therefore be minted at `/authorize` and be
- * unredeemable at `/token`.
- *
- * This suite drives both endpoints over HTTP against the same router so the
- * agreement is pinned end-to-end rather than per-unit.
+ * PKCE is mandatory, S256-only, and decided by ONE resolved policy object
+ * that `/authorize` and `/token` both read, so a code `/authorize` mints is
+ * one `/token` can redeem. Drives both endpoints over HTTP against the same
+ * router, so the agreement is pinned end-to-end rather than per unit.
  */
 
 import crypto from "node:crypto";
@@ -62,7 +54,7 @@ const makeConfig = (oauthOverrides: Record<string, unknown> = {}): AppConfig =>
 			accessToken: { expiresIn: 300 },
 			refreshToken: { expiresIn: 3600 },
 			// `dual` so a request without `openid` reaches the PKCE gate instead
-			// of tripping the IH-6 scope gate first.
+			// of tripping the OIDC scope gate first.
 			oidcMode: "dual",
 			grants: { authorization_code: { enabled: true } },
 			...oauthOverrides,
@@ -86,7 +78,7 @@ const makeApp = async (
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [REDIRECT_URI],
 		allowedScopes: ["read"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// An omitted scope is granted these, never the allowlist.
 		defaultScopes: ["read"],
 		firstParty: true,
 		...(opts.client ?? {}),
@@ -180,8 +172,6 @@ const redeem = (app: express.Express, body: Record<string, unknown>) =>
 
 describe("#273 /authorize — PKCE is mandatory for CONFIDENTIAL clients too", () => {
 	it("refuses a confidential-client request that omits code_challenge", async () => {
-		// Pre-#273: accepted, because `pkce.required` defaulted to false and
-		// the S256 mandate only covered `tokenEndpointAuthMethod: "none"`.
 		const { app } = await makeApp();
 		const params = redirectParams(await authorize(app, baseQuery));
 		expect(params.get("error")).toBe("invalid_request");
@@ -258,8 +248,8 @@ describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () =
 	});
 
 	it("cannot re-admit plain through a global supportedMethods allowlist", async () => {
-		// The whole point of #273: `plain` must not be reachable from any
-		// server-wide knob, only from a named client registration.
+		// `plain` must not be reachable from any server-wide knob, only from a
+		// named client registration.
 		const { app } = await makeApp({
 			oauth: {
 				grants: {
@@ -318,13 +308,11 @@ describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () =
 describe("#273 /authorize — repeated parameters cannot downgrade the method", () => {
 	// RFC 6749 §3.1: request parameters MUST NOT be included more than once.
 	// Express + `qs` surfaces a repeated `?p=a&p=b` as an ARRAY, and every read
-	// in the handler narrows a non-string to `undefined` — the same shape
-	// absence produces. For `code_challenge_method` that meant a repeat fell
-	// through to RFC 7636 §4.3's `plain` default, so a client the operator
-	// opted into `plain` could downgrade its own S256 request to `plain`
-	// simply by sending the parameter twice — with no S256 verifier ever
-	// computed and nothing in the request looking malformed.
-	// A well-formed S256 request, then the repeat under test layered on — so
+	// in the handler narrows a non-string to `undefined`, the shape absence
+	// produces. A repeated `code_challenge_method` would fall through to
+	// RFC 7636 §4.3's `plain` default, letting a client opted into `plain`
+	// downgrade its own S256 request by sending the parameter twice.
+	// A well-formed S256 request, then the repeat under test layered on, so
 	// each case fails on the repeated parameter and not on the PKCE gate.
 	const repeated = (app: express.Express, params: Query) =>
 		request(app)
@@ -363,9 +351,8 @@ describe("#273 /authorize — repeated parameters cannot downgrade the method", 
 		["code_challenge", ["c1", "c2"]],
 		["nonce", ["n1", "n2"]],
 	])("refuses a repeated %s at the request boundary", async (name, value) => {
-		// The same class, not the same instance: a repeated `scope` was read as
-		// "no scope requested" and widened the grant to the client's whole
-		// registered allowlist, and a repeated `state` was silently dropped from
+		// The same class, not the same instance: a repeated `scope` would read
+		// as "no scope requested", and a repeated `state` would be dropped from
 		// the response, breaking the client's CSRF check rather than the request.
 		const { app, createCode } = await makeApp();
 		const params = redirectParams(await repeated(app, { [name]: value }));
@@ -399,8 +386,6 @@ describe("#273 /authorize — repeated parameters cannot downgrade the method", 
 
 describe("#273 /token — the same policy object decides redemption", () => {
 	it("refuses a code that carries no code_challenge_method", async () => {
-		// Pre-#273 this depended on `pkce.required`, which defaulted to false,
-		// so a PKCE-less code was redeemable by a confidential client.
 		const { app } = await makeApp({
 			storedCode: { client_id: CLIENT_ID, redirect_uri: REDIRECT_URI },
 		});
@@ -421,9 +406,8 @@ describe("#273 /token — the same policy object decides redemption", () => {
 	});
 
 	it("refuses a plain code for a client with no opt-in", async () => {
-		// The divergence #273 closes: `/authorize` would not mint this today,
-		// but a code minted before the upgrade — or by a custom CodeRepository
-		// — must not be honoured either.
+		// `/authorize` would not mint this, but a code minted before an upgrade
+		// or by a custom CodeRepository must not be honoured either.
 		const { app } = await makeApp({
 			storedCode: {
 				client_id: CLIENT_ID,

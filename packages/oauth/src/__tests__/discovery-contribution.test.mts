@@ -15,18 +15,11 @@
  */
 
 /**
- * oauth `discoveryMetadata` contribution.
- *
- * The OIDC discovery document is no longer owned end-to-end by the oauth
- * module; instead oauth contributes the issuer-RELATIVE endpoints + literal
- * metadata it owns, and core's `assembleApp` aggregates every module's
- * `discoveryMetadata` (oauth's endpoints + capabilities, jwks's `jwks_uri`)
- * into the single `/.well-known/openid-configuration` document — prefixing the
- * issuer and owning `issuer` + `id_token_signing_alg_values_supported`.
- *
- * These tests pin oauth's slice of that contract. Endpoint values are
- * issuer-relative paths (the aggregator prefixes the issuer); oauth never
- * contributes the aggregator-owned reserved fields.
+ * oauth's `discoveryMetadata` contribution: the issuer-RELATIVE endpoints and
+ * literal metadata oauth owns. Core's `assembleApp` aggregates every module's
+ * contribution into `/.well-known/openid-configuration`, prefixing the issuer
+ * and owning `issuer` + `id_token_signing_alg_values_supported`, which oauth
+ * never contributes.
  */
 
 import type { AppConfig, OidcDiscoveryContribution } from "@o3co/auth-provider-core";
@@ -57,7 +50,7 @@ function grantResolver(...grantTypes: readonly string[]) {
 }
 
 /**
- * Build a config carrying an explicit `oauth.revocation.accessToken` (#277), or
+ * Build a config carrying an explicit `oauth.revocation.accessToken`, or
  * the untouched fixture when `mode` is omitted — which is the UNDECLARED case
  * both consuming layers read as `"denylist"`.
  */
@@ -77,7 +70,7 @@ async function discoveryContribution(
 	const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 	// Awaited as the boot planner does: a contribution factory may answer with
-	// a promise, and every kind's declared type says so since #626 P1.
+	// a promise.
 	return await factory({
 		config,
 		grantHandlerResolver: grantResolver(),
@@ -103,7 +96,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	it("contributes the literal capability metadata", async () => {
-		// #484: `private_key_jwt` travels with the replay store that makes it
+		// `private_key_jwt` travels with the replay store that makes it
 		// honourable, so the wired composition is what states the full set.
 		const meta = await discoveryContribution({ replaySeenSet: {} });
 		expect(meta.metadata?.response_types_supported).toEqual(["code"]);
@@ -117,7 +110,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 				"none",
 			]),
 		);
-		// #484: the assertion algorithms travel with the method, and never a
+		// The assertion algorithms travel with the method, and never a
 		// symmetric one — a shared secret is what private_key_jwt exists to avoid.
 		expect(meta.metadata?.token_endpoint_auth_signing_alg_values_supported).toEqual(
 			expect.arrayContaining(["ES256", "RS256", "EdDSA"]),
@@ -136,14 +129,14 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// #283 — PKCE methods
+	// PKCE methods
 	// -------------------------------------------------------------------------
 
 	it("advertises S256 only — `plain` is never a server-wide capability", async () => {
 		// `code_challenge_methods_supported` is a SERVER-WIDE array (RFC 8414 §2 /
 		// RFC 7636 §4.4): a client reading it concludes "I may use any of these".
-		// Since #273 the AS requires S256 of every authorization-code client and
-		// no server-wide setting admits `plain`; the only way `plain` is reachable
+		// The AS requires S256 of every authorization-code client and no
+		// server-wide setting admits `plain`; the only way `plain` is reachable
 		// is a registration carrying `allowPlainPkce: true`. That is a named
 		// per-client exception, so it stays out of a server-wide array.
 		expect((await discoveryContribution()).metadata?.code_challenge_methods_supported).toEqual([
@@ -152,10 +145,9 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	it("does not widen code_challenge_methods_supported from any pkce config block", async () => {
-		// #273 stopped honouring `oauth.grants.authorization_code.pkce.
-		// supportedMethods` at enforcement time. Discovery must not resurrect it
-		// as an advertisement either: a config that still carries the key
-		// advertises exactly what the AS enforces, which is S256.
+		// Enforcement ignores `oauth.grants.authorization_code.pkce.
+		// supportedMethods`, and so does discovery: a config that carries the
+		// key advertises exactly what the AS enforces, which is S256.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -178,13 +170,13 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// #283 — grant_types_supported
+	// grant_types_supported
 	// -------------------------------------------------------------------------
 
 	it("derives grant_types_supported from the grant handlers actually registered", async () => {
 		// RFC 8414 §2: an OMITTED `grant_types_supported` defaults to
-		// `["authorization_code", "implicit"]`, so saying nothing advertised an
-		// `implicit` flow this AS has never implemented. The value is read off the
+		// `["authorization_code", "implicit"]`, so saying nothing would advertise
+		// an `implicit` flow this AS does not implement. The value is read off the
 		// dispatch table `/oauth/token` resolves against, so it cannot drift from
 		// what a request would actually reach.
 		const meta = await discoveryContribution({
@@ -216,16 +208,14 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// #283 — revocation endpoint
+	// revocation endpoint
 	// -------------------------------------------------------------------------
 
 	it("advertises revocation_endpoint when a revocation capability is wired", async () => {
-		// Inverts the pre-#283 assertion that `revocation_endpoint` was
-		// deliberately withheld. `POST /oauth/revoke` is mounted unconditionally
-		// by `createOAuthRouter`, so withholding it hid a working endpoint from
-		// exactly the clients that discover correctly.
-		// #484: `private_key_jwt` is in the set because the store that records
-		// an assertion's `jti` is wired.
+		// `POST /oauth/revoke` is mounted unconditionally by `createOAuthRouter`;
+		// withholding it would hide a working endpoint from exactly the clients
+		// that discover correctly. `private_key_jwt` is in the set because the
+		// store that records an assertion's `jti` is wired.
 		const meta = await discoveryContribution({ ...allLogoutStores, replaySeenSet: {} });
 		expect(meta.endpoints?.revocation_endpoint).toBe("/oauth/revoke");
 		expect(meta.metadata?.revocation_endpoint_auth_methods_supported).toEqual([
@@ -238,15 +228,15 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 
 	// The gate is "can this endpoint revoke ANYTHING", and the two arms of that
 	// question resolve differently. The refresh arm is pure wiring. The access
-	// arm is wiring AND the #277 declaration: `oauth.revocation.accessToken =
+	// arm is wiring AND the declaration: `oauth.revocation.accessToken =
 	// "unsupported"` turns the access path off even with a denylist present,
 	// because `createRevokeRouter` honours the declaration over the wiring.
 	// These five cases are the whole truth table.
 
 	it("advertises when the denylist is wired and the mode is undeclared (read as denylist)", async () => {
-		// Undeclared is what every pre-#277 config looks like, and both consuming
-		// layers — core's boot validator and `createRevokeRouter` — read it as
-		// `"denylist"` when a denylist is present. Discovery must agree.
+		// Both consuming layers — core's boot validator and `createRevokeRouter`
+		// — read an undeclared mode as `"denylist"` when a denylist is present.
+		// Discovery must agree.
 		const meta = await discoveryContribution({ accessTokenDenylist: {} }, configWithRevocation());
 		expect(meta.endpoints?.revocation_endpoint).toBe("/oauth/revoke");
 	});
@@ -272,7 +262,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	it('omits revocation_endpoint when the denylist is wired but the mode is "unsupported" and nothing else can revoke', async () => {
-		// The gap Copilot found on #359. A denylist in the component map is not
+		// A denylist in the component map is not
 		// the capability — `createRevokeRouter` resolves the DECLARATION first
 		// (`opts.accessTokenRevocation ?? …`), so `"unsupported"` disables the
 		// access path however the composition is wired. With no refresh-token
@@ -290,7 +280,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	it("omits revocation_endpoint when nothing behind it can revoke anything", async () => {
 		// No `refreshTokenFamilyRevocation` and no `accessTokenDenylist`: the
 		// route still answers RFC 7009's mandatory 200, and that 200 means
-		// nothing. Advertising it would be the #277 failure in metadata form.
+		// nothing. Advertising it would promise revocation where there is none.
 		const meta = await discoveryContribution();
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("revocation_endpoint");

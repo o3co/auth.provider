@@ -44,10 +44,8 @@ import {
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
- * under test adds. Since #626 P1 `federationProviders` carries
- * `FederationProvider` rather than a one-field stand-in, so a mock has to be
- * one — which is the point: these routes read a provider the boot planner
- * could actually have handed them.
+ * under test adds. `federationProviders` carries a full `FederationProvider`,
+ * so these routes read a provider the boot planner could have handed them.
  */
 const federationBase = (name: string) => ({
 	name,
@@ -762,8 +760,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
-			// SF-13: audit details now carry the classifier reason (not the raw message)
-			// so SIEM rules can group on a stable enum. `"unexpected provider error"` is
+			// Audit details carry the classifier reason (not the raw message) so
+			// SIEM rules can group on a stable enum. `"unexpected provider error"` is
 			// neither an OAuth-defined error code nor a 5xx-shaped string, so the helper
 			// classifies it as "unknown".
 			expect(auditSink.record).toHaveBeenCalledWith(
@@ -1162,7 +1160,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 
 		// -------------------------------------------------------------------------
-		// What the adapter answers is unverified data (D5). An adapter is a
+		// What the adapter answers is unverified data. An adapter is a
 		// third-party extension point, and `core/federation-grants/retrieve.mts`
 		// holds the same contract to the same bar — `retrieve.hostile.test.mts`
 		// pins it there. These pin it here.
@@ -1630,7 +1628,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			// 5.1 makes the answer's scope optional ONLY when it matches the
 			// request. A conforming upstream that has narrowed must say so every
 			// time; silence therefore means the grant. Reading silence as "whatever
-			// the last narrowing left" is the permanent narrowing again.
+			// the last narrowing left" would make a narrowing permanent.
 			const narrowed = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
@@ -1854,9 +1852,8 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 
 		it("falls back to the current scope as the ceiling for a record written before #647", async () => {
-			// Existing records carry no `grantedScope`. They keep the behaviour they
-			// had: the current scope is the only ceiling available, which is
-			// conservative rather than wrong.
+			// A record with no `grantedScope`: the current scope is the only
+			// ceiling available, which is conservative rather than wrong.
 			const legacy = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
@@ -1922,9 +1919,8 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 
 		it("keeps the stored refresh token when a successful refresh answers an empty one", async () => {
-			// The no-access-token branch refused an empty string already; the success
-			// path used `??`, which lets one through and strands the connection at
-			// the next request.
+			// Like the no-access-token branch, the success path refuses an empty
+			// string, which would strand the connection at the next request.
 			const expiredTokens = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
@@ -2190,7 +2186,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// Fix 1 regression: post-lock re-read currentTokens.refreshToken used (Codex P2)
+	// Post-lock re-read: currentTokens.refreshToken is used
 	// ---------------------------------------------------------------------------
 
 	describe("post-lock refresh uses currentTokens.refreshToken (Codex P2 regression)", () => {
@@ -2260,7 +2256,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// Fix 2: preserve stored id_token when IdP omits it on refresh (Claude I1)
+	// Preserve the stored id_token when the IdP omits it on refresh
 	// ---------------------------------------------------------------------------
 
 	describe("preserves stored id_token when IdP omits it on refresh (Claude I1)", () => {
@@ -2692,7 +2688,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// A4 §6.2 Step 1: sessionFederationIndex.listFederations failure → 503
+	// sessionFederationIndex.listFederations failure → 503
 	// ---------------------------------------------------------------------------
 
 	describe("sessionFederationIndex.listFederations throws (fail-closed)", () => {
@@ -2711,19 +2707,10 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// D-8 regression marker: published SupportsRefresh interface uses
-	// `refreshToken` (NOT `refreshFederationToken` — the broken name pre-rename
-	// at v0.5.0). Real providers (e.g. federation-google) follow the published
-	// name. Pre-rename the route's duck-type guard probed the wrong identifier
-	// and every refresh request returned 503 `refresh_not_supported` in
-	// production.
-	//
-	// The structural lock this deferred is no longer a separate anchor: since
-	// #626 P1 the route narrows with core's own `supportsRefresh` over core's
-	// `SupportsRefresh`, so a rename of the method is a compile error rather
-	// than a probe that quietly matches nothing. There is no local
-	// `SupportsRefreshShape` left to keep in step, and nothing has to import
-	// session to say so.
+	// The published `SupportsRefresh` method is `refreshToken`, and real
+	// providers (e.g. federation-google) implement it. The route narrows with
+	// core's own `supportsRefresh`, so a rename of the method is a compile
+	// error rather than a probe that quietly matches nothing.
 	// ---------------------------------------------------------------------------
 
 	describe("D-8 regression: route detects provider.refreshToken (published interface name)", () => {
@@ -2771,15 +2758,12 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// SF-12 — post-lock RT guard (replaces ??"" fallback)
+	// Post-lock refresh-token guard
 	// ---------------------------------------------------------------------------
 
 	describe("SF-12: post-lock refresh-token guard", () => {
-		// SF-12 characterization test (NOT a true RED — pre-fix `?? ""` fallback is not
-		// triggered when currentTokens.refreshToken is truthy, so this assertion passes
-		// both pre- and post-fix). Kept as a regression guard against a future refactor
-		// that drops `currentTokens` and reaches for `freshTokens.refreshToken ?? ""`. The
-		// next two tests are the actual RED guards for SF-12.
+		// Guards against dropping `currentTokens` for `freshTokens.refreshToken ?? ""`.
+		// The next two tests pin the guard itself.
 		it('passes the real refresh_token to provider.refreshToken (no ?? "" fallback)', async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshFn = vi.fn().mockResolvedValue({
@@ -2805,10 +2789,9 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(refreshFn).not.toHaveBeenCalledWith("");
 		});
 
-		// SF-12 RED-2: post-lock re-read returns FederationTokens record with refreshToken: undefined.
-		// Pre-fix: the code falls through to `provider.refreshToken("")` which the IdP rejects with
-		// some 4xx → mapped via SF-13 string-match to 500 refresh_failed. Post-fix: a dedicated guard
-		// fires BEFORE the IdP call and returns 410 refresh_token_absent.
+		// A post-lock re-read with no refreshToken: the guard fires BEFORE the IdP
+		// call and answers 410 refresh_token_absent, rather than sending
+		// `provider.refreshToken("")` upstream.
 		it("returns 410 refresh_token_absent when post-lock re-read has no refreshToken", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			// Post-lock re-read is still expired but missing refreshToken (e.g. concurrent revoke
@@ -2844,9 +2827,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("refresh_token_absent");
 		});
 
-		// SF-12 RED-3: with the post-lock guard firing, the provider must NOT be called.
-		// Spy assertion catches the regression where the guard exists but the IdP call still
-		// happens (e.g. the guard branches on `tokens.refreshToken` instead of `currentTokens.refreshToken`).
+		// With the post-lock guard firing, the provider must NOT be called — e.g. a
+		// guard branching on `tokens.refreshToken` instead of `currentTokens.refreshToken`.
 		it("does not call provider.refreshToken when post-lock guard fires", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const postLockTokens = {
@@ -2882,7 +2864,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// SF-13 — Structured error classification (replaces fragile string match)
+	// Structured error classification
 	// ---------------------------------------------------------------------------
 
 	describe("SF-13: structured error classification", () => {
@@ -2901,10 +2883,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 		}
 
-		// SF-13 RED-1: openid-client v6 throws errors with structured `{ error: "invalid_grant" }`
-		// — the message may be a generic OAuth wrapper without "invalid_grant" substring. Pre-fix
-		// the string match misses this and falls through to 500. Post-fix the helper inspects
-		// `.error` and classifies as invalid_grant → 410.
+		// openid-client v6 throws errors with structured `{ error: "invalid_grant" }`,
+		// whose message may not contain "invalid_grant". The helper classifies on `.error`.
 		it("returns 410 when provider throws structured { error: 'invalid_grant' } without message match", async () => {
 			const providerError = Object.assign(new Error("OAuth provider rejected refresh"), {
 				error: "invalid_grant",
@@ -2918,7 +2898,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("re_authentication_required");
 		});
 
-		// SF-13 RED-2: OIDC §5.2.2 error code "invalid_token" — RFC 6750 §3.1 also defines this for
+		// OIDC §5.2.2 error code "invalid_token" — RFC 6750 §3.1 also defines this for
 		// resource access. When an upstream returns invalid_token on refresh (treat-as-revoked
 		// signal from some IdPs), map to invalid_grant cleanup path so the user re-authenticates.
 		it("returns 410 when provider throws structured { error: 'invalid_token' }", async () => {
@@ -2934,8 +2914,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("re_authentication_required");
 		});
 
-		// SF-13 RED-3: rate-limited (429). Pre-fix: 500 generic. Post-fix: 429 rate_limited so
-		// callers can implement Retry-After / exponential backoff at a higher tier.
+		// 429 rate_limited, so callers can implement Retry-After / exponential backoff
+		// at a higher tier.
 		it("returns 429 rate_limited when provider throws { status: 429 }", async () => {
 			const providerError = Object.assign(new Error("rate limit hit"), { status: 429 });
 			const app = buildRefreshFailure(providerError);
@@ -2963,7 +2943,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.headers["retry-after"]).toBe("30");
 		});
 
-		// SF-13 RED-3b (Round 1 Claude Minor): the helper also classifies on `.error ===
+		// The helper also classifies on `.error ===
 		// "too_many_requests"` (RFC 6585 §4 status name echoed back by some IdPs in the
 		// OAuth `error` field). Without this branch the only path to `rate_limited` is
 		// the HTTP status — IdPs that surface the rate-limit signal only on `.error`
@@ -2981,9 +2961,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("rate_limited");
 		});
 
-		// SF-13 RED-4: structured 5xx via `.status` (openid-client surfaces upstream HTTP code
-		// here even when the message doesn't contain it). Pre-fix: 500 generic (no /5\d\d/ match
-		// when the message is just "service down"). Post-fix: 503 temporarily_unavailable.
+		// Structured 5xx via `.status`: openid-client surfaces the upstream HTTP code
+		// there even when the message doesn't contain it.
 		it("returns 503 temporarily_unavailable when provider throws { status: 503 } without message match", async () => {
 			const providerError = Object.assign(new Error("service down"), { status: 503 });
 			const app = buildRefreshFailure(providerError);
@@ -2995,9 +2974,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("temporarily_unavailable");
 		});
 
-		// SF-13 RED-5: Node's network error codes propagate as `.code` (ECONNREFUSED / ENOTFOUND
-		// / ETIMEDOUT) — these are upstream-network failures, not OAuth grant rejections. Pre-fix:
-		// 500. Post-fix: 503.
+		// Node's network error codes propagate as `.code` (ECONNREFUSED / ENOTFOUND /
+		// ETIMEDOUT) — upstream-network failures, not OAuth grant rejections: 503.
 		it("returns 503 when provider throws { code: 'ECONNREFUSED' }", async () => {
 			const providerError = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
 				code: "ECONNREFUSED",
@@ -3011,11 +2989,9 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("temporarily_unavailable");
 		});
 
-		// SF-13 RED-5b (Round 1 Codex Important): Node/undici fetch failures are thrown as
-		// `TypeError("fetch failed")` with the actual network code on `.cause.code`, not on
-		// `.code`. openid-client v6 rethrows these as-is. Without walking the cause chain
-		// the helper would classify these as `unknown` → 500, defeating SF-13's intent that
-		// network failures return 503.
+		// Node/undici fetch failures are thrown as `TypeError("fetch failed")` with the
+		// network code on `.cause.code`, not `.code`, and openid-client v6 rethrows them
+		// as-is. The helper walks the cause chain so network failures stay 503.
 		it("returns 503 when provider throws TypeError with cause.code = 'ENOTFOUND'", async () => {
 			// undici's cause is an Error; a plain object there is read as nothing,
 			// since openid-client puts the IdP's parsed body in the same place.
@@ -3047,9 +3023,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("refresh_failed");
 		});
 
-		// SF-13 RED-7: unknown / non-OAuth error → 500 + audit emit with reason in details. Pre-fix
-		// the audit details capture the message string; post-fix they capture the helper's
-		// classification reason ("unknown") so SIEM can group.
+		// Unknown / non-OAuth error → 500, audited with the helper's classification reason
+		// ("unknown"), not the message string, so SIEM can group.
 		it("returns 500 refresh_failed and emits audit event with reason='unknown' for unrecognized errors", async () => {
 			const auditSink: AuditSink = {
 				kind: "mock",
@@ -3253,7 +3228,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// #645 — what the upstream said its token is, and whether it may be handed on
+	// What the upstream said its token is, and whether it may be handed on
 	// ---------------------------------------------------------------------------
 
 	describe("token_type: the upstream's, and only one kind of it (#645)", () => {
@@ -3301,18 +3276,17 @@ describe("POST /oauth/federation/:name/token", () => {
 			["the spelling RFC 6750 §2.1 uses", "Bearer"],
 			["an upstream shouting it", "BEARER"],
 		])("answers Bearer for %s", async (_label, tokenType) => {
-			// Always `Bearer`, never the upstream's own spelling. Once a non-bearer
-			// type is refused, the only values left are case-variants of one word —
-			// RFC 6749 §5.1 makes the comparison case-insensitive, so the spelling
-			// carries nothing a caller can act on, and echoing it would flip every
-			// connection whose upstream spells it `bearer` — every bundled adapter
-			// reports oauth4webapi's lower-cased spelling — for no gain.
+			// Always `Bearer`, never the upstream's own spelling. With non-bearer
+			// types refused, only case-variants of one word remain, and RFC 6749
+			// §5.1 makes the comparison case-insensitive: echoing the spelling would
+			// flip every connection whose upstream spells it `bearer` (every bundled
+			// adapter reports oauth4webapi's lower-cased spelling) for no gain.
 			//
 			// Silence is Bearer: §5.1 makes `token_type` REQUIRED, so a record that
-			// names none is an adapter written before `FederationProfile` carried
-			// the field — a third-party one, or a record linked before the bundled
-			// adapters reported it — and not an upstream meaning something else. This is what keeps every record
-			// written before #645 working.
+			// names none comes from an adapter that predates `FederationProfile`
+			// carrying the field (a third-party one, or a record linked before the
+			// bundled adapters reported it), not from an upstream meaning something
+			// else.
 			const { app } = storedApp({ tokenType });
 
 			const res = await postFedToken(app, "google", await mintAccessToken());
@@ -3328,8 +3302,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			["N_A"],
 			["mac"],
 			// Not a token type at all. Reading one of these as silence would
-			// answer `Bearer` for it — the behaviour #645 exists to stop, reached
-			// through a narrower door — so the record is read, not just parsed.
+			// answer `Bearer` for it, so the record is read, not just parsed.
 			["DPoP "],
 			[" DPoP"],
 			["Bearer token"],
@@ -3337,10 +3310,9 @@ describe("POST /oauth/federation/:name/token", () => {
 		])("refuses to hand on a %s token", async (tokenType) => {
 			// Every type in IANA's registry other than Bearer is
 			// sender-constrained: presenting one takes proof of possession of a
-			// key, and a caller handed the token by value holds no such key. This
-			// route used to answer `Bearer` regardless, which dropped the
-			// constraint the upstream imposed and handed out a credential that
-			// only looked usable.
+			// key, and a caller handed the token by value holds no such key.
+			// Answering `Bearer` would drop the constraint the upstream imposed and
+			// hand out a credential that only looks usable.
 			const { app } = storedApp({ tokenType });
 
 			const res = await postFedToken(app, "google", await mintAccessToken());
@@ -3365,7 +3337,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			// refuses the record that holds it.
 			["null", null],
 		])("refuses to hand on a record whose type is %s", async (_label, tokenType) => {
-			// A store is another thing this route does not own (D5). A value that
+			// A store is another thing this route does not own. A value that
 			// is not a string cannot be a bearer spelling, so it is refused rather
 			// than read as the silence that would answer `Bearer`.
 			const { app } = storedApp({ tokenType });
@@ -3532,17 +3504,17 @@ describe("POST /oauth/federation/:name/token", () => {
 			["an empty string", ""],
 			["a value with a space in it", "Bearer token"],
 			["something that is not a string", 7],
-			// Printable, and not a token type: no URI may contain `^`. The old
-			// NQCHAR bound read this as a type name and sent it down the 502
-			// meant for a real type the upstream issued (#649 review).
+			// Printable, and not a token type: no URI may contain `^`. An NQCHAR
+			// bound would read it as a type name and send it down the 502 meant for
+			// a real type the upstream issued.
 			["a value with a character no URI may contain", "Bearer^"],
 			// Every character is legal and the reference is not: an IP-literal
-			// that never closes. The lexical check read it as a type name.
+			// that never closes. A lexical check would read it as a type name.
 			["a structurally malformed URI reference", "https://["],
 		])("refuses the refresh when the answered type is %s", async (_label, tokenType) => {
 			// Not a name at all: §A.13's `token-type` admits a `type-name` or a URI
-			// reference, and none of these is either. The
-			// adapter answered something broken, which is a failed refresh rather
+			// reference, and none of these is either. The adapter answered
+			// something broken, which is a failed refresh rather
 			// than an upstream this provider may not delegate for — and the record
 			// keeps the type it had.
 			const { app, fedTokenStore } = refreshingApp({

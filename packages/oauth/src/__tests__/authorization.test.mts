@@ -35,11 +35,11 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
-// D-1 / v0.5.1: codeData must carry client_id and redirect_uri (required fields).
+// codeData must carry client_id and redirect_uri (required fields), and
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
 const RP_URI = "https://rp.example/cb";
 
-// #273: PKCE is mandatory for every authorization-code client, so a redeemable
+// PKCE is mandatory for every authorization-code client, so a redeemable
 // code record always carries an S256 challenge and every token request that is
 // meant to reach a non-PKCE branch has to present the matching verifier.
 const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
@@ -52,10 +52,9 @@ const validCode = {
 	code_challenge_method: "S256",
 };
 
-// D-6 (v0.5.1): the authorization grant requires `ctx.authenticatedClient` to
-// be present and match `codeData.client_id`. Tests default to "client1" — the
-// same client_id baked into validCode — so existing scope/PKCE/policy tests
-// pass through the binding gate unchanged.
+// The authorization grant requires `ctx.authenticatedClient` to be present and
+// match `codeData.client_id`. Tests default to "client1", validCode's
+// client_id, so they pass the binding gate.
 const DEFAULT_AUTH_CLIENT = {
 	clientId: "client1",
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
@@ -118,10 +117,10 @@ function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRP
 }
 
 describe("createAuthorizationGrant — the lifetimes it mints with", () => {
-	// A configuration built by hand never met the schema. Read when a request
-	// is answered, a bad lifetime was refused only after `consumeByCode` had
-	// spent the code: a 500, and a code the client can never redeem. Read when
-	// the grant is built, it is a composition fault that never reaches a code.
+	// A configuration built by hand never met the schema. Read when the grant is
+	// built, a bad lifetime is a composition fault that never reaches a code;
+	// read per request, it would be refused only after `consumeByCode` had spent
+	// the code: a 500, and a code the client can never redeem.
 	const broken: Array<[string, Record<string, unknown>]> = [
 		["oauth.refreshToken.expiresIn = 1.5", { refreshToken: { expiresIn: 1.5 } }],
 		["oauth.refreshToken.expiresIn = NaN", { refreshToken: { expiresIn: Number.NaN } }],
@@ -333,9 +332,9 @@ describe("createAuthorizationGrant", () => {
 				expect(decoded.sub).toBe("u1");
 				expect((decoded as Record<string, unknown>).azp).toBe("client1");
 			}
-			// D-1: only `code` remains in clear list. `code_client_id` and
-			// `granted_scopes` are no longer written by /authorize, so the
-			// /token grant no longer needs to clear them.
+			// Only `code` is in the clear list: /authorize does not write
+			// `code_client_id` or `granted_scopes`, so the grant has nothing of theirs
+			// to clear.
 			expect(sessionMutation).toBeDefined();
 			expect(sessionMutation?.clear).toContain("code");
 			expect(sessionMutation?.clear).not.toContain("code_client_id");
@@ -344,9 +343,9 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
-			// A configuration that carries only the new keys: read through
-			// `resolveAccessTokenLifetime`, not the deprecated `expiresIn`, which
-			// is absent here. Only token exchange honours `expires_in`.
+			// A configuration with only `defaultExpiresIn` / `maxExpiresIn`: read
+			// through `resolveAccessTokenLifetime`, not the deprecated `expiresIn`,
+			// which is absent here. Only token exchange honours `expires_in`.
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode })),
 				config: {
@@ -627,12 +626,10 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("returns 400 when the code carries a challenge but no code_verifier is sent", async () => {
-			// The body deliberately omits `code_verifier` — that is the whole
-			// point of this case, and asserting the errorDescription is what
-			// keeps it honest: a bare `status === 400` also passes when the
-			// request fails for an unrelated reason (a verifier that simply
-			// does not match, say), which is how this test briefly stopped
-			// testing anything at all.
+			// The body deliberately omits `code_verifier`. Asserting the
+			// errorDescription keeps the case honest: a bare `status === 400` also
+			// passes when the request fails for an unrelated reason (a verifier that
+			// simply does not match, say).
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
@@ -767,7 +764,7 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("returns 200 when plain PKCE code_verifier matches challenge — opted-in client only", async () => {
-			// #273: `plain` is reachable ONLY through the client registration's
+			// `plain` is reachable ONLY through the client registration's
 			// `allowPlainPkce: true`. The grant reads it off the authenticated
 			// client, which is the same record /authorize consulted.
 			const verifier = "b".repeat(43);
@@ -822,11 +819,8 @@ describe("createAuthorizationGrant", () => {
 			expect("error" in result && result.error).toBe("invalid_request");
 		});
 
-		// #273: the legacy `pkce.requireS256` boolean is gone. It was the only
-		// knob the TOKEN endpoint honoured, and /authorize ignored it — the
-		// divergence that could mint a code doomed at redemption. These tests
-		// pin that a config still setting it changes nothing in either
-		// direction: S256 is mandatory whatever it says.
+		// A config still setting the legacy `pkce.requireS256` changes nothing in
+		// either direction: S256 is mandatory whatever it says.
 		describe("legacy pkce.requireS256 is inert (#273)", () => {
 			const legacyConfig = (requireS256: boolean) =>
 				({
@@ -923,9 +917,9 @@ describe("createAuthorizationGrant", () => {
 			);
 		});
 
-		// A-2 redirect_uri binding — D-1 made redirect_uri a required field on
-		// CodeData; the previous "vacuous-pass when not stored" behavior (IH-4)
-		// is closed. session.code_redirect_uri fallback is removed.
+		// redirect_uri is a required field on CodeData and the binding check is
+		// unconditional: no pass when none is stored, and no fallback to
+		// session.code_redirect_uri.
 		describe("A-2: redirect_uri binding", () => {
 			it("returns invalid_grant when stored redirect_uri does not match body redirect_uri", async () => {
 				const deps = makeDeps(
@@ -1064,9 +1058,8 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it("D-1 / IH-4: rejects when codeData has no redirect_uri (was: vacuous-pass returns 200)", async () => {
-				// Pre-v0.5.1 this returned 200 because the redirect_uri binding
-				// check was guarded by `if (storedRedirectUri)`. Post-D-1
-				// codeData.redirect_uri is required and the check is unconditional.
+				// codeData.redirect_uri is required and the binding check is
+				// unconditional, so a record without one is refused.
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
@@ -1096,15 +1089,10 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		// D-6 (v0.5.1): the in-grant `client_secret` check that lived here pre-
-		// v0.5.1 is removed. RFC 6749 §2.3 client authentication is now the
-		// responsibility of `clientAuthMw` at the route level — the grant
-		// handler trusts `ctx.authenticatedClient` and only verifies the
-		// canonical binding `codeData.client_id === authenticatedClient.clientId`.
-		// The integration-level coverage for credential validity lives in
-		// `clientAuth.test.mts` (Group B + Codex M1/M4) and the route-level
-		// `routes.test.mts` (Group C). The grant-level invariant tested here is
-		// just the binding gate.
+		// RFC 6749 §2.3 client authentication is `clientAuthMw`'s, at the route
+		// (covered in `clientAuth.test.mts` and `routes.test.mts`). The grant trusts
+		// `ctx.authenticatedClient` and verifies only the binding
+		// `codeData.client_id === authenticatedClient.clientId`, pinned here.
 		describe("D-6 binding gate: codeData.client_id vs ctx.authenticatedClient.clientId", () => {
 			it("returns 401 invalid_client when ctx.authenticatedClient is null", async () => {
 				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
@@ -1125,8 +1113,7 @@ describe("createAuthorizationGrant", () => {
 			it("returns 400 invalid_grant when authenticatedClient.clientId differs from codeData.client_id", async () => {
 				// codeData binds the code to "client1" (validCode); the authenticated
 				// client at /token is a different client. The binding gate must
-				// reject — accepting it would let any authenticated client redeem
-				// any code, which is the spoof vector PB-2 closes.
+				// reject, or any authenticated client could redeem any code.
 				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1163,9 +1150,9 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		// #273 replaced the B-7/B-8 knobs (supportedMethods / defaultMethod /
-		// required) with one fixed policy plus a per-client `plain` opt-in.
-		// What is pinned here is that no server-wide config can widen it.
+		// PKCE is one fixed policy plus a per-client `plain` opt-in. No server-wide
+		// config (the legacy `supportedMethods` / `defaultMethod` / `required`
+		// keys) can widen it.
 		describe("#273: PKCE policy is fixed, not configurable", () => {
 			function makePkceConfig(pkce: Record<string, unknown>) {
 				return {
@@ -1258,8 +1245,8 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it("refuses a code with no code_challenge_method whatever `required` says", async () => {
-				// Pre-#273 `required: false` (the default!) made this a 200 for a
-				// confidential client — PKCE was effectively optional.
+				// Not even `required: false` makes PKCE optional for a confidential
+				// client.
 				for (const required of [true, false]) {
 					const handler = createAuthorizationGrant(
 						makeConfiguredDeps(
@@ -1284,9 +1271,9 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		describe("TODO-F-4: id_token issuance on openid scope", () => {
-			// F-4 reads config.oauth.jwt.issuer directly (not ctx.issuer) for
-			// id_token issuance to avoid using the request-derived host fallback
-			// as an OIDC iss claim. Tests must supply a configured issuer.
+			// id_token issuance reads config.oauth.jwt.issuer directly (not
+			// ctx.issuer), so the request-derived host fallback never becomes an OIDC
+			// iss claim. Tests must supply a configured issuer.
 			const mockConfigWithIssuer = {
 				oauth: {
 					jwt: { secret: "test-secret", issuer: "https://auth.example.com" },
@@ -1324,7 +1311,7 @@ describe("createAuthorizationGrant", () => {
 				authTime: Date;
 				claims: Record<string, unknown>;
 				amr?: readonly string[];
-				/** The MFA ADR's D9; absent, a session written before the key existed. */
+				/** Absent: a session written before the key existed (see the MFA ADR). */
 				authentication?: SessionAuthentication;
 			}) {
 				return {
@@ -1452,9 +1439,9 @@ describe("createAuthorizationGrant", () => {
 				expect(at.amr).toEqual(["pwd", "mfa"]);
 				expect(at.acr).toBe("urn:example:mfa");
 				// The refresh token carries them too: `acr` lives on the code, which is
-				// spent here, so the refresh grant has nowhere else to read it from —
-				// and a resource server gating on `amr` must not see it vanish at the
-				// first refresh (v0.13.0 audit).
+				// spent here, so the refresh grant has nowhere else to read it from, and
+				// a resource server gating on `amr` must not see it vanish at the first
+				// refresh.
 				const rt = decodeJwt(result.tokens.refresh_token as string) as Record<string, unknown>;
 				expect(rt.amr).toEqual(["pwd", "mfa"]);
 				expect(rt.acr).toBe("urn:example:mfa");
@@ -1703,15 +1690,15 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		// D-1 / IH-4 / IH-2: identity gates move from the Express session to the
-		// code record. consumeByCode (atomic getDel on a single Redis node)
-		// becomes the sole authenticity gate; client_id and redirect_uri are
-		// verified against codeData fields populated at /authorize time.
+		// Identity gates read the code record, not the Express session:
+		// consumeByCode (atomic getDel on a single Redis node) is the sole
+		// authenticity gate, and client_id and redirect_uri are verified against
+		// codeData fields populated at /authorize time.
 		describe("D-1: identity gates derive from codeData not session", () => {
 			it("IH-4: rejects when both body.redirect_uri AND codeData.redirect_uri are missing (vacuous-pass closure)", async () => {
-				// Per Codex calibration: include session.code / session.code_client_id
-				// matching the body so the early session gates would otherwise let
-				// this through, and exercise the new strict redirect_uri check directly.
+				// session.code / session.code_client_id match the body, so a
+				// session-based gate would let this through; only the redirect_uri
+				// check can refuse it.
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
@@ -1720,8 +1707,6 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
-						// redirect_uri intentionally absent — pre-fix this is the Redis
-						// drop scenario where IH-4 vacuous-pass would skip the check.
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1752,7 +1737,6 @@ describe("createAuthorizationGrant", () => {
 						code_challenge: S256_CHALLENGE,
 						code_challenge_method: "S256",
 						sid: "test-sid-1",
-						// redirect_uri intentionally absent on the codeData side.
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1775,10 +1759,9 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it("IH-2: client_id check derives from codeData.client_id, not session.code_client_id", async () => {
-				// Per Codex calibration: set session.code_client_id to MATCH the body
-				// so the pre-fix session-based gate (`client_id !== session.code_client_id`)
-				// would let the request through. The new gate must reject because
-				// codeData.client_id differs from the body's client_id.
+				// session.code_client_id MATCHES the body, so a session-based gate
+				// (`client_id !== session.code_client_id`) would let the request through.
+				// The gate must reject because codeData.client_id differs from the body's.
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
@@ -1798,7 +1781,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					session: {
 						code: "abc",
-						// matches body.client_id — pre-fix session gate passes.
+						// matches body.client_id: a session-based gate would pass.
 						code_client_id: "spoofed-client",
 						user: { id: "u1" },
 					},
@@ -1856,8 +1839,8 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it("returns 400 invalid_grant when code record has no sid and userSessionStore IS wired (F-3-2)", async () => {
-				// Code was issued before Task 2 login wiring — sid missing.
-				// When the store is wired, sid is required so the store can link/register.
+				// A code record without sid. When the store is wired, sid is required so
+				// the store can link/register.
 				const userSessionStore = {
 					kind: "spy",
 					async create() {},
@@ -1988,7 +1971,7 @@ describe("createAuthorizationGrant", () => {
 				expect(familyIdArg).toMatch(
 					/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
 				);
-				// Per A4 §5.3 TTL contract: expiresAt MUST be passed from session.expiresAt
+				// TTL contract: expiresAt MUST be passed from session.expiresAt
 				expect(expiresAtArg).toBe(sessionExpiresAt);
 				expect(registerRPSpy).toHaveBeenCalledTimes(1);
 				const [rpSid, rpData, rpExpiresAt] = registerRPSpy.mock.calls[0] as [
@@ -1999,7 +1982,7 @@ describe("createAuthorizationGrant", () => {
 				expect(rpSid).toBe("session-xyz");
 				expect(rpData.clientId).toBe("client1");
 				expect(rpData.registeredAt).toBeInstanceOf(Date);
-				// Per A4 §5.2 TTL contract: expiresAt MUST match session.expiresAt
+				// TTL contract: expiresAt MUST match session.expiresAt
 				expect(rpExpiresAt).toBe(sessionExpiresAt);
 			});
 
@@ -2010,11 +1993,8 @@ describe("createAuthorizationGrant", () => {
 			])(
 				"registers the RP with every logout field the client record carries — %s (#626)",
 				async (_label, backchannelSessionRequired, frontchannelSessionRequired) => {
-					// These four fields used to be read through `as Record<string, unknown>`
-					// and cast back: a misspelt name would have read `undefined` and dropped
-					// the RP from the logout cascade. They are read off the typed client now,
-					// and each is asserted with its own value — the types catch a field
-					// forgotten, not two same-typed fields swapped.
+					// Each of the four fields is asserted with its own value: the types catch
+					// a field forgotten, not two same-typed fields swapped.
 					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
 					const clientRepository: ClientRepository = {
 						...mockClientRepository,
@@ -2196,7 +2176,7 @@ describe("createAuthorizationGrant", () => {
 			});
 
 			it("returns 503 temporarily_unavailable when clientRepository.findById throws (F-3-I2)", async () => {
-				// findById is now inside the try/catch — a throw must produce a controlled 503.
+				// findById is inside the try/catch: a throw must produce a controlled 503.
 				const throwingClientRepo: ClientRepository = {
 					findById: vi.fn().mockRejectedValue(new Error("db down")),
 					authenticate: vi.fn().mockResolvedValue(null),
@@ -2255,22 +2235,21 @@ describe("createAuthorizationGrant", () => {
 });
 
 // ---------------------------------------------------------------------------
-// CR-4 — TOCTOU: re-validate session before returning tokens
+// TOCTOU: re-validate the session before returning tokens
 //
-// Background: between the first `userSessionStore.get(sid)` and the call to
-// `sessionFamilyIndex.addFamilyId`, the handler awaits `clientRepository.findById`.
-// If `cascadeLogout` runs during that await window, the session is gone and
-// the just-issued tokens become orphaned from logout orchestration. CR-4 closes
-// the common case (logout fully completes before the second check) by adding a
-// second `userSessionStore.get(sid)` immediately before `addFamilyId`. Per
-// Codex Delta 1, this REDUCES the window — it does not eliminate it. Phase F
-// follow-up is the atomic Lua EVAL `addFamilyIdIfSessionActive`.
+// Between the first `userSessionStore.get(sid)` and
+// `sessionFamilyIndex.addFamilyId` the handler awaits
+// `clientRepository.findById`; a `cascadeLogout` in that window would orphan
+// the just-issued tokens from logout orchestration. A second
+// `userSessionStore.get(sid)` immediately before `addFamilyId` catches the
+// common case (logout completes before it). It REDUCES the window; it does
+// not eliminate it.
 // ---------------------------------------------------------------------------
 
 describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 	it("returns 400 invalid_grant / session_invalidated when session is deleted between findById and addFamilyId", async () => {
-		// Mock: first get returns session (initial check at line ~439), second get
-		// returns null (the new CR-4 re-check immediately before addFamilyId).
+		// First get returns the session (the initial check), second returns null
+		// (the re-check immediately before addFamilyId).
 		let getCallCount = 0;
 		const userSessionStore = {
 			kind: "spy",
@@ -2331,14 +2310,14 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 		expect(result.error).toBe("invalid_grant");
 		expect((result as { errorDescription?: string }).errorDescription).toBe("session_invalidated");
 
-		// Proof of re-check: get was called twice (first + CR-4 second).
+		// Proof of re-check: get was called twice (first + re-check).
 		expect(getCallCount).toBe(2);
 
 		// Negative invariants: token-linking ops MUST NOT run when second check fails.
 		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
 		expect(sessionRPRegistry.registerRP).not.toHaveBeenCalled();
 
-		// Codex Delta 3: audit log MUST fire on session_invalidated rejection.
+		// The audit log MUST fire on the session_invalidated rejection.
 		expect(logger.warn).toHaveBeenCalledTimes(1);
 		const [warnPayload, warnMsg] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
 		expect(warnPayload).toMatchObject({
@@ -2350,7 +2329,7 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 
 	it("returns 503 temporarily_unavailable when the second userSessionStore.get throws", async () => {
 		// First get succeeds; second get throws (e.g. Redis blip mid-grant).
-		// The CR-4 second `get` has its own dedicated try/catch — store-availability
+		// The second `get` has its own dedicated try/catch: store-availability
 		// failures here surface as `503 / "session store unavailable"`, matching the
 		// first-get path and not the broader outer catch that wraps findById /
 		// addFamilyId / registerRP (which surfaces as `503 / "session linking
@@ -2418,7 +2397,7 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #259 — access/refresh token `sub` binds to the code's UserSession
+// Access/refresh token `sub` binds to the code's UserSession
 //
 // The token endpoint is a back-channel call for confidential clients: it
 // carries no end-user cookie, so `ctx.session.user` is undefined there. The
@@ -2592,7 +2571,7 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 	it("refuses when a wired store returns a record with no usable sub", async () => {
 		// Gating the request-session fallback on `sub` being nullish rather than
 		// on the store being absent would silently revert to the cookie-derived
-		// identity here — the cross-user mismatch this fix removes.
+		// identity here: the cross-user mismatch this handling prevents.
 		const store = {
 			kind: "spy",
 			async create() {},
@@ -2660,10 +2639,9 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 	});
 });
 
-// F6 coverage boost — patch lines for PR #126 (IH-13 + SF-3 + IH-16 + TS-4)
-// that are reachable but were not exercised by the original test suite.
-// Each test pins both status code AND errorDescription so a future refactor
-// that shifts an error to a different branch is caught.
+// Corrupt code records and PKCE error branches. Each test pins both status
+// code AND errorDescription so a refactor that shifts an error to a different
+// branch is caught.
 describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", () => {
 	it("returns 400 invalid_grant when code record has code_challenge without code_challenge_method (SF-3 corrupt code A)", async () => {
 		const deps = makeDeps(
@@ -2671,7 +2649,7 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 				code: "abc",
 				client_id: "client1",
 				redirect_uri: RP_URI,
-				// SF-3 corrupt shape: challenge persisted but method missing.
+				// Corrupt shape: challenge persisted but method missing.
 				// /authorize never writes this pairing — only a misbehaving
 				// CodeRepository implementation could produce it.
 				code_challenge: "challenge",
@@ -2705,9 +2683,8 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 				code: "abc",
 				client_id: "client1",
 				redirect_uri: RP_URI,
-				// code_challenge typed as `unknown` from a corrupt store record.
-				// Pre-SF-3 this passed silently because `verifier !== undefined`
-				// is true; constantTimeStringEqual now rejects non-string args.
+				// code_challenge typed as `unknown` from a corrupt store record;
+				// constantTimeStringEqual rejects non-string args.
 				code_challenge: 12345 as unknown as string,
 				code_challenge_method: "S256",
 			}),
@@ -2732,15 +2709,9 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 	});
 
 	it("returns 400 invalid_request when code_verifier fails RFC 7636 format check", async () => {
-		// RFC 7636 §4.1: code_verifier is 43-128 chars from the unreserved set.
-		// "too-short" is 9 chars → must reject. The pre-existing test for this
-		// branch omitted body.redirect_uri and so was returning early at the
-		// redirect_uri *presence* gate (authorization.mts:125, after D-1
-		// hoisted the absence check ahead of consumeByCode). The error string
-		// happened to be `"redirect_uri mismatch"` either way, but it was
-		// firing at presence-check, not at the equality-check at L168, and
-		// never reached the regex at L263. This test pins redirect_uri so
-		// the regex check is the actual cause and errorDescription is asserted.
+		// RFC 7636 §4.1: code_verifier is 43-128 chars from the unreserved set;
+		// "too-short" is 9 chars. The body carries the matching redirect_uri so
+		// the redirect_uri gates pass and the format check is what refuses it.
 		const deps = makeDeps(
 			vi.fn().mockResolvedValue({
 				code: "abc",
@@ -2775,12 +2746,11 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 
 	it("returns 400 invalid_grant when plain method code_verifier does not match challenge (SF-3 + MIN-4 timing-safe)", async () => {
 		// Both verifier and challenge are valid 43-char RFC 7636 strings, but
-		// they differ. Pre-SF-3+MIN-4 the comparison was a short-circuit `!==`
-		// whose per-byte timing leaked progress against the stored challenge;
-		// constantTimeStringEqual replaces it on both S256 and plain branches.
-		// #273: reaching the plain branch at all now requires the client's
-		// `allowPlainPkce` opt-in — without it the method allowlist rejects
-		// first and this branch is never exercised.
+		// they differ. constantTimeStringEqual compares them on both S256 and
+		// plain branches, so a short-circuit `!==`'s per-byte timing cannot leak
+		// progress against the stored challenge. Reaching the plain branch needs
+		// the client's `allowPlainPkce` opt-in, or the method allowlist rejects
+		// first.
 		const verifier = "a".repeat(43);
 		const challenge = "b".repeat(43);
 		const deps = makeDeps(
@@ -2812,16 +2782,9 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 
 	it("admits exactly the two methods the verifier comparison handles", () => {
 		// The comparison in `authorization.mts` is a two-way choice: digest the
-		// verifier for `S256`, compare it verbatim for `plain`. It used to be a
-		// `switch` with a `default` guarding against the operator-configured
-		// `supportedMethods` and the switch diverging — #273 removed that knob,
-		// so the guard became unreachable and the runtime test that drove it
-		// (by widening `supportedMethods` to include a bogus method) could no
-		// longer exist.
-		//
-		// The invariant it protected is still worth pinning, so it is asserted
-		// where it actually lives: grow the admissible set without revisiting
-		// that comparison and this fails.
+		// verifier for `S256`, compare it verbatim for `plain`. Grow the
+		// admissible method set without revisiting that comparison and this
+		// fails.
 		const policy = resolvePkceOptions(undefined);
 		const admissible = new Set([
 			...pkceMethodsForClient(policy, null),

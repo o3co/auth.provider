@@ -15,16 +15,11 @@
  */
 
 /**
- * R3 — `/oauth/introspect` consults session liveness for a `sid`-carrying
- * token.
- *
- * The handler already consulted the jti denylist, the subject watermark and
- * the refresh-token family; the session was the missing leg. That gap is what
- * let a logged-out `session`-grant token keep reporting `active: true` while
- * `/oauth/userinfo` — which does run the check — refused the very same token.
- *
- * These pin the check's own shape: which tokens pay for it, what a store
- * outage answers, and what an operator sees.
+ * `/oauth/introspect` consults session liveness for a `sid`-carrying token,
+ * beside the jti denylist, the subject watermark and the refresh-token family,
+ * so a logged-out `session`-grant token is not `active: true` here while
+ * `/oauth/userinfo` refuses it. Pins which tokens pay for the check, what a
+ * store outage answers, and what an operator sees.
  */
 
 import { createSecretKey } from "node:crypto";

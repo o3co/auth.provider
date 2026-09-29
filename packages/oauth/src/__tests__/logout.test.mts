@@ -44,11 +44,9 @@ import {
 } from "./_helpers/projectedLog.mjs";
 
 /**
- * A federation that satisfies the contract, with whatever capability the case
- * under test adds. Since #626 P1 `federationProviders` carries
- * `FederationProvider` rather than a one-field stand-in, so a mock has to be
- * one — which is the point: these routes read a provider the boot planner
- * could actually have handed them.
+ * A federation that satisfies the `FederationProvider` contract, with whatever
+ * capability the case under test adds: these routes read a provider the boot
+ * planner could actually have handed them.
  */
 const federationBase = (name: string) => ({
 	name,
@@ -66,9 +64,8 @@ const keyStore = createSymmetricKeyStore(SECRET);
 const secretKey = createSecretKey(Buffer.from(SECRET));
 
 /** Mint an id_token with the given claims. */
-// #394: mints carry typ JWT. `typ` stays overridable so the suite can present
-// a wrong spelling — including the pre-#394 `id+jwt`, which #402 made one more
-// wrong spelling rather than a special case.
+// Mints carry typ JWT. `typ` stays overridable so the suite can present a
+// wrong spelling, `id+jwt` included.
 async function mintIdToken(extra: Record<string, unknown> = {}, typ = "JWT"): Promise<string> {
 	return new SignJWT({
 		sub: "u-1",
@@ -115,7 +112,7 @@ async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<str
 		.sign(secretKey);
 }
 
-// A minimal valid UserSession (v0.5.0 shape — no derived fields)
+// A minimal valid UserSession (no derived fields)
 const baseSession: UserSession = {
 	sid: "sid-1",
 	sub: "u-1",
@@ -217,13 +214,13 @@ interface BuildAppOpts {
 	/**
 	 * The express-session bag the request carries. Absent by default, which is
 	 * the shape the rest of this suite runs in (no session middleware mounted)
-	 * and the one R1a must not throw on.
+	 * and the one the browser-session destroy must not throw on.
 	 */
 	browserSession?: FakeBrowserSession;
 }
 
 /**
- * The slice of `express-session`'s request session R1a touches: the `sid` it
+ * The slice of `express-session`'s request session logout touches: the `sid` it
  * recorded at login and the `destroy` callback. `destroyed` records whether
  * the route actually ended it, so a test can assert on scoping rather than on
  * a spy's call count alone.
@@ -348,12 +345,9 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
-			// Regression: the GET confirmation page submits a POST whose body
-			// includes `confirmed=1` plus the id_token_hint passed through as
-			// a hidden input. Previously the form did not include the hint,
-			// so the "Sign out" button always hit a 400 invalid_request. This
-			// asserts the same shape the form submits today reaches the
-			// hint-based logout path and returns 200.
+			// The GET confirmation page posts `confirmed=1` plus the
+			// id_token_hint as a hidden input; that shape must reach the
+			// hint-based logout path, or "Sign out" always fails.
 			const sessionStore = makeSessionStore();
 			const refreshFamilyRevocation = makeFamilyRevocation();
 			const app = buildApp({ sessionStore, refreshFamilyRevocation });
@@ -374,12 +368,8 @@ describe("POST /oauth/logout", () => {
 
 	describe("#394 dual-accept window, closed (#402)", () => {
 		it("refuses a pre-#394 id_token_hint carrying typ id+jwt", async () => {
-			// This is the endpoint the window existed for: an id_token already
-			// in the wild loses its logout-hint value the moment the spelling
-			// stops being accepted. #402's own conditions gate that — one
-			// refresh-token lifetime after the release, and the legacy log line
-			// gone quiet — and neither means anything for a provider with no
-			// deployment behind it. There are no such id_tokens.
+			// Logout is where an already-issued id_token would lose its hint
+			// value once the spelling is refused; none carrying `id+jwt` exist.
 			const sessionStore = makeSessionStore();
 			const app = buildApp({ sessionStore });
 			const token = await mintIdToken({}, "id+jwt");
@@ -402,8 +392,7 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("refuses at+jwt, as it always did", async () => {
-			// The accepted set is back to exactly one value, and cross-type
-			// confusion is refused the same way it was through the window.
+			// The accepted set is exactly one value: no cross-type confusion.
 			const app = buildApp({});
 			const token = await mintIdToken({}, "at+jwt");
 
@@ -995,11 +984,11 @@ describe("POST /oauth/logout", () => {
 		// A custom ClientRepository bypasses ClientEntrySchema, so an entry
 		// `checkRedirectUri` would refuse at boot can reach this route: one the
 		// URL parser cannot read, or one in an executable scheme. Matching it
-		// exactly does not make it a place to send a browser — `new URL()` on
-		// the first ended a finished logout in a 500, and the second reached
-		// `window.location.href` on the front-channel page, which is script on
-		// this origin. Either is dropped with one warn, and the logout
-		// completes as if no URI had been sent.
+		// exactly does not make it a place to send a browser: `new URL()` on
+		// the first would end a finished logout in a 500, and the second would
+		// reach `window.location.href` on the front-channel page, which is
+		// script on this origin. Either is dropped with one warn, and the
+		// logout completes as if no URI had been sent.
 		describe("a registered entry this server would not redirect to", () => {
 			const UNPARSABLE = "::not a url";
 			const EXECUTABLE = "javascript:alert(document.domain)";
@@ -1690,7 +1679,7 @@ describe("GET /oauth/logout", () => {
 	it("HTML-escapes hidden input values to prevent attribute injection", async () => {
 		// state may carry attacker-influenced characters in the worst case;
 		// the GET-confirm path echoes it into an HTML attribute so it must
-		// be escaped (regression: `"` would break out of the value attr).
+		// be escaped (an unescaped `"` would break out of the value attr).
 		const sessionStore = makeSessionStore();
 		const refreshFamilyRevocation = makeFamilyRevocation();
 		const app = buildApp({ sessionStore, refreshFamilyRevocation });
@@ -1707,10 +1696,9 @@ describe("GET /oauth/logout", () => {
 	});
 
 	it("HTML-escapes ampersands in hidden input values (& → &amp;)", async () => {
-		// Regression: the previous test only exercised the `"` escape via
-		// quoted-attribute injection. State values commonly contain `&` in
-		// query-encoded round-tripping, so the entity escape needs an
-		// independent regression guard.
+		// The previous test covers only the `"` escape. State values commonly
+		// contain `&` in query-encoded round-tripping, so the entity escape
+		// gets its own case.
 		const sessionStore = makeSessionStore();
 		const refreshFamilyRevocation = makeFamilyRevocation();
 		const app = buildApp({ sessionStore, refreshFamilyRevocation });
@@ -1728,9 +1716,8 @@ describe("GET /oauth/logout", () => {
 		expect(res.text).not.toMatch(/value="a&b=1"/);
 	});
 
-	// #498 — `postLogoutRedirectUris` now accepts RFC 8252 §7.1 reverse-domain
-	// custom schemes, so a native app can be sent back to itself after logout.
-	// These pin the two things that had to keep holding once it could: the
+	// `postLogoutRedirectUris` accepts RFC 8252 §7.1 reverse-domain custom
+	// schemes, so a native app can be sent back to itself after logout. The
 	// allowlist stays an EXACT match, and the value is never rendered into
 	// HTML unescaped.
 	describe("custom-scheme post_logout_redirect_uri (#498)", () => {
@@ -1789,8 +1776,8 @@ describe("GET /oauth/logout", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.headers.location).toBeUndefined();
-			// The JSON fallback — the very outcome #498 exists to spare a
-			// native app when the target IS registered.
+			// The JSON fallback, which a native app is spared only when the
+			// target IS registered.
 			expect(res.body).toEqual({ logged_out: true });
 		});
 
@@ -1829,7 +1816,7 @@ describe("GET /oauth/logout", () => {
 // POST /oauth/federation/:name/logout
 // ---------------------------------------------------------------------------
 
-/** Session that has google linked (v0.5.0 shape — no derived fields) */
+/** Session that has google linked (no derived fields) */
 const sessionWithGoogle: UserSession = { ...baseSession };
 const googleFederations = ["google"];
 
@@ -2739,14 +2726,10 @@ describe("audit events", () => {
 });
 
 /**
- * R1a — `/oauth/logout` must end the browser session too.
- *
- * The cascade deletes the `UserSession` record, but until this fix nothing
- * touched the express-session, so the same cookie kept satisfying
- * `req.session.isAuthenticated` at `/authorize`: the browser went on minting
- * authorization codes carrying the dead `sid`, `/token` refused them with
- * `invalid_grant`, and the user sat in a login loop with no login page for up
- * to `session.maxAge`.
+ * `/oauth/logout` must end the browser session too. The cascade deletes the
+ * `UserSession` record; a surviving express-session would keep satisfying
+ * `req.session.isAuthenticated` at `/authorize`, minting codes carrying the
+ * dead `sid` that `/token` refuses: a login loop for up to `session.maxAge`.
  *
  * Scoping is the substance of these tests: the destroy is owed to the browser
  * that OWNS the session being logged out, and to no other. An RP-initiated

@@ -15,14 +15,12 @@
  */
 
 /**
- * `POST /oauth/revoke` when the store behind a revocation fails.
- *
- * RFC 7009 §2.2 makes `200` the answer for a revocation that happened and for
- * a token the server could not use — invalid, unknown, or another client's.
- * It is not the answer for a revocation the server could not perform: §2.2.1
- * gives `503` for that, and says the client "should assume the token still
- * exists". A `200` over a denylist or family-store outage told the client its
- * token was revoked while the token kept verifying until it expired.
+ * `POST /oauth/revoke` when the store behind a revocation fails. RFC 7009
+ * §2.2's `200` covers a revocation that happened and a token the server could
+ * not use (invalid, unknown, or another client's); for a revocation it could
+ * not perform §2.2.1 gives `503`, and says the client "should assume the
+ * token still exists". A `200` over a store outage would claim a revocation
+ * while the token kept verifying until it expired.
  *
  * Driven through the real route: the real `verifyJwt`, a real memory denylist
  * and family revocation, with only the write that fails replaced.

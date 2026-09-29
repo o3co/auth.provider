@@ -51,7 +51,7 @@ import { createMockLogger } from "./_helpers/mockLogger.mjs";
 // Shared test-only stubs
 // ---------------------------------------------------------------------------
 
-// #273: PKCE/S256 is mandatory at /authorize for every client, so every
+// PKCE/S256 is mandatory at /authorize for every client, so every
 // request meant to get past the PKCE gate carries a valid S256 pair. The
 // value is the RFC 7636 §4.4 appendix-B example challenge.
 const AUTHORIZE_CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -63,7 +63,7 @@ const fakeClientRepository: ClientRepository = {
 };
 
 const fakeCodeRepository: CodeRepository = {
-	// D-1: Code requires client_id + redirect_uri.
+	// Code requires client_id + redirect_uri.
 	createCode: async () => ({
 		code: "fake-code",
 		client_id: "client1",
@@ -140,10 +140,9 @@ async function buildAuthorizeApp(opts: {
 	captureCode: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
 	captureSession?: (session: Record<string, unknown>) => void;
 	/**
-	 * Optional config override merged into the default `authorizeConfig`.
-	 * Used by IH-16 tests that need to set a non-default
-	 * `oauth.nonce.maxLength` so the configurable code path is exercised
-	 * (the no-override path uses the `?? 256` fallback only).
+	 * Optional config override merged into the default `authorizeConfig`,
+	 * e.g. a non-default `oauth.nonce.maxLength`, so the configurable path is
+	 * exercised and not only the `?? 256` fallback.
 	 */
 	configOverride?: Partial<AppConfig>;
 	clientRepo?: ClientRepository;
@@ -161,7 +160,7 @@ async function buildAuthorizeApp(opts: {
 			...opts.sessionFields,
 		};
 		(req as unknown as { session: Record<string, unknown> }).session = session;
-		// CR-2: capture the session reference so the test can inspect post-route mutations.
+		// Capture the session reference so the test can inspect post-route mutations.
 		// The /authorize route writes req.session.code* synchronously before res.redirect,
 		// so the captured reference reflects the route's writes after the request resolves.
 		opts.captureSession?.(session);
@@ -171,8 +170,8 @@ async function buildAuthorizeApp(opts: {
 	const codeRepo: CodeRepository = {
 		createCode: async (params) => {
 			opts.captureCode(params);
-			// D-1: echo back the required identity fields from params so the
-			// returned `Code` satisfies the new shape (client_id + redirect_uri).
+			// Echo back the required identity fields (client_id + redirect_uri)
+			// so the returned `Code` satisfies its shape.
 			return { code: "auth-code", client_id: params.client_id, redirect_uri: params.redirect_uri };
 		},
 		findByCode: async () => null,
@@ -207,7 +206,7 @@ async function buildAuthorizeApp(opts: {
 }
 
 // ---------------------------------------------------------------------------
-// Module manifest structural tests (§7.1 — static, no createTestApp needed)
+// Module manifest structural tests (static, no createTestApp needed)
 // ---------------------------------------------------------------------------
 
 describe("oauthAuthorizationModule — manifest shape", () => {
@@ -230,7 +229,7 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 	});
 
 	it("contributes client_credentials grant when config explicitly sets enabled=true", () => {
-		// Per-client AuthenticatedClient.allowedGrantTypes (§3.4.1 deny-by-absence)
+		// Per-client AuthenticatedClient.allowedGrantTypes (deny-by-absence)
 		// is the authoritative access gate; the server-wide flag exists for
 		// symmetric operational control with authorization_code / refresh_token.
 		// client_credentials is NOT in the factory default (standalone template is
@@ -387,8 +386,8 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
 	// contribution-factory `deps`. Both grant factories read
-	// `deps.refreshTokenFamilyRotation` (A3 §5.2 rotation persistence) and
-	// `deps.grantPolicy` (CP-18 fail-closed gate). If they are not declared
+	// `deps.refreshTokenFamilyRotation` (rotation persistence) and
+	// `deps.grantPolicy` (the fail-closed policy gate). If they are not declared
 	// here, a composition root that wires either component will see it
 	// silently dropped at the grant boundary — refresh-token rotation stops
 	// recording, and grantPolicy enforcement becomes dead code.
@@ -401,7 +400,7 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 });
 
 // ---------------------------------------------------------------------------
-// createTestApp integration tests (§7.3 — boot + inspect)
+// createTestApp integration tests (boot + inspect)
 // ---------------------------------------------------------------------------
 
 describe("oauthAuthorizationModule — createTestApp integration", () => {
@@ -485,12 +484,11 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 /**
  * The refresh_token grant rotates each refresh token through its family,
  * refuses a replayed one and revokes the family, and `/oauth/revoke` revokes
- * the family the grant reads. Both family slots are optional to wire, and
- * nothing decided what their absence meant: with the grant on and neither
- * wired, a refresh token was served with no family record and redeemed with
- * no rotation and no replay check, and `/oauth/revoke` answered 200 for a
- * family the refresh path never read. The grant's own switch is the
- * decision: on, both slots must be filled.
+ * the family the grant reads. Both family slots are optional to wire, but
+ * with the grant on and neither wired a refresh token would carry no family
+ * record, no rotation and no replay check, and `/oauth/revoke` would answer
+ * 200 for a family the refresh path never reads. So the grant's own switch
+ * decides: on, both slots must be filled.
  */
 describe("oauthAuthorizationModule — the refresh_token grant needs its token families", () => {
 	const withRefreshToken = (enabled: boolean) => {
@@ -563,8 +561,6 @@ describe("oauthAuthorizationModule — the refresh_token grant needs its token f
 // ---------------------------------------------------------------------------
 // Grant factory unit tests — test createAuthorizationGrant / createRefreshTokenGrant
 // directly with mock deps (not through the module manifest).
-// These tests preserve the behavioral coverage that was previously embedded in
-// the module-level tests via module.init(ctx).
 // ---------------------------------------------------------------------------
 
 describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", () => {
@@ -654,7 +650,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			sid: "sid-wired",
 			client_id: "client1",
 			redirect_uri: "https://rp.example/cb",
-			// #273: a redeemable code always carries an S256 challenge.
+			// A redeemable code always carries an S256 challenge.
 			code_challenge: AUTHORIZE_S256_CHALLENGE,
 			code_challenge_method: "S256",
 		});
@@ -827,10 +823,8 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 });
 
 // ---------------------------------------------------------------------------
-// authorize persists OIDC round-trip state on code record (TODO-F-3)
-// These tests use the route layer directly — they do NOT use the module
-// manifest system and remain unchanged from v0.4.x since they test the
-// /authorize route behavior, not the module shape.
+// authorize persists OIDC round-trip state on the code record. These tests
+// drive the /authorize route directly, not the module manifest.
 // ---------------------------------------------------------------------------
 
 describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", () => {
@@ -924,11 +918,9 @@ describe("IH-6: /authorize openid scope gate", () => {
 	});
 
 	it("rejects when openid is requested but client allowlist filters it out (oidc-required bypass guard)", async () => {
-		// Regression: previously the gate only checked requestedScopes, so a
-		// client whose allowedScopes did not include `openid` would silently
-		// pass the gate even when the server is `oidc-required` and the
-		// request asked for openid — the request would then proceed as
-		// OAuth-only because allowedFilteredScopes drops openid.
+		// Checking requestedScopes alone is not enough: allowedFilteredScopes
+		// drops `openid` for a client whose allowedScopes lacks it, and the
+		// request would proceed as OAuth-only on an `oidc-required` server.
 		const captureCode = vi.fn();
 		const logger = createMockLogger();
 		const restrictedClientRepo: ClientRepository = {
@@ -1171,16 +1163,12 @@ describe("IH-6: /authorize openid scope gate", () => {
 	});
 });
 
-// IH-16 (v0.5.1): /authorize must bound the `nonce` query parameter.
-//
-// Pre-IH-16 the route accepted any-length nonce verbatim and stored it on
-// the code record + echoed it into the id_token. A malicious RP sending
-// nonce=<huge-string> could exhaust per-request memory or amplify the
-// id_token payload. The route now enforces a default 256-char ceiling
-// (configurable via `oauth.nonce.maxLength`) and rejects non-printable
-// ASCII via `redirectError` — the redirect_uri is already client-allowlisted
-// at this point in the route, so RFC 6749 §4.1.2.1 redirect-based errors
-// apply (Codex calibration delta 2).
+// /authorize bounds the `nonce` query parameter. It is stored on the code
+// record and echoed into the id_token, so an unbounded one would let an RP
+// exhaust per-request memory or amplify the id_token payload. The ceiling
+// defaults to 256 chars (`oauth.nonce.maxLength`), and non-printable ASCII
+// is refused. Both go via `redirectError`: the redirect_uri is already
+// client-allowlisted at this point, so RFC 6749 §4.1.2.1 applies.
 describe("IH-16: /authorize nonce length + character-set validation", () => {
 	it("accepts a normal-sized printable nonce (32 chars)", async () => {
 		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
@@ -1291,11 +1279,9 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 	});
 
 	it("honours an operator-configured `oauth.nonce.maxLength` (not just the default 256)", async () => {
-		// Without this test, the configurable code path was completely
-		// untested — the other IH-16 tests exercise only the `?? 256`
-		// fallback. Drop the limit to 10 and verify both an 11-char nonce
-		// rejects and a 10-char nonce passes; this proves
-		// `config.oauth.nonce.maxLength` actually flows through to the gate.
+		// The other nonce tests exercise only the `?? 256` fallback. With the
+		// limit at 10, an 11-char nonce is refused and a 10-char one passes:
+		// `config.oauth.nonce.maxLength` reaches the gate.
 		const captureCode = vi.fn();
 		const app = await buildAuthorizeApp({
 			sessionFields: { sid: "sid-1" },
@@ -1331,17 +1317,12 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 	});
 });
 
-// D-1 / CR-2: /authorize MUST embed the identity binding in the code record,
-// not in the Express session. Pre-fix, four session writes (req.session.code,
-// req.session.code_client_id, req.session.code_redirect_uri,
-// req.session.granted_scopes) at routes.mts:572-575 created a last-write-wins
-// race when concurrent /authorize requests shared a session — the losing
-// request's code was orphaned in the repository because session.code had been
-// overwritten by the winning request and the /token gate would reject it.
-//
-// Per spec Codex calibration: prefer structural assertion (session writes are
-// gone) as a regression guard alongside the functional check (createCode is
-// called with client_id + redirect_uri).
+// /authorize MUST embed the identity binding in the code record, not in the
+// Express session: session writes (code, code_client_id, code_redirect_uri,
+// granted_scopes) race last-write-wins when concurrent /authorize requests
+// share a session, and the losing request's code is then refused at /token.
+// Pinned both structurally (no session writes) and functionally (createCode
+// receives client_id + redirect_uri).
 describe("D-1 / CR-2: /authorize binds identity to code record, not Express session", () => {
 	it("does NOT write code, code_client_id, code_redirect_uri, granted_scopes to req.session", async () => {
 		let capturedCode: Parameters<CodeRepository["createCode"]>[0] | undefined;
@@ -1430,7 +1411,7 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 	});
 });
 
-// D-6 (RFC 9700 §2.1.1): for public clients (`tokenEndpointAuthMethod === "none"`)
+// RFC 9700 §2.1.1: for public clients (`tokenEndpointAuthMethod === "none"`)
 // PKCE/S256 is the ONLY authenticity gate on the code redemption — Basic/Post
 // client auth is not available, so accepting `plain` or no code_challenge would
 // allow anyone with the code to redeem it. The route must enforce these even
@@ -1509,8 +1490,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		expect(location.origin + location.pathname).toBe("https://spa.example.test/cb");
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toBe(
-			// #273: same message for every client — the public-client special
-			// case became the universal rule.
+			// Same message for every client: PKCE is mandatory for all.
 			"code_challenge is required",
 		);
 		expect(location.searchParams.get("state")).toBe("state-abc");
@@ -1531,7 +1511,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		const location = new URL(res.headers.location);
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toBe(
-			// #273: `plain` is refused for every client that has not been opted
+			// `plain` is refused for every client that has not been opted
 			// into it by registration — the message names the method it refused.
 			"code_challenge_method 'plain' is not supported",
 		);
@@ -1539,11 +1519,9 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 	});
 
 	it("rejects public client when code_challenge_method is omitted (defaults to plain) → invalid_request redirect", async () => {
-		// #273: RFC 7636 §4.3 makes an omitted method `plain`, and the resolver
-		// reads it that way rather than quietly upgrading it to S256 — so
-		// absence is refused exactly as an explicit `plain` is. (Pre-#273 this
-		// was a public-client-only rule guarding against the operator-
-		// configured `defaultMethod`; that knob is gone.)
+		// RFC 7636 §4.3 makes an omitted method `plain`, and the resolver
+		// reads it that way rather than quietly upgrading it to S256, so
+		// absence is refused exactly as an explicit `plain` is.
 		const app = await buildPublicAuthorizeApp({});
 		const res = await request(app).get("/oauth/authorize").query({
 			response_type: "code",
@@ -1587,25 +1565,18 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		expect(captured?.client_id).toBe("public-app");
 		expect(captured?.redirect_uri).toBe("https://spa.example.test/cb");
 		// The /authorize gate is only the first half of the public-client
-		// protection. The verifier check at /token requires the challenge to
-		// have been persisted on the Code record — if a future refactor drops
-		// either field from `createCode`, the public-client gate would still
-		// pass requests through but `/token` would have no verifier to check
-		// against. Asserting persistence here closes that regression window.
+		// protection: `/token` checks the verifier against the challenge
+		// persisted on the Code record, so both fields must reach `createCode`.
 		expect(captured?.code_challenge).toBe(VALID_S256_CHALLENGE);
 		expect(captured?.code_challenge_method).toBe("S256");
 	});
 });
 
 /*
- * #406 — this module reads `subjectRevocation` on its own.
- *
- * `oauthModule` got the policy first, but a composition can mount the grants
- * without the routes, and that composition would then still boot with the
- * watermark unfilled and undeclared: `verifyJwt` skips the check, the #376
- * refresh-redemption gate is inert, and nothing says so. That is the hole
- * #406 exists to close, one module over — found in review on the PR that
- * closed it everywhere else.
+ * This module reads `subjectRevocation` on its own, as `oauthModule` does: a
+ * composition can mount the grants without the routes, and would otherwise
+ * boot with the watermark unfilled and undeclared, `verifyJwt` skipping the
+ * check and the refresh-redemption gate inert, with nothing saying so.
  */
 describe("oauthAuthorizationModule — declared absence for subjectRevocation (#406)", () => {
 	const withoutDeclaration = () => {

@@ -51,11 +51,9 @@ import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 /**
- * A federation that satisfies the contract, with whatever capability the case
- * under test adds. Since #626 P1 `federationProviders` carries
- * `FederationProvider` rather than a one-field stand-in, so a mock has to be
- * one — which is the point: these routes read a provider the boot planner
- * could actually have handed them.
+ * A federation that satisfies the `FederationProvider` contract, with whatever
+ * capability the case under test adds: these routes read a provider the boot
+ * planner could actually have handed them.
  */
 const federationBase = (name: string) => ({
 	name,
@@ -78,7 +76,7 @@ const fakeClientRepository: ClientRepository = {
 };
 
 const fakeCodeRepository: CodeRepository = {
-	// D-1: Code requires client_id + redirect_uri.
+	// Code requires client_id + redirect_uri.
 	createCode: async () => ({
 		code: "fake-code",
 		client_id: "client1",
@@ -113,7 +111,7 @@ const keyStoreModule = defineModule({
 	},
 });
 
-// #282: the JWKS route refuses to publish an empty key set, so the
+// The JWKS route refuses to publish an empty key set, so the
 // discovery/JWKS path-agreement tests below need a keystore that actually has
 // public key material. EdDSA is the shipped default.
 const eddsaPair = await generateKeyPair("EdDSA", { extractable: true });
@@ -135,7 +133,7 @@ const asymmetricKeyStoreModule = defineModule({
 // automatically from collected grants. Do NOT provide it from a module.
 
 // ---------------------------------------------------------------------------
-// Module manifest structural tests (§7.1 — static, no createTestApp needed)
+// Module manifest structural tests (static, no createTestApp needed)
 // ---------------------------------------------------------------------------
 
 describe("oauthModule — manifest shape", () => {
@@ -221,9 +219,8 @@ describe("oauthModule — manifest shape", () => {
 
 	it("includes only oauth-endpoints when issuer is absent (JWKS moved to core jwksModule)", () => {
 		const base = makeValidAppConfig();
-		// No issuer set — only oauth-endpoints is contributed. oidc-discovery is
-		// issuer-gated; JWKS is no longer an oauth contribution (core jwksModule
-		// owns it now).
+		// No issuer set: only oauth-endpoints is contributed. JWKS is not an
+		// oauth contribution; core's jwksModule owns it.
 		const module = oauthModule({ config: base });
 		const routes = module.contributes?.routes;
 		expect(Array.isArray(routes)).toBe(true);
@@ -231,10 +228,9 @@ describe("oauthModule — manifest shape", () => {
 	});
 
 	it("contributes a single oauth-endpoints route regardless of issuer (discovery is core-aggregated)", () => {
-		// Discovery is no longer an oauth ROUTE; oauth contributes a
-		// `discoveryMetadata` slice instead, which core's assembleApp aggregates
-		// into `/.well-known/openid-configuration`. So oauth always contributes
-		// exactly one route (oauth-endpoints), issuer or not.
+		// Discovery is not an oauth ROUTE: oauth contributes a
+		// `discoveryMetadata` slice, which core's assembleApp aggregates into
+		// `/.well-known/openid-configuration`.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -256,7 +252,7 @@ describe("oauthModule — manifest shape", () => {
 });
 
 // ---------------------------------------------------------------------------
-// createTestApp integration tests (§7.3 — boot + inspect)
+// createTestApp integration tests (boot + inspect)
 // ---------------------------------------------------------------------------
 
 describe("oauthModule — createTestApp boot failure", () => {
@@ -274,7 +270,7 @@ describe("oauthModule — createTestApp boot failure", () => {
 			createTestApp({
 				modules: [
 					oauthModule({ config }),
-					// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+					// oauthModule mounts /oauth/revoke, so the boot validator requires a
 					// denylist behind it. Memory is right here — one process, one test.
 					memoryAccessTokenDenylistModule,
 					clientRepositoryModule,
@@ -341,11 +337,10 @@ describe("oauthModule — createTestApp boot failure", () => {
 
 describe("oauthModule — createTestApp route inspection", () => {
 	it("contributes no oidc-discovery route even with an issuer; core mounts discovery from aggregated metadata", async () => {
-		// Discovery is now mounted by core's assembleApp from the aggregated
-		// `discoveryMetadata` collector — it is NOT an oauth route contribution,
-		// so it never appears in the inspected route ids. jwksModule is co-installed
-		// so the issuer-enabled composition forms a valid discovery document
-		// (jwks owns `jwks_uri`); without it boot fails the presence contract.
+		// Core's assembleApp mounts discovery from the aggregated
+		// `discoveryMetadata` collector, so it never appears in the inspected
+		// route ids. jwksModule is co-installed because it owns `jwks_uri`;
+		// without it boot fails the presence contract.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -354,7 +349,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -372,13 +367,12 @@ describe("oauthModule — createTestApp route inspection", () => {
 
 	it("oauth-endpoints is mounted at /oauth", async () => {
 		const config = makeValidAppConfig();
-		// jwksModule is co-installed because every config now carries an issuer
-		// (#266), so the provider-root contribution always activates discovery —
-		// which requires a module owning `jwks_uri` to form a valid document.
+		// jwksModule is co-installed because every config carries an issuer, so
+		// discovery is always active and needs a module owning `jwks_uri`.
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -408,7 +402,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -426,19 +420,6 @@ describe("oauthModule — createTestApp route inspection", () => {
 		await handle.dispose();
 	});
 });
-
-// ---------------------------------------------------------------------------
-// Discovery <-> JWKS path agreement (presence + config-drift contract).
-//
-// JWKS is now contributed by the core `jwksModule`, while oidc-discovery
-// (which advertises `jwks_uri`) is contributed by oauth. They live in
-// different modules, so an issuer-enabled composition MUST co-install both
-// or discovery publishes a dangling `jwks_uri`. These tests pin that
-// cross-module contract end-to-end: the advertised `jwks_uri` must resolve
-// to a mounted JWKS route, including under an `oauth.jwt.jwksPath` override
-// (both endpoints resolve the path via the shared `resolveJwksPath`, so
-// they cannot drift).
-// ---------------------------------------------------------------------------
 
 describe("oauthModule — the acr table in the served discovery document (the MFA ADR's D15)", () => {
 	const acrValues = {
@@ -524,8 +505,8 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		// The default: an upstream `mfa` is kept apart from the session's `amr`
 		// and meets no `acr`, so the entry is one nothing installed can meet —
 		// for an installed, enabled federation that says nothing of its trust.
-		// (Since #728 boot parses the `federations` section core's schema
-		// declares whenever it is present, so an entry states `enabled`.)
+		// (Boot parses the `federations` section core's schema declares
+		// whenever it is present, so an entry states `enabled`.)
 		const { body, logger, lines } = await boot([googleFederationModule, ...federationStores], {
 			google: { enabled: true },
 		});
@@ -556,7 +537,7 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 	});
 
 	it("refuses to compose when a federation's trustUpstreamAmr is given but unusable", async () => {
-		// Since #728 boot's parse refuses it by path, before the acr table is
+		// Boot's parse refuses it by path, before the acr table is
 		// read; the reader's own refusal, for a configuration handed to it
 		// outside boot, is pinned beside it in core.
 		await expect(
@@ -564,6 +545,17 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		).rejects.toThrow(/federations\.google\.trustUpstreamAmr: /);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Discovery <-> JWKS path agreement (presence + config-drift contract).
+//
+// JWKS is contributed by core's `jwksModule`, oidc-discovery (which
+// advertises `jwks_uri`) by oauth, so an issuer-enabled composition MUST
+// co-install both or discovery publishes a dangling `jwks_uri`. The
+// advertised `jwks_uri` must resolve to a mounted JWKS route, including under
+// an `oauth.jwt.jwksPath` override (both resolve it via the shared
+// `resolveJwksPath`).
+// ---------------------------------------------------------------------------
 
 describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 	function issuerConfig(extraJwt: Record<string, unknown> = {}) {
@@ -582,13 +574,13 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
-				// Asymmetric: since #282 the JWKS route refuses to publish an
+				// Asymmetric: the JWKS route refuses to publish an
 				// empty key set, so "resolves to a mounted route" is only
 				// observable with a keystore that has public material.
 				asymmetricKeyStoreModule,
@@ -611,22 +603,19 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 	it("aggregated discovery document matches the golden field set (no-logout composition)", async () => {
 		// Whole-document guard: with oauth + jwks + issuer (and no session stores →
 		// logout omitted), the assembled `/.well-known/openid-configuration`
-		// carries EXACTLY these fields. `toEqual` is the point — a field added by
+		// carries EXACTLY these fields. `toEqual` is the point: a field added by
 		// a future contribution has to be argued for here rather than appearing in
 		// the served document unnoticed.
 		//
-		// #283 changed this set: `grant_types_supported`, `revocation_endpoint` +
-		// its auth methods, and `introspection_endpoint_auth_methods_supported`
-		// are new. `grant_types_supported` is `[]` because this composition
-		// registers no grant module at all — POST /oauth/token would answer
-		// `unsupported_grant_type` for every value, and that is what the empty
-		// array says. Omitting the field would instead have claimed
-		// `authorization_code` + `implicit` (RFC 8414 §2's default).
+		// `grant_types_supported` is `[]` because this composition registers no
+		// grant module: POST /oauth/token answers `unsupported_grant_type` for
+		// every value. Omitting the field would claim `authorization_code` +
+		// `implicit` (RFC 8414 §2's default).
 		const config = issuerConfig();
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -647,13 +636,13 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
 			jwks_uri: `${iss}/.well-known/jwks.json`,
 			introspection_endpoint: `${iss}/oauth/introspect`,
-			// #283: /oauth/revoke is always mounted, and this composition wires the
+			// /oauth/revoke is always mounted, and this composition wires the
 			// memory denylist, so it can actually revoke something.
 			revocation_endpoint: `${iss}/oauth/revoke`,
 			response_types_supported: ["code"],
-			// #284: emitted BECAUSE its OIDC Discovery default is `true` — an
-			// omitted field here claimed support for `request_uri`, which
-			// `/authorize` refuses. The sibling `*_parameter_supported` fields
+			// Emitted BECAUSE its OIDC Discovery default is `true`: an omitted
+			// field would claim support for `request_uri`, which `/authorize`
+			// refuses. The sibling `*_parameter_supported` fields
 			// default to `false` and stay absent.
 			request_uri_parameter_supported: false,
 			subject_types_supported: ["public"],
@@ -661,7 +650,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			id_token_signing_alg_values_supported: ["HS256"],
 			scopes_supported: ["openid", "profile", "email", "groups"],
 			grant_types_supported: [],
-			// #484: private_key_jwt on every client-authenticated endpoint, with
+			// private_key_jwt on every client-authenticated endpoint, with
 			// the assertion algorithms it accepts (RFC 8414 §2) — advertised only
 			// where a replay seen-set can record the assertion's single-use
 			// `jti`, which this composition does not wire.
@@ -678,21 +667,19 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 	});
 
 	it('omits revocation_endpoint end-to-end under oauth.revocation.accessToken = "unsupported" with no other revocation capability', async () => {
-		// The composition #277 made legal: declaring the access-token capability
-		// absent is what lets a deployment boot with no `accessTokenDenylist`
-		// (core's step 13.9 returns early on `"unsupported"`). With no
-		// `refreshTokenFamilyRevocation` either, `POST /oauth/revoke` is mounted
-		// and revokes nothing, so the served document must not name it.
-		//
-		// End-to-end rather than unit-only because the value of this case is that
-		// the same config both survives the boot validator AND produces a document
-		// without the endpoint — two layers reading the one #277 key the same way.
+		// Declaring the access-token capability absent lets a deployment boot
+		// with no `accessTokenDenylist` (core's boot validator returns early on
+		// `"unsupported"`). With no `refreshTokenFamilyRevocation` either,
+		// `POST /oauth/revoke` is mounted and revokes nothing, so the served
+		// document must not name it. End-to-end because the same config must
+		// both survive the boot validator AND produce a document without the
+		// endpoint: two layers reading one key the same way.
 		const base = issuerConfig();
 		const config = {
 			...base,
 			// `subject: "unsupported"` rides along because this override replaces
 			// the whole `revocation` object, and the fixture's declaration
-			// (#406) goes with it. This composition wires no subject stores
+			// goes with it. This composition wires no subject stores
 			// either, so the declaration is honest.
 			oauth: {
 				...base.oauth,
@@ -761,7 +748,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const { body } = await request(app).get("/.well-known/openid-configuration");
 		expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
 		expect(body.grant_types_supported).not.toContain("client_credentials");
-		// RFC 8414 §2's omitted-default was `["authorization_code", "implicit"]`.
+		// RFC 8414 §2's omitted default is `["authorization_code", "implicit"]`.
 		// The field exists precisely so `implicit` stops being implied.
 		expect(body.grant_types_supported).not.toContain("implicit");
 		await handle.dispose();
@@ -772,7 +759,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -788,7 +775,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		expect(disco.body.jwks_uri).toBe("https://auth.example.com/keys/jwks.json");
 		const jwksPath = new URL(disco.body.jwks_uri as string).pathname;
 		expect((await request(app).get(jwksPath)).status).toBe(200);
-		// The old default path is no longer served under the override.
+		// The default path is not served under the override.
 		expect((await request(app).get("/.well-known/jwks.json")).status).toBe(404);
 		await handle.dispose();
 	});
@@ -835,7 +822,7 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,
@@ -870,9 +857,8 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 // ---------------------------------------------------------------------------
 // Behavioral: federation logout — deps.federationProviders typed slot
 //
-// Proves that oauthModule reads federationProviders from typed deps (Theme E
-// structural fix — no lazy () => ctx.federationProviders closure). Federation
-// providers are supplied at boot time via the DI graph.
+// oauthModule reads federationProviders from typed deps, supplied at boot via
+// the DI graph, not through a lazy () => ctx.federationProviders closure.
 // ---------------------------------------------------------------------------
 
 describe("oauthModule — federation logout via typed deps", () => {
@@ -969,16 +955,11 @@ describe("oauthModule — federation logout via typed deps", () => {
 			name: "test:refresh-token-family-revocation",
 			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
-		// federationProviders is SYNTHETIC — built from the "federations" collector.
-		// Contribute the google provider via a federation module; the boot planner
-		// then injects it as deps.federationProviders in the route factory.
-		// Theme E structural fix: no lazy () => ctx.federationProviders closure.
-		//
-		// Note: every federations[name] contribution requires a paired
-		// federationRedirectPolicies[name] contribution (boot invariant §7.5).
-		// Both FederationProvider and FederationRedirectPolicy are `unknown`
-		// placeholders in contributes-map (Phase 9); `as never` at the contributes
-		// boundary is the plan-sanctioned escape hatch for stub module fixtures.
+		// federationProviders is SYNTHETIC: built from the "federations"
+		// collector and injected by the boot planner as deps.federationProviders.
+		// Every federations[name] contribution requires a paired
+		// federationRedirectPolicies[name] contribution (a boot invariant).
+		// `as never` at the contributes boundary admits the stub fixtures.
 		const federationModule = defineModule({
 			name: "test:google-federation",
 			contributes: {
@@ -1008,7 +989,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				// Issuer is configured, so the discovery presence contract requires
@@ -1052,10 +1033,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 	it("federation-token endpoint is mounted from the store wiring alone (returns 401, not 404)", async () => {
 		// federationTokenSupported in routes.mts gates on the 4-store split +
 		// federationTokenStore + refreshTokenFamilyRevocation, and on nothing
-		// else — the endpoint forwards upstream and never mints our own `iss`.
-		// It used to be worth asserting that an absent issuer did not break the
-		// gate; since #266 an issuer is always configured, so what this pins is
-		// that the gate is the store wiring.
+		// else: the endpoint forwards upstream and never mints our own `iss`.
 		const sessionStore: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
@@ -1124,7 +1102,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				jwksModule,

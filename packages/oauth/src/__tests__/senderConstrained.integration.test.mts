@@ -16,7 +16,7 @@
 
 /**
  * End-to-end coverage for the senderConstrained 3-layer propagation path
- * and the shared grant-dispatch enforcement introduced in Wave 2 Phase 1c.
+ * and the shared grant-dispatch enforcement.
  *
  * Layer 1 (persisted): Client.senderConstrained
  * Layer 2 (projection): PublicClient.senderConstrained (auto via Omit)
@@ -104,7 +104,7 @@ interface BuildOptions {
 	/**
 	 * The grant type the handler is registered under. Defaults to
 	 * `client_credentials`; the WebAuthn URN case below uses it to show that a
-	 * grant contributed by another package inherits this gate unchanged (#489).
+	 * grant contributed by another package inherits this gate unchanged.
 	 */
 	readonly grantType?: string;
 }
@@ -160,7 +160,7 @@ function makeInMemoryRepo(
 }
 
 // --------------------------------------------------------------------------
-// Propagation tests (T1.13)
+// Propagation tests
 // --------------------------------------------------------------------------
 
 describe("senderConstrained three-layer propagation", () => {
@@ -193,7 +193,7 @@ describe("senderConstrained three-layer propagation", () => {
 });
 
 // --------------------------------------------------------------------------
-// Type shape test (T1.13 / type assertion)
+// Type shape test
 // --------------------------------------------------------------------------
 
 describe("SenderConstraint type shape", () => {
@@ -205,7 +205,7 @@ describe("SenderConstraint type shape", () => {
 });
 
 // --------------------------------------------------------------------------
-// Enforcement tests (T1.15)
+// Enforcement tests
 // --------------------------------------------------------------------------
 
 const fakeDPoP: TokenBinding = { kind: "dpop", confirmation: { jkt: "SC-INTEGRATION-JKT" } };
@@ -351,7 +351,7 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 
 	it("emits WWW-Authenticate: Basic on the invalid_client 401 (RFC 7235 §3.1 conformance)", async () => {
 		// Sibling invalid_client 401s in clientAuthMw set this header; the
-		// new sender-constraint reject must too, for consistency and so
+		// sender-constraint reject must too, for consistency and so
 		// RFC-conformant Basic clients see the expected challenge.
 		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
 		const repo = makeInMemoryRepo(sc);
@@ -369,11 +369,10 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 	});
 
 	it("never derives the reject-path realm from the request", async () => {
-		// The realm on this path used to interpolate a local whose fallback was
-		// `req.get("host")`, so behind a trusted proxy the caller chose the value
-		// embedded in the `WWW-Authenticate` quoted-string. `"` is deliberately
-		// outside SAFE_REALM_CHARS precisely because it terminates that string.
-		// #266 removed the fallback outright: the realm is the configured issuer.
+		// The realm is the configured issuer, never `req.get("host")`: behind a
+		// trusted proxy the caller would choose the value embedded in the
+		// `WWW-Authenticate` quoted-string. `"` is deliberately outside
+		// SAFE_REALM_CHARS because it terminates that string.
 		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
 		const repo = makeInMemoryRepo(sc);
 		const handler = capturingHandler();
@@ -454,10 +453,8 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 	});
 
 	it("is advisory when required:false (binding kind mismatch does NOT reject)", async () => {
-		// Spec §4.8: required:false means methods is purely advisory —
-		// the grant succeeds regardless of binding presence or kind. Pins
-		// the no-reject path so the JSDoc's "advisory" contract has a
-		// regression guard.
+		// required:false means methods is purely advisory (the JSDoc's
+		// contract): the grant succeeds regardless of binding presence or kind.
 		const sc: SenderConstraint = { required: false, methods: ["mtls"] };
 		const repo = makeInMemoryRepo(sc);
 		const handler = capturingHandler();
@@ -496,18 +493,18 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 });
 
 // --------------------------------------------------------------------------
-// The gate is the only sender-constraint rule any grant needs (#489)
+// The gate is the only sender-constraint rule any grant needs
 // --------------------------------------------------------------------------
 
 describe("senderConstrained enforcement reaches grants contributed by other packages", () => {
 	// The WebAuthn grant lives in @o3co/auth-provider-webauthn and is registered
 	// through the `contributes.grants` slot, so it never sees this check in its
-	// own source. #489 asked what stops a client registered
-	// `senderConstrained: "dpop"` from obtaining an unbound access token from it
-	// when the request carries no proof; the answer is this gate, which runs
-	// before every handler and does not know one grant type from another. The
-	// handler adds no second copy of the rule, so the property is pinned here,
-	// on the code that actually holds it, with the URN as the vehicle.
+	// own source. What stops a client registered `senderConstrained: "dpop"`
+	// from obtaining an unbound access token from it without a proof is this
+	// gate, which runs before every handler and does not know one grant type
+	// from another. The handler adds no second copy of the rule, so the
+	// property is pinned here, on the code that holds it, with the URN as the
+	// vehicle.
 	const WEBAUTHN_GRANT_TYPE = "urn:o3co:oauth:grant-type:webauthn";
 
 	it("refuses a proofless request for the WebAuthn grant type, before the handler runs", async () => {
@@ -554,7 +551,7 @@ describe("senderConstrained enforcement reaches grants contributed by other pack
 		expect(res.status).toBe(200);
 		expect(handler.captured.invoked).toBe(true);
 		// And the confirmation the gate insisted on is the one the handler sees,
-		// which is what the grant now puts on its access token.
+		// which is what the grant puts on its access token.
 		expect(handler.captured.ctx?.tokenBinding).toEqual(fakeDPoP);
 	});
 });

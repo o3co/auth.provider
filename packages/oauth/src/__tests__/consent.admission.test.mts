@@ -15,14 +15,14 @@
  */
 
 /**
- * `/oauth/consent` on session admission (the session-admission ADR's D4,
+ * `/oauth/consent` on session admission (ADR 2026-09-28-session-admission,
  * D8): both methods read the cookie's session through `admitSession` with
  * `oauth.consent` — liveness and revocation — after the parked request is
  * found and before anything is shown or recorded. A live session whose
  * subject is the parked request's proceeds; every other outcome is
  * `401 login_required`, a requirement's step-up included, because
- * `/authorize` decides again after consent; an outage stays `503`. The
- * pinned changes (1), (3), (4), (5) are each a test named for the change.
+ * `/authorize` decides again after consent; an outage stays `503`. Tests
+ * prefixed (1), (3), (4), (5) pin the ADR's changes of those numbers.
  */
 
 import {
@@ -215,7 +215,6 @@ describe("/oauth/consent on admission — the pinned changes (D8)", () => {
 	});
 
 	it("(1) a cookie with isAuthenticated but no sid, while a store is wired, is not_live: 401 login_required on both methods", async () => {
-		// It used to proceed: nothing to check meant authentication stood.
 		const store = storeWith(record());
 		const { app } = await makeApp({
 			userSessionStore: store,
@@ -365,9 +364,9 @@ describe("/oauth/consent on admission — a requirement's verdicts", () => {
 });
 
 describe("/oauth/consent on admission — the subject is compared after the session is read", () => {
-	// The cookie's subject used to be compared with the parked request's
-	// before the session was read, so a dead session naming another user was
-	// `400` and an outage behind one was `400` too. Admission reads first.
+	// Admission reads the session before the cookie's subject is compared
+	// with the parked request's, so a dead session or an outage behind a
+	// session naming another user is not answered `400`.
 	it("a dead session naming another user is 401 login_required, not 400", async () => {
 		const { app } = await makeApp({
 			userSessionStore: storeWith(null),

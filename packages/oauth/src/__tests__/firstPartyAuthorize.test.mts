@@ -15,24 +15,17 @@
  */
 
 /**
- * Issue #267 — `GET /authorize` minted a code for any registered client the
- * moment `req.session.isAuthenticated` was true. That is defensible in a pure
- * first-party OP where every registered client is trusted, and only there —
- * but nothing said so and nothing enforced it, so registering one
- * semi-trusted client silently turned the endpoint into an account-linking
- * vector.
+ * A client reaching `GET /authorize` must be marked `firstParty: true`.
+ * Minting a code for any registered client once `req.session.isAuthenticated`
+ * is true is defensible only in a pure first-party OP; one semi-trusted client
+ * would turn the endpoint into an account-linking vector. The removed
+ * `oauth.authorize.allowUnmarkedClients` flag has no effect: the schema
+ * rejects it at boot, and hand-built configs bypass the schema, so the handler
+ * must not read it either.
  *
- * These tests pin the invariant: a client reaching `/authorize` must be
- * marked `firstParty: true`. The one-time migration flag that admitted
- * unmarked registrations (`oauth.authorize.allowUnmarkedClients`, #317) was
- * removed in #330 — a config still carrying it must have no effect here (the
- * schema rejects it at boot; hand-built configs bypass the schema, so the
- * handler must not read it either).
- *
- * They do NOT pin "forced navigation is impossible" — it is not. A client
- * genuinely marked first-party still mints a code on a forced top-level
- * navigation. That is the accepted model here, and the user-interaction step
- * that changes it is consent (#284).
+ * Not pinned: "forced navigation is impossible" — it is not. A client marked
+ * first-party still mints a code on a forced top-level navigation; that is the
+ * accepted model, and consent is the user-interaction step that changes it.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -64,9 +57,9 @@ const makeConfig = (staleAllowUnmarkedClients: boolean): AppConfig =>
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
-			// #330: the flag is removed. A schema-validated config can no longer
-			// carry it, but a hand-built one can — injecting it here pins that
-			// the stale key is inert rather than merely absent from fixtures.
+			// A schema-validated config cannot carry the removed flag, but a
+			// hand-built one can — injecting it here pins that the stale key is
+			// inert rather than merely absent from fixtures.
 			...(staleAllowUnmarkedClients ? { authorize: { allowUnmarkedClients: true } } : {}),
 			grants: { authorization_code: { enabled: true } },
 		},
@@ -84,7 +77,7 @@ const alwaysGrant = (): GrantHandler => ({
 
 const makeApp = async (opts: {
 	firstParty?: boolean;
-	/** Injects the REMOVED `oauth.authorize.allowUnmarkedClients: true` (#330). */
+	/** Injects the REMOVED `oauth.authorize.allowUnmarkedClients: true`. */
 	staleAllowUnmarkedClients?: boolean;
 	warn?: ReturnType<typeof vi.fn>;
 }) => {
@@ -199,16 +192,14 @@ describe("/authorize first-party invariant (#267)", () => {
 describe("/authorize first-party invariant — the migration flag is removed (#330)", () => {
 	it("refuses an unmarked client even when a config still carries the removed flag", async () => {
 		// A schema-validated config cannot reach here with the key (the schema
-		// rejects it at boot); a hand-built config can, and it must be inert —
-		// post-removal behavior is the strict endstate, unconditionally.
+		// rejects it at boot); a hand-built config can, and it must be inert.
 		const app = await makeApp({ firstParty: undefined, staleAllowUnmarkedClients: true });
 		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
 	});
 
 	it("emits no admission warning — the migration code path is gone, not just off", async () => {
-		// `authorize_client_not_marked_first_party` was the per-admission log of
-		// the migration window. With no admission left there is nothing to warn
-		// about; the refusal is what surfaces (audit `client_not_first_party`).
+		// With no unmarked client admitted there is nothing to warn about; the
+		// refusal is what surfaces (audit `client_not_first_party`).
 		const warn = vi.fn();
 		const app = await makeApp({
 			firstParty: undefined,
@@ -223,8 +214,6 @@ describe("/authorize first-party invariant — the migration flag is removed (#3
 	});
 
 	it("refuses a client explicitly marked NOT first-party regardless of the stale flag", async () => {
-		// `firstParty: false` was refused even during the migration window
-		// (#317); the removal must not accidentally weaken that.
 		const app = await makeApp({ firstParty: false, staleAllowUnmarkedClients: true });
 		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
 	});
@@ -236,19 +225,12 @@ describe("/authorize first-party invariant — the migration flag is removed (#3
 });
 
 /*
- * #343 — the same invariant, driven through the repository a real deployment
- * actually uses.
- *
- * Every case above hand-stubs a `ClientRepository` returning an object literal.
- * That is how #342 shipped: `firstParty` could not be set on any file-backed
- * registration, `/authorize` was unusable with the standalone template, and CI
- * was green the whole time — the stubs pass against a repository whose schema
- * could not represent the field.
- *
- * `entrySchemaConformance.test.mts` in core catches that class mechanically.
- * This is the other half the issue asks for: at least one path through the YAML
- * loader and `InMemoryClientRepository`, end to end, so the file-backed shape
- * is exercised rather than assumed.
+ * The same invariant, driven through the YAML loader and
+ * `InMemoryClientRepository` a real deployment uses. The cases above stub a
+ * `ClientRepository` with object literals, which pass even against a
+ * repository whose schema cannot represent `firstParty`.
+ * `entrySchemaConformance.test.mts` in core catches that class mechanically;
+ * this exercises the file-backed shape end to end.
  */
 describe("/authorize first-party invariant, through a file-backed registry (#343)", () => {
 	let tmpDir: string;
@@ -315,9 +297,6 @@ describe("/authorize first-party invariant, through a file-backed registry (#343
 		].join(String.fromCharCode(10));
 
 	it("admits a YAML-registered client marked first-party", async () => {
-		// The #342 regression, at the level that would have caught it: the stub
-		// tests passed while this path answered `unauthorized_client` for every
-		// registration a deployment could actually write.
 		const app = await makeFileBackedApp(yamlFor("firstParty: true"));
 		expect(errorOf(await authorize(app))).not.toBe("unauthorized_client");
 	});

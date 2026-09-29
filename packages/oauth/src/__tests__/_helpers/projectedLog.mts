@@ -39,13 +39,10 @@ export const serialisedCalls = (logger: MockLogger): string => {
  * The policy for a branch that answers 503 because a store, a repository or a
  * keystore could not answer: exactly one line, at error level, object-first,
  * named `event`, carrying `fields` and the error's projection (a `ReplyError`
- * by name, not the error) — and no warn-level line about it, and nowhere the
- * refused command.
- *
- * "About it" means a warn line that carries an error or is a string-first
- * message: a verifier's once-per-logger audit-gap notice
- * (`jwt_verify_aud_skipped`, object-first, no error) is not the outage's line
- * and may precede it.
+ * by name, not the error); no warn line about it (one carrying an error, or
+ * string-first); and nowhere the refused command. A verifier's once-per-logger
+ * audit-gap notice (`jwt_verify_aud_skipped`, object-first, no error) is not
+ * about it and may precede it.
  */
 export const expectOutageLine = (
 	logger: MockLogger,
@@ -70,13 +67,12 @@ export const expectOutageLine = (
 };
 
 /**
- * The policy for a best-effort step whose failure the route rides over (it
- * does not answer 503 for it): exactly one warn-level line named `event`
- * whose fields include `fields` (so two lines under one event, told apart by
- * `store` or `clientId`, are each checked on their own), object-first,
- * carrying the error's projection, not the error
- * (`errName: null` for a line about no error); no line at all whose first argument is a string;
- * and nowhere the refused command.
+ * The policy for a best-effort step whose failure the route rides over (no
+ * 503): exactly one warn-level line named `event`, object-first, whose fields
+ * include `fields` (so two lines under one event, told apart by `store` or
+ * `clientId`, are each checked on their own), carrying the error's projection,
+ * not the error (`errName: null` for a line about no error); no line at all
+ * whose first argument is a string; and nowhere the refused command.
  */
 export const expectBestEffortWarn = (
 	logger: MockLogger,

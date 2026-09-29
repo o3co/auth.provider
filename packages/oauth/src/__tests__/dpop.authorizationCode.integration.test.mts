@@ -15,16 +15,12 @@
  */
 
 /**
- * Coverage for DPoP cnf-claim propagation in the authorization_code grant —
- * Wave 2 Phase 2 §9.1.
+ * Token-binding cnf-claim propagation in the authorization_code grant. Drives
+ * `handler.handle(ctx)` directly (as authorization.test.mts does): the binding
+ * logic is in the grant handler, not route middleware, and the HTTP flow's
+ * PKCE, session and redirect_uri setup is noise here.
  *
- * Uses direct grant handler invocation (mirrors authorization.test.mts) rather
- * than full HTTP because the authorization_code flow requires PKCE, session,
- * code-repo, and redirect_uri setup that adds noise unrelated to binding
- * propagation. The binding logic is in the grant handler itself, not route
- * middleware, so direct `handler.handle(ctx)` is the right surface.
- *
- * Key behavioral contracts exercised:
+ * Contracts:
  *   - AT is always bound when ctx.tokenBinding carries a confirmation
  *   - RT binding restricted to **public clients** (tokenEndpointAuthMethod === "none")
  *   - Confidential client RTs remain plain (no cnf claim) per RFC 9449 §5
@@ -62,7 +58,7 @@ const validCode = codeRecord({
 	code: "code-x",
 	client_id: CLIENT_ID,
 	redirect_uri: RP_URI,
-	// #273: PKCE is mandatory, so a redeemable code always carries an
+	// PKCE is mandatory, so a redeemable code always carries an
 	// S256 challenge and the token request presents the matching verifier.
 	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	code_challenge_method: "S256",
@@ -72,7 +68,7 @@ const validPublicCode = codeRecord({
 	code: "code-x",
 	client_id: PUBLIC_CLIENT_ID,
 	redirect_uri: RP_URI,
-	// #273: PKCE is mandatory, so a redeemable code always carries an
+	// PKCE is mandatory, so a redeemable code always carries an
 	// S256 challenge and the token request presents the matching verifier.
 	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	code_challenge_method: "S256",
@@ -226,7 +222,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 		});
 
 		it("DPoP-bound AT AND DPoP-bound RT for public client", async () => {
-			// Public client (tokenEndpointAuthMethod === "none"): both tokens are bound per §9.1
+			// Public client (tokenEndpointAuthMethod === "none"): both tokens are bound
 			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode }));
 			const handler = createAuthorizationGrant(deps);
 
@@ -267,19 +263,12 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 		});
 
 		it("public client + mTLS binding → RT bound with x5t#S256 (RFC 8705 §4 SHOULD)", async () => {
-			// Phase 3 inversion of the Phase 2 deferral: mTLS-bound RT now
-			// rides RFC 8705 §4 ("the authorization server SHOULD bind the
-			// refresh token to the certificate the client used"). mTLS still
-			// keeps wire-level token_type "Bearer" per RFC 8705 §3 — only
-			// DPoP signals "DPoP" in the response wrapper. The AT carries the
-			// member the mTLS mechanism owns (core's `ownedConfirmation`).
-			//
-			// The previous "RT stays plain" assertion was pinned at PR #185
-			// because there was no refresh-time mTLS enforcement matrix in
-			// Phase 2. Phase 3 Sub-PR 3c adds that matrix (§9.2 mTLS rows)
-			// together with this RT-binding emission, so the pair lands
-			// atomically — no window where a bound RT could be refreshed
-			// without proof.
+			// RFC 8705 §4: "the authorization server SHOULD bind the refresh
+			// token to the certificate the client used". mTLS keeps wire-level
+			// token_type "Bearer" per RFC 8705 §3 — only DPoP signals "DPoP" in
+			// the response wrapper. The AT carries the member the mTLS mechanism
+			// owns (core's `ownedConfirmation`). The refresh-time mTLS matrix
+			// enforces the bound RT, so it cannot be refreshed without proof.
 			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode }));
 			const handler = createAuthorizationGrant(deps);
 
@@ -312,12 +301,11 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 		});
 
 		it("confidential client + mTLS binding → RT stays plain (gate restricts to public clients)", async () => {
-			// Phase 3: mTLS RT-binding mirrors DPoP's public-client gate
-			// (RFC 9449 §5 rationale generalized — confidential clients
-			// authenticate via client_secret at refresh time, so binding the
-			// RT to the cert adds no security and would force cert retention
-			// across the RT lifetime). The §9.1 comment in authorization.mts
-			// is the single source of truth on this.
+			// mTLS RT-binding mirrors DPoP's public-client gate (RFC 9449 §5
+			// rationale generalized — confidential clients authenticate via
+			// client_secret at refresh time, so binding the RT to the cert adds
+			// no security and would force cert retention across the RT
+			// lifetime). The rationale lives in authorization.mts.
 			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validCode }));
 			const handler = createAuthorizationGrant(deps);
 
@@ -349,13 +337,11 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 });
 
 /*
- * #275 — the same opt-in the refresh grant carries, at the point the RT is
- * first minted. Both sites had the identical `isPublicClient` gate, so both
- * have to read the same key or a confidential client would be issued a plain
- * RT here and a bound one on its first rotation.
- *
- * See `dpop.refreshToken.integration.test.mts` for why neither RFC forbids
- * this and why it is off by default.
+ * The refresh grant's opt-in, at the point the RT is first minted. Both
+ * sites read the same key, or a confidential client would be issued a plain
+ * RT here and a bound one on its first rotation. See
+ * `dpop.refreshToken.integration.test.mts` for why neither RFC forbids this
+ * and why it is off by default.
  */
 describe("confidential-client RT binding — opt-in, authorization_code (#275)", () => {
 	const withBinding = (bind?: boolean) =>

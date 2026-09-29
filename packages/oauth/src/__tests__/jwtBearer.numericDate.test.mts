@@ -19,18 +19,13 @@
  * malformed assertion: `400 invalid_grant`, never a server fault.
  *
  * JSON has no Infinity, but `1e400` parses to it, and jose checks only that a
- * NumericDate claim is a number: `exp: 1e400` is never "expired". An ID-JAG
- * carrying it reached the replay seen-set, whose `RangeError` for a
- * non-finite expiry made the grant answer `503` — the server's fault, for the
- * client's malformed input. A plain RFC 7523 assertion carrying it was
- * verified, with `expiresAt: Infinity`, and refused only because the grant
- * happens to check that it can compute a lifetime from it; one with `iat` or
- * `nbf` of `-1e400` was accepted. A finite `exp` past what a Date can hold
- * (`1e300`) reaches the seen-set as a lifetime the Redis adapter cannot write.
+ * NumericDate claim is a number: `exp: 1e400` is never "expired". A finite
+ * `exp` past what a Date can hold (`1e300`) would reach the replay seen-set
+ * as a lifetime the Redis adapter cannot write.
  *
- * Driven through the real jwt-bearer grant, the real registry verifier and
- * the real memory seen-set. The assertions are signed over raw claim JSON,
- * because jose refuses to produce a non-finite claim.
+ * Driven through the real jwt-bearer grant, registry verifier and memory
+ * seen-set. Assertions are signed over raw claim JSON, because jose refuses
+ * to produce a non-finite claim.
  */
 
 import { generateKeyPairSync, type KeyObject } from "node:crypto";

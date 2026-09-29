@@ -15,21 +15,15 @@
  */
 
 /**
- * RFC 8707 opt-in plumbing — flag-off / flag-on tests for the grant handlers
- * that carry `extractResourceParam` wiring (T18). Token-exchange is excluded
- * per spec §5.2.
+ * RFC 8707 opt-in plumbing: flag-off / flag-on tests for the grant handlers
+ * that carry `extractResourceParam` wiring. Token exchange is excluded.
  *
- * Wave 1 partial coverage:
- * - refresh_token: resource indicator plumbed (flag-on forwards body.resource)
- * - client_credentials: resource indicator plumbed (flag-on forwards body.resource)
- * - authorization_code: intentionally DEFERRED to Wave 2.
- *   At the token endpoint, scope is already locked by the authorization-endpoint
- *   policy (C-2 / D-1 evaluate-once-at-authorize). Applying resource-aware
- *   narrowing at the token endpoint would require a Wave 2 design that respects
- *   that invariant. body.resource is currently ignored for authorization_code.
- *   Tests below lock in this "never invokes policy at auth_code token endpoint"
- *   invariant explicitly so a future refactor cannot accidentally reintroduce
- *   the T18 partial that Codex Round 3 flagged as P1 (over-scoped tokens).
+ * - refresh_token, client_credentials: flag-on forwards body.resource to the
+ *   policy hook.
+ * - authorization_code: the policy is evaluated once, at /authorize, which
+ *   locks scope; the token endpoint never invokes it, whatever the flag or
+ *   body.resource, since re-evaluating there can mint over-scoped tokens
+ *   (see ADR 2026-07-31-rfc8707-resource-audience-binding).
  */
 
 import { createSecretKey } from "node:crypto";
@@ -66,7 +60,7 @@ const DEFAULT_AUTH_CLIENT: AuthenticatedClient = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedGrantTypes: ["client_credentials"],
 	allowedScopes: ["read:res"],
-	// #396: the old implicit omitted-scope grant, now declared.
+	// An omitted scope is granted these, never the allowlist.
 	defaultScopes: ["read:res"],
 };
 
@@ -239,8 +233,8 @@ describe("RFC 8707 resource indicator — flag off (default, resourceIndicator a
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
 		});
 
-		// refresh_token has a pre-existing grantPolicy.evaluate call — it still
-		// runs flag-off, but resource is NOT forwarded (undefined).
+		// refresh_token calls grantPolicy.evaluate whatever the flag; flag-off,
+		// resource is NOT forwarded (undefined).
 		expect(capturedResource).toBeUndefined();
 	});
 
@@ -292,7 +286,7 @@ describe("RFC 8707 resource indicator — flag off (explicit false)", () => {
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
 		});
 
-		// refresh_token: pre-existing call still runs, resource NOT forwarded.
+		// refresh_token: the policy call runs, resource NOT forwarded.
 		expect(capturedResource).toBeUndefined();
 	});
 
@@ -304,7 +298,7 @@ describe("RFC 8707 resource indicator — flag off (explicit false)", () => {
 
 		await handler.handle(makeAuthzCtx({ resource: "https://rs1" }));
 
-		// Explicit false must preserve pre-existing semantics (no new invocation).
+		// Explicit false behaves as absent: no policy invocation.
 		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
@@ -316,7 +310,7 @@ describe("RFC 8707 resource indicator — flag off (explicit false)", () => {
 
 		await handler.handle(makeCCCtx({ resource: "https://rs1" }));
 
-		// Explicit false must preserve pre-existing semantics (no new invocation).
+		// Explicit false behaves as absent: no policy invocation.
 		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 });
@@ -369,11 +363,8 @@ describe("RFC 8707 resource indicator — flag on", () => {
 	});
 
 	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is string (Wave 2 deferred)", async () => {
-		// body.resource is intentionally ignored for authorization_code at the
-		// token endpoint. Scope is already locked at /authorize (C-2 / D-1).
-		// Applying resource-aware narrowing here would violate evaluate-once-at-authorize.
-		// This test locks in the deferral: a future refactor must not silently
-		// reintroduce the T18 invocation without a Wave 2 redesign review.
+		// Scope is already locked at /authorize, where the policy is evaluated
+		// once; resource-aware narrowing here would break that.
 		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const policy = makeStubPolicy(seenPolicy);
 		const deps = makeAuthzDeps({ grantPolicy: policy }, true);
@@ -424,9 +415,8 @@ describe("RFC 8707 resource indicator — flag on", () => {
 	});
 
 	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body has no resource (Wave 2 deferred)", async () => {
-		// Invariant: authorization_code NEVER invokes grantPolicy.evaluate at the
-		// token endpoint regardless of flag state or body.resource presence.
-		// body.resource is silently ignored. This is the Wave 2 deferral invariant.
+		// authorization_code NEVER invokes grantPolicy.evaluate at the token
+		// endpoint, whatever the flag or body.resource.
 		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const policy = makeStubPolicy(seenPolicy);
 		const deps = makeAuthzDeps({ grantPolicy: policy }, true);
@@ -452,12 +442,8 @@ describe("RFC 8707 resource indicator — flag on", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Invariant: authorization_code NEVER invokes grantPolicy at token endpoint
-// ---------------------------------------------------------------------------
-// Wave 2 deferral lock. This describe block exists as a single explicit
-// statement of the invariant so that any future PR touching authorization.mts
-// must consciously delete or modify this test — making the deferral decision
-// visible in code review, not just in comments.
+// Invariant: authorization_code NEVER invokes grantPolicy at token endpoint,
+// across every flag state and body.resource shape.
 // ---------------------------------------------------------------------------
 
 describe("RFC 8707 authorization_code — token-endpoint policy invariant (Wave 2 deferred)", () => {

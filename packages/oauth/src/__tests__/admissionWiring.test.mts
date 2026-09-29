@@ -15,13 +15,13 @@
  */
 
 /**
- * How `oauth`'s consumers of admission are wired (the session-admission
- * ADR's D1, D8): every factory a composition can build by hand takes the
- * branded resolver as a required option — `requirements` on the router, the
- * slot `sessionRequirementResolver` on the grants, whose deps are the
- * module's slots by name (#626 P2) — and refuses to build without it, and
- * every manifest that hands a consumer its slots lists the synthetic key
- * `sessionRequirementResolver` beside the slots admission reads —
+ * How `oauth`'s consumers of admission are wired (see ADR
+ * 2026-09-28-session-admission). Every factory a composition can build by hand
+ * takes the branded resolver as a required option (`requirements` on the
+ * router, the slot `sessionRequirementResolver` on the grants, whose deps are
+ * the module's slots by name) and refuses to build without it; every manifest
+ * that hands a consumer its slots lists the synthetic key
+ * `sessionRequirementResolver` beside the slots admission reads:
  * `userSessionStore`, `subjectRevocation`, `auditSink`, `logger`. What each
  * consumer answers per outcome is its own suite's.
  */

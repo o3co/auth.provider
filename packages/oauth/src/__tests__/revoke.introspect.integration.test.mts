@@ -15,14 +15,11 @@
  */
 
 /**
- * Integration test: revoke → introspect chain (C3 + C4 fix verification).
- *
- * Validates that:
- *  1. When `accessTokenDenylist` is wired through `createOAuthRouter`, a
- *     revoked AT is reported `active: false` by `/oauth/introspect`.
- *  2. The denylist is consulted by the introspect body handler AND by the
- *     bearer-credential path, so a revoked AT cannot even serve as its own
- *     self-introspection credential.
+ * Integration test: revoke → introspect chain. With `accessTokenDenylist`
+ * wired through `createOAuthRouter`, a revoked AT is reported
+ * `active: false` by `/oauth/introspect`. The denylist is consulted by the
+ * introspect body handler AND by the bearer-credential path, so a revoked AT
+ * cannot even serve as its own self-introspection credential.
  */
 
 import { createSecretKey } from "node:crypto";
