@@ -59,7 +59,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `endpoints` | `login.url`: デプロイのログインページ。`consent.url`: first-party でないクライアント向けの同意ページ（デフォルト `/consent`）。`mfa.url`: ステップアップのページ（デフォルト `/mfa`）。MFA パッケージの `mfa` 要件がこれをステップアップのページとして登録する。そのパッケージが無ければ、ブラウザーをそこへ送るものはない |
 | `sessionRequirements.expected` | この構成が期待するセッション要件 — 「ログイン済み」の意味を変える拡張で、MFA はその一つ — で、ブート時にインストールされたモジュールが登録したものと比較される（[セッション許可](#セッション許可) を参照）。セッション許可に問い合わせるモジュールがインストールされているときは必須（`oauthModule` はその一つ）。`[]` は「なし」。既定値は無く、構成は自らの姿勢を述べる — どちら向きの不一致も、何も宣言しないことも、ブートを拒否する（`session-requirements-undeclared`） |
 | `mfa.mode` | パスワードログインが第二要素を求めるかどうか — [MFA](#mfa) を参照: `"off"`（既定）、`"optional"`、`"required"`。`"off"` 以外のモードで `mfa` という名前のセッション要件が登録されていなければ起動を拒否する（`session-requirement-missing`）: その要件は MFA パッケージ（`@o3co/auth-provider-mfa`。standalone テンプレートが組み込むまで private）のもので、そのモジュールは `"off"` を拒否する。`mfa` セクションの残りはそれを読むパッケージのもので、そのまま通す |
-| `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込み、ストアを名前で選ぶ composition root が読むが、まだそうするものはない: standalone テンプレートが MFA を組み込むのは MFA の ADR のビルド順のステップ 20 |
+| `mfaFactorStore.adapter`、`mfaTransactionStore.adapter` | 登録済みの要素を保持するストア（`memory`、`redis`、`store`）と、MFA のトランザクションとロック状態を保持するストア（`memory`、`redis`）。どちらも既定は `memory`。MFA を組み込み、ストアを名前で選ぶ composition root が読むが、まだそうするものはない: standalone テンプレートは MFA の ADR のビルド順のステップ 20 から MFA を配線し、`mfa.mode` が `"off"` でないときに組み込む |
 | `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin — [CORS](#cors) を参照。空（既定）なら CORS は無効。CSRF の信頼は与えない（`session.csrf.trustedOrigins` を使う） |
 
 ### グラントシステム

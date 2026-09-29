@@ -1838,10 +1838,11 @@ export const fullSectionsSchema = z.object({
 	// switches are — undeclared, an operator's choice is stripped before a
 	// composition root reads it. Read by a composition root that installs
 	// MFA and picks its stores by name, which none does yet: `tools/composition`
-	// names its MFA store modules itself, and the standalone template installs
-	// MFA from the MFA ADR's build-order step 20. The factor store may be kept
-	// in the Store; a transaction is verification state and has no Store
-	// variant. Defaults live in `reference.conf`.
+	// names its MFA store modules itself, and the standalone template wires MFA
+	// from the MFA ADR's build-order step 20, installing it when `mfa.mode` is
+	// not `off`. The factor store may be kept in the Store; a transaction is
+	// verification state and has no Store variant. Defaults live in
+	// `reference.conf`.
 	mfaFactorStore: z
 		.object({
 			adapter: z.enum(["memory", "redis", "store"]).optional(),
