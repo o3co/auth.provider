@@ -303,3 +303,51 @@ describe("a relocated path — a manifest that names one it cannot", () => {
 		});
 	});
 });
+
+describe("a relocated path — claimed by two loaded modules", () => {
+	const relocating = (name: string, relocatedFrom: readonly string[] | Record<string, string>) =>
+		defineModule({ name, section: { schema: RetrySection, relocatedFrom } });
+
+	it.each([
+		["the same old path", ["legacy.fixture"], ["legacy.fixture"]],
+		["an old path covering the other's", ["legacy"], { "legacy.fixture.retries": "retries" }],
+		["an old path under the other's", { "legacy.fixture.retries": "retries" }, ["legacy"]],
+	] as const)(
+		"refuses %s at stage 1, naming both modules: which one a key moved to would be a guess",
+		async (_label, first, second) => {
+			const err = await refusal(
+				createApp({
+					modules: [relocating("fixture-first", first), relocating("fixture-second", second)],
+					bootstrapComponents: bootWith({
+						"fixture-first": { retries: 1 },
+						"fixture-second": { retries: 1 },
+					}),
+				}),
+			);
+
+			expect(err.reason).toBe("module-section-path-invalid");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toMatchObject({
+				reason: "module-section-path-invalid",
+				module: "fixture-second",
+				relocatedFrom: Array.isArray(second) ? second[0] : Object.keys(second)[0],
+			});
+			const problem = (err.details as { problem?: string }).problem ?? "";
+			expect(problem).toContain('"fixture-first"');
+			expect(problem).toContain('"fixture-second"');
+		},
+	);
+
+	it("lets one module cover its own old path with a more specific one: a subtree and a key renamed in it", async () => {
+		const handle = await createApp({
+			modules: [
+				relocating("fixture-relocating", {
+					"legacy.fixture": "",
+					"legacy.fixture.max-retries": "retries",
+				}),
+			],
+			bootstrapComponents: bootWith(current),
+		});
+		await handle.dispose();
+	});
+});
