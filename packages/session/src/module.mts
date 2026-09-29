@@ -75,26 +75,40 @@ function deriveProviderCallbackUrls(
 	return out;
 }
 
+/** The guards `csrfGuardOf` built, by configuration and then by logger. */
+const guards = new WeakMap<object, WeakMap<Logger, CsrfGuard>>();
+
 /**
  * The session's CSRF guard, as the session routes build theirs: the signed
  * double-submit token of `createCsrfProtectionFromConfig` over `session.*` —
  * the key derived from `session.secret`, the cookie named
  * `<session.name>.csrf` with the session cookie's attributes — and
- * `session.csrf.trustedOrigins`. Two guards built from one configuration
- * accept each other's tokens: the token is signed, not stored.
+ * `session.csrf.trustedOrigins`.
+ *
+ * Built once per configuration and logger: the `csrfGuard` slot and
+ * `loginCompletion` both read it here, so one policy is one object. The
+ * session routes build their own `CsrfProtection` (`routes/Session.mts`);
+ * it accepts this guard's tokens, as the token is signed, not stored.
  *
  * The key is to reach the guard through the session store's
  * `csrfTokenSigner` slot before the session store's configuration becomes a
- * section of its own (#728); until then `session` is one section, read by
- * both modules, and nothing changes owner.
+ * section of its own (#728) — here and in the session routes, together;
+ * until then `session` is one section, read by both modules, and nothing
+ * changes owner.
  */
-const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
+export const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
+	const byLogger = guards.get(config) ?? new WeakMap<Logger, CsrfGuard>();
+	guards.set(config, byLogger);
+	const built = byLogger.get(logger);
+	if (built !== undefined) return built;
 	const session = config.session as unknown as SessionCsrfConfigSlice;
-	return createSessionCsrfGuard({
+	const guard = createSessionCsrfGuard({
 		csrf: createCsrfProtectionFromConfig(session),
 		trustedOrigins: session.csrf?.trustedOrigins ?? [],
 		logger,
 	});
+	byLogger.set(logger, guard);
+	return guard;
 };
 
 /**
