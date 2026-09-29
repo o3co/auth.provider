@@ -14,11 +14,11 @@
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
 		},
-		"./reference.conf": "./src/reference.conf"
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
-		"src/reference.conf",
+		"config",
 		"README.md"
 	],
 	"repository": {
