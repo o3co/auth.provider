@@ -226,36 +226,30 @@ interface ParsedArgs {
 	lockfile: boolean;
 }
 
+/** The flags that take a value, as `--flag <value>` or `--flag=<value>`. */
+const VALUE_FLAGS = ["--dir", "--template"] as const;
+type ValueFlag = (typeof VALUE_FLAGS)[number];
+
 const parseArgs = (args: string[]): ParsedArgs => {
 	const positionals: string[] = [];
-	let dir: string | undefined;
-	let dirSeen = false;
-	let template: string | undefined;
-	let templateSeen = false;
+	const values = new Map<ValueFlag, string>();
 	let lockfile = true;
+
+	const setValue = (flag: ValueFlag, value: string): void => {
+		if (values.has(flag)) throw new Error(`${flag} specified more than once`);
+		values.set(flag, value);
+	};
 
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
-		if (a === "--dir") {
-			if (dirSeen) throw new Error("--dir specified more than once");
-			if (i + 1 >= args.length) throw new Error("--dir requires a value");
-			dir = args[i + 1];
-			dirSeen = true;
+		const spaced = VALUE_FLAGS.find((flag) => a === flag);
+		const joined = VALUE_FLAGS.find((flag) => a.startsWith(`${flag}=`));
+		if (spaced !== undefined) {
+			if (i + 1 >= args.length) throw new Error(`${spaced} requires a value`);
+			setValue(spaced, args[i + 1]);
 			i++;
-		} else if (a.startsWith("--dir=")) {
-			if (dirSeen) throw new Error("--dir specified more than once");
-			dir = a.slice("--dir=".length);
-			dirSeen = true;
-		} else if (a === "--template") {
-			if (templateSeen) throw new Error("--template specified more than once");
-			if (i + 1 >= args.length) throw new Error("--template requires a value");
-			template = args[i + 1];
-			templateSeen = true;
-			i++;
-		} else if (a.startsWith("--template=")) {
-			if (templateSeen) throw new Error("--template specified more than once");
-			template = a.slice("--template=".length);
-			templateSeen = true;
+		} else if (joined !== undefined) {
+			setValue(joined, a.slice(`${joined}=`.length));
 		} else if (a === "--no-lockfile") {
 			lockfile = false;
 		} else if (a.startsWith("-")) {
@@ -269,7 +263,12 @@ const parseArgs = (args: string[]): ParsedArgs => {
 	if (positionals.length === 0) throw new Error("missing <project-name>");
 	if (positionals.length > 1) throw new Error("too many positional arguments");
 
-	return { projectName: positionals[0], dir, template, lockfile };
+	return {
+		projectName: positionals[0],
+		dir: values.get("--dir"),
+		template: values.get("--template"),
+		lockfile,
+	};
 };
 
 const deriveDirName = (projectName: string, dir: string | undefined): string => {
