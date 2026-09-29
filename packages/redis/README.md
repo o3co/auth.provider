@@ -644,7 +644,9 @@ operations is one script on one Cluster slot.
 
 **The factors.** `create` is `HSETNX`; `update` is one script that compares
 the version as text and carries the fixed part over byte for byte — it never
-decodes the JSON, since `cjson` writes an empty array back as `{}`. No key
+decodes the JSON, since `cjson` writes an empty array back as `{}` — and
+answers `null` to a value that is not exactly three lines, never cutting one
+it did not write down to a record it did. No key
 carries a TTL. A stored record the adapter cannot read back refuses the
 subject's whole list: never "no factor", which would open a first binding. So
 `create` and `update` refuse with a `RangeError`, before anything is written,

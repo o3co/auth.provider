@@ -2604,12 +2604,14 @@ export function makeIoredisFederationGrantIntentStoreClient(
  * The value is `<version>\n<fixed>\n<mutable>` (see `MfaFactorStoreClient`).
  * The version is compared as text and the fixed part is carried over byte
  * for byte: nothing here decodes the JSON, because `cjson` would write an
- * empty array back as `{}` (the MFA ADR's D7).
+ * empty array back as `{}` (the MFA ADR's D7). All three lines are matched,
+ * to the end of the value: one with a fourth line, even an empty one, is not
+ * a record this adapter wrote, and is answered nil rather than cut to three.
  */
 const LUA_MFA_FACTOR_UPDATE = `
 local current = redis.call('HGET', KEYS[1], ARGV[1])
 if not current then return false end
-local version, fixed = string.match(current, '^([^\\n]*)\\n([^\\n]*)\\n')
+local version, fixed = string.match(current, '^([^\\n]*)\\n([^\\n]*)\\n[^\\n]*$')
 if version ~= ARGV[2] or fixed == nil then return false end
 local written = ARGV[3] .. '\\n' .. fixed .. '\\n' .. ARGV[4]
 redis.call('HSET', KEYS[1], ARGV[1], written)
