@@ -136,10 +136,10 @@ a composition root. Listed because a module may `require` them.
 A key several modules read has one owner (#728): the owning module parses its
 own section and provides what the others need through a slot whose contract is
 core's, and they require the slot instead of reading the owner's section — in
-code a package imports only core. Each contract ships a suite and a test double
-on `@o3co/auth-provider-core/testing`: the owner's tests run the suite over what
-it provides, and a reader's tests fill the slot with the double instead of
-importing the owner's package. These slots are declared ahead of their
+code a package imports only core. Each contract ships a suite on
+`@o3co/auth-provider-core/testing`, which the owner's tests run over what it
+provides, and all but `deploymentMode` a test double there, which a reader's
+tests fill the slot with instead of importing the owner's package. These slots are declared ahead of their
 providers: no bundled module provides or requires one yet, and today's readers
 still read the configuration.
 
@@ -312,9 +312,8 @@ any other difference, and on a copy that no Redis test calls. The suites under
 `packages/core/src/testing/slots/` are published on
 `@o3co/auth-provider-core/testing` instead, so another package's tests import
 them: the Redis rate limiter runs `rateLimiterContract` that way. A new port
-should gain a suite: "typed and
-swappable" means an implementer can prove they got it right, not only that they
-read the interface carefully.
+should gain a suite: "typed and swappable" means an implementer can prove they
+got it right, not only that they read the interface carefully.
 
 What the suites hold an adapter to:
 
