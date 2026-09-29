@@ -269,7 +269,9 @@ describe("scaffold — choosing a template", () => {
 		expect(() => scaffold(targetDir, "my-auth", template)).toThrow(
 			`Unknown template '${template}'. Available templates: `,
 		);
-		expect(() => scaffold(targetDir, "my-auth", template)).toThrow(/Available templates: .*standalone/);
+		expect(() => scaffold(targetDir, "my-auth", template)).toThrow(
+			/Available templates: .*standalone/,
+		);
 		expect(existsSync(targetDir)).toBe(false);
 	});
 });

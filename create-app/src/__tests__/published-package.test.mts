@@ -23,9 +23,12 @@ const CREATE_APP_DIR = resolve(__dirname, "../..");
  * repository rather than from the packed tarball, so a template the pack
  * leaves out is a failure here instead of a smaller list.
  */
-const REPOSITORY_TEMPLATES: readonly string[] = readdirSync(resolve(CREATE_APP_DIR, "../templates"), {
-	withFileTypes: true,
-})
+const REPOSITORY_TEMPLATES: readonly string[] = readdirSync(
+	resolve(CREATE_APP_DIR, "../templates"),
+	{
+		withFileTypes: true,
+	},
+)
 	.filter(
 		(entry) =>
 			entry.isDirectory() &&

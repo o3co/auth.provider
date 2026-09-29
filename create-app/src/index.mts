@@ -14,13 +14,34 @@
  * limitations under the License.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shouldCopyTemplateEntry } from "./internal/template-filter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
+const TEMPLATES_ROOT = resolve(__dirname, "../templates");
+
+/** The template a scaffold is made from when none is named. */
+export const DEFAULT_TEMPLATE = "standalone";
+
+/**
+ * The templates under `templatesRoot`: every directory holding a
+ * `package.json`, sorted. `copy-templates.mjs` puts every template of the
+ * repository there, beside `versions.json`, which is not one. A name is only
+ * ever looked up in this list, so nothing outside the templates directory can
+ * be named as a template.
+ */
+export const availableTemplates = (templatesRoot: string = TEMPLATES_ROOT): string[] => {
+	if (!existsSync(templatesRoot)) return [];
+	return readdirSync(templatesRoot, { withFileTypes: true })
+		.filter(
+			(entry) =>
+				entry.isDirectory() && existsSync(resolve(templatesRoot, entry.name, "package.json")),
+		)
+		.map((entry) => entry.name)
+		.sort();
+};
 
 const getPackageVersions = (): Record<string, string> => {
 	const versionFile = resolve(__dirname, "../templates/versions.json");
@@ -46,17 +67,28 @@ export const isValidDirName = (name: string): boolean => {
 	return UNSCOPED_NAME_RE.test(name);
 };
 
-export const scaffold = (targetDir: string, projectName: string): void => {
-	if (!existsSync(TEMPLATES_DIR)) {
+export const scaffold = (
+	targetDir: string,
+	projectName: string,
+	template: string = DEFAULT_TEMPLATE,
+): void => {
+	const templates = availableTemplates();
+	if (templates.length === 0) {
 		throw new Error(
-			`Template directory not found at ${TEMPLATES_DIR}. If developing locally, run the prebuild script first.`,
+			`No templates found at ${TEMPLATES_ROOT}. If developing locally, run the prebuild script first.`,
 		);
 	}
+	if (!templates.includes(template)) {
+		throw new Error(
+			`Unknown template '${template}'. Available templates: ${templates.join(", ")}.`,
+		);
+	}
+	const templateDir = resolve(TEMPLATES_ROOT, template);
 
 	// Copy template to target
-	cpSync(TEMPLATES_DIR, targetDir, {
+	cpSync(templateDir, targetDir, {
 		recursive: true,
-		filter: (source) => shouldCopyTemplateEntry(source, TEMPLATES_DIR),
+		filter: (source) => shouldCopyTemplateEntry(source, templateDir),
 	});
 
 	// #407: npm drops a file literally named `.gitignore` from a published
@@ -190,6 +222,7 @@ export const generateLockfile = (targetDir: string): LockfileResult => {
 interface ParsedArgs {
 	projectName: string;
 	dir: string | undefined;
+	template: string | undefined;
 	lockfile: boolean;
 }
 
@@ -197,6 +230,8 @@ const parseArgs = (args: string[]): ParsedArgs => {
 	const positionals: string[] = [];
 	let dir: string | undefined;
 	let dirSeen = false;
+	let template: string | undefined;
+	let templateSeen = false;
 	let lockfile = true;
 
 	for (let i = 0; i < args.length; i++) {
@@ -211,6 +246,16 @@ const parseArgs = (args: string[]): ParsedArgs => {
 			if (dirSeen) throw new Error("--dir specified more than once");
 			dir = a.slice("--dir=".length);
 			dirSeen = true;
+		} else if (a === "--template") {
+			if (templateSeen) throw new Error("--template specified more than once");
+			if (i + 1 >= args.length) throw new Error("--template requires a value");
+			template = args[i + 1];
+			templateSeen = true;
+			i++;
+		} else if (a.startsWith("--template=")) {
+			if (templateSeen) throw new Error("--template specified more than once");
+			template = a.slice("--template=".length);
+			templateSeen = true;
 		} else if (a === "--no-lockfile") {
 			lockfile = false;
 		} else if (a.startsWith("-")) {
@@ -224,7 +269,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 	if (positionals.length === 0) throw new Error("missing <project-name>");
 	if (positionals.length > 1) throw new Error("too many positional arguments");
 
-	return { projectName: positionals[0], dir, lockfile };
+	return { projectName: positionals[0], dir, template, lockfile };
 };
 
 const deriveDirName = (projectName: string, dir: string | undefined): string => {
@@ -252,15 +297,26 @@ export const main = (): void => {
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
 		console.error(
-			"Usage: @o3co/create-auth-provider <project-name> [--dir <dir-name>] [--no-lockfile]",
+			"Usage: @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]",
 		);
 		console.error(
 			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
+		);
+		console.error(
+			`--template names the template to copy (default: ${DEFAULT_TEMPLATE}); available: ${availableTemplates().join(", ")}.`,
 		);
 		process.exit(1);
 	}
 
 	const { projectName, dir, lockfile } = parsed;
+	const template = parsed.template ?? DEFAULT_TEMPLATE;
+
+	if (!availableTemplates().includes(template)) {
+		console.error(
+			`Error: Unknown template '${template}'. Available templates: ${availableTemplates().join(", ")}.`,
+		);
+		process.exit(1);
+	}
 
 	if (!isValidProjectName(projectName)) {
 		console.error(
@@ -284,8 +340,8 @@ export const main = (): void => {
 		process.exit(1);
 	}
 
-	console.log(`Creating ${projectName}...`);
-	scaffold(targetDir, projectName);
+	console.log(`Creating ${projectName} from the ${template} template...`);
+	scaffold(targetDir, projectName, template);
 
 	let lockfileGenerated = false;
 	if (lockfile) {
