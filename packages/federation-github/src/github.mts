@@ -32,7 +32,7 @@ import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes githubFederationConfig as a typed
 // DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config (per A5 §10.2 const-Module pattern).
+// app config.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly githubFederationConfig?: GithubProviderConfig;
@@ -101,9 +101,8 @@ const githubScope = (value: string | undefined): string | undefined => {
 	// scope as consent. Present-but-empty travels as the empty string. A scope
 	// that is not a string never gets here: openid-client refuses the answer.
 	if (value === undefined) return undefined;
-	// Commas to spaces first, then core's grammar. GitHub's delimiter is the
-	// only thing this adapter knows that core does not, so it is the only thing
-	// this function does.
+	// Commas to spaces, then core's grammar: GitHub's delimiter is the only
+	// thing this adapter knows that core does not.
 	return parseScopeTokens(value.replaceAll(",", " ")).join(" ");
 };
 
@@ -153,14 +152,12 @@ const DECIMAL_ID = /^[1-9][0-9]*$/;
  * string, or a string of decimal digits (no sign, no leading zero) as it is.
  * `undefined` when neither is usable.
  *
- * GitHub types `id` as an int64 integer. The identity handed to the Store is
- * `github:<id>`, so an id outside the safe-integer range after
- * `Response.json()` (`JSON.parse`) is not one — a parsed number there no
- * longer names one id: at 2^53 or above, two ids parse as the same number, and
- * `1e400` parses as `Infinity`. Taken as they came,
- * two GitHub users would sign in as one account. The
- * string form is held to the digits `String(n)` would give, so one user
- * cannot arrive under two spellings.
+ * GitHub types `id` as int64, and the Store identity is `github:<id>`. After
+ * `JSON.parse`, a number outside the safe-integer range no longer names one
+ * id (at 2^53 or above two ids parse as the same number; `1e400` is
+ * `Infinity`), so two GitHub users could sign in as one account. The string
+ * form is held to the digits `String(n)` would give, so one user cannot
+ * arrive under two spellings.
  */
 const githubSub = (user: Record<string, unknown>): string | undefined => {
 	if (typeof user.sub === "string" && user.sub !== "") return user.sub;
@@ -215,15 +212,12 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 		}): Promise<FederationProfile> {
 			// Synthesize the callback URL from redirectUri + code.
 			//
-			// #597: unlike the OIDC, Google and Apple providers this one does NOT
-			// forward the callback's RFC 9207 `iss` to the library — yet. GitHub's
-			// published metadata (/.well-known/oauth-authorization-server/login/oauth)
-			// names its issuer "https://github.com/login/oauth" and advertises the
-			// parameter. GITHUB_ISSUER, "https://github.com", is this provider's
-			// label for the profile, and it is also what the library is configured
-			// with. Forwarding `iss` today would compare the two and refuse every
-			// GitHub login. Doing it properly — the library's issuer set to
-			// GitHub's own, the profile label kept — is #598.
+			// Unlike the OIDC, Google and Apple providers, this one does NOT forward
+			// the callback's RFC 9207 `iss` to the library. GitHub's published
+			// metadata (/.well-known/oauth-authorization-server/login/oauth) names
+			// its issuer "https://github.com/login/oauth", while the library is
+			// configured with GITHUB_ISSUER, "https://github.com" (the profile's
+			// label), so forwarding `iss` would refuse every GitHub login.
 			const callbackUrl = new URL(params.redirectUri);
 			callbackUrl.searchParams.set("code", params.code);
 
@@ -235,16 +229,14 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			// over, not after the REST reads.
 			const obtainedAt = Date.now();
 
-			// The user is GitHub's REST `GET /user`, which is not an OpenID Connect
-			// UserInfo endpoint: it answers a numeric `id` and no `sub`. It is
-			// fetched as a protected resource and read here, not through
-			// `oidc.fetchUserInfo`: the library requires a string `sub` in a
-			// UserInfo body, and checks it before it looks at `skipSubjectCheck`,
-			// so it refused every real GitHub user.
+			// GitHub's REST `GET /user` is not an OpenID Connect UserInfo endpoint:
+			// it answers a numeric `id` and no `sub`. It is read as a protected
+			// resource, not through `oidc.fetchUserInfo`, which requires a string
+			// `sub` before it looks at `skipSubjectCheck`.
 			//
-			// PB-5 N/A for GitHub: GitHub OAuth Apps issue no id_token, so there is
-			// no id_token `sub` to bind the user to (OIDC §5.3.2 applies only when
-			// an id_token is in scope). Do NOT mirror the Google PB-5 fix here.
+			// GitHub OAuth Apps issue no id_token, so there is no id_token `sub` to
+			// bind the user to (OIDC §5.3.2): do NOT mirror Google's UserInfo /
+			// id_token `sub` binding here.
 			const body = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_USER_URL);
 			// A body that is not a JSON object is treated as a user with no id or
 			// sub, and so is a user whose id githubSub refuses: either fails the
@@ -257,12 +249,8 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				);
 			}
 
-			// Fetch primary+verified email from /user/emails.
-			// GitHub's /user endpoint often omits email for users who keep it private.
-			// Fallback order:
-			//   1. primary + verified email
-			//   2. first verified email (when primary is unverified)
-			//   3. undefined (no verified email at all)
+			// /user often omits a private email, so read /user/emails: the primary
+			// verified address, else the first verified one, else none.
 			let email: string | undefined;
 			let emailVerified: boolean | undefined;
 			try {
@@ -286,15 +274,13 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 
 			// Core's one reading of the token response, less three things GitHub
 			// needs differently: the scope is comma-delimited (below); a refresh
-			// token is not kept — this adapter has no refresh, so one that a
-			// GitHub App's expiring user token comes with would never be used;
-			// and an id_token is never carried. GitHub is plain OAuth 2.0 and
-			// issues none, so one in its answer was put there by something
-			// between this server and GitHub, and nothing here verifies it: kept,
-			// it would be stored and later handed to an end-session endpoint as
-			// `id_token_hint`, as if it were GitHub's. `expiresAt` is `null` for
-			// an OAuth App token, which states no lifetime:
-			// `/oauth/federation/:name/token` then reuses the token rather than
+			// token is not kept, since this adapter has no refresh; and an id_token
+			// is never carried. GitHub is plain OAuth 2.0 and issues none, so one in
+			// its answer was put there by something in between and is unverified:
+			// kept, it would later be handed to an end-session endpoint as
+			// `id_token_hint`, as if it were GitHub's. `expiresAt` is `null` for an
+			// OAuth App token, which states no lifetime, so
+			// `/oauth/federation/:name/token` reuses the token rather than
 			// refreshing it (FederationProfile.expiresAt).
 			const {
 				refreshToken: _notKept,
@@ -313,21 +299,17 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				picture: typeof user.avatar_url === "string" ? user.avatar_url : undefined,
 				...snapshot,
 				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. GitHub
-				// always states it. Dropping it left the route to infer consent from
-				// the request instead (#647).
-				//
-				// Comma-delimited, against §3.3's space-delimited list: GitHub
-				// answers `read:user,user:email`. Passed through as it arrives, the
-				// whole string reads as ONE scope everywhere downstream, and a
-				// client asking whether `user:email` was granted is told no.
+				// from the request, so what it says is what it granted; GitHub always
+				// states it. It arrives comma-delimited (`read:user,user:email`),
+				// against §3.3's space-delimited list: passed through, the whole string
+				// would read as ONE scope downstream.
 				scope: githubScope(tokens.scope),
 			};
 		},
 
 		// GitHub has no RP-Initiated Logout endpoint by default.
 		// Precedence: (1) configured endSessionEndpoint wins; (2) postLogoutRedirectUri redirect;
-		// (3) fallback to https://github.com/logout (preserves pre-Task-3 behaviour, supports GitHub Enterprise).
+		// (3) fallback to https://github.com/logout.
 		// (2) redirects to the URI as given, which is safe only because the
 		// caller hands this method one already matched against the client's
 		// registered postLogoutRedirectUris, or none (core's `EndSessionRequest`;
@@ -378,23 +360,16 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 /**
  * Const Module for the GitHub federation integration.
  *
- * Contributes both `federations.github` (FederationProvider — upstream OAuth 2
- * protocol) and `federationRedirectPolicies.github` (FederationRedirectPolicy
- * — consumer redirect URL policy).
- *
- * Config supplied via the `githubFederationConfig` ComponentMap slot
- * (per A5 §10.2 const-Module pattern).
- *
- * Per A5 §10.2.
+ * Contributes `federations.github` (the upstream OAuth 2 provider) and
+ * `federationRedirectPolicies.github` (the consumer redirect URL policy).
+ * Config is supplied via the `githubFederationConfig` ComponentMap slot.
  */
 export const githubFederationModule = defineModule({
 	name: "federation-github",
 	requires: ["githubFederationConfig"] as const,
 	contributes: {
 		federations: {
-			// v0.5.0 is single-tenant: provider.name is fixed at "github".
-			// Multi-tenant support deferred to post-publish; consumers needing
-			// multiple GitHub apps will get an additive Config shape.
+			// Single-tenant: provider.name is fixed at "github".
 			github: (deps) => createGithubProvider(deps.githubFederationConfig),
 		},
 		federationRedirectPolicies: {
