@@ -16,22 +16,14 @@
 
 /**
  * What the `MfaFactor` contract lets a factor do without holding a key, a
- * store or a transaction (the MFA ADR's D7, D11, D14, F3, F5, F7). These are
- * type assertions: the file is in core's typecheck list.
+ * store or a transaction. The rules are in the MFA ADR, D7's amendment "what
+ * the contract hands a factor"; the D and F labels below refer to that ADR.
+ * In short: the coordinator digests under the key ring for the factor, which
+ * never sees the ring; a factor may refuse a sign count that did not increase,
+ * opt in to a challenge that stays across attempts, and say a user cannot
+ * enroll it without throwing (a throw reads as an outage).
  *
- * - D11 digests an email code over (transaction id, factor id, code) and a
- *   recovery code over the normalised code, under the key ring, each digest
- *   kept with its key id. The coordinator does it for the factor: the
- *   ceremony context carries the transaction id and a digest capability, and
- *   the ring never reaches the factor.
- * - A WebAuthn verification refuses a sign count that did not increase (F7),
- *   which D28 audits as `sign_count_regression`.
- * - Only a WebAuthn challenge is taken by the verification that answers it;
- *   an email code stays on the transaction across attempts until a re-send
- *   replaces it (F5, F7). The factor says which.
- * - A factor may say a user cannot enroll one — the email factor needs an
- *   address on the account (F3, F5) — without throwing, which the coordinator
- *   would read as an outage.
+ * These are type assertions: the file is in core's typecheck list.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";

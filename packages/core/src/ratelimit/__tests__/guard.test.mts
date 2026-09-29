@@ -15,9 +15,8 @@
  */
 
 /**
- * Issue #325 — `createRateLimitGuard` is the single implementation of the
- * rate-limit outage policy that used to live as two hand-synchronized copies
- * (`checkRateLimit` in oauth routes, `loginRateLimit` in session routes).
+ * `createRateLimitGuard` is the single implementation of the rate-limit
+ * outage policy, shared by the oauth and session routes.
  *
  * These tests pin the contract both consumers rely on: the key shape, the
  * check context, the 429 envelope, the `failMode` outage policy with its

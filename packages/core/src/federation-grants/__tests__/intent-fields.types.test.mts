@@ -16,28 +16,26 @@
 
 /**
  * An intent store's copy of an intent cannot leave a field out and still
- * compile (#626) — for a copy built as an object literal of the record type;
- * not for one behind a cast or one that names a field with the wrong value.
+ * compile, for a copy built as an object literal of the record type; not for
+ * one behind a cast or one that names a field with the wrong value.
  *
- * The intent is what every later step of an acquisition is judged against
- * (D6), and both bundled stores copy it field by field — the memory one on
- * every write and read, the Redis one through its codec, and the transaction
- * carries a snapshot of it. Both optional fields widen the flow when lost:
+ * Every later step of an acquisition is judged against the intent (see ADR
+ * 2026-09-17-federation-grants-offline-delegation, D6); both bundled stores
+ * copy it field by field, and the transaction carries a snapshot of it. Both
+ * fields that may be `undefined` widen the flow when lost:
  *
  * - `resource` gone: the upstream is asked, at authorization and at the code
  *   exchange, without the RFC 8707 audience the connection narrows it to, and
  *   the grant is activated without it.
  * - `upstreamSubject` gone: the callback no longer checks that the upstream
- *   account is the one the client said to expect. What it still checks — the
- *   issuer, a renewal's existing account, and the identity lookup where one
- *   is configured — stays; this one check is what is lost.
+ *   account is the one the client said to expect. Its other checks (the
+ *   issuer, a renewal's existing account, the identity lookup where one is
+ *   configured) stay; this one is what is lost.
  *
- * So every field is a REQUIRED key, holding `undefined` where there is none; a
- * copy that forgets one fails to compile.
- *
- * Asserted with conditional types rather than `@ts-expect-error`. This file
- * only proves anything under the TypeScript checker, and is on BOTH of core's
- * typecheck lists for that reason.
+ * So every field is a required key, holding `undefined` where there is none.
+ * Asserted with conditional types rather than `@ts-expect-error`; this file
+ * proves anything only under the TypeScript checker, so it is on both of
+ * core's typecheck lists.
  */
 
 import { describe, expectTypeOf, it } from "vitest";

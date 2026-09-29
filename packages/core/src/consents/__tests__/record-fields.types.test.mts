@@ -16,27 +16,24 @@
 
 /**
  * A consent store's copy of a record cannot leave a field out and still
- * compile (#626) — for a copy built as an object literal of the record type;
- * not for one behind a cast or one that names a field with the wrong value.
+ * compile, for a copy built as an object literal of the record type; not for
+ * one behind a cast or one that names a field with the wrong value.
  *
- * The Redis store copies both records field by field when it reads them back
- * (the memory store keeps and returns the record it was given), and a field
- * such a copy forgets is dropped without a sound:
+ * The Redis store copies both records field by field when it reads them back,
+ * and a field such a copy forgets is dropped silently:
  *
- * - `ConsentRecord.expiresAt` gone reads as "until revoked" — the one field
- *   whose absence WIDENS what the record grants. Dropped on the way in, a
+ * - `ConsentRecord.expiresAt` gone reads as "until revoked", the one field
+ *   whose absence widens what the record grants. Dropped on the way in, a
  *   consent meant to lapse is written without an expiry; on the way out, it
  *   is treated as one by a store that judges expiry from what it returns.
  * - `PendingConsentRecord.state` gone takes `state` off the denial redirect,
  *   and the client's CSRF check refuses the user's own "no" (RFC 6749
  *   §4.1.2.1: `state` is REQUIRED there when the request carried one).
  *
- * So every field is a REQUIRED key, holding `undefined` where there is no
- * expiry or no `state`; a copy that forgets one fails to compile.
- *
- * Asserted with conditional types rather than `@ts-expect-error`. This file
- * only proves anything under the TypeScript checker, and is on BOTH of core's
- * typecheck lists for that reason.
+ * So every field is a required key, holding `undefined` where there is no
+ * expiry or no `state`. Asserted with conditional types rather than
+ * `@ts-expect-error`; this file proves anything only under the TypeScript
+ * checker, so it is on both of core's typecheck lists.
  */
 
 import { describe, expectTypeOf, it } from "vitest";

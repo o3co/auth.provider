@@ -24,8 +24,6 @@ describe("isGrantTypeAllowed", () => {
 	});
 
 	it("denies a grant absent from a declared allowlist", () => {
-		// The #268 bug: a client registered for client_credentials could still
-		// redeem authorization codes.
 		expect(isGrantTypeAllowed(["client_credentials"], "authorization_code")).toBe(false);
 	});
 
@@ -36,21 +34,14 @@ describe("isGrantTypeAllowed", () => {
 	});
 
 	/*
-	 * #311 — the deployment-level counterpart to #326's per-grant rule.
+	 * requireAllowlist is deny-by-default for the whole deployment. Without it
+	 * the secure posture is opt-in per client registration: one that omits the
+	 * field silently gets every grant.
 	 *
-	 * Allow-by-absence is what made #268 shippable: the grants that ignore
-	 * `allowedGrantTypes` predate it, so denying on absence would have revoked
-	 * every grant from every registration written before the field existed.
-	 * The cost is that the secure posture is opt-in *per client registration*,
-	 * and an operator who wants deny-by-default has no way to say so once for
-	 * the deployment — a registration that omits the field silently gets every
-	 * grant.
-	 *
-	 * RFC 7591 §2 is the precedent for absence not meaning "everything": an
-	 * omitted `grant_types` there defaults to `["authorization_code"]` alone.
-	 * This flag goes further (absence denies outright) because a deployment
-	 * that turns it on has said it audits its registrations, and an implied
-	 * set would be exactly the silent decision #363 exists to refuse.
+	 * RFC 7591 §2 defaults an omitted `grant_types` to `["authorization_code"]`
+	 * alone. This flag denies outright instead: a deployment that turns it on
+	 * has said it audits its registrations, and an implied set would be a
+	 * silent decision made for it.
 	 */
 	describe("requireAllowlist (#311)", () => {
 		it("denies a grant when the client declares no allowlist", () => {
@@ -82,8 +73,9 @@ describe("isGrantTypeAllowed", () => {
 			expect(isGrantTypeAllowed([], "authorization_code", { requireAllowlist: true })).toBe(false);
 		});
 
-		// The default has to stay allow-by-absence, or #268's migration story
-		// breaks for every deployment that has not audited its registrations.
+		// The default must stay allow-by-absence: denying would revoke every
+		// grant from registrations that predate the field, in every deployment
+		// that has not audited them.
 		it("defaults to allow-by-absence when the option is omitted or false", () => {
 			expect(isGrantTypeAllowed(undefined, "authorization_code")).toBe(true);
 			expect(isGrantTypeAllowed(undefined, "authorization_code", {})).toBe(true);

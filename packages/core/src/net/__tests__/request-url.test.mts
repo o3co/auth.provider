@@ -15,18 +15,14 @@
  */
 
 /**
- * request-url.test.mts — the single canonical-request-URL vocabulary
- * (#292, #356).
+ * request-url.test.mts — the single canonical-request-URL vocabulary, shared
+ * by DPoP htu comparison (`@o3co/auth-provider-dpop`: the expected `htu` every
+ * proof is checked against) and the /authorize login round-trip
+ * (`@o3co/auth-provider-oauth`: the `redirect_to` handed to the login page).
  *
- * Two consumers share this construction and must not drift apart:
- *   - DPoP htu comparison (`@o3co/auth-provider-dpop`, #292): the expected
- *     `htu` every proof is checked against.
- *   - the /authorize login round-trip (`@o3co/auth-provider-oauth`, #356):
- *     the `redirect_to` handed to the login page.
- *
- * The properties pinned here are the ones both consumers' security arguments
- * lean on: the origin half comes only from the first argument, and no request
- * target — protocol-relative, absolute-form, or otherwise — can move it.
+ * Both consumers' security arguments lean on what is pinned here: the origin
+ * half comes only from the first argument, and no request target —
+ * protocol-relative, absolute-form, or otherwise — can move it.
  */
 import { describe, expect, it } from "vitest";
 import { buildCanonicalRequestUrl } from "#/net/request-url.mjs";

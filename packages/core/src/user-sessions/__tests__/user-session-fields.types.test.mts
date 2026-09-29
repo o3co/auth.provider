@@ -15,25 +15,20 @@
  */
 
 /**
- * A session store's copy of a session cannot leave `amr` — or, since the MFA
- * ADR's D9, `authentication` — out and still compile (#626) — for a copy
- * built as an object literal of the record type; not for one behind a cast or
- * one that names it with the wrong value.
+ * A session store's copy of a session cannot leave `amr` or `authentication`
+ * out and still compile, when the copy is an object literal of the record
+ * type; not when it is behind a cast, or names the key with the wrong value.
  *
- * Both bundled stores copy the session field by field on the way in and on
- * the way out, and `amr` is the one field a copy could forget without an
- * error. Gone, `/authorize` can no longer see the step-up the user performed:
- * a request whose `acr_values` needs it is answered
- * `unmet_authentication_requirements` — what the RP does next is its own
- * call — and the id_token and the refresh chain carry no `amr`.
- *
- * So `amr` is a REQUIRED key on the session and on what creates one, holding
- * `undefined` where the login path recorded nothing: a store's copy that
- * forgets it, or a login path that does not say what it knows, fails to
- * compile.
+ * Both bundled stores copy the session field by field, in and out. Without
+ * `amr`, `/authorize` cannot see the step-up the user performed: a request
+ * whose `acr_values` needs it is answered `unmet_authentication_requirements`,
+ * and the id_token and refresh chain carry no `amr`. So both keys are REQUIRED
+ * on the session and on what creates one, holding `undefined` where the login
+ * path recorded nothing. See ADR 2026-09-25-multi-factor-authentication, "What
+ * the session records".
  *
  * Asserted with conditional types rather than `@ts-expect-error`. This file
- * only proves anything under the TypeScript checker; `user-sessions/__tests__`
+ * proves anything only under the TypeScript checker; `user-sessions/__tests__`
  * is on BOTH of core's typecheck lists.
  */
 

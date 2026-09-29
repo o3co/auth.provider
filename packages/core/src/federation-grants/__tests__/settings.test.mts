@@ -16,13 +16,10 @@
 
 /**
  * `federationGrants.*` as an operator writes it, turned into the limits the
- * retrieval takes (#593, D3/D10/D12).
- *
- * The conversion is where a module goes wrong silently: seconds forwarded as
- * milliseconds make a thirty-second refresh buffer out of thirty, and a
- * default substituted for an explicitly invalid value turns a typo into a
- * deployment nobody chose. So it is a function with a name, tested directly,
- * rather than an expression inside a module factory.
+ * retrieval takes (federation-grants ADR, D3/D10/D12). The conversion goes
+ * wrong silently: seconds forwarded as milliseconds, or a default substituted
+ * for an explicitly invalid value, which turns a typo into a deployment nobody
+ * chose. So it is a named function, tested directly.
  */
 
 import { readFileSync } from "node:fs";
@@ -144,10 +141,10 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 	});
 
 	it("takes the subject-revocation allowance rather than inventing a second one", () => {
-		// D13's backstop is compared against the same watermark `verifyJwt`
-		// reads, so a federation-grant-specific skew would be a second
-		// allowance for one comparison — and slice 5's retention proof has to
-		// cover whichever is larger.
+		// The D13 backstop (federation-grants ADR) is compared against the
+		// watermark `verifyJwt` reads, so a federation-grant-specific skew would
+		// be a second allowance for one comparison, and the boundary's
+		// retention would have to cover whichever is larger.
 		const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
 		expect(limits.revocationSkewMs).toBe(1_000);
 	});
@@ -182,12 +179,12 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 	});
 
 	it("refuses a value that is not a number, rather than coercing it into one", async () => {
-		// Found by review. `Number(x)` is a wide door: `null` and `[]` are 0,
-		// `true` is 1, `[45]` is 45, `"0x10"` is 16 and a `Date` is its epoch
-		// milliseconds. Two of those arrive through the SHIPPED schema, not
-		// only a hand-built config — `z.coerce.number().int().nonnegative()`
-		// takes `null` as 0 — and `refreshBuffer = 0` hands out tokens with
-		// milliseconds of life left instead of refreshing them.
+		// `Number(x)` is a wide door: `null` and `[]` are 0, `true` is 1,
+		// `[45]` is 45, `"0x10"` is 16, a `Date` is its epoch milliseconds. Two
+		// of those arrive through the shipped schema too
+		// (`z.coerce.number().int().nonnegative()` takes `null` as 0), and
+		// `refreshBuffer = 0` hands out tokens with milliseconds of life left
+		// instead of refreshing them.
 		for (const refreshBuffer of [null, true, false, [], [45], "0x10", "1e3", " ", new Date(1000)]) {
 			expect(
 				() => resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer } }),
@@ -208,7 +205,7 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 	it("refuses an allowance so large that nothing is ever fresh", async () => {
 		// `1e21` is an integer as far as `Number.isInteger` is concerned, and
 		// `refreshBufferMs` is an allowance rather than a timer, so the
-		// downstream check only asked for finite and non-negative. A buffer
+		// downstream check only asks for finite and non-negative. A buffer
 		// past the ceiling makes every token look stale for ever.
 		expect(() =>
 			resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer: 1e21 } }),

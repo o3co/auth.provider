@@ -9,14 +9,11 @@
  */
 
 /**
- * Issue #297 — the Store owns email-verification state and its flow;
- * auth.provider's only job is to surface `email_verified` into what it issues.
- *
- * `claimFilter` already mapped `emailVerified` → `email_verified`, but that was
- * only pinned at unit level: nothing asserted the claim survives the whole
- * path from a `User` the Store returned into a signed id_token. This file
- * pins that end to end, so the chain cannot be broken silently by a change at
- * either end.
+ * The Store owns email-verification state and its flow; auth.provider only
+ * surfaces `email_verified` in what it issues. This pins the whole path, from
+ * a `User` the Store returned through `claimFilter` (`emailVerified` →
+ * `email_verified`) into a signed id_token, so a change at either end cannot
+ * break it silently.
  */
 
 import { decodeJwt } from "jose";

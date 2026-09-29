@@ -28,15 +28,12 @@ const FUTURE = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
 
 /**
- * How a test reaches an entry's expiry on the store's own terms.
- *
- * An in-process store judges expiry on this process's clock. A Redis key
- * expires on the server's, which sits to either side of the host's, and a
- * relative `PX` runs from when the command reached the server; a loaded run
- * also reaches its next line late. A fixed sleep after a short expiry therefore
- * either read an entry the store had already dropped, or checked one it had
- * not dropped yet. The default is this process's clock; a Redis runner passes
- * one that reads the server's `TIME`, or waits for the keys to be gone.
+ * How a test reaches an entry's expiry on the store's own terms. A Redis key
+ * expires on the server's clock, which may sit either side of the host's, and
+ * a relative `PX` runs from when the command reached the server, so a fixed
+ * sleep can find an entry already dropped or one not yet dropped. The default
+ * is this process's clock; a Redis runner passes one that reads the server's
+ * `TIME`, or waits for the keys to be gone.
  */
 export interface ExpiryClock {
 	/** Epoch milliseconds on the clock the store expires entries by. */
@@ -72,7 +69,7 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	authentication: overrides.authentication,
 });
 
-/** How a password login records itself (the MFA ADR's D9), every field named. */
+/** How a password login records itself, every field named. */
 const PASSWORD_LOGIN = {
 	primary: "pwd",
 	federation: undefined,
@@ -102,8 +99,8 @@ export function runUserSessionStoreContract(
 			await store.create(INPUT({ sid: "sid-amr", amr: ["pwd", "mfa"] }));
 			expect((await store.get("sid-amr"))?.amr).toEqual(["pwd", "mfa"]);
 			await store.create(INPUT({ sid: "sid-plain" }));
-			// Named, not left out: a store that dropped the key on its way back
-			// is the copy #626 makes a compile error; this holds it at runtime.
+			// Named, not left out: the required key makes a store's copy that
+			// drops it a compile error; this holds it at runtime.
 			expect(await store.get("sid-plain")).toHaveProperty("amr", undefined);
 		});
 
@@ -162,9 +159,9 @@ export function runUserSessionStoreContract(
 		});
 
 		it("create refuses an expiresAt that is not a valid date, and records nothing", async () => {
-			// An Invalid Date's `getTime()` is NaN, which is never `<= now`: the
-			// memory store kept such a session for ever, and Redis was sent
-			// `PX NaN`. A caller fault, and a RangeError, not a session.
+			// An Invalid Date's `getTime()` is NaN, which is never `<= now`: a
+			// memory store would keep the session for ever, and Redis would be
+			// sent `PX NaN`. A caller fault, and a RangeError, not a session.
 			const store = await factory();
 			await expect(
 				store.create(INPUT({ sid: "sid-invalid", expiresAt: new Date(Number.NaN) })),
@@ -176,11 +173,10 @@ export function runUserSessionStoreContract(
 		});
 
 		it("create refuses an authTime that is not a valid date, or is before 1970, and records nothing", async () => {
-			// The memory store kept either and handed it back — an Invalid Date as
-			// the id_token's `auth_time`. The Redis store wrote either (NaN as JSON
-			// `null`) and then read the session back as corrupt: the user was
-			// logged out by their own login. Neither is a login time, so neither
-			// is a session.
+			// Kept, either would come back from a memory store (an Invalid Date as
+			// the id_token's `auth_time`), and a Redis store would write it (NaN
+			// as JSON `null`) and read the session back as corrupt, logging the
+			// user out by their own login. Neither is a login time.
 			const store = await factory();
 			for (const authTime of [new Date(Number.NaN), new Date(-1)]) {
 				await expect(store.create(INPUT({ sid: "sid-bad-auth", authTime }))).rejects.toThrow(
@@ -276,8 +272,7 @@ export function runUserSessionStoreContract(
 
 		it("get returns null after expiresAt elapsed", async () => {
 			// Dated from, and waited out on, the store's own clock (see
-			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep: on a loaded
-			// run the first read landed after the expiry.
+			// `ExpiryClock`).
 			const store = await factory();
 			const expiresAt = await aheadOf(expiry);
 			await store.create(INPUT({ sid: "soon", expiresAt }));
@@ -313,10 +308,9 @@ export function runUserSessionStoreContract(
 			);
 			const s1 = await store.get("iso");
 			expect(s1).not.toBeNull();
-			// Stress all three defensive-copy axes: claims index signature,
-			// claims.groups array, and Date fields. The contract suite is the
-			// load-bearing artifact that the redis adapter MUST satisfy as well —
-			// a redis adapter that forgets to clone Dates on retrieve must fail here.
+			// All three defensive-copy axes: the claims index signature, the
+			// claims.groups array, and the Date fields. A Redis adapter that
+			// forgets to clone Dates on retrieve must fail here.
 			(s1?.claims as Record<string, unknown>).injected = "evil";
 			(s1?.claims.groups as string[] | undefined)?.push("admin");
 			s1?.authTime.setTime(0);
@@ -379,10 +373,10 @@ export function runUserSessionStoreContract(
 
 /**
  * What a store owes once it claims {@link SupportsSecondFactorUpdate}, the
- * step-up capability (the MFA ADR's D9). Optional on the port — a custom
- * store without it keeps working, and a step-up asks for a re-authentication
- * instead — so the base suite above does not ask for it, and this one runs
- * only against a store that claims it. Both bundled stores do.
+ * step-up capability. Optional on the port (a custom store without it keeps
+ * working, and a step-up asks for a re-authentication instead), so the base
+ * suite above does not ask for it, and this one runs only against a store
+ * that claims it. Both bundled stores do.
  */
 export function runSecondFactorUpdateContract(
 	factory: UserSessionStoreContractFactory,
@@ -423,7 +417,7 @@ export function runSecondFactorUpdateContract(
 			};
 			// What it answers is what is stored, and the session is otherwise
 			// the one that was there: sid, sub, authTime (a step-up never moves
-			// it, D18), createdAt, expiresAt and claims.
+			// it), createdAt, expiresAt and claims.
 			expect(recorded).toStrictEqual(expected);
 			expect(await store.get("sf-1")).toStrictEqual(expected);
 		});
@@ -433,7 +427,7 @@ export function runSecondFactorUpdateContract(
 			await store.create(INPUT({ sid: "sf-mono", amr: ["pwd"], authentication: PASSWORD_LOGIN }));
 			const first = at(10_000);
 			await store.recordSecondFactor("sf-mono", { amr: ["otp", "mfa"], at: first });
-			// A step-up appends (D14); an earlier time does not move mfaAt back.
+			// A step-up appends; an earlier time does not move mfaAt back.
 			const stale = await store.recordSecondFactor("sf-mono", {
 				amr: ["hwk", "mfa"],
 				at: at(20_000),
@@ -484,7 +478,7 @@ export function runSecondFactorUpdateContract(
 		});
 
 		it("answers null for a pre-upgrade session whose primary cannot be told, and changes nothing", async () => {
-			// Such a session is re-authenticated (D16); a second factor added to
+			// Such a session is re-authenticated; a second factor added to
 			// it would be recorded against a primary nobody can name.
 			const store = await capable();
 			await store.create(INPUT({ sid: "sf-unknown", amr: ["hwk"] }));

@@ -20,8 +20,8 @@ import { InMemoryCodeRepository } from "#/repositories/InMemoryCodeRepository.mj
 describe("InMemoryCodeRepository", () => {
 	let repo: InMemoryCodeRepository;
 
-	// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri
-	// required); every other field named, unset (#626).
+	// Minimal valid params: client_id and redirect_uri required; every other
+	// field named, unset.
 	const minimalParams: CreateCodeInput = {
 		client_id: "test-client",
 		redirect_uri: "https://rp.example/cb",
@@ -170,8 +170,8 @@ describe("InMemoryCodeRepository", () => {
 		});
 
 		it("refuses a lifetime that is not a positive number of seconds, and stores nothing", async () => {
-			// NaN is never `>= now`: a code minted with a NaN lifetime was
-			// redeemable for ever, and no sweep ever reclaimed it. An infinite
+			// NaN is never `>= now`: a code minted with a NaN lifetime would be
+			// redeemable for ever, and no sweep would reclaim it. An infinite
 			// one is no lifetime either, and zero or less is a code that is dead
 			// on arrival — which the Redis repository cannot store at all.
 			repo = new InMemoryCodeRepository();
@@ -208,10 +208,9 @@ describe("InMemoryCodeRepository", () => {
 
 		it("consumeByCode refuses an expired code, and burns it on the way out", async () => {
 			// The expiry checks on `findByCode` and `consumeByCode` are separate
-			// guards and only the former was pinned — but `consumeByCode` is the
-			// one `/token` calls, so it is the one that decides whether an
-			// expired authorization code is still redeemable. A code past its
-			// TTL must not be exchangeable for tokens no matter how it is
+			// guards, and `consumeByCode` is the one `/token` calls, so it decides
+			// whether an expired authorization code is still redeemable. A code
+			// past its TTL must not be exchangeable for tokens no matter how it is
 			// presented.
 			vi.useFakeTimers();
 			try {
@@ -251,18 +250,16 @@ describe("InMemoryCodeRepository", () => {
 		});
 	});
 
-	// D-1 / TS-1: client_id and redirect_uri are required fields on CodeData and
-	// must be required on CodeRepository.createCode params, so omitting either
-	// is a TS error at every call site (including consumer custom impls).
+	// client_id and redirect_uri are required on CodeData and on
+	// CodeRepository.createCode params, so omitting either is a TS error at
+	// every call site (including consumer custom impls).
 	//
-	// Each probe is the full input with that one field taken out. Since #626
-	// every other field is a required key too, so a probe that named only the
-	// other identity field would be refused for the keys it leaves out, and its
-	// directive consumed whether or not the field under test were required.
-	//
-	// Type-only assertions: the directives are attached to typed-variable
-	// declarations rather than runtime call sites, so vitest's typecheck pass
-	// validates the contract without storing invalid records in the repository.
+	// Each probe is the full input with that one field taken out: every other
+	// field is a required key too, so a probe that named only the other
+	// identity field would be refused for the keys it leaves out, consuming its
+	// directive whether or not the field under test were required. The
+	// directives sit on typed-variable declarations, not runtime calls, so the
+	// typecheck pass validates the contract without storing invalid records.
 	describe("D-1 / TS-1: createCode requires client_id and redirect_uri at compile time", () => {
 		it("compile-time guard: omitting client_id is a type error", () => {
 			const { client_id: _omitted, ...withoutClientId } = minimalParams;

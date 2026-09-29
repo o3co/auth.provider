@@ -3,18 +3,10 @@ import { z } from "zod";
 import type { ProviderDeps } from "../provider.mjs";
 
 // ---------------------------------------------------------------------------
-// Local fixture types — used instead of augmenting the shared ComponentMap.
-//
-// Augmenting `declare module "../component-map.mjs"` in this file would
-// pollute the shared TypeScript program that also includes
-// component-map.test.mts (both files are compiled together via
-// tsconfig.test.json `files`). That leakage would cause
-// component-map.test.mts assertions about the BASE (empty) ComponentMap to
-// fail because ComponentKey would no longer be `never`.
-//
-// Instead, we prove the same structural property of ProviderDeps by building
-// a local ComponentMap-shaped interface and a parallel LocalProviderDeps
-// that uses the identical mapped-type logic.
+// Local fixture types, used instead of augmenting the shared ComponentMap:
+// this file is compiled in one program with component-map.test.mts
+// (tsconfig.test.json `files`), whose assertions about the BASE ComponentMap
+// an augmentation here would break.
 // ---------------------------------------------------------------------------
 
 /** Minimal local fixture — mirrors the shape of ComponentMap for these tests. */
@@ -26,12 +18,7 @@ interface LocalComponentMap {
 
 type LocalKey = keyof LocalComponentMap;
 
-/**
- * Parallel derivation of ProviderDeps using LocalComponentMap.
- * The logic is identical to the real ProviderDeps<R, O>; only the backing
- * map type differs. This lets us test the mapped-type derivation without
- * touching the shared ComponentMap interface.
- */
+/** ProviderDeps<R, O>'s mapped-type logic, over LocalComponentMap. */
 type LocalProviderDeps<R extends LocalKey = never, O extends LocalKey = never> = {
 	readonly [K in R]: NonNullable<LocalComponentMap[K]>;
 } & {
@@ -40,11 +27,9 @@ type LocalProviderDeps<R extends LocalKey = never, O extends LocalKey = never> =
 
 test("ProviderDeps<R, O> derives required + optional shape", () => {
 	type Deps = LocalProviderDeps<"_testConfig" | "_testStore", "_testLogger">;
-	// Use .branded.toEqualTypeOf() because ProviderDeps is an intersection type
-	// ({ R-keys } & { O-keys? }), which is NOT considered identical to a flat
-	// object literal under StrictEqualUsingTSInternalIdenticalToOperator (the
-	// default used by toEqualTypeOf). The branded variant uses DeepBrand which
-	// normalises intersection types and flat objects with the same shape as equal.
+	// `.branded`: the intersection ({ R-keys } & { O-keys? }) is NOT identical
+	// to a flat object literal under toEqualTypeOf's default comparison;
+	// DeepBrand treats same-shaped intersections and flat objects as equal.
 	expectTypeOf<Deps>().branded.toEqualTypeOf<{
 		readonly _testConfig: { readonly host: string };
 		readonly _testStore: { readonly get: (k: string) => string };
@@ -53,12 +38,9 @@ test("ProviderDeps<R, O> derives required + optional shape", () => {
 });
 
 test("ProviderDeps strips `| undefined` from required slots derived from optional ComponentMap entries", () => {
-	// The real ComponentMap declares every slot OPTIONAL via declaration-merging
-	// (`slot?: T`) so consumers can opt into slots additively. Without
-	// NonNullable, `ComponentMap[K]` for a required key would still resolve to
-	// `T | undefined`, forcing every `provides` callback to write `deps.slot!`
-	// to convince the type-checker. This test pins the behavior that required
-	// keys come out non-undefined even when the backing slot was declared `?`.
+	// ComponentMap declares every slot OPTIONAL (`slot?: T`) so slots merge in
+	// additively. Required keys must still come out non-undefined, or every
+	// `provides` callback would need `deps.slot!`.
 	interface OptionalSlotMap {
 		readonly _testOptionalSlot?: { readonly value: string };
 	}
@@ -74,19 +56,13 @@ test("ProviderDeps strips `| undefined` from required slots derived from optiona
 });
 
 test("ProviderDeps<never, never> is an empty object", () => {
-	// Record<never, never> is the type-safe equivalent of `{}` (no properties).
-	// We use .branded because ProviderDeps<never, never> is an intersection
-	// `{} & {}` which is structurally equal but not TSInternalIdentical to the
-	// plain `Record<never, never>` object type.
+	// `.branded`: `{} & {}` is structurally equal to, but not identical with,
+	// `Record<never, never>`.
 	expectTypeOf<ProviderDeps<never, never>>().branded.toEqualTypeOf<Record<never, never>>();
 });
 
 test("Provider<K, Deps> is a function from Deps to ComponentMap[K] | Promise", () => {
-	// Augment ComponentMap locally for this single test only.
-	// This is safe here because component-map.test.mts's assertions (which must
-	// see an empty base) are on ComponentKey / keyof ComponentMap, not on
-	// Provider<K>. Keeping the augmentation in this specific test rather than
-	// at module scope prevents it from tainting the earlier ProviderDeps test.
+	// Mirrors Provider<K, Deps> over the local fixture.
 	type LocalCM = LocalComponentMap;
 	type LocalProvider<K extends LocalKey, Deps> = (deps: Deps) => LocalCM[K] | Promise<LocalCM[K]>;
 	type NoDeps = Record<never, never>;

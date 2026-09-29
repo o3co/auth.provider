@@ -15,24 +15,15 @@
  */
 
 /**
- * What every {@link KeyStore} owes its callers (#303).
+ * What every {@link KeyStore} owes its callers, so an implementer can prove
+ * they got the port right rather than having read the interface carefully.
+ * It runs against every implementation in the repository (the two in-config
+ * stores and the remote-signing one); adapters outside it, such as an AWS KMS
+ * or PKCS#11 binding, import it and run it too.
  *
- * The port was already shaped for remote signing — its doc comments name
- * KMS/HSM adapters at `sign`, `getSigningKidFallback` and
- * `getVerificationKeys` — but nothing checked that a *new* implementation
- * satisfies it. For a surface the project treats as its differentiator (#305),
- * "typed and swappable" has to mean an implementer can prove they got it right,
- * not that they read the interface carefully.
- *
- * So this runs against every implementation in the repository: the two
- * in-config stores that already existed, and the remote-signing one #303 adds.
- * Adapters outside this repository — an AWS KMS or PKCS#11 binding — import it
- * and run it too, which is the point.
- *
- * Deliberately expressed in terms an implementation cannot fake: a token is
- * verified with the public key the store itself hands back, so an
- * implementation that signs with one key and publishes another fails here
- * rather than in production.
+ * Expressed in terms an implementation cannot fake: a token is verified with
+ * the public key the store itself hands back, so one that signs with one key
+ * and publishes another fails here rather than in production.
  */
 
 import { decodeProtectedHeader, jwtVerify } from "jose";

@@ -22,15 +22,14 @@ const FUTURE = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
 
 /**
- * How a test reaches an entry's expiry on the store's own terms.
- *
- * An in-process store judges expiry on this process's clock. A Redis key
- * expires on the server's, which sits to either side of the host's, and a
- * relative `PX` runs from when the command reached the server; a loaded run
- * also reaches its next line late. A fixed sleep after a short expiry therefore
- * either read an entry the store had already dropped, or checked one it had
- * not dropped yet. The default is this process's clock; a Redis runner passes
- * one that reads the server's `TIME`, or waits for the keys to be gone.
+ * How a test reaches an entry's expiry on the store's own terms. An
+ * in-process store judges expiry on this process's clock. A Redis key expires
+ * on the server's, which sits to either side of the host's, and a relative
+ * `PX` runs from when the command reached the server; a loaded run also
+ * reaches its next line late. So a fixed sleep after a short expiry may read
+ * an entry the store has already dropped, or one it has not dropped yet. The
+ * default is this process's clock; a Redis runner passes one that reads the
+ * server's `TIME`, or waits for the keys to be gone.
  */
 export interface ExpiryClock {
 	/** Epoch milliseconds on the clock the store expires entries by. */
@@ -138,17 +137,18 @@ export function runSessionRPRegistryContract(
 
 		it("registerRP refuses an expiresAt that is not a valid date, and records nothing", async () => {
 			// An Invalid Date's time is NaN, which is never `<= now`: the memory
-			// store kept such an entry for ever, and Redis wrote the entry and then
-			// refused `PEXPIREAT NaN`, leaving the key with no TTL. A caller fault.
+			// store would keep such an entry for ever, and Redis would write the
+			// entry, then refuse `PEXPIREAT NaN` and leave the key with no TTL.
+			// A caller fault.
 			const reg = await factory();
 			await expect(reg.registerRP("sid-1", RP(), new Date(Number.NaN))).rejects.toThrow(RangeError);
 			expect(await reg.listRPs("sid-1")).toEqual([]);
 		});
 
 		it("registerRP refuses a registeredAt that is not a valid date, and records nothing", async () => {
-			// The memory registry kept it and handed back an Invalid Date. The
-			// Redis registry wrote NaN as JSON `null` and then read the RP back as
-			// corrupt and skipped it — an RP silently dropped from the logout
+			// The memory registry would keep it and hand back an Invalid Date; the
+			// Redis registry would write NaN as JSON `null`, then read the RP back
+			// as corrupt and skip it — an RP silently dropped from the logout
 			// fan-out. A caller fault, refused before anything is written.
 			const reg = await factory();
 			await expect(
@@ -159,9 +159,7 @@ export function runSessionRPRegistryContract(
 
 		it("listRPs returns empty after expiresAt elapsed", async () => {
 			// Dated from, and waited out on, the store's own clock (see
-			// `ExpiryClock`): a fixed 50 ms expiry and a 100 ms sleep on the host
-			// read a Redis key after the server had already expired it on a
-			// loaded run — or before, when the server's clock lagged the host's.
+			// `ExpiryClock`).
 			const reg = await factory();
 			const expiresAt = await aheadOf(expiry);
 			await reg.registerRP("sid-1", RP(), expiresAt);
@@ -206,8 +204,8 @@ export function runSessionRPRegistryContract(
 
 		it("optional fields round-trip cleanly (undefined stays undefined; not coerced)", async () => {
 			// Redis HGETALL implementations sometimes coerce undefined fields to ""
-			// or omit them entirely on parse. Pin the contract so the redis adapter
-			// (T15) cannot ship a subtle drift (e.g., undefined → "" or → false).
+			// or omit them entirely on parse. Pinned so the redis adapter cannot
+			// drift (e.g., undefined → "" or → false).
 			const reg = await factory();
 			await reg.registerRP(
 				"sid-1",
@@ -225,7 +223,7 @@ export function runSessionRPRegistryContract(
 			const list = await reg.listRPs("sid-1");
 			expect(list).toHaveLength(1);
 			const rp = list[0];
-			// Named, not left out (#626): `toHaveProperty(key, undefined)` fails
+			// Named, not left out: `toHaveProperty(key, undefined)` fails
 			// on a missing key as well as on a value.
 			expect(rp).toHaveProperty("backchannelLogoutUri", undefined);
 			expect(rp).toHaveProperty("backchannelLogoutSessionRequired", undefined);

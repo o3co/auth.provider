@@ -15,13 +15,11 @@
  */
 
 /**
- * The two calls a Store makes rather than two routes this server mounts
- * (#593, D13).
- *
- * `revokeFederationGrant` is how an operator's own console ends a grant, and
- * `listFederationGrantsForSubject` is what lets a Store offer a user a
- * "connected applications" page. Without the second, a user has no direct way
- * to withdraw one at all.
+ * The two calls a Store makes, rather than two routes this server mounts (see
+ * ADR 2026-09-17-federation-grants-offline-delegation, D13).
+ * `revokeFederationGrant` is how an operator's own console ends a grant;
+ * `listFederationGrantsForSubject` lets a Store offer a user a "connected
+ * applications" page, without which a user has no direct way to withdraw one.
  *
  * They are library calls because this provider mounts no admin route and has
  * no operator identity model to authorize one with. Authenticating the person
@@ -132,11 +130,11 @@ describe("revokeFederationGrant", () => {
 	});
 
 	it("says what access it ended, not only which grant", async () => {
-		// D18 carries the upstream account, the connection, the resource and
-		// the scopes where they have been established — and the record the
-		// write returned is the establishment. Without them an operator
-		// reading a revocation has a grant id and has to go and look up what
-		// was taken away, from a record that may now be a tombstone.
+		// The audit event carries the upstream account, the connection, the
+		// resource and the scopes where they have been established, and the
+		// record the write returned is the establishment. Without them an
+		// operator reading a revocation has a grant id and has to go and look up
+		// what was taken away, from a record that may now be a tombstone.
 		const { h, deps: d, events } = deps();
 		await h.seed();
 		await revokeFederationGrant(d as never, "g-1", "operator");

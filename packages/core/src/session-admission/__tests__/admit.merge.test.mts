@@ -15,23 +15,19 @@
  */
 
 /**
- * The merge (the session-admission ADR's D2, step 7): the MFA ADR's step-4
- * table — its D16 and D17 rows, as `decideMfaRequirement` decided them —
- * passes unchanged against `admitSession` with a requirement whose `admit`
- * is the MFA requirement's table (D6), under the mapping D2 states
- * (acceptance criterion 4): the rule's `requirement: "acr"` is `"acr"` here,
- * its `requirement: "baseline"` is the requirement's name, and its
- * `step_up.requirement` is `whenStillUnmet` — `"acr"` → `"unmet"`,
- * `"baseline"` → the requirement's own answer.
+ * The merge: the requirement rule's rows from
+ * ADR 2026-09-25-multi-factor-authentication pass unchanged against
+ * `admitSession` with a requirement whose `admit` is the MFA requirement's
+ * table, under the mapping to `MfaRequirementDecision` in
+ * ADR 2026-09-28-session-admission.
  *
- * The rows are D17's table, the rows the rule decided — the freshness rows
- * (`max_age`, `prompt=login`, the ask) and the `prompt=none` answers are
- * `/authorize`'s, around the admission — kept as data in
- * `testing/merge.rows.mts`, published on `@o3co/auth-provider-core/testing`,
- * so the MFA package runs the same list against the requirement it
- * registers. After them, the rows of D2's merge table that the MFA table
- * alone does not reach: a step-up whose page is another requirement's, and
- * one no single requirement can finish.
+ * The rows are the ones the rule decided — the freshness rows (`max_age`,
+ * `prompt=login`, the ask) and the `prompt=none` answers are `/authorize`'s,
+ * around the admission — kept as data in `testing/merge.rows.mts`, published
+ * on `@o3co/auth-provider-core/testing`, so the MFA package runs the same
+ * list against the requirement it registers. After them, the merge rows the
+ * MFA table alone does not reach: a step-up whose page is another
+ * requirement's, and one no single requirement can finish.
  */
 
 import { describe, expect, it } from "vitest";
@@ -77,11 +73,11 @@ const passwordSession = (amr: readonly string[], mfaAt?: Date): UserSession => (
 	authentication: { primary: "pwd", federation: undefined, upstreamAmr: undefined, mfaAt },
 });
 
-/** The primaries the baseline can judge (the MFA ADR's D9, D16). */
+/** The primaries the baseline can judge. */
 const KNOWN_PRIMARIES: ReadonlySet<string> = new Set(["pwd", "fed"]);
 
 /**
- * A stand-in for the MFA requirement's `admit`: D6's table for the `use`
+ * A stand-in for the MFA requirement's `admit`: its table for the `use`
  * grade, under `mode` with `reach` — the MFA package's own requirement runs
  * the same rows in that package.
  */

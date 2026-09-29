@@ -16,13 +16,11 @@
 
 /**
  * A session's `amr` and a code's `acr` go into `generateIdToken` as they are,
- * for a consumer who turns on `exactOptionalPropertyTypes` (#626).
- *
- * Both records name the key and may hold `undefined`, and under that option
- * `a?: T` refuses an explicit `undefined` — so `GenerateIdTokenOptions` says
- * `?: T | undefined` for them. Without the option the two spellings are the
- * same type, so no ordinary type test can tell them apart; this compiles a
- * probe with the option ON, and a control proves it is on.
+ * for a consumer who turns on `exactOptionalPropertyTypes`. Both records name
+ * the key and may hold `undefined`, which `a?: T` refuses under that option,
+ * so `GenerateIdTokenOptions` says `?: T | undefined` for them. Without the
+ * option the two spellings are the same type, so this compiles a probe with
+ * the option ON, and a control proves it is on.
  */
 
 import path from "node:path";

@@ -15,8 +15,8 @@
  */
 
 /**
- * Conformance suite for `FederationGrantIntentStore` (#593, D16) — every rule
- * both adapters owe, and nothing an adapter may decide for itself.
+ * Conformance suite for `FederationGrantIntentStore`: every rule both adapters
+ * owe, and nothing an adapter may decide for itself.
  *
  * Copied into `@o3co/auth-provider-redis` and held in step mechanically, as the
  * grant store's is: a contract file cannot be imported across a package
@@ -65,17 +65,13 @@ const DAY = 86_400_000;
  * partway through the suite. Not on a whole second, so that an adapter
  * truncating an instant to seconds does not hand every fixture back unchanged.
  *
- * Not set until the first test starts, and read only through `T0()` — `at`
- * included — which refuses to read it before then: a date taken while the
- * suite is collected — in a `describe` body rather than a test — is dated
- * from the import, not from the test that uses it, and next to that test's
- * own dates it is off by however long the suite took to get there. The
- * FederationGrantStore contract lost a test to exactly that, and only on a
- * slow enough run.
+ * Read only through `T0()` (and `at`), which throws before the first test
+ * starts: a date taken while the suite is collected, in a `describe` body, is
+ * dated from the import, and next to the test's own dates it is off by
+ * however long the suite took to get there.
  *
- * Handed out as a copy each time, never the clock itself: a store that wrote
- * to the `now` it was given would otherwise move every date the test takes
- * after it.
+ * Handed out as a copy each time: a store that wrote to the `now` it was
+ * given would otherwise move every date the test takes after it.
  */
 let testClock = new Date(Number.NaN);
 const T0 = (): Date => {
@@ -190,7 +186,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				const record = await lodge();
 				const read = await store.getIntent(record.handle, at(MIN));
 				// Strictly: `resource` and `upstreamSubject`, unset here, come back
-				// named `undefined` rather than left out (#626).
+				// named `undefined` rather than left out.
 				expect(read).toStrictEqual(record);
 				expect(read).not.toBe(record);
 				if (read === null) throw new Error("unreachable");
@@ -350,9 +346,9 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 			});
 
 			it("keeps the pairs apart when a separator could make two of them one", async () => {
-				// Mutation found this: a key of `${clientId}:${subject}` makes
-				// ("agent:x", "u-1") and ("agent", "x:u-1") one bucket, so one
-				// client's abandoned attempts would exhaust another's places.
+				// A key of `${clientId}:${subject}` would make ("agent:x", "u-1") and
+				// ("agent", "x:u-1") one bucket, so one client's abandoned attempts
+				// would exhaust another's places.
 				for (let i = 0; i < FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT; i += 1) {
 					expect(
 						(
@@ -512,9 +508,9 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 			});
 
 			it("never takes a challenge another intent is holding", async () => {
-				// Mutation found this: without the guard, the second park replaces
-				// the first intent's challenge, and the browser holding it answers
-				// a question that is now somebody else's.
+				// Without the guard, the second park replaces the first intent's
+				// challenge, and the browser holding it answers a question that is now
+				// somebody else's.
 				const first = await lodge();
 				const second = await lodge({ handle: "h-2", grantId: "g-2" });
 				await store.parkConsent({
@@ -645,7 +641,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 						nonce: answer.nonce,
 						consent: { at: at(2 * MIN), sid: "sid-1", scopes: [...SCOPES] },
 						// Dated from the answer, by the store: the grant's expiry is not
-						// the callback's to choose (D3).
+						// the callback's to choose.
 						grantExpiresAt: new Date(at(2 * MIN).getTime() + record.lifetimeMs),
 						createdAt: at(2 * MIN),
 						expiresAt: record.expiresAt,

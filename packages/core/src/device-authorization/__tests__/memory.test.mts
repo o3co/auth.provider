@@ -61,17 +61,12 @@ describe("memory DeviceCodeStore — sweep", () => {
 });
 
 /*
- * The store was unbounded. The module built it with no `sweepIntervalMs`, so
- * the timer was null; `findPendingByUserCode`, `approve` and `deny` answered
- * "expired" without dropping the entry; only `poll` reclaimed. A device that
- * asks for a code and never polls -- or an attacker who asks for ten thousand
- * -- left a record resident until process exit.
- *
- * Same shape as the access-token denylist fix (#293 item 6): an amortized
- * sweep on the one operation that grows the map, expired entries reclaimed
- * on every read path, and a cap the rate limiter's `maxBuckets` already set
- * the pattern for -- except that at the cap this store refuses rather than
- * evicts (#445), because what it holds is not a counter that can be reset.
+ * Bounded growth: an amortized sweep on `create`, the one operation that
+ * grows the map; expired entries reclaimed on every read path; and a cap.
+ * Without them a device that asks for a code and never polls, or an attacker
+ * who asks for ten thousand, leaves a record resident until process exit. At
+ * the cap the store refuses rather than evicts, because what it holds is not
+ * a counter that can be reset.
  */
 describe("memory DeviceCodeStore — bounded growth", () => {
 	afterEach(() => {
@@ -144,7 +139,7 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 
 	it("keeps every live entry when it sweeps", async () => {
 		// A sweep that drops a live pending code strands a device mid-flow,
-		// which is worse than the growth it is fixing.
+		// which is worse than the growth it bounds.
 		vi.useFakeTimers();
 		const store = createMemoryDeviceCodeStore({ sweepInterval: 5 });
 		await fill(store, 10, 600_000, "live");
@@ -158,13 +153,12 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 	});
 
 	it("refuses a create at maxEntries rather than evicting a live record", async () => {
-		// #445: a pending or approved-not-yet-polled record is a human's
-		// answer in flight, and a flood that reaches the cap carries the
-		// newest expiries -- so "evict the one closest to expiry" evicted every
-		// legitimate authorization before any of the attacker's. Refusing the
-		// newcomer is the answer that costs the flooder rather than the user
-		// already mid-flow; the per-IP guard ahead of the endpoint bounds how
-		// often anyone is refused.
+		// A pending or approved-not-yet-polled record is a human's answer in
+		// flight, and a flood that reaches the cap carries the newest expiries,
+		// so evicting the one closest to expiry would evict every legitimate
+		// authorization before any of the attacker's. Refusing the newcomer
+		// costs the flooder rather than the user already mid-flow; the per-IP
+		// guard ahead of the endpoint bounds how often anyone is refused.
 		const base = Date.now();
 		const store = createMemoryDeviceCodeStore({ maxEntries: 2 });
 		await store.create(entry(1, base + 100_000, "a"));
@@ -213,11 +207,9 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 	});
 
 	it("sweeps at most once per create, even where the cadence and the cap coincide", async () => {
-		// Copilot on #451: the amortized boundary and the cap both wanted the
-		// expired records gone and each asked for its own O(n) pass — two
-		// sweeps on the one create where they coincide, on the refusal path a
-		// flood exercises. A second pass straight after the first has nothing
-		// left to find. `sweep` is the only reader of the clock inside
+		// The amortized boundary and the cap both need the expired records
+		// gone; where they coincide, on the refusal path a flood exercises, one
+		// O(n) pass serves both. `sweep` is the only reader of the clock inside
 		// `create`, so one clock read per create is one sweep per create.
 		const store = createMemoryDeviceCodeStore({ sweepInterval: 3, maxEntries: 2 });
 		const base = Date.now();
@@ -254,9 +246,9 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 	it("never lets a record with a non-finite expiry take a slot under the cap", async () => {
 		// `NaN` and `Infinity` never satisfy `expiresAtMs <= now`, so a record
 		// carrying one would sit in the map until process exit and, under a
-		// cap that refuses rather than evicts (#445), hold a slot forever. It
-		// is refused at `create`, so the slot stays free and the next record
-		// is admitted.
+		// cap that refuses rather than evicts, hold a slot forever. It is
+		// refused at `create`, so the slot stays free and the next record is
+		// admitted.
 		const base = Date.now();
 		const store = createMemoryDeviceCodeStore({ maxEntries: 1 });
 		await expect(store.create(record(1, Number.POSITIVE_INFINITY))).rejects.toThrow(RangeError);
@@ -295,11 +287,10 @@ const falsySeed = {
 };
 
 /**
- * What this adapter does with an untyped caller's falsy `requestedScope`: the
- * scopeless request it was before #626 made the field a required key, which
- * both bundled stores keep by testing it for truthiness. It is outside the
- * port's types, so it is this adapter's behaviour and not the contract's — a
- * third-party store owes nothing for it (#626).
+ * What this adapter does with an untyped caller's falsy `requestedScope`: a
+ * scopeless request, which both bundled stores keep by testing the field for
+ * truthiness. It is outside the port's types, so it is this adapter's
+ * behaviour and not the contract's; a third-party store owes nothing for it.
  */
 describe("memory DeviceCodeStore — an untyped caller's falsy requestedScope", () => {
 	it.each([

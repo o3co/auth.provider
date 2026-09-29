@@ -15,14 +15,11 @@
  */
 
 /**
- * The subject revocation service (#593, D13).
- *
- * What it adds over the free function is the one thing a free function cannot
- * have: an operator's policy. `"keep"` — end the subject's sessions and tokens
- * but leave their federation grants standing — is a decision about residual
- * access, and a caller that could turn it on per call would be deciding it
- * instead of the operator. So the allowance is configuration, the request is a
- * question, and the answer is reported back: `requested`, `applied`, `reason`.
+ * The subject revocation service: the free function plus the operator's
+ * allowance for `"keep"` (end sessions and tokens, leave federation grants
+ * standing). The allowance is configuration, the request is a question, and
+ * the answer reports `requested`, `applied`, `reason`. See ADR
+ * 2026-09-17-federation-grants-offline-delegation.
  *
  * `complete: true` means **the applied action** completed. A Store that asked
  * to keep, was refused, and got `complete: true` has had every grant revoked.
@@ -81,10 +78,9 @@ describe("createSubjectRevocationService", () => {
 		});
 
 		it("is built for a deployment that declared the boundary absent, and reports it", () => {
-			// #406 lets a deployment declare either subject-level capability
-			// absent. Refusing to construct would be a harder demand than the
-			// operation this wraps makes, and the answer is the one
-			// `revokeAllForSubject` has always given: say what was not done.
+			// A deployment may declare either subject-level capability absent.
+			// Refusing to construct would demand more than the wrapped operation
+			// does; like `revokeAllForSubject`, it says what was not done.
 			const { subjectRevocation: _absent, ...withoutBoundary } = deps();
 			const service = createSubjectRevocationService(
 				withoutBoundary as Parameters<typeof createSubjectRevocationService>[0],

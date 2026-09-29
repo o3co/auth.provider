@@ -15,19 +15,17 @@
  */
 
 /**
- * `checkOAuthTokenSettings` (#728): the `oauthTokenSettings` a composition
- * holds, held to what its readers read before any of them reads a member.
+ * `checkOAuthTokenSettings`: the `oauthTokenSettings` a composition holds,
+ * held to what its readers read before any of them reads a member.
  *
- * A reader reads every member from a slot the composition holds, and the
- * configuration only when it holds none — never member by member, which
- * would mix two sources in one reading. So a member a host's slot lacks or
- * gets wrong is refused, naming it, rather than read as `undefined` — which
- * for a switch such as `requireEmailVerified` would quietly turn it off.
- *
- * Its lifetimes are also held to the ones core resolves from the
- * configuration, whoever provides the slot: retention is sized from the
- * configured lifetimes, so a longer slot lifetime would mint a token that
- * outlives the record revoking it.
+ * A reader reads every member from the composition's slot, or from the
+ * configuration when the composition holds none — never member by member,
+ * which would mix two sources in one reading. So a member a host's slot lacks or gets wrong
+ * is refused by name rather than read as `undefined`, which for a switch
+ * such as `requireEmailVerified` would quietly turn it off. Lifetimes are
+ * held to those core resolves from the configuration, whoever provides the
+ * slot: retention is sized from the configured lifetimes, so a longer slot
+ * lifetime would mint a token that outlives the record revoking it.
  */
 
 import { describe, expect, it } from "vitest";

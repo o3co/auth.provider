@@ -20,12 +20,10 @@
  * slot — what a composition actually runs.
  *
  * Absent — the section not given, a module not loaded — seeds nothing, and
- * the prefix runs on the adapter's default, as #270 and #448 intend. Present
- * but not a spec a limiter can apply is a configuration someone wrote: it
- * used to be skipped as silently, so the route ran on the adapter's 60 per
- * 60 s instead of what was written. It must refuse to boot, naming the config
- * key, not the limiter — since #728 by the schema core's composed parse
- * applies to each section it mirrors, before any seed is read.
+ * the prefix runs on the adapter's default. Present but not a spec a limiter
+ * can apply is a configuration someone wrote, so it must refuse to boot,
+ * naming the config key, not the limiter — by the schema core's composed
+ * parse applies to each section it mirrors, before any seed is read.
  */
 
 import express, { Router } from "express";
@@ -119,7 +117,7 @@ describe("a seeded budget whose section is absent", () => {
 describe("a seeded budget given as the strings HOCON substitutes", () => {
 	// An environment variable reaches the config as a string, and every
 	// schema that owns these keys coerces it — core's composed parse among
-	// them, for the sections it still mirrors (#728) — so a composition that
+	// them, for the sections it still mirrors — so a composition that
 	// hands createApp HOCON directly must boot on the budget written, not
 	// refuse it.
 	it("boots on rateLimit.login as numeric strings, and applies it", async () => {

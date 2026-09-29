@@ -15,25 +15,18 @@
  */
 
 /**
- * Issue #406 — the one silent no-op #363 did not close.
- *
- * #363 introduced `ModuleSpec.absencePolicies` so an unfilled optional slot
- * has to be a *stated* decision at boot, and its own doc cites "a
- * subject-revocation watermark nothing consulted (#322)" as a motivating
- * example. `auditSink` and `accessTokenDenylist` got policies.
- * `subjectRevocation` and `subjectSessionIndex` did not.
- *
- * The consequence, in every shape this repository shipped: a scaffolded
- * deployment got `subjectRevocation: undefined`, so `verifyJwt` skipped the
- * watermark check, the #376 refresh-redemption gate was inert, and
- * `revokeAllForSubject` reported `unavailable` — with no boot-time signal in
- * either direction. Exactly the shape `absencePolicies` exists to refuse.
+ * `SUBJECT_REVOCATION_ABSENCE_POLICY`: an unfilled `subjectRevocation` or
+ * `subjectSessionIndex` must be a *stated* decision at boot, as
+ * `ModuleSpec.absencePolicies` requires of an optional slot. Without the
+ * watermark, `verifyJwt` skips its check, the refresh-redemption gate is
+ * inert and `revokeAllForSubject` reports `unavailable`; left unstated,
+ * nothing at boot would say so.
  *
  * One config key covers both slots. They are two components but one
  * capability: subject-level revocation needs the index to enumerate what to
  * cascade and the watermark to refuse what the cascade missed, and a
- * deployment that has neither has one thing to say, not two. #321's adapters
- * fill them together for the same reason.
+ * deployment that has neither has one thing to say, not two. The bundled
+ * session-store modules fill them together for the same reason.
  */
 
 import { describe, expect, it } from "vitest";
@@ -99,7 +92,7 @@ function boot(value?: "watermark" | "unsupported") {
 			oauth.revocation = rest;
 		}
 	} else {
-		// `accessToken` is required once the `revocation` object exists (#277),
+		// `accessToken` is required once the `revocation` object exists,
 		// so it is seeded here for the case where a caller strips the whole
 		// object first. The fixture itself carries both keys, and the spread
 		// below keeps whatever it has.
@@ -166,7 +159,7 @@ describe("SUBJECT_REVOCATION_ABSENCE_POLICY (#406)", () => {
 
 	it("uses one key for both slots — one capability, one decision", async () => {
 		// Two components, but a deployment that has neither has one thing to
-		// say. #321's adapters fill them together for the same reason.
+		// say.
 		expect(SUBJECT_REVOCATION_ABSENCE_POLICY.configKey).toEqual(["oauth", "revocation", "subject"]);
 		expect(SUBJECT_REVOCATION_ABSENCE_POLICY.absentValue).toBe("unsupported");
 	});

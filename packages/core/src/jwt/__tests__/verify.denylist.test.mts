@@ -113,7 +113,6 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 	});
 
 	it("does NOT consult denylist when option is undefined (default)", async () => {
-		// Confirms backwards-compat: existing callers (no denylist option) see no behavior change.
 		const { token } = await mintAccessToken();
 		const verified = await verifyJwt(token, testKeyStore(), {
 			type: "access_token",
@@ -125,11 +124,10 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 	});
 
 	it("fail-closed: denylist.has() throwing causes JwtVerificationError reason=revocation_unavailable (Copilot review #3, #459)", async () => {
-		// SECURITY: if the denylist backend (e.g. Redis) is unavailable, we cannot
-		// determine revocation state. Failing open would accept revoked tokens during
-		// the outage; secure default is to reject. The refusal is what this pins
-		// and it has not changed. The *reason* has: since #459 it is
-		// `revocation_unavailable`, not `revoked` — see the outage suite below.
+		// SECURITY: if the denylist backend (e.g. Redis) is unavailable, revocation
+		// state is unknown, and failing open would accept revoked tokens during
+		// the outage. This pins the refusal; its reason is `revocation_unavailable`,
+		// not `revoked` (see the outage suite below).
 		const throwingDenylist = {
 			kind: "throwing-test-stub",
 			add: async () => {},
@@ -153,7 +151,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 
 	it("keeps the store's error as the cause, never its text in the verdict's message", async () => {
 		// A caught error reaches a log only through loggableError. Folded into
-		// the message, the store's text rode past the projection as the
+		// the message, the store's text would ride past the projection as the
 		// verdict's own words; kept as `cause`, a caller's log projects it.
 		const outage = Object.assign(
 			new Error("READONLY You can't write against a read only replica."),
@@ -182,20 +180,12 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 });
 
 /*
- * #459 — a denylist backend outage is not a revocation.
- *
- * Failing closed on an unreachable denylist is right, but reporting it as
- * `reason: "revoked"` made it indistinguishable from a real one. The comment
- * above the consult claimed operators could tell the two apart via the error
- * message; `emitRejection` logs the reason and not the message, so a Redis
- * blip and a genuinely revoked token produced the same
- * `jwt_verify_rejected reason=revoked` line — for every token, on every
- * replica, until the backend came back. #408 already split the outage from
- * the finding for the subject watermark and named it `revocation_unavailable`;
- * the denylist path predates that and was not brought in line.
- *
- * Nothing here lets a token through. It only stops an outage from being
- * labelled as a revocation.
+ * A denylist backend outage is not a revocation. It still fails closed, but
+ * with `reason: "revocation_unavailable"`, as the subject watermark does:
+ * `emitRejection` logs the reason and not the message, so under `revoked` a
+ * Redis blip and a genuinely revoked token would log the same
+ * `jwt_verify_rejected reason=revoked` line, for every token on every
+ * replica, until the backend came back. Nothing here lets a token through.
  */
 describe("verifyJwt — denylist backend outage (#459)", () => {
 	/** A denylist whose consult always fails — a transient outage, not a revocation. */
@@ -245,7 +235,7 @@ describe("verifyJwt — denylist backend outage (#459)", () => {
 	});
 
 	it("is covered by isVerificationUnavailable — one predicate for both stores", async () => {
-		// A caller that answers 503 for a watermark outage (#408) must not
+		// A caller that answers 503 for a watermark outage must not
 		// have to know which store was down to give the denylist outage the
 		// same answer.
 		const err = await rejectionOf(verifyWith(outageDenylist()));
@@ -264,7 +254,7 @@ describe("verifyJwt — denylist backend outage (#459)", () => {
 
 	it("logs jwt_verify_rejected with reason=revocation_unavailable — the field operators actually see", async () => {
 		// The audit record carries the reason, not the message. This pins the
-		// field a SIEM filter indexes on, which is the one the issue was about.
+		// field a SIEM filter indexes on.
 		const logger = spyLogger();
 		await expect(verifyWith(outageDenylist(), logger)).rejects.toThrow();
 		expect(logger.warn).toHaveBeenCalledWith(

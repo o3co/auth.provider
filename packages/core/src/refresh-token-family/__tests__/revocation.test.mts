@@ -73,12 +73,8 @@ describe("createRefreshTokenFamilyRevocation", () => {
 	});
 
 	it("revokeFamily updater returns a frozen value (I3 freeze regression)", async () => {
-		// Mirrors the rotation.mts updater-freeze pattern. Adapters also freeze
-		// on persist, so this test pins the wrapper-layer freeze (defence-in-
-		// depth) directly: a future refactor stripping the freeze in
-		// revocation.mts must fail this assertion. Without it, the symmetry
-		// with rotation.mts could silently drift on edits.
-		// We intercept the updater via a recording stub for the underlying store.
+		// Adapters also freeze on persist, so a recording stub store pins the
+		// wrapper-layer freeze (defence in depth, as in rotation.mts) directly.
 		let captured: RefreshTokenFamily | null = null;
 		const initial: RefreshTokenFamily = Object.freeze({
 			familyId: "fam-1",
@@ -116,17 +112,14 @@ describe("createRefreshTokenFamilyRevocation", () => {
 });
 
 /**
- * `revokeFamily` for a family with no record registers a revoked one. Between
- * the "not found" and the registration, a concurrent revocation (or
- * registration) can write the same record: `registerFamily` then refuses with
- * `duplicate-family`, and the wrapper takes a second pass, which finds the
- * record and revokes it — or finds it already revoked. Any other refusal is
- * the store's, and propagates. A second collision means the revocation is not
- * known to be recorded: `conflict-exhausted`, which a caller answers as an
- * outage and never as a revocation done.
- *
- * A scripted store plays each pass exactly; the clock is fixed so the
- * retention rule's expiry can be checked to the millisecond.
+ * `revokeFamily` for a family with no record registers a revoked one. If a
+ * concurrent revocation (or registration) writes the same record first,
+ * `registerFamily` refuses with `duplicate-family` and the wrapper takes a
+ * second pass, which revokes the record it finds, or finds it already revoked.
+ * Any other refusal is the store's, and propagates. A second collision means
+ * the revocation is not known to be recorded: `conflict-exhausted`, which a
+ * caller answers as an outage and never as a revocation done. The clock is
+ * fixed so the retention rule's expiry can be checked to the millisecond.
  */
 describe("createRefreshTokenFamilyRevocation — a record that appears while a missing family is revoked", () => {
 	const NOW = 1_800_000_000_000;

@@ -15,32 +15,12 @@
  */
 
 /**
- * Issue #343 — a coverage-*shape* problem, not a coverage-percentage one.
- *
- * #342 fixed a release blocker: `firstParty` could not be set on any
- * file-backed client registration, so `/authorize` was unusable with the
- * shipped template. CI was green throughout, because every in-repo test of the
- * #316 invariant hand-stubbed a `ClientRepository` returning an object literal
- * with `firstParty: true`. Nothing drove the invariant through
- * `InMemoryClientRepository` or the YAML loader — which is what every real
- * deployment uses. The stubs passed against a repository whose schema could not
- * represent the field at all.
- *
- * The issue asks for the mechanical form of the check rather than one more
- * instance of the bug, and `ClientEntrySchema` is `.strict()`, which makes it
- * cheap: parse a `Client` with **every** field populated, and any field the
- * domain type has but the schema does not becomes an unrecognized key. That is
- * precisely the #342 shape, caught by construction instead of by someone
- * noticing.
- *
- * Keeping this honest is the fixtures' job, and it has to be enforced rather
- * than asked for: when `Client` gains a field, `FULLY_POPULATED_CLIENT` below
- * must gain it too, or the guard silently stops covering the one thing it
- * exists to cover. A plain `satisfies Omit<Client, "clientId">` does not do
- * that — an omitted *optional* field is still assignable, so the fixture would
- * quietly fall behind the type. `Required<...>` is what makes the omission a
- * compile error, which is the same move as the runtime check below: catch the
- * class mechanically instead of trusting a comment.
+ * The file-backed entry schemas can represent every field of the domain type
+ * they load. A test that stubs `ClientRepository` with an object literal
+ * cannot see a field the schema lacks, so this parses fixtures with every
+ * field populated through the schemas themselves: `ClientEntrySchema` is
+ * `.strict()`, so a field `Client` has and the schema lacks surfaces as an
+ * unrecognized key. `Required<...>` keeps each fixture in step with its type.
  */
 
 import { describe, expect, it } from "vitest";
@@ -58,9 +38,9 @@ import type { Client, User } from "#/repositories/types.mjs";
 const FULLY_POPULATED_CLIENT = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	clientSecret: "a-client-secret-value",
-	// #484: the private_key_jwt key sources. Mutually exclusive with each
-	// other and with clientSecret by method, so the runtime parse below
-	// registers the fixture as variants; the type-level check stays whole.
+	// The private_key_jwt key sources. Mutually exclusive with each other and
+	// with clientSecret by method, so the runtime parse below registers the
+	// fixture as variants; the type-level check stays whole.
 	jwks: {
 		keys: [
 			{
@@ -86,8 +66,6 @@ const FULLY_POPULATED_CLIENT = {
 	clientName: "Example App",
 	clientUri: "https://app.example.com",
 	allowedAzpForFederationToken: true,
-	// #593, D9: what a client may spend a federation grant on, and where a
-	// connect flow may return to for it.
 	allowedFederationGrantConnections: ["graph"],
 	federationGrantRedirectUris: ["https://app.example.com/grants/cb"],
 	senderConstrained: { required: true, methods: ["dpop"] },
@@ -99,10 +77,9 @@ const FULLY_POPULATED_CLIENT = {
 } satisfies Required<Omit<Client, "clientId">>;
 
 /**
- * #484: `clientSecret`, `jwks` and `jwksUri` cannot coexist on one
- * registration — the method selects exactly one credential — so the runtime
- * check registers three variants that together carry every field of the
- * fixture. The union-of-keys assertion below is what keeps that honest.
+ * `clientSecret`, `jwks` and `jwksUri` cannot coexist on one registration —
+ * the method selects exactly one credential — so the runtime check registers
+ * three variants that together carry every field of the fixture.
  */
 const { jwks, jwksUri, clientSecret, ...common } = FULLY_POPULATED_CLIENT;
 const REGISTRABLE_VARIANTS: ReadonlyArray<Record<string, unknown>> = [
@@ -118,9 +95,8 @@ describe("ClientEntrySchema conformance with Client (#343)", () => {
 	});
 
 	it("represents every field the domain type carries", () => {
-		// The whole point. `.strict()` means an unrecognized key throws, so a
-		// field on `Client` that the schema never learned about fails here —
-		// which is exactly how #342 would have been caught before it shipped.
+		// `.strict()` throws on an unrecognized key, so a field on `Client` that
+		// the schema lacks fails here.
 		for (const variant of REGISTRABLE_VARIANTS) {
 			expect(() => ClientEntrySchema.parse(variant)).not.toThrow();
 		}
@@ -139,34 +115,30 @@ describe("ClientEntrySchema conformance with Client (#343)", () => {
 	});
 
 	it("names the offending key when a registration carries one the schema does not know", () => {
-		// The other direction, and the reason `.strict()` is worth keeping: a
-		// typo'd key in a YAML registration must fail boot rather than be
-		// silently ignored, which would leave the operator believing they
-		// configured something.
+		// Why `.strict()` stays: a typo'd key in a YAML registration must fail
+		// boot rather than be silently ignored, leaving the operator believing
+		// they configured something.
 		expect(() => ClientEntrySchema.parse({ ...REGISTRABLE_VARIANTS[0], frstParty: true })).toThrow(
 			/frstParty/,
 		);
 	});
 
 	it("carries firstParty specifically — the #342 regression", () => {
-		// Named on its own because this one was a release blocker: without it
-		// `/authorize` answered `unauthorized_client` for every file-backed
-		// registration, and no stub-based test could see it.
+		// Pinned on its own: without it `/authorize` answers
+		// `unauthorized_client` for every file-backed registration.
 		const parsed = ClientEntrySchema.parse(REGISTRABLE_VARIANTS[0]) as { firstParty?: boolean };
 		expect(parsed.firstParty).toBe(true);
 	});
 });
 
 /**
- * A `User` with every *declared* field set. `User` also carries an index
- * signature for Store-specific claims, which no schema can enumerate — and
- * `UserEntrySchema` is `.catchall(z.unknown())` rather than `.strict()` for
- * that reason. So the check here is the round-trip, not the refusal.
+ * A `User` with every *declared* field set. `User` also has an index
+ * signature for Store-specific claims, which no schema can enumerate, so
+ * `UserEntrySchema` is `.catchall(z.unknown())` rather than `.strict()` and
+ * the check here is the round-trip, not the refusal.
  *
- * `Required<User>` for the same reason the client fixture uses it: a new
- * optional field on `User` must break this line rather than slip past it. The
- * index signature survives `Required` and forces nothing, which is correct —
- * there is no set of Store-specific claims to enumerate.
+ * `Required<User>` makes a new optional field on `User` break this line. The
+ * index signature survives `Required` and forces nothing, which is correct.
  */
 const FULLY_POPULATED_USER = {
 	id: "u-1",
@@ -176,7 +148,8 @@ const FULLY_POPULATED_USER = {
 	name: "Alice Example",
 	picture: "https://example.com/alice.png",
 	groups: ["staff"],
-	// The MFA ADR's D12: the enrollment witness a Store answers on `authenticate`.
+	// The MFA enrollment witness a Store answers on `authenticate`
+	// (ADR 2026-09-25-multi-factor-authentication).
 	mfaEnrolled: true,
 } satisfies Required<User>;
 

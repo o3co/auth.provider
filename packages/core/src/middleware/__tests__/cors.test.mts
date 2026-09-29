@@ -9,12 +9,10 @@
  */
 
 /**
- * #500 — `cors.allowedOrigins` was declared, shipped in every reference.conf,
- * and read by nothing. A cross-origin preflight to `/oauth/token` got no
- * `Access-Control-Allow-Origin`, so a browser SPA on any origin but the
- * provider's could not use this provider at all — and the operator who set the
- * key had no way to discover that, because a silent no-op config key produces
- * no error, no warning and no log line.
+ * `corsMw` and its mount (core README, "CORS"). Without
+ * `Access-Control-Allow-Origin` a browser SPA on any origin but the
+ * provider's cannot use the provider at all, and a config key that silently
+ * does nothing produces no error, warning or log line to say so.
  *
  * These exercise the middleware through a real Express app rather than a stub
  * `Response`: `res.vary` appends rather than sets, the path match has to agree
@@ -415,10 +413,8 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 	// The environment variable is the documented way to configure this, and it
 	// can only carry a list as a comma-separated string. `assembleApp` reads
 	// `components.config`, which has NOT necessarily been through
-	// `AppConfigSchema` — `validateAndComposeConfig` validates with the core
-	// schema, which does not declare `cors`, and merges the raw extras back
-	// over the result. Testing that string for `Array.isArray` mounted nothing
-	// at all, silently, which is the failure this key exists to end.
+	// `AppConfigSchema`, so a mount that tested for an array would silently
+	// mount nothing.
 	it("mounts from a comma-separated string, the shape an env var carries", async () => {
 		const { app, handle } = await bootWith(`${ALLOWED}, ${OTHER_ALLOWED}`);
 		for (const origin of [ALLOWED, OTHER_ALLOWED]) {
@@ -440,11 +436,11 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 	});
 
 	it("refuses to boot on a shape nothing can read, naming the key", async () => {
-		// AppConfigSchema refuses this shape by path, and since #728 boot's
-		// composed parse runs the schema core mirrors for `cors` whenever the
-		// section is present: a hand-built composition that hands createApp
-		// its configuration unparsed is refused too, before the mount site
-		// could only warn about it.
+		// AppConfigSchema refuses this shape by path, and boot's composed parse
+		// runs the schema core mirrors for `cors` whenever the section is
+		// present, so a hand-built composition that hands createApp its
+		// configuration unparsed is refused too, before the mount site (which
+		// could only warn).
 		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
 		config.cors = { allowedOrigins: 42 };
 		const refused = await createApp({

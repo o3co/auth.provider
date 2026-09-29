@@ -15,14 +15,11 @@
  */
 
 /**
- * The one way a removed config key dies loudly (#366).
+ * `withRemovedKeys`: the one way a removed config key dies loudly.
  *
  * Zod's default object behavior strips unknown keys before refinement sees
  * them, so an operator's stale config line would be silently ignored on
- * upgrade — the exact opposite of what a removal needs. The repo had grown
- * two copy-pasted preprocess wrappers doing the detection (refreshToken,
- * authorize) plus a differently-shaped one for the legacy JWT fields;
- * `withRemovedKeys` is the shared spelling, and this suite is its contract.
+ * upgrade. This suite is the helper's contract.
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -58,10 +55,8 @@ describe("withRemovedKeys", () => {
 		const result = schema.safeParse({ kept: "value", oldFlag: true });
 		expect(result.success).toBe(false);
 		const issue = result.success ? undefined : result.error.issues[0];
-		// The message skeleton is shared with the pre-#366 wrappers, so the
-		// operator-facing shape (and the tests pinning it) survive the
-		// consolidation: "<section>.<key> was removed in <release>; see
-		// CHANGELOG. <note> Remove this field from your config."
+		// The operator-facing shape: "<section>.<key> was removed in
+		// <release>; see CHANGELOG. <note> Remove this field from your config."
 		expect(issue?.message).toContain("test.section.oldFlag was removed in v9.9.9 (test)");
 		expect(issue?.message).toContain("see CHANGELOG");
 		expect(issue?.message).toContain("It stopped meaning anything.");
@@ -79,7 +74,7 @@ describe("withRemovedKeys", () => {
 
 	it("leaves non-object input to the wrapped schema's own error", () => {
 		// The detection must not crash on scalars/arrays; the wrapped schema
-		// reports the type mismatch as it always did.
+		// reports the type mismatch.
 		expect(schema.safeParse("nonsense").success).toBe(false);
 		expect(schema.safeParse([1, 2]).success).toBe(false);
 	});

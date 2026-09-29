@@ -174,17 +174,15 @@ describe("the v2 key-ring envelope", () => {
 
 	it("reads only a 16-byte tag and a 12-byte IV, whatever lengths the platform's GCM would take", () => {
 		// Node before 26 accepts a GCM tag of 4 to 16 bytes on decrypt unless
-		// told the length, so an envelope whose tag was cut short opened: a
-		// forgery would then need to match 32 bits, not 128, and short tags
-		// leak the authentication key (Ferguson). Every envelope ever sealed
-		// has a 12-byte IV and a 16-byte tag, so nothing else is read.
+		// told the length: a forgery would then need to match 32 bits, not 128,
+		// and short tags leak the authentication key (Ferguson). Every envelope
+		// ever sealed has a 12-byte IV and a 16-byte tag, so nothing else is read.
 		//
-		// Each is also opened with a ring that lacks its key. The lengths are
-		// part of the envelope's shape, read before the ring is consulted, so
-		// the answer is `unreadable` there too; a platform that refuses a short
-		// tag itself (Node 26) would otherwise make the first check pass without
-		// the envelope's own, and without it the second would be
-		// `key_unavailable` on every platform.
+		// Each is also opened with a ring that lacks its key: the lengths are
+		// part of the envelope's shape, read before the ring, so the answer is
+		// `unreadable` there too. On Node 26, which refuses a short tag itself,
+		// the first check passes without the envelope's own; without it the
+		// second would be `key_unavailable` on every platform.
 		const withoutItsKey: SealingKeyRing = [RING[1] as SealingKey];
 		const parts = sealWithKeyRing("rt-1", RING, BINDING).split(".");
 		const tag = Buffer.from(parts[4] as string, "base64url");

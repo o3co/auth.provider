@@ -15,20 +15,13 @@
  */
 
 /**
- * `revokeAllForSubject` reaches the subject's federation grants (#593, D13).
- *
- * The free function **always revokes**: it has no way to keep anything, and
- * that is deliberate. Keeping is offered only by the subject revocation
- * service, where an operator's allowance can be read — a boolean handed to a
- * helper by the Store would be a convention among trusted callers rather than
- * a control.
- *
- * The grant store stays **optional**, and its omission is not a newly
- * unavailable capability. Every call written before #593 omits it, and marking
- * those incomplete would turn working deployments — ones with no grants at
- * all — into failures overnight. What omission means is "no explicit grant
- * pass was asked for", and the adapter-enforced boundary is the backstop for
- * exactly that case.
+ * `revokeAllForSubject` reaches the subject's federation grants. The free
+ * function **always revokes**; keeping is offered only by the subject
+ * revocation service, where an operator's allowance can be read. The grant
+ * store stays **optional**, and omitting it is not an unavailable capability:
+ * it means "no explicit grant pass was asked for", and the adapter-enforced
+ * boundary is the backstop for exactly that case.
+ * See ADR 2026-09-17-federation-grants-offline-delegation.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -180,8 +173,8 @@ describe("revokeAllForSubject with a grant store", () => {
 	});
 
 	it("leaves a call that passed no store complete, and says the pass was not run", async () => {
-		// Every call written before #593 looks like this, and the boundary the
-		// stamp just wrote is the backstop for it.
+		// The boundary the stamp just wrote is the backstop for a call without
+		// a grant store.
 		const result = await revokeAllForSubject({ ...base(), now: () => now().getTime() });
 		expect(result.complete).toBe(true);
 		expect(result.unavailable).toEqual([]);

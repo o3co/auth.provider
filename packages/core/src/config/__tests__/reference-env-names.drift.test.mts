@@ -15,30 +15,21 @@
  */
 
 /**
- * #728 B9: an environment variable a package's defaults read is named after
- * the path it sets, in upper snake case, with no exception —
- * `oauth.dpop.nonce.ttl-seconds` is `OAUTH_DPOP_NONCE_TTL_SECONDS`, a list
- * element's index is a word of its own (`mfa.encryptionKeys.0.key` is
- * `MFA_ENCRYPTION_KEYS_0_KEY`), and a camelCase key splits at each capital.
+ * An environment variable a package's defaults read is named after the path
+ * it sets, in upper snake case, with no exception: a list element's index is
+ * a word of its own, and a camelCase key splits at each capital.
  *
  * It reads every package's `config/reference.conf` and the standalone
  * template's configuration layers (`templates/standalone/config/*.conf`):
  * each `${?VAR}` (or `${VAR}`) outside a comment is resolved alone, set to a
  * marker, and the paths the marker lands on are the paths the variable sets.
- * A name that is not the upper-snake-case form of each of its paths fails,
- * unless it is in `LEGACY`: the names that predated the rule when this guard
- * was written, which the move pull requests rename.
  *
- * The rule the guard holds (`namingProblems`):
- *
- * - `LEGACY` is a fixed baseline. It is never edited except to delete an
- *   entry — never to add one — and it may keep a name that has since been
- *   renamed; its length is held at or under its first count, 61.
- * - Every misnamed variable is in `LEGACY`: a variable misnamed anew is
- *   outside it and fails, whatever else a change renames.
- * - How many variables are misnamed is held at `CEILING`, the count today: a
- *   move pull request lowers it by the names it renames, and a rename that
- *   leaves it where it was fails until it is lowered. Nothing raises it.
+ * The rule (`namingProblems`): a misnamed variable fails unless it is in
+ * `LEGACY`, the names that predated the rule, whatever else a change renames.
+ * `LEGACY` only loses entries, and may keep a name that has since been
+ * renamed. How many variables are misnamed is held at exactly `CEILING`: a
+ * rename fails until `CEILING` is lowered by the names it renames. Nothing
+ * raises it.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -55,8 +46,8 @@ const TEMPLATE_CONFIG = fileURLToPath(
 
 /**
  * How many variables may still not be named after their paths: exactly as
- * many as are today. A move pull request lowers it by the names it renames;
- * nothing raises it.
+ * many as are today. A rename lowers it by the names it renames; nothing
+ * raises it.
  */
 const CEILING = 61;
 
@@ -64,10 +55,9 @@ const CEILING = 61;
 const LEGACY_BASELINE = 61;
 
 /**
- * The names that predated the rule, as `<layer>: <VAR> at <path>` — `<layer>`
- * is a package's directory name, or `template` for the standalone template's
- * layers; the move pull requests rename them. A fixed baseline: entries are
- * deleted, never added (see the file header).
+ * The names that predated the rule, as `<layer>: <VAR> at <path>`, where
+ * `<layer>` is a package's directory name, or `template` for the standalone
+ * template's layers. Entries are deleted, never added (see the file header).
  */
 const LEGACY: readonly string[] = [
 	"core: LOG_LEVEL at logging.level",

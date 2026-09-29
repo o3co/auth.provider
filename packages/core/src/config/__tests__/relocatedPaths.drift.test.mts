@@ -15,18 +15,15 @@
  */
 
 /**
- * The relocated-path refusal is removed at the first major release (#728 B10).
+ * The relocated-path refusal is removed at the first major release.
  *
- * #728 moves configuration sections under the module that owns them, and a
- * setting still written at an old path refuses boot naming the new one —
- * `section.relocatedFrom`, enforced as `config-path-relocated`. The owner
- * decided that this is a bridge for the 0.x line: the refusals, and the
- * vocabulary that declares them, are removed at the first major release.
- *
- * Nothing in a release cut would remember that on its own, so this fails from
- * the cut that writes the first major version's section in the CHANGELOG —
- * the section is written at cut time (docs/release-policy.md R2) — until
- * `relocatedFrom` and `config-path-relocated` are gone from core's source.
+ * A setting still written at a section's old path refuses boot naming the new
+ * one (`section.relocatedFrom`, enforced as `config-path-relocated`). That
+ * bridge is for the 0.x line only, and nothing in a release cut would remember
+ * to remove it. So this fails from the cut that writes the first major
+ * version's section in the CHANGELOG (written at cut time,
+ * docs/release-policy.md R2) until `relocatedFrom` and
+ * `config-path-relocated` are gone from core's source.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

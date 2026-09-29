@@ -15,14 +15,10 @@
  */
 
 /**
- * The bundled in-memory grant store's manifest (#593, D16).
- *
- * One setting, and the one where a misreading is invisible from outside:
- * "keep no tombstones" and "keep thirty days of them" look identical until
- * somebody asks why a revoked grant cannot be looked up. Its schema used to be
- * a narrow restatement of core's section with `z.coerce.number()` in it, so
- * `tombstoneRetention: null` became `0` — Copilot's finding — and a deployment
- * that had written nothing of the sort had no tombstones at all.
+ * The bundled in-memory grant store's manifest. One setting, and the one where
+ * a misreading is invisible from outside: "keep no tombstones" and "keep
+ * thirty days of them" look identical until somebody asks why a revoked grant
+ * cannot be looked up.
  */
 
 import { describe, expect, it } from "vitest";

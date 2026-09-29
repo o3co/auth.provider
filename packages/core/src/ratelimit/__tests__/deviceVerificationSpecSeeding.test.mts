@@ -15,18 +15,12 @@
  */
 
 /**
- * `device_verification` was "present", not "5 attempts".
- *
- * The verification endpoint keys its budget `device_verification:user:<sub>`
- * and both bundled adapters resolve a spec by prefix, falling back to the
- * adapter's `defaultLimit` of 60/60s. Nothing seeded a `device_verification`
- * spec, so the effective budget was twelve times what the boot refusal
- * reasons from ("RFC 8628 §5.1 ... only allow 5 attempts"), and the key the
- * package README told operators to set did not exist.
- *
- * Same fix `login` got in #270: one config key that is the source of truth
- * (`oauth.deviceAuthorization.rateLimit`), seeded into each adapter's
- * `limits` unless the operator declared that prefix explicitly.
+ * Seeding the `device_verification` spec (the verification endpoint's
+ * `device_verification:user:<sub>` budget) from
+ * `oauth.deviceAuthorization.rateLimit` into each adapter's `limits`, unless
+ * the operator declared that prefix explicitly. Unseeded, the prefix falls to
+ * the adapter's `defaultLimit` (60/60s), twelve times the budget the
+ * device-grant boot refusal reasons from (RFC 8628 §5.1).
  */
 
 import { describe, expect, it } from "vitest";
@@ -86,8 +80,8 @@ describe("resolveDeviceVerificationLimitSpec", () => {
 
 	it("refuses a budget that is given but unusable, naming the key", () => {
 		// A hand-built config that never passed the schema is still a
-		// configuration someone wrote; skipped, the route ran on the adapter's
-		// 60 per 60 s default instead of it.
+		// configuration someone wrote; skipped, the route would run on the
+		// adapter's 60 per 60 s default instead of it.
 		for (const [limit, windowSeconds] of [
 			[0, 300],
 			[5, 0],
@@ -152,18 +146,16 @@ describe("resolveSeededLimitSpecs", () => {
 });
 
 describe("isDeviceVerificationRateLimitSpec", () => {
-	// #448: the seed above leaves the adapter default in place for an
-	// unusable budget, and the device-grant module refuses to boot on one.
-	// Both decisions have to be the same decision, so the shape of a usable
-	// budget is defined once, here, and this is its specification.
+	// The seed and the device-grant module's boot refusal must make the same
+	// decision, so the shape of a usable budget is defined once, here, and
+	// this is its specification.
 	it("accepts a positive-integer limit and window", () => {
 		expect(isDeviceVerificationRateLimitSpec({ limit: 5, windowSeconds: 300 })).toBe(true);
 	});
 
 	it("is the one predicate every limiter judges a spec by", () => {
 		// The seed, the device-grant boot refusal and both adapters' refusal at
-		// construction answer the same question; a second definition is how
-		// they came to answer it differently for a window past the Date range.
+		// construction answer the same question, so there is one definition.
 		expect(isDeviceVerificationRateLimitSpec).toBe(isUsableRateLimitSpec);
 	});
 

@@ -16,14 +16,12 @@
 
 /**
  * The `mfaFactors` contribution kind and its read side, `mfaFactorResolver`,
- * booted through `createApp` (the ADR's D3 and D7).
- *
- * A factor reaches the coordinator from a package the MFA package does not
- * depend on, as a contribution keyed by kind. A factory may answer `null` —
- * the factor switched off by its configuration — and the kind is then
- * absent from the resolver, as a switched-off token-binding mechanism is
- * absent from the composed middleware. The resolver is a synthetic key: the
- * planner assembles it, and nothing else may supply it.
+ * booted through `createApp` (MFA ADR, D3 and D7). A factor reaches the
+ * coordinator from a package the MFA package does not depend on, as a
+ * contribution keyed by kind. A factory may answer `null` (the factor switched
+ * off by its configuration), and the kind is then absent from the resolver.
+ * The resolver is a synthetic key: the planner assembles it, and nothing else
+ * may supply it.
  */
 
 import { inspect } from "node:util";

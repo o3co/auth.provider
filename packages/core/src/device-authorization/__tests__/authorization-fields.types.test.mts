@@ -15,28 +15,22 @@
  */
 
 /**
- * A device-code store's copy of an authorization cannot leave a field out
- * and still compile (#626) — for a copy built as an object literal of the
- * record type; not for one behind a cast or one that names a field with the
- * wrong value.
+ * A device-code store's copy of an authorization cannot leave a field out and
+ * still compile, for a copy built as an object literal of the record type;
+ * not for one behind a cast or one that names a field with the wrong value.
  *
  * Both bundled stores copy the record field by field on `create` and on every
- * read, and a field a copy forgot was dropped with no error: `requestedScope`
- * gone from a read shows the user an empty scope, and gone from what `create`
- * stores it grants nothing; `subject` gone makes the grant
- * refuse an approval the user gave; `grantedScope` gone mints a token with no
- * scope, while the verification endpoint's audit event falls back to
- * `requestedScope` and records more than was granted.
+ * read, and a forgotten field is dropped silently: `requestedScope` gone from
+ * a read shows the user an empty scope, and gone from what `create` stores it
+ * grants nothing; `subject` gone makes the grant refuse an approval the user
+ * gave; `grantedScope` gone mints a token with no scope, while the
+ * verification endpoint's audit event falls back to `requestedScope` and
+ * records more than was granted. So what a store answers with names every
+ * field as a required key, holding `undefined` where there is none.
  *
- * So what a store answers with names every field as a REQUIRED key, holding
- * `undefined` where there is none — `subject` and `grantedScope` until an
- * approval. What `/device_authorization` writes names `requestedScope` the
- * same way. The approval's own `grantedScope` stays optional: leaving it out
- * is the documented way to grant `requestedScope` whole.
- *
- * Asserted with conditional types rather than `@ts-expect-error`. This file
- * only proves anything under the TypeScript checker, and is on BOTH of core's
- * typecheck lists for that reason.
+ * Asserted with conditional types rather than `@ts-expect-error`; this file
+ * proves anything only under the TypeScript checker, so it is on both of
+ * core's typecheck lists.
  */
 
 import { describe, expectTypeOf, it } from "vitest";
