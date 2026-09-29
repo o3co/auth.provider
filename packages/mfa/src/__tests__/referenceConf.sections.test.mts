@@ -31,7 +31,7 @@ import { mfaTotpFactorModule } from "#/totp/module.mjs";
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 
-describe("the package's config/reference.conf (#728)", () => {
+describe("the package's config/reference.conf", () => {
 	const modules = [mfaModule(), mfaTotpFactorModule];
 
 	it("is read at the sections its modules declare", () => {

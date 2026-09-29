@@ -152,7 +152,7 @@ describe("the MFA settings this package reads", () => {
 	});
 });
 
-describe("the key ring (D11, D20)", () => {
+describe("the key ring", () => {
 	it("refuses an empty ring, naming MFA_ENCRYPTION_KEY", () => {
 		const message = refusal(() => readMfaSettings(valid({ encryptionKeys: [] })));
 		expect(message).toContain("mfa.encryptionKeys");
@@ -249,7 +249,7 @@ describe("the key ring (D11, D20)", () => {
 		).toContain("duplicate");
 	});
 
-	it("refuses one key under two written ids — one AES key cannot be two rotation generations — naming the later entry and quoting neither key nor id (retro review of #721)", () => {
+	it("refuses one key under two written ids — one AES key cannot be two rotation generations — naming the later entry and quoting neither key nor id", () => {
 		const message = refusal(() =>
 			readMfaSettings(
 				valid({
@@ -295,7 +295,7 @@ describe("the key ring (D11, D20)", () => {
 	});
 });
 
-describe("the development sample key (D11, #473's rule)", () => {
+describe("the development sample key", () => {
 	const sample = (extra: Record<string, unknown> = {}, second = false) =>
 		configWith(
 			{
@@ -379,7 +379,7 @@ describe("the development sample key (D11, #473's rule)", () => {
 		expect(readMfaSettings(valid()).developmentSampleKeyAccepted).toBe(false);
 	});
 
-	it("keeps #473's two names: an alias such as prod is not one of them", () => {
+	it("is accepted where the environment is named prod: an alias does not count as production", () => {
 		vi.stubEnv("NODE_ENV", "development");
 		expect(readMfaSettings(sample(), { environment: "prod" }).encryptionKeys).toHaveLength(1);
 	});
@@ -399,7 +399,7 @@ describe("the development sample key (D11, #473's rule)", () => {
 	});
 });
 
-describe("the TOTP factor's parameters (D19, D22)", () => {
+describe("the TOTP factor's parameters", () => {
 	it("holds digits to 6-8, period to 15-120 seconds and window to 0-2 steps", () => {
 		for (const [key, accepted, refused] of [
 			["digits", [6, 7, 8], [5, 9, 6.5, "6", null]],
@@ -457,7 +457,7 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 		expect(readMfaTotpSettings(withTotp({ issuer: "Example Co" })).issuer).toBe("Example Co");
 	});
 
-	it("defaults the issuer to the host of the issuer it is handed — the oauthTokenSettings slot's — over the configuration's (#728)", () => {
+	it("defaults the issuer to the host of the issuer it is handed — the oauthTokenSettings slot's — over the configuration's", () => {
 		expect(
 			readMfaTotpSettings(withTotp({}), { issuer: "https://login.example.org:8443/tenant" }).issuer,
 		).toBe("login.example.org");
@@ -552,7 +552,7 @@ describe("the TOTP factor's parameters (D19, D22)", () => {
 	});
 });
 
-describe("the transaction's life and attempts (D8, D21, and step 3's obligations)", () => {
+describe("the transaction's life and attempts, and the lock", () => {
 	it("holds mfa.transactionTtlSeconds to 60-1800 seconds, a whole number", () => {
 		for (const value of [60, 600, 1800]) {
 			expect(readMfaSettings(valid({ transactionTtlSeconds: value })).transactionTtlSeconds).toBe(

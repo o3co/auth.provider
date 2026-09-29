@@ -95,7 +95,7 @@ async function bootRefusal(config: Record<string, unknown>): Promise<BootError> 
 	throw new Error("expected the boot to be refused");
 }
 
-describe("mfaTotpFactorModule (D1, D3)", () => {
+describe("mfaTotpFactorModule", () => {
 	it("is a module of its own, stateless, asking only for the config", () => {
 		expect(mfaTotpFactorModule.name).toBe("mfa-totp-factor");
 		expect(mfaTotpFactorModule.requires).toEqual(["config"]);

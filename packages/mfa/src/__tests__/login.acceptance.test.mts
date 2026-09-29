@@ -104,7 +104,7 @@ function watchedTransactions(): { store: MfaTransactionStore; create: ReturnType
 	return { store: { ...store, create }, create };
 }
 
-describe("a password login under required, the subject holding a factor (F1 step 2)", () => {
+describe("a password login under required, the subject holding a factor", () => {
 	it("is answered 403 mfa_required with the closed body, the transaction bound to the regenerated session and carrying the login's continuation, and no UserSession written", async () => {
 		const { app, userSessionStore, transactionStore } = await boot({
 			config: configFor("required"),
@@ -145,7 +145,7 @@ describe("a password login under required, the subject holding a factor (F1 step
 	});
 });
 
-describe("session fixation, end to end (the MFA ADR's D27)", () => {
+describe("session fixation, end to end", () => {
 	it("binds the transaction to a session id the login minted: one the browser held before — planted — is not it, and holds nothing afterwards", async () => {
 		const { app, transactionStore } = await boot({
 			config: configFor("required"),
@@ -175,7 +175,7 @@ describe("session fixation, end to end (the MFA ADR's D27)", () => {
 	});
 });
 
-describe("the transaction's life, as configured (D8)", () => {
+describe("the transaction's life, as configured", () => {
 	it("lives mfa.transactionTtlSeconds: the 403's expires_in and the transaction's expiry are the setting's, not the default's", async () => {
 		const { app, transactionStore } = await boot({
 			config: configFor("required", { transactionTtlSeconds: 120 }),
@@ -189,7 +189,7 @@ describe("the transaction's life, as configured (D8)", () => {
 	});
 });
 
-describe("a password login under required, the subject holding no record (F3 step 1; owner decision 2)", () => {
+describe("a password login under required, the subject holding no record", () => {
 	it("is answered 403 mfa_enrollment_required with the kinds that may be enrolled and whether an email proof comes first, and no UserSession written", async () => {
 		const { app, userSessionStore, transactionStore } = await boot({
 			config: configFor("required"),
@@ -242,7 +242,7 @@ describe("a password login under optional, the subject holding no record", () =>
 	});
 });
 
-describe("a password login whose transaction cannot be kept (F1 step 2)", () => {
+describe("a password login whose transaction cannot be kept", () => {
 	it("is answered 503 after the regeneration, the cookie session dropped, one error line, and no UserSession written", async () => {
 		const store = createMemoryMfaTransactionStore();
 		const { app, userSessionStore, logger } = await boot({
@@ -267,7 +267,7 @@ describe("a password login whose transaction cannot be kept (F1 step 2)", () => 
 	});
 });
 
-describe("a password login while the factor store is down (F1 step 1)", () => {
+describe("a password login while the factor store is down", () => {
 	it("is answered 503 once, with one error line and nothing written — no UserSession, no transaction", async () => {
 		const watched = watchedTransactions();
 		const { app, userSessionStore, logger } = await boot({

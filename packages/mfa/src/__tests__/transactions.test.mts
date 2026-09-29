@@ -56,7 +56,7 @@ const opened = (
 	transactions: createLoginTransactions({ store, ttlSeconds, now: () => NOW }),
 });
 
-describe("the login's transaction (D8)", () => {
+describe("the login's transaction", () => {
 	it("is opened bound to the session id it is given, carrying the continuation, the primary's subject and redirect, for mfa.transactionTtlSeconds", async () => {
 		const { store, transactions } = opened();
 		const answer = await transactions.open("sess-regenerated", CONTINUATION, {

@@ -155,7 +155,7 @@ describe("the mfa requirement holds core's contract, as the real requirement", (
 // What it declares
 // ---------------------------------------------------------------------------
 
-describe("what the requirement declares (D3, D6)", () => {
+describe("what the requirement declares", () => {
 	it("is named mfa, starts its step-up at the page it is given, declares mfa.step_up, and the hints enrollable and email_proof", () => {
 		const { requirement } = build("required");
 		expect(requirement.name).toBe("mfa");
@@ -173,7 +173,7 @@ describe("what the requirement declares (D3, D6)", () => {
 		);
 	});
 
-	it("reaches mfa only when an installed factor adds it: the email code alone reaches email (O7)", () => {
+	it("reaches mfa only when an installed factor adds it: the email code alone reaches email", () => {
 		expect([...build("required", { factors: [FACTORS.email()] }).requirement.reach]).toEqual([
 			"email",
 		]);
@@ -300,7 +300,7 @@ interface AdmitRow {
 	readonly expected: RequirementVerdict;
 }
 
-describe("admit — D6's table under mfa.mode, with owner decision 1's rows", () => {
+describe("admit — its table of verdicts under mfa.mode", () => {
 	const rows: readonly AdmitRow[] = [
 		// required · use and credential_change: no session, or a primary the rule does not know.
 		{
@@ -551,7 +551,7 @@ describe("admit — D6's table under mfa.mode, with owner decision 1's rows", ()
 	});
 });
 
-describe("admit — a step-up only where the session store can record one (the MFA ADR's F2, D20)", () => {
+describe("admit — a step-up only where the session store can record one", () => {
 	it("sends a password session to log in again, where the table steps it up, when the store cannot record a second factor", async () => {
 		const { requirement } = build("required", { stepUpRecordable: false });
 		expect(await requirement.admit(about(password()))).toEqual(REAUTHENTICATE);
@@ -580,7 +580,7 @@ describe("admit — a step-up only where the session store can record one (the M
 // admitPrimary: decideAfterPrimary, and the interruption
 // ---------------------------------------------------------------------------
 
-describe("admitPrimary — after a password login (F1 step 1, F3; owner decision 2)", () => {
+describe("admitPrimary — after a password login", () => {
 	it("establishes under optional when the subject holds no factor record: the login is as it was", async () => {
 		const { requirement } = build("optional");
 		expect(await requirement.admitPrimary?.(primaryOf("u-alice"))).toBe("establish");
@@ -616,7 +616,7 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 		}
 	});
 
-	it("never opens a first binding while any record exists — recovery codes alone, a kind no longer installed — and interrupts for a second factor instead (F3)", async () => {
+	it("never opens a first binding while any record exists — recovery codes alone, a kind no longer installed — and interrupts for a second factor instead", async () => {
 		for (const mode of ["optional", "required"] as const) {
 			for (const kind of ["recovery_code", "retired-kind"]) {
 				const { requirement } = build(mode, {
@@ -730,7 +730,7 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 		}
 	});
 
-	it("establishes a primary that is not a password login without reading the factors: the baseline applies after pwd only (D13)", async () => {
+	it("establishes a primary that is not a password login without reading the factors: the baseline applies after pwd only", async () => {
 		const { requirement } = build("required", { factorStore: unreachableFactorStore() });
 		const federatedPrimary: PrimaryAuthentication = {
 			...primaryOf("u-alice"),

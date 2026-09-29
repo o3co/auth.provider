@@ -143,7 +143,7 @@ describe("RFC 4226 Appendix D (HOTP)", () => {
 	});
 });
 
-describe("matching a code against the window (F6, D22)", () => {
+describe("matching a code against the window", () => {
 	const period = 30;
 	const T = 50_000_000;
 	/** Ten seconds into step T. */

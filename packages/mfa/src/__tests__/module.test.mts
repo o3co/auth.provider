@@ -102,7 +102,7 @@ describe("mfaModules", () => {
 // The requirement it registers
 // ---------------------------------------------------------------------------
 
-describe("the requirement it registers (the session-admission ADR's D3, D7)", () => {
+describe("the requirement it registers", () => {
 	it("registers mfa with the reach boot recomputes from the enabled factors, the page endpoints.mfa.url names and mfa.step_up — said in the boot line", async () => {
 		const { handle, logger } = await boot();
 		const registered = handle.components.sessionRequirementResolver?.get("mfa");
@@ -213,7 +213,7 @@ describe("the requirement it registers (the session-admission ADR's D3, D7)", ()
 // Boot refusals
 // ---------------------------------------------------------------------------
 
-describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)", () => {
+describe("the boot refusals", () => {
 	it('refuses mfa.mode = "off" with the module installed: remove the module, or set mfa.mode', async () => {
 		const err = await refusal({ config: configFor("off") });
 		expect(err.reason).toBe("contribute-factory-failed");
@@ -463,7 +463,7 @@ describe("the factors' sections are the factors' modules' to read (the module re
 		}
 	});
 
-	it("defaults the TOTP issuer to the host of the oauthTokenSettings issuer the composition holds, over the configuration's (#728)", async () => {
+	it("boots the TOTP factor over the oauthTokenSettings issuer the composition holds when the configuration's issuer names no host", async () => {
 		// The configuration's issuer names no host a TOTP issuer could default
 		// to; the slot's does, so the factor's module boots.
 		expect(mfaTotpFactorModule.optional).toContain("oauthTokenSettings");
@@ -494,7 +494,7 @@ describe("the factors' sections are the factors' modules' to read (the module re
 	});
 });
 
-describe("the development sample key (D11, #473's rule)", () => {
+describe("the development sample key", () => {
 	const sample = () =>
 		configFor("required", { encryptionKeys: [{ key: MFA_DEVELOPMENT_SAMPLE_KEY }] });
 
@@ -525,7 +525,7 @@ describe("the development sample key (D11, #473's rule)", () => {
 // A session store that cannot record a step-up
 // ---------------------------------------------------------------------------
 
-describe("a session store without recordSecondFactor (the MFA ADR's F2, D9, D20)", () => {
+describe("a session store without recordSecondFactor", () => {
 	/** A store of the deployment's own that predates the step-up capability. */
 	const withoutStepUp = (): UserSessionStore => {
 		const { recordSecondFactor: _recordSecondFactor, ...store } = createInMemoryUserSessionStore();

@@ -121,7 +121,7 @@ function completionContext(
 	return { ...ceremony, nowMs, user: USER, factors: [], state, proof };
 }
 
-describe("the totp factor's declaration (D7, D14, D21)", () => {
+describe("the totp factor's declaration", () => {
 	const factor: MfaFactor = createTotpFactor(SETTINGS);
 
 	it("is the kind totp, adds otp and mfa, counts as MFA, and is guessable", () => {
@@ -153,7 +153,7 @@ describe("the totp factor's declaration (D7, D14, D21)", () => {
 	});
 });
 
-describe("verifying a TOTP code (F6)", () => {
+describe("verifying a TOTP code", () => {
 	const factor = createTotpFactor(SETTINGS);
 
 	it("accepts the current code, naming the factor, and answers the step as the factor's next data", async () => {
@@ -294,7 +294,7 @@ describe("verifying a TOTP code (F6)", () => {
 	});
 });
 
-describe("enrolling a TOTP factor (F6; core's contract requires it of every factor)", () => {
+describe("enrolling a TOTP factor", () => {
 	const factor = createTotpFactor(SETTINGS);
 
 	it("hands out a secret of the algorithm's output length, in base32, and its otpauth URI", async () => {
