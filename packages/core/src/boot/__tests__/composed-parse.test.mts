@@ -242,6 +242,32 @@ describe("a loaded module's section is never stripped", () => {
 	});
 });
 
+describe("a value a schema makes nothing of", () => {
+	/** An environment variable exported empty: read as unset. */
+	const blankIsUnset = <T extends z.ZodType>(schema: T) =>
+		z.preprocess((value) => (value === "" ? undefined : value), schema.optional());
+
+	it("is removed from the config slot, not left as it was written", async () => {
+		const reader = defineModule({
+			name: "blank-reader",
+			configSchema: z.object({ widget: z.object({ note: blankIsUnset(z.string()) }) }),
+		});
+		const config = await bootAndRead([reader], resolved({ widget: { note: "", extra: "kept" } }));
+		expect(config.widget).toEqual({ extra: "kept" });
+		expect(Object.hasOwn(config.widget as object, "note")).toBe(false);
+	});
+
+	it("removes a section whose schema makes nothing of what is there", async () => {
+		const seen: Record<string, unknown> = {};
+		const config = await bootAndRead(
+			[sectioned("blank-section", blankIsUnset(RetrySection), undefined, seen)],
+			resolved({ "blank-section": "" }),
+		);
+		expect(seen["blank-section"]).toBeUndefined();
+		expect(Object.hasOwn(config, "blank-section")).toBe(false);
+	});
+});
+
 describe("a section nested in another module's", () => {
 	const Outer = z.object({ level: z.coerce.number() });
 

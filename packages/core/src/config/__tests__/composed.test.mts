@@ -117,8 +117,17 @@ describe("overlayConfig — a parse laid over what was written", () => {
 		).toEqual({ a: { kept: 1, both: 2 }, list: [9] });
 	});
 
-	it("leaves the lower value where the upper one is undefined", () => {
-		expect(overlayConfig({ a: 1 }, { a: undefined })).toEqual({ a: 1 });
+	it("removes a key the upper object holds as undefined: the schema made nothing of the value", () => {
+		const merged = overlayConfig({ a: "", b: 1 }, { a: undefined }) as Record<string, unknown>;
+		expect(merged).toEqual({ b: 1 });
+		expect(Object.hasOwn(merged, "a")).toBe(false);
+	});
+
+	it("keeps a key the upper object does not hold: the schema did not declare it", () => {
+		expect(overlayConfig({ a: "x", b: 1 }, { b: 2 })).toEqual({ a: "x", b: 2 });
+	});
+
+	it("answers the lower value whole when there is no upper one", () => {
 		expect(overlayConfig({ a: 1 }, undefined)).toEqual({ a: 1 });
 	});
 
