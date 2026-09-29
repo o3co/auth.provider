@@ -184,7 +184,7 @@ describe("one composed parse over the transitional base", () => {
 		expect(err.message).toMatch(/logging\.level: /);
 		expect(err.message).not.toMatch(/http\.port/);
 		expect(
-			(err.details as { issues: { path: PropertyKey[] }[] }).issues.map((issue) =>
+			(err.details as unknown as { issues: { path: PropertyKey[] }[] }).issues.map((issue) =>
 				issue.path.join("."),
 			),
 		).toEqual(["logging.level"]);

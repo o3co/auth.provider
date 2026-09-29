@@ -1644,8 +1644,9 @@ function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
  *
  * Returns the composed configuration: what the `config` slot holds once
  * each module's section is written back into it (`parseModuleSections`).
- * Every refused value, from the base and from every module's schema, is one
- * `config-validation-failed` naming each operator path.
+ * Every refused value is one `config-validation-failed` naming each operator
+ * path: the base's alone when the base refuses — the modules' schemas read
+ * its output, and there is none — else every module schema's.
  * Per A2-β §5.1 step 13.
  * @internal
  */
@@ -1654,14 +1655,18 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 	const issues: z.core.$ZodIssue[] = [];
 	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
+	for (const m of modules) if (m.configSchema) participants.push({ module: m.name });
+
 	const base = TransitionalConfigSchema.safeParse(raw);
+	// The modules' schemas read the base's output. Without one there is
+	// nothing for them to read: over what was written they would refuse the
+	// environment strings the base coerces, errors nobody made.
 	if (!base.success) issues.push(...base.error.issues);
 	const overlaid = base.success ? overlayConfig(raw, base.data) : raw;
 
 	let composed = overlaid;
-	for (const m of modules) {
+	for (const m of base.success ? modules : []) {
 		if (!m.configSchema) continue;
-		participants.push({ module: m.name });
 		const result = m.configSchema.safeParse(overlaid);
 		if (result.success) composed = overlayConfig(composed, result.data);
 		else issues.push(...result.error.issues);
