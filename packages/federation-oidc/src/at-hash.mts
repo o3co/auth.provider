@@ -18,14 +18,11 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { decodeProtectedHeader } from "jose";
 
 /**
- * `at_hash` (OIDC Core §3.3.2.11, #524).
- *
- * When the id_token carries `at_hash`, it binds the access token that came
- * with it: the left-most half of the access token's hash, under the hash
- * function the id_token's own `alg` names, base64url-encoded. openid-client
- * does not check it on the code flow — both tokens arrive over the same TLS
- * response, so the binding is weak there — but an IdP that sends the claim
- * means it, and a mismatch is a response that has been tampered with.
+ * `at_hash` (OIDC Core §3.3.2.11): the left-most half of the access token's
+ * hash, under the hash function the id_token's `alg` names, base64url-encoded.
+ * openid-client does not check it on the code flow, where both tokens arrive
+ * in one TLS response, but an IdP that sends the claim means it, and a
+ * mismatch is a response that has been tampered with.
  */
 
 /** The hash `alg` names for `at_hash`; `undefined` for an alg that names none. */

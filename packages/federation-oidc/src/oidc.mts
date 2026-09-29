@@ -45,28 +45,16 @@ import { verifyAtHash } from "./at-hash.mjs";
 import { clientAuthFor, type OidcPrivateKey } from "./client-auth.mjs";
 
 /**
- * A generic OpenID Connect federation provider (#524): any OIDC-compliant
- * IdP — Okta, Entra ID, Auth0, Keycloak, a customer's own tenant — from
- * configuration alone, and as many instances as a deployment has issuers.
+ * A generic OpenID Connect federation provider: any OIDC-compliant IdP from
+ * configuration alone, as many instances as a deployment has issuers. See
+ * README, "What happens at boot" and "What happens at login".
  *
- * ## What one instance does
- *
- * - **At construction** (boot): resolves the issuer's metadata through
- *   OpenID Connect Discovery. A discovery failure is fatal — there is no
- *   silent fallback to hand-typed endpoints; a deployment that wants those
- *   sets `discovery = false` and writes them down under `endpoints`. The
- *   error says so in fixed words and carries openid-client's as `cause`,
- *   never its text: that is the library's reading of what the issuer sent.
- * - **Authorization request**: `authorization_code` with PKCE S256, `state`
- *   and `nonce`, all three minted by the session routes per transaction.
- * - **Callback**: exchanges the code with `client_secret_basic` or
- *   `private_key_jwt`, then validates the id_token — signature against the
- *   issuer's JWKS (cached, refetched on an unknown `kid`), `iss`, `aud`,
- *   `exp`, `iat`, `nonce`, and `at_hash` when present. UserInfo, when the
- *   issuer publishes it, is bound to the id_token's `sub`.
- * - **Identity**: `sub` is opaque and stable per issuer; the session routes
- *   hand `<name>:<sub>` to the Store, and an identity the Store does not
- *   know is refused — this package provisions nothing.
+ * Discovery runs at construction and a failure is fatal, never a silent
+ * fallback to hand-typed endpoints. A library's refusal is thrown in fixed
+ * words with the library's error as `cause`, never its text: that is the
+ * library's reading of what the issuer sent. The id_token is verified against
+ * the issuer's JWKS, and this package provisions nothing: an identity the
+ * Store does not know is refused.
  */
 export const DEFAULT_OIDC_SCOPES = ["openid", "profile", "email"] as const;
 
@@ -170,7 +158,7 @@ const sameEndpoint = (fetched: string, configured: string): boolean => {
  * The lifetime the upstream SENT, judged before the library's coercion: it
  * applies `parseFloat` to whatever it finds, so `[3600, 7200]` reads as 3600
  * and "1000seconds" as 1000, and neither is a lifetime an operator's maximum
- * can be held against (D5). A number is one; so is a string of digits, which
+ * can be held against. A number is one; so is a string of digits, which
  * some IdPs send; nothing else. Without a captured body the coerced value is
  * all there is.
  */
@@ -345,10 +333,10 @@ export async function createOidcProvider(
 		clientAuth,
 	);
 	// Every request the library makes goes through here. Outside a delegated
-	// refresh it is the configured fetch, or the global one, exactly as before.
-	// Inside one, the caller's signal is combined with the library's own, and
-	// the token endpoint's body is kept so that a rotated refresh token is not
-	// lost to a parser that refuses the rest of the answer (D5).
+	// refresh it is the configured fetch, or the global one. Inside one, the
+	// caller's signal is combined with the library's own, and the token
+	// endpoint's body is kept so that a rotated refresh token is not lost to a
+	// parser that refuses the rest of the answer.
 	const baseFetch: typeof fetch = config.fetch ?? fetch;
 	const tokenEndpoint = optionalString(metadata.token_endpoint);
 	const delegatedFetch: oidc.CustomFetch = async (url, options) => {
@@ -370,10 +358,10 @@ export async function createOidcProvider(
 	configuration[oidc.customFetch] = delegatedFetch;
 	if (insecure) oidc.allowInsecureRequests(configuration);
 	// openid-client 6 treats an id_token from the token endpoint as delivered
-	// over TLS and skips its signature by default. The issue asks for
-	// verification against the issuer's JWKS with rotation, and that is what
-	// this switches on: the key is looked up by `kid`, the set is cached and
-	// refetched when an unknown `kid` appears.
+	// over TLS and skips its signature by default. This switches on
+	// verification against the issuer's JWKS with rotation: the key is looked
+	// up by `kid`, the set is cached and refetched when an unknown `kid`
+	// appears.
 	oidc.enableNonRepudiationChecks(configuration);
 
 	const hasUserInfo = typeof metadata.userinfo_endpoint === "string";
@@ -406,8 +394,8 @@ export async function createOidcProvider(
 			);
 		}
 		const extra = params.authorizationParams ?? {};
-		// The authorization parameters this provider owns (#593, D17; the set is
-		// core's `RESERVED_DELEGATED_AUTHORIZATION_PARAMS`). An operator's
+		// The authorization parameters this provider owns (core's
+		// `RESERVED_DELEGATED_AUTHORIZATION_PARAMS`). An operator's
 		// `authorizationParams` may not name them: openid-client sets `client_id`
 		// and `response_type` only when absent, so a copied parameter would send
 		// the consent to another registration or select a flow the callback
@@ -459,7 +447,7 @@ export async function createOidcProvider(
 			);
 		} catch (error) {
 			// An answer the library could not parse may still carry a rotated
-			// refresh token, and that one is never lost (D5). Only a 200 is ever
+			// refresh token, and that one is never lost. Only a 200 is ever
 			// captured: the IdP's own refusal is a 4xx, has nothing to salvage
 			// from whatever its body says, and is rethrown for the classifier.
 			const rotated = optionalString(call.captured?.refresh_token);
@@ -469,11 +457,11 @@ export async function createOidcProvider(
 		const rotated = optionalString(tokens.refresh_token);
 		const lifetime = rawLifetime(call.captured, tokens.expires_in);
 		// A lifetime that is not one withholds the access token — core marks
-		// the answer malformed — and keeps the rotated refresh token (D5).
+		// the answer malformed — and keeps the rotated refresh token.
 		if (!lifetime.ok) return rotated !== undefined ? { refreshToken: rotated } : {};
 		// Dated when the answer ARRIVED, on this adapter's clock: the library
 		// may have gone on to verify an id_token against a JWKS it had to fetch,
-		// and that time is not the token's (#593, D17).
+		// and that time is not the token's.
 		const obtainedAt = call.receivedAt ?? Date.now();
 		return {
 			accessToken: tokens.access_token,
@@ -485,24 +473,19 @@ export async function createOidcProvider(
 			// sent. The session route reads absence as "as requested" (RFC 6749
 			// §3.3) and would then record every requested scope as the consent for a
 			// response that granted none; the refresh route reads it as silence and
-			// would widen back to the grant. The delegated exchange has kept an empty
-			// scope for this reason since #593, and these two now agree with it.
+			// would widen back to the grant.
 			...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 			tokenType: tokens.token_type,
 		};
 	};
 
 	/**
-	 * The connect callback's exchange (#593, D7, D17). It shares the refresh's
-	 * capture of the raw answer — the lifetime the upstream SENT, dated at
-	 * receipt — and none of the login exchange's profile work: no UserInfo, no
-	 * claim mapping. The identity is the verified id_token's, and only that.
-	 *
-	 * What it does NOT share with the refresh is the salvage. A refresh recovers
-	 * a rotated refresh token from an answer the library refused to parse,
-	 * because the grant it rotates already exists. An acquisition whose answer
-	 * could not be verified has no grant, and no identity to bind one to; the
-	 * failure is thrown whole.
+	 * The connect callback's exchange: the refresh's capture of the raw answer
+	 * (the lifetime the upstream SENT, dated at receipt), and none of the login
+	 * exchange's profile work (no UserInfo, no claim mapping). The identity is
+	 * the verified id_token's alone. Unlike a refresh, it salvages no rotated
+	 * refresh token from an answer the library refused to parse: there is no
+	 * grant yet, nor an identity to bind one to, so the failure is thrown whole.
 	 */
 	const exchangeDelegated = async (
 		params: DelegatedCodeExchangeRequest,
@@ -552,7 +535,7 @@ export async function createOidcProvider(
 		const refreshToken = optionalString(tokens.refresh_token);
 		const lifetime = rawLifetime(call.captured, tokens.expires_in);
 		// A lifetime that is not one withholds the access token — core then reads
-		// the answer as malformed and refuses the activation (D5) — as a refresh
+		// the answer as malformed and refuses the activation — as a refresh
 		// does. The identity above was verified, so it is still reported.
 		if (!lifetime.ok) {
 			return { upstream, tokens: refreshToken !== undefined ? { refreshToken } : {} };
@@ -570,7 +553,7 @@ export async function createOidcProvider(
 				// an empty scope both mean "what the grant already has", but here an
 				// empty one dropped would read as omitted — "as requested" — and the
 				// callback would grant every consented scope on an answer that named
-				// none. Present and empty is the callback's to refuse (Codex).
+				// none. Present and empty is the callback's to refuse.
 				...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 				tokenType: tokens.token_type,
 			},
@@ -604,7 +587,7 @@ export async function createOidcProvider(
 
 		async exchangeCode(params): Promise<FederationProfile> {
 			const nonce = requireNonce(params.nonce);
-			// #595: RFC 9207. The library compares `iss` with the configured issuer,
+			// RFC 9207: the library compares `iss` with the configured issuer,
 			// and requires one from an issuer that advertises
 			// `authorization_response_iss_parameter_supported` — so dropping it both
 			// skips the mix-up check and fails every login against such an issuer.
@@ -654,7 +637,7 @@ export async function createOidcProvider(
 				name: optionalString(pick("name")),
 				picture: optionalString(pick("picture")),
 				// Core's one reading of the token response: the lifetime as sent
-				// or none, the scope as sent (an empty one kept, #647), the type.
+				// or none, the scope as sent (an empty one kept), the type.
 				...federationTokenSnapshot(tokens, obtainedAt),
 				...(groups ? { groups } : {}),
 			};

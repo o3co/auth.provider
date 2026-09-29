@@ -14,15 +14,9 @@
  * limitations under the License.
  */
 
-import { createPrivateKey, type KeyObject } from "node:crypto";
-import { type FederationClientSecret, resolveClientSecret } from "@o3co/auth-provider-core";
-import { importPKCS8 } from "jose";
-import * as oidc from "openid-client";
-
 /**
- * Client authentication at the upstream token endpoint (#524).
- *
- * Two methods, chosen by which credential the config carries:
+ * Client authentication at the upstream token endpoint, chosen by which
+ * credential the config carries:
  *
  * - `clientSecret` → `client_secret_basic` (RFC 6749 §2.3.1). The secret may
  *   be a resolver, consulted on every token request, so a deployment that
@@ -31,13 +25,14 @@ import * as oidc from "openid-client";
  *   PEM-encoded PKCS#8 key; the JWS algorithm is inferred from the key type
  *   unless `alg` says otherwise, and `kid` is put in the assertion header so
  *   the IdP can pick the key from the client's registered JWKS.
- *
- * Exactly one of the two: a config with both is ambiguous, one with neither
- * cannot authenticate, and each is refused at construction rather than at the
- * first login. So is a key OpenSSL cannot parse or jose cannot sign with — in
- * fixed words naming the setting, the library's error kept as `cause` and off
- * the message, since a library's message is its reading of the input.
  */
+
+import { createPrivateKey, type KeyObject } from "node:crypto";
+import { type FederationClientSecret, resolveClientSecret } from "@o3co/auth-provider-core";
+import { importPKCS8 } from "jose";
+import * as oidc from "openid-client";
+
+/** A `private_key_jwt` signing key. */
 export interface OidcPrivateKey {
 	/** PEM-encoded PKCS#8 private key (`-----BEGIN PRIVATE KEY-----`). */
 	readonly pem: string;
@@ -109,7 +104,12 @@ function inferAlg(label: string, key: KeyObject): string {
 	}
 }
 
-/** `private_key_jwt` from a PEM key, importing it once at construction. */
+/**
+ * `private_key_jwt` from a PEM key, importing it once at construction. A key
+ * OpenSSL cannot parse or jose cannot sign with is refused here, in fixed words
+ * naming the setting, with the library's error kept as `cause` and off the
+ * message, since a library's message is its reading of the input.
+ */
 export async function privateKeyJwt(
 	label: string,
 	privateKey: string | OidcPrivateKey,
@@ -134,7 +134,11 @@ export async function privateKeyJwt(
 	return oidc.PrivateKeyJwt(spec.kid === undefined ? key : { key, kid: spec.kid });
 }
 
-/** The one client authentication method the credentials describe. */
+/**
+ * The one client authentication method the credentials describe. Exactly one
+ * of the two: both is ambiguous, neither cannot authenticate, and each is
+ * refused at construction rather than at the first login.
+ */
 export async function clientAuthFor(
 	label: string,
 	credentials: OidcClientCredentials,
