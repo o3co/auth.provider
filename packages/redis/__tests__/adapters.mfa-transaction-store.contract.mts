@@ -809,7 +809,7 @@ export function runMfaTransactionStoreContract(
 		});
 	});
 
-	describe("MfaTransactionStore contract: the subject state (D21), under an injected clock", () => {
+	describe("MfaTransactionStore contract: the subject state, under an injected clock", () => {
 		/** An instant near the host's clock, so an adapter that expires state on its own clock keeps it. */
 		const start = () => Math.floor(Date.now() / 1000) * 1000;
 
@@ -1472,7 +1472,7 @@ export function runMfaTransactionStoreContract(
 		});
 	});
 
-	describe("MfaTransactionStore contract: the email proof at the next first binding (D25)", () => {
+	describe("MfaTransactionStore contract: the email proof at the next first binding", () => {
 		// The operator reset's `requireEmailProof: true` must hold until the
 		// subject's next first binding. The factor store has been emptied, the
 		// witness is a boolean, and the lock state is cleared by the same reset

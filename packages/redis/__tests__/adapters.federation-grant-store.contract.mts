@@ -389,7 +389,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect(await store.isCurrentIntent("g-1", "h-1", at(10 * MIN))).toBe(false);
 				});
 
-				it("spends nothing: the callback asks before it exchanges the code, and the activation still succeeds (D7)", async () => {
+				it("spends nothing: the callback asks before it exchanges the code, and the activation still succeeds", async () => {
 					await store.createPending(pendingInput());
 					expect(await store.isCurrentIntent("g-1", "h-1", at(MIN))).toBe(true);
 					expect(await store.isCurrentIntent("g-1", "h-1", at(MIN))).toBe(true);
@@ -529,7 +529,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			describe("retireIntent", () => {
-				it("retires whichever intent is current, and changes nothing else: the renewal in flight cannot finish (D13)", async () => {
+				it("retires whichever intent is current, and changes nothing else: the renewal in flight cannot finish", async () => {
 					const grant = await inUse();
 					await nameRenewalIntent();
 					expect(await store.retireIntent({ grantId: "g-1", now: at(DAY + MIN) })).toStrictEqual({
@@ -767,7 +767,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await resident("g-unknown")).toBe(false);
 			});
 
-			it("refuses an expiry beyond the lifetime ceiling of the consent, and accepts one at it (D3)", async () => {
+			it("refuses an expiry beyond the lifetime ceiling of the consent, and accepts one at it", async () => {
 				await store.createPending(pendingInput());
 				const consentAt = at(MIN);
 				const beyond = new Date(consentAt.getTime() + FEDERATION_GRANT_LIFETIME_CEILING_MS + 1);
@@ -807,7 +807,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				).toEqual({ ok: false });
 			});
 
-			it("refuses a consent or an authorization dated after the write: a boundary stamped from then on must always cover it (D13)", async () => {
+			it("refuses a consent or an authorization dated after the write: a boundary stamped from then on must always cover it", async () => {
 				// With no allowance at all. The backstop's comparison has its own, for
 				// the clocks of two replicas; any this rule added would come on top of
 				// it, and a consent dated thirty seconds ahead would slip past a
@@ -1021,7 +1021,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					}
 				});
 
-				it("never re-points a grant: a renewal for another upstream account, or under another identity, is refused (D4, D7)", async () => {
+				it("never re-points a grant: a renewal for another upstream account, or under another identity, is refused", async () => {
 					// The connect callback checks the account before it gets here. This
 					// is the same rule at the write, where ADR
 					// 2026-09-17-federation-grants-offline-delegation, D2, says rules are
@@ -1044,7 +1044,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect((await renew()).ok).toBe(true);
 				});
 
-				it("leaves an existing grant exactly as it was when it is refused for what it carries (D7)", async () => {
+				it("leaves an existing grant exactly as it was when it is refused for what it carries", async () => {
 					// A credential written beside a `pending` grant is invisible through
 					// the port; beside an active one it is the user's working refresh
 					// token that a partial write would have replaced.
@@ -1532,7 +1532,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
-		describe("noteRefreshFailure (D5, D12)", () => {
+		describe("noteRefreshFailure", () => {
 			const failure = (over: Partial<FederationGrantRefreshFailureInput> = {}) => ({
 				at: at(DAY),
 				kind: "unavailable" as const,
@@ -1577,7 +1577,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await store.isCurrentIntent("g-1", "h-g-1", at(DAY))).toBe(false);
 			});
 
-			describe("a stamp that says the user has to come back (D11, D12, #616)", () => {
+			describe("a stamp that says the user has to come back", () => {
 				// The four codes an IdP answers a refresh with when it wants the user
 				// and not a new token. Such a stamp is the grant's memory of that,
 				// read as `reauthorization_required` until an activation clears it —
@@ -2318,7 +2318,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
-		describe("the races of D2, in the order they would happen", () => {
+		describe("the races with a revocation or an expiry, in the order they would happen", () => {
 			it("a callback that passed its checks and activates after a revocation fails", async () => {
 				await store.createPending(pendingInput());
 				expect(await store.isCurrentIntent("g-1", "h-1", at(MIN))).toBe(true);
@@ -2776,7 +2776,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
-		describe("acquireRefreshLock (D12)", () => {
+		describe("acquireRefreshLock", () => {
 			it("excludes a second holder of the same grant until the first releases", async () => {
 				const first = await store.acquireRefreshLock("g-1", HELD);
 				if (!first.acquired) throw new Error("fixture: the first acquire failed");

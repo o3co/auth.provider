@@ -95,7 +95,7 @@ export function runUserSessionStoreContract(
 			expect(s?.claims.email).toBe("user@example.com");
 		});
 
-		it("round-trips amr (#481), and names it undefined when none was recorded (#626)", async () => {
+		it("round-trips amr, and names it undefined when none was recorded", async () => {
 			const store = await factory();
 			await store.create(INPUT({ sid: "sid-amr", amr: ["pwd", "mfa"] }));
 			expect((await store.get("sid-amr"))?.amr).toEqual(["pwd", "mfa"]);
@@ -105,7 +105,7 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-plain")).toHaveProperty("amr", undefined);
 		});
 
-		it("round-trips authentication, and names it undefined when none was recorded (the MFA ADR's D9)", async () => {
+		it("round-trips authentication, and names it undefined when none was recorded", async () => {
 			const store = await factory();
 			const federated = {
 				primary: "fed",
@@ -127,7 +127,7 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-auth-none")).toHaveProperty("authentication", undefined);
 		});
 
-		it("returns the session whole, as plain data: what was written, and when it was created (#626)", async () => {
+		it("returns the session whole, as plain data: what was written, and when it was created", async () => {
 			// Strictly: a key too many, one left out, or a class instance in place
 			// of plain data fails here, where the field-by-field checks above pass.
 			const store = await factory();
@@ -325,7 +325,7 @@ export function runUserSessionStoreContract(
 			expect(s2?.createdAt.getTime()).not.toBe(0);
 		});
 
-		it("keeps its own copy of amr: neither the array written nor the one read changes what is stored (#626)", async () => {
+		it("keeps its own copy of amr: neither the array written nor the one read changes what is stored", async () => {
 			// `amr` is what `/authorize` judges `acr_values` against; a store that
 			// kept the caller's array, or handed out its own, would let a later
 			// push on either one grant a step-up nobody performed.
@@ -339,7 +339,7 @@ export function runUserSessionStoreContract(
 			expect((await store.get("amr-iso"))?.amr).toEqual(["pwd"]);
 		});
 
-		it("keeps its own copy of authentication: neither what was written nor what was read changes what is stored (the MFA ADR's D9)", async () => {
+		it("keeps its own copy of authentication: neither what was written nor what was read changes what is stored", async () => {
 			// `mfaAt` is what the baseline and recent MFA are judged on, and
 			// `upstreamAmr` what an untrusted IdP said; a store that shared either
 			// with a caller would let a later write change a verified session.
@@ -392,7 +392,7 @@ export function runSecondFactorUpdateContract(
 		return store;
 	};
 
-	describe("SupportsSecondFactorUpdate contract — recordSecondFactor, a second factor verified in a live session (the MFA ADR's D9)", () => {
+	describe("SupportsSecondFactorUpdate contract — recordSecondFactor, a second factor verified in a live session", () => {
 		const at = (msAgo: number) => new Date(Date.now() - msAgo);
 
 		it("adds the factor's values to amr, in insertion order, sets mfaAt, and changes nothing else", async () => {
