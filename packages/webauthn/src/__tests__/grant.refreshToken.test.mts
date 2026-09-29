@@ -616,6 +616,25 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
 	});
 
+	it("leaves a confidential client's refresh token unbound when the oauthTokenSettings the composition holds do not opt in, though the configuration does (#728)", async () => {
+		// The slot's `false` is read: a reader that took it for "unset" would
+		// fall through to the configuration's `true` and bind the token.
+		const tokens = await issue(
+			await makeDeps({
+				config: makeConfig({ bindConfidentialClientRefreshTokens: true }),
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: ISSUER,
+					tokenBinding: { bindConfidentialClientRefreshTokens: false },
+				}),
+			}),
+			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
+				tokenBinding: dpopBinding("PROOF-JKT"),
+			}),
+		);
+
+		expect(decodePayload(tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+
 	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
 		const tokens = await issue(
 			await makeDeps({

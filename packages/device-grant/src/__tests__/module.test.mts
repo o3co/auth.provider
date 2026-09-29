@@ -626,6 +626,36 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		});
 	});
 
+	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on (#728)", async () => {
+		// The other way round: the slot says false, and a reader that took
+		// `false` for "unset" would fall through to the configuration's `true`.
+		const approve = (deps: TestDeps) =>
+			request(mountVerificationRoute(deps))
+				.post("/oauth/device/verification")
+				.set("Host", "as.example.test")
+				.set("Origin", "http://as.example.test")
+				.send({ action: "approve", user_code: "BCDF-GHJK" });
+		const configOn = (): TestDeps => {
+			const base = enabledDeps();
+			return {
+				...base,
+				config: { ...base.config, oauth: { ...base.config.oauth, requireEmailVerified: true } },
+			};
+		};
+		// The configuration alone holds the approval.
+		expect((await approve(configOn())).status).toBe(403);
+		// The slot's false is read, and the approval goes on to the code as it
+		// does with the setting off.
+		const res = await approve({
+			...configOn(),
+			oauthTokenSettings: createTestOAuthTokenSettings({ requireEmailVerified: false }),
+		});
+		const off = await approve(enabledDeps());
+		expect(res.status).not.toBe(403);
+		expect(res.status).toBe(off.status);
+		expect(res.body).toEqual(off.body);
+	});
+
 	/** A limiter whose backend is down: every check rejects, as a Redis client would. */
 	const brokenLimiter: RateLimiter = {
 		kind: "broken",

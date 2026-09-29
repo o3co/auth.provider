@@ -157,10 +157,15 @@ afterEach(async () => {
  * `grantPolicy` slot, and `oauth.resourceIndicator.enabled` on — the flag
  * under which the grant forwards `resource` at all.
  */
-async function boot(options: { readonly flagIn?: "configuration" | "slot" } = {}) {
+async function boot(
+	options: { readonly flagIn?: "configuration" | "slot" | "configuration-over-slot-off" } = {},
+) {
 	// `slot`: the configuration leaves resource indicators off, and the
 	// `oauthTokenSettings` the composition holds turns them on (#728).
+	// `configuration-over-slot-off`: the other way round — the configuration
+	// turns them on, and the slot the composition holds leaves them off.
 	const inSlot = options.flagIn === "slot";
+	const slotOff = options.flagIn === "configuration-over-slot-off";
 	const authenticator = createSoftwareAuthenticator();
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential({
@@ -198,10 +203,10 @@ async function boot(options: { readonly flagIn?: "configuration" | "slot" } = {}
 					webauthnCredentialStore: () => credentialStore,
 					keyStore: () => createSymmetricKeyStore("resource-indicator-secret-32-bytes!"),
 					grantPolicy: (): GrantPolicyHook => ({ kind: "test-spy", evaluate }),
-					...(inSlot
+					...(inSlot || slotOff
 						? {
 								oauthTokenSettings: () =>
-									createTestOAuthTokenSettings({ issuer: ISSUER, resourceIndicatorEnabled: true }),
+									createTestOAuthTokenSettings({ issuer: ISSUER, resourceIndicatorEnabled: inSlot }),
 							}
 						: {}),
 				},
@@ -268,6 +273,18 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 
 		expect(result.status).toBe(200);
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
+	});
+
+	it("forwards no resource when the oauthTokenSettings the composition holds leave resource indicators off, though the configuration turns them on (#728)", async () => {
+		// The slot's `false` is read: a reader that took it for "unset" would
+		// fall through to the configuration's `true` and forward the resource.
+		const { evaluate, signIn } = await boot({ flagIn: "configuration-over-slot-off" });
+
+		const { result } = await signIn("https://rs.example");
+
+		expect(result.status).toBe(200);
+		expect(evaluate).toHaveBeenCalledOnce();
+		expect(evaluate.mock.calls[0]?.[0].resource).toBeUndefined();
 	});
 
 	it("drops the blank entry of a repeated resource, as the oauth grants do", async () => {
