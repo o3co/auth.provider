@@ -28,9 +28,9 @@
  *   router refuses the same issuer at construction;
  * - the lifetimes through core's `resolveAccessTokenLifetime` (the
  *   deprecated `expiresIn` read in its place) and `resolveRefreshTokenLifetime`;
- * - the dispatch policy as core's token-binding middleware reads
- *   `oauth.tokenBinding.dispatch-policy`: `strict-mutual-exclusion` when it
- *   says so, `intent-explicit` otherwise;
+ * - the dispatch policy through core's `resolveTokenBindingDispatchPolicy`,
+ *   the one reading of `oauth.tokenBinding.dispatch-policy`, which boot reads
+ *   through in a composition without this module;
  * - every switch on only when it is `true`.
  *
  * The whole is frozen, the nested members too, so no reader can change what
@@ -44,15 +44,13 @@ import {
 	type OAuthTokenSettings,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	resolveTokenBindingDispatchPolicy,
 } from "@o3co/auth-provider-core";
 
 /** The keys of `oauth {}` the settings are read from, as a configuration may carry them. */
 interface OAuthTokenSection {
 	readonly jwt?: { readonly issuer?: unknown; readonly legacyTypAccept?: unknown };
-	readonly tokenBinding?: {
-		readonly "dispatch-policy"?: unknown;
-		readonly bindConfidentialClientRefreshTokens?: unknown;
-	};
+	readonly tokenBinding?: { readonly bindConfidentialClientRefreshTokens?: unknown };
 	readonly resourceIndicator?: { readonly enabled?: unknown };
 	readonly requireEmailVerified?: unknown;
 }
@@ -76,10 +74,7 @@ export function oauthTokenSettingsFrom(config: AppConfig): OAuthTokenSettings {
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
 		refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
 		tokenBinding: Object.freeze({
-			dispatchPolicy:
-				oauth?.tokenBinding?.["dispatch-policy"] === "strict-mutual-exclusion"
-					? "strict-mutual-exclusion"
-					: "intent-explicit",
+			dispatchPolicy: resolveTokenBindingDispatchPolicy(config),
 			bindConfidentialClientRefreshTokens:
 				oauth?.tokenBinding?.bindConfidentialClientRefreshTokens === true,
 		}),

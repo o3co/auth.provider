@@ -174,6 +174,22 @@ export interface TokenBindingRefusal {
  */
 export type DispatchPolicy = "intent-explicit" | "strict-mutual-exclusion";
 
+/**
+ * The dispatch policy a configuration declares, `oauth.tokenBinding.dispatch-policy`:
+ * `strict-mutual-exclusion` when it says so, `intent-explicit` otherwise —
+ * an absent key included.
+ *
+ * The one reading of the key (#728): the oauth module resolves the policy of
+ * its `oauthTokenSettings` through it, and boot reads it through this in a
+ * composition without that module. Takes any value, since boot holds the
+ * configuration as the parsed component and the oauth module as its own.
+ */
+export function resolveTokenBindingDispatchPolicy(config: unknown): DispatchPolicy {
+	const raw = (config as { oauth?: { tokenBinding?: { "dispatch-policy"?: unknown } } } | null)
+		?.oauth?.tokenBinding?.["dispatch-policy"];
+	return raw === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
+}
+
 export interface TokenBindingMiddlewareOptions {
 	readonly mechanisms: readonly TokenBindingMechanism[];
 	readonly dispatchPolicy: DispatchPolicy;

@@ -620,6 +620,7 @@ export { terminalErrorHandler } from "./middleware/terminalError.mjs";
 export {
 	type DispatchPolicy,
 	isTokenBindingMw,
+	resolveTokenBindingDispatchPolicy,
 	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
 	type TokenBindingMiddlewareOptions,

@@ -27,7 +27,7 @@
  * then (`validate-manifests.mts`, the `grantPolicy` issuer check).
  */
 
-import type { DispatchPolicy } from "../middleware/tokenBinding.mjs";
+import { type DispatchPolicy, resolveTokenBindingDispatchPolicy } from "../middleware/tokenBinding.mjs";
 import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 
 /** The component map as boot holds it. */
@@ -48,12 +48,34 @@ export function compositionIssuer(components: Components): unknown {
 		?.issuer;
 }
 
-/** The dispatch policy: the slot's, else `oauth.tokenBinding.dispatch-policy` — `strict-mutual-exclusion` when it says so, `intent-explicit` otherwise. */
+const DISPATCH_POLICIES: ReadonlySet<unknown> = new Set<DispatchPolicy>([
+	"intent-explicit",
+	"strict-mutual-exclusion",
+]);
+
+/**
+ * The dispatch policy: the slot's when the composition holds it, else the
+ * configuration's, through `resolveTokenBindingDispatchPolicy`.
+ *
+ * A slot is read whole or not at all: one whose policy is not one of the two
+ * — a host's value without `tokenBinding` among them — is refused with a
+ * `RangeError` naming the member, rather than failing on a property read or
+ * falling back to the configuration the slot stands in for.
+ */
 export function compositionDispatchPolicy(components: Components): DispatchPolicy {
-	const fromSlot = tokenSettingsOf(components)?.tokenBinding.dispatchPolicy;
-	if (fromSlot !== undefined) return fromSlot;
-	const raw = (
-		components.config as { oauth?: { tokenBinding?: { "dispatch-policy"?: unknown } } } | undefined
-	)?.oauth?.tokenBinding?.["dispatch-policy"];
-	return raw === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
+	const settings = tokenSettingsOf(components);
+	if (settings === undefined) return resolveTokenBindingDispatchPolicy(components.config);
+	const fromSlot = (
+		settings as { tokenBinding?: { dispatchPolicy?: unknown } } | null
+	)?.tokenBinding?.dispatchPolicy;
+	if (!DISPATCH_POLICIES.has(fromSlot)) {
+		throw new RangeError(
+			`oauthTokenSettings.tokenBinding.dispatchPolicy must be "intent-explicit" or ` +
+				`"strict-mutual-exclusion", and the composition's oauthTokenSettings carries ` +
+				`${JSON.stringify(fromSlot) ?? "none"}. A host that fills the slot fills it whole — ` +
+				"oauthTokenSettingsContract holds a value to it — and the token-binding middleware " +
+				"cannot arbitrate between mechanisms without a policy.",
+		);
+	}
+	return fromSlot as DispatchPolicy;
 }
