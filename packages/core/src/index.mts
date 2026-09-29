@@ -191,6 +191,9 @@ export {
 	composeConfigSchema,
 	fullSectionsSchema,
 	isLifetimeSeconds,
+	// #728: the hop ceiling `http.trustProxy` is held to, which the
+	// `httpSettings` contract suite holds the slot's value to as well.
+	MAX_TRUST_PROXY_HOPS,
 	type RefreshTokenLifetimeSource,
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,

@@ -8,7 +8,7 @@ The one decision that an authenticated browser session — or the primary authen
 
 It owns the decision and its vocabulary: the reading of each carrier a session is claimed by, the actions and their grades, the steps and the merge of their verdicts, the requirement contract and what registration holds a requirement to, the establishment half (the primary, the continuation a requirement persists, the interruption's validated answer, the capability to establish), and the provider's `acr` vocabulary.
 
-It does not own a protocol: what a consumer answers for an outcome — a redirect, an RFC 6749 error, a `403` — is the consumer's. How a requirement decides is the requirement's; the MFA requirement is `packages/mfa`'s. Writing a session is `packages/session`'s. Reading the subject-revocation boundary against an instant is `federation-grants/`'s helper, which this directory calls. The registration pass that runs its rules at boot is `boot/`'s.
+It does not own a protocol: what a consumer answers for an outcome — a redirect, an RFC 6749 error, a `403` — is the consumer's. How a requirement decides is the requirement's; the MFA requirement is `packages/mfa`'s. Writing a session is `packages/session`'s; the contract a requirement's completion finishes a login through, the `loginCompletion` slot (#728), is declared here, beside the establishment it consumes, and the session module is to provide it. Reading the subject-revocation boundary against an instant is `federation-grants/`'s helper, which this directory calls. The registration pass that runs its rules at boot is `boot/`'s.
 
 It is a directory of its own so that the consumers cannot disagree on what a live session is, and so that a second extension touches this port's contributors and nothing else.
 
@@ -16,7 +16,6 @@ It is a directory of its own so that the consumers cannot disagree on what a liv
 
 - The entry point is [`admit.mts`](./admit.mts): the decision for a session and for a login, and the builders of the claims it reads.
 - The contract is [`requirement.mts`](./requirement.mts): what a consumer passes and is answered, what a requirement is, is asked and answers, the bundled actions, and the rules a requirement is registered under.
-- The tail of a login as a contract is [`login-completion.mts`](./login-completion.mts): the `loginCompletion` slot (#728) a requirement's completion finishes a login through — the session package's `establishSession` and `answerInterruption`, with the stores, the session's lifetime and the CSRF mechanism left to the provider. Its contract suite and recording double are on the testing entry, beside the other slots' (`../testing/slots/`).
 - The testing entry, [`testing/`](./testing/), is published on `@o3co/auth-provider-core/testing`: the resolver a consumer built by hand takes in a test, the contract suite every requirement runs, and the MFA table's merge rows.
 - What the package exports from here is listed, with where each name is defined, in the package README's [Session admission](../../README.md#session-admission).
 

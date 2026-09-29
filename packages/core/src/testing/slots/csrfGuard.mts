@@ -25,7 +25,7 @@
  * - **A request** (`check`, `middleware`, #272): an `Origin` — or, without
  *   one, a `Referer` — that names another origin (`null`, another scheme,
  *   another host) is refused whatever the request carries, a valid token
- *   included; one that names this origin, or the trusted origin the input
+ *   or a same-origin `Referer` included — the `Origin` is authoritative; one that names this origin, or the trusted origin the input
  *   names, is accepted without a token; with neither, the token decides.
  *   Absent is refused. The one `issue` set is accepted, echoed in
  *   `headerName` or in `bodyField` when the guard names one. One that does
@@ -207,6 +207,16 @@ export function csrfGuardContract(input: CsrfGuardContractInput): readonly Contr
 					guard.check(requestWith({ ...headers, referer: "https://attacker.contract.test/page" })),
 					"foreign_origin",
 					"a foreign Referer with no Origin, and a valid token",
+				);
+				refusedFor(
+					guard.check(
+						requestWith({
+							origin: "https://attacker.contract.test",
+							referer: `${CONTRACT_ORIGIN}/login`,
+						}),
+					),
+					"foreign_origin",
+					"a foreign Origin beside a same-origin Referer: the Origin is authoritative",
 				);
 			},
 		},
@@ -444,6 +454,14 @@ export function csrfGuardContract(input: CsrfGuardContractInput): readonly Contr
 					navigation({ referer: foreign }, "a Referer"),
 					"foreign_origin",
 					"a foreign page",
+				);
+				refusedFor(
+					navigation(
+						{ origin: "https://attacker.contract.test", referer: own },
+						"an Origin beside a Referer",
+					),
+					"foreign_origin",
+					"a foreign Origin beside a page of this origin: the Origin is authoritative",
 				);
 				refusedFor(
 					navigation({ referer: "not a url" }, "a malformed Referer"),

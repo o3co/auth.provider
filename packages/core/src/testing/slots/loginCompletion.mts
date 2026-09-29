@@ -40,7 +40,8 @@
  * - Every outage — the session store at `create`, the cookie session's
  *   `regenerate` or `save`, the ceremony's `open` — is reported to the
  *   caller's reporter once, never established, and leaves the browser not
- *   signed in; an establishment's leaves no record behind, and an
+ *   signed in; an establishment's — the session store's included — leaves
+ *   no record behind, and an
  *   interruption's is answered `503 temporarily_unavailable` with no token.
  *
  * `createRecordingLoginCompletion` keeps that contract: it counts the
@@ -95,9 +96,10 @@ export interface LoginCompletionContractInput {
 	 */
 	readonly withSessionStoreOutage?: () => LoginCompletion;
 	/**
-	 * How many session records the store holds that the completion `build`
-	 * returned last writes to — read after `build`, before and after a call.
-	 * Absent for a completion whose records the test cannot count.
+	 * How many session records the store holds that the completion built
+	 * last — by `build` or by `withSessionStoreOutage` — writes to: read after
+	 * the build, before and after a call. Absent for a completion whose
+	 * records the test cannot count.
 	 */
 	readonly records?: () => number;
 	/** The CSRF token's cookie, when the completion answers a `403` with a fresh token: set on the `403`, never on a `503`. */
@@ -333,14 +335,19 @@ export function loginCompletionContract(
 		cases.push({
 			name: "a session store that is down is its outage at create: reported once, the cookie session untouched",
 			run: async () => {
+				const completion = withSessionStoreOutage();
+				const held = records?.();
 				const { req, session } = fakeRequest();
 				const { reporter, unavailable } = establishmentReporter();
-				const result = await withSessionStoreOutage().establishSession(await establishment(), {
+				const result = await completion.establishSession(await establishment(), {
 					req,
 					reporter,
 				});
 				assert.deepEqual(result, { outcome: "unavailable", store: "user_session", step: "create" });
 				assert.deepEqual(unavailable, [["user_session", "create"]], "the outage is reported once");
+				if (records !== undefined) {
+					assert.equal(records(), held, "a session-store outage left a session record behind");
+				}
 				assert.equal(
 					session.regenerated,
 					0,
