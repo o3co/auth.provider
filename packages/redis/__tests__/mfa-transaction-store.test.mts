@@ -127,7 +127,7 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 	return {
 		id: "tx-1",
 		purpose: "step_up",
-		sessionId: "express-session-1",
+		binding: { kind: "session", id: "express-session-1" },
 		subject: "user-1",
 		sid: "sid-1",
 		continuation: undefined,

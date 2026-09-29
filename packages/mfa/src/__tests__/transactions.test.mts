@@ -68,7 +68,7 @@ describe("the login's transaction (D8)", () => {
 		expect(await store.get(id)).toEqual({
 			id,
 			purpose: "login",
-			sessionId: "sess-regenerated",
+			binding: { kind: "session", id: "sess-regenerated" },
 			subject: "u-alice",
 			sid: undefined,
 			continuation: CONTINUATION,
