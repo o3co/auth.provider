@@ -43,6 +43,7 @@ import {
 	type Admission,
 	type AdmissionDeps,
 	admitSession,
+	consoleLogger,
 	cookieClaim,
 	createMemoryMfaFactorStore,
 	createMemoryMfaTransactionStore,
@@ -158,6 +159,7 @@ const realRequirement = (
 		}),
 		stepUpPage: PAGE,
 		stepUpRecordable: true,
+		logger: consoleLogger,
 	});
 
 const storeOf = (session: UserSession): UserSessionStore => ({

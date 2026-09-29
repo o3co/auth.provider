@@ -43,6 +43,7 @@ import {
 	admitPrimary,
 	createMemoryMfaTransactionStore,
 	federatedSessionAuthentication,
+	type Logger,
 	type MfaFactor,
 	type MfaFactorStore,
 	type MfaTransactionStore,
@@ -58,7 +59,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { resolverForTests, sessionRequirementContract } from "@o3co/auth-provider-core/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, type Mock, vi } from "vitest";
 import { createMfaRequirement } from "#/requirement.mjs";
 import { createLoginTransactions } from "#/transactions.mjs";
 import {
@@ -71,6 +72,20 @@ import {
 } from "./requirementHarness.mjs";
 
 const ISSUER = "https://auth.example";
+
+/** A logger whose `warn` is a spy and every other level does nothing. */
+function silentLogger(): Logger & { readonly warn: Mock } {
+	const logger = {
+		trace: () => {},
+		debug: () => {},
+		info: () => {},
+		warn: vi.fn(),
+		error: () => {},
+		fatal: () => {},
+		child: () => logger,
+	};
+	return logger as unknown as Logger & { readonly warn: Mock };
+}
 const PAGE = { url: "/mfa", params: {} };
 const NOW = 1_900_000_000_000;
 
@@ -87,6 +102,7 @@ function build(
 		readonly transactionStore?: MfaTransactionStore;
 		/** Whether the session store can record a step-up (`supportsSecondFactorUpdate`); it can, by default. */
 		readonly stepUpRecordable?: boolean;
+		readonly logger?: Logger;
 	} = {},
 ): Built {
 	const transactionStore = options.transactionStore ?? createMemoryMfaTransactionStore();
@@ -101,6 +117,7 @@ function build(
 		}),
 		stepUpPage: PAGE,
 		stepUpRecordable: options.stepUpRecordable ?? true,
+		logger: options.logger ?? silentLogger(),
 	});
 	return { requirement, transactionStore };
 }
@@ -648,6 +665,41 @@ describe("admitPrimary — after a password login (F1 step 1, F3; owner decision
 			enrollment: "required",
 			emailProof: "not_required",
 		});
+	});
+
+	it("says so each time a first binding offers nothing — every counting factor refuses this user — naming the kinds alone, and answers as it would", async () => {
+		const logger = silentLogger();
+		const refusing = (kind: string): MfaFactor => ({
+			...stubFactor(kind, ["email"], { addsMfa: false }),
+			enrollable: () => false,
+		});
+		const { requirement } = build("required", {
+			factors: [refusing("email"), FACTORS.recovery(), refusing("sms_code")],
+			logger,
+		});
+		for (let login = 1; login <= 2; login++) {
+			const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice"));
+			if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+			expect((await admission.open(`sess-${login}`)).body).toMatchObject({
+				error: "mfa_enrollment_required",
+				hints: { enrollable: [], email_proof: false },
+			});
+			expect(logger.warn).toHaveBeenCalledTimes(login);
+		}
+		expect(logger.warn).toHaveBeenLastCalledWith(
+			{ kinds: ["email", "sms_code"] },
+			"mfa_enrollment_nothing_enrollable",
+		);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("u-alice");
+	});
+
+	it("says nothing when a first binding offers a kind", async () => {
+		const logger = silentLogger();
+		const { requirement } = build("required", { logger });
+		const admission = await admitPrimary(depsFor(requirement), primaryOf("u-alice"));
+		if (admission.outcome !== "interrupt") throw new Error("not interrupted");
+		await admission.open("sess-1");
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("reads no enrollment witness before step 12: a user the Store says enrolled, with no record, is still asked for a first binding (owner decision 2)", async () => {
