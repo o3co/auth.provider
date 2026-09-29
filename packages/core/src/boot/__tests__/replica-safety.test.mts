@@ -54,7 +54,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 		const { logger: log } = logger();
 		expect(() =>
 			checkReplicaSafety({
-				modules: modules("memorySessionStores", "oauth"),
+				modules: modules("core-session-stores-memory", "oauth"),
 				config: { deployment: { mode: "multi" } },
 				logger: log,
 			}),
@@ -65,7 +65,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 		const { logger: log } = logger();
 		try {
 			checkReplicaSafety({
-				modules: modules("memorySessionStores", "core-rate-limiter-memory", "oauth"),
+				modules: modules("core-session-stores-memory", "core-rate-limiter-memory", "oauth"),
 				config: { deployment: { mode: "multi" } },
 				logger: log,
 			});
@@ -79,7 +79,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 			// asserting nothing.
 			if (details.reason !== "replica-unsafe-adapter") expect.unreachable("wrong reason");
 			expect(details.modules).toEqual(
-				expect.arrayContaining(["memorySessionStores", "core-rate-limiter-memory"]),
+				expect.arrayContaining(["core-session-stores-memory", "core-rate-limiter-memory"]),
 			);
 		}
 	});
@@ -88,7 +88,7 @@ describe("checkReplicaSafety — multi mode fails closed", () => {
 		const { logger: log, warn } = logger();
 		expect(() =>
 			checkReplicaSafety({
-				modules: modules("redisSessionStores", "redis-rate-limiter", "oauth"),
+				modules: modules("redis-session-stores", "redis-rate-limiter", "oauth"),
 				config: { deployment: { mode: "multi" } },
 				logger: log,
 			}),
@@ -104,7 +104,7 @@ describe("checkReplicaSafety — three states", () => {
 		// to be loud.
 		const { logger: log, warn } = logger();
 		checkReplicaSafety({
-			modules: modules("memorySessionStores"),
+			modules: modules("core-session-stores-memory"),
 			config: {},
 			logger: log,
 		});
@@ -118,7 +118,7 @@ describe("checkReplicaSafety — three states", () => {
 		// operators to ignore the warning that matters.
 		const { logger: log, warn } = logger();
 		checkReplicaSafety({
-			modules: modules("memorySessionStores"),
+			modules: modules("core-session-stores-memory"),
 			config: { deployment: { mode: "single" } },
 			logger: log,
 		});
@@ -127,14 +127,14 @@ describe("checkReplicaSafety — three states", () => {
 
 	it("stays silent when the mode is unset but nothing unsafe is wired", () => {
 		const { logger: log, warn } = logger();
-		checkReplicaSafety({ modules: modules("redisSessionStores"), config: {}, logger: log });
+		checkReplicaSafety({ modules: modules("redis-session-stores"), config: {}, logger: log });
 		expect(warn).not.toHaveBeenCalled();
 	});
 
 	it("warns once, listing every offending module together", () => {
 		const { logger: log, warn } = logger();
 		checkReplicaSafety({
-			modules: modules("memorySessionStores", "core-access-token-denylist-memory"),
+			modules: modules("core-session-stores-memory", "core-access-token-denylist-memory"),
 			config: {},
 			logger: log,
 		});
@@ -169,7 +169,7 @@ describe("checkReplicaSafety — three states", () => {
 
 	it("does not require a logger", () => {
 		expect(() =>
-			checkReplicaSafety({ modules: modules("memorySessionStores"), config: {} }),
+			checkReplicaSafety({ modules: modules("core-session-stores-memory"), config: {} }),
 		).not.toThrow();
 	});
 });
@@ -184,7 +184,7 @@ describe("REPLICA_UNSAFE_MODULES", () => {
 	});
 
 	it("covers the two the issue named", () => {
-		expect(REPLICA_UNSAFE_MODULES).toContain("memorySessionStores");
+		expect(REPLICA_UNSAFE_MODULES).toContain("core-session-stores-memory");
 		expect(REPLICA_UNSAFE_MODULES).toContain("core-rate-limiter-memory");
 	});
 });
@@ -195,7 +195,7 @@ describe("REPLICA_UNSAFE_MODULES", () => {
 
 describe("checkReplicaSafety — modules that declare replicaSafety on their manifest (#455)", () => {
 	// The standalone template wires its own in-memory modules
-	// (`standalone:in-memory-session-stores`, …) under names the core table
+	// (`standalone-in-memory-session-stores`, …) under names the core table
 	// had never heard of, so `deployment.mode = "multi"` booted with them.
 	// A module's manifest is where it says what it holds; the guard reads it.
 
@@ -203,7 +203,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 		const { logger: log } = logger();
 		try {
 			checkReplicaSafety({
-				modules: [declaring("standalone:in-memory-session-stores"), ...modules("oauth")],
+				modules: [declaring("standalone-in-memory-session-stores"), ...modules("oauth")],
 				config: { deployment: { mode: "multi" } },
 				logger: log,
 			});
@@ -212,7 +212,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 			expect(err).toBeInstanceOf(BootError);
 			const details = (err as BootError).details;
 			if (details.reason !== "replica-unsafe-adapter") expect.unreachable("wrong reason");
-			expect(details.modules).toEqual(["standalone:in-memory-session-stores"]);
+			expect(details.modules).toEqual(["standalone-in-memory-session-stores"]);
 		}
 	});
 
@@ -259,8 +259,8 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 		try {
 			checkReplicaSafety({
 				modules: [
-					...modules("memorySessionStores"),
-					declaring("standalone:in-memory-code-repository"),
+					...modules("core-session-stores-memory"),
+					declaring("standalone-in-memory-code-repository"),
 					...modules("oauth"),
 				],
 				config: { deployment: { mode: "multi" } },
@@ -271,8 +271,8 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 			const details = (err as BootError).details;
 			if (details.reason !== "replica-unsafe-adapter") expect.unreachable("wrong reason");
 			expect(details.modules).toEqual([
-				"memorySessionStores",
-				"standalone:in-memory-code-repository",
+				"core-session-stores-memory",
+				"standalone-in-memory-code-repository",
 			]);
 		}
 	});
@@ -360,14 +360,14 @@ describe("checkReplicaSafety — wired into boot", () => {
 			}),
 		});
 		expect(warn).toHaveBeenCalledWith(
-			expect.objectContaining({ modules: ["memorySessionStores"] }),
+			expect.objectContaining({ modules: ["core-session-stores-memory"] }),
 			"replica_unsafe_adapters",
 		);
 	});
 
 	// #455: a composition root's own module, under a name core has never
 	// seen, declaring what it holds. Exactly the shape the standalone's
-	// `standalone:in-memory-session-stores` takes.
+	// `standalone-in-memory-session-stores` takes.
 	const holdsStateModule = defineModule({
 		name: "test:holds-state",
 		replicaSafety: {

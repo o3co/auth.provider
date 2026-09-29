@@ -110,7 +110,7 @@ const MULTI = { env: MULTI_ENV, shippedRefreshTokenFamilyStore: true } as const;
 
 /** What `buildModules` lists with every switch on and every shared store on Redis. */
 const ALL_ON_REDIS_MODULES = [
-	"sessionStoreModule",
+	"session-store",
 	"federation-grant-background",
 	"federation-grants",
 	"oauth",
@@ -118,18 +118,18 @@ const ALL_ON_REDIS_MODULES = [
 	"oauth-authorization",
 	"jwks",
 	"session",
-	"federation:google",
-	"standalone:google-federation-config",
-	"standalone:oidc-federation-config",
-	"federation:oidc:oidc",
-	"standalone:key-store",
+	"federation-google",
+	"google-federation-config",
+	"oidc-federation-config",
+	"federation-oidc-oidc",
+	"key-store",
 	"test:repositories",
-	"standalone:audit-sink",
-	"standalone:redis-clients",
+	"audit-sink",
+	"redis-clients",
 	"redis-federation-token-store",
 	"redis-federation-grant-store",
 	"redis-federation-grant-intent-store",
-	"redisSessionStores",
+	"redis-session-stores",
 	"redis-rate-limiter",
 	"redis-code-repository",
 	"redis-access-token-denylist",
@@ -171,10 +171,10 @@ describe('every module on, every shared store on Redis, deployment.mode = "multi
 	 * boot names the module that declared the state it would fork.
 	 */
 	const MEMORY_SWITCHES: ReadonlyArray<readonly [variable: string, module: string]> = [
-		["SESSION_STORAGE_TYPE", "sessionStoreModule"],
-		["USER_SESSION_STORES_ADAPTER", "standalone:in-memory-session-stores"],
-		["OAUTH_CODE_ADAPTER", "standalone:in-memory-code-repository"],
-		["FEDERATION_TOKEN_STORE_TYPE", "standalone:in-memory-federation-token-store"],
+		["SESSION_STORAGE_TYPE", "session-store"],
+		["USER_SESSION_STORES_ADAPTER", "standalone-in-memory-session-stores"],
+		["OAUTH_CODE_ADAPTER", "standalone-in-memory-code-repository"],
+		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],
 		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
 		["ACCESS_TOKEN_DENYLIST_ADAPTER", "core-access-token-denylist-memory"],
 		["REPLAY_SEEN_SET_ADAPTER", "core-replay-seen-set-memory"],
@@ -226,7 +226,7 @@ describe("the shared Redis socket can back every store the Redis package ships",
 	});
 
 	it.each(storeModules.map((m) => [m.name, m] as const))(
-		"%s: its client slot is provided by standalone:redis-clients",
+		"%s: its client slot is provided by redis-clients",
 		(_name, module) => {
 			const provided = Object.keys(standaloneRedisClientsModule.provides ?? {});
 			const clients = (module.requires ?? []).filter((slot) => String(slot).endsWith("Client"));

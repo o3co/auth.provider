@@ -195,7 +195,7 @@ describe("loadRedisStoreLibraries", () => {
 	describe("a log line keeps what the message is for", () => {
 		const logged = (err: unknown) => {
 			const { name, detail } = loggableError(err);
-			return `Module "sessionStoreModule" route factory failed: ${name}: ${detail}`.slice(
+			return `Module "session-store" route factory failed: ${name}: ${detail}`.slice(
 				0,
 				LOGGED_STRING_MAX_LENGTH,
 			);

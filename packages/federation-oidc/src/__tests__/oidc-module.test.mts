@@ -34,7 +34,7 @@ const okta = {
 describe("oidcFederationModule(name) (#524)", () => {
 	it("is one module per instance, named after the federation", () => {
 		const mod = oidcFederationModule("okta");
-		expect(mod.name).toBe("federation:oidc:okta");
+		expect(mod.name).toBe("federation-oidc-okta");
 		expect(mod.requires).toEqual(["oidcFederationConfigs"]);
 		const contributes = mod.contributes as unknown as Contributes;
 		expect(Object.keys(contributes.federations)).toEqual(["okta"]);
