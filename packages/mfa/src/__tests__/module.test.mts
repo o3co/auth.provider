@@ -418,7 +418,7 @@ describe("the boot refusals", () => {
 // The development sample key
 // ---------------------------------------------------------------------------
 
-describe("the factors' sections are the factors' modules' to read (the module review of 2026-09-29)", () => {
+describe("the factors' sections are the factors' modules' to read", () => {
 	/** An issuer with no host a TOTP issuer could default to: an IPv6 literal would put a colon in the otpauth label. */
 	const NO_TOTP_HOST = "https://[2001:db8::1]";
 	const withIssuer = (config: ReturnType<typeof configFor>, issuer: string) =>
