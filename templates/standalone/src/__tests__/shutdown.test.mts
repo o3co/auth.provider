@@ -15,19 +15,11 @@
  */
 
 /**
- * Issue #290 — shutdown was delegated to `@o3co/auth.utils@0.0.4`, whose
- * guarantees were not pinned by any contract this repository could check.
- *
- * Reading the 22 lines answered the question the issue asked, and the answer
- * was worth knowing: **there was no force-close deadline**. `server.close()`
- * waits for in-flight requests indefinitely, so one stuck request meant the
- * process never exited on its own and the orchestrator's SIGKILL took it down
- * mid-flight — the opposite of a graceful shutdown, and invisible until it
- * happened. The cleanup-failure path also wrote to `console.error`, a bare
- * line in a service whose every other line is NDJSON.
- *
- * So the behaviour lives here now, with a deadline and the app's own logger,
- * and these tests are the contract the issue said was missing.
+ * The contract of the template's graceful shutdown (README, "Shutdown
+ * guarantees"): a force-close deadline on the drain, a bounded cleanup, and
+ * every stage logged through the app's own logger. `server.close()` alone
+ * waits for in-flight requests indefinitely, so one stuck request would keep
+ * the process up until the orchestrator's SIGKILL took it down mid-flight.
  */
 
 import { createServer, type Server } from "node:http";
@@ -74,8 +66,7 @@ function makeServer() {
 
 /**
  * A `Logger`-shaped spy. Typed rather than cast: `as never` would hide a real
- * mismatch the day the port gains a method, which is the whole reason the
- * shutdown path logs through the app logger instead of `console`.
+ * mismatch the day the port gains a method.
  */
 const makeLogger = () => {
 	const spy = {
@@ -192,7 +183,6 @@ describe("installGracefulShutdown (#290)", () => {
 		expect(cleanup).toHaveBeenCalledTimes(1);
 	});
 
-	// The gap the audit was pointing at.
 	it("forces the remaining connections closed when draining outruns the deadline", async () => {
 		vi.useFakeTimers();
 		try {
@@ -385,11 +375,9 @@ describe("installGracefulShutdown (#290)", () => {
 	});
 
 	it("bounds cleanup so a hanging dispose cannot wedge the process", async () => {
-		// The guarantees above say cleanup "never wedges the process", but `finish`
-		// awaited it with no deadline — and the drain deadline is already cleared
-		// by then, so a dispose that never settles meant `exit` was never reached.
-		// The same defect was found in auth.proxy#81 and auth.policy-verifier#210,
-		// both of which took this file as their starting point.
+		// The drain deadline is already cleared when cleanup runs, so without a
+		// deadline of its own a dispose that never settles would keep `exit`
+		// from ever being reached.
 		vi.useFakeTimers();
 		try {
 			const { signals, finishDraining, exit, logger } = install({
@@ -437,9 +425,9 @@ describe("installGracefulShutdown (#290)", () => {
 	});
 
 	it("reports the cleanup outcome as the reason, not the drain that preceded it", async () => {
-		// `exitCode` became 1 while `reason` still said "drained", so the one line
-		// an operator alerts on contradicted itself. The drain outcome is still
-		// carried, under its own key, so neither fact is lost.
+		// `reason` must agree with `exitCode` on the one line an operator alerts
+		// on. The drain outcome is carried under its own key, so neither fact is
+		// lost.
 		const { signals, finishDraining, logger, exit } = install({
 			cleanup: () => Promise.reject(new Error("teardown failed")),
 		});
@@ -483,7 +471,7 @@ describe("#593 slice 7: the cleanup allowance federation grants need", () => {
 		expect(cleanupAllowanceFor({ federationGrants: { enabled: true } })).toEqual({
 			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
 		});
-		// Off, nothing: the cleanup budget stays the drain's, as it was.
+		// Off, nothing: the cleanup budget stays the drain's.
 		expect(cleanupAllowanceFor({ federationGrants: { enabled: false } })).toEqual({});
 		expect(cleanupAllowanceFor({})).toEqual({});
 	});

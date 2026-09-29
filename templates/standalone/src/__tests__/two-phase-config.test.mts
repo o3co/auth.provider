@@ -15,8 +15,7 @@
  */
 
 /**
- * The template reads its configuration in two phases (#728), as `app.mts`
- * does:
+ * The template reads its configuration in two phases, as `app.mts` does:
  *
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
  *    core's transitional reader — parses only `SWITCHES`, what the template
@@ -26,11 +25,10 @@
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
  *
- * Where the template used to parse with `AppConfigSchema` (through the HOCON
- * library's Zod bridge) before `buildModules`, phase one must read each switch
- * as that parse did — the template's values are unchanged — and nothing but
- * its switches, so that a section a package's reference completes (known only
- * in phase two) does not refuse it.
+ * Phase one must read each switch as a parse of the same layers with
+ * `AppConfigSchema` (through the HOCON library's Zod bridge) does, and nothing
+ * but its switches, so that a section a package's reference completes (known
+ * only in phase two) does not refuse it.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -90,7 +88,7 @@ const ownFiles = (environment: string): string[] => {
 	return [envConfPath, applicationConfPath];
 };
 
-/** What `app.mts` read before #728: the layers parsed with `AppConfigSchema` through the bridge. */
+/** The layers parsed with `AppConfigSchema` through the bridge: how phase one must read each switch. */
 function preParsed(environment: string, env: Readonly<Record<string, string>>): unknown {
 	const read = (file: string) => parseFile(file, { env: { ...env } });
 	const [top, application] = ownFiles(environment) as [string, string];
@@ -295,9 +293,8 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		for (const environment of ["development", "production"]) {
 			for (const [name, shipped] of Object.entries(ENVIRONMENTS)) {
 				// `mfa.mode` off: boot refuses another mode with no requirement
-				// named `mfa` registered, and the template installs none yet (the
-				// MFA ADR's step 20). Phase one's reading of the mode is pinned
-				// against the old pre-parse above.
+				// named `mfa` registered, and the template installs none. Phase
+				// one's reading of the mode is pinned against the pre-parse above.
 				const variables = { ...shipped, MFA_MODE: "off" };
 				const own = readOwnLayers(ownFiles(environment), { env: variables });
 				const switches = withSessionRequirements(readSwitches(own));
@@ -326,7 +323,7 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 	});
 });
 
-/** The stores an enabled federation needs, which boot refuses a composition without (#101). */
+/** The stores an enabled federation needs, which boot refuses a composition without. */
 const FEDERATION_STORES = Object.fromEntries(
 	[
 		"userSessionStore",

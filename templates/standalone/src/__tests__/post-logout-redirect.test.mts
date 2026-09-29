@@ -22,16 +22,11 @@
  *
  * Google publishes no end-session endpoint, and without one configured its
  * adapter sends the browser straight to the `postLogoutRedirectUri` it is
- * handed. Both logout routes used to hand it the caller's value unchecked,
- * ahead of the allowlist check that guarded their own redirect, so a fresh
- * id_token of the caller's own and `post_logout_redirect_uri=https://evil…`
- * made this provider's origin answer `303` to any site. With an end-session
- * endpoint configured, the unchecked value was forwarded to the upstream
- * instead.
- *
- * The redirect asserted here is the one a browser would follow: the real
- * Google adapter, composed as a deployment composes it
- * (`google-session.fixture.mts`).
+ * handed: unchecked, a caller's own fresh id_token would make this provider's
+ * origin answer `303` to any site. With an end-session endpoint configured,
+ * an unchecked value would be forwarded to the upstream instead. The real
+ * Google adapter is composed (`google-session.fixture.mts`), so the redirect
+ * asserted is the one a browser would follow.
  */
 
 import type express from "express";
@@ -107,7 +102,7 @@ describe("a logout's post_logout_redirect_uri reaches the upstream only once it 
 			expect(res.status).toBe(303);
 			expect(new URL(res.headers.location as string).origin).not.toBe("https://evil.example");
 			// Google's own logout page: the adapter's answer when it is handed no
-			// redirect target, which is what an unregistered one now is.
+			// redirect target, which is what an unregistered one becomes.
 			expect(res.headers.location).toBe(`${GOOGLE_LOGOUT}?state=s-1`);
 			// The logout itself still happened.
 			expect(await userSessionStore.get(sid)).toBeNull();

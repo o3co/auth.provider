@@ -16,14 +16,13 @@
 
 /**
  * `oauth.accessToken.expiresIn` / OAUTH_ACCESS_TOKEN_EXPIRES_IN is a deprecated
- * alias of `defaultExpiresIn`, and the composition says so once — the OR-9
- * shape `repositories.code.type` already has.
+ * alias of `defaultExpiresIn`, and the composition says so once, as it does for
+ * `repositories.code.type`.
  *
- * The line has to be exact in both directions. Core's `reference.conf` keeps
- * the shipped lifetime on the deprecated key, so "the alias supplied the
- * default" describes every deployment that set nothing; warning on that would
- * train operators to ignore the line. Only an override of the old key is
- * something to move.
+ * Core's `reference.conf` keeps the shipped lifetime on the deprecated key, so
+ * the alias supplies the default for every deployment that set nothing; a
+ * warning there would train operators to ignore it. Only an override of the old
+ * key is something to move.
  */
 
 import { fileURLToPath } from "node:url";

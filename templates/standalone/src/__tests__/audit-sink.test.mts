@@ -15,16 +15,14 @@
  */
 
 /**
- * #287 — the audit-event pipeline existed and the scaffold wired no sink, so
- * every security-relevant event the routes emit (`token.issued.failure`,
- * `authorize.rejected`, `rate_limit.unavailable`, …) was dropped by the
- * artifact operators actually deploy. `emitAuditEvent` is a no-op when the
- * slot is empty, so nothing failed and nothing warned: the deployment simply
- * had no audit trail.
+ * The scaffold wires an audit sink. `emitAuditEvent` is a no-op when the slot
+ * is empty, so without one every security-relevant event the routes emit
+ * (`token.issued.failure`, `authorize.rejected`, `rate_limit.unavailable`, …)
+ * is dropped, and nothing fails or warns.
  *
- * These tests pin the closure from three sides — the sink implementation, the
- * module that resolves it from config, and the manifest that must contain
- * exactly one provider for the slot.
+ * Pinned from three sides: the sink implementation, the module that resolves
+ * it from config, and the manifest, which must contain exactly one provider
+ * for the slot.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -57,9 +55,9 @@ const keyPair = generateKeyPairSync("ed25519", {
 const baseConfig: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
-	// The parsed config always carries `mfa`: "off" until the release that
-	// turns MFA on (the MFA ADR's D19) — and, as `app.mts` derives from it,
-	// the posture on session admission (the session-admission ADR's D7).
+	// The parsed config always carries `mfa` (ADR
+	// 2026-09-25-multi-factor-authentication) and, as `app.mts` derives from
+	// it, the posture on session admission (ADR 2026-09-28-session-admission).
 	mfa: { mode: "off" },
 	sessionRequirements: { expected: [] },
 	oauth: {
@@ -224,9 +222,8 @@ describe("#287: the template's audit sink", () => {
 	describe("the audit trail is not gated by logging.level", () => {
 		it("keeps the audit logger at info while the app logger is silenced", () => {
 			// An audit trail is evidence, not diagnostics. `LOG_LEVEL=warn` is an
-			// ordinary production setting and `silent` is a legitimate one; if
-			// either silenced audit events, #287 would be back — the same silent
-			// drop, reached from the operator's side instead of the scaffold's.
+			// ordinary production setting and `silent` is a legitimate one;
+			// neither may silently drop audit events.
 			const appLogger = createAppLogger({ ...baseConfig, logging: { level: "silent" } });
 			const auditLogger = createAuditLogger();
 			expect((appLogger as unknown as { level: string }).level).toBe("silent");
@@ -252,17 +249,17 @@ describe("#287: the template's audit sink", () => {
 		});
 
 		it("still produces a sink when the audit section is absent entirely", async () => {
-			// The failure #287 describes is silent absence. A config that says
-			// nothing about auditing must land on a sink, not on `undefined`.
+			// A config that says nothing about auditing must land on a sink, not
+			// on `undefined`.
 			const { audit: _audit, ...withoutAudit } = baseConfig;
 			const sink = await resolveSink(withoutAudit as AppConfig);
 			expect(sink.kind).toBe("logger");
 		});
 
 		it("refuses an unknown sink type at boot, naming what is registered", async () => {
-			// There is no "none" — #304's sink policy. An operator who writes one
-			// gets a boot failure naming the sinks that exist, not a silent
-			// deployment with no audit trail.
+			// There is no "none" sink. An operator who writes one gets a boot
+			// failure naming the sinks that exist, not a silent deployment with
+			// no audit trail.
 			await expect(
 				resolveSink({ ...baseConfig, audit: { sink: { type: "none" } } }),
 			).rejects.toThrow(/none/);
@@ -297,8 +294,7 @@ describe("#287: the template's audit sink", () => {
 		});
 
 		it("records token.issued.failure for an unsupported grant_type", async () => {
-			// Before #287 this assertion could not fail: nothing filled the slot,
-			// so `emitAuditEvent` returned without recording anything.
+			// `emitAuditEvent` records nothing when the slot is empty.
 			const logger = fakeLogger();
 			const spyAuditModule = defineModule({
 				name: "audit-sink",

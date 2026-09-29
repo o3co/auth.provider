@@ -19,17 +19,14 @@
  * than one replica: every shared store on Redis, `deployment.mode = "multi"`,
  * every module the template can turn on switched on together.
  *
- * What it holds: the replica-safety declarations hold with every module on —
- * the all-Redis composition boots with nothing declaring replica-unsafe state,
- * and each store switched back to memory is refused at boot, naming the
- * module — and the Redis adapters change nothing a client can see: the same
- * routes, the same discovery document as on one replica.
+ * With every module on, the all-Redis composition boots with nothing declaring
+ * replica-unsafe state, and each store switched back to memory is refused at
+ * boot, naming the module. The Redis adapters change nothing a client can
+ * see: the same routes, the same discovery document as on one replica.
  *
  * ioredis, node-redis and connect-redis are stand-ins, as in
- * `replica-safety.test.mts`: what is under test is the composition and the
- * boot's verdict, and nothing here issues a command. The template has no
- * Redis server to run against — `packages/redis` runs its adapters against
- * one.
+ * `replica-safety.test.mts`: nothing here issues a command. `packages/redis`
+ * runs its adapters against a real server.
  */
 
 import { type Module, replicaUnsafeReason } from "@o3co/auth-provider-core";
@@ -212,8 +209,8 @@ describe("the shared Redis socket can back every store the Redis package ships",
 	 * the others to the manifest with the modules that read them (the device
 	 * grant's code store, WebAuthn's challenge store), and each requires its
 	 * client from this module. One it does not provide is a boot refused with
-	 * `missing-required-component` — the #439 shape, which `modules.mts`
-	 * guards against for the device-code store by name.
+	 * `missing-required-component`, which `modules.mts` guards against for
+	 * the device-code store by name.
 	 */
 	const storeModules: Module[] = Object.entries(redisPackage).flatMap(([name, value]) => {
 		if (name.endsWith("ModuleFor") && typeof value === "function") {

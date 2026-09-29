@@ -16,8 +16,8 @@
 
 /**
  * `POST /oauth/federation/:name/token` ends a session's upstream tokens only
- * on the upstream's own verdict that the refresh token is bad — a structured
- * `invalid_grant` under a 4xx — and never while the upstream is down, whatever
+ * on the upstream's own verdict that the refresh token is bad (a structured
+ * `invalid_grant` under a 4xx), and never while the upstream is down, whatever
  * the body of its 5xx says. An outage is `503`, and the tokens are kept for
  * the retry.
  *
@@ -26,8 +26,7 @@
  * are the ones the library raises: a 4xx whose body names a code is a
  * `ResponseBodyError` carrying `error` and `status`; a 5xx is an
  * `OperationProcessingError` raised over the `Response`, whose body the
- * library does not read — and which the route used to answer `500
- * refresh_failed`, as if the upstream had said something it could not place.
+ * library does not read.
  */
 
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";

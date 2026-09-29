@@ -29,30 +29,19 @@ import { buildModules, withSessionRequirements } from "../buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
 
 /**
- * #288 — boot the shipped config with EVERY documented override supplied the
- * way an operator actually supplies one: as a string.
+ * Boots the shipped config with EVERY documented override supplied the way an
+ * operator supplies one: as a string.
  *
- * HOCON substitutes `${?VAR}` as a string, always. Whether that string is
- * usable depends entirely on the schema leaf it lands on, and the schema had
- * two answers to that question — an explicit `coerceBooleanFromEnv` on two
- * fields, and a bare `z.boolean()` everywhere else that only worked because
- * `@o3co/ts.hocon`'s zod bridge coerces a bare boolean leaf it can *reach*.
- * The bridge stops at anything that is not a `ZodObject` shape (or an
- * optional/nullable/default/catch/readonly wrapper around one), so wrapping a
- * section in `z.preprocess(...)` silently took the override away — which is
- * precisely what had happened to `OAUTH_JWT_LEGACY_TYP_ACCEPT`.
+ * HOCON substitutes `${?VAR}` as a string, always. `app.mts` reads its switches
+ * with core's transitional reader and hands `createApp` what it resolved,
+ * which boot parses once with plain Zod, so every schema leaf must read the
+ * string itself. This suite reads through that path: `readSwitches` for what
+ * is read before boot, `resolveForBoot` and `createApp` for the configuration
+ * boot parsed.
  *
- * Since #728 the bridge is on no path: `app.mts` reads its switches with
- * core's transitional reader and hands `createApp` what it resolved, which
- * boot parses once with plain Zod. So every leaf must read the string itself,
- * and this suite reads through that path — `readSwitches` for what is read
- * before boot, `resolveForBoot` and `createApp` for the configuration boot
- * parsed.
- *
- * This suite is the thing that stops the two paths diverging again. It is not
- * a sample of interesting variables: `covers every documented override` below
- * fails when a `${?VAR}` is added to either config layer, or documented in the
- * README, without being exercised here.
+ * It is not a sample of interesting variables: `covers every documented
+ * override` below fails when a `${?VAR}` is added to either config layer, or
+ * documented in the README, without being exercised here.
  */
 
 // config/ is two levels above this test file: src/__tests__/ → src/ → standalone/
@@ -62,12 +51,11 @@ const readmePath = fileURLToPath(new URL("../../README.md", import.meta.url));
 const readmeJaPath = fileURLToPath(new URL("../../README.ja.md", import.meta.url));
 
 /**
- * Every environment variable the shipped artifact documents, with a value in
- * the shape an operator would supply. Strings throughout — that is the whole
- * point of the exercise.
+ * Every environment variable the shipped artifact documents, as the string an
+ * operator would supply.
  *
- * `OAUTH_JWT_ALGORITHM` is `EdDSA` here so the asymmetric key variables can be
- * in the same map: the HS256 branch of `signingKey.local` is a `.strict()`
+ * `OAUTH_JWT_ALGORITHM` is `EdDSA` so the asymmetric key variables fit in the
+ * same map: the HS256 branch of `signingKey.local` is a `.strict()`
  * discriminated-union member and refuses `privateKeyPath` and friends by
  * design. The HS256 shape gets its own test below.
  */
@@ -90,8 +78,6 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_PRIVATE_KEY_PATH: "./config/jwt-private.pem",
 	OAUTH_JWT_PUBLIC_KEY: "-----BEGIN PUBLIC KEY-----\nMCo=\n-----END PUBLIC KEY-----",
 	OAUTH_JWT_PUBLIC_KEY_PATH: "./config/jwt-public.pem",
-	// The override this issue was filed over: a bare `z.boolean()` behind a
-	// `z.preprocess` wrapper the hocon bridge cannot see through.
 	OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 
 	// --- oauth tokens / policy ----------------------------------------
@@ -132,7 +118,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "true",
 	OAUTH_GRANTS_REFRESH_TOKEN_ENABLED: "true",
 	OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED: "true",
-	// #273 tombstone: inert, but a still-exported value must reach the boot
+	// Tombstone: inert, but a still-exported value must reach the boot
 	// warning rather than failing parse.
 	OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256: "true",
 
@@ -154,7 +140,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	MEMORY_RATE_LIMITER_MAX_BUCKETS: "10000",
 
 	// --- audit --------------------------------------------------------
-	// #287: selects the sink builder; "console" is the registered builtin.
+	// Selects the sink builder; "console" is the registered builtin.
 	// There is deliberately no "none" — an unknown type fails boot in
 	// buildModules (pinned by audit-sink.test.mts), not at config parse,
 	// because the schema keeps `audit.sink.type` an open string so
@@ -165,9 +151,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	DEPLOYMENT_MODE: "multi",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
-	// #484: the replay seen-set behind private_key_jwt client authentication.
+	// The replay seen-set behind private_key_jwt client authentication.
 	REPLAY_SEEN_SET_ADAPTER: "redis",
-	// #561: the consent stores' shared backend and its namespace.
+	// The consent stores' shared backend and its namespace.
 	CONSENT_STORE_ADAPTER: "redis",
 	REDIS_CONSENT_STORE_KEY_PREFIX: "tenant-a:consent:",
 	REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX: "atdeny:",
@@ -176,31 +162,29 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "rt-family-password",
-	// #456: the federation token store's Redis branch, which the README
-	// documented and which could not boot.
+	// The federation token store's Redis branch.
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX: "ft:",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "required",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-	// #593: federation grants — a user's standing consent that a client may
-	// obtain upstream tokens without them. The overrides `reference.conf`
-	// declares, and (slice 7) the two adapter switches the template composes
-	// the feature from.
+	// Federation grants: a user's standing consent that a client may obtain
+	// upstream tokens without them. The overrides `reference.conf` declares,
+	// and the two adapter switches the template composes the feature from.
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANT_STORE_ADAPTER: "redis",
 	FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
 	FEDERATION_GRANTS_ENCRYPTION_MODE: "required",
 	FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION: "false",
-	// Slice 6: acquisition's two deployment decisions — whether the callback
+	// Acquisition's two deployment decisions — whether the callback
 	// refuses an upstream account linked to another user, and the consent page.
 	FEDERATION_GRANTS_IDENTITY_LOOKUP: "required",
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
-	// The MFA ADR's D19: the mode — `off` until the MFA package exists, and
-	// what `sessionRequirements.expected` is derived from in TypeScript (the
-	// session-admission ADR's D7) — and the two store switches a composition
+	// The mode (ADR 2026-09-25-multi-factor-authentication), which
+	// `sessionRequirements.expected` is derived from in TypeScript (ADR
+	// 2026-09-28-session-admission), and the two store switches a composition
 	// installs MFA's stores from.
 	MFA_MODE: "off",
 	MFA_FACTOR_STORE_ADAPTER: "redis",
@@ -216,7 +200,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
 	FEDERATIONS_GOOGLE_CALLBACK_URL: "https://auth.test/session/oauth/federation/google/callback",
 	FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
-	// #524: the generic OIDC federation the template ships disabled.
+	// The generic OIDC federation the template ships disabled.
 	FEDERATIONS_OIDC_ENABLED: "true",
 	FEDERATIONS_OIDC_ISSUER: "https://idp.test",
 	FEDERATIONS_OIDC_CLIENT_ID: "oidc-client-id",
@@ -231,7 +215,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	CLIENT_USER_AUTHENTICATE_URL: "https://users.example.com/authenticate",
 	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL: "https://users.example.com/authenticate-by-token",
 	CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://users.example.com/link-federated-identity",
-	// #613: the Store's identity lookup for federation grants (D7 check 5).
+	// The Store's identity lookup for federation grants (see ADR
+	// 2026-09-17-federation-grants-offline-delegation).
 	CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
 		"https://users.example.com/find-subject-by-federated-identity",
 	CLIENT_USER_TIMEOUT: "5000",
@@ -250,7 +235,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	ENDPOINTS_MFA_URL: "/account/mfa",
 
 	// --- cors ---------------------------------------------------------
-	// #500: a list, in the only shape an environment variable can carry one.
+	// A list, in the only shape an environment variable can carry one.
 	// The schema splits and validates it; the `turns every non-boolean
 	// override into its declared type` case below pins the result.
 	CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
@@ -273,13 +258,10 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
  * first. `SESSION_SECURE=false` is the one it cannot run without: the suite
  * speaks plain HTTP.
  *
- * The two `FEDERATION_TOKEN_STORE` lines are what #455 / #456 **require the
- * umbrella compose to add**: the federation token store defaults to memory,
- * and the standalone's memory module now declares itself replica-unsafe, so
- * the umbrella's `DEPLOYMENT_MODE=multi` refuses it by name until the compose
- * selects the Redis store and supplies its encryption key. Until that lands
- * in `o3co/auth`, this transcription is ahead of the file it transcribes on
- * exactly those two lines.
+ * The two `FEDERATION_TOKEN_STORE` lines are required: the federation token
+ * store defaults to memory, the standalone's memory module declares itself
+ * replica-unsafe, and `DEPLOYMENT_MODE=multi` refuses it by name unless the
+ * Redis store is selected with its encryption key.
  */
 const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
@@ -318,7 +300,7 @@ function readShippedSwitches(env: Record<string, string>, configEnv = "productio
 
 /**
  * The stores an enabled federation needs beside it, which boot refuses a
- * composition without (#101). What they hold is not this suite's question.
+ * composition without. What they hold is not this suite's question.
  */
 const FEDERATION_STORES = Object.fromEntries(
 	[
@@ -410,9 +392,8 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 		expect(config.federations.google?.enabled).toBe(true);
 		expect(config.federations.oidc?.enabled).toBe(true);
-		// #593: the newest one, and the one where a leftover string would be
-		// read as "on" by a truthiness check and as "off" by `=== true` — a
-		// feature whose whole default is off.
+		// A leftover string here would be read as "on" by a truthiness check
+		// and as "off" by `=== true`, for a feature whose whole default is off.
 		expect(config.federationGrants?.enabled).toBe(true);
 	});
 
@@ -435,7 +416,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.oauth.nonce?.maxLength).toBe(256);
 		expect(config.consentStore?.adapter).toBe("redis");
 		expect(config.redisConsentStore?.keyPrefix).toBe("tenant-a:consent:");
-		// #529: the comma-separated lists become lists, trimmed; the numbers, numbers.
+		// The comma-separated lists become lists, trimmed; the numbers, numbers.
 		expect(config.oauth.clientIdMetadataDocuments).toEqual({
 			enabled: true,
 			allowedScopes: ["read", "write"],
@@ -450,14 +431,14 @@ describe("#288: the shipped config boots with every documented override supplied
 			maxConcurrentFetches: 4,
 			cacheMaxAgeMs: 60000,
 		});
-		// The MFA ADR's D19.
+		// ADR 2026-09-25-multi-factor-authentication.
 		expect(config.mfa?.mode).toBe("off");
 		expect(config.endpoints.mfa?.url).toBe("/account/mfa");
 		expect(config.mfaFactorStore?.adapter).toBe("redis");
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 		expect(config.redisMfaFactorStore?.keyPrefix).toBe("tenant-a:mfaf:");
 		expect(config.redisMfaTransactionStore?.keyPrefix).toBe("tenant-a:mfat:");
-		// #500: a comma-separated string becomes a list of origins, trimmed.
+		// A comma-separated string becomes a list of origins, trimmed.
 		expect(config.cors?.allowedOrigins).toEqual([
 			"https://app.example.com",
 			"http://localhost:5173",
@@ -491,8 +472,8 @@ describe("#288: the shipped config boots with every documented override supplied
 
 		it("fails boot on a value that is neither a list nor a string, naming the key", async () => {
 			// The variable can only ever carry a string, so this shape comes
-			// from a configuration file — and it used to read as no origins:
-			// CORS silently off for a key someone wrote.
+			// from a configuration file. Read as no origins, it would turn CORS
+			// silently off for a key someone wrote.
 			for (const value of ["42", "true", '{ origin = "https://app.example.com" }']) {
 				await expect(
 					bootParsed(DOCUMENTED_ENV, "production", `cors.allowedOrigins = ${value}`),
@@ -536,9 +517,9 @@ describe("#288: the shipped config boots with every documented override supplied
 	it("wires nothing replica-unsafe for the umbrella E2E environment", async () => {
 		// `DEPLOYMENT_MODE=multi` makes the provider audit its own store wiring
 		// at boot, so a config that parses but wires a memory store still fails
-		// there. Ask each manifest, the way the guard does (#455): the exported
-		// name list covers core's modules only, and the template's own memory
-		// modules are precisely the ones it could not see.
+		// there. Ask each manifest, the way the guard does: the exported name
+		// list covers core's modules only, and cannot see the template's own
+		// memory modules.
 		const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
 		for (const module of buildModules(readShippedSwitches(UMBRELLA_E2E_ENV))) {
 			expect(replicaUnsafeReason(module), module.name).toBeUndefined();
@@ -553,7 +534,7 @@ describe("#288: the shipped config boots with every documented override supplied
 			["false", false],
 			["0", false],
 			// An exported-but-empty variable — the `.env` / compose / ConfigMap
-			// shape. Reads as false, matching what #292 decided for trustProxy.
+			// shape. Reads as false, as it does for trustProxy.
 			["", false],
 		];
 
@@ -583,7 +564,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		});
 
 		it("refuses SESSION_SAME_SITE=none unless SESSION_SECURE is on", async () => {
-			// The #282 guard reads the coerced value, so it has to keep firing
+			// The SameSite=None guard reads the coerced value, so it has to keep firing
 			// for the string form an environment variable actually delivers.
 			await expect(
 				bootParsed({
@@ -703,7 +684,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		// artifact these tests would pass while testing nothing. Checked by
 		// what the directory holds, not by what it is called: this file ships
 		// in every scaffolded project, and none of those lives at
-		// `templates/standalone` (#512).
+		// `templates/standalone`.
 		for (const file of ["config/application.conf", "config/production.conf", "src/app.mts"]) {
 			expect(existsSync(join(standaloneDir, file)), file).toBe(true);
 		}

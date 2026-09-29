@@ -41,7 +41,7 @@ function buildApp(probes: Parameters<ReturnType<typeof createMetrics>["route"]>[
  * Starts `app` on 127.0.0.1, the address the raw-socket tests dial. A hostless
  * `listen(0)` binds `[::]`, and on macOS the port it gets can be one another
  * process holds on 127.0.0.1 — the request then reaches that process and can
- * hang until the test times out (#556).
+ * hang until the test times out.
  */
 function listenOnLoopback(app: express.Express): Promise<ReturnType<express.Express["listen"]>> {
 	return new Promise((resolve) => {
@@ -137,14 +137,9 @@ describe("GET /metrics", () => {
 	it("counts a request whose client disconnects before the response finishes", async () => {
 		// `close` fires without `finish` when a client or proxy gives up
 		// mid-handler, and those are disproportionately the slow and failing
-		// requests RED metrics exist to surface.
-		//
-		// Sequenced on the server's own events, never on a fixed wait: the abort
-		// goes out once the handler holds the request, and /metrics is read once
-		// the response has closed. A 30 ms sleep either side raced a loaded
-		// machine — an abort sent before the request reached its route was
-		// counted as `unmatched`, or not at all, and one whose close had not yet
-		// been processed was read as nothing.
+		// requests RED metrics exist to surface. Sequenced on the server's own
+		// events, never on a fixed wait: the abort goes out once the handler
+		// holds the request, and /metrics is read once the response has closed.
 		const metrics = createMetrics();
 		const app = express();
 		app.use(metrics.middleware);

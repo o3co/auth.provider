@@ -15,22 +15,15 @@
  */
 
 /**
- * #495 / #496 — end to end, through this template's real resolution chain.
- *
- * `app.mts` used to resolve `{env}.conf → application.conf → reference.conf`
- * and validate the result with `AppConfigSchema` before `buildModules` ran.
- * The schema stripped what it did not declare, so a section declared by a
- * module rather than by core vanished at exactly that step — and, because
- * `redisRateLimiterModule.configSchema` carries a
- * `.default({ limit: 60, windowSeconds: 60 })`, the deployment that
- * `docker-compose.production.yml` ships (`RATE_LIMITER_ADAPTER: redis`) then
- * ran on 60 requests / 60 s no matter what the operator wrote.
- *
- * Since #728 it reads its configuration in two phases, and hands `createApp`
- * what it resolved, which boot parses once. This starts from the shipped
- * configuration, adds the two overrides an operator writes in a layer of
- * their own, and follows them through both phases and `createApp` to the
- * limiter the module builds.
+ * Sections declared by a module rather than by core (`redisRateLimiter`,
+ * `oauth.mtls`) survive this template's real resolution chain, end to end.
+ * Starting from the shipped configuration plus an operator's own layer, the
+ * overrides are followed through both configuration phases and `createApp`
+ * to the limiter the module builds. Were `redisRateLimiter` stripped, the
+ * module's `.default({ limit: 60, windowSeconds: 60 })` would put the
+ * deployment `docker-compose.production.yml` ships
+ * (`RATE_LIMITER_ADAPTER: redis`) on 60 requests / 60 s whatever the
+ * operator wrote.
  */
 
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -53,7 +46,7 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 /**
  * The secrets `application.conf` substitutes, plus the one
  * `docker-compose.production.yml` sets to put the OAuth endpoints behind a
- * shared limiter. Test-only values; #282's entropy floor applies to the two
+ * shared limiter. Test-only values; the entropy floor applies to the two
  * secrets, and the `.` characters keep them out of the base64 alphabet so the
  * UTF-8 length is what counts.
  */
@@ -68,7 +61,7 @@ const ENV = {
  * What an operator adds to their own `application.conf` layer: per-endpoint
  * budgets for the Redis limiter, and the mTLS posture from
  * `@o3co/auth-provider-mtls`. Neither section appears in anything this
- * template ships, which is why neither was ever covered by a `.conf` diff.
+ * template ships.
  */
 const OPERATOR_OVERRIDES = `
 redisRateLimiter {
@@ -180,17 +173,16 @@ describe("the shipped configuration reaches the Redis rate limiter (#495)", () =
 	});
 
 	it("still falls back to the module's default where nothing is declared", async () => {
-		// The point of the assertion above: 60 is what EVERY endpoint got while
-		// the section was stripped, so a test that only saw 60 could not tell a
-		// working configuration from a lost one.
+		// 60 is what every endpoint would get were the section stripped, so the
+		// budgets above differ from it to tell a working configuration from a
+		// lost one.
 		const decision = await limiter.check("introspect:ip:203.0.113.5", { ip: "203.0.113.5" });
 		expect(decision.limit).toBe(60);
 	});
 
 	it("keeps seeding /session/login from rateLimit.login", async () => {
-		// `resolveSeededLimitSpecs` reads a declared section, so this worked
-		// even while `redisRateLimiter` was being stripped — which is why the
-		// defect showed up only at the endpoints below it.
+		// `resolveSeededLimitSpecs` reads a section core declares, so this
+		// holds even were `redisRateLimiter` stripped.
 		const decision = await limiter.check("login:ip:203.0.113.5", { ip: "203.0.113.5" });
 		expect(decision.limit).toBe(config.rateLimit?.login.limit);
 	});

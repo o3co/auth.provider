@@ -15,16 +15,14 @@
  */
 
 /**
- * `standaloneRedisClientsModule` provides `deviceCodeStoreClient` (#433).
+ * `standaloneRedisClientsModule` provides `deviceCodeStoreClient`.
  *
  * The template does not mount the device grant, so nothing in `buildModules`
- * selects `redisDeviceCodeStoreModule` today and the smoke test's client-slot
+ * selects `redisDeviceCodeStoreModule` and the smoke test's client-slot
  * invariant cannot see it. This pins the slot directly: a deployment that adds
  * `deviceGrantModule` to this manifest and picks the Redis store must not hit
- * the `missing-required-component` boot failure that #439 already paid for
- * once with the subject-level slots — a Redis-branch module whose required
- * client slot the shared clients module did not provide, caught only by the
- * umbrella e2e.
+ * `missing-required-component` for a client slot the shared clients module
+ * does not provide.
  */
 
 import type { LifecycleRegistrar } from "@o3co/auth-provider-core";

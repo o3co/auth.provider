@@ -19,14 +19,11 @@
  * composition: `CLIENT_USER_BEARER_TOKEN` in the environment → the HOCON
  * layers → `AppConfigSchema` → the production `repositoriesModule` → the
  * `"http"` user adapter → the `Authorization` header a real `node:http` Store
- * receives. Unset, the Store receives no `Authorization` header; set blank —
- * an exported-but-empty variable — the user repository is refused.
- *
- * And what a mismatch looks like from outside, with the app booted from the
- * shipped config through `createApp`: a Store that refuses the token with a
- * `401` and a `Bearer` challenge turns `POST /session/login` into a `503`
- * whose log line names the refused credential and never the token; a `401`
- * without the challenge is still a wrong password.
+ * receives. Unset, no header is sent; exported but empty, the user repository
+ * is refused. From outside the booted app, a Store's `401` with a `Bearer`
+ * challenge turns `POST /session/login` into a `503` whose log line names the
+ * refused credential and never the token; a `401` without the challenge is
+ * still a wrong password.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -221,7 +218,7 @@ describe("a token the Store refuses, seen from outside the booted app", () => {
 	});
 
 	/**
-	 * The client registry the boot reads, which this test brings itself (#704).
+	 * The client registry the boot reads, which this test brings itself.
 	 * `CLIENT_PATH`'s default, `./config/clients.yaml`, is per-deployment: the
 	 * scaffold's `.gitignore` keeps it out of the project's repository, so a
 	 * fresh clone — a CI runner, the `test` image — has none. The login below
