@@ -64,6 +64,7 @@ import {
 	verifyJwt,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -597,6 +598,39 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		);
 
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
+	});
+
+	it("binds a confidential client's refresh token when the oauthTokenSettings the composition holds opt in, over the configuration (#728)", async () => {
+		const tokens = await issue(
+			await makeDeps({
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: ISSUER,
+					tokenBinding: { bindConfidentialClientRefreshTokens: true },
+				}),
+			}),
+			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
+				tokenBinding: dpopBinding("PROOF-JKT"),
+			}),
+		);
+
+		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
+	});
+
+	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
+		const tokens = await issue(
+			await makeDeps({
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: ISSUER,
+					accessTokenLifetime: { defaultExpiresIn: 111, maxExpiresIn: 111 },
+					refreshTokenExpiresIn: 2222,
+				}),
+			}),
+			makeCtx(makeClient()),
+		);
+		const access = decodePayload(tokens.access_token);
+		const refresh = decodePayload(tokens.refresh_token as string);
+		expect((access.exp as number) - (access.iat as number)).toBe(111);
+		expect((refresh.exp as number) - (refresh.iat as number)).toBe(2222);
 	});
 
 	it("emits no cnf when the request carried no binding", async () => {

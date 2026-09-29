@@ -51,7 +51,7 @@ import {
 	memoryChallengeStoreModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import express from "express";
 import supertest from "supertest";
@@ -157,7 +157,10 @@ afterEach(async () => {
  * `grantPolicy` slot, and `oauth.resourceIndicator.enabled` on — the flag
  * under which the grant forwards `resource` at all.
  */
-async function boot() {
+async function boot(options: { readonly flagIn?: "configuration" | "slot" } = {}) {
+	// `slot`: the configuration leaves resource indicators off, and the
+	// `oauthTokenSettings` the composition holds turns them on (#728).
+	const inSlot = options.flagIn === "slot";
 	const authenticator = createSoftwareAuthenticator();
 	const credentialStore = createMemoryWebAuthnCredentialStore();
 	await credentialStore.registerCredential({
@@ -178,7 +181,7 @@ async function boot() {
 		oauth: {
 			...base.oauth,
 			jwt: { ...base.oauth.jwt, issuer: ISSUER },
-			resourceIndicator: { enabled: true },
+			resourceIndicator: { enabled: !inSlot },
 		},
 	};
 
@@ -195,6 +198,12 @@ async function boot() {
 					webauthnCredentialStore: () => credentialStore,
 					keyStore: () => createSymmetricKeyStore("resource-indicator-secret-32-bytes!"),
 					grantPolicy: (): GrantPolicyHook => ({ kind: "test-spy", evaluate }),
+					...(inSlot
+						? {
+								oauthTokenSettings: () =>
+									createTestOAuthTokenSettings({ issuer: ISSUER, resourceIndicatorEnabled: true }),
+							}
+						: {}),
 				},
 			}),
 			// Makes the planner materialise the grant registry into the handle.
@@ -249,6 +258,15 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 
 		expect(result.status).toBe(200);
 		expect(evaluate).toHaveBeenCalledOnce();
+		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
+	});
+
+	it("forwards resource when the oauthTokenSettings the composition holds turn resource indicators on, over the configuration (#728)", async () => {
+		const { evaluate, signIn } = await boot({ flagIn: "slot" });
+
+		const { result } = await signIn("https://rs.example");
+
+		expect(result.status).toBe(200);
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
