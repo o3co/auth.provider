@@ -61,8 +61,8 @@ describe("guarded fetch — destination", () => {
 	});
 
 	it("fetches from a private address the operator allowlisted — the allowlist, not RFC 6890, is this guard's control", async () => {
-		// A deliberate divergence from core's `isSpecialUseAddress` (v0.13.0
-		// audit): an internal CA publishes its CRLs and runs its OCSP responder
+		// A deliberate divergence from core's `isSpecialUseAddress`: an internal
+		// CA publishes its CRLs and runs its OCSP responder
 		// inside the network, so refusing special-use addresses here would refuse
 		// the deployments mTLS is for. The destination is one the operator named,
 		// not one a stranger chose, which is the case the special-use list is for.

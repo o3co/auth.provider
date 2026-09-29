@@ -47,7 +47,7 @@ const TRUSTED_PEER = "10.0.0.7";
 /**
  * Build a minimal Express-like Request stub.
  *
- * `socket.remoteAddress` is part of the minimum since #280: the header source
+ * `socket.remoteAddress` is part of the minimum: the header source
  * authenticates the forwarding proxy by its TCP peer address, so a stub
  * without one is not a request the mechanism can accept.
  */
@@ -304,15 +304,14 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 });
 
 // ---------------------------------------------------------------------------
-// #280 — the certificate must come from the TLS layer, or from an
+// The certificate must come from the TLS layer, or from an
 // authenticated trusted proxy (RFC 8705 §3).
 // ---------------------------------------------------------------------------
 
 describe("createMtlsMechanism — default certificate source (#280)", () => {
 	it("defaults to the TLS layer when `source` is omitted", async () => {
-		// The pre-#280 default was "header", which trusted a forwarded header
-		// from any peer that could reach the process. The certificate now comes
-		// from the transport by default; a forwarded header is opt-in.
+		// The certificate comes from the transport by default. A forwarded
+		// header, which any peer that can reach the process could set, is opt-in.
 		const mech = createMtlsMechanism({ mode: "self-signed" });
 		const result = await mech.extract(makeReqWithTlsCert(LEAF_DER) as Request);
 		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
@@ -368,8 +367,8 @@ describe("createMtlsMechanism — trusted-proxy allowlist for the header source 
 	});
 
 	it("rejects a forwarded certificate from a peer that is not an allowlisted proxy", async () => {
-		// The threat #280 closes: anyone who can open a connection to the app
-		// could previously assert any client identity by setting this header.
+		// The threat: without the allowlist, anyone who can open a connection to
+		// the app could assert any client identity by setting this header.
 		const mech = createMtlsMechanism({
 			source: "header",
 			trustedProxies: ["10.0.0.7"],
@@ -471,9 +470,9 @@ describe("createMtlsMechanism — trusted-proxy allowlist for the header source 
 	});
 
 	it("accepts the forwarded certificate when the peer falls inside an allowlisted CIDR range", async () => {
-		// #292 widened the shared vocabulary to ranges. A pod CIDR is the shape
-		// an operator actually has: the ingress replica's address is assigned
-		// per-restart, so enumerating literals is not an option.
+		// The shared vocabulary takes ranges as well as addresses. A pod CIDR is
+		// the shape an operator actually has: the ingress replica's address is
+		// assigned per-restart, so enumerating literals is not an option.
 		const mech = createMtlsMechanism({
 			source: "header",
 			trustedProxies: ["10.0.0.0/8"],
@@ -535,9 +534,9 @@ describe("createMtlsMechanism — boot-time validation", () => {
 	});
 
 	it("throws on construction when mode === 'pki' and source === 'tls-layer'", () => {
-		// Codex Round 1 Important #1 fix — Phase 3 narrow PKI mode requires
-		// the intermediate chain (XFCC Chain=). TLS-layer full-chain
-		// extraction is deferred to a future phase. Reject at construction.
+		// The narrow PKI mode takes its intermediates from the XFCC `Chain=`
+		// parameter, so it cannot read them from the TLS layer (`full-pki` reads
+		// the chain from the TLS session). Reject at construction.
 		expect(() =>
 			createMtlsMechanism({
 				source: "tls-layer",

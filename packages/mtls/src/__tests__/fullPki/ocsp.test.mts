@@ -15,7 +15,7 @@
  */
 
 /**
- * The OCSP resolver on its own (#431): what it asks, what it verifies before
+ * The OCSP resolver on its own: what it asks, what it verifies before
  * it believes an answer, and how it behaves when the responder is down or
  * lying. `validate.test.mts` covers the policy decisions built on top.
  */
@@ -524,8 +524,8 @@ describe("OCSP resolver — the signature-algorithm policy applies to the answer
 	it("holds a resolver built without an algorithms policy to the strict default, refusing SHA-1", async () => {
 		// The resolver options are public surface, so `algorithms` is
 		// optional — a consumer who upgrades without touching their code gets
-		// this security fix rather than opting into it (#470 review). The
-		// default is the strict policy, so omitting it can only be stricter.
+		// the strict policy rather than opting into it. The default is the
+		// strict policy, so omitting it can only be stricter.
 		const { int, leaf } = await chain();
 		const { fetch } = stubResponders({
 			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, hash: "SHA-1" }),

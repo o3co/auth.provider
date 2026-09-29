@@ -15,7 +15,7 @@
  */
 
 /**
- * mtls `discoveryMetadata` contribution (#283).
+ * mtls `discoveryMetadata` contribution.
  *
  * RFC 8705 §3.3 defines `tls_client_certificate_bound_access_tokens` as
  * authorization server metadata, defaulting to `false` when omitted. This
@@ -67,8 +67,8 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 	});
 
 	it("advertises the binding regardless of where the certificate comes from", async () => {
-		// #280 made `source` default to the TLS layer and put a trusted-proxy
-		// allowlist behind the header path. Either way the ISSUED TOKEN carries
+		// `source` defaults to the TLS layer, and the header path sits behind a
+		// trusted-proxy allowlist. Either way the ISSUED TOKEN carries
 		// the same `cnf["x5t#S256"]`, and the RFC 8705 §3.3 flag describes the
 		// token, not the transport the certificate arrived over.
 		const meta = await contribution(

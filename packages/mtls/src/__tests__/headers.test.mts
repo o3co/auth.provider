@@ -78,8 +78,8 @@ describe("parseEnvoyXfccHeader", () => {
 	});
 
 	it("strips enclosing double-quotes from Cert= value (Envoy 1.18+ quoted-string form)", () => {
-		// Codex Round 1 Important #2 / Claude Minor #2 convergence: Envoy may
-		// quote field values whose payloads contain structural characters.
+		// Envoy may quote field values whose payloads contain structural
+		// characters.
 		const xfcc = `By="spiffe://cluster.local/sa/server";Hash=abc;Cert="${ENCODED_CERT}"`;
 		const result = parseEnvoyXfccHeader(xfcc);
 		expect(result.certPem).toBe(TEST_CERT_PEM);
@@ -91,13 +91,13 @@ describe("parseEnvoyXfccHeader", () => {
 	});
 
 	it("rejects an XFCC header that exceeds the raw size cap", () => {
-		// Defense-in-depth size cap (Codex Round 1 Important #1).
+		// Defense-in-depth size cap.
 		const oversize = `Cert=${"x".repeat(20 * 1024)}`;
 		expect(() => parseEnvoyXfccHeader(oversize)).toThrow("size cap");
 	});
 
 	it("measures the raw size cap in UTF-8 bytes, not UTF-16 code units (multi-byte cannot bypass)", () => {
-		// Copilot review Round 2 Important #1: an attacker who emits non-ASCII
+		// An attacker who emits non-ASCII
 		// characters could bypass a cap measured in `value.length` (UTF-16 code
 		// units) because multi-byte UTF-8 chars take fewer code units than bytes.
 		// Each "あ" is 1 UTF-16 code unit but 3 UTF-8 bytes; 6KB code units = 18KB
@@ -107,7 +107,7 @@ describe("parseEnvoyXfccHeader", () => {
 	});
 
 	it("normalizes invalid percent-encoding into a plain Error (not URIError)", () => {
-		// safeDecodeURIComponent wrapper (Codex Round 1 Important #3).
+		// The safeDecodeURIComponent wrapper.
 		// `%C3` is a partial UTF-8 multi-byte sequence — looks URL-encoded
 		// (matches the isUrlEncoded regex), but decodeURIComponent throws
 		// URIError mid-decode. The wrapper MUST rethrow as a plain Error.
@@ -151,13 +151,13 @@ describe("parsePlainPemHeader", () => {
 	});
 
 	it("rejects a plain-PEM header that exceeds the raw size cap", () => {
-		// Defense-in-depth size cap (Codex Round 1 Important #1).
+		// Defense-in-depth size cap.
 		const oversize = `-----BEGIN CERTIFICATE-----\n${"A".repeat(20 * 1024)}\n-----END CERTIFICATE-----`;
 		expect(() => parsePlainPemHeader(oversize)).toThrow("size cap");
 	});
 
 	it("applies the raw size cap BEFORE trim/empty check (parity with parseEnvoyXfccHeader)", () => {
-		// Copilot review Round 2 Minor #2: don't do trim work on oversize input.
+		// Don't do trim work on oversize input.
 		// A whitespace-only value larger than the raw cap must be rejected by the
 		// size check, not the empty check.
 		const oversizeWhitespace = " ".repeat(20 * 1024);
@@ -165,13 +165,13 @@ describe("parsePlainPemHeader", () => {
 	});
 
 	it("measures the raw size cap in UTF-8 bytes, not UTF-16 code units (multi-byte cannot bypass)", () => {
-		// Copilot review Round 2 Important #1: see parallel envoy test.
+		// See the parallel envoy test.
 		const multibyte = "あ".repeat(6 * 1024); // 6KB UTF-16 code units = 18KB UTF-8 bytes
 		expect(() => parsePlainPemHeader(multibyte)).toThrow("size cap");
 	});
 
 	it("normalizes invalid percent-encoding into a plain Error (not URIError)", () => {
-		// safeDecodeURIComponent wrapper (Codex Round 1 Important #3).
+		// The safeDecodeURIComponent wrapper.
 		// `%C3` is a partial UTF-8 multi-byte sequence — matches isUrlEncoded
 		// so triggers decode, but decodeURIComponent throws URIError. The
 		// wrapper MUST rethrow as a plain Error.
