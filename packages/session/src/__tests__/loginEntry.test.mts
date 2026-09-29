@@ -20,6 +20,10 @@
  * the federation-grants connect flow send a browser there by.
  *
  * - It keeps core's contract (`loginEntryContract`).
+ * - It holds the login page to the rules `/authorize`'s own login redirect
+ *   keeps (oauth's configSchema and `loginRedirect`): a page whose query
+ *   already carries `redirect_to` is refused when the entry is built, and
+ *   `redirect_to` joins the page's query before any fragment.
  * - With no login page configured it is still built — a composition that
  *   installs a consumer and never sends a browser to log in boots as it
  *   did — and fails where the page is read, naming the key.
@@ -60,6 +64,40 @@ describe("createLoginEntry keeps core's loginEntry contract", () => {
 		expect(createLoginEntry("/login?tenant=x").urlFor("/back")).toBe(
 			"/login?tenant=x&redirect_to=%2Fback",
 		);
+	});
+
+	it.each([
+		["a path", "/login?redirect_to=https://x"],
+		["an absolute URL", "https://login.example/signin?tenant=x&redirect_to=https%3A%2F%2Fx"],
+		["a name written percent-encoded", "/login?redirect%5Fto=x"],
+		["a name with no value", "/login?tenant=x&redirect_to"],
+		["a URL that does not parse", "http://[::1/login?redirect_to=x"],
+		["a URL that does not parse, with a fragment", "http://[::1/login?tenant=x&redirect_to=y#z"],
+	])("refuses %s whose own query carries redirect_to: urlFor adds it", (_label, page) => {
+		expect(() => createLoginEntry(page)).toThrow(
+			/must not carry a "redirect_to" query parameter of its own/,
+		);
+	});
+
+	it.each([
+		["redirect_to inside the fragment alone", "/login#redirect_to=https://x"],
+		["a `?` inside the fragment alone", "/login#a?redirect_to=x"],
+		["a name that differs in case", "/login?Redirect_To=x"],
+		["a longer name", "/login?redirect_to_after=x"],
+	])("builds an entry for a page with %s", (_label, page) => {
+		expect(createLoginEntry(page).url).toBe(page);
+	});
+
+	it.each([
+		["/login#x", "/login?redirect_to=%2Fback#x"],
+		["/login?tenant=x#y", "/login?tenant=x&redirect_to=%2Fback#y"],
+		["/login#a?b", "/login?redirect_to=%2Fback#a?b"],
+		[
+			"https://login.example/signin?tenant=x#y",
+			"https://login.example/signin?tenant=x&redirect_to=%2Fback#y",
+		],
+	])("adds redirect_to to %s's query, before its fragment", (page, sent) => {
+		expect(createLoginEntry(page).urlFor("/back")).toBe(sent);
 	});
 });
 
