@@ -15,16 +15,14 @@
  */
 
 /**
- * Issue #265 — sender-constraint handling in the RFC 8693 exchange grant.
- *
- * The grant did no `cnf` handling at all: a DPoP- or mTLS-bound
- * `subject_token` was accepted with no proof-of-possession and the issued
- * token dropped the binding, so exchange laundered a stolen bound token into
- * a usable bearer token. These tests pin the same 5-row matrix per mechanism
- * that `packages/oauth/src/grants/refreshToken.mts` established for refresh.
- * The refusal code differs: refresh answers RFC 6749's `invalid_grant` for its
- * refresh token, the exchange RFC 8693 §2.2.2's `invalid_request` for an
- * unacceptable subject_token or actor_token.
+ * Sender-constraint handling in the RFC 8693 exchange grant. A DPoP- or
+ * mTLS-bound `subject_token` needs proof of possession and the issued token
+ * keeps the binding, or exchange would launder a stolen bound token into a
+ * usable bearer token. The same 5-row matrix per mechanism as
+ * `packages/oauth/src/grants/refreshToken.mts`, except the refusal code:
+ * refresh answers RFC 6749's `invalid_grant` for its refresh token, the
+ * exchange RFC 8693 §2.2.2's `invalid_request` for an unacceptable
+ * subject_token or actor_token.
  */
 
 import type {
@@ -60,11 +58,10 @@ const publicClient = (): PublicClient => ({
 	clientId: "client-a",
 	tokenEndpointAuthMethod: "none",
 	allowedRedirectUris: [],
-	// `signSelfIssuedAccessToken` defaults the subject to `scope: "read"`, so
-	// the registration names it — the client's `allowedScopes` is a ceiling on
-	// the granted scope now, and the exchange grant denies by absence of
-	// `allowedGrantTypes` (#326). Neither gate is what this file tests; both
-	// have to be satisfied to reach the binding matrix.
+	// `signSelfIssuedAccessToken` defaults the subject to `scope: "read"`; the
+	// client's `allowedScopes` caps the granted scope, and the exchange grant
+	// denies by absence of `allowedGrantTypes`. Neither gate is tested here;
+	// both must be satisfied to reach the binding matrix.
 	allowedScopes: ["read"],
 	allowedAudiences: [],
 	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
@@ -145,8 +142,8 @@ describe("token exchange — DPoP binding matrix (#265)", () => {
 	});
 
 	it("bound subject, no proof → invalid_request (the de-binding laundry)", async () => {
-		// The #265 attack: a stolen bound subject_token exchanged by a client
-		// that cannot prove possession of the binding key.
+		// The attack: a stolen bound subject_token exchanged by a client that
+		// cannot prove possession of the binding key.
 		const res = await exchange({ cnf: { jkt: JKT } });
 		expect(res.status).toBe(400);
 		expect(res.error).toBe("invalid_request");
@@ -242,17 +239,15 @@ describe("token exchange — cnf edge cases (#265)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Actor matrix (#309) — the residual #265 deliberately left open
+// Actor matrix
 // ---------------------------------------------------------------------------
 
 /**
- * `exchange` with an `actor_token` alongside the subject.
- *
- * The subject defaults to unbound so each matrix row is driven by the actor's
- * `cnf` alone — a bound subject would consume the single `ctx.tokenBinding`
- * and confound which of the two tokens caused the rejection. `subjectClaims`
- * overrides that for the one row that deliberately binds both, which is the
- * only delegation shape a single binding can carry.
+ * `exchange` with an `actor_token` alongside the subject. The subject defaults
+ * to unbound so each row is driven by the actor's `cnf` alone (a bound subject
+ * would consume the single `ctx.tokenBinding` and confound which token caused
+ * the rejection); `subjectClaims` overrides that for the one row that binds
+ * both, the only delegation shape a single binding can carry.
  */
 const exchangeWithActor = async (
 	actorClaims: Record<string, unknown>,
@@ -289,24 +284,22 @@ const exchangeWithActor = async (
 };
 
 /*
- * #265 enforced the subject's `cnf` and named the actor as a tracked residual:
- * a request carries exactly one `ctx.tokenBinding`, so "enforce both" is not a
- * rule any caller could satisfy when the two tokens are bound to different
- * keys. The consequence was that a sender-constrained `actor_token` was
- * accepted with no proof-of-possession at all, while `buildActClaim` folded
- * its identity into the issued token's `act` claim (RFC 8693 §4.1) — a stolen
- * bound actor token forged the delegation chain recorded on the issued token.
+ * A sender-constrained `actor_token` needs proof of possession too:
+ * `buildActClaim` folds its identity into the issued token's `act` claim
+ * (RFC 8693 §4.1), so a stolen bound actor token would forge the delegation
+ * chain recorded on the issued token.
  *
- * The rule below is the subject matrix applied to the actor, and it is the
- * strictest one that is physically expressible: match the presented binding or
- * be refused. `AuthenticatedClient` carries no certificate thumbprint of its
- * own — for an mTLS-authenticated client the certificate IS `ctx.tokenBinding`
- * — so there is no second credential to check an actor's `cnf` against.
+ * The rule is the subject matrix applied to the actor, the strictest one that
+ * is physically expressible: match the presented binding or be refused. A
+ * request carries exactly one `ctx.tokenBinding`, and `AuthenticatedClient`
+ * carries no certificate thumbprint of its own (for an mTLS-authenticated
+ * client the certificate IS `ctx.tokenBinding`), so there is no second
+ * credential to check an actor's `cnf` against.
  *
- * What this deliberately does not support: delegation where the actor and the
- * subject are bound to *different* keys. That needs more than one proof per
- * request, which RFC 9449 has no token-endpoint precedent for; it stays out of
- * scope rather than being approximated by a rule that enforces nothing.
+ * Not supported: an actor and a subject bound to *different* keys. That needs
+ * more than one proof per request, which RFC 9449 has no token-endpoint
+ * precedent for; it stays out of scope rather than approximated by a rule
+ * that enforces nothing.
  */
 describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
 	it("unbound actor, no proof → exchanges and records the delegation", async () => {
@@ -320,7 +313,7 @@ describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
 		expect(res.status).toBe(200);
 	});
 
-	// The #309 finding itself.
+	// The core case: a stolen bound actor token, no proof.
 	it("bound actor, no proof → invalid_request", async () => {
 		const res = await exchangeWithActor({ cnf: { jkt: JKT } });
 		expect(res.status).toBe(400);

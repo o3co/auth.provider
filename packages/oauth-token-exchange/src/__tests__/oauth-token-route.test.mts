@@ -13,16 +13,13 @@
  * composed with `@o3co/auth-provider-oauth`'s `oauthModule` through core's
  * `createApp`, and the request POSTed to the real `/oauth/token` route.
  *
- * The other suites call the handler — directly, or as `grantHandlerResolver`
- * hands it out — so what only the route does is checked here: client
- * authentication, dispatch through the resolver and the explicit grant
- * allowlist the handler declares, and the response the route writes from the
+ * The other suites call the handler, so this one checks what only the route
+ * does: client authentication, dispatch through the resolver and the explicit
+ * grant allowlist the handler declares, the response written from the
  * handler's result (status, body, `Cache-Control`, the RFC 6749 §5.2 character
  * set of `error_description`), and how `resource` and `audience` arrive from
- * the body parsers the route mounts — a JSON value that is not a string or an
- * array of strings, a repeated or empty form parameter. Nothing is stubbed but
- * what a deployment supplies itself: the client and code repositories and the
- * key store.
+ * the route's body parsers. Only what a deployment supplies is stubbed: the
+ * client and code repositories and the key store.
  */
 
 import {
@@ -179,10 +176,10 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 		expect(issued).toMatchObject({ iss: ISSUER, sub: "user-1", aud: "billing", scope: "read" });
 	});
 
-	// Note 15: the grant denies by absence. Dispatch refuses a registration
-	// naming other grants only with the base check, and one with no
-	// `allowedGrantTypes` with the strict check; both answer in the same
-	// words, quoting the grant type.
+	// The grant denies by absence (README, security note 15). Dispatch refuses
+	// a registration naming other grants only with the base check, and one
+	// with no `allowedGrantTypes` with the strict check; both answer in the
+	// same words, quoting the grant type.
 	it.each([
 		["names other grants only", otherGrants],
 		["omits allowedGrantTypes", noGrants],
