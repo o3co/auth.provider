@@ -150,7 +150,7 @@ describe("RedisCodeRepository", () => {
 		// A record without `client_id` / `redirect_uri` is corrupt: parseCodeValue
 		// returns null (and logs a structured error), so the strict identity
 		// gates in /token never see either as undefined.
-		it("treats pre-v0.5.1 records lacking client_id and redirect_uri as corrupt", async () => {
+		it("treats records lacking client_id and redirect_uri as corrupt", async () => {
 			store.set(`${KEY_PREFIX}legacy-1`, JSON.stringify({ code_challenge: "x" }));
 			expect(await repo.findByCode("legacy-1")).toBeNull();
 		});
@@ -217,7 +217,7 @@ describe("RedisCodeRepository", () => {
 	// The repository writes through the `CodeRepositoryClient` it is given. PX
 	// expiry is in milliseconds; keyPrefix and defaultExpiresIn come through
 	// the options object.
-	describe("OR-9 external client", () => {
+	describe("external client", () => {
 		it("calls client.set with PX mode and ttlMs = expiresIn * 1000", async () => {
 			await repo.createCode({ ...minimalParams, expiresIn: 300 });
 			expect(client.set).toHaveBeenCalledWith(
@@ -263,7 +263,7 @@ describe("RedisCodeRepository", () => {
 			);
 		});
 
-		it("has no dispose / [Symbol.asyncDispose] method (consumer manages client lifecycle, D-5 v2)", () => {
+		it("has no dispose / [Symbol.asyncDispose] method (consumer manages client lifecycle)", () => {
 			// The composition root owns the ioredis socket
 			// (`standaloneRedisClientsModule`) and registers its own quit; a
 			// dispose() here would quit the shared socket twice.
@@ -297,7 +297,7 @@ describe("RedisCodeRepository", () => {
 	// Every field of the code record round-trips, not just code_challenge,
 	// code_challenge_method and expiresIn: a code exchange with a user session
 	// store needs `sid` back.
-	describe("D-1 extended fields round-trip", () => {
+	describe("extended fields round-trip", () => {
 		it("persists and returns client_id, redirect_uri via consumeByCode", async () => {
 			const result = await repo.createCode({
 				...minimalParams,
@@ -309,7 +309,7 @@ describe("RedisCodeRepository", () => {
 			expect(consumed?.redirect_uri).toBe("https://rp.example/cb");
 		});
 
-		it("persists and returns acr, and leaves it absent when none was recorded (#481)", async () => {
+		it("persists and returns acr, and leaves it absent when none was recorded", async () => {
 			const withAcr = await repo.createCode({
 				...minimalParams,
 				client_id: "client-abc",
@@ -361,7 +361,7 @@ describe("RedisCodeRepository", () => {
 			expect(parsed.grantedScope).toEqual(["openid"]);
 		});
 
-		it("round-trips every field with its own value, through both reads (#626)", async () => {
+		it("round-trips every field with its own value, through both reads", async () => {
 			// The types catch a field forgotten by a copy, not two fields of the
 			// same type swapped: `nonce`, `sid`, `acr` and the challenge are all
 			// strings. Every value is distinct here, and the whole record is
@@ -385,7 +385,7 @@ describe("RedisCodeRepository", () => {
 			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
 		});
 
-		it("names every field it has no value for as undefined, rather than leaving it out (#626)", async () => {
+		it("names every field it has no value for as undefined, rather than leaving it out", async () => {
 			const created = await repo.createCode(minimalParams);
 			const found = await repo.findByCode(created.code);
 			// The read `/token` makes, which builds its record separately from

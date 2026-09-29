@@ -97,7 +97,7 @@ const RECORD = (overrides: Partial<MfaFactorRecord> = {}): MfaFactorRecord => ({
 const storeAt = (keyPrefix: string, connection: Redis = first()): MfaFactorStore =>
 	createRedisMfaFactorStore({ client: makeIoredisMfaFactorStoreClient(connection), keyPrefix });
 
-describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7)", () => {
+describe("createRedisMfaFactorStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
 	});

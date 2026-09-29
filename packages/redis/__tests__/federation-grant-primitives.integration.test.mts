@@ -131,7 +131,7 @@ const activeWithCredential = async (id = "g-1"): Promise<void> => {
 const deadline = async (key: string): Promise<number> =>
 	Number(await redis.call("PEXPIRETIME", key));
 
-describe("createPending (#593, D16)", () => {
+describe("createPending", () => {
 	it("writes the record, at version 1, and hangs the key's deadline on the intent's expiry", async () => {
 		const fields = await pending();
 		expect(fields).toMatchObject({
@@ -184,7 +184,7 @@ describe("createPending (#593, D16)", () => {
 	});
 });
 
-describe("snapshot (#593, D16)", () => {
+describe("snapshot", () => {
 	it("reads the record and its credential in one step", async () => {
 		await pending();
 		await redis.set(credKey("g-1"), "v2.sealed");
@@ -207,7 +207,7 @@ describe("snapshot (#593, D16)", () => {
 	});
 });
 
-describe("the intent pointer (#593, D16)", () => {
+describe("the intent pointer", () => {
 	it("is replaced on an authorized record and on nothing else, and moves no deadline", async () => {
 		await pending();
 		// A `pending` grant's intent is named at creation and never renamed: the
@@ -236,7 +236,7 @@ describe("the intent pointer (#593, D16)", () => {
 	});
 });
 
-describe("the intent pointer of an authorized grant (#593, D2)", () => {
+describe("the intent pointer of an authorized grant", () => {
 	it("is retired only by the handle it holds: a consent refused for a superseded intent does not end the newer one", async () => {
 		await activeWithCredential();
 		await client.nameIntent(grantKey("g-1"), {
@@ -287,7 +287,7 @@ describe("the intent pointer of an authorized grant (#593, D2)", () => {
 	});
 });
 
-describe("touch (#593, D16)", () => {
+describe("touch", () => {
 	it("moves the last use forward and never back", async () => {
 		await active();
 		await client.touch(grantKey("g-1"), at(MIN));
@@ -311,7 +311,7 @@ describe("touch (#593, D16)", () => {
 	});
 });
 
-describe("the subject index (#593, D16)", () => {
+describe("the subject index", () => {
 	const member = (id: string): string => JSON.stringify(id);
 
 	it("holds each grant at its horizon, and the key's own deadline runs past the last of them", async () => {
@@ -380,7 +380,7 @@ describe("the subject index (#593, D16)", () => {
 	});
 });
 
-describe("activate (#593, D2, D7)", () => {
+describe("activate", () => {
 	it("replaces the authorization whole, seals the credential, retires the intent and bumps the version", async () => {
 		await pending();
 		const fields = await client.activate(grantKey("g-1"), credKey("g-1"), {
@@ -504,7 +504,7 @@ describe("activate (#593, D2, D7)", () => {
 	});
 });
 
-describe("replaceCredentials (#593, D2, D10)", () => {
+describe("replaceCredentials", () => {
 	it("replaces the credential, replaces the marker whole, forgets the stamp and bumps the version", async () => {
 		await activeWithCredential();
 		await redis.hset(grantKey("g-1"), {
@@ -573,7 +573,7 @@ describe("replaceCredentials (#593, D2, D10)", () => {
 		expect(await redis.get(credKey("g-1"))).toBe("v2.sealed-1");
 	});
 
-	it("refuses to replace a credential that is not there, in the same step as the write (#631, Copilot)", async () => {
+	it("refuses to replace a credential that is not there, in the same step as the write", async () => {
 		// The credential key's deadline is the expiry on the server's clock; once
 		// it has fired, a refresh whose caller's clock is still before the expiry
 		// finds nothing to rotate. The adapter reads the credential a round trip
@@ -595,7 +595,7 @@ describe("replaceCredentials (#593, D2, D10)", () => {
 	});
 });
 
-describe("requireReauthorization (#593, D2)", () => {
+describe("requireReauthorization", () => {
 	it("takes the credential, keeps the marker, forgets the stamp and bumps the version", async () => {
 		await activeWithCredential();
 		await redis.hset(grantKey("g-1"), {
@@ -627,7 +627,7 @@ describe("requireReauthorization (#593, D2)", () => {
 	});
 });
 
-describe("revoke (#593, D2, D13)", () => {
+describe("revoke", () => {
 	it("ends the grant, takes the credential and the intent, and keeps what it was authorized for", async () => {
 		await activeWithCredential();
 		await client.nameIntent(grantKey("g-1"), {
@@ -675,7 +675,7 @@ describe("revoke (#593, D2, D13)", () => {
 	});
 });
 
-describe("noteRefreshFailure (#593, D12)", () => {
+describe("noteRefreshFailure", () => {
 	const stamp = (over: Record<string, unknown> = {}) =>
 		client.noteRefreshFailure(grantKey("g-1"), {
 			nowMs: at(DAY),
@@ -761,7 +761,7 @@ describe("noteRefreshFailure (#593, D12)", () => {
 	});
 });
 
-describe("the lock over a real connection (#593, D12)", () => {
+describe("the lock over a real connection", () => {
 	const lockKey = (id: string): string => `${prefix}{${id}}:lock`;
 
 	it("is held by one caller at a time, and its TTL is the one asked for", async () => {

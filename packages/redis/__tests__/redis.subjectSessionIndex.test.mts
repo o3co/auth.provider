@@ -57,7 +57,7 @@ runSubjectSessionIndexContract(async () => {
 const aheadOfBoth = aheadOfServer(() => raw);
 const serverPassed = (at: Date): Promise<void> => serverPasses(() => raw)(at.getTime());
 
-describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
+describe("SubjectSessionIndex — Redis-specific behaviour", () => {
 	const index = (prefix: string) =>
 		createRedisSubjectSessionIndex({
 			client: makeIoredisClients(raw).subjectSessionIndexClient,
@@ -137,7 +137,7 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 	});
 });
 
-describe("SubjectSessionIndex — the read boundary is the store's clock (#321)", () => {
+describe("SubjectSessionIndex — the read boundary is the store's clock", () => {
 	it("hands the read no timestamp of its own", async () => {
 		// Structural, not incidental: `pruneExpiredAndList` takes a key and
 		// nothing else, so the adapter *cannot* pass a caller-side `Date.now()`

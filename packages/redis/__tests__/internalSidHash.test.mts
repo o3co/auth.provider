@@ -83,7 +83,7 @@ describe("createRedisSidHash", () => {
 	// A stale-`expiresAt` race with a shorter TTL must NOT truncate the key's
 	// existing TTL. The `pExpireGT` (NX + GT pair) prevents the write from
 	// clobbering a longer existing TTL with a shorter incoming one.
-	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write (CR-3)", async () => {
+	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("ttl-trunc") });
 		const longExpiry = FUTURE(); // first writer
 		const stale = await aheadOfServer(() => raw)(); // a second out — stale view

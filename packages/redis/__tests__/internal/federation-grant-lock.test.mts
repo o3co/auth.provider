@@ -91,7 +91,7 @@ const lock = (client: { tryLock: unknown; unlock: unknown }) =>
 		pollIntervalMs: 5,
 	});
 
-describe("the refresh lock over a connection (#593, D12)", () => {
+describe("the refresh lock over a connection", () => {
 	it("takes it on the first attempt and says it waited nothing", async () => {
 		// What is reported is what elapsed before the attempt was SENT — on a
 		// real process the millisecond or two this call itself took, which is

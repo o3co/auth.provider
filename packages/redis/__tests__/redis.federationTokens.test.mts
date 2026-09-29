@@ -151,7 +151,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 // which actually land in Redis carry no plaintext, that a legacy per-field
 // record is dropped on first read, and that a ciphertext moved to another
 // key is refused — all over the wire.
-describe("#293 — mode=required over a real Redis", () => {
+describe("mode=required over a real Redis", () => {
 	const encryptionKey = Buffer.alloc(32, 7);
 	const fullTokens: FederationTokens = {
 		accessToken: "at-secret",

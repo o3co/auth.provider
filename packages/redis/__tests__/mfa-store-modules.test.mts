@@ -196,7 +196,7 @@ describe.each(CASES)("$module.name", (c) => {
 		).toStrictEqual({ [c.configKey]: { keyPrefix: "tenant-a:" } });
 	});
 
-	it("declares nothing the replica-safety guard refuses (D10), where the memory module does", () => {
+	it("declares nothing the replica-safety guard refuses, where the memory module does", () => {
 		expect(replicaUnsafeReason(c.module)).toBeUndefined();
 		expect(replicaUnsafeReason(c.memoryModule)).toBeDefined();
 	});
@@ -213,7 +213,7 @@ describe.each(CASES)("$module.name", (c) => {
 	});
 
 	it.each(["allkeys-lru", "allkeys-lfu", "allkeys-random"])(
-		"refuses %s at boot: a policy that may evict any key, naming the policy (D12)",
+		"refuses %s at boot: a policy that may evict any key, naming the policy",
 		async (policy) => {
 			const { logger, calls } = recordingLogger();
 			const refused = boot({ ...DURABLE, maxmemoryPolicy: policy }, logger);
@@ -233,7 +233,7 @@ describe.each(CASES)("$module.name", (c) => {
 	});
 
 	it.each(["volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl"])(
-		"boots on %s with AOF, and warns once only where an evicted key would lift a D21 hold",
+		"boots on %s with AOF, and warns once only where an evicted key would lift a subject's hold",
 		async (policy) => {
 			// The factor store's keys carry no TTL, so a volatile-* policy never
 			// picks them. The transaction store's lock and week keys carry one

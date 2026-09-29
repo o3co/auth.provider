@@ -44,7 +44,7 @@ function createClient(members: string[]) {
 	} satisfies SessionSidSortedSetClient;
 }
 
-describe("#291 — createRedisSidSortedSet.list pages by rank", () => {
+describe("createRedisSidSortedSet.list pages by rank", () => {
 	it("never asks for the whole set in one command", async () => {
 		const client = createClient(["a", "b", "c"]);
 		const zset = createRedisSidSortedSet({ client, keyPrefix: "t:" });
@@ -96,7 +96,7 @@ describe("#291 — createRedisSidSortedSet.list pages by rank", () => {
 	});
 });
 
-describe("#291 — createRedisSidSortedSet.removeBySid uses UNLINK", () => {
+describe("createRedisSidSortedSet.removeBySid uses UNLINK", () => {
 	it("unlinks the sid's key", async () => {
 		const client = createClient([]);
 		const zset = createRedisSidSortedSet({ client, keyPrefix: "t:" });
@@ -109,7 +109,7 @@ describe("#291 — createRedisSidSortedSet.removeBySid uses UNLINK", () => {
 // into an infinite loop, on the logout path. `0` is the sharpest case:
 // `ZRANGE key 0 -1` returns the whole set, the short-page test never fires, and
 // the same command repeats forever. Rejected at construction instead.
-describe("#291 — createRedisSidSortedSet validates pageSize at construction", () => {
+describe("createRedisSidSortedSet validates pageSize at construction", () => {
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (pageSize) => {
 		expect(() =>
 			createRedisSidSortedSet({ client: createClient([]), keyPrefix: "t:", pageSize }),

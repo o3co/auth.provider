@@ -71,7 +71,7 @@ const replica = (n: string) => {
 	};
 };
 
-describe("revokeAllForSubject on Redis-backed stores (#321)", () => {
+describe("revokeAllForSubject on Redis-backed stores", () => {
 	it("reports nothing unavailable and cascades every session", async () => {
 		const r = replica("cascade");
 		await r.userSessionStore.create(session("s1"));

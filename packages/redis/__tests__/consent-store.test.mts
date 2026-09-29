@@ -107,7 +107,7 @@ const parked = (overrides: Partial<PendingConsentRecord> = {}): PendingConsentRe
 	...overrides,
 });
 
-describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
+describe("createRedisConsentStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(consentStoreAt(freshPrefix()).kind).toBe("redis");
 	});
@@ -217,7 +217,7 @@ describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
 	});
 });
 
-describe("createRedisPendingConsentStore — what is Redis-specific (#561)", () => {
+describe("createRedisPendingConsentStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(pendingStoreAt(freshPrefix()).kind).toBe("redis");
 	});

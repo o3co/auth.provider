@@ -38,7 +38,7 @@ afterAll(async () => {
 	await client?.quit();
 });
 
-describe("A3 wiring — full Redis composition (createApp + redis modules)", () => {
+describe("refresh-token family wiring — full Redis composition (createApp + redis modules)", () => {
 	it("composes per-purpose clients + redis store + default rotation + default revocation against real Redis", async () => {
 		// Activator: force materialisation of
 		// the wrapper slots via a closure root that requires them.

@@ -46,7 +46,7 @@ const provideFrom = (
 	});
 };
 
-describe("#473 — the module hands the guard the selected environment and deployment.mode", () => {
+describe("the module hands the guard the selected environment and deployment.mode", () => {
 	let origEnv: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
 

@@ -161,7 +161,7 @@ const storeAt = (keyPrefix: string, connection: Redis = first()): MfaTransaction
 const deadlineOf = async (key: string): Promise<number> =>
 	Number(await first().call("PEXPIRETIME", key));
 
-describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)", () => {
+describe("createRedisMfaTransactionStore — the transaction", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
 	});
@@ -364,7 +364,7 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 	});
 });
 
-describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D21)", () => {
+describe("createRedisMfaTransactionStore — the subject state", () => {
 	/** A whole-millisecond instant near both clocks, so the deadlines below are exact. */
 	const start = () => Math.floor(Date.now() / 1000) * 1000;
 
@@ -570,7 +570,7 @@ const seeded = (seed: number): (() => number) => {
 	};
 };
 
-describe("createRedisMfaTransactionStore — the same answers as core's in-process store (the MFA ADR's D21)", () => {
+describe("createRedisMfaTransactionStore — the same answers as core's in-process store", () => {
 	// The contract samples the lockout schedule; this walks it. Each seed drives the
 	// same random sequence of reservations, settlements, exempt successes and
 	// clears through core's in-process store and this one, and every answer
@@ -609,7 +609,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 	const OUTCOMES = ["failure", "failure", "success", "void"] as const;
 
 	it.each(Array.from({ length: 16 }, (_, i) => i + 1))(
-		"over a random sequence of D21's operations (seed %i)",
+		"over a random sequence of the subject state's operations (seed %i)",
 		async (seed) => {
 			const random = seeded(seed);
 			const choose = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)] as T;
@@ -742,7 +742,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 	});
 });
 
-describe("createRedisMfaTransactionStore — the email proof at the next first binding (the MFA ADR's D25)", () => {
+describe("createRedisMfaTransactionStore — the email proof at the next first binding", () => {
 	it("keeps it in a key of its own with no TTL, which clearSubjectState leaves and a consume removes", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);

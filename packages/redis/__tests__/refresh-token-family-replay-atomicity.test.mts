@@ -77,7 +77,7 @@ const tally = (settled: PromiseSettledResult<RefreshTokenFamilyRotationOutcome>[
 	return counts;
 };
 
-describe("refresh-replay detection and family revocation are one Redis write (#274)", () => {
+describe("refresh-replay detection and family revocation are one Redis write", () => {
 	it("revokes the family in the same WATCH/MULTI/EXEC that detects the replay", async () => {
 		const store = freshStore();
 		const rotation = createRefreshTokenFamilyRotation({

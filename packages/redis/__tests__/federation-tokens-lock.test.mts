@@ -15,7 +15,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createRedisLock } from "../src/internal/lock.mjs";
 
-describe("D-9 — lock release is atomic compare-and-delete (no spurious DEL)", () => {
+describe("lock release is atomic compare-and-delete (no spurious DEL)", () => {
 	it("release() does NOT call del when compareAndDelete reports value mismatch", async () => {
 		const data = new Map<string, string>();
 		const delSpy = vi.fn(async (key: string) => {

@@ -90,7 +90,7 @@ describe("createRedisSidSortedSet", () => {
 	// A stale-`expiresAt` race with a shorter TTL must NOT truncate the key's
 	// existing TTL. The `pExpireGT` (NX + GT pair) prevents the write from
 	// clobbering a longer existing TTL with a shorter one.
-	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write (CR-3)", async () => {
+	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("ttl-trunc") });
 		const longExpiry = FUTURE(); // first writer
 		const stale = await aheadOfServer(() => raw)(); // a second out — stale view
@@ -165,7 +165,7 @@ describe("createRedisSidSortedSet", () => {
 	});
 
 	// `_insertionCounter` is monotonic across restart.
-	describe("OR-8: _insertionCounter restart-monotonicity", () => {
+	describe("_insertionCounter restart-monotonicity", () => {
 		it("two add() calls with same expiresAt — second member sorts after first in list()", async () => {
 			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-same-exp") });
 			const sharedExp = FUTURE();

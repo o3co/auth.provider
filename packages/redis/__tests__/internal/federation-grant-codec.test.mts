@@ -66,7 +66,7 @@ const record = {
 const aad = (authorizationText: string, over: Partial<typeof record> = {}): string =>
 	credentialAad({ ...record, ...over, authorization: authorizationText }).toString("utf8");
 
-describe("the canonical authorization text (#593, D16)", () => {
+describe("the canonical authorization text", () => {
 	it("is a flat array of strings with the dates as milliseconds: no property names to order, no numbers to format", () => {
 		expect(canonicalAuthorization(authorization())).toBe(
 			JSON.stringify([
@@ -160,7 +160,7 @@ describe("the canonical authorization text (#593, D16)", () => {
 	});
 });
 
-describe("the credential's authenticated data (#593, D16)", () => {
+describe("the credential's authenticated data", () => {
 	it("binds the key it is stored under together with the record's identity and every authorization field", () => {
 		const text = canonicalAuthorization(authorization());
 		expect(aad(text)).toBe(
@@ -236,7 +236,7 @@ describe("the credential's authenticated data (#593, D16)", () => {
 	});
 });
 
-describe("the credential payload (#593, D16)", () => {
+describe("the credential payload", () => {
 	const credentials = (
 		over: Partial<FederationGrantCredentials> = {},
 	): FederationGrantCredentials => ({

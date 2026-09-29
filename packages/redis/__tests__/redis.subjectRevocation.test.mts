@@ -71,7 +71,7 @@ runSessionsOnlyRevocationContract(
 	{ expiry: serverDeadlines(() => raw) },
 );
 
-describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
+describe("SubjectRevocation — Redis-specific behaviour", () => {
 	const store = (prefix: string) =>
 		createRedisSubjectRevocation({
 			client: makeIoredisClients(raw).subjectRevocationClient,
@@ -126,7 +126,7 @@ describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
 	});
 });
 
-describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () => {
+describe("SubjectRevocation — the two boundaries on one key", () => {
 	const store = (prefix: string) =>
 		createRedisSubjectRevocation({
 			client: makeIoredisClients(raw).subjectRevocationClient,

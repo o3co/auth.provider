@@ -111,7 +111,7 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 		["frontchannelLogoutSessionRequired as a number", { frontchannelLogoutSessionRequired: 0 }],
 		["backchannelLogoutUri as a number", { backchannelLogoutUri: 42 }],
 		["frontchannelLogoutUri as null", { frontchannelLogoutUri: null }],
-	])("treats a logout field of the wrong type as corrupt — %s (#626)", async (_label, bad) => {
+	])("treats a logout field of the wrong type as corrupt — %s", async (_label, bad) => {
 		// Every field is checked, not only `clientId` and `registeredAtMs`. A
 		// `"false"` read back under the boolean type would be truthy, and the
 		// logout cascade would send `sid` to an RP that asked not to receive it.

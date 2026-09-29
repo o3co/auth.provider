@@ -160,7 +160,7 @@ const client_nameIntentOk = async (held: FederationGrantStore): Promise<void> =>
 	expect(written.ok).toBe(true);
 };
 
-describe("a field someone edited (#593, D16)", () => {
+describe("a field someone edited", () => {
 	it("refuses the credential when any field the authorization is bound to is changed, and takes nothing away", async () => {
 		const held = await activated();
 		const original = (await redis.hgetall(key("g-1", "grant"))) as Record<string, string>;
@@ -254,7 +254,7 @@ describe("a field someone edited (#593, D16)", () => {
 	});
 });
 
-describe("what the port may disclose (#593, D1, D16)", () => {
+describe("what the port may disclose", () => {
 	it("hands out nothing for a grant that is not active, even with a credential still resident", async () => {
 		// Every transition away from `active` deletes the credential, so this
 		// cannot arise from the store. The status is checked all the same: a
@@ -298,7 +298,7 @@ describe("what the port may disclose (#593, D1, D16)", () => {
 	});
 });
 
-describe("a field the envelope does not cover (#593, D16, the reviewer)", () => {
+describe("a field the envelope does not cover", () => {
 	it("answers nothing for a record whose retention is gone, rather than a grant nothing can end", async () => {
 		// `retentionMs` is in neither the envelope nor the guard comparison, and
 		// every script derives the horizon from it. Read through the configured
@@ -328,7 +328,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
 	});
 
-	it("still ends a grant whose expiry copy was rewritten into the past: the horizon a revocation honours is the authenticated text's (#627)", async () => {
+	it("still ends a grant whose expiry copy was rewritten into the past: the horizon a revocation honours is the authenticated text's", async () => {
 		// `expiresAtMs` is a copy outside the envelope. A horizon read from it,
 		// once the copy is moved sixty days back, is in the past, and the script
 		// would answer "a tombstone is not revoked again" — for a grant `find`
@@ -346,7 +346,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await held.find("g-1", at(DAY))).toMatchObject({ status: "revoked" });
 	});
 
-	it("reads the tombstone's horizon from the text as well: a copy moved into the future revokes nothing for a caller past the real one (#627)", async () => {
+	it("reads the tombstone's horizon from the text as well: a copy moved into the future revokes nothing for a caller past the real one", async () => {
 		// The other direction of the same rule. The text says the grant is
 		// retained until thirty days past its expiry; a caller whose clock is
 		// past that is asking to revoke a tombstone, whatever the copy says.
@@ -357,7 +357,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await redis.exists(key("g-1", "cred"))).toBe(1);
 	});
 
-	it("still ends a grant whose text carries an expiry the reader refuses: a number Lua would take is not a horizon (#627, Codex)", async () => {
+	it("still ends a grant whose text carries an expiry the reader refuses: a number Lua would take is not a horizon", async () => {
 		// `"-1.5"` is JSON, and `tonumber` reads it; the codec's reader does not
 		// (a string of digits, within the safe-integer range), so the record
 		// answers nothing — and a horizon computed from it here would be in the
@@ -372,7 +372,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
 	});
 
-	it("still ends a grant whose retention was rewritten negative: a horizon before the expiry is none (#627)", async () => {
+	it("still ends a grant whose retention was rewritten negative: a horizon before the expiry is none", async () => {
 		// Both stores refuse a negative retention at construction, so this is a
 		// rewrite. Honoured, it puts the horizon in the past: `find` says gone,
 		// and a revocation would be refused while the credential rests.
@@ -547,7 +547,7 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 	});
 });
 
-describe("a credential from somewhere else (#593, D16)", () => {
+describe("a credential from somewhere else", () => {
 	it("does not open under another grant, another subject's record, or another prefix", async () => {
 		const first = await activated("g-1");
 		await activated("g-2", [KEY_A], "u-2");
@@ -556,7 +556,7 @@ describe("a credential from somewhere else (#593, D16)", () => {
 		expect((await first.open("g-1", at(DAY)))?.credentials.state).toBe("unreadable");
 	});
 
-	it("does not answer a record found under another grant's key, ciphertext and all (Codex on #593)", async () => {
+	it("does not answer a record found under another grant's key, ciphertext and all", async () => {
 		// The whole record copied, not just the secret: the authenticated data
 		// names the credential's key, so a copied ciphertext alone fails. Copied
 		// TOGETHER with the HASH that names it, it would authenticate if the key
@@ -576,7 +576,7 @@ describe("a credential from somewhere else (#593, D16)", () => {
 		expect((await held.open("g-source", at(DAY)))?.credentials.state).toBe("ok");
 	});
 
-	it("does not re-seal a credential under an authorization it cannot authenticate the old one against (Codex on #593)", async () => {
+	it("does not re-seal a credential under an authorization it cannot authenticate the old one against", async () => {
 		// A refresh seals the new credential under the authorization it read. If
 		// that text was rewritten in the keyspace — the expiry extended, the
 		// version left alone — the old ciphertext no longer authenticates under
@@ -624,7 +624,7 @@ describe("a credential from somewhere else (#593, D16)", () => {
 	});
 });
 
-describe("a key ring that rotates (#593, D16)", () => {
+describe("a key ring that rotates", () => {
 	it("opens what an older key sealed, seals new writes under the first, and never re-seals what it did not write", async () => {
 		await activated("g-1", [KEY_A]);
 		// A key introduced later: first in the ring seals, the old one still opens.
@@ -648,7 +648,7 @@ describe("a key ring that rotates (#593, D16)", () => {
 	});
 });
 
-describe("the subject index against what `find` answers (#593, D16)", () => {
+describe("the subject index against what `find` answers", () => {
 	it("lists what `find` answers for at every stage of a grant's life", async () => {
 		const held = await activated("g-1");
 		const listed = async (now: Date): Promise<readonly string[]> =>
@@ -701,7 +701,7 @@ describe("the subject index against what `find` answers (#593, D16)", () => {
 	});
 });
 
-describe("a retention that was changed under existing grants (#593, D16, Codex)", () => {
+describe("a retention that was changed under existing grants", () => {
 	it("keeps answering for a tombstone from the retention its record was created with", async () => {
 		// A key's TTL and an index score are written once, so the scripts go on
 		// using the retention the record carries. Decoding it under the new
@@ -721,7 +721,7 @@ describe("a retention that was changed under existing grants (#593, D16, Codex)"
 	});
 });
 
-describe("two clocks (#593, D16)", () => {
+describe("two clocks", () => {
 	it("tells a caller whose clock is far ahead nothing, and reclaims nothing on its behalf", async () => {
 		const held = await activated("g-1");
 		const farAhead = at(5_000 * DAY);
@@ -744,7 +744,7 @@ describe("two clocks (#593, D16)", () => {
 	});
 });
 
-describe("the ring after construction (#593, D16)", () => {
+describe("the ring after construction", () => {
 	it("is not changed by the buffer the caller handed over", async () => {
 		const mutable = Buffer.alloc(32, 7);
 		const held = createRedisFederationGrantStore({
@@ -772,7 +772,7 @@ describe("the ring after construction (#593, D16)", () => {
 	});
 });
 
-describe("the keyspace as a Cluster sees it (#593, D16)", () => {
+describe("the keyspace as a Cluster sees it", () => {
 	it("hashes a grant's three keys into one slot, and different grants into different ones", () => {
 		const grant = slot(key("g-1", "grant"));
 		expect(slot(key("g-1", "cred"))).toBe(grant);
@@ -802,7 +802,7 @@ describe("the keyspace as a Cluster sees it (#593, D16)", () => {
 	});
 });
 
-describe("a script cache that was flushed (#593)", () => {
+describe("a script cache that was flushed", () => {
 	it("goes on working: the next call loads the script again", async () => {
 		const held = await activated("g-1");
 		await redis.script("FLUSH");
@@ -818,7 +818,7 @@ describe("a script cache that was flushed (#593)", () => {
 	});
 });
 
-describe("a snapshot while the grant is being renewed (#593, D16)", () => {
+describe("a snapshot while the grant is being renewed", () => {
 	it("is wholly one authorization or wholly the other, never one's record with the other's credential", async () => {
 		const held = await activated("g-1");
 		const renewal = authorization({
@@ -850,7 +850,7 @@ describe("a snapshot while the grant is being renewed (#593, D16)", () => {
 	});
 });
 
-describe("plaintext, where an operator has allowed it (#593, D16)", () => {
+describe("plaintext, where an operator has allowed it", () => {
 	it("stores a credential neither reader takes for the other's", async () => {
 		const plain = createRedisFederationGrantStore({
 			client: makeIoredisFederationGrantStoreClient(redis),

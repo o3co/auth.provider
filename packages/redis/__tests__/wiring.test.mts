@@ -37,7 +37,7 @@ afterAll(async () => {
 	await client?.quit();
 });
 
-describe("A1 wiring — full Redis composition (createApp + redis modules)", () => {
+describe("challenge store and replay seen-set wiring — full Redis composition (createApp + redis modules)", () => {
 	it("composes per-purpose clients + redis ChallengeStore + redis ReplaySeenSet + default ceremony into a working AppHandle", async () => {
 		// The boot planner walks `requires` only from closure roots (modules
 		// with `contributes` or `overrides`), so a marker module that

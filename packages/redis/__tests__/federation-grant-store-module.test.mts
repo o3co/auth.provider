@@ -99,7 +99,7 @@ const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => 
 	return ((await boot.catch((err: unknown) => err)) as Error).cause;
 };
 
-describe("the Redis federation grant store module (#593, D16)", () => {
+describe("the Redis federation grant store module", () => {
 	it("needs the client and the configuration, and says which slot it fills", () => {
 		const module = redisFederationGrantStoreModuleFor();
 		expect(module.name).toBe("redis-federation-grant-store");

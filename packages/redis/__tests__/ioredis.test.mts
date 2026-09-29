@@ -447,7 +447,7 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 // caller's error.
 // ---------------------------------------------------------------------------
 
-describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRIPT fallback (#433)", () => {
+describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRIPT fallback", () => {
 	const keys = {
 		codeKeyPrefix: "devauth:{devauth}:code:",
 		userKeyPrefix: "devauth:{devauth}:user:",
@@ -582,7 +582,7 @@ describe("makeIoredisClients deviceCodeStoreClient.create — the script's reply
 	});
 });
 
-describe("makeIoredisClients rateLimiterClient (#458)", () => {
+describe("makeIoredisClients rateLimiterClient", () => {
 	// The script returns `{count, pttl}` as one reply, PTTL read inside the
 	// script after the increment, so the pair describes a single counter
 	// state — a separate PTTL round-trip could observe a key the window had
@@ -617,7 +617,7 @@ describe("makeIoredisClients rateLimiterClient (#458)", () => {
 // in `consent-store.test.mts`.
 // ---------------------------------------------------------------------------
 
-describe("makeIoredisClients consent clients — keys declared and the caller's clock (#561)", () => {
+describe("makeIoredisClients consent clients — keys declared and the caller's clock", () => {
 	const pendingKeys = {
 		recordKeyPrefix: "consent:{pending}:ch:",
 		sessionKeyPrefix: "consent:{pending}:sess:",

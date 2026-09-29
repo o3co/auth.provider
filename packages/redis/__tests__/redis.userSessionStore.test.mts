@@ -61,7 +61,7 @@ runUserSessionStoreContract(freshStore, { expiry });
 // The step-up capability, which the Redis store claims (the MFA ADR's D9).
 runSecondFactorUpdateContract(freshStore, { expiry });
 
-describe("a session Redis holds from before the MFA ADR's D9", () => {
+describe("a session Redis holds from before sessions carried authentication", () => {
 	// Envelopes as the release before `authentication` wrote them, captured
 	// from its writer (`support/preUpgradeEnvelopes.mts`). A live one survives
 	// the upgrade and must read no more trusted than it was: a federated
@@ -109,7 +109,7 @@ describe("a session Redis holds from before the MFA ADR's D9", () => {
 	});
 });
 
-describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
+describe("recordSecondFactor on Redis", () => {
 	const store = (prefix: string) =>
 		createRedisUserSessionStore({
 			client: makeIoredisClients(raw).userSessionStoreClient,

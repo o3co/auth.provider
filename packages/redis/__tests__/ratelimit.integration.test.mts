@@ -100,7 +100,7 @@ describe("both limiters — a spec neither can apply as written", () => {
 	});
 });
 
-describe("createRedisRateLimiter on ioredis — resetAt (#458)", () => {
+describe("createRedisRateLimiter on ioredis — resetAt", () => {
 	it("reports a resetAt inside the window, from the counter key's PTTL", async () => {
 		const limiter = createRedisRateLimiter({
 			client: makeIoredisClients(redis).rateLimiterClient,

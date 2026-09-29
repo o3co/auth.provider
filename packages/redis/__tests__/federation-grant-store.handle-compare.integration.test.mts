@@ -56,7 +56,7 @@ beforeEach(() => {
 	compare.mockClear();
 });
 
-describe("isCurrentIntent compares the handle in constant time (#631)", () => {
+describe("isCurrentIntent compares the handle in constant time", () => {
 	it("goes through core's constantTimeStringEqual, with the stored handle and the one asked about", async () => {
 		const store = createRedisFederationGrantStore({
 			client: makeIoredisFederationGrantStoreClient(redis),

@@ -84,7 +84,7 @@ const plaintextWarning = (store: string) => ({
 	args: [{ store, mode: "allow-plaintext" }, "federation_store_plaintext"],
 });
 
-describe("the plaintext guard's notices (#473)", () => {
+describe("the plaintext guard's notices", () => {
 	let origEnv: string | undefined;
 	let origInsecure: string | undefined;
 

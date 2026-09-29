@@ -124,7 +124,7 @@ const storeOver = (client: FederationGrantStoreClient) =>
 		encryption: { mode: "required", keys: [{ id: "k-1", key: Buffer.alloc(32, 1) }] },
 	});
 
-describe("how many commands a read is (#593, D16)", () => {
+describe("how many commands a read is", () => {
 	it("reads the record and its credential as ONE command", async () => {
 		// The property a race cannot prove: between a `HGETALL` and a `GET`, an
 		// activation can replace both, and the caller would evaluate one
@@ -157,7 +157,7 @@ describe("how many commands a read is (#593, D16)", () => {
 	});
 });
 
-describe("the order a write goes out in (#593, D16)", () => {
+describe("the order a write goes out in", () => {
 	it("reserves the index member, and waits for it, before the record is created", async () => {
 		const { calls, client, letReserveFinish } = recording();
 		const writing = storeOver(client).createPending({

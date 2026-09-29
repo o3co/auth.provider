@@ -132,7 +132,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
 
-	it("round-trips grantedScope, and a record written without one (#647)", async () => {
+	it("round-trips grantedScope, and a record written without one", async () => {
 		// The ceiling a refresh is bounded by has to survive the store, and a
 		// record written before the field existed has to keep opening.
 		const store = createRedisFederationTokenStore({
@@ -264,7 +264,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
 
-	it("get() self-heals corrupt JSON by deleting the key (Copilot round 3 #5)", async () => {
+	it("get() self-heals corrupt JSON by deleting the key", async () => {
 		const store = createRedisFederationTokenStore({
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -275,7 +275,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 
-	it("get() self-heals an empty-string value like corrupt JSON — key deleted, index member dropped (#473)", async () => {
+	it("get() self-heals an empty-string value like corrupt JSON — key deleted, index member dropped", async () => {
 		// `""` is a value Redis can hold and `JSON.parse` cannot read. Answered
 		// as `null` before `open()` ran, it would keep the key and its index
 		// member: a record that is never served and never reclaimed until the
@@ -437,7 +437,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 // The federation-tokens production guard for `allow-plaintext` mode
 // ---------------------------------------------------------------------------
 
-describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard", () => {
+describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 	let origEnv: string | undefined;
 	let origInsecure: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -562,7 +562,7 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 // FEDERATION_TOKENS_ALLOW_INSECURE=1 overrides it.
 // ---------------------------------------------------------------------------
 
-describe("#473 — the plaintext guard reads the selected environment and deployment.mode", () => {
+describe("the plaintext guard reads the selected environment and deployment.mode", () => {
 	let origEnv: string | undefined;
 	let origInsecure: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -761,7 +761,7 @@ const fullTokens: FederationTokens = {
 // chance match inside base64url ciphertext is not a realistic flake.
 const plaintextMarkers = ["at-secret", "rt-secret", "it-secret", "openid email"];
 
-describe("#293 — mode=required stores one ciphertext over the whole envelope", () => {
+describe("mode=required stores one ciphertext over the whole envelope", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
 	beforeEach(() => {
 		redis = createFakeRedis();
@@ -880,7 +880,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 	});
 });
 
-describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (development only)", () => {
+describe("mode=allow-plaintext keeps the envelope as plain JSON (development only)", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
 	beforeEach(() => {
 		redis = createFakeRedis();
@@ -938,7 +938,7 @@ describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (develo
 // returned, in both modes.
 // ---------------------------------------------------------------------------
 
-describe("#293 — a v2 record with a malformed inner envelope self-heals like corrupt JSON", () => {
+describe("a v2 record with a malformed inner envelope self-heals like corrupt JSON", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
 	beforeEach(() => {
 		redis = createFakeRedis();
@@ -1016,7 +1016,7 @@ describe("#293 — a v2 record with a malformed inner envelope self-heals like c
 				["an array", "[]"],
 				["null", "null"],
 			])(
-				"still reads an envelope that carries the removed rawParams (%s), and drops it (#645 follow-up)",
+				"still reads an envelope that carries rawParams, which is not a field (%s), and drops it",
 				async (_label, rawParams) => {
 					// `rawParams` is not a field. An envelope that carries it must not
 					// become unreadable, which would lose the connection's tokens; the

@@ -60,7 +60,7 @@ const seed = {
 	intervalSeconds: 5,
 };
 
-describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
+describe("createRedisDeviceCodeStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
 	});

@@ -51,7 +51,7 @@ const noopReplayClient: ReplaySeenSetClient = {
 	exists: async () => 0,
 };
 
-describe("TS-M2: redisChallengeStoreBuilder — client guard", () => {
+describe("redisChallengeStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisChallengeStoreBuilder({} as never, { lifecycle: undefined } as never),
@@ -68,7 +68,7 @@ describe("TS-M2: redisChallengeStoreBuilder — client guard", () => {
 	});
 });
 
-describe("TS-M2: redisReplaySeenSetBuilder — client guard", () => {
+describe("redisReplaySeenSetBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() => redisReplaySeenSetBuilder({} as never, { lifecycle: undefined } as never)).toThrow(
 			"redisReplaySeenSetBuilder: 'client' option is required",
@@ -113,7 +113,7 @@ const noopUserSessionStoreClient: UserSessionStoreClient = {
 	replaceIfUnchanged: async () => false,
 };
 
-describe("AS-9: redisSessionFamilyIndexBuilder — client guard", () => {
+describe("redisSessionFamilyIndexBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisSessionFamilyIndexBuilder({} as never, { lifecycle: undefined } as never),
@@ -130,7 +130,7 @@ describe("AS-9: redisSessionFamilyIndexBuilder — client guard", () => {
 	});
 });
 
-describe("AS-9: redisSessionFederationIndexBuilder — client guard", () => {
+describe("redisSessionFederationIndexBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisSessionFederationIndexBuilder({} as never, { lifecycle: undefined } as never),
@@ -147,7 +147,7 @@ describe("AS-9: redisSessionFederationIndexBuilder — client guard", () => {
 	});
 });
 
-describe("AS-9: redisSessionRPRegistryBuilder — client guard", () => {
+describe("redisSessionRPRegistryBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisSessionRPRegistryBuilder({} as never, { lifecycle: undefined } as never),
@@ -164,7 +164,7 @@ describe("AS-9: redisSessionRPRegistryBuilder — client guard", () => {
 	});
 });
 
-describe("AS-9: redisUserSessionStoreBuilder — client guard", () => {
+describe("redisUserSessionStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisUserSessionStoreBuilder({} as never, { lifecycle: undefined } as never),
@@ -192,7 +192,7 @@ const noopDeviceCodeStoreClient: DeviceCodeStoreClient = {
 	remove: async () => {},
 };
 
-describe("#433: redisDeviceCodeStoreBuilder — client guard", () => {
+describe("redisDeviceCodeStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisDeviceCodeStoreBuilder({} as never, { lifecycle: undefined } as never),
@@ -226,7 +226,7 @@ const noopPendingConsentStoreClient: PendingConsentStoreClient = {
 	discard: async () => false,
 };
 
-describe("#561: redisConsentStoreBuilder / redisPendingConsentStoreBuilder — client guard", () => {
+describe("redisConsentStoreBuilder / redisPendingConsentStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() => redisConsentStoreBuilder({} as never, { lifecycle: undefined } as never)).toThrow(
 			"redisConsentStoreBuilder: 'client' option is required",

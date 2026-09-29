@@ -55,7 +55,7 @@ const makeMockClient = (
 	return self;
 };
 
-describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", () => {
+describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", () => {
 	const keyPrefix = "rtfam:";
 
 	it("throws RefreshTokenStorageError({reason:'corrupt-data'}) for truncated JSON in Redis", async () => {
@@ -166,7 +166,7 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 		},
 	);
 
-	it("returns the family normally for a valid envelope (regression guard)", async () => {
+	it("returns the family for a valid envelope", async () => {
 		const expiresAtMs = Date.now() + 60_000;
 		const store = new Map<string, string>([
 			[
@@ -193,7 +193,7 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 	});
 });
 
-describe("TS-6: redisRefreshTokenFamilyStoreBuilder — client guard", () => {
+describe("redisRefreshTokenFamilyStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisRefreshTokenFamilyStoreBuilder({} as never, { lifecycle: undefined } as never),

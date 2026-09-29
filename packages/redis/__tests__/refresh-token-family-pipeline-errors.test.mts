@@ -91,7 +91,7 @@ const makeStore = (execReplies: unknown[]) => {
 const commitRotation = () =>
 	({ action: "commit", family: { ...FAMILY, activeJti: "jti-new" } }) as const;
 
-describe("#352 regression — updateFamily must not report a rotation Redis refused", () => {
+describe("updateFamily must not report a rotation Redis refused", () => {
 	it("does NOT return committed when the queued SET failed inside MULTI/EXEC", async () => {
 		// The exact ioredis shape: EXEC succeeded, the SET inside it did not.
 		const { store } = makeStore([

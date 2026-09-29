@@ -113,7 +113,7 @@ const plaintext = { mode: "allow-plaintext" } as const;
 const indexMembers = (redis: ReturnType<typeof createFakeRedis>, sid: string): string[] =>
 	[...(redis.sets.get(`ft:idx:${sid}`) ?? [])].sort();
 
-describe("#291 — per-session federation key index", () => {
+describe("per-session federation key index", () => {
 	it("attach records the federation name in the sid's index SET", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
@@ -167,7 +167,7 @@ describe("#291 — per-session federation key index", () => {
 	});
 });
 
-describe("#291 — removeBySid is O(the session's federations)", () => {
+describe("removeBySid is O(the session's federations)", () => {
 	it("removes every indexed envelope without scanning the keyspace", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
@@ -247,7 +247,7 @@ describe("#291 — removeBySid is O(the session's federations)", () => {
 	});
 });
 
-describe("#291 — scanFallback migration flag", () => {
+describe("scanFallback migration flag", () => {
 	it("defaults to enabled, so an upgrade still reaches tokens written before the index existed", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({ client: redis, encryption: plaintext });
@@ -321,7 +321,7 @@ describe("#291 — scanFallback migration flag", () => {
 	});
 });
 
-describe("#291 — builder structural validator covers the index methods", () => {
+describe("builder structural validator covers the index methods", () => {
 	it.each(["unlink", "sAddWithTtl", "sRem", "sScanIterator"])(
 		"rejects a client missing %s",
 		(method) => {

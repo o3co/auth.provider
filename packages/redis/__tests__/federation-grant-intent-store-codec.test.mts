@@ -63,7 +63,7 @@ describe("the intent codec", () => {
 		);
 	});
 
-	it("writes an intent with neither resource nor upstreamSubject to the text it always has (#626)", () => {
+	it("writes an intent with neither resource nor upstreamSubject to the text it always has", () => {
 		// Pinned byte for byte: the admission script answers a retry `unchanged`
 		// only when the stored text is equal, so a change here would turn the
 		// retry of an intent written by the previous release into a collision.
@@ -81,7 +81,7 @@ describe("the intent codec", () => {
 		expect(decodeFederationGrantIntent(encodeFederationGrantIntent(written))).toEqual(written);
 	});
 
-	it("keeps every parameter it is handed as its own key, as the memory store does (Copilot)", () => {
+	it("keeps every parameter it is handed as its own key, __proto__ included", () => {
 		// Assigning a decoded `__proto__` into `{}` invokes the prototype setter
 		// and drops it; the memory store's spread keeps it. The resolver refuses
 		// the name at boot, and the codec does not rely on that.

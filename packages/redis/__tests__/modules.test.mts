@@ -52,7 +52,7 @@ describe("redisReplaySeenSetModule", () => {
 	});
 });
 
-describe("redisDeviceCodeStoreModule (#433)", () => {
+describe("redisDeviceCodeStoreModule", () => {
 	it("has the canonical module name 'redis-device-code-store'", () => {
 		expect(redisDeviceCodeStoreModule.name).toBe("redis-device-code-store");
 	});
@@ -71,7 +71,7 @@ describe("redisDeviceCodeStoreModule (#433)", () => {
 	});
 });
 
-describe("redisConsentStoreModule (#561)", () => {
+describe("redisConsentStoreModule", () => {
 	it("has the canonical module name 'redis-consent-store'", () => {
 		expect(redisConsentStoreModule.name).toBe("redis-consent-store");
 	});
@@ -92,7 +92,7 @@ describe("redisConsentStoreModule (#561)", () => {
 	});
 });
 
-describe("the MFA store modules and adapters, from the package's entry (the MFA ADR's D7, D8)", () => {
+describe("the MFA store modules and adapters, from the package's entry", () => {
 	it.each([
 		[
 			redisMfaFactorStoreModule,

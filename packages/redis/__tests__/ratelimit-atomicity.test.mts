@@ -36,7 +36,7 @@ const fakeRedis = () => {
 	};
 };
 
-describe("createRedisRateLimiter — atomicity (#269)", () => {
+describe("createRedisRateLimiter — atomicity", () => {
 	it("counts and limits across a window", async () => {
 		const redis = fakeRedis();
 		const limiter = createRedisRateLimiter({
@@ -172,7 +172,7 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
  * `Retry-After`: the Lua script hands back the counter key's PTTL with the
  * count, and the limiter turns it into the moment the window ends.
  */
-describe("createRedisRateLimiter — resetAt (#458)", () => {
+describe("createRedisRateLimiter — resetAt", () => {
 	/**
 	 * A client on the two-method contract, whose window started
 	 * `windowAgeMs` ago — so the PTTL it reports is the window minus that.

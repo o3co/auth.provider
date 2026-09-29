@@ -50,7 +50,7 @@ function createClient(pages: Pair[][]) {
 	} satisfies SessionRPRegistryClient;
 }
 
-describe("#291 — createRedisSidHash.listValues is cursor-based", () => {
+describe("createRedisSidHash.listValues is cursor-based", () => {
 	it("reads through hScanIterator rather than one unbounded reply", async () => {
 		const client = createClient([[["c1", '{"a":1}']]]);
 		const hash = createRedisSidHash({ client, keyPrefix: "t:" });
@@ -101,7 +101,7 @@ describe("#291 — createRedisSidHash.listValues is cursor-based", () => {
 	});
 });
 
-describe("#291 — createRedisSidHash.removeBySid uses UNLINK", () => {
+describe("createRedisSidHash.removeBySid uses UNLINK", () => {
 	it("unlinks the sid's key", async () => {
 		const client = createClient([]);
 		const hash = createRedisSidHash({ client, keyPrefix: "t:" });
@@ -114,7 +114,7 @@ describe("#291 — createRedisSidHash.removeBySid uses UNLINK", () => {
 // rejects a non-positive one — but a command the server refuses on the logout
 // path is no better than a hang. Same construction-time guard as the sorted-set
 // helper's `pageSize`.
-describe("#291 — createRedisSidHash validates scanCount at construction", () => {
+describe("createRedisSidHash validates scanCount at construction", () => {
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (scanCount) => {
 		expect(() =>
 			createRedisSidHash({ client: createClient([]), keyPrefix: "t:", scanCount }),

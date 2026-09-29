@@ -51,7 +51,7 @@ describe("encryptTokenField / decryptTokenField", () => {
 // The federation-token store binds each envelope ciphertext to the Redis key
 // it lives under, so a value copied to another session's key is refused.
 // These pin the primitive that binding rests on.
-describe("encryptTokenField / decryptTokenField with additional authenticated data (#293)", () => {
+describe("encryptTokenField / decryptTokenField with additional authenticated data", () => {
 	const aad = "ft:sid-1:google";
 
 	it("roundtrips when the same AAD is presented on decrypt", () => {
@@ -60,7 +60,7 @@ describe("encryptTokenField / decryptTokenField with additional authenticated da
 		expect(decryptTokenField(ct, key, aad)).toBe(plaintext);
 	});
 
-	it("does not store the AAD in the envelope — the format is unchanged", () => {
+	it("does not store the AAD in the envelope, which keeps its four parts", () => {
 		const ct = encryptTokenField(plaintext, key, aad);
 		expect(ct.split(".")).toHaveLength(4);
 		expect(ct).not.toContain(Buffer.from(aad).toString("base64url"));

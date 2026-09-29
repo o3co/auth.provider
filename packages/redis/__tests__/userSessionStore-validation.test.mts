@@ -53,10 +53,10 @@ const validEnvelope = {
 	claims: { iss: "https://auth.example" },
 };
 
-describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () => {
+describe("RedisUserSessionStore.get — corrupt envelope validation", () => {
 	const keyPrefix = "sess:";
 
-	it("returns the session for a valid envelope (regression guard)", async () => {
+	it("returns the session for a valid envelope", async () => {
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix });
 		client.seed(`${keyPrefix}sid-1`, JSON.stringify(validEnvelope));
@@ -172,7 +172,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		);
 	});
 
-	it("reads an envelope written before authentication existed as a session with authentication undefined (the MFA ADR's D9)", async () => {
+	it("reads an envelope written before authentication existed as a session with authentication undefined", async () => {
 		// The bytes a release before the key wrote, captured from its writer:
 		// nothing to split here — `sessionAuthentication` / `vouchedAmr` split
 		// it as it is read.
@@ -223,7 +223,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 	});
 });
 
-describe("RedisUserSessionStore.recordSecondFactor — what it reads and how often it tries (the MFA ADR's D9)", () => {
+describe("RedisUserSessionStore.recordSecondFactor — what it reads and how often it tries", () => {
 	const keyPrefix = "sess:";
 	const passwordEnvelope = {
 		...validEnvelope,
@@ -291,7 +291,7 @@ describe("RedisUserSessionStore.recordSecondFactor — what it reads and how oft
 	});
 });
 
-describe("RedisUserSessionStore — what the store needs from its client, and what it keeps of a newer release's envelope (the MFA ADR's D9)", () => {
+describe("RedisUserSessionStore — what the store needs from its client, and what it keeps of a newer release's envelope", () => {
 	const keyPrefix = "sess:";
 
 	it("refuses at construction a client without replaceIfUnchanged, naming it, rather than failing the first step-up", () => {
