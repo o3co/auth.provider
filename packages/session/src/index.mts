@@ -130,6 +130,9 @@ export { createLoginEntry, loginEntryFromConfig } from "./login-entry.mjs";
 // toolkit (`codeChallenge`, `callbackUrlForExchange`, `resolveClientSecret`).
 // `FederationResult` above stays because only this router answers with one.
 export { sessionModule } from "./module.mjs";
+// #728 — the `loginCompletion` slot, over the deployment's `csrfGuard`: its own
+// module, loaded beside `sessionModule` where a requirement completes a login.
+export { loginCompletionModule } from "./modules/loginCompletionModule.mjs";
 export {
 	type SessionStoreModuleConfig,
 	sessionStoreModule,

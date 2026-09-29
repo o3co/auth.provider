@@ -32,7 +32,6 @@ import {
 } from "./csrf.mjs";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
-import { createLoginCompletion } from "./login-completion.mjs";
 import { loginEntryFromConfig } from "./login-entry.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -75,9 +74,6 @@ function deriveProviderCallbackUrls(
 	return out;
 }
 
-/** The guards `csrfGuardOf` built, by configuration and then by logger. */
-const guards = new WeakMap<object, WeakMap<Logger, CsrfGuard>>();
-
 /**
  * The session's CSRF guard, as the session routes build theirs: the signed
  * double-submit token of `createCsrfProtectionFromConfig` over `session.*` —
@@ -85,10 +81,9 @@ const guards = new WeakMap<object, WeakMap<Logger, CsrfGuard>>();
  * `<session.name>.csrf` with the session cookie's attributes — and
  * `session.csrf.trustedOrigins`.
  *
- * Built once per configuration and logger: the `csrfGuard` slot and
- * `loginCompletion` both read it here, so one policy is one object. The
- * session routes build their own `CsrfProtection` (`routes/Session.mts`);
- * it accepts this guard's tokens, as the token is signed, not stored.
+ * The `csrfGuard` slot's value. The session routes build their own
+ * `CsrfProtection` (`routes/Session.mts`); it accepts this guard's tokens,
+ * as the token is signed, not stored.
  *
  * The key is to reach the guard through the session store's
  * `csrfTokenSigner` slot before the session store's configuration becomes a
@@ -96,19 +91,13 @@ const guards = new WeakMap<object, WeakMap<Logger, CsrfGuard>>();
  * until then `session` is one section, read by both modules, and nothing
  * changes owner.
  */
-export const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
-	const byLogger = guards.get(config) ?? new WeakMap<Logger, CsrfGuard>();
-	guards.set(config, byLogger);
-	const built = byLogger.get(logger);
-	if (built !== undefined) return built;
+const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
 	const session = config.session as unknown as SessionCsrfConfigSlice;
-	const guard = createSessionCsrfGuard({
+	return createSessionCsrfGuard({
 		csrf: createCsrfProtectionFromConfig(session),
 		trustedOrigins: session.csrf?.trustedOrigins ?? [],
 		logger,
 	});
-	byLogger.set(logger, guard);
-	return guard;
 };
 
 /**
@@ -149,9 +138,9 @@ export const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
  *
  * `provides` (#728) — what other packages need of the browser session,
  * through slots whose contracts are core's, so that none imports this
- * package: `csrfGuard` (the guard these routes run), `loginEntry` (the login
- * page and its `redirect_to` protocol) and `loginCompletion` (the tail of a
- * login, for a requirement's completion).
+ * package: `csrfGuard` (the guard these routes run) and `loginEntry` (the
+ * login page and its `redirect_to` protocol). `loginCompletion` is the
+ * login-completion module's (`modules/loginCompletionModule.mts`).
  *
  * `providerCallbackUrls` is derived from `config.federations` inside the
  * federation-routes lambda — a route-local config projection, not a synthetic
@@ -226,19 +215,10 @@ export const sessionModule = defineModule<
 		// `/authorize` and the federation-grants connect flow send a browser
 		// there by. Built with no page configured, failing where it is read.
 		loginEntry: (deps) => loginEntryFromConfig(deps.config),
-		// The tail of a login (the session-admission ADR's D5), for a
-		// requirement's completion: the session stores this module requires,
-		// the session's lifetime, and a guard over the same CSRF key, whose
-		// fresh token an interruption's `403` carries (the MFA ADR's D27).
-		loginCompletion: (deps) => {
-			const config = deps.config as AppConfig;
-			return createLoginCompletion({
-				userSessionStore: deps.userSessionStore,
-				...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
-				sessionTtlMs: config.session.maxAge,
-				csrf: csrfGuardOf(config, deps.logger ?? consoleLogger),
-			});
-		},
+		// `loginCompletion` is the login-completion module's
+		// (`modules/loginCompletionModule.mts`): it answers with the
+		// deployment's `csrfGuard`, a slot this module fills and so cannot
+		// require.
 	},
 	contributes: {
 		routes: [
