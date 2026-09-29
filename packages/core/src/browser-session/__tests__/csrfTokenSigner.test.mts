@@ -184,7 +184,8 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 		const build = () =>
 			signerOf(
 				(payload) => hmac(key, payload, "base64"),
-				(payload, signature) => signature === hmac(key, payload, "base64"),
+				(payload, signature) =>
+					typeof payload === "string" && signature === hmac(key, payload, "base64"),
 			);
 		expect(await failing({ build, other })).toEqual([RULES.shape]);
 	});
@@ -226,7 +227,8 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 				verify: (_payload, signature) => issued.has(signature),
 			};
 		});
-		expect(await failing({ build, other })).toEqual([RULES.changedPayload]);
+		// A payload that is not a string, beside a signature it issued, is accepted too.
+		expect(await failing({ build, other })).toEqual([RULES.changedPayload, RULES.malformed]);
 	});
 
 	it("a signer whose key does not depend on what it was built from", async () => {
@@ -234,7 +236,8 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 		const fixed = () =>
 			signerOf(
 				(payload) => hmac(key, payload, "base64url"),
-				(payload, signature) => signature === hmac(key, payload, "base64url"),
+				(payload, signature) =>
+					typeof payload === "string" && signature === hmac(key, payload, "base64url"),
 			);
 		expect(await failing({ build: fixed, other: fixed })).toEqual([RULES.otherSigner]);
 	});
@@ -256,7 +259,7 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 				key,
 				sign: (payload: string) => hmac(key, payload, "base64url"),
 				verify: (payload: string, signature: string) =>
-					signature === hmac(key, payload, "base64url"),
+					typeof payload === "string" && signature === hmac(key, payload, "base64url"),
 			}) as CsrfTokenSigner;
 		};
 		expect(await failing({ build, other })).toEqual([RULES.alone]);
@@ -271,12 +274,14 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 		const build = () =>
 			signerOf(
 				(payload) => hmac(SESSION_SECRET, payload, "base64url"),
-				(payload, signature) => signature === hmac(SESSION_SECRET, payload, "base64url"),
+				(payload, signature) =>
+					typeof payload === "string" && signature === hmac(SESSION_SECRET, payload, "base64url"),
 			);
 		const another = () =>
 			signerOf(
 				(payload) => hmac("another-secret", payload, "base64url"),
-				(payload, signature) => signature === hmac("another-secret", payload, "base64url"),
+				(payload, signature) =>
+					typeof payload === "string" && signature === hmac("another-secret", payload, "base64url"),
 			);
 		expect(await failing({ build, other: another, sessionSecret: SESSION_SECRET })).toEqual([
 			RULES.separated,
