@@ -181,6 +181,7 @@ describe("a relocated path — refused", () => {
 			}),
 		);
 
+		// The new path is under a transitional `at`: no variable binds it yet, so none is named.
 		expect(err.details).toEqual({
 			reason: "config-path-relocated",
 			relocated: [
@@ -188,7 +189,6 @@ describe("a relocated path — refused", () => {
 					module: "fixture-relocating",
 					from: "legacy.current.max-retries",
 					to: "legacy.current.retries",
-					environmentVariable: "LEGACY_CURRENT_RETRIES",
 				},
 			],
 		});
@@ -349,5 +349,135 @@ describe("a relocated path — claimed by two loaded modules", () => {
 			bootstrapComponents: bootWith(current),
 		});
 		await handle.dispose();
+	});
+});
+
+describe("a relocated path — more", () => {
+	it("an old path left empty, as HOCON leaves an unset variable's object, sets nothing: it boots", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: { schema: RetrySection, relocatedFrom: ["legacy.fixture"] },
+		});
+
+		const handle = await createApp({
+			modules: [relocating],
+			bootstrapComponents: bootWith({ ...current, legacy: { fixture: {} } }),
+		});
+
+		await handle.dispose();
+	});
+
+	it("a key removed rather than moved — a map entry to null — is refused as removed", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: {
+				schema: RetrySection,
+				relocatedFrom: { "oauth-legacy.grants.authorization_code.pkce.requireS256": null },
+			},
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootWith({
+					...current,
+					"oauth-legacy": { grants: { authorization_code: { pkce: { requireS256: true } } } },
+				}),
+			}),
+		);
+
+		expect(err.details).toEqual({
+			reason: "config-path-relocated",
+			relocated: [
+				{
+					module: "fixture-relocating",
+					from: "oauth-legacy.grants.authorization_code.pkce.requireS256",
+					to: null,
+				},
+			],
+		});
+		expect(err.message).toContain(
+			"oauth-legacy.grants.authorization_code.pkce.requireS256 was removed; see CHANGELOG.",
+		);
+	});
+
+	it("names every key, of every module, in module order, each attributed to its module", async () => {
+		const first = defineModule({
+			name: "fixture-first",
+			section: { schema: RetrySection, relocatedFrom: { "legacy-first.retries": "retries" } },
+		});
+		const second = defineModule({
+			name: "fixture-second",
+			section: { schema: RetrySection, relocatedFrom: ["legacy-second"] },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [first, second],
+				bootstrapComponents: bootWith({
+					"fixture-first": { retries: 1 },
+					"fixture-second": { retries: 1 },
+					"legacy-second": { retries: 2, label: "x" },
+					"legacy-first": { retries: 3 },
+				}),
+			}),
+		);
+
+		expect(err.details).toMatchObject({
+			relocated: [
+				{ module: "fixture-first", from: "legacy-first.retries", to: "fixture-first.retries" },
+				{ module: "fixture-second", from: "legacy-second.retries", to: "fixture-second.retries" },
+				{ module: "fixture-second", from: "legacy-second.label", to: "fixture-second.label" },
+			],
+		});
+		expect(err.message).toContain("Configuration sets 3 path(s) that moved:");
+		for (const sentence of [
+			"legacy-first.retries has moved to fixture-first.retries; see CHANGELOG.",
+			"legacy-second.retries has moved to fixture-second.retries; see CHANGELOG.",
+			"legacy-second.label has moved to fixture-second.label; see CHANGELOG.",
+		]) {
+			expect(err.message).toContain(sentence);
+		}
+	});
+
+	it("refuses at stage 1 a new path at or under its own old path: a key written right would be refused", async () => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: { schema: RetrySection, at: "legacy", relocatedFrom: { "legacy.a": "a.b" } },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [relocating],
+				bootstrapComponents: bootWith({ legacy: { retries: 1 } }),
+			}),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.details).toMatchObject({
+			module: "fixture-relocating",
+			relocatedFrom: "legacy.a",
+			problem: expect.stringContaining("legacy.a.b"),
+		});
+	});
+
+	it.each([
+		["is", ["fixture-relocating"], "it is the path the section is read at"],
+		["holds", ["legacy"], "it holds the path the section is read at"],
+	])("says an old path %s the section's own path", async (_label, relocatedFrom, words) => {
+		const relocating = defineModule({
+			name: "fixture-relocating",
+			section: {
+				schema: RetrySection,
+				...(relocatedFrom[0] === "legacy" ? { at: "legacy.fixture" } : {}),
+				relocatedFrom,
+			},
+		});
+
+		const err = await refusal(
+			createApp({ modules: [relocating], bootstrapComponents: bootWith(current) }),
+		);
+
+		expect(err.details).toMatchObject({ problem: expect.stringContaining(words) });
 	});
 });

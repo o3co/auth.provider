@@ -15,16 +15,16 @@
  */
 
 /**
- * The relocated-path refusal is deleted at 1.0.0 (#728 B10).
+ * The relocated-path refusal is removed at the first major release (#728 B10).
  *
  * #728 moves configuration sections under the module that owns them, and a
  * setting still written at an old path refuses boot naming the new one —
  * `section.relocatedFrom`, enforced as `config-path-relocated`. The owner
  * decided that this is a bridge for the 0.x line: the refusals, and the
- * vocabulary that declares them, are deleted at 1.0.0.
+ * vocabulary that declares them, are removed at the first major release.
  *
  * Nothing in a release cut would remember that on its own, so this fails from
- * the cut that writes a `## [1.0.0]` (or later) section in the CHANGELOG —
+ * the cut that writes the first major version's section in the CHANGELOG —
  * the section is written at cut time (docs/release-policy.md R2) — until
  * `relocatedFrom` and `config-path-relocated` are gone from core's source.
  */
@@ -66,7 +66,7 @@ function sourcesNamingRelocations(dir: string = coreSrc): string[] {
 	return found;
 }
 
-describe("relocated-path refusals are deleted at 1.0.0 (#728 B10)", () => {
+describe("relocated-path refusals are removed at the first major release (#728 B10)", () => {
 	it("reads the newest release a CHANGELOG lists", () => {
 		expect(
 			newestRelease("## [0.16.0] - 2026-09-26\n\n## [0.9.0] - 2026-01-01\n## [0.15.2] - x\n"),
@@ -74,7 +74,7 @@ describe("relocated-path refusals are deleted at 1.0.0 (#728 B10)", () => {
 		expect(newestRelease("# Changelog\n")).toBeUndefined();
 	});
 
-	it("retires them from 1.0.0 on, and not before", () => {
+	it("retires them from the first major release on, and not before", () => {
 		expect(retiresRelocations([0, 99, 0])).toBe(false);
 		expect(retiresRelocations([1, 0, 0])).toBe(true);
 		expect(retiresRelocations(undefined)).toBe(false);
@@ -84,14 +84,14 @@ describe("relocated-path refusals are deleted at 1.0.0 (#728 B10)", () => {
 		expect(sourcesNamingRelocations().length).toBeGreaterThan(0);
 	});
 
-	it("leaves no relocation in core's source once a 1.0.0 section is written", () => {
+	it("leaves no relocation in core's source once the first major version's section is written", () => {
 		const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
 		const remaining = retiresRelocations(newestRelease(changelog))
 			? sourcesNamingRelocations()
 			: [];
 		expect(
 			remaining,
-			"1.0.0 retires relocatedFrom and config-path-relocated (#728 B10): delete them",
+			"the first major release retires relocatedFrom and config-path-relocated (#728 B10): delete them",
 		).toEqual([]);
 	});
 });

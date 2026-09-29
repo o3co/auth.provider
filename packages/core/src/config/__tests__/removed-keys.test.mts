@@ -136,17 +136,67 @@ describe("findRelocatedKeys — a key that moved (#728)", () => {
 		).toEqual(["dpop.iatWindowSeconds"]);
 	});
 
-	it("reads a list as one value, and an empty subtree as the path itself", () => {
+	it("reads a list of values as one value, and a list of objects element by element, each index a key (#728 R4)", () => {
 		expect(
-			findRelocatedKeys({ old: { list: [1, 2] } }, [{ from: ["old"], to: ["new"] }]).map(
+			findRelocatedKeys({ old: { list: [1, 2], empty: [] } }, [{ from: ["old"], to: ["new"] }]).map(
 				({ from, to, environmentVariable }) => [from, to, environmentVariable],
 			),
-		).toEqual([["old.list", "new.list", "NEW_LIST"]]);
+		).toEqual([
+			["old.list", "new.list", "NEW_LIST"],
+			["old.empty", "new.empty", "NEW_EMPTY"],
+		]);
 		expect(
-			findRelocatedKeys({ old: {} }, [{ from: ["old"], to: ["new"] }]).map(
-				({ from, to, environmentVariable }) => [from, to, environmentVariable],
+			findRelocatedKeys({ old: { keys: [{ id: "a", key: "k" }] } }, [
+				{ from: ["old"], to: ["new"] },
+			]).map(({ from, to, environmentVariable }) => [from, to, environmentVariable]),
+		).toEqual([
+			["old.keys.0.id", "new.keys.0.id", "NEW_KEYS_0_ID"],
+			["old.keys.0.key", "new.keys.0.key", "NEW_KEYS_0_KEY"],
+		]);
+	});
+
+	it("reads an empty subtree as nothing set: HOCON leaves {} where an unset variable was the only binding", () => {
+		expect(findRelocatedKeys({ old: {} }, [{ from: ["old"], to: ["new"] }])).toEqual([]);
+		expect(
+			findRelocatedKeys({ old: { nested: {}, value: 1 } }, [{ from: ["old"], to: ["new"] }]).map(
+				({ from }) => from,
 			),
-		).toEqual([["old", "new", undefined]]);
+		).toEqual(["old.value"]);
+	});
+
+	it("reads a value that is not plain data — a Date, a URL — as one value, not walked into", () => {
+		expect(
+			findRelocatedKeys({ old: { at: new Date(0), url: new URL("https://x.example/") } }, [
+				{ from: ["old"], to: ["new"] },
+			]).map(({ from }) => from),
+		).toEqual(["old.at", "old.url"]);
+	});
+
+	it("finds a key under each old path, a second one disjoint from the first included", () => {
+		expect(
+			findRelocatedKeys({ second: { value: 1 } }, [
+				{ from: ["first"], to: ["new"] },
+				{ from: ["second"], to: ["new", "moved"] },
+			]).map(({ from, to }) => [from, to]),
+		).toEqual([["second.value", "new.moved.value"]]);
+	});
+
+	it("reports a key removed rather than moved — a relocation to null — with no new path and no variable", () => {
+		const pkce = ["oauth", "grants", "authorization_code", "pkce", "requireS256"];
+		expect(
+			findRelocatedKeys(
+				{ oauth: { grants: { authorization_code: { pkce: { requireS256: true } } } } },
+				[{ from: pkce, to: null }],
+			).map(({ from, to, environmentVariable }) => [from, to, environmentVariable]),
+		).toEqual([["oauth.grants.authorization_code.pkce.requireS256", null, undefined]]);
+	});
+
+	it("names no variable for a new path no variable binds yet: under a transitional section path", () => {
+		expect(
+			findRelocatedKeys({ old: { value: 1 } }, [
+				{ from: ["old"], to: ["legacy", "current"], unbound: true },
+			]).map(({ to, environmentVariable }) => [to, environmentVariable]),
+		).toEqual([["legacy.current.value", undefined]]);
 	});
 
 	it("finds nothing where the configuration sets nothing, and reads own keys only", () => {
@@ -155,7 +205,7 @@ describe("findRelocatedKeys — a key that moved (#728)", () => {
 		expect(findRelocatedKeys(undefined, [dpopMoved])).toEqual([]);
 	});
 
-	it("says what moved where in the words a removed key is refused in", () => {
+	it("says what moved where, or that it was removed, in the words a removed key is refused in", () => {
 		expect(
 			relocatedKeyMessage({
 				from: "oauth.dpop.iat-window-seconds",
@@ -164,10 +214,16 @@ describe("findRelocatedKeys — a key that moved (#728)", () => {
 			}),
 		).toBe(
 			"oauth.dpop.iat-window-seconds has moved to dpop.iatWindowSeconds; see CHANGELOG. " +
-				"Write it there (environment variable DPOP_IAT_WINDOW_SECONDS) and remove this field from your config.",
+				"Write it there (environment variable DPOP_IAT_WINDOW_SECONDS) and remove this field from your config " +
+				"(or unset the environment variable that sets it).",
 		);
 		expect(relocatedKeyMessage({ from: "old", to: "new" })).toBe(
-			"old has moved to new; see CHANGELOG. Write it there and remove this field from your config.",
+			"old has moved to new; see CHANGELOG. Write it there and remove this field from your config " +
+				"(or unset the environment variable that sets it).",
+		);
+		expect(relocatedKeyMessage({ from: "old", to: null })).toBe(
+			"old was removed; see CHANGELOG. Remove this field from your config " +
+				"(or unset the environment variable that sets it).",
 		);
 	});
 });
