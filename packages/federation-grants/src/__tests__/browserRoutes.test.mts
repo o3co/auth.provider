@@ -460,6 +460,25 @@ describe("GET /session/federation-grants/connect — the start a client sends th
 		expect(new URL(asked[0] as string).searchParams.get("request")).toBe(handle);
 	});
 
+	it("sends a login page with a fragment its redirect_to in the page's query, before the fragment (#728)", async () => {
+		// The connect flow used to append `?redirect_to=…` after the page's
+		// fragment, where the page never read it. Through the entry it follows
+		// core's login-page rule, as `/authorize` does.
+		const w = world({ login: createTestLoginEntry("/login?tenant=a#pane") });
+		const { handle } = await w.lodge();
+		const response = await w.connect(handle);
+		expect(response.status).toBe(303);
+		const sent = response.headers.location as string;
+		expect(sent.endsWith("#pane")).toBe(true);
+		const location = new URL(sent, ISSUER);
+		expect(location.pathname).toBe("/login");
+		expect(location.hash).toBe("#pane");
+		expect(location.searchParams.get("tenant")).toBe("a");
+		expect(location.searchParams.getAll("redirect_to")).toHaveLength(1);
+		const back = new URL(location.searchParams.get("redirect_to") ?? "");
+		expect(back.searchParams.get("request")).toBe(handle);
+	});
+
 	it("parks one challenge for the subject's own browser, and sends it to the consent page", async () => {
 		const w = world();
 		const { handle } = await w.lodge();
