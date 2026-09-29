@@ -80,12 +80,11 @@ const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, stri
 
 /**
  * What an `unavailable` admission is described as to the client, by the
- * store it names (D10): one of admission's own stores (`user_session`,
- * `revocation_boundary`, `ADMISSION_INFRASTRUCTURE_STORES`) by
- * name, anything else as a requirement's outage — never by the
- * requirement's name, which is the operator's, in the log line. One text
- * for every consumer, so none reports a requirement's outage as the
- * session store's.
+ * store it names (D10): either of admission's own stores — `user_session`,
+ * `revocation_boundary` — by name, anything else as a requirement's
+ * outage — never by the requirement's name, which is the operator's, in the
+ * log line. One text for every consumer, so none reports a requirement's
+ * outage as the session store's.
  */
 export const describeAdmissionOutage = (store: string): string =>
 	isAdmissionInfrastructureStore(store)
@@ -658,9 +657,9 @@ export interface RegisteredRequirement extends SessionRequirement {
  * `value` as it is registered (D3): its shape held to the contract — a
  * `name` of RFC 6749's error-code characters (`isWellFormedErrorCode`, the
  * rule `/oauth/token` sends a `step_up` under: printable ASCII without `"`
- * or `\`, at least one) that is none of
- * {@link ADMISSION_INFRASTRUCTURE_STORES}, `remediations` the requirement's
- * own routes
+ * or `\`, at least one) that is neither of the names admission gives its own
+ * stores' outages (`user_session`, `revocation_boundary`), `remediations`
+ * the requirement's own routes
  * (`checkRemediations`: `<name>.<route>`, each once), a `stepUpPage` that
  * is a page when present
  * (`checkStepUpPage`, on `issuer`'s origin when one is given) and is
@@ -703,7 +702,7 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	};
 	if (isAdmissionInfrastructureStore(name)) {
 		refuse(
-			"the name is the one admission gives an outage of its own store (ADMISSION_INFRASTRUCTURE_STORES): a consumer telling an outage by its store would take the requirement's for the store's",
+			`the name is one admission gives an outage of its own stores (${ADMISSION_INFRASTRUCTURE_STORES.join(", ")}): a consumer telling an outage by its store would take the requirement's for the store's`,
 		);
 	}
 	// A page that fails names what is wrong itself (`checkStepUpPage`); one
