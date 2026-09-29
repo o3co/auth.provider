@@ -123,6 +123,37 @@ describe("readTransitionalConfig — the switches a composition root reads befor
 		);
 	});
 
+	it("refuses to read a path under a value the schema transforms whole, naming the path to read instead", () => {
+		// `oauth.accessToken` is parsed as one value and transformed: the
+		// deprecated `expiresIn` takes `defaultExpiresIn`'s value. Read beneath
+		// the transform, a key would be what was written, not what boot makes
+		// of it (3600 where boot has 900).
+		expect(() => readTransitionalConfig(resolved(), ["oauth.accessToken.expiresIn"])).toThrow(
+			/cannot read "oauth\.accessToken\.expiresIn".*read "oauth\.accessToken"/,
+		);
+		const accessToken = { defaultExpiresIn: 900, expiresIn: 3600 };
+		const config = readTransitionalConfig(
+			resolved({ oauth: { ...makeValidCoreConfig().oauth, accessToken } }),
+			["oauth.accessToken"],
+		);
+		expect(config.oauth.accessToken.expiresIn).toBe(900);
+	});
+
+	it("reads a path under a value the schema only preprocesses", () => {
+		// `oauth.jwt` is a `z.preprocess` (a legacy-field refusal) around an
+		// object: its keys are read as the object parses them.
+		const config = readTransitionalConfig(resolved(), ["oauth.jwt.issuer"]);
+		expect(config.oauth.jwt.issuer).toBe(makeValidCoreConfig().oauth.jwt.issuer);
+	});
+
+	it("keeps an ancestor's default: an absent section reads as its declared default does", () => {
+		// With no `mfa` section, the full parse has `mfa.mode = "off"` from the
+		// section's own default; a read of `mfa.mode` must agree.
+		const { mfa: _absent, ...withoutMfa } = resolved() as Record<string, unknown>;
+		expect(TransitionalConfigSchema.parse(withoutMfa).mfa.mode).toBe("off");
+		expect(readTransitionalConfig(withoutMfa, ["mfa.mode"]).mfa?.mode).toBe("off");
+	});
+
 	it("covers a path under another it reads", () => {
 		const config = readTransitionalConfig(
 			resolved({ http: { port: "8080", trustProxy: false, readinessTimeoutMs: "1500" } }),
