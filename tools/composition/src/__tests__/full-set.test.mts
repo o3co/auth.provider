@@ -54,7 +54,9 @@
  */
 
 import { createHash, generateKeyPairSync, sign, X509Certificate } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	BootError,
 	type MfaFactorStore,
@@ -64,7 +66,7 @@ import {
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
-import { DEVICE_CODE_GRANT_TYPE } from "@o3co/auth-provider-device-grant";
+import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import {
 	ACCESS_TOKEN_TYPE,
 	TOKEN_EXCHANGE_GRANT_TYPE,
@@ -87,16 +89,19 @@ import {
 	KIB,
 	type ModuleOrder,
 	type OutageCase,
+	ownFiles,
 	padForm,
 	padJson,
 	REVERSED,
 	redeem,
+	SINGLE_ENV,
 	TEMPLATE_DEPENDENCIES,
 	TOO_LARGE,
 	TRANSFERS,
 	WEB,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
+import { readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
@@ -355,6 +360,21 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		expect(valueAt(on, "oauth.mtls.enabled")).toBe(true);
 		expect(valueAt(on, "oauth.mtls.trusted-proxies")).toEqual(["loopback"]);
 		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
+	});
+
+	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers (#472)", () => {
+		const operator = join(mkdtempSync(join(tmpdir(), "full-set-472-")), "device.conf");
+		writeFileSync(
+			operator,
+			`oauth.deviceAuthorization {\n  enabled = true\n  verification-uri = "${ISSUER}/device"\n}\n`,
+		);
+		const switches = readSwitches([operator, ...ownFiles()], { env: SINGLE_ENV });
+		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
+			DEVICE_CODE_GRANT_TYPE,
+		]);
+		// And off where nothing says on: the grant is opt-in.
+		const unset = readSwitches(ownFiles(), { env: SINGLE_ENV });
+		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
 	});
 
 	it("names no section as ignored: every one it is handed has an owner", async () => {
