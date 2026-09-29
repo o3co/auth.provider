@@ -150,7 +150,7 @@ beforeEach(() => {
 
 describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	// -------------------------------------------------------------------------
-	// Test 1: 401 when no authenticated subject
+	// 401 when no authenticated subject
 	// -------------------------------------------------------------------------
 	it("401 when no authenticated subject", async () => {
 		const { app } = buildApp(undefined);
@@ -165,7 +165,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 2: Success path — 200 with credentialId/transports/backedUp
+	// Success path — 200 with credentialId/transports/backedUp
 	// -------------------------------------------------------------------------
 	it("200 on success: credentialStore.registerCredential called with full credential; response has credentialId/transports/backedUp", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
@@ -214,7 +214,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 3: Challenge consumed (replay rejection)
+	// Challenge consumed (replay rejection)
 	// -------------------------------------------------------------------------
 	it("400 challenge_invalid on second call with the same challenge (replay)", async () => {
 		mockVerifyAttestation.mockResolvedValue({ ok: true, material: STUB_MATERIAL });
@@ -239,7 +239,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 4: 400 challenge_invalid when no challenge exists (unknown)
+	// 400 challenge_invalid when no challenge exists (unknown)
 	// -------------------------------------------------------------------------
 	it("400 challenge_invalid when no challenge was issued (unknown outcome)", async () => {
 		const { app } = buildApp({ userId: "alice" });
@@ -254,7 +254,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 5: Attestation failure → 400 with reason
+	// Attestation failure → 400 with reason
 	// -------------------------------------------------------------------------
 	it("400 with reason when verifyWebAuthnAttestation returns ok=false", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: false, reason: "origin_mismatch" });
@@ -293,7 +293,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 6: Nickname too long → 400 invalid_request
+	// Nickname too long → 400 invalid_request
 	// -------------------------------------------------------------------------
 	it("400 invalid_request when nickname exceeds 64 characters", async () => {
 		const { app } = buildApp({ userId: "alice" });
@@ -309,7 +309,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 7: Nickname empty string → 400 invalid_request
+	// Nickname empty string → 400 invalid_request
 	// -------------------------------------------------------------------------
 	it("400 invalid_request when nickname is an empty string", async () => {
 		const { app } = buildApp({ userId: "alice" });
@@ -324,7 +324,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 8: Nickname at exactly 64 chars → accepted
+	// Nickname at exactly 64 chars → accepted
 	// -------------------------------------------------------------------------
 	it("200 when nickname is exactly 64 characters (upper bound inclusive)", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
@@ -347,7 +347,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 9: userId in body ignored — session userId wins
+	// userId in body ignored — session userId wins
 	// -------------------------------------------------------------------------
 	it("userId taken from authenticated session (req.webauthnSubject), NOT request body", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
@@ -373,7 +373,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 10: Duplicate credential ID — different user
+	// Duplicate credential ID — different user
 	// -------------------------------------------------------------------------
 	it("400 credential_id_conflict when credential ID already registered to a different user", async () => {
 		// A colliding credential ID — distinct from STUB_MATERIAL.credentialId to
@@ -425,7 +425,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 11: Duplicate credential ID — same user re-registering
+	// Duplicate credential ID — same user re-registering
 	// -------------------------------------------------------------------------
 	it("400 credential_id_conflict when same user attempts to re-register the same credential ID (no silent re-upsert)", async () => {
 		// Strict policy: no silent re-upsert, not even same-user.
@@ -478,7 +478,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 12: Non-duplicate adapter error is an outage
+	// Non-duplicate adapter error is an outage
 	// -------------------------------------------------------------------------
 	it("503 (not silent 200) when registerCredential throws a non-duplicate adapter error", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });

@@ -110,8 +110,8 @@ export async function generateRegistrationOptionsForUser(args: {
 		})),
 		authenticatorSelection: {
 			userVerification: args.config.userVerification,
-			// residentKey: "preferred" enables discoverable credentials by default
-			// per WebAuthn §2.4.
+			// "preferred": ask for a discoverable credential, accept a
+			// server-side one (WebAuthn Level 3 §5.4.6).
 			residentKey: "preferred",
 		},
 		challenge: args.challenge,
