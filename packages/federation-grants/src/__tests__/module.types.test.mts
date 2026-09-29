@@ -42,6 +42,8 @@ const OPTIONAL = [
 	"userSessionStore",
 	// The login page connect sends a browser that is not signed in to (#728).
 	"loginEntry",
+	// The issuer the routes and the acquisition settings are built on (#728).
+	"oauthTokenSettings",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

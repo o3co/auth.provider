@@ -37,6 +37,7 @@ import type {
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
 	Logger,
+	OAuthTokenSettings,
 	SessionRequirement,
 	SubjectRevocation,
 	UserRepository,
@@ -52,7 +53,11 @@ import {
 	InMemoryUserRepository,
 	passwordSessionAuthentication,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	makeValidCoreConfig,
+	makeValidFullSections,
+} from "@o3co/auth-provider-core/testing";
 import { HttpUserRepository } from "@o3co/auth-provider-foundation";
 import type { Request, RequestHandler } from "express";
 import express from "express";
@@ -123,6 +128,9 @@ const clientRepository: ClientRepository = {
 	authenticate: async (id, secret) =>
 		id === CLIENT_ID && secret === SECRET ? (client as never) : null,
 };
+
+/** The oauthTokenSettings the composition holds, when a test puts them there (#728); none by default. */
+let tokenSettings: OAuthTokenSettings | undefined;
 
 /** Whose account the fake upstream's exchange verifies; a test may add claims. */
 let exchangeUpstream: { issuer: string; subject: string; claims?: Record<string, string> } = {
@@ -278,6 +286,7 @@ const boot = async (
 			},
 			pathResolver: (s: string) => s,
 			...(logger === undefined ? {} : { logger }),
+			...(tokenSettings === undefined ? {} : { oauthTokenSettings: tokenSettings }),
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
@@ -467,6 +476,28 @@ describe("a grant created end to end, and spent", () => {
 			expect(login.pathname).toBe(ACQUISITION_LOGIN_PAGE);
 			expect(login.searchParams.get("redirect_to")).toBe(connect.href);
 		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("builds connect_uri, and the login trip back to it, on the issuer of the oauthTokenSettings the composition holds (#728)", async () => {
+		// The oauth module provides the slot from the same configuration; a slot
+		// naming the issuer under a path prefix shows which one the routes read.
+		tokenSettings = createTestOAuthTokenSettings({ issuer: `${ISSUER}/tenant` });
+		const { handle, app } = await boot();
+		try {
+			const connect = await lodgeFor(app);
+			expect(connect.href.startsWith(`${ISSUER}/tenant/session/federation-grants/connect?`)).toBe(
+				true,
+			);
+			const anonymous = await request(app).get(
+				`/session/federation-grants/connect${connect.search}`,
+			);
+			expect(anonymous.status).toBe(303);
+			const login = new URL(anonymous.headers.location as string, ISSUER);
+			expect(login.searchParams.get("redirect_to")).toBe(connect.href);
+		} finally {
+			tokenSettings = undefined;
 			await handle.dispose();
 		}
 	});
