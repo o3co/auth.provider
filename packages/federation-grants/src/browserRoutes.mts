@@ -111,10 +111,12 @@ import {
 	admitSession,
 	type ClientRepository,
 	type CookieCarrier,
+	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
 	cookieClaim,
 	coveredByRevocationBoundary,
+	describeIssuerRejection,
 	type FederatedIdentityLookupResult,
 	type FederationGrantAcquisitionConnection,
 	type FederationGrantBrowserBinding,
@@ -191,7 +193,7 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly consentUrl: string;
 	/** `endpoints.login.url`, read per request as `/authorize` reads it. */
 	readonly loginUrl: () => string;
-	/** `oauth.jwt.issuer`: every URL this router builds is built on it. */
+	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
 	readonly issuer: string;
 	readonly rateLimiter: RateLimiter;
 	readonly failMode: RateLimitFailMode;
@@ -451,6 +453,15 @@ export function createFederationGrantBrowserRouter(
 		throw new TypeError(
 			"createFederationGrantBrowserRouter: subjectRevocation is required — the sessions " +
 				"boundary a session must have authenticated after (D13) is read through it",
+		);
+	}
+	// Likewise the issuer every URL here is built on — the consent location,
+	// the connect URI: on one that is not an absolute http(s) URL (`mailto:`,
+	// `urn:`) each throws, a 500 on every request. Core's canonical rule.
+	const issuerRejection = checkCanonicalIssuer(options.issuer);
+	if (issuerRejection !== null) {
+		throw new TypeError(
+			`createFederationGrantBrowserRouter: issuer ${describeIssuerRejection(issuerRejection)} — it is oauth.jwt.issuer`,
 		);
 	}
 	const now = options.now ?? (() => new Date());
