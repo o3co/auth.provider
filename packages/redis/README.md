@@ -646,12 +646,15 @@ operations is one script on one Cluster slot.
 the version as text and carries the fixed part over byte for byte — it never
 decodes the JSON, since `cjson` writes an empty array back as `{}` — and
 answers `null` to a value that is not exactly three lines, never cutting one
-it did not write down to a record it did. No key
-carries a TTL. A stored record the adapter cannot read back refuses the
-subject's whole list: never "no factor", which would open a first binding. So
-`create` and `update` refuse with a `RangeError`, before anything is written,
-whatever a read would refuse — a binding outside D24's three, a field that is
-not the type the record declares, a date that is not a valid one.
+it did not write down to a record it did. No key carries a TTL. A stored
+record the adapter cannot read back refuses the subject's whole list: never
+"no factor", which would open a first binding. So `create` and `update`
+refuse with a `RangeError`, before anything is written, whatever a read would
+refuse — a binding outside D24's three, a field that is not the type the
+record declares, a date that is not a valid one, and, for `update`, a record
+at `Number.MAX_SAFE_INTEGER`, whose next version would be no safe integer
+(core's `checkMfaVersionAdvances`, which the transactions' `update` applies
+too).
 
 **The transactions.** Every operation the port calls atomic is one script:
 insert-only `create`; `update`, a compare-and-set on the version and on the

@@ -43,6 +43,7 @@
  */
 
 import {
+	checkMfaVersionAdvances,
 	consoleLogger,
 	defineModule,
 	type MfaFactorRecord,
@@ -214,6 +215,10 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		async update(subject, id, expectedVersion, next) {
 			checkMutable(next);
 			const mutable = mutablePart(next);
+			// Refused before the script: the next version would be written as
+			// 9007199254740992, which `recordOf` refuses, and the subject's whole
+			// list would be unreadable from then on.
+			checkMfaVersionAdvances(expectedVersion, "MfaFactorStore.update");
 			// No stored record is at a version that is not a whole number.
 			if (!isWholeVersion(expectedVersion)) return null;
 			const field = mfaKeyPart(id);
