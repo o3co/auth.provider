@@ -15,16 +15,11 @@
  */
 
 /**
- * boot/assemble-app.mts — Stage 6 of the A2-β boot planner pipeline.
- *
- * Takes the `FrozenWorld` from stage 5, computes mount order via Kahn's
- * topological sort over `before`/`after` route tokens with
- * `declarationIndex` as tie-breaker, constructs an Express Router with all
- * routes mounted in mount-index order and core's terminal error handler
- * after them (`middleware/terminalError.mts`), and builds the public
- * `AppHandle`.
- *
- * Per A2-β §5.6 + §6.3 + §8.1.
+ * boot/assemble-app.mts: stage 6 of the boot planner. Takes the `FrozenWorld`
+ * from stage 5, orders routes by Kahn's topological sort over `before`/`after`
+ * tokens (`declarationIndex` breaks ties), mounts them on an Express Router
+ * with core's terminal error handler after them
+ * (`middleware/terminalError.mts`), and builds the public `AppHandle`.
  */
 
 import { createServer } from "node:http";
@@ -77,28 +72,21 @@ const corsIssuerOptions = (
 };
 
 // ---------------------------------------------------------------------------
-// Internal: post-apply route collision check (§5.6 pre-pass, MUST-FIX 2)
+// Internal: post-apply route collision check
 // ---------------------------------------------------------------------------
 
 /**
- * Run the same route-collision checks that validate-manifests performs for
- * static contributions, but against the FULL materialised route list (which
- * includes factory-produced routes that were opaque at stage 1).
- *
- * This is defence-in-depth: validate-manifests catches static violations
- * early; this pass catches factory-produced violations at stage 6.
- *
- * Checks:
+ * Run the route-collision checks validate-manifests performs for static
+ * contributions again, over the FULL materialised route list, which includes
+ * factory-produced routes that were opaque at stage 1:
  *  - Duplicate id (`duplicate-contribute` identityKind="id")
  *  - Duplicate mountPath with no id (`duplicate-contribute` identityKind="mountPath")
  *  - Effective (method, mountPath+adv.path) collision (`duplicate-contribute` identityKind="effective-method-path")
  *  - RouteAdvertisement.path missing leading slash (`invalid-route-advertisement-path`)
- *
- * Per A2-β §5.1 step 7 (factory-produced extension), §5.6 pre-pass.
  * @internal
  */
 function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContribution[]): void {
-	// 7a: Duplicate id check
+	// Duplicate id check
 	const seenIds = new Map<string, string>(); // id → module
 	for (const { contribution: route, contributedBy: module } of routes) {
 		if (route.id !== undefined) {
@@ -121,7 +109,7 @@ function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContrib
 		}
 	}
 
-	// 7b: Duplicate mountPath (no id) check
+	// Duplicate mountPath (no id) check
 	const seenMountPaths = new Map<string, string>(); // mountPath → module
 	for (const { contribution: route, contributedBy: module } of routes) {
 		if (route.id === undefined) {
@@ -144,13 +132,13 @@ function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContrib
 		}
 	}
 
-	// 7c + 7d: RouteAdvertisement checks
+	// RouteAdvertisement checks
 	const seenEffective = new Map<string, { module: string; mountPath: string }>();
 
 	for (const { contribution: route, contributedBy: module } of routes) {
 		if (!route.routes) continue;
 		for (const adv of route.routes) {
-			// 7d: leading-slash check
+			// Leading-slash check
 			if (!adv.path.startsWith("/")) {
 				throw new BootError({
 					message: `assembleApp: RouteAdvertisement.path "${adv.path}" in module "${module}" (mountPath "${route.mountPath}") must start with "/".`,
@@ -166,7 +154,7 @@ function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContrib
 				});
 			}
 
-			// 7c: effective method+path collision
+			// Effective method+path collision
 			const effectiveIdentity = `${adv.method} ${route.mountPath}${adv.path}`;
 			const prev = seenEffective.get(effectiveIdentity);
 			if (prev !== undefined) {
@@ -189,7 +177,7 @@ function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContrib
 }
 
 // ---------------------------------------------------------------------------
-// Internal: mount-order computation (§5.6 step 1)
+// Internal: mount-order computation
 // ---------------------------------------------------------------------------
 
 /**
@@ -376,16 +364,13 @@ function computeMountOrder(
 }
 
 // ---------------------------------------------------------------------------
-// Internal: dispose builder (§8.1)
+// Internal: dispose builder
 // ---------------------------------------------------------------------------
 
 /**
- * Build the single-shot dispose function for AppHandle.
- * Iterates cleanups in reverse order, then falls back to Symbol.asyncDispose
- * for components without an explicit cleanup. Errors accumulate into
- * AggregateError.
- *
- * Per A2-β §8.1.
+ * Build the single-shot dispose function for AppHandle: explicit cleanups in
+ * reverse order, then Symbol.asyncDispose for components without one, then
+ * the LifecycleRegistrar drain. Errors accumulate into an AggregateError.
  */
 function buildDispose(
 	frozen: FrozenWorld,
@@ -400,12 +385,10 @@ function buildDispose(
 
 		cachedPromise = (async () => {
 			// Track errors alongside their (module, componentKey) origin so the
-			// AggregateError message names which cleanup failed (per spec §6.3 /
-			// §8.1: "errors are aggregated and surfaced through `dispose()`'s
-			// rejection — see §6.3").
+			// AggregateError message names which cleanup failed.
 			const errorsWithOrigin: { module: string; componentKey: string; error: unknown }[] = [];
 
-			// Step 1: iterate cleanups in reverse order (§8.1 steps 1-2).
+			// Step 1: iterate cleanups in reverse order.
 			const reversedCleanups = [...frozen.cleanups].reverse() as CleanupRecord[];
 			for (const record of reversedCleanups) {
 				try {
@@ -419,11 +402,9 @@ function buildDispose(
 				}
 			}
 
-			// Step 2: Symbol.asyncDispose fallback (§8.1 step 3).
-			// Only for components without an explicit lifecycle[K].cleanup AND
-			// that were NOT provided by the host environment (bootstrap or
-			// override). External values are consumer-owned: their lifecycle is
-			// outside the boot planner's responsibility. Per A2-β §5.3 / §8.1.
+			// Step 2: Symbol.asyncDispose fallback, only for components without an
+			// explicit lifecycle[K].cleanup that the host did NOT provide
+			// (bootstrap or override): external values are consumer-owned.
 			const explicitCleanupKeys = new Set<ComponentKey>(frozen.cleanups.map((r) => r.componentKey));
 
 			for (const [key, value] of Object.entries(frozen.components)) {
@@ -451,13 +432,10 @@ function buildDispose(
 				}
 			}
 
-			// Step 3: D-5 LifecycleRegistrar drain (LIFO across all builder-
-			// registered cleanups). Component cleanups (Steps 1-2) ran first
-			// because they operate at the module level; sub-resource cleanups
-			// (registered via LifecycleRegistrar) operate on resources owned by
-			// those components. A Redis client backing a session store should
-			// outlive the component's own cleanup so the component can issue a
-			// final command if needed.
+			// Step 3: LifecycleRegistrar drain (LIFO across builder-registered
+			// cleanups), after the component cleanups: a sub-resource such as the
+			// Redis client behind a session store must outlive the component's own
+			// cleanup so the component can issue a final command.
 			if (lifecycleReg !== undefined) {
 				// The logger component when one is wired, else `consoleLogger`:
 				// either way one object-first line per failed cleanup.
@@ -472,7 +450,7 @@ function buildDispose(
 				}
 			}
 
-			// Step 4: reject with AggregateError if any errors accumulated (§8.1 step 4).
+			// Step 4: reject with AggregateError if any errors accumulated.
 			if (errorsWithOrigin.length > 0) {
 				const originSummary = errorsWithOrigin
 					.map((e) => `${e.module}:${e.componentKey}`)
@@ -495,29 +473,24 @@ function buildDispose(
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 6 of the A2-β boot planner pipeline.
+ * Stage 6 of the boot planner.
  *
  * Takes the `FrozenWorld` from stage 5, computes mount order (Kahn's
  * topological sort over `before`/`after` route tokens with cycle detection),
  * constructs an Express Router with all routes mounted in mount-index order,
  * and builds the public `AppHandle` with `router`, `listen(port)`,
- * `dispose()`, and `components`.
- *
- * The construction phase is synchronous. `listen` and `dispose` on the
- * returned handle are async.
- *
- * Per A2-β §5.6 + §6.3 + §8.1.
+ * `dispose()`, and `components`. Construction is synchronous; `listen` and
+ * `dispose` on the returned handle are async.
  */
 export function assembleApp(
 	frozen: FrozenWorld,
 	options: {
 		readonly express?: { Router: () => Router };
 		/**
-		 * D-5: Boot-planner-owned LifecycleRegistrar threaded through createApp.
-		 * `AppHandle.dispose()` drains the registrar's cleanups in LIFO order
-		 * after the component-level cleanup steps (1-2) complete. Optional
-		 * because direct callers of `assembleApp` (test harnesses) need not
-		 * provide one — Steps 1-2 still run.
+		 * Boot-planner-owned LifecycleRegistrar threaded through createApp.
+		 * `AppHandle.dispose()` drains it in LIFO order after the component
+		 * cleanups. Optional: direct callers (test harnesses) need not provide
+		 * one.
 		 */
 		readonly lifecycleReg?: InternalLifecycleRegistrar;
 		/**
@@ -557,43 +530,34 @@ export function assembleApp(
 		);
 	}
 
-	// The OIDC discovery subsystem decides — from issuer config + provider-root
-	// contributions — whether to synthesize a discovery route, and returns it as
+	// The OIDC discovery subsystem decides, from issuer config and provider-root
+	// contributions, whether to synthesize a discovery route, and returns it as
 	// an ORDINARY route contribution (mounted at "/", advertising
 	// `GET /.well-known/openid-configuration`). All OIDC knowledge lives in
-	// `discovery/`; from here discovery is just another route that flows through
-	// the standard collision-check + mount-order + mount pipeline below, so a
-	// module contributing a colliding route fails the boot fast with no special-
-	// casing. `null` when no document is served.
+	// `discovery/`; from here the route flows through the standard
+	// collision-check, mount-order and mount pipeline below, so a colliding
+	// module route fails the boot. `null` when no document is served.
 	//
-	// Its inputs are read here rather than handed the world (#626 F4): the
-	// frozen components are already `Readonly<Partial<ComponentMap>>`, so
-	// `config` and `keyStore` arrive typed and the step needs no cast to read
-	// them. What is left is the collector, whose value type the registry map
-	// does not carry — that cast belongs on this side, because mapping a
-	// contribution kind to its collector is what assembly knows and the
-	// discovery step does not.
+	// The collector is cast here, not in `discovery/`: mapping a contribution
+	// kind to its collector is what assembly knows. The other inputs arrive
+	// typed from the frozen components.
 	const collector = frozen.registries.get("discoveryMetadata") as
 		| ListCollector<OidcDiscoveryContribution>
 		| undefined;
 	// No `try` here. The planner hands back a document that failed to validate
-	// as a value, and only that. The host-supplied code it reads — the key
-	// store's algorithm, this collector, a contribution's `providerRoot` — and
+	// as a value, and only that. The host-supplied code it reads (the key
+	// store's algorithm, this collector, a contribution's `providerRoot`) and
 	// the router factory `discoveryRouteFor` calls below are outside any
-	// conversion, and whatever they throw arrives as itself. A
-	// `try` around the planner kept converting some of it: two review rounds on
-	// #650 found one such path each (the router factory, then the host reads).
+	// conversion: whatever they throw arrives as itself.
 	const planning = planDiscoveryDocument({
-		// The oauth module's `oauthTokenSettings` when the composition holds it
-		// (#728), otherwise the configuration's issuer, as before.
-		// The planner validates what it is handed, as it did the configuration's
-		// value, typed as the configuration types it.
+		// The oauth module's `oauthTokenSettings` when the composition holds it,
+		// otherwise the configuration's issuer. The planner validates what it
+		// is handed.
 		issuer: compositionIssuer(frozen.components as Record<string, unknown>) as string | undefined,
 		// `KeyStore.algorithm` is typed, but a host may put an object of its own
-		// in the slot through `bootstrapComponents` / `overrideComponents`, which
-		// is not checked at that boundary — so the reading is still guarded, and
-		// it is a reader so the step reads it only once both activation
-		// conditions have passed, as it did before.
+		// in the slot through `bootstrapComponents` / `overrideComponents`,
+		// unchecked at that boundary, so the read is guarded. A reader, so the
+		// step reads it only once both activation conditions have passed.
 		readSigningAlgs: () => {
 			const algorithm = frozen.components.keyStore?.algorithm;
 			return typeof algorithm === "string" ? [algorithm] : [];
@@ -603,12 +567,10 @@ export function assembleApp(
 		readMetadata: () => (collector === undefined ? [] : [...collector.values()]),
 	});
 	if (planning.outcome === "invalid") {
-		// The taxonomy is this stage's, which is why the conversion is here and
-		// not in the step: a discovery misconfiguration has to surface as a
-		// `BootError` like every other assembleApp failure, and the step would
-		// have to import the stage to say so.
-		// The planner's text by its projection (`failureDetail`), in the
-		// message and in `details.detail` alike, never the message itself: see
+		// Converted here, not in the step: a discovery misconfiguration surfaces
+		// as a `BootError` like every other assembleApp failure. The planner's
+		// text goes by its projection (`failureDetail`), in the message and in
+		// `details.detail` alike, never the message itself: see
 		// `failure-summary.mts`.
 		const detail = failureDetail(planning.error);
 		throw new BootError({
@@ -633,35 +595,28 @@ export function assembleApp(
 					},
 				];
 
-	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
-	// Catches collisions produced by factory-generated routes that were opaque
-	// at validate-manifests time, AND any module route colliding with the
-	// synthesized discovery route. Same checks as stage 1, over the full list.
+	// Pre-pass: post-apply route collision check. Catches collisions produced
+	// by factory-generated routes that were opaque at validate-manifests time,
+	// AND any module route colliding with the synthesized discovery route.
 	checkMaterialisedRouteCollisions(allRoutes);
 
-	// Step 1: Mount-order computation (§5.6 step 1).
+	// Step 1: Mount-order computation.
 	const ordered = computeMountOrder(allRoutes);
 
-	// Step 2: Construct router (§5.6 step 2).
+	// Step 2: Construct router.
 	const router: Router = RouterCtor();
 
-	// CORS, FIRST — before every other middleware and every route (#500).
+	// CORS, FIRST: before every other middleware and every route.
 	//
-	// Order is the whole design here. A preflight carries no `Authorization`
-	// and no body, so it must be answered before anything that would inspect
-	// either; and a browser can only read an error response — the `400
-	// invalid_grant` an SPA most needs to see — if `Access-Control-Allow-Origin`
-	// is already on the response when a downstream handler ends it. Headers set
-	// on the way IN survive whatever the route does; headers set on the way out
-	// would not exist for a response that never came back through here.
+	// A preflight carries no `Authorization` and no body, so it must be answered
+	// before anything that would inspect either; and a browser can read an error
+	// response (the `400 invalid_grant` an SPA most needs to see) only if
+	// `Access-Control-Allow-Origin` is set on the way IN, before a downstream
+	// handler ends the response.
 	//
-	// Mounted on an ALLOWLIST of paths, which is the opposite polarity to the
-	// sender-constraint mount below, and deliberately so. That one guards a
-	// credential and must therefore cover routes core has never heard of (#327);
-	// this one GRANTS a cross-origin read, so a route core has never heard of is
-	// exactly the route that must not silently acquire it. `corsMw` returns null
-	// for an empty `cors.allowedOrigins`, so a deployment that has not opted in
-	// gains nothing at all — not even a `Vary` header.
+	// Mounted on an ALLOWLIST of paths, deliberately the opposite polarity to the
+	// sender-constraint mount below (core README, CORS). `corsMw` returns null
+	// for an empty `cors.allowedOrigins`: no CORS headers, not even `Vary`.
 	{
 		const components = frozen.components as Record<string, unknown>;
 		const config = components.config as
@@ -670,21 +625,16 @@ export function assembleApp(
 		const configured = config?.cors?.allowedOrigins;
 		const logger = components.logger as Logger | undefined;
 		// Read through the shared shape normaliser rather than testing for an
-		// array. Through `createApp` the config has been through the schema
-		// core mirrors for `cors` since #728, but `assembleApp` is a stage of
-		// its own, and before that boot parsed only core's sections and laid
-		// the raw top-level extras back over them. So an operator who
-		// configured this the documented way — `${?CORS_ALLOWED_ORIGINS}`, a
-		// comma-separated string, the only shape an environment variable can
-		// carry a list in — handed an `Array.isArray` test a string, and the
-		// middleware was silently not mounted. That is the exact failure this
-		// key was wired up to stop being.
+		// array: `assembleApp` is a stage of its own and may be handed raw
+		// config, where the documented `${?CORS_ALLOWED_ORIGINS}` is a
+		// comma-separated string (the only way an environment variable carries
+		// a list). An `Array.isArray` test would silently skip the middleware.
 		const allowedOrigins = normalizeAllowedOrigins(configured);
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,
 				// On the issuer the discovery route is served on: the oauth
-				// module's `oauthTokenSettings` when the composition holds it (#728).
+				// module's `oauthTokenSettings` when the composition holds it.
 				routes: browserFacingCorsRoutes(config ?? {}, corsIssuerOptions(components)),
 				...(logger ? { logger } : {}),
 			});
@@ -704,37 +654,29 @@ export function assembleApp(
 		}
 	}
 
-	// The paths the protected-resource sender-constraint middleware (#264)
-	// must NOT run on. Everything else is guarded — the mount below is GLOBAL,
-	// not an allowlist of the surfaces that accept an access token. #308
-	// shipped the allowlist shape (four literal paths coupled to the bundled
-	// `oauthModule`'s mount points); #327 inverted it, because an allowlist
-	// has to be kept in sync with every module's mount points, so a module
-	// contributing a NEW token-accepting route shipped unguarded by default —
-	// the silent-downgrade failure #308 fixed, reintroduced at the extension
-	// seam. A global mount is safe because the middleware judges only requests
-	// that actually present an access token: it passes through requests with
-	// no Authorization header, non-token schemes (`Basic` client auth on the
-	// introspection endpoint, browser-redirect flows), tokens that do not
-	// decode as JWTs, and unbound tokens.
+	// The paths the protected-resource sender-constraint middleware must NOT
+	// run on. Everything else is guarded: the mount below is GLOBAL, not an
+	// allowlist of token-accepting surfaces, because an allowlist must track
+	// every module's mount points and leaves a module's new token-accepting
+	// route unguarded by default. A global mount is safe because the
+	// middleware judges only requests that present an access token: it passes
+	// requests with no Authorization header, non-token schemes (`Basic` client
+	// auth on the introspection endpoint, browser-redirect flows), tokens that
+	// do not decode as JWTs, and unbound tokens.
 	//
 	// `/oauth/token` is deliberately exempt: it authenticates a *client*, has
 	// no access token in play, and runs the token-endpoint binding profile
-	// above instead. The exempt path is coupled to the bundled `oauthModule`'s
-	// mountPath the same way the `/oauth/token` mounts above and below are —
+	// instead. The path is coupled to the bundled `oauthModule`'s mountPath;
 	// see the NOTE on the `grantMiddleware` mount.
 	const TOKEN_ENDPOINT_PATH = "/oauth/token";
 	/** The token endpoint's one method (RFC 6749 §3.2). */
 	const TOKEN_ENDPOINT_METHOD = "POST";
 
-	// A POST to exactly `/oauth/token` — case-insensitive, with one optional
-	// trailing slash, the paths a `use` mount on it leaves as `/` — which is
-	// what `tokenEndpointOnly` below admits. So the exemption covers exactly
-	// what the token-endpoint middleware covers. Not the sub-tree beneath it,
-	// and not another method: a later module's `/oauth/token/custom`, or its
-	// `GET /oauth/token`, gets no token-endpoint profile, so exempting it here
-	// would leave it guarded by neither, and a DPoP-bound token replayed there
-	// as a plain Bearer would be admitted.
+	// A POST to exactly `/oauth/token`, case-insensitive, with one optional
+	// trailing slash: exactly what `tokenEndpointOnly` below admits. Not the
+	// sub-tree beneath it nor another method: those get no token-endpoint
+	// profile, so exempting them would leave them guarded by neither, and a
+	// DPoP-bound token replayed there as a plain Bearer would be admitted.
 	const isSenderConstraintExempt = (req: Request): boolean => {
 		const lowered = req.path.toLowerCase();
 		return (
@@ -743,16 +685,14 @@ export function assembleApp(
 		);
 	};
 
-	// `mw`, for the token endpoint alone: mounted with
-	// `router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(mw))`, it runs only for
-	// a POST whose path ends at the mount — `req.path` is `/` for
-	// `/oauth/token` and `/oauth/token/`, in any letter case — and passes every
-	// other request on. A `use` mount rather than a route (`router.all`), so a
-	// contribution sees the request as it always has: `req.path` `/`, `req.url`
-	// `/?<query>`, `req.baseUrl` ending in `/oauth/token`. A bare `use` mount
-	// would also run it for every path beneath (`/oauth/token/custom`) and
-	// every method, handing another module's route the token endpoint's
-	// binding verdict and grant middleware.
+	// `mw`, for the token endpoint alone: under
+	// `router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(mw))` it runs only for
+	// a POST whose `req.path` is `/` (`/oauth/token` or `/oauth/token/`, any
+	// case) and passes every other request on. A `use` mount rather than a
+	// route, so a contribution sees `req.path` `/`, `req.url` `/?<query>` and
+	// `req.baseUrl` ending in `/oauth/token`. A bare `use` mount would also run
+	// it for every sub-path and method, handing another module's route the
+	// token endpoint's binding verdict and grant middleware.
 	const tokenEndpointOnly =
 		(mw: RequestHandler): RequestHandler =>
 		(req, res, next) => {
@@ -766,15 +706,11 @@ export function assembleApp(
 
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
 	// collector and mount it on `/oauth/token` BEFORE any other grant
-	// middleware — for the token endpoint alone (`tokenEndpointOnly`).
-	// Multiple mechanism modules (DPoP, mTLS, ...) contribute raw mechanisms; core composes them into one middleware so the
-	// configured `DispatchPolicy` (`intent-explicit` / `strict-mutual-
-	// exclusion`) arbitrates across modules. See ADR
-	// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
-	// for the design rationale.
-	//
-	// Null entries (disabled-by-config) are filtered. When no mechanisms
-	// are contributed, no middleware is synthesized.
+	// middleware, for the token endpoint alone. Mechanism modules (DPoP, mTLS,
+	// ...) contribute raw mechanisms; one composed middleware lets the
+	// configured `DispatchPolicy` arbitrate across modules. See ADR
+	// 2026-05-20-token-binding-first-class-abstraction. Null entries (disabled
+	// by config) are filtered; with no mechanisms, nothing is synthesized.
 	const mechanismCollector = frozen.registries.get("tokenBindingMechanisms") as
 		| ListCollector<TokenBindingMechanism | null>
 		| undefined;
@@ -784,8 +720,8 @@ export function assembleApp(
 			if (m !== null) mechanisms.push(m);
 		}
 		if (mechanisms.length > 0) {
-			// Core's own policy, for core's own extension point (#728): read
-			// from the configuration in every composition, never from a slot.
+			// Core's own policy, for core's own extension point: read from the
+			// configuration in every composition, never from a slot.
 			const dispatchPolicy: DispatchPolicy = resolveTokenBindingSettings(
 				(frozen.components as Record<string, unknown>).config,
 			).dispatchPolicy;
@@ -795,25 +731,21 @@ export function assembleApp(
 		}
 	}
 
-	// Mount the protected-resource sender-constraint middleware (#264). The
-	// `/oauth/token` mount above establishes a binding so a grant can stamp it
-	// into the issued token's `cnf`; this one holds the other end of that
-	// promise, refusing a `cnf`-bearing token at the surfaces that accept an
-	// access token as a credential unless the matching proof-of-possession
-	// arrives with it. Without it a stolen DPoP- or mTLS-bound token replays
-	// as a plain Bearer and the binding buys nothing.
+	// Mount the protected-resource sender-constraint middleware. The
+	// `/oauth/token` mount above establishes a binding a grant stamps into the
+	// issued token's `cnf`; this one refuses a `cnf`-bearing token at every
+	// surface that accepts an access token unless the matching
+	// proof-of-possession arrives with it. Without it a stolen DPoP- or
+	// mTLS-bound token replays as a plain Bearer.
 	//
-	// Mounted UNCONDITIONALLY — deliberately unlike the `/oauth/token` mount
-	// above, which is skipped when no mechanisms are contributed. Access
-	// tokens outlive a config change, so a deployment that removes its DPoP
-	// module still has bound tokens in the wild; skipping the middleware there
-	// would make those tokens silently downgrade to Bearer, which is the exact
-	// failure this exists to prevent. With no mechanisms the middleware admits
-	// every unbound token unchanged and refuses every bound one — fail closed.
+	// Mounted UNCONDITIONALLY, unlike the `/oauth/token` mount: access tokens
+	// outlive a config change, so a deployment that removes its DPoP module
+	// still has bound tokens in the wild. With no mechanisms the middleware
+	// admits every unbound token and refuses every bound one: fail closed.
 	//
-	// Mounted GLOBALLY, before every route contribution, so routes contributed
-	// by modules core has never heard of are guarded the moment they mount —
-	// see the exempt-list rationale above (#327).
+	// Mounted GLOBALLY, before every route contribution, so routes from modules
+	// core has never heard of are guarded the moment they mount (see the
+	// exempt-path rationale above).
 	const protectedResourceMechanisms: TokenBindingMechanism[] = [];
 	if (mechanismCollector !== undefined) {
 		for (const m of mechanismCollector.values()) {
@@ -836,19 +768,16 @@ export function assembleApp(
 	});
 
 	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
-	// synthesized tokenBindingMw above — for the token endpoint alone, as
-	// that one is (`tokenEndpointOnly`). The bundled `oauthModule` contributes
-	// its sub-router at mountPath `/oauth` (packages/oauth/src/module.mts),
-	// so the external grant-dispatch URL is `/oauth/token`. Express runs
-	// middleware in mount order, so these handlers fire before the OAuth
-	// `/token` route handler the routes loop installs below. Null returns
-	// (disabled-by-config path) are skipped here; the collector still
+	// synthesized tokenBindingMw above, for the token endpoint alone. The
+	// bundled `oauthModule` mounts its sub-router at `/oauth`
+	// (packages/oauth/src/module.mts), so these handlers fire before its
+	// `/token` route handler, which the routes loop installs below. Null
+	// returns (disabled by config) are skipped here; the collector still
 	// records them for value-identity dedup with other contributions.
 	//
 	// NOTE: this mount path is coupled to the bundled `oauthModule`'s
 	// mountPath. A downstream that re-mounts the OAuth router at a different
-	// path must also wrap or replace this composition step. Per Wave 2
-	// Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+	// path must also wrap or replace this composition step.
 	const grantMwCollector = frozen.registries.get("grantMiddleware") as
 		| ListCollector<RequestHandler | null>
 		| undefined;
@@ -867,14 +796,12 @@ export function assembleApp(
 		router.use(orderedRoute.contribution.mountPath, orderedRoute.contribution.handler as never);
 	}
 
-	// The router's own answer to an error a route let through — a body
-	// parser's refusal, or anything that escaped a handler — LAST, since
+	// The router's own answer to an error a route let through (a body
+	// parser's refusal, anything that escaped a handler), mounted LAST because
 	// Express hands an error only to handlers mounted after the layer that
-	// raised it. Without it such an error left the router for whatever the
-	// host had after it: Express's final handler, an HTML page with the stack
-	// outside production, for any composition root that did not copy the
-	// standalone template's. A request no route answered still passes on to
-	// the host: an error handler sees only errors. See
+	// raised it. Without it the error falls to the host, by default Express's
+	// final handler: an HTML page with the stack outside production. A request
+	// no route answered still passes on to the host. See
 	// `middleware/terminalError.mts`.
 	router.use(
 		terminalErrorHandler(
@@ -883,7 +810,7 @@ export function assembleApp(
 		),
 	);
 
-	// Step 3: Construct AppHandle (§6.3).
+	// Step 3: Construct AppHandle.
 	const dispose = buildDispose(frozen, options.lifecycleReg);
 
 	const handle: AppHandle = {
@@ -918,6 +845,6 @@ export function assembleApp(
 		readinessProbes: options.readinessReg?._probes() ?? [],
 	};
 
-	// Theme D: freeze the whole AppHandle before returning (§6.3).
+	// Freeze the whole AppHandle before returning.
 	return Object.freeze(handle);
 }

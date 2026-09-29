@@ -19,12 +19,11 @@ import { TransitionalConfigSchema } from "#/config/composed.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * The sections core's schema still mirrors for another package's modules
- * (#728, transitional): `redisRateLimiter`, the `redis*` store namespaces,
+ * The sections core's schema still mirrors, transitionally, for another
+ * package's modules: `redisRateLimiter`, the `redis*` store namespaces,
  * `oauth.mtls`, `oauth.dpop`, `webauthn`. Boot's composed parse applies each
- * mirror whenever the configuration carries the section — the module that
- * reads it loaded or not — until the move pull request for its package takes
- * the mirror out of core's schema; the checks pinned here go with it.
+ * mirror whenever the configuration carries the section, the module that
+ * reads it loaded or not; a check here goes when its mirror leaves core.
  *
  * Nothing here is about a section surviving: boot lays every parse over what
  * was written, and a loaded module's section is written back at its path

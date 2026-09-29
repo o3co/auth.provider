@@ -15,40 +15,26 @@
  */
 
 /**
- * #455 / #456 — the standalone's own store modules under
- * `deployment.mode = "multi"`, booted the way an operator reaches them: from
- * the shipped HOCON with one environment variable flipped.
+ * The standalone's own store modules under `deployment.mode = "multi"`,
+ * booted the way an operator reaches them: from the shipped HOCON with one
+ * environment variable flipped.
  *
- * #455: the replica-safety guard keyed on core's module names, and this
- * template wires its *own* in-memory modules for three of the stores —
- * session stores, the code repository, the federation token store — under
- * names the guard had never heard of. `DEPLOYMENT_MODE=multi` with
- * `USER_SESSION_STORES_ADAPTER=memory` booted, and the refusal the README
- * promises did not fire for exactly the stores that fork per replica the
- * worst. Every memory branch is booted here under `"multi"` and must be
- * refused by name; the all-Redis environment must boot.
+ * - Every memory branch must be refused by name, and the all-Redis
+ *   environment must boot. The replica-safety guard reads each module's
+ *   manifest declaration, which covers the template's own in-memory modules
+ *   and express-session's store (`buildModules` builds it from config,
+ *   `sessionStoreModuleFor`).
+ * - `federationTokenStore.type = "redis"` mounts
+ *   `redisFederationTokenStoreModule` off the shared ioredis socket.
+ * - The Redis federation store's `allow-plaintext` guard reads the
+ *   environment the config was selected by (`CONFIG_ENV || NODE_ENV`, passed
+ *   through `buildModules`) and refuses under `deployment.mode = "multi"` in
+ *   every environment.
  *
- * #456: `federationTokenStore.type = "redis"` was documented and could not
- * boot — the module went through the adapter factory without ever handing
- * the builder a client. The Redis branch now mounts
- * `redisFederationTokenStoreModule` off the shared ioredis socket; the boot
- * below is the test the README sentence never had.
- *
- * #474: express-session's own store was the one memory store the guard could
- * not see — `SESSION_STORAGE_TYPE=memory` is config, and `sessionStoreModule`'s
- * static manifest carried no declaration. `buildModules` now builds it from
- * the config (`sessionStoreModuleFor`), so it is refused by name like the rest.
- *
- * #473: the Redis federation store's `allow-plaintext` guard keyed off
- * `NODE_ENV` alone. It now reads the environment the config was selected by
- * (`CONFIG_ENV || NODE_ENV`, passed through `buildModules`) and refuses under
- * `deployment.mode = "multi"` in every environment.
- *
- * ioredis is mocked, as in `device-code-store-client-module.test.mts`: the
- * point is composition and the boot planner's stage-1 verdict, not Redis.
- * Nothing here issues a command. node-redis and connect-redis — the session
- * store's own connection — are mocked for the same reason, since #474 puts
- * `SESSION_STORAGE_TYPE=redis` in the baseline.
+ * ioredis, node-redis and connect-redis are mocked, as in
+ * `device-code-store-client-module.test.mts`: the point is composition and
+ * the boot planner's stage-1 verdict, not Redis. Nothing here issues a
+ * command.
  */
 
 import { fileURLToPath } from "node:url";
@@ -71,8 +57,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
 import { resolveConfigPaths } from "../configPath.mjs";
 
-// The redis session-store builder dynamically imports these (#474 puts the
-// Redis session store in the baseline); mock them so no socket opens.
+// The redis session-store builder, which the baseline selects, dynamically
+// imports these; mock them so no socket opens.
 vi.mock("redis", () => ({
 	createClient: vi.fn(() => ({
 		connect: vi.fn().mockResolvedValue(undefined),
@@ -142,8 +128,8 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /**
  * The umbrella E2E's shape (`o3co/auth` `tests/docker-compose.yml`), with
- * every shared store on Redis — express-session's own included, since #474
- * put it under the guard. Each case below flips one variable off this.
+ * every shared store on Redis, express-session's own included. Each case
+ * below flips one variable off this.
  */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
@@ -164,7 +150,7 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	REPLAY_SEEN_SET_ADAPTER: "redis",
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
-	// #561: the consent step for clients that are not first-party, on the
+	// The consent step for clients that are not first-party, on the
 	// shared store — the one switch value `multi` accepts besides `none`.
 	CONSENT_STORE_ADAPTER: "redis",
 };
@@ -241,20 +227,19 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 	});
 
 	const cases: ReadonlyArray<readonly [variable: string, module: string]> = [
-		// The template's own modules — the three the guard could not see.
+		// The template's own modules.
 		["USER_SESSION_STORES_ADAPTER", "standalone-in-memory-session-stores"],
 		["OAUTH_CODE_ADAPTER", "standalone-in-memory-code-repository"],
 		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],
-		// #474: express-session's own store. Not a module of this template but
+		// express-session's own store. Not a module of this template but
 		// built here from its config, which is what lets the manifest declare.
 		["SESSION_STORAGE_TYPE", "session-store"],
-		// #527: the consent store, wired only when the switch says so.
+		// The consent store, wired only when the switch says so.
 		["CONSENT_STORE_ADAPTER", "core-consent-store-memory"],
-		// Core's, selected by the same kind of switch. The guard knew these by
-		// name; pinned so the name table's departure (#455) did not lose them.
+		// Core's, selected by the same kind of switch.
 		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
 		["ACCESS_TOKEN_DENYLIST_ADAPTER", "core-access-token-denylist-memory"],
-		// #484: the jti single-use record behind private_key_jwt client auth.
+		// The jti single-use record behind private_key_jwt client auth.
 		["REPLAY_SEEN_SET_ADAPTER", "core-replay-seen-set-memory"],
 	];
 
@@ -290,7 +275,7 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 	});
 
 	it("each standalone memory module declares its consequence on its own manifest", () => {
-		// The declaration is what the guard reads (#455), so it has to be on
+		// The declaration is what the guard reads, so it has to be on
 		// the module and it has to say what breaks — the guard quotes it.
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
@@ -331,8 +316,8 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 	});
 
 	it("reaches the resolved config from FEDERATION_TOKEN_STORE_TYPE", () => {
-		// `AppConfigSchema` strips top-level keys it does not declare; the
-		// switch had to be declared before an env var could select anything.
+		// `AppConfigSchema` strips top-level keys it does not declare, so the
+		// switch must be declared for an env var to select anything.
 		expect(resolveConfig(ALL_REDIS_ENV).federationTokenStore?.type).toBe("redis");
 		expect(
 			resolveConfig(without(ALL_REDIS_ENV, "FEDERATION_TOKEN_STORE_TYPE")).federationTokenStore
@@ -358,7 +343,7 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 		// Every other store on memory, single replica: the Redis federation
 		// store still needs `federationTokenStoreClient`, which only the shared
 		// clients module provides. Without this the branch fails stage 1 with
-		// `missing-required-component` — the #439 shape, once more.
+		// `missing-required-component`.
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
 			DEPLOYMENT_MODE: "single",
@@ -431,7 +416,7 @@ describe('#561: consentStore.adapter = "redis" in the standalone', () => {
 	it("pulls the shared clients module in for the consent stores alone", () => {
 		// Every other store on memory, single replica: the consent module still
 		// needs its two client slots, which only the shared clients module
-		// provides — the #439 shape otherwise.
+		// provides.
 		const config = resolveConfig({
 			...ALL_REDIS_ENV,
 			DEPLOYMENT_MODE: "single",
@@ -490,8 +475,7 @@ describe("#473: the Redis federation store's plaintext guard, booted from the sh
 	};
 
 	it('is refused under deployment.mode = "multi" in a development environment', async () => {
-		// The umbrella shape with plaintext: refused before #473 only if
-		// NODE_ENV happened to say production. A multi-replica deployment is
+		// The umbrella shape with plaintext. A multi-replica deployment is
 		// never a development box.
 		await expect(boot(resolveConfig(PLAINTEXT_ENV), "development")).rejects.toSatisfy(
 			(err: unknown) => /deployment\.mode is "multi"/.test(messageChain(err)),
@@ -501,8 +485,8 @@ describe("#473: the Redis federation store's plaintext guard, booted from the sh
 
 	it("is refused when the config was selected by CONFIG_ENV=production, whatever NODE_ENV says", async () => {
 		// `app.mts` selects `production.conf` by `CONFIG_ENV || NODE_ENV` and
-		// passes that name through `buildModules`; the guard used to read
-		// NODE_ENV alone and would have let this boot.
+		// passes that name through `buildModules`; the guard reads that name,
+		// not NODE_ENV alone.
 		const config = resolveConfig({ ...PLAINTEXT_ENV, DEPLOYMENT_MODE: "single" });
 		await expect(boot(config, "production")).rejects.toSatisfy((err: unknown) =>
 			/the environment is "production"/.test(messageChain(err)),

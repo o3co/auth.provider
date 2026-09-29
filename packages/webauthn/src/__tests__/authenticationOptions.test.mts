@@ -15,16 +15,10 @@
  */
 
 /**
- * Tests for POST /oauth/webauthn/authentication/options endpoint (spec §2.4).
- *
- * Uses supertest + express for HTTP-level testing. Memory adapters from
- * @o3co/auth-provider-core are used for ChallengeStore and
- * WebAuthnCredentialStore — no hand-rolled stubs.
- *
- * Uses real generateAuthenticationOptionsForUser (T26) — it is a pure
- * function and requires no mocking.
- *
- * Cross-refs: Plan T29 / spec §2.4 / issue #281
+ * Tests for the POST /oauth/webauthn/authentication/options endpoint, over
+ * HTTP with supertest + express. ChallengeStore and WebAuthnCredentialStore
+ * are core's memory adapters, not hand-rolled stubs, and
+ * generateAuthenticationOptionsForUser is the real one: a pure function.
  */
 
 import {
@@ -49,7 +43,7 @@ const BASE_CONFIG: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// #281: enumeration-resistant default — the endpoint never derives
+	// Enumeration-resistant default: the endpoint never derives
 	// allowCredentials from a body-supplied user id.
 	allowCredentialsForKnownUser: false,
 	rateLimit: {
@@ -57,7 +51,7 @@ const BASE_CONFIG: WebAuthnConfig = {
 	},
 };
 
-/** Config with the #281 escape hatch turned on (non-discoverable deployments). */
+/** Config with the enumeration escape hatch turned on (non-discoverable deployments). */
 const OPT_IN_CONFIG: WebAuthnConfig = {
 	...BASE_CONFIG,
 	allowCredentialsForKnownUser: true,
@@ -163,7 +157,7 @@ describe("POST /oauth/webauthn/authentication/options (spec §2.4)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #281 — account enumeration via allowCredentials
+// Account enumeration via allowCredentials
 // ---------------------------------------------------------------------------
 
 describe("POST /oauth/webauthn/authentication/options — enumeration resistance (#281)", () => {
@@ -261,7 +255,7 @@ describe("POST /oauth/webauthn/authentication/options — enumeration resistance
 });
 
 // ---------------------------------------------------------------------------
-// #281 — unbounded user IDs
+// Unbounded user IDs
 // ---------------------------------------------------------------------------
 
 describe("POST /oauth/webauthn/authentication/options — userId bounds (#281)", () => {

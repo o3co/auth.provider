@@ -16,17 +16,11 @@
 
 /**
  * A store that cannot answer is the server's outage on every route that
- * accepts a token, never a verdict on the token.
- *
- * RFC 6750 §3.1's `invalid_token` describes the token — "expired, revoked,
- * malformed, or invalid for other reasons" — and invites the client to get a
- * new one; RFC 7662 §2.2's `active: false` tells a resource server the token
- * is not active. A refresh-token family store or a session store that did not
- * answer says neither. `userinfo`, the federation token route and federation
- * logout answered a family-store outage `401 invalid_token`, introspection
- * answered a family- or session-store outage `active: false`, and userinfo a
- * session-store outage `401`, while every other route answers a store outage
- * `503 temporarily_unavailable`.
+ * accepts a token (`503 temporarily_unavailable`), never a verdict on the
+ * token. RFC 6750 §3.1's `invalid_token` describes the token and invites the
+ * client to get a new one; RFC 7662 §2.2's `active: false` tells a resource
+ * server the token is not active. A refresh-token family store or a session
+ * store that did not answer says neither.
  *
  * Driven through the real router (`createOAuthRouter`) with the real keystore,
  * one route per case, and a control for each: the same route with the store

@@ -1,36 +1,18 @@
 import type { ComponentMap } from "@o3co/auth-provider-core";
 import { expectTypeOf, test } from "vitest";
 
-// Cross-spec invariant enforcement (X1 amendment) at the PACKAGE BOUNDARY.
+// The ComponentMap exported from `@o3co/auth-provider-core` MUST NOT declare:
+//   - userSessionStore: UserSessionStoreBase   (legacy shape)
+//   - refreshTokenStore: RefreshTokenStoreBase (legacy slot name)
 //
-// Per A3 spec §5.5 and A4 spec §5.6: the v0.5.0 ComponentMap MUST NOT
-// declare:
-//   - userSessionStore: UserSessionStoreBase   (legacy v0.4.x shape)
-//   - refreshTokenStore: RefreshTokenStoreBase (legacy v0.4.x slot name)
-//
-// Phases 5 (A1), 6 (A3), 8 (A4) declaration-merge their replacement slots:
-//   - challengeStore, replaySeenSet, challengeCeremony (A1)
-//   - refreshTokenFamilyStore, refreshTokenFamilyRotation,
-//     refreshTokenFamilyRevocation (A3)
-//   - userSessionStore (A4 — narrowed type, NOT UserSessionStoreBase),
-//     sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex,
-//     redisClient (A1)
-//
-// This test mirrors the namespace-level test in component-map.test.mts
-// but imports from the package boundary `@o3co/auth-provider-core`.
-// Together they catch a regression regardless of which sub-file
-// accidentally re-introduces a legacy shape.
+// Mirrors the namespace-level test in component-map.test.mts at the package
+// boundary, so a legacy shape re-introduced from any sub-file is caught.
 
 test("legacy v0.4.x slots are NOT in v0.5.0 ComponentMap (package-boundary check)", () => {
-	// userSessionStore: A4 (Phase 8) reuses this slot name with a NARROW
-	// 3-method type (`create` / `get` / `delete` only, no `registerRP` /
-	// `linkFamily` / `updateClaims` / `removeFederation`). Discriminate on
-	// `registerRP` to detect ONLY the legacy shape; the A4 narrow type
-	// passes through as expected.
-	//
-	// The `?: infer V` form handles both required and optional slot
-	// declarations — A4 declares `userSessionStore?: UserSessionStore`
-	// (optional). NonNullable<V> strips undefined.
+	// The userSessionStore slot name is reused with a narrow type (`create` /
+	// `get` / `delete` only), so discriminate on `registerRP` to detect ONLY
+	// the legacy shape. `?: infer V` handles both required and optional slot
+	// declarations; NonNullable<V> strips undefined.
 	type _LegacyUserSessionAbsent = ComponentMap extends {
 		userSessionStore?: infer V;
 	}
@@ -43,11 +25,8 @@ test("legacy v0.4.x slots are NOT in v0.5.0 ComponentMap (package-boundary check
 	type _A1 = _LegacyUserSessionAbsent extends "PASS" ? true : false;
 	expectTypeOf<_A1>().toEqualTypeOf<true>();
 
-	// refreshTokenStore: A3 retires the slot NAME entirely (replaced by
-	// refreshTokenFamilyStore + refreshTokenFamilyRotation +
-	// refreshTokenFamilyRevocation). Issue #101 (Task A8) deletes the
-	// transitional bridge that was added during Phase 9; this assertion
-	// is now active.
+	// The refreshTokenStore slot NAME is retired entirely (replaced by
+	// refreshTokenFamilyStore / Rotation / Revocation).
 	type _LegacyRefreshAbsent = "refreshTokenStore" extends keyof ComponentMap
 		? "FAIL: legacy refreshTokenStore slot name reappeared"
 		: "PASS";

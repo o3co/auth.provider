@@ -36,7 +36,7 @@ export interface RedisUserSessionStoreOptions {
 	readonly keyPrefix: string;
 	/**
 	 * Where `get()` reports a stored envelope that fails JSON.parse or shape
-	 * validation (TS-3): one `user_session_corrupt_envelope` warn, `reason`
+	 * validation: one `user_session_corrupt_envelope` warn, `reason`
 	 * `json_parse` (with the parser's projection as `err`) or
 	 * `shape_invalid`. `redisSessionStoresModule` passes the composition's
 	 * `logger` slot; absent, `consoleLogger`. The read is refused (`null`)
@@ -46,8 +46,8 @@ export interface RedisUserSessionStoreOptions {
 }
 
 /**
- * `UserSession.authentication` as the envelope stores it (the MFA ADR's D9):
- * `mfaAt` as epoch milliseconds, like every other instant here. A field that
+ * `UserSession.authentication` as the envelope stores it: `mfaAt` as epoch
+ * milliseconds, like every other instant here. A field that
  * holds `undefined` is left out by `JSON.stringify`.
  */
 interface EnvelopeAuthentication {
@@ -65,16 +65,15 @@ interface Envelope {
 	expiresAtMs: number;
 	claims: Record<string, unknown>;
 	/**
-	 * #481: RFC 8176 values recorded by the login path. A required key (#626),
-	 * `undefined` when there are none — `JSON.stringify` leaves it out, so
-	 * the stored bytes are what they were.
+	 * RFC 8176 values recorded by the login path. A required key, `undefined`
+	 * when there are none, which `JSON.stringify` leaves out.
 	 */
 	amr: string[] | undefined;
 	/**
-	 * The MFA ADR's D9: how the session was established. Absent in an
-	 * envelope written before the key existed — which an older release also
-	 * writes and reads, its shape check ignoring the key — and read as
-	 * `undefined`, a session `sessionAuthentication` splits as it reads it.
+	 * How the session was established. Absent in an envelope an older release
+	 * wrote (an older release also reads envelopes that have it, its shape
+	 * check ignoring the key), and read as `undefined`: a session
+	 * `sessionAuthentication` splits as it reads it.
 	 */
 	authentication: EnvelopeAuthentication | undefined;
 }
@@ -88,18 +87,12 @@ interface Envelope {
 const MAX_DATE_MS = 8_640_000_000_000_000;
 
 /**
- * Per-field timestamp predicate: must be a non-negative safe integer within
- * the `Date` valid range. Using `Number.isSafeInteger` (vs the looser
- * `Number.isFinite`) closes a stricter form of the TS-3 expiry-bypass:
- * very large finite numbers (e.g. `Number.MAX_VALUE` or any value > 2^53)
- * lose precision and may produce `Invalid Date` via `new Date(ms)`. The
- * comparison `expiresAtMs <= Date.now()` could then evaluate to `false`
- * against an effectively-never-expiring envelope, again silently bypassing
- * the gate. Per Copilot review on PR #123.
- *
- * Negative values are rejected because session timestamps are always
- * positive epoch milliseconds; a negative value would map to a pre-1970
- * Date, which is structurally meaningless for OAuth session lifecycle.
+ * Per-field timestamp predicate: a non-negative safe integer within the Date
+ * range. `Number.isFinite` is not enough: a very large finite number (past
+ * 2^53, or `Number.MAX_VALUE`) loses precision and may give an Invalid Date,
+ * and `expiresAtMs <= Date.now()` could then be `false` for an envelope that
+ * effectively never expires, silently bypassing the expiry check. Negative
+ * values are refused: a session timestamp is never before 1970.
  */
 const isValidTimestamp = (x: unknown): x is number =>
 	typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= MAX_DATE_MS;
@@ -128,20 +121,12 @@ const isValidEnvelopeAuthentication = (v: unknown): v is EnvelopeAuthentication 
 };
 
 /**
- * Hand-rolled type predicate for `Envelope`. Lighter than Zod for the
- * storage layer and matches the Wave 5g `ts-safety-batch` convention.
- *
- * Timestamp validation uses `isValidTimestamp` (safe integer + Date-range
- * bounded). The original `expiresAtMs <= Date.now()` comparison silently
- * returned `false` for `undefined`/`NaN`, bypassing the expiry filter and
- * propagating `Invalid Date` into the returned `UserSession`.
- *
- * `claims` must be a plain object — `[]` and `null` both fail the
- * `typeof === "object"` plus index-signature contract. Callers that need
- * to support `claims: null` should change the predicate explicitly; the
- * fail-closed default is the safer posture for a security-critical path.
- *
- * Per TS-3 (Wave 5j) + Copilot review on PR #123 (timestamp tightening).
+ * Hand-rolled type predicate for `Envelope`, lighter than Zod for the storage
+ * layer. A cast is not enough: for an `expiresAtMs` of `undefined` or `NaN`,
+ * `expiresAtMs <= Date.now()` is `false`, which would bypass the expiry check
+ * and return a session with Invalid Date fields. `claims` must be a plain
+ * object; `[]` and `null` both fail, the fail-closed default for a
+ * security-critical path.
  */
 const isValidEnvelope = (v: unknown): v is Envelope => {
 	if (typeof v !== "object" || v === null) return false;
@@ -206,36 +191,31 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 const RECORD_SECOND_FACTOR_ATTEMPTS = 5;
 
 /**
- * Redis-backed UserSessionStore, with the step-up capability (the MFA ADR's
- * D9). Per A4 §5.1 + §7.2.
+ * Redis-backed UserSessionStore, with the step-up capability.
  *
- * Storage shape: each session is a single Redis string key
- * `${keyPrefix}${sid}` whose value is a JSON-encoded envelope, with TTL
- * applied via SET PX. The v0.4.x lost-update window is **structurally
- * absent**: the one write after `create` is `recordSecondFactor`, and it
- * replaces the envelope only while it still holds what was read.
+ * Each session is one string key `${keyPrefix}${sid}` holding a JSON envelope,
+ * its TTL set by `SET PX`. There is no lost-update window: the one write after
+ * `create` is `recordSecondFactor`, which replaces the envelope only while it
+ * still holds what was read.
  *
- * Atomicity:
- *  - `create` uses SET NX PX — atomic insert-only, same primitive as A1
- *    ChallengeStore.issue and A3 registerFamily. The PX is whole milliseconds
- *    because a Date is; an Invalid Date is a RangeError before Redis is asked.
- *  - `get` is a read-only GET (no PTTL round-trip needed; expiresAtMs is
- *    embedded in the JSON envelope and the SET PX TTL eventually deletes
- *    the key).
- *  - `recordSecondFactor` reads, computes the next envelope in JavaScript
- *    (core's `sessionAfterSecondFactor`, which splits a pre-upgrade session
- *    first) and writes it with the client's `replaceIfUnchanged` — `KEEPTTL`,
- *    only if the stored bytes are still the ones read — re-reading on a loss,
- *    at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times: the refresh-token
- *    family's compare-and-set pattern. Only `amr` and the fields of
- *    `authentication` this release knows are rewritten; everything else is
- *    written back as it was read — a key a newer release added beside the
- *    session's fields, or inside `authentication`, included — so a step-up
- *    on a replica not yet upgraded loses nothing a newer one recorded.
- *  - `delete` is single-key DEL.
+ * - `create`: `SET NX PX`, an atomic insert-only write. `PX` is whole
+ *   milliseconds because a Date is; an Invalid Date is a RangeError before
+ *   Redis is asked.
+ * - `get`: one `GET`. The envelope carries `expiresAtMs`, so no `PTTL` is
+ *   needed; the TTL deletes the key eventually.
+ * - `recordSecondFactor`: reads, computes the next envelope with core's
+ *   `sessionAfterSecondFactor` (which first splits a session recorded without
+ *   `authentication`), and writes it with the client's `replaceIfUnchanged`
+ *   (`KEEPTTL`, only while the stored bytes are the ones read), re-reading on
+ *   a loss at most {@link RECORD_SECOND_FACTOR_ATTEMPTS} times. Only `amr` and
+ *   the `authentication` fields this release knows are rewritten; everything
+ *   else, keys a newer release added included, is written back as read, so a
+ *   step-up on a replica not yet upgraded loses nothing a newer one recorded.
+ * - `delete`: `DEL`.
  *
- * The client must have `replaceIfUnchanged`: a client without it is refused
- * here, naming the method, rather than failing the first step-up.
+ * A client without `replaceIfUnchanged` is refused here, naming the method,
+ * rather than failing the first step-up.
+ * See the MFA ADR (2026-09-25-multi-factor-authentication), D9.
  */
 export function createRedisUserSessionStore(
 	opts: RedisUserSessionStoreOptions,
@@ -254,23 +234,14 @@ export function createRedisUserSessionStore(
 	 * caller's to judge.
 	 */
 	const readEnvelope = (sid: string, raw: string): Envelope | null => {
-		// TS-3 (Wave 5j): the previous `JSON.parse(raw) as Envelope` was a
-		// compile-time cast only. A corrupt envelope with `expiresAtMs:
-		// undefined` made `expiresAtMs <= Date.now()` evaluate to `false`
-		// (NaN comparison), bypassing the expiry filter and returning a
-		// session with `Invalid Date` fields. Treat any parse / shape
-		// failure as fail-closed (return null) and emit a structured
-		// warn for operator observability.
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(raw);
 		} catch (cause) {
-			// Object-first call shape per the D-4 Logger interface — keeps
-			// `sid` / `reason` reliably emitted as structured fields across
-			// `Logger` implementations (pino, console, custom). Per Copilot
-			// review on PR #123. The cause is projected: a SyntaxError's
-			// message quotes the envelope — the session's claims — around
-			// the point the parse failed.
+			// Object-first, so `sid` and `reason` are structured fields on every
+			// `Logger` implementation. The cause is projected: a SyntaxError's
+			// message quotes the envelope (the session's claims) around the
+			// point the parse failed.
 			logger.warn(
 				{ sid, reason: "json_parse", err: loggableError(cause) },
 				"user_session_corrupt_envelope",
@@ -290,14 +261,14 @@ export function createRedisUserSessionStore(
 		async create(input) {
 			const expiresAtMs = input.expiresAt.getTime();
 			// An Invalid Date's time is NaN, and `NaN <= 0` is false: without this
-			// it reached Redis as `PX NaN`. A caller fault, not a session.
+			// it would reach Redis as `PX NaN`. A caller fault, not a session.
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError(`UserSession ${input.sid}: expiresAt must be a valid date`);
 			}
 			// `isValidEnvelope` reads back a non-negative timestamp only, so an
-			// Invalid Date (stored as JSON `null`) or a pre-epoch authTime was
-			// written and then read as corrupt: the session vanished on its first
-			// read. Refused before Redis is asked.
+			// Invalid Date (stored as JSON `null`) or a pre-epoch authTime would
+			// be written and then read as corrupt, and the session would vanish on
+			// its first read. Refused before Redis is asked.
 			const authTimeMs = input.authTime.getTime();
 			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
 				throw new RangeError(
@@ -378,20 +349,15 @@ export function createRedisUserSessionStore(
 }
 
 /**
- * AdapterFactory builder for the Redis-backed `UserSessionStore` (AS-9).
+ * AdapterFactory builder for the Redis-backed `UserSessionStore`, for
+ * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
+ * common case. The default `keyPrefix` is the bundle's (`ss:us:`), so
+ * switching between the two keeps the keyspace. A missing `client` throws at
+ * boot, as in `redisChallengeStoreBuilder`, rather than at the first command.
  *
- * Use when per-adapter `AdapterFactory` granularity is needed; for the common
- * case the bundled `redisSessionStoresModule` is sufficient. Default
- * `keyPrefix` matches the bundle's production layout (`ss:us:`) so swapping
- * between bundle and individual builder does not change the keyspace.
- *
- * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
- * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op. The TS-3 corrupt-envelope warn inside `get()` goes to
- * `config.logger`, else the factory context's logger, else `consoleLogger`;
- * the corrupt-envelope fail-closed (returns `null`) is independent of which.
- * The spread idiom omits the field when neither was supplied (preserves
- * "absent" semantics under `exactOptionalPropertyTypes`).
+ * The corrupt-envelope warn from `get()` goes to `config.logger`, else the
+ * factory context's logger, else `consoleLogger`; a corrupt envelope reads as
+ * `null` whichever it is.
  */
 export const redisUserSessionStoreBuilder: AdapterBuilder<UserSessionStore> = (config, ctx) => {
 	const c = config as { client?: UserSessionStoreClient; keyPrefix?: string; logger?: Logger };

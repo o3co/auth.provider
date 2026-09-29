@@ -1,19 +1,16 @@
-// tools/live-check — the loopback front for a real IdP login against the
-// standalone template. One process on LIVE_CHECK_PORT does three things:
-//
+// tools/live-check: the loopback front for a real IdP login against the
+// standalone template. One process on LIVE_CHECK_PORT:
 //   1. serves the test page at `/`, its record at `/__live-check/state` and
-//      the same record as an issue-ready markdown at `/__live-check/report`;
-//   2. is the user Store the template's HttpUserRepository asks — every
-//      `<federation>:<sub>` token is a user here, so a login never fails for
-//      want of a local account (this is what makes the Store unfit for
-//      anything but a loopback check);
-//   3. proxies everything else to the provider and records what the
-//      federation callback carried (`iss` in full; `code` and `state` as
-//      lengths only — never their values, never the `sub`) and how the
-//      provider answered it.
-//
-// Nothing here is the thing under test. The provider's own handling of the
-// callback — the RFC 9207 `iss` check in particular — is.
+//      the same record as issue-ready markdown at `/__live-check/report`;
+//   2. is the user Store the template's HttpUserRepository asks: every
+//      `<federation>:<sub>` token is a user, so a login never fails for want
+//      of a local account (which makes it unfit for anything but a loopback
+//      check);
+//   3. proxies everything else to the provider, recording what the federation
+//      callback carried (`iss` in full; `code` and `state` as lengths only,
+//      never their values, never the `sub`) and how the provider answered.
+// Nothing here is under test; the provider's handling of the callback is,
+// the RFC 9207 `iss` check in particular.
 import http from "node:http";
 import { URL } from "node:url";
 

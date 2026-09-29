@@ -18,21 +18,19 @@
  * A revocation is remembered for as long as a token it revoked is still
  * accepted.
  *
- * A refresh-token family's record expires with the family — the refresh
- * token's lifetime, set once at creation — and revocation used to keep that
- * expiry. An access token minted by a refresh late in the family's life
- * outlives it by up to its own lifetime, and the verifier accepts a token for
- * five minutes past its `exp` besides. Once the revoked record was gone,
- * `isFamilyRevoked` answered "no" and the token was served at userinfo and
- * reported active at introspection again. A family whose record had already
- * run out when it was revoked recorded nothing at all. The access-token
- * denylist had the same hole by five minutes: an entry kept until `exp` for
- * a token accepted until `exp` + the clock tolerance.
+ * A refresh-token family's record expires with the family (the refresh
+ * token's lifetime, set once at creation), but an access token minted by a
+ * refresh late in the family's life outlives it by up to its own lifetime,
+ * and the verifier accepts a token for five minutes past its `exp` besides.
+ * A revoked record gone with the family would let `isFamilyRevoked` answer
+ * "no" and the token be served at userinfo and reported active at
+ * introspection again. A family revoked after its record ran out must still
+ * record the revocation, and an access-token denylist entry must outlast
+ * `exp` + the clock tolerance, not just `exp`.
  *
- * Driven through the real router, the real refresh grant and core's real
- * family modules booted by `createTestApp` — the memory store, the default
- * rotation and revocation, as a composition wires them — with the clock
- * moved by `vi.setSystemTime`.
+ * Driven through the real router, refresh grant and core's family modules
+ * booted by `createTestApp` (the memory store, the default rotation and
+ * revocation), with the clock moved by `vi.setSystemTime`.
  */
 
 import {
@@ -236,8 +234,8 @@ describe("a revoked refresh-token family is remembered while its access tokens a
 		expect((await revoke(h.app, tokens.refresh_token, "refresh_token")).status).toBe(200);
 		expect((await userinfo(h.app, tokens.access_token)).status).toBe(401);
 
-		// Past the family's own expiry — how long a revoked record used to be
-		// kept — with the access token still forty minutes from its exp.
+		// Past the family's own expiry, with the access token still forty
+		// minutes from its exp.
 		advance(10 * 60_000);
 		expect((await userinfo(h.app, tokens.access_token)).status).toBe(401);
 		expect((await introspect(h.app, tokens.access_token)).body).toEqual({ active: false });

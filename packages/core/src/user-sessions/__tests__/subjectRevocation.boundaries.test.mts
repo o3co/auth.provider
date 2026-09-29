@@ -15,20 +15,12 @@
  */
 
 /**
- * The subject watermark becomes two boundaries in one record (#593, D13).
- *
- * A password change and "revoke everything" are different events, and the
- * industry treats them so — Entra leaves a confidential client's token alive
- * after a password change and revokes every class only on an explicit
- * revocation. Ending every delegation on every password change also puts the
- * price in the wrong place: each agent and each paused job then needs a new
- * login, a new grant, a new consent and a new upstream authorization.
- *
- * So `revokeBefore` — the method every existing caller already calls — keeps
- * meaning "end everything" and advances **both**. Keeping grants is the new,
- * narrower operation and takes a deliberate call. A Store that upgrades
- * without touching its call site therefore still ends the subject's grants,
- * exactly as one watermark would.
+ * The subject watermark is two boundaries in one record: sessions and grants.
+ * `revokeBefore` means "end everything" and advances **both**; keeping grants
+ * is the narrower operation and takes a deliberate call, so a Store that does
+ * not change its call site still ends the subject's grants. See
+ * ADR 2026-09-17-federation-grants-offline-delegation, "Two boundaries, one
+ * default".
  */
 
 import { describe, expect, it } from "vitest";
@@ -75,8 +67,7 @@ describe("the two boundaries", () => {
 	});
 
 	it("advances both when the existing method is called", async () => {
-		// The whole compatibility argument: an unchanged call site still ends
-		// the subject's grants.
+		// An unchanged call site still ends the subject's grants.
 		const store = capable();
 		await store.revokeBefore("u", at(1_000), far());
 		expect((await store.revokedBefore("u"))?.getTime()).toBe(1_000);
@@ -129,13 +120,12 @@ describe("the two boundaries", () => {
 
 describe("the retention floor the adapter applies", () => {
 	// Each of these asks for an expiry that has ALREADY passed, so the record
-	// is readable afterwards only if something raised it. Review found the
-	// earlier form of these tests — a short expiry, read back at once —
-	// passing with the floor deleted, which is a test certifying nothing.
+	// is readable afterwards only if something raised it. A short expiry,
+	// read back at once, would pass with the floor deleted.
 	it("outlives every grant a full revocation covers, however short the caller's expiry", async () => {
-		// A caller that passes a one-minute expiry — or a Store on an old
-		// version whose TTL is sized to refresh tokens — must not leave a
-		// boundary that lapses under a grant consented for a year.
+		// A caller that passes a one-minute expiry — or a Store whose TTL is
+		// sized to refresh tokens — must not leave a boundary that lapses under
+		// a grant consented for a year.
 		const store = capable();
 		const before = Date.now();
 		await store.revokeBefore("u", at(before), at(before - 1));

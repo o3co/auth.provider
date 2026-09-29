@@ -15,177 +15,31 @@
  */
 
 /**
- * `POST /oauth/device/verification` — where the human answers (#298).
+ * `POST /oauth/device/verification` — where the user answers an RFC 8628
+ * device request (§3.3). This package serves the JSON API; the page at
+ * `verification_uri` belongs to the deployment.
  *
- * RFC 8628 leaves this endpoint's shape entirely to the implementation; §3.3
- * says only that the user "visits the verification URI and enters the user
- * code". What that means concretely is a decision, and this is it:
- *
- * ### The library provides the API, the deployment provides the page
- *
- * There is no HTML here, and `verification_uri` is configuration rather than a
- * route this package mounts. That is the boundary `/authorize` already draws —
- * it redirects to a deployment-configured `loginUrl` rather than rendering a
- * login form — and drawing it differently for this one flow would mean the
- * library ships a page for one ceremony and not the other.
- *
- * ### One endpoint, three actions
- *
- * `lookup`, `approve` and `deny` are one route rather than three, because all
- * three take a `user_code` and **all three are the same brute-force oracle**.
- * §5.1 requires rate-limiting the code; a `lookup` route that answered "which
- * client is this?" without counting against the same budget would be a free
- * oracle sitting beside a limited one. One route means one limiter call, and
- * no way to add a fourth entry point that forgets it.
- *
- * ### Rate limiting is half of the security argument, not a nicety
- *
- * §5.1's own worked example: an 8-character base-20 code has "roughly 34.5
- * bits of entropy", and reaching a 2^-32 attack probability needs the
- * "rate-limiting interval and validity period ... to only allow 5 attempts".
- * The entropy and the limit are two halves of one mitigation. This endpoint
- * therefore **refuses to run without a rate limiter** rather than degrading to
- * an unlimited one — see `createDeviceVerificationHandler`.
- *
- * The limiter is keyed on the **authenticated subject**, not the code. Keying
- * on the code would count an attacker's misses against whichever code they
- * happened to hit, which is nobody's budget; keying on the subject means an
- * attacker needs an account and burns their own budget guessing.
- *
- * ### A limiter outage is the product's outage policy, not a 500 (#457)
- *
- * The check cannot sit behind `createRateLimitGuard` as a middleware: the
- * budget is keyed on the subject rather than the IP, and the 429's audit
- * event needs the `action` — so what this endpoint shares with the guarded
- * routes is the guard's check-plus-outage-policy as a function,
- * `checkWithFailMode`. When the limiter backend itself fails,
- * `rateLimit.failMode` decides here exactly as it does on `/oauth/token`:
- * `"closed"` answers the guard's `503 service_unavailable`, `"open"` serves
- * the request, and either way `rate_limiter_failed_*` is logged and
- * `rate_limit.unavailable` is emitted. Before #457 the call was bare, so an
- * outage was an unhandled throw — `500 server_error` through the terminal
- * handler, `failMode` ignored, and no audit event for the alert operators
- * page on — on the one endpoint whose limit is half of its security argument.
- * A `limited` decision is not an outage: it stays a 429 under either mode,
- * and stays the `device.rate_limited` signal (#443).
- *
- * A device-code **store** outage is the other outage here, and gets the
- * product's answer for one (`storeOutage.mts`): `503 temporarily_unavailable`,
- * logged at error as `device_verification_store_unavailable` — not a `500`
- * through the terminal handler, and not an answer about the code. A 503 on an
- * approval or a denial does not say nothing was decided: the store's script
- * may have run before its reply was lost, and a retry then answers
- * `409 already_decided`. Such an outcome is audited as
- * `device.decision_outcome_unknown`, with the subject, as the decision itself
- * would have been.
- *
- * ### The body first, then the session behind the cookie
- *
- * Which action the body asks for decides what admission is asked about, so
- * the body's `action` is read before anything else: an action this endpoint
- * does not implement is `400 invalid_request` before a signed-out cookie's
- * `401` and before a store outage's `503` (the session-admission ADR's D8).
- *
- * Then the session is admitted — core's `admitSession`, the one reading
- * every consumer of an authenticated browser session shares — on the
- * cookie's claim (`cookieClaim`) and the action's own name, one per body
- * action: `device.lookup`, `device.approve`, `device.deny`, all graded
- * `use` (`ADMISSION_ACTIONS`, the ADR's D4). `isAuthenticated` is what the
- * cookie claims; the `UserSession` its `sid` names is the fact. A logout, a
- * `revokeAllForSubject` or a record deleted out of band ends the record and
- * leaves the cookie as it was — and the approval is the one point that can
- * see it: the device token it leads to carries no `sid` and no `family_id`,
- * so no logout reaches that token afterwards, and a subject watermark
- * stamped before the approval is older than the token's `iat`. (A watermark
- * stamped after the token is minted does reach it, at `verifyJwt`; the
- * window between the approval and the poll is closed at the poll, by the
- * grant — see `grant.mts`.) So admission reads the record: a `sid` the store
- * holds, recording the cookie's own subject, not past its `expiresAt` on
- * this handler's clock, and — with `subjectRevocation` wired — authenticated
- * after the subject's sessions boundary (`revokeAllForSubject` stamps it
- * before it deletes the sessions, so a cascade that failed for one, or a
- * session the subject index never learnt of, leaves a record the boundary
- * has ended). Then it asks the registered session requirements. The module
- * refuses to boot an enabled grant without a store, and this handler
- * refuses to be built without one, or without the resolver the planner
- * built (core's `checkResolver`), so there is no cookie-only mode and no
- * admission the planner did not build.
- *
- * What each admission is answered with is this endpoint's, a JSON API a page
- * calls: a new login is the remedy for every session that cannot be used,
- * so all of them are `401 login_required`, each with the description it had
- * — a signed-out cookie, or one that names no user, "an authenticated
- * end-user session is required to approve a device"; a cookie with no `sid`,
- * "session identifier (sid) is required", so a login of the deployment's own
- * that set `isAuthenticated` and `user.id` without the `UserSession` is told
- * what is missing; a record gone, expired, another subject's or covered by
- * the boundary, "the session is no longer active; sign in again" — and a
- * requirement's `reauthenticate` or `unmet` "sign in again to continue": the
- * page has no other remedy to offer a device. A `step_up` is
- * `403 step_up_required` with the `requirement` that asked and its `page` —
- * the requirement's step-up page as registered: resolved at registration on
- * the issuer, its params on the query and no return parameter, since the
- * page that called knows where it returns (the ADR's D8: a browser-facing
- * consumer answers the page) — on any of the three actions: the MFA requirement never steps up `lookup` or `deny` (a
- * user refuses a phished device request without one, the ADR's D6), but
- * another requirement may. An outage — the store, the boundary, or a
- * requirement that throws — fails closed as `503 temporarily_unavailable`,
- * described by what could not answer as `/oauth/consent` describes it
- * (core's `describeAdmissionOutage`: "session store unavailable",
- * "revocation store unavailable" or "session requirement unavailable"), not
- * `login_required`, which would tell the page the user is signed out when
- * the store said nothing. Admission writes the lines — one at error for an
- * outage (`session_admission_unavailable`, with the store and the action,
- * never the `sid`), one at warn for a record of another subject
- * (`session_admission_subject_mismatch`, audited as
- * `session.admission.subject_mismatch` with the `sid`) — through this
- * handler's logger, core's console logger when none is wired. Every
- * refusal comes before the budget is spent and before the code is read.
- *
- * ### `oauth.requireEmailVerified` holds an approval as it holds issuance
- *
- * `/authorize` and the session grant refuse a user the Store has not
- * published a verified email for (#297); an approval is what the device's
- * token is issued from, so `approve` is refused the same way —
- * `403 access_denied`, the code `/authorize` answers it with. Only `approve`:
- * a lookup shows the user what is asked, and a denial issues nothing. The
- * refusal comes before the budget is spent and before the code is read, so
- * it is neither an attempt nor an oracle.
- *
- * ### The decision is an audit event
- *
- * An approval is a consent: a named subject grants a named client a scope,
- * and a device somewhere turns that into a token. That belongs in the same
- * sink as `authorize.granted`, not in an optional `logger.info` nobody tails
- * — so `approve` emits `device.approved`, `deny` emits `device.denied`, and a
- * subject who exhausts the budget emits `device.rate_limited`, which is the
- * signal that an account is being used to guess codes. No event carries the
- * user code or the device code: one is the value being brute-forced and the
- * other is a bearer credential.
- *
- * ### JSON only, whatever parsed the body
- *
- * A form body — `application/x-www-form-urlencoded`, `multipart/form-data`,
- * `text/plain` — is a CORS "simple" request: a browser sends it cross-site
- * with the user's session cookie and no preflight, which is RFC 8628 §5.4's
- * remote-phishing attack in one auto-submitting form. `application/json` is
- * preflighted. So this handler answers anything that is not
- * `application/json` with `415 invalid_request` before it reads a field.
- *
- * It checks the media type itself rather than relying on no form parser
- * having run. In the route `deviceGrantModule` mounts none has — it mounts
- * JSON only, and `oauthModule`'s router beside it parses its own routes
- * only — but a composition that mounts this handler by hand may put one in
- * front of it, and the rule is the endpoint's either way.
- *
- * ### The origin check is the module's, and runs first
- *
- * This handler runs no body parser and no origin check. The router
- * `deviceGrantModule` mounts parses JSON and runs the session package's CSRF
- * guard ahead of it (see `module.mts`); a composition that mounts this
- * handler by hand must do the same. So a cross-site form is refused by the
- * guard, `403 access_denied`, before this handler sees it: only a request
- * the guard lets through can be answered `415`.
+ * - `lookup`, `approve` and `deny` share one route: each takes a `user_code`
+ *   and is the same brute-force oracle, so one route means one limiter call.
+ * - The limiter is required: RFC 8628 §5.1's ~34.5-bit code is safe only with
+ *   about 5 attempts. The budget is keyed on the authenticated subject, so an
+ *   attacker burns their own account's budget; that is why this runs
+ *   `checkWithFailMode` itself instead of the IP-keyed guard middleware.
+ * - Order: JSON media type (415), the body's `action` (400), session
+ *   admission, the email gate (`approve` only), the budget, then the code.
+ *   Refusals before the budget spend no attempt and read no code.
+ * - Admission (`admitSession`; see the session-admission ADR) reads the live
+ *   `UserSession` behind the cookie's `sid`, not the cookie's claim: the
+ *   device token carries no `sid` or `family_id`, so no later logout reaches
+ *   it, and the approval is the last point that can check the session.
+ * - Outages fail closed as 503 (a limiter outage follows
+ *   `rateLimit.failMode`), never as `login_required`.
+ * - Decisions and budget exhaustion are audit events; none carries the user
+ *   code (the brute-force target) or the device code (a bearer credential).
+ * - JSON only, checked here whatever parsed the body: a form POST is a CORS
+ *   "simple" request sent cross-site with the cookie and no preflight
+ *   (RFC 8628 §5.4 remote phishing). Body parsing and the CSRF guard are the
+ *   mounting router's (`module.mts`); a hand-built mount must add both.
  */
 
 import type {
@@ -226,7 +80,7 @@ const ACTIONS: readonly Action[] = ["lookup", "approve", "deny"];
 const isAction = (value: unknown): value is Action =>
 	typeof value === "string" && (ACTIONS as readonly string[]).includes(value);
 
-/** Each body action as admission is asked about it: its own name, graded `use` (the session-admission ADR's D4). */
+/** Each body action as admission is asked about it: its own name, graded `use`. */
 const ADMITTED_AS: Readonly<Record<Action, AdmissionAction>> = {
 	lookup: ADMISSION_ACTIONS["device.lookup"],
 	approve: ADMISSION_ACTIONS["device.approve"],
@@ -302,7 +156,7 @@ const admissionLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
 	return adapted;
 };
 
-/** The three descriptions `401 login_required` had before admission, and the one it adds. */
+/** The `401 login_required` descriptions. */
 const NO_SESSION = "an authenticated end-user session is required to approve a device";
 const NO_SID = "session identifier (sid) is required";
 const ENDED = "the session is no longer active; sign in again";
@@ -312,9 +166,11 @@ const loginRequired = (description: string) =>
 	({ status: 401, body: { error: "login_required", error_description: description } }) as const;
 
 /**
- * What an admission that did not admit a live session is answered with —
- * see the file header. An `admitted` without a record is one a handler
- * built with a store is never given, and is refused with the rest.
+ * The answer to an admission that did not admit a live session. A new login
+ * is the only remedy the page can offer, so every unusable session is
+ * `401 login_required`; `step_up` is `403 step_up_required` with its page; an
+ * outage is 503, never `login_required`. An `admitted` without a record never
+ * reaches a handler built with a store, and is refused with the rest.
  */
 const refusalOf = (
 	admission: Admission,
@@ -358,41 +214,33 @@ const refusalOf = (
 
 export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencies {
 	/**
-	 * Required. See the file header: the code's entropy budget is calculated
-	 * against a limit, so running without one is running with 34.5 bits and no
-	 * ceiling.
+	 * Required: RFC 8628 §5.1 sizes the user code's entropy against a limit,
+	 * so without one it is 34.5 bits and no ceiling.
 	 */
 	readonly rateLimiter: RateLimiter;
 	/**
-	 * Required, like the limiter, and not defaulted for the same reason the
-	 * module refuses to: what this endpoint does when the limiter backend is
-	 * down is `rateLimit.failMode`, one policy for the product (#457).
+	 * Required, not defaulted: `rateLimit.failMode` is the product's one
+	 * policy for a limiter-backend outage.
 	 */
 	readonly failMode: RateLimitFailMode;
 	/**
 	 * Required: where admission reads the `UserSession` behind the cookie's
-	 * `sid` — see the file header. Without it an approval would rest on the
-	 * cookie's word alone, which is the defect the read closes.
+	 * `sid`. Without it an approval would rest on the cookie's word alone.
 	 */
 	readonly userSessionStore: UserSessionStore;
 	/**
-	 * Required: the synthetic key `sessionRequirementResolver` the boot
-	 * planner built (`resolverForTests` in a test) — the registered session
-	 * requirements admission asks (the session-admission ADR's D1). Admission
-	 * refuses any other object.
+	 * Required: the `sessionRequirementResolver` the boot planner built
+	 * (`resolverForTests` in a test). Admission refuses any other object.
 	 */
 	readonly requirements: SessionRequirementResolver;
 	/**
-	 * `oauth.requireEmailVerified` (#297), resolved. Required rather than
-	 * defaulted, so a composition that mounts this handler by hand states
-	 * whether the gate holds instead of losing it by omission.
+	 * `oauth.requireEmailVerified`, resolved. Required rather than defaulted, so
+	 * a hand-built composition states whether the gate holds.
 	 */
 	readonly requireEmailVerified: boolean;
 	/**
-	 * Where admission reads the subject's sessions boundary (see the file
-	 * header). Optional as it is at every surface that reads it: a
-	 * composition that declared subject-level revocation absent has no
-	 * boundary to honour.
+	 * Where admission reads the subject's sessions boundary. Optional: a
+	 * composition that declared subject-level revocation absent has none.
 	 */
 	readonly subjectRevocation?: SubjectRevocation;
 }
@@ -470,7 +318,7 @@ export const createDeviceVerificationHandler = (
 		}
 		const subject = session.sub;
 
-		// #297, before the budget and the code — see the file header.
+		// Before the budget and the code — see the file header.
 		if (
 			action === "approve" &&
 			options.requireEmailVerified &&
@@ -492,16 +340,16 @@ export const createDeviceVerificationHandler = (
 			contextOf(req, subject),
 		);
 		if (budget.status === "unavailable") {
-			// The limiter had no answer, so `rateLimit.failMode` is the answer
-			// (#457). The outage is already logged and audited by the shared
-			// check; `open` serves the request exactly as the guard would.
+			// The limiter had no answer, so `rateLimit.failMode` decides. The
+			// shared check already logged and audited the outage; `open`
+			// serves the request exactly as the guard would.
 			if (budget.failMode === "closed") {
 				respond(res, 503, { ...rateLimiterUnavailableEnvelope() });
 				return;
 			}
 		} else if (!budget.decision.allowed) {
-			// A limiter that answered "no" is not an outage: this is the #443
-			// signal that an account is guessing codes, under either fail mode.
+			// A limiter that answered "no" is not an outage: this is the signal
+			// that an account is guessing codes, under either fail mode.
 			const { decision } = budget;
 			(options.logger ?? consoleLogger).warn(
 				{ subject, action, remaining: decision.remaining },
@@ -591,14 +439,10 @@ export const createDeviceVerificationHandler = (
 						await options.store.approve({ userCode, subject, nowMs })
 					: await options.store.deny(userCode, nowMs);
 		} catch (err) {
-			// The store may have recorded the decision before its reply was lost
-			// — a timeout or a reset after the command was sent — and the device's
-			// poll can then be handed tokens that no `device.approved` accounts
-			// for. So an outcome nobody knows is audited as one, attributed as
-			// the decision would have been: the subject, the action, the
-			// request's address. It names no client, since the record could not
-			// be read. (The log line names no subject; an audit event is where a
-			// decision is attributed.)
+			// The store may have recorded the decision before its reply was lost,
+			// and the device's poll may then get tokens no `device.approved`
+			// accounts for, so the unknown outcome is audited, attributed to the
+			// subject. It names no client: the record could not be read.
 			emitAuditEvent(options.auditSink, {
 				timestamp: new Date(),
 				type: "device.decision_outcome_unknown",

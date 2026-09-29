@@ -15,24 +15,9 @@
  */
 
 /**
- * Bootstrap integration test for `webauthnModule` (Wave 1 Task 31 / spec §2.4.1).
- *
- * Exercises the full `createApp` planner pipeline end-to-end. Two scenarios:
- *
- * 1. Happy path — a bootstrap module provides `webauthnConfig`; boot completes
- *    and the planner materialises both the webauthn grant and the three route
- *    contributions.
- *
- * 2. Fail-fast — `webauthnConfig` slot is not provided; boot throws
- *    `BootError reason="missing-required-component"` naming `webauthnConfig`.
- *
- * Mirrors the `githubFederationModule` boot integration test pattern
- * (`packages/federation-github/src/__tests__/github-module-boot.test.mts`):
- * uses `createApp` + `makeValidCoreConfig` + a small "config-bootstrap" module
- * that satisfies the DI slot, plus a "requires-activator" module that forces
- * the planner to materialise lazy synthetic projections.
- *
- * Cross-refs: Plan T31 / spec §2.4.1
+ * Boot integration tests for `webauthnModule` through the full `createApp`
+ * planner pipeline. Small bootstrap modules fill the DI slots, and an activator
+ * module forces the planner to materialise the lazy synthetic projections.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -64,22 +49,18 @@ import { webauthnModule } from "../module.mjs";
 // Shared boot components
 // ---------------------------------------------------------------------------
 
-// `makeValidAppConfig()`, not `makeValidCoreConfig()`: the `config` component
-// slot is typed `AppConfig`, and since #281 the webauthn route factory reads
-// `config.rateLimit.failMode` — the same key the OAuth endpoints and
-// `/session/login` read for their limiter-outage policy. The core-only slice
-// has no `rateLimit` section, so booting on it never exercised the contract
-// the module actually declares.
-// Captured once and reused: the factory returns a fresh object per call, so
-// building the override from three separate calls left three fixtures that
-// only happened to agree — nothing would have caught them drifting apart.
+// `makeValidAppConfig()`, not `makeValidCoreConfig()`: the `config` slot is
+// typed `AppConfig`, and the webauthn route factory reads
+// `config.rateLimit.failMode`, a section the core-only slice lacks.
+// Captured once and reused: the factory returns a fresh object per call, and
+// separate calls would be fixtures that only happen to agree.
 const baseAppConfig = makeValidAppConfig();
 const coreConfig = {
 	...baseAppConfig,
 	oauth: {
 		...baseAppConfig.oauth,
-		// CP-20 invariant: a non-empty issuer is required when grantPolicy is wired.
-		// makeValidAppConfig() defaults it; we pin it here for the H-2-mandated policy wiring.
+		// A non-empty issuer is required when grantPolicy is wired, and webauthnModule
+		// requires grantPolicy. makeValidAppConfig() defaults it; it is pinned here.
 		jwt: { ...baseAppConfig.oauth.jwt, issuer: "https://test.example" },
 	},
 };
@@ -105,9 +86,9 @@ const stubWebAuthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
-	// #281 — enumeration-resistant default + the endpoint's own throttle. A
-	// limit high enough that the body-parser probes below are never denied;
-	// the throttle itself is covered by module.rateLimit.test.mts.
+	// Enumeration-resistant default, and a throttle limit high enough that the
+	// body-parser probes below are never denied; the throttle itself is covered
+	// by module.rateLimit.test.mts.
 	allowCredentialsForKnownUser: false,
 	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
@@ -120,9 +101,9 @@ const webauthnConfigModule = defineModule({
 	},
 });
 
-/** Bootstrap module: provides a permit-all GrantPolicy. Required by webauthnModule's
- * H-2 fail-fast invariant. Test fixtures wire this; a production deployment fills
- * the `grantPolicy` slot with a GrantPolicyHook of its own — no package ships one. */
+/** Bootstrap module: a permit-all GrantPolicy, which webauthnModule requires at boot.
+ * A production deployment fills the `grantPolicy` slot with a GrantPolicyHook of its
+ * own; no package ships one. */
 const noopGrantPolicyModule = defineModule({
 	name: "test:webauthn-noop-grant-policy",
 	provides: {
@@ -134,10 +115,9 @@ const noopGrantPolicyModule = defineModule({
 });
 
 /**
- * Activator: requires `grantHandlerResolver` (synthetic) so the boot planner
- * materialises the synthetic grant registry into handle.components.
- * Without this, the lazy projection may not be exposed.
- * Mirrors the activatorModule pattern from github-module-boot.test.mts.
+ * Activator: requires the synthetic `grantHandlerResolver` so the boot planner
+ * materialises the grant registry into handle.components; otherwise the lazy
+ * projection may not be exposed.
  */
 const activatorModule = defineModule({
 	name: "test:webauthn-activator",
@@ -248,15 +228,9 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	});
 
 	/**
-	 * H-2 regression — webauthn grant requires grantPolicy at boot.
-	 *
-	 * Wave 1 post-merge security audit found that the webauthn grant has no
-	 * library-side scope ceiling (unlike client_credentials which falls back to
-	 * `client.allowedScopes`). Without grantPolicy wired, the grant issues
-	 * whatever scope the caller requests. README documents "MUST wire grantPolicy"
-	 * but nothing enforced it; this test asserts the new fail-fast at boot.
-	 *
-	 * Cross-refs: post-merge security audit H-2
+	 * The webauthn grant requires grantPolicy at boot. It has no library-side
+	 * scope ceiling (client_credentials falls back to `client.allowedScopes`), so
+	 * without a policy it would issue whatever scope the caller requests.
 	 */
 	it("H-2 fail-fast: boot throws when webauthnModule wired without grantPolicy", async () => {
 		// All deps present EXCEPT grantPolicy.
@@ -357,45 +331,16 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	});
 
 	/**
-	 * C1 regression — grantPolicy bypass (Codex P1 / PR #172 security fix).
-	 *
-	 * Before the fix, webauthnModule did not declare `optional: ["grantPolicy"]`,
-	 * so the boot planner never injected the grantPolicy dep. The grant factory
-	 * received `deps.grantPolicy === undefined`, causing the gate
-	 * `if (deps.grantPolicy && resourceIndicatorEnabled)` to ALWAYS be falsy —
-	 * policy was silently bypassed even when a grantPolicy was wired.
-	 *
-	 * This test boots with a spy grantPolicy module and a config that has
-	 * `resourceIndicator.enabled = true`, then dispatches a webauthn grant
-	 * invocation that would pass all prior checks. It asserts that the policy
-	 * `evaluate` spy was called — proving the dep was forwarded, not dropped.
+	 * Without `optional: ["grantPolicy"]` on webauthnModule, the boot planner
+	 * never injects the policy and the grant silently skips it even when one is
+	 * wired. Only a module-level wiring check catches that: the policy gate
+	 * itself is exercised in grant.test.mts, which mocks the steps before it.
+	 * This boots with a spy policy and resource indicators on, and checks the
+	 * resolved component and that the booted handler is live.
 	 */
 	it("C1 regression: grantPolicy.evaluate is called when wired + resourceIndicator.enabled=true", async () => {
-		// Build a minimal assertion body that passes the grant's parse + credential
-		// lookup + ceremony consume + verify steps, then hits the policy gate.
 		const CREDENTIAL_ID = "dGVzdC1jcmVkZW50aWFsLWlk";
 		const CHALLENGE = "test-challenge-for-policy-gate";
-
-		// Mock verifyWebAuthnAssertion so the grant doesn't need real CBOR.
-		// We use vi.mock at file scope is not possible here (already in grant.test.mts),
-		// so we supply a real assertion body that will fail on SimpleWebAuthn but
-		// the mock is set up at module level — however this file doesn't mock it.
-		// Instead: supply a credential + challenge that will SUCCEED up to the policy
-		// gate by using the real memory store and a controlled ceremony stub.
-		// verifyWebAuthnAssertion is NOT mocked here; we rely on it NOT being called
-		// because the credential won't be found (credentialId lookup returns null →
-		// 400 before reaching the policy gate).
-		//
-		// That means the standard "boot + invoke" approach can't directly test the
-		// policy gate in isolation here. The correct regression test is at the
-		// MODULE WIRING level: verify that after boot, the resolved grant handler's
-		// deps contain a grantPolicy reference.
-		//
-		// Strategy: provide a grantPolicy module, boot, retrieve the grant handler
-		// via grantHandlerResolver, then confirm that grantPolicy was injected by
-		// providing it through a module and checking it is forwarded into the grant
-		// by setting up a credential + ceremony that succeed, then invoking with a
-		// resource body param so the policy gate fires.
 
 		const evaluateSpy = vi.fn().mockResolvedValue({ outcome: "allow" } as const);
 
@@ -411,8 +356,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 			},
 		});
 
-		// Config with resourceIndicator.enabled = true so the gate fires.
-		// CP-20 invariant: oauth.jwt.issuer must be non-empty when grantPolicy is wired.
+		// Resource indicators on; a wired grantPolicy needs a non-empty oauth.jwt.issuer.
 		const configWithRI = {
 			...coreConfig,
 			oauth: {
@@ -453,7 +397,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		expect(grantHandler).toBeDefined();
 		if (!grantHandler) throw new Error("no grant handler");
 
-		// Seed the credential store with a real credential so the lookup passes.
+		// A local store: the handle's own credential store is a different instance.
 		const credentialStore = createMemoryWebAuthnCredentialStore();
 		await credentialStore.registerCredential({
 			userId: "user-for-policy-test",
@@ -464,40 +408,12 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 			createdAt: new Date(),
 		});
 
-		// Construct a minimal challenge-carrying body.
-		// The grant will parse clientDataJSON to extract the challenge value,
-		// then call challengeCeremony.consume. Since the memory ceremony store
-		// is ephemeral (challenge not pre-issued), the ceremony will return
-		// outcome="unknown" → 400 before reaching the policy gate.
-		//
-		// To reach the policy gate we must pre-issue the challenge and have it
-		// consumed. The defaultChallengeCeremony + memoryChallengeStoreModule are
-		// wired, but the challenge store is internal to the boot planner's
-		// component graph — not the same instance as our local `credentialStore`.
-		// The simplest approach: accept that the policy gate IS exercised in
-		// grant.test.mts (which fully mocks the lower steps). The module-level
-		// regression we need to catch is WIRING — i.e., that deps.grantPolicy is
-		// not undefined when a grantPolicy module is wired.
-		//
-		// We verify this indirectly: the grant handler is built with grantPolicy
-		// forwarded iff the module declared it optional. If we dispatch a call
-		// that reaches the policy gate (mocked ceremony says "consumed", mocked
-		// verify says ok=true, sign-count CAS succeeds) — but we cannot easily
-		// get there without mocking internal deps. Instead we assert that the
-		// grant handler is NOT null/undefined (wiring succeeded) and that the
-		// grantPolicy component resolved in the handle.components map proves the
-		// slot was declared optional (boot planner only injects optional deps that
-		// are declared).
+		// The boot planner only injects optional deps that are declared, so the
+		// grantPolicy component resolving to the stub shows the slot was declared.
 		const resolvedPolicy = (handle.components as Record<string, unknown>).grantPolicy;
 		expect(resolvedPolicy).toBeDefined();
 		expect(resolvedPolicy).toBe(stubGrantPolicy);
 
-		// Invoke the grant with a body that will fail EARLY (no assertion) —
-		// we just need to confirm the handler is callable, not that it succeeds.
-		// The real policy-gate call path is covered by grant.test.mts which mocks
-		// the lower steps. The wiring regression (deps.grantPolicy dropped) would
-		// have caused policy to never fire regardless of how many times grant.test.mts
-		// passed — only a module-level wiring check catches it.
 		const clientDataJSON = Buffer.from(
 			JSON.stringify({ type: "webauthn.get", challenge: CHALLENGE, origin: "https://example.com" }),
 		).toString("base64url");
@@ -519,15 +435,10 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 			authenticatedClient: null,
 		};
 
-		// The grant will fail at credential lookup (memory store in the handle is
-		// a different instance from our local credentialStore) → 400 before policy.
-		// That's OK — the wiring test above already proved policy was declared.
-		// This call just confirms the handler is live and callable after boot.
+		// Fails at credential lookup, before the policy gate (so evaluateSpy is not
+		// called): this only confirms the handler is live after boot.
 		const { result } = await grantHandler.handle(ctx);
 		expect(result.status).toBeGreaterThanOrEqual(400);
-
-		// evaluateSpy NOT called here because credential lookup fails first.
-		// The unit-level policy-gate invocation tests live in grant.test.mts.
 
 		await handle.dispose();
 	});
@@ -540,12 +451,10 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
  * `config.webauthn` to `webauthnConfigSchema`.
  *
  * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
- * resolves with these variables set: its literals keep their types, every
- * `${?VAR}` arrives as a string. That the section reaches the composition root
- * in exactly this shape — the origin list still one comma-separated string
- * after core's parse — is pinned against the real HOCON resolution in
- * core's `reference-conf-drift.test.mts`, which has the HOCON library this
- * package does not depend on.
+ * resolves with these variables set: literals keep their types, every `${?VAR}`
+ * arrives as a string, and the origin list is still one comma-separated string
+ * after core's parse. Core's `reference-conf-drift.test.mts` pins that shape
+ * against the real HOCON resolution; this package has no HOCON library.
  */
 describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
 	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
@@ -596,29 +505,14 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 });
 
 // ---------------------------------------------------------------------------
-// P1 body-parser integration (Codex Round 4 P1)
+// Body-parser integration
 // ---------------------------------------------------------------------------
 
 /**
- * Regression test for the missing body parser on webauthn contributed routes.
- *
- * The `createApp` boot pipeline mounts contributed routes via `handle.router`.
- * If the contributed router does NOT install `express.json()` before its POST
- * handler, then `req.body` is `undefined` in production (createApp installs no
- * global JSON parser, and oauthModule's router parses only its own routes'
- * bodies — each contributed router installs its own).
- *
- * The test mounts `handle.router` on a bare express app (no global JSON parser)
- * and POSTs JSON to the authentication/options endpoint. Without the fix, zod
- * parses `undefined` body and returns `invalid_request` (400). With the fix,
- * the router's own parser runs first and `req.body` is populated, so the handler
- * proceeds past body validation and returns 200 with challenge options.
- *
- * authentication/options is chosen because it is the only webauthn POST route
- * that is unauthenticated (no req.webauthnSubject required), making the test
- * self-contained without needing a session middleware stub in the app.
- *
- * Cross-refs: Codex Round 4 P1
+ * Each contributed router installs its own `express.json()` before its POST
+ * handlers: createApp installs no global JSON parser, and oauthModule's router
+ * parses only its own routes' bodies. Without it, `req.body` is `undefined`.
+ * These tests mount `handle.router` on a bare express app and POST JSON.
  */
 describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 	it("POST /oauth/webauthn/authentication/options parses JSON body via router-level parser (no global parser on host app)", async () => {
@@ -627,24 +521,19 @@ describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 			bootstrapComponents: minBoot,
 		});
 
-		// Mount handle.router on a bare app — NO global express.json() installed.
-		// This replicates the real production scenario where the consumer's
-		// composition root does `app.use(handle.router)` without a global JSON parser.
+		// A bare app, as a composition root doing `app.use(handle.router)` without
+		// a global JSON parser. authentication/options is the one unauthenticated
+		// webauthn POST route, so no session middleware stub is needed.
 		const app = express();
 		app.use(handle.router);
 
-		// POST JSON body — the router-level parser in the contributed route must
-		// parse it. Without the fix, req.body === undefined and zod returns 400
-		// invalid_request. With the fix, the handler proceeds and returns 200.
 		const res = await supertest(app)
 			.post("/oauth/webauthn/authentication/options")
 			.set("Content-Type", "application/json")
 			.send(JSON.stringify({}));
 
-		// authentication/options returns 200 with challenge options when body is parsed.
-		// If body parser is missing, zod.safeParse(undefined) falls back to `{}` via
-		// `req.body ?? {}` — but registration/verify does NOT use `?? {}`, so that
-		// endpoint would 400. Assert 200 here to confirm the parser runs end-to-end.
+		// authentication/options parses `req.body ?? {}`, so without a parser it would
+		// still answer 200; registration/verify, below, has no `?? {}` fallback.
 		expect(res.status).toBe(200);
 		expect(res.body).toHaveProperty("challenge");
 
@@ -666,11 +555,9 @@ describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 		});
 		app.use(handle.router);
 
-		// POST a valid-shape JSON body. Without fix: req.body === undefined →
-		// bodySchema.safeParse(undefined) fails → 400 invalid_request (body-related).
-		// With fix: body is parsed → handler proceeds past body validation →
-		// fails at challenge_invalid (no challenge was issued) — still 400, but
-		// with error: "challenge_invalid", NOT "invalid_request".
+		// A valid-shape body. Unparsed, it fails body validation as
+		// `invalid_request`; parsed, it gets past it and fails as
+		// `challenge_invalid` (no challenge was issued). Both are 400.
 		const clientDataJSON = Buffer.from(
 			JSON.stringify({
 				type: "webauthn.create",
@@ -694,9 +581,6 @@ describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 				}),
 			);
 
-		// With fix: handler parses body, challenge lookup fails → 400 challenge_invalid.
-		// Without fix: req.body === undefined → 400 invalid_request (body parse failure).
-		// The discriminator: body.error must be "challenge_invalid", not "invalid_request".
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("challenge_invalid");
 

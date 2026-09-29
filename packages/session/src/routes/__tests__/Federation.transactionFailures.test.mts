@@ -16,18 +16,15 @@
 
 /**
  * What a `form_post` federation does when the transaction cannot be written,
- * read or retired (#494).
+ * read or retired: every path fails closed. The transaction is the CSRF, PKCE
+ * and nonce binding at once, so a flow whose transaction cannot be persisted
+ * before the redirect, or retired before the code is exchanged, must not
+ * continue: an attacker who could force the failure and then replay would
+ * bypass the binding.
  *
- * Every one of these paths fails closed. The ephemeral state is the CSRF, PKCE
- * and nonce binding all at once, so a transaction that cannot be persisted
- * before the redirect, or cannot be retired before the code is exchanged, is a
- * flow that must not continue — an attacker who could force the failure and
- * then replay would otherwise bypass the binding entirely.
- *
- * A store that cannot answer is the server's outage: `503
- * temporarily_unavailable`, logged once at error level with `store` and
- * `step`. A composition with no store to hold the transaction, or no callback
- * URL to scope its cookie to, is the deployment's fault: `500
+ * A store that cannot answer is `503 temporarily_unavailable`, logged once at
+ * error level with `store` and `step`. A composition with no store to hold the
+ * transaction, or no callback URL to scope its cookie to, is `500
  * misconfiguration`, logged once at error level as `federation_misconfigured`
  * with the `reason`.
  */
@@ -251,8 +248,8 @@ async function start(app: express.Express, records: Map<string, unknown>) {
 
 describe("a form_post start leg refuses when it cannot hold a transaction", () => {
 	it("500s when no express-session store is mounted on the request", async () => {
-		// The old code warned and carried on, redirecting the user to Apple for a
-		// callback that could not possibly have worked.
+		// Carrying on would send the user to Apple for a callback that cannot
+		// work.
 		const logger = spyLogger();
 		const { app } = buildApp({ withoutSessionStore: true, logger });
 		const res = await request(app).get("/oauth/federation/apple");

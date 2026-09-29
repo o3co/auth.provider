@@ -15,22 +15,16 @@
  */
 
 /**
- * The `totp` second factor, as core's `MfaFactor` contract states it (the MFA
- * ADR's D7, D14, D21, F6):
+ * The `totp` second factor, as core's `MfaFactor` contract states it. See ADR
+ * 2026-09-25-multi-factor-authentication.
  *
- * - it adds `otp`, and `mfa` (`addsMfa`), counts as MFA, and its proof is
- *   guessable — the subject lock applies to it;
- * - a verification checks the factor the request named, at the steps the
- *   window allows, and only after the factor's `lastUsedStep`; it answers the
- *   step it matched as the factor's next data, which the coordinator writes
- *   by compare-and-set; a code used once, or an older one, is `replayed`;
- * - a proof it cannot read is `malformed`, and data that is not a TOTP record
- *   is a fault it throws, never a wrong code;
- * - the parameters are the factor's own (F6: a configuration change never
- *   breaks an enrollment), the window the configuration's;
- * - enrollment (core's contract requires it of every factor) hands out a
- *   secret of the algorithm's output length and its `otpauth://` URI, and
- *   binds the factor at the step its proof matched.
+ * Its proof is guessable, so the subject lock applies to it. A verification
+ * checks the named factor at the steps the window allows, only after the
+ * factor's `lastUsedStep`, and answers the step it matched as the factor's
+ * next data, which the coordinator writes by compare-and-set: a code used
+ * once, or an older one, is `replayed`. The parameters are the factor's own,
+ * so a configuration change never breaks an enrollment; the window is the
+ * configuration's.
  */
 
 import {

@@ -39,15 +39,9 @@ const decodeUnreservedPercent = (s: string): string => {
 /**
  * Remove dot segments from a URI path per RFC 3986 §5.2.4 + §6.2.2.3.
  *
- * Preserves multiple consecutive slashes (the spec only removes dot segments,
- * not double-slashes). Preserves trailing slash if the *original input* had
- * one — trailing slash produced by resolving a `..` segment (e.g. `/a/b/..`
- * → `/a/`) is stripped since the original input didn't end with `/`.
- *
- * NOTE: The WHATWG URL API resolves `.` and `..` during parsing, so
- * `url.pathname` for `https://as/a/b/..` already yields `/a/`. We operate on
- * the original raw URL path (before WHATWG parsing) to detect whether the
- * caller supplied a trailing slash.
+ * Consecutive slashes are preserved (the spec removes only dot segments). A
+ * trailing slash is kept only if the original raw input had one: WHATWG URL
+ * already resolves `/a/b/..` to `/a/`, and that slash is stripped.
  */
 const removeDotSegments = (path: string, originalHadTrailingSlash: boolean): string => {
 	// Split preserves empty strings between consecutive slashes.
@@ -74,43 +68,31 @@ const removeDotSegments = (path: string, originalHadTrailingSlash: boolean): str
 };
 
 /**
- * Normalise an `htu` URI per RFC 9449 §6 / RFC 3986 §6.2.2.
+ * Normalise an `htu` URI per RFC 9449 §6 / RFC 3986 §6.2.2, returning the
+ * canonical string for equality comparison.
  *
  * Rules applied (in order):
- *   1. Parse via WHATWG URL — handles scheme/host lowercase + IDN ASCII.
+ *   1. Parse via WHATWG URL — lowercases scheme and host, IDN → Punycode.
  *   2. Strip query (`?`) and fragment (`#`).
  *   3. Remove default port (443 for https, 80 for http).
  *   4. Decode unreserved percent-encoded sequences in the path.
  *   5. Remove dot segments from the path (RFC 3986 §5.2.4).
  *   6. Normalise empty path to `/`.
  *
- * WHATWG URL (used internally) already performs:
- *   - Scheme + host lowercasing.
- *   - IDN (internationalized domain) → ASCII-compatible (Punycode) form.
- *
- * It does NOT perform:
- *   - Unreserved character decoding in the path (rule 4).
- *   - Dot-segment removal for already-parsed inputs (rule 5).
- *
- * Returns the canonical `htu` string ready for equality comparison.
- *
- * Per Wave 2 Phase 2 spec §7.
+ * WHATWG URL does not perform rule 4, nor rule 5 for already-parsed inputs.
  */
 export const normalizeHtu = (raw: string): string => {
 	const url = new URL(raw);
-	// Reject userinfo: WHATWG URL preserves `username`/`password` but the
-	// canonical reconstruction below drops them, so without this check a
-	// proof carrying `https://attacker:pwn@as.example/oauth/token` would
-	// normalize to `https://as.example/oauth/token` and equality-match the
-	// server-built URL — weakening the htu binding check. RFC 9449 §4
-	// gives userinfo no meaning at the token endpoint; reject loudly so
-	// the verifier surfaces a `malformed_proof` audit signal.
+	// Reject userinfo: the canonical reconstruction below drops it, so a proof
+	// carrying `https://attacker:pwn@as.example/oauth/token` would otherwise
+	// equality-match the server-built URL. RFC 9449 §4 gives userinfo no
+	// meaning at the token endpoint; the verifier surfaces `malformed_proof`.
 	if (url.username !== "" || url.password !== "") {
 		// Not the userinfo itself: it is the client's text, and this error
 		// travels on as a refusal's cause.
 		throw new Error("normalizeHtu: htu must not contain userinfo");
 	}
-	// Strip query and fragment (rules from spec §7 / RFC 3986 §6.2.2).
+	// Strip query and fragment (RFC 3986 §6.2.2).
 	url.search = "";
 	url.hash = "";
 
@@ -129,11 +111,8 @@ export const normalizeHtu = (raw: string): string => {
 	const originalHadTrailingSlash = rawWithoutQF.length > 1 && rawWithoutQF.endsWith("/");
 
 	// Normalise path: unreserved decode + dot-segment removal + empty → /.
-	//
-	// WHATWG URL resolves `.` / `..` segments at parse time, which may
-	// introduce a trailing slash (e.g. `/a/b/..` → `/a/`). Strip it when
-	// the original input did not have a trailing slash, so the normalised
-	// form respects the caller's intent rather than the resolver's artifact.
+	// WHATWG URL's parse-time `..` resolution may add a trailing slash
+	// (`/a/b/..` → `/a/`); strip it when the original input had none.
 	let rawPath = url.pathname; // WHATWG URL always starts pathname with "/".
 	if (!originalHadTrailingSlash && rawPath.length > 1 && rawPath.endsWith("/")) {
 		rawPath = rawPath.slice(0, -1);
@@ -142,13 +121,9 @@ export const normalizeHtu = (raw: string): string => {
 	const normalizedPath =
 		decodedPath === "" ? "/" : removeDotSegments(decodedPath, originalHadTrailingSlash);
 
-	// Reconstruct the canonical URL string without using url.toString()
-	// to avoid WHATWG URL applying its own re-encoding to our decoded
-	// characters. WHATWG `url.hostname` keeps IPv6 brackets verbatim
-	// (e.g. `[::1]` for `http://[::1]/` per the URL Standard host
-	// serializer), so the IP-literal form survives reconstruction
-	// unchanged — confirmed by the IPv6 regression test in
-	// `__tests__/htu-normalize.test.mts`.
+	// Reconstruct by hand: url.toString() would re-encode the decoded
+	// characters. `url.hostname` keeps IPv6 brackets (`[::1]`), so an IP
+	// literal survives (pinned in `__tests__/htu-normalize.test.mts`).
 	const portPart = url.port ? `:${url.port}` : "";
 	return `${url.protocol}//${url.hostname}${portPart}${normalizedPath}`;
 };

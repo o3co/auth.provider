@@ -15,15 +15,13 @@
  */
 
 /**
- * The `session` grant on session admission (the session-admission ADR's
- * D8, the `session` grant row): the cookie handed to the grant is read
- * through `admitSession` with `oauth.session_grant`, and each outcome is the
- * token endpoint's answer — `400 invalid_grant` for a session that cannot
- * mint, with `step_up: "<requirement>"` beside it when a requirement can be
- * met by a step-up (the MFA ADR's D16 row: RFC 6749's vocabulary, so an
- * existing client keeps its mapping), `503` for an outage. The pinned
- * changes (4) and (5) are each a test named for the change; the `step_up`
- * member is pinned on the wire, as `/oauth/token` sends it.
+ * The `session` grant on session admission (see ADR
+ * 2026-09-28-session-admission): the cookie is read through `admitSession`
+ * with `oauth.session_grant`. A session that cannot mint is `400
+ * invalid_grant`, with `step_up: "<requirement>"` beside it when a
+ * requirement can be met by a step-up (RFC 6749's vocabulary, so an existing
+ * client keeps its mapping); an outage is `503`. `step_up` is pinned on the
+ * wire, as `/oauth/token` sends it.
  */
 
 import {

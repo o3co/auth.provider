@@ -112,12 +112,10 @@ describe("HttpUserRepository", () => {
 		});
 	});
 
-	// TS-2 (Wave 5g): pre-fix, `(await res.json()) as User` was a compile-time
-	// cast only. A 200 response with an unexpected body shape silently
-	// produced a `User` whose required fields were `undefined`, leaking
-	// `sub: undefined` into the authentication flow. The new `isUser`
-	// runtime guard rejects such shapes by throwing — an "upstream broken"
-	// failure is distinct from "user not found" (401).
+	// A type cast checks nothing at runtime. The `isUser` guard throws on a
+	// 200 whose body is not a `User`, so `sub: undefined` never reaches the
+	// authentication flow; "upstream broken" is distinct from "user not
+	// found" (401).
 	describe("TS-2: upstream response shape validation", () => {
 		it("throws when upstream 200 returns an object missing required fields", async () => {
 			server.use(
@@ -169,10 +167,9 @@ describe("HttpUserRepository", () => {
 		});
 	});
 
-	// #285: the endpoints receive plaintext credentials. A mistyped `http://`
-	// URL published them to every hop on the path and nothing refused it. The
-	// check lives in the CONSTRUCTOR so a misconfigured deployment fails at
-	// boot rather than at the first login attempt.
+	// The endpoints receive plaintext credentials. The check lives in the
+	// CONSTRUCTOR so a misconfigured deployment fails at boot rather than at
+	// the first login attempt.
 	describe("#285: endpoints must be https (loopback carve-out)", () => {
 		const secure = {
 			authenticateUrl: "https://users.example.com/authenticate",
@@ -248,9 +245,9 @@ describe("HttpUserRepository", () => {
 		});
 	});
 
-	// #285: `timeout` reached `setTimeout` unvalidated. `0`, a negative number
-	// and `NaN` all clamp to "fire immediately", so a typo'd or blank-env
-	// timeout aborted every request instead of allowing a long one.
+	// `setTimeout` clamps `0`, a negative number and `NaN` to "fire
+	// immediately", so a typo'd or blank-env timeout would abort every
+	// request instead of allowing a long one.
 	describe("#285: timeout validation", () => {
 		const urls = {
 			authenticateUrl: "https://users.example.com/authenticate",
@@ -317,7 +314,7 @@ describe("HttpUserRepository", () => {
 		});
 	});
 
-	// #285: `res.json()` buffers whatever the upstream sends. A hostile or
+	// `res.json()` buffers whatever the upstream sends. A hostile or
 	// broken Store could stream gigabytes into the process.
 	describe("#285: response body cap", () => {
 		const capped = () =>
@@ -489,9 +486,9 @@ describe("HttpUserRepository", () => {
 	});
 });
 
-// #613: D7 check 5's identity lookup over HTTP — the client of a Store that
-// resolves who holds an upstream identity, and the boot-time declaration of
-// which registrations that Store covers.
+// The identity lookup over HTTP: the client of a Store that resolves who
+// holds an upstream identity, and the boot-time declaration of which
+// registrations that Store covers.
 describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 	const LOOKUP_URL = `${BASE_URL}/user/federated-identity`;
 	const REG = {
@@ -613,7 +610,7 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 		it("freezes the declaration it keeps — the list, each entry, each claim list — so nothing in-process widens the probe", () => {
 			// The boot probe is the check that refuses a hijacked upstream
 			// account; a repository whose coverage anything holding it could push
-			// onto would let that check be widened after boot (review).
+			// onto would let that check be widened after boot.
 			const r = looking();
 			const kept = (r as unknown as { coverage: FederatedIdentityLookupCoverage[] }).coverage;
 			expect(Object.isFrozen(kept)).toBe(true);
@@ -828,16 +825,12 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 		});
 
 		it("aborts the request at the deadline rather than waiting for headers that never come", async () => {
-			// The deadline race in the body read covers a stalled body; headers
-			// that never arrive are the abort signal's to cut, and without it the
-			// caller would still be told "timed out" — after the upstream finally
-			// answered. So the failure must land before the upstream does.
-			//
-			// Pinned by order, not by a stopwatch: the upstream notes when it
-			// answers, and it must not have by the time the caller is told. A bound
-			// on elapsed time measures the scheduler as well as the abort, and a
-			// loaded run stretches a 20ms deadline past any bound short enough to
-			// tell the two apart.
+			// The body read's deadline race covers a stalled body; headers that
+			// never arrive are the abort signal's to cut. Without it the caller would
+			// still be told "timed out", after the upstream finally answered.
+			// Pinned by order, not by a stopwatch: a bound on elapsed time measures
+			// the scheduler as well as the abort, and a loaded run stretches a 20ms
+			// deadline past any bound short enough to tell the two apart.
 			let answered = false;
 			server.use(
 				http.post(LOOKUP_URL, async () => {

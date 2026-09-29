@@ -18,20 +18,12 @@ import type { ErrorRequestHandler, RequestHandler, Router } from "express";
 import type { Contributed } from "./contributed.mjs";
 
 /**
- * Express-compatible route handler shape. Per A2-α §4.6 + A2-β §5.7
- * (forward-deferred): the union covers `Router | RequestHandler |
- * ErrorRequestHandler`. core declares `express` as an optional peer
- * dependency. Modules that contribute routes consume Express via the
- * peer; core imports the type-only via `import type`.
+ * Express-compatible route handler. core declares `express` as an optional
+ * peer dependency and imports its types only.
  */
 export type RouteHandler = Router | RequestHandler | ErrorRequestHandler;
 
-/**
- * HTTP method literal union. Covers the 9 standard methods defined in
- * RFC 7231 / RFC 5789.
- *
- * Per A2-β §4.2.
- */
+/** The nine standard HTTP methods (RFC 7231, RFC 5789). */
 export type HttpMethod =
 	| "GET"
 	| "HEAD"
@@ -44,77 +36,44 @@ export type HttpMethod =
 	| "TRACE";
 
 /**
- * Fine-grained route advertisement attached to a `RouteContribution`.
- * Enables the boot planner to detect method + path collisions at the
- * sub-router level, independent of `mountPath`.
- *
- * Per A2-β §4.2.
+ * A method + path a `RouteContribution` exposes, so the boot planner can
+ * detect collisions below `mountPath`.
  */
 export interface RouteAdvertisement {
-	/** HTTP method this advertisement covers. Per A2-β §4.2. */
 	readonly method: HttpMethod;
 	/**
 	 * Path relative to the contribution's `mountPath`. MUST start with "/";
-	 * the boot planner's `validateManifests` stage throws
-	 * `invalid-route-advertisement-path` otherwise (A2-β §5.1 step 7,
-	 * §6.1).
-	 *
-	 * Per A2-β §4.2.
+	 * boot rejects it otherwise (`invalid-route-advertisement-path`).
 	 */
 	readonly path: string;
 }
 
 /**
- * A route contribution. Per A2-α §4.6:
+ * A route contribution.
  * - `mountPath` MUST start with "/".
- * - `handler` is the Express-compatible router or middleware.
- * - `id` is an optional collision-identity hint. Two RouteContributions
- *   with the same `id` MUST throw at boot. Two with the same `mountPath`
- *   and no `id` SHOULD throw.
+ * - `id` is an optional collision identity: two contributions with the same
+ *   `id` throw at boot; two with the same `mountPath` and no `id` SHOULD.
  *
- * The handler's interior is opaque to the boot planner per A2-α §4.7
- * (handler opacity is structural, not a defect).
- *
- * A2-β §4.2 adds three optional fields:
- * - `routes`: fine-grained advertisement of method + path pairs exposed
- *   by this contribution. The boot planner uses effective
- *   `mountPath + advertisement.path` for collision identity.
- * - `before`: token array of contribution `id`s this contribution must
- *   be mounted before. Resolved by the boot planner's assemble-app stage
- *   §5.6 step 1.
- * - `after`: token array of contribution `id`s this contribution must
- *   be mounted after. Resolved alongside `before`.
+ * The handler's interior is opaque to the boot planner; `routes` is how a
+ * contribution exposes what it serves.
  */
 export interface RouteContribution {
 	readonly mountPath: string;
 	readonly handler: RouteHandler;
 	readonly id?: string;
-	/**
-	 * Fine-grained route advertisements. Per A2-β §4.2.
-	 * The boot planner uses these for sub-router collision detection.
-	 */
+	/** Method + path pairs served; collision identity is `mountPath + path`. */
 	readonly routes?: readonly RouteAdvertisement[];
-	/**
-	 * Contribution `id` tokens this contribution must be mounted before.
-	 * Per A2-β §4.2; resolved at assemble-app stage §5.6.
-	 */
+	/** Contribution `id`s this contribution must be mounted before. */
 	readonly before?: readonly string[];
-	/**
-	 * Contribution `id` tokens this contribution must be mounted after.
-	 * Per A2-β §4.2; resolved at assemble-app stage §5.6.
-	 */
+	/** Contribution `id`s this contribution must be mounted after. */
 	readonly after?: readonly string[];
 }
 
-/**
- * Factory producing a RouteContribution from typed deps. Used when the
- * route handler must close over typed deps (per A2-α §4.6).
- */
+/** Builds a RouteContribution whose handler closes over typed deps. */
 export type RouteContributionFactory<Deps> = (deps: Deps) => Contributed<RouteContribution>;
 
 /**
- * Per-entry shape inside `contributes.routes`. Either a static
- * RouteContribution value (dep-free routes) or a factory returning one
- * (dep-using routes). Per A2-α §4.6 Amendment 1.
+ * One entry of `contributes.routes`: a static RouteContribution (no deps) or
+ * a factory returning one.
  */
 export type RouteContributionEntry<Deps> = RouteContribution | RouteContributionFactory<Deps>;

@@ -15,18 +15,15 @@
  */
 
 /**
- * The module that builds core's subject revocation service (#593, D13).
+ * The module that builds core's subject revocation service.
  *
- * It lives here, and not in core, for the reason `cascadeSession` is a
- * parameter at all: tearing one session down is `cascadeLogout`, a carefully
- * ordered four-store sequence this package owns, and core cannot import it
- * without inverting the package dependency. The orchestration is core's; the
- * wiring is the only part that has to be here.
+ * It lives here, not in core, because tearing one session down is
+ * `cascadeLogout`, an ordered four-store sequence this package owns, and core
+ * cannot import it without inverting the package dependency.
  *
- * **Installed explicitly.** It is not folded into `oauthModule`, whose routes
- * work perfectly well in a deployment with no session stores at all. Requiring
- * the whole cascade from the module that serves `/oauth/token` would break
- * those deployments to give this one a component it never asked for.
+ * Installed explicitly, not folded into `oauthModule`: those routes work in a
+ * deployment with no session stores at all, and requiring the whole cascade
+ * from the module that serves `/oauth/token` would break such deployments.
  */
 
 import {
@@ -54,7 +51,7 @@ const NAME = "subjectRevocationServiceModule";
  * Core strips the keys no installed module declares, and the two this reads —
  * whether grants exist at all, and whether keeping one is allowed — both live
  * in that block. Taking core's shape rather than restating it keeps the
- * `${?VAR}` coercions in one place (#288).
+ * `${?VAR}` coercions in one place.
  */
 const configSchema = z.object({
 	federationGrants: fullSectionsSchema.shape.federationGrants,
@@ -71,13 +68,12 @@ const REQUIRES = [
 	"federationTokenStore",
 ] as const;
 /**
- * What turns "this subject" into sessions, and what outlives them — both
- * `optional`, and not because the service can do without them. #406 lets a
- * deployment declare either capability absent, and a module that REQUIRED
- * them could not be installed there at all; absence is reported instead,
- * in `unavailable`, exactly as `revokeAllForSubject` has always reported
- * it. What is refused is the pairing that matters: no boundary while
- * federation grants are enabled, in the provider below.
+ * What turns "this subject" into sessions, and what outlives them, are
+ * `optional` although the service needs them: a deployment may declare
+ * either capability absent, and a module that required them could not be
+ * installed there. Absence is reported in `unavailable` instead. The provider
+ * below refuses the pairing that matters: no boundary while federation
+ * grants are enabled.
  */
 const OPTIONAL = [
 	"subjectSessionIndex",
@@ -85,7 +81,7 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// What the boundary must outlive (#728): the oauth module's token
+	// What the boundary must outlive: the oauth module's token
 	// lifetimes and the session store's session lifetime, read from the
 	// configuration when the composition holds neither.
 	"oauthTokenSettings",
@@ -94,7 +90,7 @@ const OPTIONAL = [
 
 /**
  * The deps the provider receives: exactly the module's `requires` /
- * `optional`, typed (#626 P2).
+ * `optional`, typed.
  */
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
@@ -106,19 +102,16 @@ const grantsEnabled = (deps: SubjectRevocationServiceModuleDeps): boolean =>
 /**
  * What ended a grant, told to the deployment's sink.
  *
- * No `ip` and no `userAgent`, unlike the route bridge: this is a library call
- * a Store makes after writing a credential, and there is no request behind it
- * to attribute. Inventing one would put the provider's own address in the
- * field an operator reads as "where it came from".
+ * No `ip` and no `userAgent`: this is a library call a Store makes after
+ * writing a credential, with no request behind it. Inventing one would put
+ * the provider's own address in the field an operator reads as "where it
+ * came from".
  *
- * **Dispatched and not awaited**, which is the opposite of what the route
- * bridge does, for the opposite reason. There, core bounds its own audit
- * waits and hands the promise to a registry a shutdown drains, so returning
- * it is how a failing sink becomes visible. Here the caller is a Store in the
- * middle of a credential change it cannot undo, and nothing bounds anything:
- * a sink that never settles would hang that call for ever, having already
- * revoked the grants. So the event goes out, a failure is logged, and the
- * revocation reports what it did.
+ * Dispatched and not awaited, unlike the route bridge: the caller is a Store
+ * in the middle of a credential change it cannot undo, and nothing bounds the
+ * wait, so a sink that never settles would hang that call for ever after the
+ * grants were revoked. A failure is logged, and the revocation reports what
+ * it did.
  */
 const auditor = (
 	sink: AuditSink,
@@ -135,11 +128,11 @@ const auditor = (
 			details: {
 				correlationId: event.correlationId,
 				grantId: auditErrorText(event.grantId),
-				// What access ended, where core established it (D18). Copies,
+				// What access ended, where core established it. Copies,
 				// so a sink that holds its argument cannot be handed a
 				// reference into what core is still working with.
 				...(event.connection === undefined ? {} : { connection: event.connection }),
-				// Projected, not spread: the established pair and nothing else (#611).
+				// Projected, not spread: the established pair and nothing else.
 				...(event.upstream === undefined
 					? {}
 					: { upstream: { issuer: event.upstream.issuer, subject: event.upstream.subject } }),
@@ -174,8 +167,7 @@ const auditor = (
  * The refusals are here rather than at request time because each is structural
  * — what a component *is* — and a subject revocation is the wrong moment to
  * discover that the grants it should have ended had nowhere to be read from.
- * They apply only when grants are enabled: a deployment with the feature off
- * gets exactly the service #296 would have had.
+ * They apply only when grants are enabled.
  */
 export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	name: "subject-revocation-service",
@@ -183,17 +175,12 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	requires: REQUIRES,
 	optional: OPTIONAL,
 	/**
-	 * Eager, because its consumer is not a module.
-	 *
-	 * The boot planner builds a component when something in the graph needs
-	 * it, and nothing here does: the caller is the Store, which reads
-	 * `handle.components.subjectRevocationService` after `createApp` returns.
-	 * Without this the module installs, refuses nothing, and provides a
-	 * component that is never built — a deployment would find out when the
-	 * first password change had nothing to call.
-	 *
-	 * It also puts the refusals below at boot for every deployment that
-	 * installs this module, which is where a composition error belongs.
+	 * Eager, because its consumer is not a module: the Store reads
+	 * `handle.components.subjectRevocationService` after `createApp` returns,
+	 * and the boot planner otherwise builds a component only when something
+	 * in the graph needs it. Without this the component is never built and
+	 * the refusals below never run; being eager puts them at boot, where a
+	 * composition error belongs.
 	 */
 	lifecycle: { subjectRevocationService: { eager: true } },
 	provides: {
@@ -240,7 +227,7 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				}),
 				// The boundary must outlive the longest-lived thing it covers,
 				// which this module can read and the service cannot: the slots'
-				// lifetimes when the composition holds them (#728), otherwise
+				// lifetimes when the composition holds them, otherwise
 				// the configuration's.
 				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config, {
 					...(deps.oauthTokenSettings === undefined

@@ -19,17 +19,13 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * #456 — `federationTokenStore.type = "redis"` has to *reach* the composition
- * root before it can select anything.
- *
- * The standalone validates its HOCON against `AppConfigSchema` before
- * `buildModules` runs, and a top-level `z.object` strips keys it does not
- * know. `federationTokenStore` was never declared here, so the switch the
- * README documented was dropped at parse time — and the module-internal
- * `redisFederationTokenStore.*` section (the encryption key above all) went
- * the same way, exactly the trap `redisSessionStores` / `redisAccessTokenDenylist`
- * already paid for. Presence-only, like those: the defaults stay in
- * `reference.conf` and in `redisFederationTokenStoreModule.configSchema`.
+ * `federationTokenStore.type = "redis"` has to *reach* the composition root
+ * before it can select anything. The standalone validates its HOCON against
+ * `AppConfigSchema` before `buildModules` runs, and a top-level `z.object`
+ * strips keys it does not know, so the switch and the module-internal
+ * `redisFederationTokenStore.*` section (the encryption key above all) are
+ * declared. Presence-only, like the other `redis*` sections: the defaults stay
+ * in `reference.conf` and in `redisFederationTokenStoreModule.configSchema`.
  */
 describe("federationTokenStore / redisFederationTokenStore survive AppConfigSchema (#456)", () => {
 	it("keeps the adapter switch", () => {

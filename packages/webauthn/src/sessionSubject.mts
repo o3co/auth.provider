@@ -15,33 +15,12 @@
  */
 
 /**
- * `webauthnSessionSubjectModule` — the bridge from the browser's cookie
- * session to `req.webauthnSubject`, which the two registration routes
- * require, as a module the deployment installs instead of writing (the
- * session-admission ADR's D8).
- *
- * Its one route runs on `POST /oauth/webauthn/registration/options` and
- * `/verify`, after `session-middleware` and before both registration
- * routes, and reads the session through core's `admitSession` as
- * `webauthn.register` — graded `credential_change`: a passkey is a new way
- * into the account, so a requirement's recent-authentication rule applies.
- * `admitted` sets the subject the deployment's `subjectFor` maps the live
- * record to (the README requires an opaque `userId`; the answer is held to
- * the subject's shape, and one that is not is `500 server_error`, logged
- * once as `webauthn_session_subject_invalid`); `unavailable` is
- * `503 temporarily_unavailable`, described by what failed (core's
- * `describeAdmissionOutage`), logged once by admission; `step_up` is
- * `403 step_up_required` with the requirement and its page — as registered,
- * one absolute URL resolved on the issuer at registration, as every
- * consumer answers it;
- * a browser that is not signed in passes on untouched (a bearer bridge's
- * subject stands); every other outcome clears any subject an earlier
- * middleware set, and the route answers its own `401`.
- *
- * It requires `userSessionStore`: the cookie path it serves is the
- * store-backed one, so an admitted session is always a record the mapper can
- * read. A subject taken from a bearer token, and a cookie-only composition
- * without a store, stay the deployment's own middleware.
+ * `webauthnSessionSubjectModule`: sets `req.webauthnSubject`, which both
+ * registration routes require, from the browser's cookie session, admitted as
+ * `webauthn.register` (graded `credential_change`: a passkey is a new way
+ * into the account). What it needs, where it runs and what each admission
+ * outcome answers are in the README, "Registering from a browser session";
+ * see also ADR 2026-09-28-session-admission.
  */
 
 import {
@@ -103,12 +82,11 @@ const refuseInvalidSubject = (res: Response): void => {
 };
 
 /**
- * The module (the session-admission ADR's D8): requires the resolver and
- * the user-session store; takes `subjectRevocation`, `auditSink` and
- * `logger` when they are wired, the first two under their shared absence
- * policies. Throws a `TypeError` when `subjectFor` is not a function, and
- * its route factory a `RangeError` for a resolver missing or not the
- * planner's (core's `checkResolver`).
+ * The module: requires the resolver and the user-session store; takes
+ * `subjectRevocation`, `auditSink` and `logger` when they are wired, the
+ * first two under their shared absence policies. Throws a `TypeError` when
+ * `subjectFor` is not a function, and its route factory a `RangeError` for a
+ * resolver missing or not the planner's (core's `checkResolver`).
  */
 export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOptions): Module {
 	if (typeof options !== "object" || options === null || typeof options.subjectFor !== "function") {

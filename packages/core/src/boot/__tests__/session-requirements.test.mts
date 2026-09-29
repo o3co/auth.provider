@@ -16,14 +16,11 @@
 
 /**
  * The `sessionRequirements` contribution kind and its read side,
- * `sessionRequirementResolver`, booted through `createApp` (the
- * session-admission ADR's D3, D7): registration in init order and the
- * branded projection; the three refusals that keep a requirement from being
- * switched off from behind the consumers; the checks at the end of stage 4 —
- * the reach and the page, the declaration `sessionRequirements.expected`
- * compared as a set, `mfa.mode` asking for a requirement that is not
- * installed, and the name `mfa` bound to core's MFA ports; and the one boot
- * line.
+ * `sessionRequirementResolver`, booted through `createApp` (see ADR
+ * 2026-09-28-session-admission): registration in init order and the branded
+ * projection, the three refusals that keep a requirement from being switched
+ * off from behind the consumers, the checks at the end of stage 4, and the
+ * boot line.
  */
 
 import { describe, expect, it } from "vitest";

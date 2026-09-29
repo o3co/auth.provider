@@ -19,18 +19,15 @@ import type { FederationGrantConnection } from "./types.mjs";
 
 /**
  * The two fingerprints a grant records of the connection it was authorized
- * under (#593, D4). Both are compared with the current connection on every
- * read, and never persisted as a status, so reverting a mistaken edit restores
- * the grants it had cut off.
+ * under. Compared with the current connection on every read and never
+ * persisted as a status, so reverting a mistaken edit restores the grants.
  *
- * What is hashed is JSON of a fixed-shape array: JSON quotes and escapes every
- * string, so no value can run into its neighbour, and a leading tag keeps the
- * two fingerprints apart even if their fields ever coincided.
+ * The hash input is JSON of a fixed-shape array (no value can run into its
+ * neighbour), led by a tag that keeps the two fingerprints apart.
  *
- * Both are a PERSISTED FORMAT. They are stored on every grant, and a change to
- * what is hashed makes every grant read as `connection_identity_changed`,
- * which is terminal. The tag carries a version for that reason, and the tests
- * pin a known answer.
+ * A PERSISTED FORMAT: changing what is hashed makes every grant read as
+ * `connection_identity_changed`, which is terminal. Hence the versioned tag
+ * and the known-answer tests.
  */
 function fingerprint(tag: string, fields: readonly unknown[]): string {
 	return createHash("sha256")
@@ -54,18 +51,14 @@ export function federationGrantIdentityRevision(
 
 /**
  * What is asked of the upstream, for which resource, in which environment.
- *
  * When this differs the grant reads as `reauthorization_required` /
  * `connection_changed` and is reauthorized in place. Narrowing the scopes
- * changes it too: reusing consent across a narrowing would be sound, but
- * proving "narrower" for every field is not worth it, and asking again is
- * always safe.
+ * changes it too: asking again is always safe.
  *
- * `maxAccessTokenLifetime` and `allowScopeSubsets` are deliberately not here.
- * The first is judged against its current value before every disclosure, so
- * tightening it takes effect on the next call; making it part of this
- * fingerprint would turn a configuration slip into a reconnect for every
- * user. The second only governs what a new intent may ask for.
+ * Deliberately excluded: `maxAccessTokenLifetime` (judged at its current
+ * value on every disclosure; hashing it would turn a config slip into a
+ * reconnect for every user) and `allowScopeSubsets` (only governs new
+ * intents).
  */
 export function federationGrantAuthorizationRevision(
 	connection: Pick<

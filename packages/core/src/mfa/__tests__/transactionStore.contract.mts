@@ -26,18 +26,14 @@ import {
 
 /**
  * The `MfaTransactionStore` contract (the MFA ADR's D8 and D21), for every
- * adapter.
- *
- * Two halves. The transaction: a short-lived, single-use record of one
- * second-factor ceremony, whose every operation a race could split —
- * attempts reserved before a proof is checked, a challenge answered once,
- * one winner among verifications in flight. And the subject state, which
- * bounds guessable proofs across transactions: the consecutive run with its
- * short backoff and hard limit, the weekly budget no success refunds, and
- * the browsers an exempt success trusts against the weekly hold.
+ * adapter. Two halves: the transaction, a short-lived single-use record of one
+ * second-factor ceremony whose every operation a race could split; and the
+ * subject state, which bounds guessable proofs across transactions (the
+ * consecutive run, the weekly budget no success refunds, the browsers an
+ * exempt success trusts against the weekly hold).
  *
  * The subject state is judged on the time its caller passes, so D21's
- * schedule is driven here by an injected clock; a transaction expires on the
+ * schedule is driven by an injected clock; a transaction expires on the
  * store's own clock, read through {@link ExpiryClock} as the session-store
  * suite does.
  */

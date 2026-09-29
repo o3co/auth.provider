@@ -15,17 +15,12 @@
  */
 
 /**
- * The contract suite of the `sessionCookiePolicy` slot (#728) and its test
- * double.
+ * The contract suite of the `sessionCookiePolicy` slot and its test double.
  * `sessionCookiePolicyContract(input)` holds the policy to what the session
- * configuration and the session store module hold the cookie to today: a
- * name that is an RFC 6265 token, `sameSite` of the three and `secure` a
- * boolean, a domain that is a non-empty string or absent, what a browser
- * keeps — a cookie sent cross-site (`sameSite: "none"`) and a `__Secure-`
- * name only secure, a `__Host-` name only secure and host-only — a lifetime
- * of whole milliseconds within the one-year ceiling, and the whole frozen. `createTestSessionCookiePolicy`
- * answers the fixture configuration's session cookie with any attribute
- * replaced; it checks nothing. Published on
+ * configuration and store hold the cookie to, what a browser keeps
+ * included (`SameSite=None`, `__Secure-` and `__Host-` names).
+ * `createTestSessionCookiePolicy` answers the fixture configuration's
+ * cookie with any attribute replaced; it checks nothing. Published on
  * `@o3co/auth-provider-core/testing`.
  */
 

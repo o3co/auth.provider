@@ -19,21 +19,17 @@ import type { SectionSchema } from "./module-section.mjs";
 import type { Module, ModuleSpec } from "./module-spec.mjs";
 
 /**
- * Authoring entry point for v0.5.0 manifests. The `const` generic
- * parameters R and O capture the literal `requires` / `optional` arrays
- * at the call site without the author writing `as const`, so providers
- * and contribution factories receive a precisely-typed deps object.
- * `S` is inferred from `section.schema`, so the same deps object carries
- * the module's own section, typed as the schema's output (#728).
+ * Authoring entry point for module manifests. The `const` generic parameters
+ * `R` and `O` capture the literal `requires` / `optional` arrays without
+ * `as const`, so providers and contribution factories receive precisely typed
+ * deps. `S` is inferred from `section.schema`, so the deps also carry the
+ * module's own section, typed as the schema's output.
  *
- * A call that writes its type arguments (`defineModule<Requires,
- * Optional>(…)`) infers none of them: a sectioned module that does names
- * its schema's type as the third (`typeof MySection`), and one that
- * declares `authoritative` keys names them as the fourth. `P` is otherwise
- * inferred from the keys of `provides`, so `authoritative` compiles only
- * with keys the module provides (#728).
- *
- * Per A2-α §3.1 (TypeScript 5.0+ `const` modifier on generic parameters).
+ * A call that writes its type arguments (`defineModule<Requires, Optional>(…)`)
+ * infers none: a sectioned module then names its schema's type third
+ * (`typeof MySection`), and one declaring `authoritative` keys names them
+ * fourth. Otherwise `P` is inferred from the keys of `provides`, so
+ * `authoritative` compiles only with keys the module provides.
  *
  * @example
  * ```typescript
@@ -53,14 +49,8 @@ export function defineModule<
 	S extends SectionSchema = never,
 	P extends ComponentKey = never,
 >(spec: ModuleSpec<R, O, S, P>): Module {
-	// Pure pass-through. The boot planner (Phase 4) consumes the erased
-	// Module type; the type-level R/O information is captured at the
-	// defineModule call site for inference but not used at runtime.
-	//
-	// Object.freeze omitted because the manifest is itself `readonly` at
-	// the type level; runtime freezing is a defensive belt the boot planner
-	// applies to projected views (synthetic resolvers per A2-α §6.5), not
-	// to user-authored manifests. Per principle spec Theme D guidance: the
-	// type-level readonly is the contract.
+	// Pure pass-through: the type parameters serve inference only. Not frozen:
+	// the type-level `readonly` is the contract; boot freezes only the
+	// projected views it builds (synthetic resolvers).
 	return spec;
 }

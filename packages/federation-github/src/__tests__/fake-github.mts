@@ -15,25 +15,20 @@
  */
 
 /**
- * A fake GitHub behind a `fetch` implementation.
- *
- * A test hands `github.fetch` to the adapter as `config.fetch`, which the
- * adapter sets as openid-client's `customFetch`, so every request the library
- * makes — the token exchange, `/user`, `/user/emails` — reaches it and the real
- * library runs against it: nothing touches the network, and every request is
- * recorded for the test to inspect.
+ * A fake GitHub behind a `fetch` implementation. A test hands `github.fetch`
+ * to the adapter as `config.fetch` (openid-client's `customFetch`), so every
+ * request the real library makes (the token exchange, `/user`,
+ * `/user/emails`) reaches it and is recorded; nothing touches the network.
  *
  * The bodies are GitHub's, not an OpenID Provider's: the token response is
  * `token_type: "bearer"` with a comma-delimited `scope` and no id_token, and
- * `/user` answers a numeric `id` and no `sub`. The knobs below let a test make
- * one endpoint answer differently at a time.
+ * `/user` answers a numeric `id` and no `sub`.
  *
  * It enforces the two points where the library's defaults decide success:
- * the token endpoint answers form-encoded unless the request's `Accept` asks
- * for JSON, and the REST API (`api.github.com`) refuses a request without a
- * `User-Agent` with `403`. `fake-github.test.mts` holds it to both. It does not
- * check `Authorization` or `X-GitHub-Api-Version`; the adapter's tests assert
- * those header values exactly instead.
+ * the token endpoint answers form-encoded unless `Accept` asks for JSON, and
+ * the REST API (`api.github.com`) refuses a request without a `User-Agent`
+ * with `403`. It does not check `Authorization` or `X-GitHub-Api-Version`;
+ * the adapter's tests assert those header values exactly.
  */
 
 export const GITHUB = {

@@ -16,13 +16,12 @@
 
 /**
  * A keystore that cannot answer is an outage, not a verdict on the token.
- *
  * `KeyStore.getVerificationKey` refuses a kid it does not hold with
  * `UnknownKidError` and a retired one with `ExpiredKidError`. Anything else it
- * throws — a remote key service that timed out, a vault that refused the
- * connection — says nothing about the token, and the verifier reported it as
- * `kid_unknown`: the "attacker-fabricated header" signal, which every caller
- * answers as the client's fault.
+ * throws (a remote key service that timed out, a vault that refused the
+ * connection) says nothing about the token, so it must not read as
+ * `kid_unknown`, the "attacker-fabricated header" signal every caller answers
+ * as the client's fault.
  */
 
 import { createSecretKey } from "node:crypto";
@@ -221,16 +220,13 @@ describe("isVerificationUnavailable — an outage, whichever dependency it was",
 });
 
 /*
- * A header the client made up is the client's, never an outage.
- *
- * `kid` and `typ` come from the token and were used without a type check: the
- * bundled keystores build `Unknown kid: ${kid}`, so a `kid` of
- * `{"toString": null}` threw a TypeError inside `UnknownKidError`'s
- * constructor, and that TypeError — raised while handling the client's input —
- * was classified as the keystore failing to answer. An unauthenticated caller
- * could turn any verifying route into a 503 and an error-level outage line,
- * before a signature was checked. The same held for `typ`, whose message
- * interpolated the header value.
+ * A header the client made up is the client's, never an outage. `kid` and
+ * `typ` come from the token: the bundled keystores build `Unknown kid: ${kid}`,
+ * so an unchecked `kid` of `{"toString": null}` would throw a TypeError inside
+ * `UnknownKidError`'s constructor, classified as the keystore failing to
+ * answer. An unauthenticated caller could then turn any verifying route into a
+ * 503 and an error-level outage line before a signature is checked. The same
+ * holds for `typ`, whose message interpolates the header value.
  */
 describe("verifyJwt — a kid or typ the client made up", () => {
 	const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");

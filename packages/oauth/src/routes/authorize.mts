@@ -79,55 +79,42 @@ export interface AuthorizeHandlerOptions {
 	readonly grantPolicy?: GrantPolicyHook;
 	readonly auditSink?: AuditSink;
 	readonly logger: Logger;
-	/**
-	 * CP-11: the canonical issuer, config-only — never request-derived (the
-	 * Host header is attacker-controlled in many deployments).
-	 */
+	/** The canonical issuer, config-only: never request-derived (Host is attacker-controlled). */
 	readonly issuer: string;
 	/**
 	 * The login trip for a browser that must log in: `urlFor(returnTo)` is the
-	 * login page with the request to come back to. The `loginEntry` slot the
-	 * session module provides (#728) when a module provides it; otherwise
-	 * {@link loginTripFromConfig} over `config.endpoints.login.url`.
+	 * login page with the request to come back to. The session module's
+	 * `loginEntry` when provided, else {@link loginTripFromConfig}.
 	 */
 	readonly login: Pick<LoginEntry, "urlFor">;
 	/**
-	 * Consent-page URL for a client that is not first-party (#527). A thunk,
-	 * evaluated per request as the login page's URL is when no module
-	 * provides the login entry.
+	 * Consent-page URL for a client that is not first-party. A thunk, evaluated
+	 * per request.
 	 */
 	readonly consentUrl: () => string;
-	/**
-	 * #527: where consent records live. Optional: without it a client that is
-	 * not first-party is refused, exactly as before the slot existed.
-	 */
+	/** Where consent records live. Without it a client that is not first-party is refused. */
 	readonly consentStore?: ConsentStore;
 	/**
-	 * #552: where a request is parked while the consent page asks. Wired
-	 * with `consentStore` — the router refuses one without the other.
+	 * Where a request is parked while the consent page asks. Wired with
+	 * `consentStore`; the router refuses one without the other.
 	 */
 	readonly pendingConsentStore?: PendingConsentStore;
-	/** The `oauth.*` knobs, resolved once at router composition (#328). */
+	/** The `oauth.*` knobs, resolved once at router composition. */
 	readonly oauth: ResolvedOAuthOptions;
 	/**
-	 * The durable session store, which admission reads the cookie's session
-	 * from (the session-admission ADR's D2). Optional for the same reason it
-	 * is optional on the router: a deployment without session-backed login
-	 * has no record to read, and admission then decides on the cookie alone.
+	 * The durable session store admission reads the cookie's session from.
+	 * Without it (no session-backed login) admission decides on the cookie alone.
 	 */
 	readonly userSessionStore?: UserSessionStore;
 	/**
-	 * The subject-revocation boundary, which admission applies to the live
-	 * record when it is wired (D8, change 4): a session established before
-	 * the subject's sessions were revoked is refused here too, not only at
-	 * the token side.
+	 * The subject-revocation boundary admission applies to the live record: a
+	 * session established before the subject's sessions were revoked is refused
+	 * here too, not only at the token side.
 	 */
 	readonly subjectRevocation?: SubjectRevocation;
 	/**
-	 * The registered session requirements (D1): what admission asks about the
-	 * session. Required — `oauthModule` passes the synthetic key
-	 * `sessionRequirementResolver` through the router; a handler built by
-	 * hand without one is refused.
+	 * The registered session requirements admission asks about. Required: a
+	 * handler built without one is refused.
 	 */
 	readonly requirements: SessionRequirementResolver;
 }
@@ -141,16 +128,10 @@ export interface AuthorizeHandlerOptions {
 export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
 
 /**
- * The login trip read from the configuration, for a composition in which no
- * module provides the `loginEntry` slot (#728) — the oauth module boots
- * without the session module. `loginUrl` is a thunk, evaluated per request
- * exactly as the inline handler read `config.endpoints.login.url`, so a
- * hand-built config missing the key fails at the same point (request time) it
- * always did — `oauthModule`'s configSchema is what turns the missing key into
- * a boot failure for schema-validated deployments, and refuses a login URL
- * that carries `redirect_to` of its own. The URL is built by core's
- * `loginPageUrlFor` — `redirect_to` in the page's query, before any fragment,
- * the target encoded whole — the rule the session module's entry keeps too.
+ * The login trip read from configuration, for a composition where no module
+ * provides the `loginEntry` slot (the oauth module without the session
+ * module). `loginUrl` is evaluated per request; the URL is built by core's
+ * `loginPageUrlFor`, the rule the session module's entry keeps too.
  */
 export const loginTripFromConfig = (loginUrl: () => string): Pick<LoginEntry, "urlFor"> => ({
 	urlFor: (returnTo: string): string => loginPageUrlFor(loginUrl(), returnTo),
@@ -178,21 +159,18 @@ interface AuthorizeContext {
 	/** Verbatim `state` when it was a single string; echoed on every response. */
 	readonly state: string | undefined;
 	/**
-	 * The request's parameters — query string on GET, form body on POST.
-	 * Carried on the context so every check reads the same object regardless
-	 * of how the request arrived (#284).
+	 * The request's parameters — query string on GET, form body on POST — so
+	 * every check reads the same object however the request arrived.
 	 */
 	readonly params: Record<string, unknown>;
 }
 
 const toStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
-// A-1: RFC 6749 §4.1.2.1 — errors that prevent redirect (invalid client / redirect_uri)
-// must return 400 JSON. Other errors redirect with error params. The same
-// section limits `error_description` to %x20-21 / %x23-5B / %x5D-7E, and
-// several descriptions name what the client sent (a `response_type`, a PKCE
-// method, `prompt` or `acr_values` entries, a `resource`), so it is
-// sanitised here rather than at each call site.
+// RFC 6749 §4.1.2.1: errors that prevent redirect (invalid client or
+// redirect_uri) are 400 JSON; the rest redirect with error params. The same
+// section limits `error_description`'s characters, and several descriptions
+// echo client input, so it is sanitised here once.
 const redirectError = (
 	ctx: AuthorizeContext,
 	error: string,
@@ -206,11 +184,8 @@ const redirectError = (
 };
 
 /**
- * Emits the `authorize.rejected` audit event every rejected authorization
- * request shares — the payload shape (clientId / ip / userAgent /
- * `details.reason`) matches the token endpoint's `token.issued.failure`, but
- * the name is this endpoint's own: /authorize mints codes, not tokens, and
- * its success event is `authorize.granted` (#329).
+ * Emits `authorize.rejected`, with the payload shape of the token endpoint's
+ * `token.issued.failure`; the success event is `authorize.granted`.
  */
 const auditFailure = (ctx: AuthorizeContext, details: Record<string, unknown>): Promise<void> =>
 	emitAuditEvent(ctx.opts.auditSink, {
@@ -223,16 +198,11 @@ const auditFailure = (ctx: AuthorizeContext, details: Record<string, unknown>): 
 	});
 
 /**
- * RFC 6749 §4.1.1 identification: `client_id` / `redirect_uri` presence, the
- * client lookup, and the `redirect_uri` allowlist. Everything here fails as
- * 400/503 JSON (A-1) because no trusted redirect target exists yet.
- *
- * A `client_id` that cannot name a client (core's `isWellFormedClientId`: a
- * control character, or longer than `MAX_CLIENT_ID_LENGTH`) is answered like
- * an unknown one and never reaches the repository, which may throw on it. A
- * repository that throws cannot answer: `503 temporarily_unavailable`
- * ("client repository unavailable"), logged at error level as
- * `client_repository_unavailable` — as client authentication answers it.
+ * RFC 6749 §4.1.1 identification: `client_id`/`redirect_uri` presence, client
+ * lookup and the `redirect_uri` allowlist. Everything here answers 400/503
+ * JSON because no trusted redirect target exists yet. A malformed `client_id`
+ * is answered as unknown and never reaches the repository (which may throw on
+ * it); a repository that throws is `503 temporarily_unavailable`.
  *
  * Returns `null` when a response has been sent.
  */
@@ -243,7 +213,7 @@ const resolveClientAndRedirectUri = async (
 ): Promise<{ client: PublicClient; clientId: string; redirectUri: string } | null> => {
 	const { client_id = null, redirect_uri = null } = authorizeParams(req);
 
-	// A-1: invalid client_id and redirect_uri → 400 JSON (cannot redirect)
+	// Invalid client_id or redirect_uri → 400 JSON (cannot redirect).
 	if (typeof client_id !== "string" || !client_id) {
 		res.status(400).json({ error: "invalid_request", error_description: "client_id is required" });
 		return null;
@@ -283,12 +253,11 @@ const resolveClientAndRedirectUri = async (
 		return null;
 	}
 
-	// #483: exact string equality, except that a `http:` loopback IP literal on
-	// both sides is compared with the port dropped — a native app's listener
-	// binds an ephemeral port the registration cannot name (RFC 8252 §7.3).
-	// `localhost` and `https:` get no carve-out. The PRESENTED URI is what is
-	// carried forward and bound to the code record, so the token endpoint's
-	// §4.1.3 equality check still compares the URI actually used.
+	// Exact string equality, except that an `http:` loopback IP literal on both
+	// sides is compared without the port — a native app's listener binds an
+	// ephemeral port the registration cannot name (RFC 8252 §7.3). `localhost`
+	// and `https:` get no carve-out. The PRESENTED URI is bound to the code, so
+	// the token endpoint's §4.1.3 equality check compares the URI actually used.
 	if (
 		!client.allowedRedirectUris.some((entry) => matchesRegisteredRedirectUri(entry, redirect_uri))
 	) {
@@ -302,19 +271,14 @@ const resolveClientAndRedirectUri = async (
 	return { client, clientId: client_id, redirectUri: redirect_uri };
 };
 
-// The sole owner of the response_type refusal since #397 — it runs after
-// `resolveClientAndRedirectUri`, so the refusal travels via redirect per
-// RFC 6749 §4.1.2.1 (A-1's rule that nothing redirects to an unvalidated
-// target holds; validation has already succeeded here). Handles unknown
-// types and repeats such as `?response_type=code&response_type=token`,
-// which Express surfaces as an array.
+// Runs after the redirect target is validated, so the refusal redirects (RFC
+// 6749 §4.1.2.1). Also refuses a repeat, which Express surfaces as an array.
 const checkResponseTypeIsCode = (ctx: AuthorizeContext): boolean => {
 	const raw = ctx.params.response_type;
 	if (toStr(raw) !== "code") {
-		// The description names what actually arrived — a missing parameter and
-		// a repeated one are different client bugs, and `"undefined"` in quotes
-		// (the old rendering of both) pointed at neither. Quoted with `'`:
-		// `redirectError` holds the text to RFC 6749's character set.
+		// Names what arrived: a missing and a repeated parameter are different
+		// client bugs. Quoted with `'`, as `redirectError` holds the text to
+		// RFC 6749's character set.
 		const description =
 			raw === undefined
 				? "response_type is required"
@@ -327,11 +291,9 @@ const checkResponseTypeIsCode = (ctx: AuthorizeContext): boolean => {
 	return true;
 };
 
-// #268: the code flow leads to `grant_type=authorization_code` at
-// the token endpoint, so a client not registered for it must be
-// turned away here rather than after the user has authenticated
-// and a code has been minted. `redirect_uri` is validated above,
-// so RFC 6749 §4.1.2.1 puts this error in the redirect.
+// The code flow leads to `grant_type=authorization_code`, so a client not
+// registered for it is refused here, before the user authenticates and a code
+// is minted.
 const checkAuthorizationCodeGrantAllowed = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
@@ -352,10 +314,8 @@ const checkAuthorizationCodeGrantAllowed = async (
 	return false;
 };
 
-// #267 / #527: a client that is not first-party is served only through the
-// consent step, so with no consent store wired it is refused here — the #267
-// refusal, in the position it always had (ahead of the request-shape gates),
-// so what such a deployment answers does not change.
+// A client that is not first-party is served only through consent, so without
+// a consent store it is refused here, ahead of the request-shape checks.
 const checkFirstPartyOrConsentable = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
@@ -376,36 +336,12 @@ const subjectOf = (req: Request): string | null => {
 	return typeof id === "string" && id.length > 0 ? id : null;
 };
 
-// #267 / #527: `/authorize` mints a code as soon as the session is
-// authenticated — for a first-party client. That is the accepted model for a
-// client the deployment operates, and only there: a forced top-level
-// navigation from an attacker's page makes a logged-in victim's browser mint
-// a code, bound to the victim's session, delivered to the named client's
-// registered `redirect_uri`, and since the attacker chose the
-// `code_challenge` they redeem it. Consent is the step that changes that,
-// and it is what every other client goes through: the user is asked, on the
-// deployment's own page, before a code is minted, and what they answered is
-// recorded so they are not asked again for what they already allowed.
-//
-// Anything that is not an explicit `firstParty: true` goes through it — a
-// registration with no field and one carrying `false` alike (the one-time
-// migration flag that admitted unmarked registrations, #317, was removed in
-// #330). Without a consent store there is no way to ask, and the refusal
-// #267 introduced stands: an operator who wants to serve a third-party
-// client wires `consentStore` rather than marking the client first-party.
-//
-// Runs after every request-shape check and before the policy hook: a user
-// is not asked to consent to a request that would fail anyway, and the
-// policy sees the request only once the user has allowed it.
 /**
- * This authorization request as a GET URL on the issuer's origin: the path
- * it arrived at, and its parameters — a GET's query, a POST's form body
- * (`authorizeParams`) — written as the query, a repeated one once per value.
- * What every page the browser is sent to returns it to — the consent page,
- * the login page, a requirement's step-up page — and what an ask is bound
- * to. Not `req.originalUrl` (#527): a POST carries its parameters in the
- * body, so its URL alone names no client, no `redirect_uri`, no PKCE, and
- * the browser would come back to a different, invalid request.
+ * This authorization request as a GET URL on the issuer's origin, with a
+ * POST's form parameters written as the query: what the consent, login and
+ * step-up pages return to, and what an ask is bound to. Not
+ * `req.originalUrl`: a POST's URL alone names no client, `redirect_uri` or
+ * PKCE.
  */
 const authorizeRequestUrl = (issuerOrigin: string, req: Request): URL => {
 	const url = new URL(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
@@ -423,12 +359,9 @@ const authorizeRequestUrl = (issuerOrigin: string, req: Request): URL => {
 };
 
 /**
- * The authorize request to come back to once the consent page has an
- * answer: this request (`authorizeRequestUrl`, which carries a POST's
- * parameters back as the query), less `prompt=consent`, which this very
- * round trip answers — carried back, it would park the request again,
- * forever (#527). Every other prompt value is left alone — `login` has its
- * own ask (#481), a record the ask parameter names.
+ * The authorize request to resume after consent: this request less
+ * `prompt=consent`, which the round trip answers — carried back, it would
+ * park the request again forever. Other prompt values stay.
  */
 const resumeUrl = (ctx: AuthorizeContext): string => {
 	const url = authorizeRequestUrl(ctx.issuerOrigin, ctx.req);
@@ -447,6 +380,14 @@ const resumeUrl = (ctx: AuthorizeContext): string => {
 	return url.toString();
 };
 
+/**
+ * Consent for a client that is not an explicit `firstParty: true`. Without
+ * it, a forced navigation from an attacker's page would make a logged-in
+ * victim's browser mint a code for the attacker's chosen `code_challenge`.
+ * The user is asked on the deployment's own page and the answer recorded, so
+ * covered requests are not asked again. Runs after every request-shape check
+ * (no consent for a request that would fail anyway) and before the policy.
+ */
 const checkConsent = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
@@ -496,15 +437,10 @@ const checkConsent = async (
 		);
 		return false;
 	}
-	// Park the request under an unguessable challenge and hand the browser to
-	// the deployment's page. The challenge is what the page's answer carries
-	// back, and being session-bound and unreadable cross-site it is the
-	// synchronizer token that keeps a forged POST from answering for the user.
-	//
-	// #552: in a record of its own, not on the session. The session is a
-	// per-request snapshot, so a field on it cannot be consumed atomically
-	// across two answers in flight; the record names the session that parked
-	// it, which is what keeps the challenge session-bound.
+	// Park the request under an unguessable, session-bound challenge: the
+	// consent page's answer must carry it back, which keeps a forged cross-site
+	// POST from answering for the user. Parked in its own record, not on the
+	// session (a per-request snapshot), so it can be consumed atomically.
 	const sessionId = (ctx.req as { sessionID?: unknown }).sessionID;
 	if (typeof sessionId !== "string" || sessionId.length === 0) {
 		await auditFailure(ctx, { reason: "consent_without_session_id" });
@@ -545,18 +481,10 @@ const checkConsent = async (
 	return false;
 };
 
-// #297: refuse before a code is minted when the deployment requires
-// a verified email and the Store has not published one for this
-// user. `/authorize` and the `session` grant are the two points
-// that hold the user's session at issuance; `refresh_token` and
-// token-exchange derive from an artifact that already passed this
-// gate, so re-checking there would revoke a session mid-life on a
-// Store hiccup rather than gate its creation.
-//
-// `access_denied` is the RFC 6749 §4.1.2.1 code for "the resource
-// owner or authorization server denied the request", which is
-// exactly what this is — and unlike `invalid_request` it does not
-// suggest the client sent something malformed.
+// Refuse before a code is minted when a verified email is required and the
+// Store has published none. Artifacts derived from a code (refresh, token
+// exchange) are not re-checked: that would end a live session on a Store
+// hiccup. `access_denied` does not suggest the client sent something malformed.
 const checkEmailVerified = async (ctx: AuthorizeContext): Promise<boolean> => {
 	if (!(ctx.opts.oauth.requireEmailVerified && !isEmailVerified(ctx.req.session.user))) return true;
 	await auditFailure(ctx, { reason: "email_not_verified" });
@@ -565,25 +493,12 @@ const checkEmailVerified = async (ctx: AuthorizeContext): Promise<boolean> => {
 };
 
 /**
- * #273 (OAuth 2.1 §4.1.1 / RFC 9700 §2.1.1): PKCE gate + method resolution,
- * as one step.
- *
- * Pre-#273 this was two functions running either side of scope narrowing and
- * policy evaluation — a presence check here, an allowlist check after the
- * policy hook — with three different rules between them (a public-client
- * S256 mandate, an operator `pkce.required` flag, an operator
- * `supportedMethods` allowlist with a `defaultMethod` fallback). They are one
- * rule now, applied to every client:
- *
- * 1. a `code_challenge` is REQUIRED — confidential clients included, because a
- *    client secret proves who is redeeming the code, not that the redeemer is
- *    the party it was issued to;
- * 2. the method is `S256`, unless this client's registration opts into `plain`
- *    (`pkceMethodsForClient`).
- *
- * Running the allowlist check here rather than after `applyGrantPolicy` also
- * means an unsupported method is refused before the policy hook's external
- * I/O, matching the `checkNonce` placement rationale.
+ * PKCE (OAuth 2.1 §4.1.1, RFC 9700 §2.1.1) for every client: a
+ * `code_challenge` is required — confidential clients included, since a
+ * client secret proves who redeems the code, not that the redeemer is the
+ * party it was issued to — and the method is `S256` unless this client's
+ * registration opts into `plain` (`pkceMethodsForClient`). Runs before the
+ * policy hook so a bad method costs no external I/O.
  */
 const checkPkce = (
 	ctx: AuthorizeContext,
@@ -591,21 +506,17 @@ const checkPkce = (
 	codeChallenge: unknown,
 	codeChallengeMethod: unknown,
 ): { method: string } | null => {
-	// The resolved policy object — the SAME one the authorization grant reads
-	// at `/token`. The challenge requirement is unconditional for the reason
-	// given there: `ResolvedPkceOptions.required` is the literal `true`, so
-	// gating on it would be a branch with no reachable other path. The shared
-	// runtime read is `pkceMethodsForClient(policy, client)` below.
+	// The same resolved policy the authorization grant reads at `/token`. The
+	// challenge is unconditionally required (`ResolvedPkceOptions.required` is
+	// literally `true`).
 	const policy = ctx.opts.oauth.pkce;
 	if (typeof codeChallenge !== "string" || !codeChallenge) {
 		redirectError(ctx, "invalid_request", "code_challenge is required");
 		return null;
 	}
-	// `checkSingleValuedParams` already refused a repeated parameter, so
-	// `toStr` yielding undefined here means genuinely absent — which RFC 7636
-	// §4.3 defines as `plain`, and which is then refused unless this client
-	// opted in. (Before that gate existed, a repeat also landed here and was
-	// silently read as `plain`; see SINGLE_VALUED_QUERY_PARAMS.)
+	// A repeat was refused by `checkSingleValuedParams`, so undefined means
+	// absent, which RFC 7636 §4.3 defines as `plain` — refused unless this
+	// client opted in.
 	const requestedMethod = toStr(codeChallengeMethod);
 	const method = requestedMethod ?? PKCE_METHOD_ABSENT_DEFAULT;
 	if (!pkceMethodsForClient(policy, client).includes(method)) {
@@ -622,114 +533,41 @@ const checkPkce = (
 };
 
 /**
- * The `/authorize` query parameters RFC 6749 §3.1 defines as single-valued
- * ("Request and response parameters MUST NOT be included more than once").
+ * `/authorize` parameters RFC 6749 §3.1 defines as single-valued. Express
+ * surfaces a repeat as an array, which every read here narrows to
+ * `undefined` — absence. Unchecked, a repeated `code_challenge_method` would
+ * downgrade to `plain`, a repeated `scope` would fall back to the default,
+ * and a repeated `state` would be dropped, silently failing the client's
+ * CSRF check.
  *
- * Express + `qs` surfaces a repeated `?p=a&p=b` as an ARRAY (and `?p[k]=v` as
- * an object), while every read in this file narrows a non-string to
- * `undefined` — the same shape *absence* produces. Without this gate a
- * repeated parameter is therefore read as "not sent", which is a different
- * request from the one the client made, and in three places that difference
- * was wrong rather than merely surprising:
- *
- * - **`code_challenge_method`** fell through to RFC 7636 §4.3's `plain`
- *   default. A client the operator opted into `plain` (`allowPlainPkce`)
- *   could downgrade its own S256 request by sending the parameter twice —
- *   the AS minted a `plain` code, no S256 verifier was ever computed, and
- *   nothing about the request looked malformed. That is the instance
- *   Copilot flagged on #350.
- * - **`scope`** became "no scope requested", which does not narrow — it
- *   widens the grant to the client's entire registered allowlist.
- * - **`state`** was dropped from the response, so the client's CSRF check
- *   failed silently instead of the request failing loudly.
- *
- * Two parameters are deliberately NOT in the list:
- *
- * - `response_type` is already refused by `checkResponseTypeIsCode` with
- *   `unsupported_response_type`, the code RFC 6749 §4.1.2.1 defines for it.
- *   Sweeping it in here would replace a specific error with a generic one.
- * - `resource` is defined as **repeatable** by RFC 8707 §2, so rejecting a
- *   repeat would break a conformant client. `extractResourceParam` validates
- *   its elements instead.
- *
- * `client_id` and `redirect_uri` are absent for a different reason: they are
- * single-valued too, but they are validated in the pre-redirect phase where
- * the correct answer is `400` JSON, not a redirect — a `redirect_uri` we
- * could not read is precisely one we must not redirect to (A-1).
- *
- * `nonce` is absent for a third reason: `checkNonce` already owns it, and has
- * since IH-16 — it rejects a repeat with this exact message and then applies
- * the length and character-set bounds. Listing it here as well would give one
- * parameter two owners and make the check inside `checkNonce` unreachable,
- * which is dead code rather than defence in depth. One owner per parameter;
- * this gate is for the ones that had none.
+ * Deliberately absent: `response_type` (its own `unsupported_response_type`),
+ * `resource` (repeatable, RFC 8707 §2), `client_id`/`redirect_uri` (checked
+ * before a redirect target exists, so 400 JSON) and `nonce` (`checkNonce`
+ * owns it). One owner per parameter.
  */
 const SINGLE_VALUED_QUERY_PARAMS = [
 	"scope",
 	"state",
 	"code_challenge",
 	"code_challenge_method",
-	// #481
 	"max_age",
 	"acr_values",
 	"reauth_ask",
-	// The MFA ADR's D15: one JSON object, read by `checkClaimsParameter`.
+	// One JSON object, read by `checkClaimsParameter`.
 	"claims",
 ] as const;
 
 /**
- * Refuses a repeated single-valued parameter at the request boundary, before
- * any of it is interpreted. The message is per-parameter and matches the
- * wording IH-16 already used for `nonce`, which this gate now owns for the
- * whole class.
- */
-/**
- * The authorization request's parameters, wherever this request carried them.
- *
- * OIDC Core §3.1.2.1: *"Authorization Servers MUST support the use of the HTTP
- * GET and POST methods"*. A POST carries the same parameters in a
- * form-encoded body — the parameter names, the single-valued rule and every
- * check below are identical, so the only thing that differs is which object
- * they are read from, and reading it in one place is what keeps a check from
- * silently applying to GET alone (#284).
- *
- * Express's `qs` surfaces a repeated parameter as an array from either source,
- * so `checkSingleValuedParams` covers both without knowing which it got.
+ * The authorization request's parameters: a POST's form body or a GET's
+ * query (OIDC Core §3.1.2.1 requires both methods). Read in one place so no
+ * check silently applies to GET alone.
  */
 export const authorizeParams = (req: Request): Record<string, unknown> =>
 	req.method === "POST"
 		? ((req.body ?? {}) as Record<string, unknown>)
 		: (req.query as Record<string, unknown>);
 
-/**
- * OIDC Core §3.1.2.1 `prompt` (#284).
- *
- * `none` is the one that matters and the one whose absence broke standard RP
- * libraries: silent renewal asks for a token without user interaction and
- * expects `login_required` when there is no session. Answering with the login
- * page instead — which is what happened before — hands an HTML redirect to a
- * hidden iframe, where it does nothing and produces a timeout rather than an
- * error the RP can act on.
- *
- * `consent` is honoured since #527: for a client that is not first-party it
- * forces the consent page even when a record already covers the request; for
- * a first-party client it is a no-op, since the deployment operates that
- * client and there is nothing to consent to.
- *
- * `login` is honoured since #481, through the re-authentication ask
- * (`./reauthAsk.mts`), which is what keeps it from looping.
- *
- * Every other value is **refused**, not ignored:
- *
- * - `select_account` — there is no account picker. Ignoring it would hand
- *   back a token the RP believes was freshly account-picked.
- *
- * `invalid_request` naming the value is the answer — OIDC Core defines no
- * "prompt value unsupported" code, and inventing one would put a non-standard
- * error where an RP expects a standard one.
- *
- * Returns the resolved directive, or `null` when it has already answered.
- */
+/** The `prompt` values this server honours. */
 type PromptDirective = {
 	readonly silent: boolean;
 	readonly login: boolean;
@@ -738,6 +576,17 @@ type PromptDirective = {
 
 const NO_PROMPT: PromptDirective = { silent: false, login: false, consent: false };
 
+/**
+ * OIDC Core §3.1.2.1 `prompt`. `none` answers `login_required` instead of a
+ * login page, which a hidden iframe doing silent renewal cannot act on.
+ * `consent` forces the consent page for a client that is not first-party (a
+ * no-op for first-party). `login` goes through the re-authentication ask
+ * (`./reauthAsk.mts`), which keeps it from looping. Anything else
+ * (`select_account`) is refused with `invalid_request`, not ignored: ignoring
+ * it would return a token the RP believes honoured it.
+ *
+ * Returns the directive, or `null` when it has already answered.
+ */
 const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 	const raw = ctx.params.prompt;
 	if (raw === undefined) return NO_PROMPT;
@@ -745,11 +594,8 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 		redirectError(ctx, "invalid_request", "prompt must be a single string value");
 		return null;
 	}
-	// §3.1.2.1: a space-delimited list, read strictly — a tab is not a
-	// delimiter, so `none\tlogin` is malformed rather than one value this
-	// server happens not to support. `none` may not be combined with any other
-	// value — "if this parameter contains none with any other value, an error
-	// is returned".
+	// §3.1.2.1: a space-delimited list read strictly (a tab is not a
+	// delimiter); `none` may not be combined with any other value.
 	const values = readSpaceDelimitedParameter(raw);
 	if (values === null) {
 		redirectError(ctx, "invalid_request", "prompt is not a space-delimited list of values");
@@ -760,8 +606,7 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 		redirectError(ctx, "invalid_request", "prompt=none cannot be combined with other values");
 		return null;
 	}
-	// #481: `login` is honoured — see `evaluateReauthentication`.
-	// #527: so is `consent` — see `checkConsent`.
+	// `login`: see `evaluateReauthentication`; `consent`: see `checkConsent`.
 	const unsupported = values.filter((v) => v !== "none" && v !== "login" && v !== "consent");
 	if (unsupported.length > 0) {
 		redirectError(
@@ -780,11 +625,8 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 };
 
 /**
- * #481 — `max_age` (OIDC Core §3.1.2.1): the seconds since the End-User's
- * authentication that the RP will accept. A non-negative integer, or a
- * refusal; absent means no constraint, and so does an empty value — RFC 6749
- * §3.1: "Parameters sent without a value MUST be treated as if they were
- * omitted from the request."
+ * `max_age` (OIDC Core §3.1.2.1): a non-negative integer, or a refusal.
+ * Absent or empty means no constraint (RFC 6749 §3.1).
  */
 const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefined } | null => {
 	const raw = ctx.params.max_age;
@@ -796,11 +638,6 @@ const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefine
 	return { value: Number(raw) };
 };
 
-/**
- * #481 — the re-authentication ask, and why it is neither a request
- * parameter nor a session field: see `./reauthAsk.mts`, which holds the
- * record and the reasoning.
- */
 /**
  * The authorize request an ask is minted for and returned to: this request
  * as a GET URL (`authorizeRequestUrl` — a POST's form body written as the
@@ -816,12 +653,10 @@ const askRequestOf = (ctx: AuthorizeContext): string => {
 type ReauthOutcome = "proceed" | "login" | "answered";
 
 /**
- * The ask the request presents, consumed — spent, as #481's was, so a
- * replay of the returned URL asks again rather than minting twice: `null`
- * when none is presented, none is found, it names another request or has
+ * The presented ask, consumed so a replayed URL asks again rather than
+ * minting twice: `null` when absent, unknown, bound to another request or
  * expired; `undefined` after an outage has been answered. Read only when a
- * decision needs it — freshness asked for, or a step-up to send — so a
- * request that asks for neither never touches the store, as before.
+ * decision needs it.
  */
 const presentedAsk = async (
 	ctx: AuthorizeContext,
@@ -865,18 +700,12 @@ const returnWithAsk = (askRequest: string, askId: string): string => {
 };
 
 /**
- * #481 — decide whether the session's authentication is fresh enough.
- *
- * `prompt=login` and a `max_age` the session's `auth_time` is older than
- * both mean "re-authenticate". The first time through, the browser is sent
- * to the login page with the request round-tripped and the ask recorded —
- * unless the RP asked for `prompt=none`, in which case the only honest
- * answer is `login_required`. When the presented ask records a login trip
- * the user has been to the login page: a session authenticated after the
- * ask satisfies both `prompt=login` and any `max_age` (it is as fresh as
- * this request), and one that was not is refused with `login_required`
- * rather than looped. Decided on the session the admission carries, before
- * its verdict is acted on (the MFA ADR's D17: freshness first).
+ * Whether the session's authentication is fresh enough. `prompt=login`, or a
+ * `max_age` older than the session's `auth_time`, sends the browser to log in
+ * with the ask recorded (`login_required` under `prompt=none`). When the
+ * presented ask records a login trip, a session authenticated after the ask
+ * satisfies both; one that was not is refused with `login_required` rather
+ * than looped. Decided before admission's verdict is acted on.
  */
 const evaluateReauthentication = (
 	ctx: AuthorizeContext,
@@ -941,12 +770,11 @@ const evaluateReauthentication = (
 };
 
 /**
- * The login trip (#481): the ask is a record in the session store named by
- * an opaque id on the URL the browser carries (v0.13.0 audit) — a caller
- * cannot invent an id that exists, the record survives the session
- * regeneration the login itself performs, and it is bound to this request
- * so it cannot satisfy another's freshness requirement. A step-up trip
- * already asked is carried, so the same session is not sent on it twice.
+ * The login trip. The ask is a store record named by an opaque id on the URL:
+ * a caller cannot invent an id that exists, the record survives the session
+ * regeneration login performs, and it is bound to this request so it cannot
+ * satisfy another's freshness requirement. A step-up trip already asked is
+ * carried over, so the session is not sent on it twice.
  */
 const sendToLogin = async (
 	ctx: AuthorizeContext,
@@ -957,8 +785,7 @@ const sendToLogin = async (
 	const askRequest = askRequestOf(ctx);
 	const askId = await recordAsk(ctx, askStore, {
 		request: askRequest,
-		// Kept across the trips of one request: the MFA ADR's D17 caps a
-		// chain of them from it.
+		// Kept across the trips of one request, which caps a chain of them.
 		createdAt: ask?.createdAt ?? now,
 		loginAskedAt: now,
 		stepUpAskedAt: { ...ask?.stepUpAskedAt },
@@ -968,13 +795,9 @@ const sendToLogin = async (
 };
 
 /**
- * #481 — `acr_values` (OIDC Core §3.1.2.1), parsed. A repeat never reaches
- * here (`checkSingleValuedParams`). Read strictly, as every space-delimited
- * request parameter is: a malformed list is the request's fault, not an acr
- * this deployment lacks. What the values are met by — the table less the
- * entries nothing installed can satisfy (the MFA ADR's D15,
- * `../acrValues.mts`), over the `amr` the session vouches for — is
- * admission's step 6, asked for through `asks.acrValues`.
+ * `acr_values` (OIDC Core §3.1.2.1), read strictly: a malformed list is the
+ * request's fault, not an acr this deployment lacks. Whether the values are
+ * met is admission's decision (`asks.acrValues`).
  */
 const parseAcrValues = (ctx: AuthorizeContext): readonly string[] | null => {
 	const raw = ctx.params.acr_values;
@@ -988,10 +811,9 @@ const parseAcrValues = (ctx: AuthorizeContext): readonly string[] | null => {
 };
 
 /**
- * An `unmet` admission (D8): `unmet_authentication_requirements` when it is
- * the `acr` the request asked for that nothing meets — naming a value this
- * deployment has not configured when that is why, rather than accepting it
- * silently — and `login_required` when a requirement is unmet, since only a
+ * An `unmet` admission: `unmet_authentication_requirements` when the
+ * requested `acr` is what nothing meets (naming values not configured here
+ * rather than accepting them silently), else `login_required`, since only a
  * new login can change what the requirement decides on.
  */
 const refuseUnmet = (
@@ -1022,20 +844,12 @@ const refuseUnmet = (
 };
 
 /**
- * A `step_up` admission (the MFA ADR's D17, amended): the browser is sent to
- * the requirement's page as registered — the URL every consumer answers,
- * resolved at registration on the issuer with the page's own parameters on
- * the query, never by concatenation — with this trip's own two: the
- * values a step-up can meet as `acr_values` when the request asked for an
- * acr, and `redirect_to` naming this request with the ask recorded.
- *
- * The ask records the trip under the requirement's name. A session that
- * comes back not later than that record was already sent on this trip and
- * is refused rather than sent again — `unmet_authentication_requirements`
- * when the request's `acr_values` are what is still unmet, `login_required`
- * when the requirement asks for a new login — while a session established
- * after the ask (`max_age` ran out during the trip and the user logged in
- * again) may make one more. `prompt=none` cannot be sent anywhere:
+ * A `step_up` admission: send the browser to the requirement's registered
+ * page with `acr_values` (when the request asked for an acr) and
+ * `redirect_to` naming this request with the ask recorded. A session that
+ * comes back no later than the recorded trip is refused rather than sent
+ * again (`unmet_authentication_requirements` or `login_required`); one
+ * established after it may make one more. `prompt=none` is
  * `interaction_required`.
  */
 const stepUpTrip = async (
@@ -1083,9 +897,7 @@ const stepUpTrip = async (
 		);
 		return;
 	}
-	// The page as registered, resolved then on the issuer with its params on
-	// the query — what every consumer answers. This trip's own parameters —
-	// the hint and the return — are set on it below.
+	// The page as registered; this trip's own parameters are set on it below.
 	const target = new URL(page.href);
 	// Registration holds a page to the issuer's origin (core's
 	// `checkStepUpPage`); a resolver built without an issuer does not. The
@@ -1114,12 +926,9 @@ const stepUpTrip = async (
 };
 
 /**
- * Regenerates the cookie session, as express-session does when a route asks
- * for a new id: the old record is destroyed in its store and a fresh,
- * unauthenticated one takes its place, so nothing of the refused session
- * survives. A failure is that store's outage. A request whose session cannot
- * regenerate at all is not express-session's — nothing this endpoint can
- * drop the authentication of — and fails the same way.
+ * Regenerates the cookie session so nothing of the refused session survives.
+ * A failure is that store's outage; a session that cannot regenerate at all
+ * fails the same way.
  */
 const regenerateCookieSession = (
 	req: Request,
@@ -1139,17 +948,12 @@ const regenerateCookieSession = (
 	});
 
 /**
- * The one class a new login remedies (D2): `not_live`, `revoked` and
- * `reauthenticate` — and `unauthenticated`, which the flag check answered
- * before anything was read. Under `prompt=none` the honest answer is
- * `login_required` (OIDC Core §3.1.2.6), delivered where the RP is
- * listening. Otherwise the cookie session is regenerated first (D8, change
- * 6), so a login page that forwards signed-in users cannot loop on the flag
- * the refused session left behind; a regeneration that fails is a
- * session-store write, answered `temporarily_unavailable` and logged once
- * at error level as `authorize_cookie_session_unavailable`, and the cookie
- * session is abandoned so express-session does not try that store again on
- * the way out. Then the login page, with this request to come back to.
+ * A new login, for `not_live`, `revoked`, `reauthenticate` and
+ * `unauthenticated`. Under `prompt=none` the answer is `login_required` (OIDC
+ * Core §3.1.2.6). Otherwise the cookie session is regenerated first, so a
+ * login page that forwards signed-in users cannot loop on the refused
+ * session's flag; if regeneration fails, answer `temporarily_unavailable` and
+ * abandon the session so express-session does not write to that store again.
  */
 const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise<void> => {
 	if (prompt.silent) {
@@ -1174,20 +978,14 @@ const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise
 };
 
 /**
- * What the admission decides for this request (D8, the `/authorize` row),
- * or `null` once it has been answered:
- *
- * - `unavailable` → `temporarily_unavailable` on the validated redirect URI
- *   (change 2: never the login page, whose forwarding of signed-in users
- *   would loop on an outage);
- * - `unauthenticated`, `not_live`, `revoked`, `reauthenticate` → a new login
- *   (`newLogin`);
- * - `admitted`, `step_up`, `unmet` — the three that carry the session —
- *   freshness first, on that session: `max_age` and `prompt=login` may send
- *   the browser to log in, or refuse, before the verdict is acted on, so
- *   `prompt=none` with a stale `max_age` is `login_required` whatever the
- *   verdict; then `unmet` is refused, `step_up` is a trip, and `admitted`
- *   proceeds with the `acr` the session met.
+ * Acts on the admission, or returns `null` once answered. An outage is
+ * `temporarily_unavailable` on the validated redirect URI — never the login
+ * page, whose forwarding of signed-in users would loop. A dead or
+ * unauthenticated session gets a new login. For the outcomes that carry a
+ * session, freshness (`max_age`, `prompt=login`) is decided first, so
+ * `prompt=none` with a stale `max_age` is `login_required` whatever the
+ * verdict; then `unmet` is refused, `step_up` is a trip, and `admitted`
+ * proceeds with the `acr` the session met.
  */
 const decideOnAdmission = async (
 	ctx: AuthorizeContext,
@@ -1245,20 +1043,11 @@ const decideOnAdmission = async (
 };
 
 /**
- * Refuse the request-object parameters this AS does not implement (#284).
- *
- * OIDC Core defines `request_not_supported` and `request_uri_not_supported`
- * for exactly this, and the reason to answer rather than ignore is security,
- * not tidiness. A signed request object exists to make the parameters
- * tamper-proof; an AS that ignores it and processes the query string instead
- * gives an attacker precisely what the request object was there to prevent,
- * while the RP believes its signed request was honoured. Silence is the worst
- * of the three options.
- *
- * The discovery document says the same thing in its own vocabulary —
- * `request_uri_parameter_supported: false` is emitted because OIDC Discovery
- * defaults that field to **true** when omitted, so saying nothing claimed
- * support for `request_uri`. Same shape #283 found in `grant_types_supported`.
+ * Refuses request objects (`request`, `request_uri`), which this server does
+ * not implement, with OIDC Core's `request_not_supported` /
+ * `request_uri_not_supported`. Ignoring them would be unsafe: the RP would
+ * believe its signed, tamper-proof parameters were honoured while the
+ * unsigned query was processed instead.
  */
 const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean => {
 	if (ctx.params.request !== undefined) {
@@ -1281,23 +1070,14 @@ const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean => {
 };
 
 /**
- * OIDC Core §5.5 `claims` (the MFA ADR's D15): a request that names `acr` in
- * it — essential or not, for the id_token or for userinfo (§5.5.1.1) — is
- * refused with `invalid_request`, by #284's rule for a security-relevant
- * parameter this server does not honour. It vouches for an `acr` only
- * through `acr_values` and its table; ignoring the request would hand back a
- * token the RP reads as having honoured it. Every other use of `claims` is
- * ignored, as it always was, and discovery keeps `claims_parameter_supported`
- * absent, which reads as `false`.
- *
- * An empty value is omitted (RFC 6749 §3.1). Any other value that is not a
- * JSON object cannot be told not to name `acr`, so it is malformed, as a
- * malformed `acr_values` is. A repeat never reaches here
- * (`checkSingleValuedParams`). Runs before the re-authentication decision, so
- * a refused request is never sent by a `prompt=login` or `max_age` to log in
- * first. (An unauthenticated browser is still sent to the login page before
- * this runs, as for every parameter: its `redirect_uri` is not yet trusted to
- * answer at — #284's ordering.)
+ * OIDC Core §5.5 `claims`: a request naming `acr` (for id_token or userinfo,
+ * essential or not) is refused with `invalid_request` — this server vouches
+ * for `acr` only through `acr_values`, and ignoring the request would return
+ * a token the RP reads as honouring it. Other uses of `claims` are ignored
+ * (discovery omits `claims_parameter_supported`). An empty value is omitted
+ * (RFC 6749 §3.1); any other non-object is malformed. Runs before the
+ * re-authentication decision, so a refused request is never first sent to
+ * log in.
  */
 const checkClaimsParameter = (ctx: AuthorizeContext): boolean => {
 	const raw = ctx.params.claims;
@@ -1322,6 +1102,7 @@ const checkClaimsParameter = (ctx: AuthorizeContext): boolean => {
 	return true;
 };
 
+/** Refuses a repeated single-valued parameter before any of it is interpreted. */
 const checkSingleValuedParams = (ctx: AuthorizeContext): boolean => {
 	for (const name of SINGLE_VALUED_QUERY_PARAMS) {
 		const value = ctx.params[name];
@@ -1332,41 +1113,16 @@ const checkSingleValuedParams = (ctx: AuthorizeContext): boolean => {
 	return true;
 };
 
-// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter BEFORE the
-// scope/policy block runs. Pre-fix the value was stored on the code
-// record + echoed verbatim into the id_token, letting a malicious
-// RP exhaust per-request memory or amplify the token payload with a
-// multi-megabyte string. The 256-char ceiling is operator-tunable
-// via `oauth.nonce.maxLength` (default in core HOCON, env-var
-// `OAUTH_NONCE_MAX_LENGTH`). Errors use `redirectError` because
-// `redirect_uri` is already validated against the client allowlist
-// at this point — RFC 6749 §4.1.2.1 requires error redirects from
-// here on.
-//
-// Placement (Claude review fixup): the gate runs BEFORE
-// `grantPolicy.evaluate()` so an oversized nonce cannot trigger
-// external policy I/O (Redis lookup / HTTP call) before the cheap
-// length+character-set check rejects the request. Moving the gate
-// any earlier than this is unsafe — it must follow `redirect_uri`
-// validation so errors can use `redirectError`.
+// Bounds `nonce`, which is stored on the code and echoed into the id_token,
+// so an oversized value cannot exhaust memory or bloat tokens
+// (`oauth.nonce.maxLength`). Runs after `redirect_uri` validation (so errors
+// can redirect) and before the policy hook (so it costs no external I/O).
 const checkNonce = (ctx: AuthorizeContext): boolean => {
 	const nonceMaxLength = ctx.opts.oauth.nonceMaxLength;
 	if (ctx.params.nonce === undefined) return true;
-	// Reject a `nonce` that is not a single string (Copilot review on
-	// PR #126). This is the sole owner of the rule for this
-	// parameter — `SINGLE_VALUED_QUERY_PARAMS` deliberately omits
-	// `nonce` so that this check stays reachable rather than
-	// becoming an unexercisable duplicate of the gate.
-	// Express + qs parses repeated `?nonce=a&nonce=b` as an
-	// array, which silently failed the previous
-	// `typeof === "string"` gate, causing the request to
-	// proceed with `nonce: undefined` on the issued code. The
-	// client's downstream OIDC nonce check would then fail
-	// long after `/authorize` returned 302 + code, surfacing
-	// as a confusing client-side error. Reject as
-	// `invalid_request` immediately so the failure is at the
-	// request boundary, not asynchronously at id_token
-	// validation time.
+	// The sole owner of the single-value rule for `nonce` (it is not in
+	// SINGLE_VALUED_QUERY_PARAMS): a repeat arrives as an array and would
+	// otherwise mint a code with no nonce, failing only later at the client.
 	if (typeof ctx.params.nonce !== "string") {
 		redirectError(ctx, "invalid_request", "nonce must be a single string value");
 		return false;
@@ -1388,20 +1144,15 @@ const checkNonce = (ctx: AuthorizeContext): boolean => {
 };
 
 /**
- * RFC 6749 §3.3 scope narrowing plus the IH-6 openid requirement. Returns the
- * requested scopes and the client-allowlist-filtered set the policy step takes
- * as its ceiling, or `null` when a response has been sent.
+ * RFC 6749 §3.3 scope narrowing plus the openid requirement. Returns the
+ * requested scopes and the allowlist-filtered set the policy step takes as
+ * its ceiling, or `null` when a response has been sent.
  *
- * Narrowing is kept, deliberately (#396): §3.3 sanctions ignoring scopes the
- * client is not registered for, and the honesty half — the token response's
- * `scope` member naming what WAS granted whenever it differs — is pinned by
- * test. The omitted-scope default is not kept: it granted the client's entire
- * allowlist, making "forgot to send scope" the maximum grant. An omitted
- * scope now draws on the client's declared `defaultScopes`, and a client that
- * declares none answers `invalid_scope` — deny-by-absence, the #326/#363
- * shape. The one carve-out: a client whose allowlist is EMPTY keeps the empty
- * grant, because there is nothing to over-grant and scope-less deployments
- * are a supported shape.
+ * Scopes the client is not registered for are dropped (§3.3 allows it; the
+ * token response's `scope` names what was granted). An omitted scope draws on
+ * the declared `defaultScopes`, never the whole allowlist; with none declared
+ * it is `invalid_scope`, except that a client with an empty allowlist keeps
+ * the empty grant.
  */
 const resolveScopes = (
 	ctx: AuthorizeContext,
@@ -1423,9 +1174,7 @@ const resolveScopes = (
 	if (requestedScopes.length > 0) {
 		allowedFilteredScopes = requestedScopes.filter((s) => allowedScopes.includes(s));
 	} else if (client.defaultScopes !== undefined) {
-		// Filtered through the allowlist even so: schema-validated registrations
-		// are ⊆ allowedScopes by boot (#396's superRefine), but a custom
-		// ClientRepository is under no such obligation.
+		// Filtered even so: a custom ClientRepository is not schema-validated.
 		allowedFilteredScopes = client.defaultScopes.filter((s) => allowedScopes.includes(s));
 	} else if (allowedScopes.length === 0) {
 		allowedFilteredScopes = [];
@@ -1434,26 +1183,15 @@ const resolveScopes = (
 		redirectError(ctx, "invalid_scope", "scope is required: this client declares no defaultScopes");
 		return null;
 	}
-	// #328: the openid-scope gate used to also test issuer presence
-	// (`isActingAsOidcProvider`), suggesting issuer-less operation was a
-	// supported mode. It is not: router construction throws when
-	// `oauth.jwt.issuer` is missing or malformed (#266/#307), so by the time
-	// a request reaches this handler the server is always acting as an OIDC
-	// OP and `oidcMode` alone decides.
+	// The router refuses a missing issuer, so `oidcMode` alone decides.
 	if (
 		ctx.opts.oauth.oidcMode === "oidc-required" &&
-		// Two failure modes both undermine "OIDC required":
-		//   (a) the request itself omits openid;
-		//   (b) the request includes openid but the client allowlist
-		//       filters it out — without checking the filtered set
-		//       the request would silently proceed as OAuth-only
-		//       even though the server is configured oidc-required.
+		// Both undermine "OIDC required": the request omits openid, or the
+		// client allowlist filtered it out.
 		(!requestedScopes.includes("openid") || !allowedFilteredScopes.includes("openid"))
 	) {
-		// The requested scopes are the caller's: every one a scope-token (the
-		// grammar check above), but as long and as many as it sent. The line
-		// keeps the first ten, each capped, and how many there were when it
-		// had to cut.
+		// The requested scopes are the caller's: logged as the first ten, each
+		// capped, with the count when cut.
 		const loggedScopes = auditErrorList(requestedScopes);
 		ctx.opts.logger.warn(
 			{
@@ -1480,10 +1218,9 @@ const resolveScopes = (
 	return { requestedScopes, allowedFilteredScopes };
 };
 
-// C-2: policy evaluation at /authorize (evaluate-once, persist on Code).
-// The code exchange MUST NOT re-evaluate — it reads the narrowed values off
-// Code.grantedScope / Code.grantedAudience. This prevents scope escalation
-// via a crafted /token request after /authorize decided the narrow.
+// Policy is evaluated once, here, and its narrowed scope and audience persist
+// on the code; the code exchange must not re-evaluate, so a crafted `/token`
+// request cannot escalate.
 const applyGrantPolicy = async (
 	ctx: AuthorizeContext,
 	inputs: {
@@ -1492,9 +1229,9 @@ const applyGrantPolicy = async (
 		/** The client's full allowlist — the policy's `originalScope`. */
 		originalScope: readonly string[];
 		/**
-		 * #520: the audiences this grant may mint for — the client's
-		 * `allowedAudiences`, or an empty ceiling when it registers none.
-		 * Policy may narrow within it, never originate outside it.
+		/**
+		 * The audiences this grant may mint for: the client's `allowedAudiences`,
+		 * or empty. Policy may narrow within it, never originate outside it.
 		 */
 		audienceCeiling: readonly string[];
 		authorizeResource: readonly string[] | null;
@@ -1517,14 +1254,8 @@ const applyGrantPolicy = async (
 		typeof sessionUser?.id === "string" ? (sessionUser.id as string) : undefined;
 	const { grantPolicy } = ctx.opts;
 	if (grantPolicy) {
-		// CP-11: issuer must NOT be request-derived (Host header is
-		// attacker-controlled in many deployments). `opts.issuer` is the
-		// router's canonical issuer — config-only — so policy decisions match
-		// the issuer claim on minted tokens.
-		// CP-18 (authorize side): fail-closed on policy throw. Same
-		// rationale as the refresh_token path — policy is a security
-		// boundary and failing open would hand out the pre-policy
-		// scope ceiling.
+		// `opts.issuer` is config-only, never request-derived, so decisions
+		// match the minted tokens' `iss`. A throw fails closed.
 		let decision: Awaited<ReturnType<typeof grantPolicy.evaluate>>;
 		try {
 			decision = await grantPolicy.evaluate(
@@ -1534,12 +1265,9 @@ const applyGrantPolicy = async (
 					subject: subjectForPolicy,
 					requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
 					originalScope,
-					// RFC 8707 Stage 2 (#173): `resource` is accepted at the
-					// AUTHORIZATION endpoint for this flow and forwarded here,
-					// so the policy can narrow `grantedAudience` to the
-					// requested target before it is persisted on the code.
-					// This is what keeps the token endpoint free of policy:
-					// the audience decision happens once, here (C-2 / D-1).
+					// RFC 8707: `resource` is accepted here and forwarded so the
+					// policy can narrow `grantedAudience` before it is persisted;
+					// the audience is decided once, keeping `/token` free of policy.
 					...(ctx.opts.oauth.resourceIndicatorEnabled && authorizeResource
 						? { resource: authorizeResource }
 						: {}),
@@ -1579,22 +1307,17 @@ const applyGrantPolicy = async (
 			redirectError(ctx, error, sanitizeErrorText(decision.errorDescription) || "policy denied");
 			return null;
 		}
-		// Presence, not truthiness: `""` and `null` are a policy saying
-		// something malformed, not a policy saying nothing, and only
-		// `undefined` is "no opinion" (#521).
+		// Presence, not truthiness: `""` and `null` are malformed answers; only
+		// `undefined` is "no opinion".
 		if (decision.grantedScope !== undefined) {
 			if (!Array.isArray(decision.grantedScope)) {
-				// #521: a non-array from a JS policy would throw in `.filter`.
+				// A non-array from a JS policy would throw in `.filter`.
 				redirectError(ctx, "server_error", "policy returned a non-array grantedScope");
 				return null;
 			}
-			// CP-13: policy MUST NOT expand the client's scope ceiling.
-			// Enforce grantedScope ⊆ allowedFilteredScopes (the
-			// pre-policy-narrowed set) — a policy returning a scope
-			// outside this is a bug or a compromised policy. Fail closed
-			// with `server_error` (RFC 6749 §4.1.2.1), the answer every
-			// grant gives a policy that exceeds its authority (#520): the
-			// request was fine, the deployment's policy was not.
+			// Policy may narrow, never widen, the client's scope ceiling. A scope
+			// outside it means a buggy or compromised policy: `server_error`, as
+			// every grant answers a policy that exceeds its authority.
 			const invalidFromPolicy = decision.grantedScope.filter(
 				(s) => !allowedFilteredScopes.includes(s),
 			);
@@ -1609,15 +1332,10 @@ const applyGrantPolicy = async (
 			grantedScopes = decision.grantedScope;
 		}
 		if (decision.grantedAudience !== undefined) {
-			// #520: the same ceiling `client_credentials`, jwt-bearer and the
-			// WebAuthn grant apply, through the same home — a policy may narrow
-			// the grant's audience and may not originate one. `/authorize` used
-			// to check only the shape, and nothing re-bounds the value at
-			// `/token`: it is persisted on the code and read back there, so an
-			// audience a buggy or compromised policy invented would reach a
-			// resource server the client was never registered for. Refused as
-			// `server_error` (the redirect shape of `policyOutOfBounds`): the
-			// deployment's policy exceeded its authority, the caller did not.
+			// Policy may narrow the audience within the client's ceiling, never
+			// originate one: the value is persisted and read back at `/token`
+			// without re-checking, so an invented audience would reach a resource
+			// server the client was never registered for. `server_error`, as above.
 			const bounded = boundPolicyAudience(decision, audienceCeiling);
 			if (!bounded.ok) {
 				redirectError(
@@ -1636,9 +1354,8 @@ const applyGrantPolicy = async (
 };
 
 /**
- * RFC 8707 §2 audience shaping for the code record (Stage 2, #173), or `null`
- * when the requested resources cannot be represented and a response has been
- * sent.
+ * RFC 8707 §2 audience shaping for the code record, or `null` when the
+ * requested resources cannot be represented and a response has been sent.
  */
 const resolveAudienceForPersist = (
 	ctx: AuthorizeContext,
@@ -1646,14 +1363,10 @@ const resolveAudienceForPersist = (
 	authorizeResource: readonly string[] | null,
 	grantedAudience: readonly string[] | undefined,
 ): { audienceForPersist: readonly string[] | undefined } | null => {
-	// RFC 8707 §2 audience derivation (Stage 2, #173). When a `resource`
-	// was requested and no policy narrowed an audience, derive it here so
-	// the value persisted on the code — which the token endpoint reads and
-	// enforces against — already reflects the request. Deriving at
-	// `/authorize` rather than `/token` is what keeps the audience decided
-	// exactly once (C-2 / D-1). Bounded by the client's allowedAudiences
-	// plus its own id; a policy-returned audience met the client's
-	// allowedAudiences in `applyGrantPolicy` before it got here (#520).
+	// RFC 8707 §2: when a `resource` was requested and no policy narrowed an
+	// audience, derive it here, so the audience persisted on the code — which
+	// `/token` enforces — is decided exactly once. Bounded by the client's
+	// `allowedAudiences` plus its id.
 	let effectiveGrantedAudience = grantedAudience;
 	if (ctx.opts.oauth.resourceIndicatorEnabled && authorizeResource && !effectiveGrantedAudience) {
 		const derived = deriveAudienceFromResources(
@@ -1667,17 +1380,9 @@ const resolveAudienceForPersist = (
 			? effectiveGrantedAudience
 			: undefined;
 
-	// RFC 8707 §2 (Stage 2, #173): reject here rather than issuing a code
-	// that is already doomed. The token endpoint applies the same check
-	// against the persisted audience, so a code whose audience cannot
-	// represent the requested resource would fail there anyway — after the
-	// user has completed the redirect. Failing at `/authorize` surfaces
-	// `invalid_target` while the client can still act on it, which is where
-	// RFC 8707 §2 places the error for this endpoint.
-	//
-	// The effective audience mirrors the token endpoint's derivation: the
-	// persisted audience when the policy narrowed one, else the client id
-	// (the `authorization_code` default).
+	// RFC 8707 §2: refuse now rather than issue a code `/token` would reject
+	// after the user completed the redirect. Mirrors the token endpoint's
+	// audience: the persisted one, else the client id.
 	if (ctx.opts.oauth.resourceIndicatorEnabled && authorizeResource) {
 		const effectiveAudience = audienceForPersist?.[0] ?? ctx.clientId;
 		const unrepresented = unrepresentedResources(authorizeResource, effectiveAudience);
@@ -1706,20 +1411,20 @@ const mintCode = async (
 		codeChallengeMethod: string | undefined;
 		grantedScope: readonly string[] | undefined;
 		grantedAudience: readonly string[] | undefined;
-		/** #481 */
+		/** The `acr` the session met. */
 		acr: string | undefined;
 	},
 ): Promise<{ code: string } | null> => {
 	let issue: Awaited<ReturnType<CodeRepository["createCode"]>>;
 	try {
 		issue = await ctx.opts.codeRepository.createCode({
-			client_id: ctx.clientId, // D-1: identity binding embedded in the code record (replaces session.code_client_id)
-			redirect_uri: ctx.redirectUri, // D-1: required field (closes IH-4 vacuous-pass)
+			client_id: ctx.clientId, // the identity binding lives on the code record
+			redirect_uri: ctx.redirectUri, // required: RFC 6749 §4.1.3 compares it at the token endpoint
 			code_challenge: params.codeChallenge,
 			code_challenge_method: params.codeChallengeMethod,
 			grantedScope: params.grantedScope,
 			grantedAudience: params.grantedAudience,
-			// NEW (TODO-F-3): OIDC round-trip state on the code record.
+			// OIDC round-trip state.
 			nonce: typeof ctx.params.nonce === "string" ? ctx.params.nonce : undefined,
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
 			acr: params.acr,
@@ -1740,11 +1445,9 @@ const mintCode = async (
 	return { code: issue.code };
 };
 
-// D-1 / CR-2: identity binding lives in the code record only — no
-// session writes. Concurrent /authorize requests sharing a session
-// previously raced on `req.session.code` last-write-wins; the
-// losing request's code became unredeemable. consumeByCode (atomic
-// getDel on a single Redis node) is now the sole authenticity gate.
+// The code record alone carries the identity binding — no session writes, so
+// concurrent requests sharing a session cannot race. `consumeByCode`'s atomic
+// read-and-delete is the sole authenticity gate.
 const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Response> => {
 	const url = new URL(ctx.redirectUri);
 	url.searchParams.append("code", code);
@@ -1765,47 +1468,30 @@ const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Re
 };
 
 /**
- * Creates the `GET /authorize` handler — the RFC 6749 §4.1.1 → §4.1.2
- * authorization-code sequence, one step per concern:
+ * Creates the `GET /authorize` handler: the RFC 6749 §4.1.1 → §4.1.2
+ * authorization-code sequence.
  *
- * 1. the cookie's flag: a browser that is not authenticated is sent to log
- *    in before anything is looked up — the #325 rate-limit guard runs
- *    before this handler, mounted as sibling middleware on the route;
- * 2. identify the client and validate `redirect_uri` (§4.1.1; 400 JSON —
- *    no trusted redirect target yet, per A-1);
+ * 1. an unauthenticated browser is sent to log in before any lookup;
+ * 2. identify the client and validate `redirect_uri` (400 JSON — no trusted
+ *    redirect target yet);
  * 3. read the request's shape: request objects refused, then `prompt`, the
  *    single-valued parameters, `claims`, `max_age` and `acr_values`;
- * 4. admit the session, once, through core's `admitSession` (the
- *    session-admission ADR's D8): freshness decided first, then the verdict
- *    — a new login, a step-up trip, a refusal, or on;
- * 5. validate the rest of the request: `response_type`, the client's
- *    registered grant types (#268), the first-party invariant (#267), the
- *    email-verified gate (#297), PKCE — mandatory, S256 (#273) — and `nonce`
- *    bounds (IH-16);
- * 6. narrow scope and audience: client allowlist + openid requirement
- *    (IH-6), consent for a client that is not first-party (#527), then
- *    policy (C-2), then the RFC 8707 resource check;
- * 7. issue the code and redirect back with `code` + `state` (§4.1.2).
- *
- * Extracted from the inline `routes.mts` closure in #328. Session admission
- * moved the session read to step 4 and changed what a dead, expired, revoked
- * or subject-less session is answered (the package README's "Session
- * admission").
+ * 4. admit the session once (`admitSession`): freshness first, then the
+ *    verdict — a new login, a step-up trip, a refusal, or on;
+ * 5. validate `response_type`, registered grant types, first-party or
+ *    consentable, verified email, PKCE (mandatory, S256) and `nonce`;
+ * 6. narrow scope (allowlist, openid), ask for consent when not first-party,
+ *    apply the grant policy, check RFC 8707 resources;
+ * 7. issue the code and redirect with `code` and `state` (§4.1.2).
  */
 export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHandler => {
-	// #356: the login round-trip target is built from the deployment's
-	// configured origin plus `req.originalUrl` — never `req.protocol` +
-	// `Host`, which follow `X-Forwarded-Proto` / the client's `Host` under
-	// `trust proxy` and made `redirect_to` an open redirect the caller aims.
-	// Same door #292 closed for the DPoP htu; `buildCanonicalRequestUrl`
-	// (core/src/net/request-url.mts) is the shared vocabulary. Resolved once
-	// here so a hand-built config whose issuer cannot name an origin fails at
-	// composition, not per request (`checkCanonicalIssuer` already vouched for
-	// schema-validated deployments at router creation).
+	// The login round-trip target is built from the configured origin, never
+	// `req.protocol` + `Host`, which follow forwarded headers under
+	// `trust proxy` and would make `redirect_to` an open redirect. Resolved
+	// once so an issuer that names no origin fails at composition.
 	const issuerOrigin = new URL(opts.issuer).origin;
-	// What admission reads for this endpoint (the session-admission ADR's D1):
-	// the handler's own slots as wired, the resolver, and the vouchable acr
-	// table the router computed once.
+	// What admission reads for this endpoint: the handler's slots as wired, the
+	// resolver, and the vouchable acr table the router computed once.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: opts.userSessionStore,
 		subjectRevocation: opts.subjectRevocation,
@@ -1815,57 +1501,30 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		auditSink: opts.auditSink,
 	};
 	return async (req: Request, res: Response) => {
-		// #284: `prompt=none` asks for a token *without* user interaction, so
-		// the login redirect below is exactly what it must not get — a hidden
-		// iframe cannot act on an HTML page, and the RP sees a timeout instead
-		// of an error. Such a request falls through to have its client and
-		// `redirect_uri` validated, so `login_required` can be delivered where
-		// the RP is listening for it.
-		//
-		// The gate opens for any `prompt` list that names `none`, including
-		// the combinations §3.1.2.1 forbids (`prompt=none login`). That is
-		// deliberate, not slack: such a request still comes from a silent
-		// context, so answering it with a login page hangs the same hidden
-		// iframe, and its `invalid_request` belongs at the RP's
-		// `redirect_uri` — which cannot be trusted until it is validated,
-		// which costs the lookup. Every other unauthenticated request still
-		// answers before touching the repository, which is what keeps an
-		// unauthenticated endpoint from doing a lookup per hit.
-		//
-		// For the same reason the gate reads `prompt` tolerantly
-		// (`parseScopeTokens`, any whitespace a delimiter), where
-		// `resolvePrompt` reads it strictly: `none<TAB>` is malformed, but it
-		// still comes from a silent context, and its `invalid_request` is
-		// `resolvePrompt`'s to deliver at the validated `redirect_uri`.
+		// `prompt=none` must not get a login page (a hidden iframe cannot act on
+		// it); it falls through so `login_required` can be delivered at the
+		// validated `redirect_uri`. Any list naming `none` opens this gate —
+		// forbidden combinations included, read tolerantly (`parseScopeTokens`)
+		// — since such a request still comes from a silent context and its
+		// `invalid_request` belongs at the RP's `redirect_uri`. Every other
+		// unauthenticated request is answered before any lookup.
 		const promptRaw = authorizeParams(req).prompt;
 		const wantsSilentAuth =
 			typeof promptRaw === "string" && parseScopeTokens(promptRaw).includes("none");
 
-		// The cookie's claim, read once (the session-admission ADR's D2): the
-		// flag first, before the client is looked up and with no store read, so
-		// a genuinely anonymous request costs no lookup (#284, R1b). Whether the
-		// session behind the flag is live is admission's to say, once, below:
-		// after the client lookup and the `redirect_uri` check, the request-object
-		// refusal, and the parsing of `prompt`, the single-valued parameters,
-		// `claims`, `max_age` and `acr_values`; before the `response_type`, grant
-		// type, first-party, email-verified, PKCE, nonce and scope checks.
+		// The cookie's flag is checked first, with no store read, so an
+		// anonymous request costs no lookup. Whether the session behind it is
+		// live is admission's to decide, once, below.
 		const claim = cookieClaim(req);
 		if (!claim.authenticated && !wantsSilentAuth) {
 			loginRedirect(res, opts.login, authorizeRequestUrl(issuerOrigin, req).toString());
 			return;
 		}
 
-		// #397: no early response_type gate. RFC 6749 §4.1.2.1 prefers that once
-		// the client and redirect_uri ARE validated, errors travel via redirect
-		// so the user lands back in the app — and the pre-validation 400-JSON
-		// gate that used to sit here made that unreachable for this error class.
-		// A-1's trust rule is untouched: `resolveClientAndRedirectUri` still
-		// answers 400 JSON whenever the redirect target cannot be validated, and
-		// nothing redirects before it succeeds. `checkResponseTypeIsCode` (after
-		// validation) is now the sole owner of the response_type refusal. The
-		// accepted cost: a garbage response_type with a real client_id spends one
-		// repository lookup before its refusal — the price of having a validated
-		// target to redirect the user back to.
+		// No early `response_type` gate: once the redirect target is validated,
+		// errors redirect so the user lands back in the app (RFC 6749
+		// §4.1.2.1). The cost: a bad `response_type` with a real client_id
+		// spends one lookup.
 
 		const {
 			scope = null,
@@ -1890,9 +1549,8 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			params: authorizeParams(req),
 		};
 
-		// #284: the request-object refusal runs before anything interprets the
-		// query parameters, because the whole point is that those parameters
-		// are not the ones the RP signed.
+		// Request objects are refused before anything interprets the query
+		// parameters: those are not the parameters the RP signed.
 		if (!checkRequestObjectUnsupported(ctx)) return;
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
@@ -1908,24 +1566,18 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			return;
 		}
 		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
-		// it is interpreted — a repeat read as absence is a different request
-		// from the one the client sent. This runs ahead of the re-authentication
-		// evaluation as well as the client-policy gates, so a malformed request
-		// never reaches the repository or the policy hook either.
+		// it is interpreted, ahead of re-authentication and every repository or
+		// policy call.
 		if (!checkSingleValuedParams(ctx)) return;
-		// The MFA ADR's D15: `acr` is asked for through `acr_values` alone —
-		// refused here, before a `prompt=login` or `max_age` sends the browser to
-		// log in.
+		// `acr` is asked for through `acr_values` alone; refused before a
+		// `prompt=login` or `max_age` sends the browser to log in.
 		if (!checkClaimsParameter(ctx)) return;
 		const maxAge = parseMaxAge(ctx);
 		if (maxAge === null) return;
 		const requested = parseAcrValues(ctx);
 		if (requested === null) return;
-		// One admission per request (the session-admission ADR's D8), after the
-		// client and the parameters are validated: the live record, the subject,
-		// the revocation boundary, the registered requirements and the acr the
-		// request asked for, decided in core; what each outcome is answered with
-		// is this endpoint's (`decideOnAdmission`).
+		// One admission per request, after the client and parameters are
+		// validated; what each outcome is answered with is `decideOnAdmission`'s.
 		const admission = await admitSession(admissionDeps, {
 			claim,
 			action: ADMISSION_ACTIONS["oauth.authorize"],
@@ -1951,15 +1603,12 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const scopes = resolveScopes(ctx, scope, client);
 		if (!scopes) return;
 
-		// #527: a client that is not first-party mints only with the user's
-		// recorded consent — asked for on the deployment's page otherwise.
+		// A client that is not first-party mints only with the user's recorded
+		// consent, asked for on the deployment's page otherwise.
 		if (!(await checkConsent(ctx, client, scopes.allowedFilteredScopes, prompt))) return;
 
-		// RFC 8707 §2 at the authorization endpoint (Stage 2, #173). Read
-		// through `authorizeParams`, so a GET's query string and a POST's
-		// form body reach the same extractor the token endpoint uses and a
-		// repeated `resource` (which Express surfaces as an array) is
-		// handled identically on every endpoint and method.
+		// RFC 8707 §2, read through `authorizeParams` so GET and POST reach the
+		// same extractor as the token endpoint (a repeat arrives as an array).
 		const authorizeResource = opts.oauth.resourceIndicatorEnabled
 			? extractResourceParam(authorizeParams(req))
 			: null;
@@ -1968,17 +1617,15 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			requestedScopes: scopes.requestedScopes,
 			allowedFilteredScopes: scopes.allowedFilteredScopes,
 			originalScope: client.allowedScopes,
-			// #520: the same `?? []` the sibling grants pass — a client that
-			// registers no audiences gives the policy nothing to narrow within.
+			// A client that registers no audiences gives the policy nothing to
+			// narrow within.
 			audienceCeiling: client.allowedAudiences ?? [],
 			authorizeResource,
 		});
 		if (!policy) return;
 
-		// CP-14: persist `undefined` when no scopes/audiences survived —
-		// an empty array would later stringify to `scope: ""` in the
-		// token response, which is indistinguishable from "scope claim
-		// omitted" and surprises consumers.
+		// Persist `undefined` when nothing survived: an empty array would become
+		// `scope: ""` in the token response.
 		const scopeForPersist = policy.grantedScopes.length > 0 ? policy.grantedScopes : undefined;
 		const audience = resolveAudienceForPersist(
 			ctx,

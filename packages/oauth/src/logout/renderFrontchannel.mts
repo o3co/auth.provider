@@ -56,14 +56,9 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * JSON-stringifies a string, then escapes `<` and `>` as `\u003c` / `\u003e` so
- * an embedded `</script>` cannot prematurely close an inline `<script>` block.
- *
- * This is the standard CSP-safe pattern for embedding untrusted strings in
- * inline JS — see OWASP "JSON in HTML" guidance. Plain `JSON.stringify` alone
- * is not sufficient: it escapes `"`, but leaves `<` and `>` literal, which
- * allows `</script><script>alert(1)</script>` to break out of the inline JS
- * context even though the payload would otherwise be bound as a safe string.
+ * `JSON.stringify`, then `<` and `>` escaped as `\u003c` / `\u003e`, so an
+ * embedded `</script>` cannot close the inline `<script>` block (OWASP "JSON
+ * in HTML"). `JSON.stringify` alone leaves `<` and `>` literal.
  */
 function safeJsStringLiteral(s: string): string {
 	return JSON.stringify(s).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
@@ -72,11 +67,9 @@ function safeJsStringLiteral(s: string): string {
 const DEFAULT_REDIRECT_DELAY_MS = 2_000;
 
 /**
- * Builds an iframe src URL by appending `iss` (and optionally `sid`) query
- * parameters to `baseUri`. Uses `new URL()` + `searchParams.set()` so that:
- *  - Existing query params are preserved with `&` separator.
- *  - Fragment identifiers remain at the end of the URL (RFC 3986 §3.5), so
- *    query params are not swallowed as fragment content by the browser.
+ * `baseUri` with `iss` (and optionally `sid`) set as query parameters,
+ * through `URL` so an existing query is kept and a fragment stays last (RFC
+ * 3986 §3.5) instead of swallowing the new parameters.
  */
 function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined): string {
 	const url = new URL(baseUri);
@@ -88,13 +81,11 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
 }
 
 /**
- * Renders an OIDC Front-Channel Logout 1.0 HTML page: one hidden `<iframe>` per RP
- * that has a `frontchannelLogoutUri`. Each iframe URL carries `iss` and optionally
- * `sid` query parameters (sid included when `frontchannelLogoutSessionRequired`
- * is not explicitly `false`). When `postLogoutRedirectUri` is provided, appends
- * a `<script>` that redirects after `redirectDelayMs` to let iframes load.
- *
- * Pure function: does no I/O, returns a string. Callers MUST send with
+ * Renders an OIDC Front-Channel Logout 1.0 page: one hidden `<iframe>` per RP
+ * with a `frontchannelLogoutUri`, its URL carrying `iss` and, unless
+ * `frontchannelLogoutSessionRequired` is `false`, `sid`. With
+ * `postLogoutRedirectUri`, a `<script>` redirects after `redirectDelayMs` so
+ * the iframes can load. Pure; callers MUST send it as
  * `Content-Type: text/html; charset=utf-8`.
  */
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
@@ -105,15 +96,9 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 				typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0,
 		)
 		.map((rp) => {
-			// Use new URL() + searchParams to correctly handle URIs that contain an
-			// existing query string or a fragment. Manual string-concat would produce
-			// `https://rp/fc#frag?iss=...` where the browser treats the query as
-			// part of the fragment — the RP never receives iss/sid.
-			//
-			// Per-RP try/catch: if new URL() throws (invalid or relative URI that slipped
-			// past schema validation, or corrupted store record), skip that RP's iframe
-			// rather than propagating the throw after cascadeLogout has already cleared
-			// session state (which would produce a 500 with an empty response body).
+			// A URI `URL` cannot parse (past schema validation, or a corrupt record)
+			// skips that RP's iframe: throwing after cascadeLogout has cleared
+			// session state would answer a 500 with an empty body.
 			try {
 				const includeSid = rp.frontchannelLogoutSessionRequired !== false;
 				const iframeSrc = buildIframeUrl(
@@ -121,9 +106,7 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 					opts.issuer,
 					includeSid ? opts.sid : undefined,
 				);
-				// escapeHtml is still required: new URL() percent-encodes for URL context
-				// but the value is being placed inside an HTML attribute, so & must become
-				// &amp; to produce well-formed HTML.
+				// `URL` encodes for URL context; the HTML attribute still needs `&amp;`.
 				return `<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`;
 			} catch (err) {
 				logger.warn(

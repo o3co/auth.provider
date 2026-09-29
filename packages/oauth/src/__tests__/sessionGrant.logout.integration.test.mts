@@ -15,19 +15,14 @@
  */
 
 /**
- * R3 — logout must reach the `session` grant's access token.
+ * Logout must reach the `session` grant's access token. The grant mints
+ * straight from an authenticated browser session (the BFF / proxy topology:
+ * the browser holds the cookie, the BFF the access token); without a `sid`
+ * on the token, no liveness check would see the logout.
  *
- * The grant mints straight from an authenticated browser session, which is
- * the BFF / proxy topology: the browser holds the cookie, the BFF holds the
- * access token. Until this fix the token carried no `sid`, so none of the
- * liveness machinery could see it — `/oauth/logout` deleted the `UserSession`
- * record and revoked every refresh family, and this token went on working for
- * the rest of its lifetime (3600s by default).
- *
- * The unit tests in `session.test.mts` pin the claim; this file pins the
- * consequence, through the real router: after a logout, the same token is
- * refused at `/oauth/userinfo` and reports `active: false` at
- * `/oauth/introspect`.
+ * `session.test.mts` pins the claim; this file pins the consequence through
+ * the real router: after a logout, the same token is refused at
+ * `/oauth/userinfo` and reports `active: false` at `/oauth/introspect`.
  */
 
 import { createSecretKey } from "node:crypto";

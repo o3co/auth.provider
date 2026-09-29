@@ -208,20 +208,12 @@ describe("tokenBindingMw", () => {
 	});
 
 	it("intent-explicit: two ambient mechanisms succeeding → first-registered wins (#199 M2)", async () => {
-		// The ambient tail of the intent-explicit branch used to assert its
-		// own precondition in a comment — "Stage 1 has exactly one ambient
-		// mechanism (mTLS), so successes.length is provably 1 here" — and
-		// deferred the test until a second ambient mechanism shipped. A
-		// comment cannot fail, so the day a second ambient mechanism is added
-		// the first-wins rule would be applied silently, without anyone being
-		// asked whether it is the right rule for two ambient signals.
-		//
-		// This pins the behavior with a synthetic second ambient mechanism, so
-		// the decision surfaces as a failing test rather than as production
-		// behavior. It asserts what the code does today, NOT that first-wins
-		// is necessarily correct for a real multi-ambient deployment: whoever
-		// adds that mechanism must consciously either keep this or change it
-		// (e.g. to reject like the ≥2-explicit branch does).
+		// Pinned with a synthetic second ambient mechanism, so that adding a
+		// real one surfaces the first-wins rule as a failing test instead of
+		// applying it silently. It asserts what the code does today, NOT that
+		// first-wins is right for a real multi-ambient deployment: whoever adds
+		// that mechanism must consciously keep this or change it (e.g. to
+		// reject, like the ≥2-explicit branch does).
 		const secondAmbient: TokenBindingMechanism = {
 			kind: "mtls-secondary",
 			intentExplicit: false,
@@ -304,10 +296,10 @@ describe("tokenBindingMw", () => {
 });
 
 describe("a retry instruction is the mechanism's to state, not core's to know (v0.13.0 audit)", () => {
-	// The dispatcher is deliberately vendor-neutral, and string-matched
-	// DPoP's `use_dpop_nonce` to decide the description (here) and the
-	// challenge (at a protected resource). A second mechanism with a retry of
-	// its own could not get either without editing core.
+	// The dispatcher is deliberately vendor-neutral: string-matching DPoP's
+	// `use_dpop_nonce` to decide the description (here) and the challenge (at
+	// a protected resource) would leave a second mechanism with a retry of its
+	// own unable to get either without editing core.
 	it("answers with the instruction a refusal carries, whatever its code", async () => {
 		const err = Object.assign(new Error("nonce"), {
 			code: "use_fresh_nonce",
@@ -340,12 +332,11 @@ describe("a retry instruction is the mechanism's to state, not core's to know (v
 });
 
 describe("a server-side outage is the mechanism's to state, and answers 503", () => {
-	// A mechanism that cannot reach a verdict — a replay store it cannot read —
-	// has not found the material invalid. Answering 400 with the mechanism's
-	// proof error told the client its proof was bad, and a client that treats
-	// a 400 from the token endpoint as final gave up on a request that would
-	// have succeeded a moment later. The client did nothing wrong: 503, with
-	// the code and description the mechanism states.
+	// A mechanism that cannot reach a verdict (a replay store it cannot read)
+	// has not found the material invalid. A 400 with its proof error would tell
+	// the client its proof was bad, and a client that treats a 400 from the
+	// token endpoint as final would give up on a request that would succeed a
+	// moment later. So: 503, with the code and description the mechanism states.
 	const outage = () =>
 		Object.assign(new Error("ECONNREFUSED"), {
 			code: "temporarily_unavailable",
@@ -428,9 +419,9 @@ describe("a server-side outage is the mechanism's to state, and answers 503", ()
 	});
 
 	it("leaves out an outage's reason that is not a code, as the verdict line does", async () => {
-		// `reason` is the mechanism's name for the refusal — a code. A mechanism
-		// that wrote free text there (the store's reply, a key it read) put it on
-		// the outage line unfiltered, while the verdict line kept only a code.
+		// `reason` is the mechanism's name for the refusal: a code. Free text a
+		// mechanism wrote there (the store's reply, a key it read) must not reach
+		// the outage line, just as the verdict line keeps only a code.
 		const logger = spyLogger();
 		for (const reason of [
 			"replay store at 10.0.0.7 refused SET dpop-proof:free-text-marker",
@@ -463,7 +454,7 @@ describe("a server-side outage is the mechanism's to state, and answers 503", ()
 	it("logs a verdict once at warn: the refusal's reason, and its projection with the cause inside", async () => {
 		// A mechanism states why it refused (`reason`) and, when a parser
 		// refused the material, that parser's error (`cause`). The verdict line
-		// carried the mechanism and the code alone, so neither reached a log.
+		// carries both, not only the mechanism and the code.
 		const logger = spyLogger();
 		let parseError: unknown;
 		try {
@@ -583,8 +574,8 @@ describe("tokenBindingMw — response headers a mechanism asks for (#530)", () =
 describe("resolveTokenBindingSettings (#728)", () => {
 	// The one reading of `oauth.tokenBinding`: the settings that apply across
 	// every mechanism installed at core's token-binding extension point, and so
-	// core's, as the point is (#728). Boot reads the dispatch policy through
-	// this and the grants the refresh-token rule; no slot carries either.
+	// core's, as the point is. Boot reads the dispatch policy through this and
+	// the grants the refresh-token rule; no slot carries either.
 	const settingsOf = (tokenBinding: unknown) =>
 		resolveTokenBindingSettings({ oauth: { tokenBinding } });
 

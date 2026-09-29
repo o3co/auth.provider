@@ -25,8 +25,8 @@ import { loggableError } from "../logging/loggableError.mjs";
 import type { RateLimitContext, RateLimitDecision, RateLimiter, RateLimitSpec } from "./types.mjs";
 
 /**
- * How the guard behaves when the limiter backend itself errors — mirrors
- * `config.rateLimit.failMode` (OR-5). See {@link createRateLimitGuard}.
+ * How the guard behaves when the limiter backend itself errors; mirrors
+ * `config.rateLimit.failMode`. See {@link createRateLimitGuard}.
  */
 export type RateLimitFailMode = "open" | "closed";
 
@@ -40,9 +40,9 @@ export interface RateLimitGuardOptions {
 	 */
 	readonly tag: string;
 	/**
-	 * OR-5: fail-mode policy for a limiter-backend outage, read from
-	 * `config.rateLimit.failMode` — one policy for the product, not one per
-	 * router. `"open"` lets the request through; `"closed"` returns 503.
+	 * Policy for a limiter-backend outage, from `config.rateLimit.failMode`:
+	 * one policy for the product, not one per router. `"open"` lets the
+	 * request through; `"closed"` returns 503.
 	 */
 	readonly failMode: RateLimitFailMode;
 	/** Operator-visible outage channel. Defaults to `consoleLogger`. */
@@ -64,18 +64,11 @@ export interface RateLimitGuardOptions {
 	readonly headerFallback?: RateLimitSpec;
 	/**
 	 * A fixed `error_description` for this route's 429, in place of the
-	 * limiter's own `decision.reason` (#593).
-	 *
-	 * For a route whose error bodies are a vocabulary rather than prose: the
-	 * federation-grant routes answer in core's denial union, where a throttle
-	 * is `rate_limited` with the reason `provider`, and a client switches on
-	 * that identifier. Without this the same route would answer `provider`
-	 * when core throttled and whatever the limiter adapter happened to call
-	 * its budget when this guard did.
-	 *
-	 * Leave it unset — the default — wherever `error_description` is for a
-	 * human, which is every other route: `decision.reason` is the
-	 * operator-visible cause, and losing it makes an outage harder to read.
+	 * limiter's `decision.reason`, for routes whose error bodies are a
+	 * vocabulary a client switches on: the federation-grant routes answer
+	 * `rate_limited` with the reason `provider` whoever throttled. Leave it
+	 * unset wherever `error_description` is for a human: `decision.reason` is
+	 * the operator-visible cause.
 	 */
 	readonly deniedDescription?: string;
 }
@@ -90,7 +83,7 @@ export interface RateLimitOutageLogger {
 
 /**
  * What {@link checkWithFailMode} needs from {@link RateLimitGuardOptions}: the
- * limiter, the endpoint tag, the OR-5 outage policy and its two channels.
+ * limiter, the endpoint tag, the outage policy and its two channels.
  */
 export type RateLimitPolicyOptions = Pick<
 	RateLimitGuardOptions,
@@ -110,24 +103,14 @@ export type RateLimitCheckOutcome =
 
 /**
  * The guard's check with its outage policy attached, for a route that cannot
- * be guarded by a middleware (#457).
- *
- * `POST /oauth/device/verification` keys its budget on the authenticated
- * subject rather than the IP, and its 429 is its own audit event carrying the
- * request's `action` — neither fits the `<tag>:ip:<ip>` middleware. Until
- * #457 it therefore called `limiter.check` bare, and a limiter-backend outage
- * there was an unhandled throw: a 500 through the terminal handler,
- * `rateLimit.failMode` ignored, no `rate_limit.unavailable` event. This is
- * the half of {@link createRateLimitGuard} such a route shares: the check,
- * and on a throw the paired `logger.error` + audit emission described there.
- * The caller renders the outcome — 503 with
+ * use the middleware (`POST /oauth/device/verification` keys its budget on the
+ * authenticated subject and audits its own 429). On a throw it writes the
+ * paired `logger.error` + audit event described at {@link createRateLimitGuard};
+ * the caller renders the outcome (503 with
  * {@link rateLimiterUnavailableEnvelope} under `"closed"`, proceed under
- * `"open"` — so that the policy and its reporting exist once, and the guard
- * is this function plus HTTP framing.
+ * `"open"`), so the policy and its reporting exist once.
  *
- * The outage report's `ip` / `userAgent` are read from `ctx`, so a caller
- * that wants them on the audit event passes them in the check context, as
- * the guard does.
+ * The outage report's `ip` / `userAgent` are read from `ctx`.
  */
 export const checkWithFailMode = async (
 	{ limiter, tag, failMode, logger = consoleLogger, auditSink }: RateLimitPolicyOptions,
@@ -137,13 +120,11 @@ export const checkWithFailMode = async (
 	try {
 		return { status: "decided", decision: await limiter.check(key, ctx) };
 	} catch (cause) {
-		// A string, as the log line has always carried — but the projection's:
-		// a limiter's error is a store's (a Redis reply echoes the command it
-		// refused), so its message is read through loggableError, and a thrown
-		// non-Error says what kind it was, not what it held. The audit event
-		// keeps less: the error's name and code (`auditedError`) as
-		// `details.cause`, because a sink is a record other systems read, and
-		// the message is still a store's words.
+		// A limiter's error is a store's (a Redis reply echoes the command it
+		// refused), so the log line carries loggableError's projection, and a
+		// thrown non-Error says what kind it was, not what it held. The audit
+		// event, a record other systems read, keeps only the name and code
+		// (`auditedError`) as `details.cause`.
 		const projected = loggableError(cause);
 		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
@@ -178,34 +159,21 @@ export const rateLimiterUnavailableEnvelope = (): ErrorEnvelope =>
 	errorEnvelope("service_unavailable", "Rate limiter temporarily unavailable");
 
 /**
- * Middleware factory for the product's security throttles (#325).
- *
- * One implementation of the rate-limit check + outage policy shared by the
+ * Middleware factory for the product's security throttles, shared by the
  * OAuth endpoints (`/token`, `/authorize`, `/introspect`) and
- * `/session/login`, which previously carried two hand-synchronized copies
- * (#314) that had already drifted: only the oauth copy emitted the
- * `rate_limit.unavailable` audit event, and only the session copy emitted
- * `RateLimit-*` headers. Both surfaces now do both.
+ * `/session/login`. It checks `limiter.check("<tag>:ip:<ip>", ctx)` and:
  *
- * The guard checks `limiter.check("<tag>:ip:<ip>", ctx)` and:
+ * - **allow** → `RateLimit-*` headers, then `next()`;
+ * - **deny** → `RateLimit-*` headers, `Retry-After` when the decision carries
+ *   a reset time, and a 429 with the RFC 6749 §5.2 envelope
+ *   (`{error: "rate_limited"}`);
+ * - **limiter outage** → applies `failMode` and reports on two channels:
+ *   `logger.error` for operators, which works even when the audit sink shares
+ *   the failed backend (typically Redis), and the `rate_limit.unavailable`
+ *   audit event for dashboards.
  *
- * - **allow** → emits `RateLimit-*` headers and calls `next()`;
- * - **deny** → emits `RateLimit-*` headers, `Retry-After` when the decision
- *   carries a reset time, and a 429 with the RFC 6749 §5.2 envelope
- *   (`{error: "rate_limited"}` — AS-2 unified error shape);
- * - **limiter outage** → applies `failMode` (OR-5). The previous
- *   implementation was silent fail-open with a fire-and-forget audit event.
- *   The audit sink is typically Redis-backed too, so during a Redis outage
- *   the audit emission also silently drops — operators saw nothing while
- *   rate limiting was down for hours. The `failMode` policy makes the
- *   behavior configurable, and the `logger.error` call ensures operators see
- *   the outage regardless of audit-sink status. Belt-and-suspenders: the
- *   `rate_limit.unavailable` audit event is kept for ops dashboards that
- *   consume it — the logger call is the operator-visible path, the audit
- *   event is the structured pipeline path.
- *
- * The check and the outage policy are {@link checkWithFailMode} (#457); this
- * factory adds the `<tag>:ip:<ip>` key, the headers and the responses.
+ * The check and outage policy are {@link checkWithFailMode}; this factory
+ * adds the key, the headers and the responses.
  */
 export const createRateLimitGuard = ({
 	limiter,
@@ -219,9 +187,8 @@ export const createRateLimitGuard = ({
 	const policy: RateLimitPolicyOptions = { limiter, tag, failMode, logger, auditSink };
 	return async (req: Request, res: Response, next): Promise<void> => {
 		const ip = req.ip ?? "unknown";
-		// CP-10: pass the same normalized ip into the check context as the
-		// key derivation uses, so limiters that re-use ctx.ip for logging
-		// or secondary keying observe the same value.
+		// The same ip as the key, so a limiter that reuses ctx.ip for logging
+		// or secondary keying sees the same value.
 		const outcome = await checkWithFailMode(policy, `${tag}:ip:${ip}`, {
 			ip,
 			userAgent: req.get("user-agent"),
@@ -236,14 +203,10 @@ export const createRateLimitGuard = ({
 		}
 		const { decision } = outcome;
 
-		// The advertised limit is the one the adapter reports having *applied*,
-		// not the one configured by the caller. They differ whenever an operator
-		// declares a per-adapter spec (e.g. `limits.login`) — which deliberately
-		// overrides the value seeded from `rateLimit.login` — and a header
-		// advertising a limit no request is measured against is worse than no
-		// header. `decision.limit` is optional, so a custom adapter that does
-		// not report one falls back to `headerFallback`; a caller with no
-		// configured spec omits the fallback and the header with it.
+		// Advertise the limit the adapter applied, not the caller's (see
+		// `RateLimitDecision.limit`): a header naming a limit no request is
+		// measured against is worse than none. `headerFallback` covers adapters
+		// that report none; without either, the header is omitted.
 		const limitHeader = decision.limit ?? headerFallback?.limit;
 		if (limitHeader !== undefined) {
 			res.setHeader("RateLimit-Limit", String(limitHeader));
@@ -264,14 +227,10 @@ export const createRateLimitGuard = ({
 			if (decisionResetSeconds !== undefined) {
 				res.setHeader("Retry-After", String(decisionResetSeconds));
 			}
-			// AS-2: rate-limit body migrated from `{error, reason}` to RFC 6749 §5.2
-			// `{error, error_description}` so all auth-product error responses share
-			// a single shape. `decision.reason` is the operator-visible cause string,
-			// sent as the envelope sends every description: within RFC 6749's
-			// characters. A reason that is empty or not a string — a custom
-			// adapter can put anything there — falls back to the default, which
-			// the envelope would otherwise drop and leave the 429 without an
-			// `error_description`.
+			// RFC 6749 §5.2 `{error, error_description}`, the shape every error
+			// response shares. A reason that is empty or not a string (a custom
+			// adapter can put anything there) falls back to the default, which the
+			// envelope would otherwise drop, leaving the 429 without one.
 			const reason =
 				typeof decision.reason === "string" && decision.reason !== ""
 					? decision.reason

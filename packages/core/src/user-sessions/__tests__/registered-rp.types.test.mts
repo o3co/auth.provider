@@ -20,17 +20,15 @@
  * record type; not for one behind a cast or one that names a field with the
  * wrong value.
  *
- * A registry copies the record field by field — both bundled ones do — and a
- * field it forgets is dropped without a sound. For `RegisteredRP` that is the
- * logout cascade: `backchannelLogoutUri` / `frontchannelLogoutUri` gone, and
- * the RP is never told the session ended, so its own session outlives the
- * user's logout here; `*SessionRequired: false` gone, and `sid` is sent to an
- * RP that asked not to receive it (the default is `true`).
- *
- * Every field is a REQUIRED key, `undefined` where the client registered
- * none, so a copy that forgets one fails to compile. Asserted with
- * conditional types rather than `@ts-expect-error`; `user-sessions/__tests__`
- * is on both of core's typecheck lists.
+ * A registry copies the record field by field, as both bundled ones do, and a
+ * field it forgets is dropped silently: `backchannelLogoutUri` /
+ * `frontchannelLogoutUri` gone, the RP is never told the session ended, so
+ * its own session outlives the user's logout here; `*SessionRequired: false`
+ * gone, `sid` is sent to an RP that asked not to receive it (the default is
+ * `true`). So every field is a REQUIRED key, `undefined` where the client
+ * registered none. Asserted with conditional types rather than
+ * `@ts-expect-error`; `user-sessions/__tests__` is on both of core's
+ * typecheck lists.
  */
 
 import { describe, expectTypeOf, it } from "vitest";

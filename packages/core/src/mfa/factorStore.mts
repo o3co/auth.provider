@@ -15,15 +15,13 @@
  */
 
 /**
- * The enrolled-factor record and the port that keeps it (the MFA ADR's D7),
- * with its `mfaFactorStore` slot.
+ * The enrolled-factor record, the port that keeps it, and its `mfaFactorStore`
+ * slot (ADR 2026-09-25-multi-factor-authentication).
  *
- * A record is one second factor bound to one subject. Its `data` is the
- * factor's own state, sealed by the coordinator before it reaches the store
- * (D11), and opaque to every store: kept byte for byte, never decoded,
- * logged or derived from. "Only zero records open a first binding" (F3) is
- * only as strong as this store, which is why losing it is guarded
- * separately (D12, the enrollment witness on `UserRepository`).
+ * A record's `data` is sealed by the coordinator and opaque to every store:
+ * kept byte for byte, never decoded, logged or derived from. Only zero records
+ * open a first binding, so losing this store is guarded separately by the
+ * enrollment witness on `UserRepository`.
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
@@ -38,13 +36,13 @@ export interface MfaFactorRecord {
 	readonly kind: string;
 	/** What the user called it: at most 64 printable characters, checked by the coordinator. */
 	readonly label: string | undefined;
-	/** What authorized the binding (D24): recorded for audit, not enforced. */
+	/** What authorized the binding: recorded for audit, not enforced. */
 	readonly binding: "password" | "email_proof" | "mfa" | undefined;
 	readonly createdAt: Date;
 	readonly lastUsedAt: Date | undefined;
 	/** Bumped by every update; the compare-and-set token. */
 	readonly version: number;
-	/** The factor's own state, sealed (D11). Opaque to every store. */
+	/** The factor's own state, sealed. Opaque to every store. */
 	readonly data: string;
 }
 
@@ -59,8 +57,8 @@ export interface MfaFactorRecordUpdate {
  * Where a subject's second factors are kept.
  *
  * Every operation is atomic on its own. A store that cannot answer throws:
- * an outage is never "no factors" (D28), which a caller could read as a
- * subject with nothing enrolled.
+ * an outage is never "no factors", which a caller could read as a subject
+ * with nothing enrolled.
  */
 export interface MfaFactorStore {
 	readonly kind: string;
@@ -70,12 +68,10 @@ export interface MfaFactorStore {
 	create(record: MfaFactorRecord): Promise<void>;
 	/**
 	 * Compare-and-set on `version`: replaces `data`, `label` and `lastUsedAt`
-	 * and bumps `version` by one, only if the record is still at
-	 * `expectedVersion`. Answers the record as written, or `null` when the
-	 * version moved or the record is gone. An `expectedVersion` of
-	 * `Number.MAX_SAFE_INTEGER`, whose next version would be no safe integer,
-	 * is a `RangeError`, whatever the stored version
-	 * (`checkMfaVersionAdvances`).
+	 * and bumps `version`, only if the record is still at `expectedVersion`.
+	 * Answers the record as written, or `null` when the version moved or the
+	 * record is gone. `Number.MAX_SAFE_INTEGER` as `expectedVersion` is a
+	 * `RangeError` whatever the stored version (`checkMfaVersionAdvances`).
 	 */
 	update(
 		subject: string,
@@ -97,7 +93,7 @@ export type MfaFactorStoreFactory = AdapterFactory<MfaFactorStore>;
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** Where enrolled second factors are kept (the MFA ADR's D7). */
+		/** Where enrolled second factors are kept. */
 		readonly mfaFactorStore?: MfaFactorStore;
 	}
 }

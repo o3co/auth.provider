@@ -19,9 +19,6 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * #561 — the consent step's adapter switch has a shared backend, and that
- * backend's namespace reaches its module.
- *
  * `consentStore.adapter` selects which module provides both consent slots in
  * a composition like the standalone; `"redis"` is the one
  * `deployment.mode = "multi"` accepts. `redisConsentStore` is presence-only,

@@ -28,29 +28,21 @@ export interface DPoPProofClaims {
 	readonly iat: number;
 	readonly jti: string;
 	/**
-	 * `base64url(SHA-256(access token))` — RFC 9449 §4.2.
-	 *
-	 * Optional here because the claim's necessity depends on where the proof is
-	 * presented, which this parser does not know. At the token endpoint there
-	 * is no access token yet and the claim is absent; at a protected resource
-	 * it is REQUIRED and the resource verifies it against the token it was
-	 * handed (§7.1). That binding is what stops a proof captured alongside one
-	 * request from being replayed with a different stolen token.
+	 * `base64url(SHA-256(access token))` — RFC 9449 §4.2. Optional here: absent
+	 * at the token endpoint, REQUIRED at a protected resource, which verifies it
+	 * against the token it was handed (§7.1). That binding stops a proof captured
+	 * with one request from being replayed with a different stolen token.
 	 */
 	readonly ath?: string;
-	/** The server-provided nonce echoed back (RFC 9449 §8 / §9, #530). */
+	/** The server-provided nonce echoed back (RFC 9449 §8 / §9). */
 	readonly nonce?: string;
 }
 
 /**
- * Result of structural DPoP proof parsing. Layout matches Wave 2 Phase 2
- * spec §5.3 — flat fields, with the proof-key JWK and its RFC 7638 SHA-256
- * thumbprint (`jkt`) computed at parse time so downstream consumers (the
- * verifier in 2b, the grant-side cnf claim in 2c) can route on the binding
- * identity without re-deriving the thumbprint.
- *
- * Signature verification is the verifier's responsibility (Sub-PR 2b) —
- * `parseProof` only validates JOSE shape and claim presence.
+ * Result of structural DPoP proof parsing: flat fields, with the proof-key
+ * JWK and its RFC 7638 SHA-256 thumbprint (`jkt`) computed at parse time so
+ * consumers (the verifier, the grant-side `cnf` claim) need not re-derive it.
+ * The signature is not verified here; that is the verifier's job.
  */
 export interface DPoPProof {
 	/** Proof-of-possession public key from the JOSE protected header. */
@@ -60,38 +52,29 @@ export interface DPoPProof {
 	/** RFC 7638 SHA-256 thumbprint of `jwk` — the value used in `cnf.jkt`. */
 	readonly jkt: string;
 	readonly claims: DPoPProofClaims;
-	/** Original raw JWT — needed for signature verification in 2b. */
+	/** Original raw JWT — needed for the verifier's signature check. */
 	readonly raw: string;
 }
 
 /**
  * Parse a raw DPoP header value into a structured `DPoPProof`. Throws
- * `DPoPError` for malformed input — does NOT verify the signature or
- * validate semantic claims (htm, htu, iat). Those happen in the
- * verifier (T2.5 / Sub-PR 2b).
+ * `DPoPError` for malformed input; does NOT verify the signature or the
+ * semantic claims (htm, htu, iat), which the verifier does.
  *
- * Validation order follows spec §6 with one performance-driven deviation:
- *   Step 3: JWT shape (3 parts)
- *   Step 4: typ = dpop+jwt
- *   Step 5: alg present (whitelist check is in verifier)
- *   Step 6: jwk present in header
- *   Step 7: jwk is public-only (no private material — name-screened)
- *   Step 9: required claims present + correct types       ← runs BEFORE step 8
- *           (and a `jti` of at most `MAX_JTI_LENGTH` characters)
- *           (`iat`, and any `exp` / `nbf`, a NumericDate — not merely a number)
- *   Step 8: jkt computed via RFC 7638 SHA-256 thumbprint  ← runs LAST
+ * Checks, in order:
+ *   1. JWT shape (3 parts)
+ *   2. typ = dpop+jwt
+ *   3. alg present (the allowlist is the verifier's)
+ *   4. jwk present in the header, public-only (private members screened by name)
+ *   5. required claims present with correct types; a `jti` of at most
+ *      `MAX_JTI_LENGTH` characters; `iat`, and any `exp` / `nbf`, a NumericDate
+ *   6. jkt computed via RFC 7638 SHA-256 thumbprint
  *
- * Step 8 is moved AFTER step 9 because `computeJkt` is the only cryptographic
- * operation in the parser (canonical JSON serialization + SHA-256). Cheap
- * structural / type checks run first so a proof with missing claims rejects
- * without burning the thumbprint cost. The spec authorizes this ordering —
- * §6's step numbering is the validation taxonomy, not a literal execution
- * sequence, since steps 7 and 9 don't depend on the jkt value.
- *
- * Per Wave 2 Phase 2 spec §6 + design principle §3.2 (total-order validation).
+ * The thumbprint runs last because it is the parser's only cryptographic
+ * operation, so a proof with missing claims is refused without paying for it.
  */
 export const parseProof = async (raw: string): Promise<DPoPProof> => {
-	// Step 3 (spec §6): JWT shape — must be exactly 3 dot-separated parts
+	// JWT shape: exactly 3 dot-separated parts
 	if (typeof raw !== "string" || raw.split(".").length !== 3) {
 		throw new DPoPError("malformed_proof", "DPoP header is not a JWT");
 	}
@@ -103,25 +86,22 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		throw new DPoPError("malformed_proof", "DPoP header is not parseable");
 	}
 
-	// Step 4 (spec §6): typ must be exactly "dpop+jwt"
 	if (header.typ !== "dpop+jwt") {
 		// Fixed text: the value is the client's, and the refusal's message
 		// reaches the dispatcher's log line through its projection.
 		throw new DPoPError("typ_mismatch", "typ is not dpop+jwt");
 	}
 
-	// Step 5 (spec §6): alg must be present as a non-empty string
-	// (whitelist enforcement is in the verifier).
+	// alg must be a non-empty string; the allowlist is enforced in the verifier.
 	if (typeof header.alg !== "string" || header.alg.length === 0) {
 		throw new DPoPError("malformed_proof", "missing or non-string alg");
 	}
 
-	// Step 6 (spec §6): jwk must be present in the protected header
 	if (!header.jwk || typeof header.jwk !== "object") {
 		throw new DPoPError("missing_jwk", "JOSE header has no jwk");
 	}
 
-	// Step 7 (spec §6): JWK must carry public key material only
+	// The JWK must carry public key material only.
 	const jwk = header.jwk as Record<string, unknown>;
 	const privateKeyFields = ["d", "p", "q", "dp", "dq", "qi", "k"];
 	for (const field of privateKeyFields) {
@@ -137,17 +117,15 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		throw new DPoPError("malformed_proof", "DPoP body is not parseable");
 	}
 
-	// Step 9 (spec §6): required claims must be present
 	for (const claim of ["htm", "htu", "iat", "jti"] as const) {
 		if (!(claim in claims)) {
 			throw new DPoPError("missing_claim", `missing required claim: ${claim}`);
 		}
 	}
 
-	// Step 9 continued: claim type validation.
-	// Wrong-type claims are a STRUCTURAL error (`malformed_proof`), distinct
-	// from the `missing_claim` branch above — operator audit triage needs to
-	// distinguish "client omitted htm" from "client sent iat as a string".
+	// Wrong-type claims are `malformed_proof`, distinct from `missing_claim`:
+	// audit triage must tell "client omitted htm" from "client sent iat as a
+	// string".
 	if (
 		typeof claims.htm !== "string" ||
 		typeof claims.htu !== "string" ||
@@ -160,10 +138,9 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	// The jti is the key the verifier records in the seen-set for
 	// `replay-store-ttl-seconds`, and this runs before the signature is checked
 	// and, at the token endpoint, before the client is authenticated: whoever
-	// sends the proof chooses it. Non-empty and at most `MAX_JTI_LENGTH` (256)
-	// characters — RFC 9449 §4.2 asks only for uniqueness, which a UUID (36)
-	// or 96 random bits (16 in base64url) already give — so an over-long one
-	// is malformed here and never reaches the store.
+	// sends the proof chooses it. RFC 9449 §4.2 asks only for uniqueness, which a
+	// UUID (36 characters) already gives, so an over-long one is malformed here
+	// and never reaches the store.
 	if (!isRecordableJti(claims.jti)) {
 		throw new DPoPError(
 			"malformed_proof",
@@ -187,18 +164,16 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	if ("ath" in claims && typeof claims.ath !== "string") {
 		throw new DPoPError("malformed_proof", "invalid claim types");
 	}
-	// #530: same rule for `nonce` — present-and-wrong-typed is malformed, not
-	// absent, so it cannot read as "no nonce was sent".
+	// Same rule for `nonce`: present-and-wrong-typed is malformed, not absent,
+	// so it cannot read as "no nonce was sent".
 	if ("nonce" in claims && typeof claims.nonce !== "string") {
 		throw new DPoPError("malformed_proof", "invalid claim types");
 	}
 
-	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK.
-	// `computeJkt` delegates to jose's `calculateJwkThumbprint`, which throws
-	// `JWKInvalid` for malformed JWK shapes (e.g. EC key missing `crv`/`x`/`y`,
-	// RSA missing `n`/`e`). Step 7 only screens for private-material *field
-	// names* — shape validity is jose's job. Wrap any jose error so the
-	// package's documented `DPoPError` contract holds at the boundary.
+	// RFC 7638 thumbprint over the validated JWK. jose throws `JWKInvalid` for a
+	// malformed shape (EC key missing `crv`/`x`/`y`, RSA missing `n`/`e`); the
+	// private-member screen above checks names only. Wrap any jose error so the
+	// `DPoPError` contract holds at the boundary.
 	let jkt: string;
 	try {
 		jkt = await computeJkt(jwk as JWK);

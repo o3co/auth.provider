@@ -15,26 +15,18 @@
  */
 
 /**
- * Subject-wide revocation with an operator's policy attached (#593, D13).
+ * Subject-wide revocation with an operator's policy attached: the work of
+ * `revokeAllForSubject` behind a component a module wires once, so the
+ * caller names only a subject and, at most, what becomes of their
+ * federation grants. See ADR 2026-09-17-federation-grants-offline-delegation.
  *
- * `revokeAllForSubject` is a function a Store calls with every store it has
- * and a TTL it has to size correctly. This is the same work behind a component
- * a module wires once: the caller names a subject and, at most, what should
- * happen to their federation grants.
- *
- * **Keeping is the reason it exists.** A subject-wide revocation exists for
- * two very different events. A user changing their password wants their
- * sessions gone; whether the calendar integration a backend has been using for
- * a month should die with it is a question about residual access, and the
- * answer differs per deployment. So the allowance is configuration
- * (`federationGrants.allowKeepOnSubjectRevocation`, default `false`) rather
- * than an argument: a flag on the call would let any caller decide it, which
- * is not what an operator policy is.
- *
- * What the caller asks for and what happened are both reported, because they
- * can differ: a `"keep"` refused by policy is carried out as a full
- * revocation. See {@link SubjectRevocationReport.complete} for the sentence
- * that matters operationally.
+ * **Keeping is the reason it exists.** A password change wants sessions
+ * gone; whether a backend's month-old calendar integration dies with it is
+ * a question of residual access that differs per deployment. So the
+ * allowance is configuration (`federationGrants.allowKeepOnSubjectRevocation`,
+ * default `false`), not a call argument any caller could set. A `"keep"`
+ * refused by policy is carried out as a full revocation, and the report
+ * says so (see {@link SubjectRevocationReport.federationGrants}).
  */
 
 import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
@@ -66,55 +58,41 @@ export type FederationGrantDisposition = "revoke" | "keep";
 
 export interface SubjectRevocationRequest {
 	readonly subject: string;
-	/** Defaults to `"revoke"`. `"keep"` is a request, not an instruction — see the module note. */
+	/** Defaults to `"revoke"`. `"keep"` is a request, not an instruction: see the module note. */
 	readonly federationGrants?: FederationGrantDisposition;
 	/**
-	 * While keeping, end the grants consented at or after this instant anyway.
-	 *
-	 * What it is for: a compromise an operator can date. Everything the subject
-	 * agreed to from that moment on may have been agreed to by somebody else,
-	 * and is ended; what they agreed to before it is what "keep" keeps. The
-	 * comparison is against `consent.at`, is inclusive, and is not widened by
-	 * any clock skew — an operator's instant is not a guess.
-	 *
-	 * Ignored when the applied disposition is `"revoke"`: everything is already
-	 * being ended.
+	 * While keeping, end the grants consented at or after this instant anyway:
+	 * a compromise an operator can date, from which on the subject's consents
+	 * may be somebody else's. Compared inclusively against `consent.at`, with
+	 * no clock-skew widening (an operator's instant is not a guess). Ignored
+	 * when the applied disposition is `"revoke"`.
 	 */
 	readonly revokeGrantsConsentedSince?: Date;
 }
 
 export interface SubjectRevocationReport extends RevokeAllForSubjectResult {
-	/**
-	 * Grants that were kept, and whose renewal in flight was ended (D13).
-	 *
-	 * Empty on the revoking path, where there is nothing to keep a renewal for.
-	 */
+	/** Grants that were kept, and whose renewal in flight was ended. Empty when revoking. */
 	readonly grantsRetired: readonly string[];
 	/**
-	 * Grants that were **kept**, and whose renewal could not be ended.
-	 *
-	 * Separate from `grantsFailed`, and the separation is the point: that
-	 * field means "the revocation write threw — still live, safe to retry",
-	 * and a Store that read these two as one would retry by revoking grants
-	 * the operator's policy had just chosen to keep. Retrying one of these
-	 * means asking for the retirement again, not for a revocation.
+	 * Grants that were **kept**, and whose renewal could not be ended. Apart
+	 * from `grantsFailed` ("revocation threw, safe to retry") because a Store
+	 * that read them as one would retry by revoking grants the policy chose to
+	 * keep: retrying one of these means asking for the retirement again.
 	 */
 	readonly grantsRetireFailed: readonly string[];
 	/**
-	 * What was asked for, what was done, and — when they differ — why.
+	 * What was asked for, what was done, and why when they differ.
 	 *
-	 * `complete: true` means the **applied** action completed. It does not mean
-	 * the requested one was honoured: a Store that asked to keep, was refused
-	 * by policy, and reads only `complete` will believe the subject's grants
-	 * survived when every one of them was revoked. Read all three fields.
+	 * `complete: true` means the **applied** action completed, not that the
+	 * requested one was honoured: a Store that asked to keep, was refused by
+	 * policy, and reads only `complete` will believe grants survived that were
+	 * all revoked. Read all three fields.
 	 *
-	 * And `complete: false` is worse under `"keep"` than under `"revoke"`. A
-	 * full revocation stamps the grants boundary before it enumerates
-	 * anything, so a grant its pass could not reach is refused at `/token` and
-	 * revoked durably there; the retry only tidies up. `"keep"` advances no
-	 * grants boundary — that is the mode — so a grant in `grantsFailed`,
-	 * selected by `revokeGrantsConsentedSince` and left unwritten by an
-	 * outage, stays usable until the retry succeeds. Nothing else will end it.
+	 * `complete: false` is worse under `"keep"`. A full revocation stamps the
+	 * grants boundary first, so a grant its pass missed is still refused at
+	 * `/token`. `"keep"` advances no grants boundary, so a grant in
+	 * `grantsFailed` (selected by `revokeGrantsConsentedSince`, left unwritten
+	 * by an outage) stays usable until a retry succeeds.
 	 */
 	readonly federationGrants: {
 		readonly requested: FederationGrantDisposition;
@@ -129,14 +107,11 @@ export interface SubjectRevocationService {
 
 export interface SubjectRevocationServiceDeps {
 	/**
-	 * Optional for the reason the free function's are: #406 lets a deployment
-	 * declare either capability absent, and a service that could not be
-	 * *installed* in such a deployment would be a harder demand than the
-	 * operation it wraps. An absence is reported exactly as
-	 * `revokeAllForSubject` reports it — in `unavailable`, with
-	 * `complete: false` — rather than refused here. What IS refused is a
-	 * missing boundary while federation grants are enabled, which the module
-	 * checks: a grant ends when nothing else does.
+	 * Optional, as for `revokeAllForSubject`, so the service installs in a
+	 * deployment that declares either capability absent; an absence is
+	 * reported in `unavailable` with `complete: false`. The module refuses a
+	 * missing boundary while federation grants are enabled: a grant ends when
+	 * nothing else does.
 	 */
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly subjectRevocation?: SubjectRevocation;
@@ -159,13 +134,10 @@ export interface SubjectRevocationServiceDeps {
 }
 
 /**
- * Wiring errors are refused here, once, rather than answered per request.
- *
- * An operator who turned the allowance on and got a full revocation on every
- * call would read the outcome as the policy working — `"keep"` is precisely
- * the mode whose failure looks like success from the outside. So an adapter
- * that cannot stamp the two boundaries separately is a refusal at
- * construction, where a composition error belongs.
+ * Wiring errors are refused here, once, rather than per request. With the
+ * allowance on, an adapter that cannot stamp the two boundaries separately
+ * would turn every `"keep"` into a full revocation, a failure that looks
+ * like the policy working, so it is refused at construction.
  */
 export function createSubjectRevocationService(
 	deps: SubjectRevocationServiceDeps,
@@ -204,8 +176,8 @@ export function createSubjectRevocationService(
 					? { requested, applied }
 					: { requested, applied, reason: "keep_not_allowed" };
 
-			// One correlation ID per call, on either path (#618): the service's
-			// own, when it was composed with one, and otherwise this call's.
+			// One correlation ID per call, on either path: the service's own,
+			// when it was composed with one, and otherwise this call's.
 			const correlationId = federationGrantCorrelationId(deps.correlationId);
 			if (applied === "revoke") {
 				const result = await revokeAllForSubject({
@@ -240,15 +212,10 @@ export function createSubjectRevocationService(
 }
 
 /**
- * Sessions and tokens end; established grants stay.
- *
- * The order is the one the full revocation makes, and for the same reason: the
- * boundary is written before anything is enumerated, so a session or a token
- * minted while this runs is covered by something. What differs is only which
- * boundary — `revokeSessionsBefore` moves the sessions one and leaves the
- * grants one exactly where it was. That is what makes "keep" a decision rather
- * than a race: a grant covered by an earlier full revocation stays covered,
- * because this never moves that boundary backwards.
+ * Sessions and tokens end; established grants stay. Same order as the full
+ * revocation, for the same reason: the boundary is written before anything
+ * is enumerated. Only the sessions boundary moves (`revokeSessionsBefore`),
+ * so a grant covered by an earlier full revocation stays covered.
  */
 async function keep(
 	deps: SubjectRevocationServiceDeps,
@@ -325,21 +292,18 @@ async function keep(
 					if (written.ok) grantsRevoked.push(grant.id);
 					continue;
 				}
-				// The grant stays. Its renewal does not: a reauthorization
-				// somebody walked the subject into would widen the very grant
-				// this call froze, and by now the pointer is the only part of
-				// it this provider can still reach (D13). No handle — whichever
-				// intent is current is the one to end.
+				// The grant stays; its renewal does not: a reauthorization somebody
+				// walked the subject into would widen the very grant this call
+				// froze, and the pointer is the only part of it still reachable.
+				// No handle: whichever intent is current is the one to end.
 				const written = await store.retireIntent({ grantId: grant.id, now: new Date(now()) });
 				// `ok: false` is a grant that had no renewal in flight. Nothing
 				// to end is not a failure to end something.
 				if (written.ok) grantsRetired.push(grant.id);
 			} catch (error) {
-				// Counted against `complete`, both of them: reporting a
-				// completed revocation while a renewal somebody else started is
-				// still current would be the wrong half of the truth. Which
-				// list they land in decides what a retry should DO — revoke
-				// again, or retire again — so they are not one list.
+				// Both count against `complete`: a renewal still current is not a
+				// completed revocation. The list decides what a retry should do
+				// (revoke again, or retire again), so they are two lists.
 				(end ? grantsFailed : grantsRetireFailed).push(grant.id);
 				failures.push({
 					capability: "federationGrantStore",

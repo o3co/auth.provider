@@ -15,14 +15,14 @@
  */
 
 /**
- * The `authorization_code` grant on session admission (the session-admission
- * ADR's D4, D8): both reads of the code's session go through `admitSession`
- * with `oauth.code_exchange` — the first, before anything is signed, with
- * `codeClaimFirstRead(code)` (a code carries no subject), the second, before
- * the family is linked, with `codeClaimRevalidation(code, <the first read's
- * sub>)`, so a subject that changed between the two reads stands refused as
- * `session_invalidated`. The pinned changes (4) and (5) are each a test named
- * for the change, on both reads.
+ * The `authorization_code` grant on session admission (ADR
+ * 2026-09-28-session-admission, D8). Both reads of the code's session go
+ * through `admitSession` with `oauth.code_exchange`: the first, before anything
+ * is signed, with `codeClaimFirstRead(code)` (a code carries no subject); the
+ * second, before the family is linked, with `codeClaimRevalidation(code, sub)`
+ * on the first read's `sub`, so a subject changed in between is refused as
+ * `session_invalidated`. Tests prefixed (4) and (5) pin the ADR's changes of
+ * those numbers, on both reads.
  */
 
 import crypto from "node:crypto";

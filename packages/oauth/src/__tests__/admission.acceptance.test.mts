@@ -15,15 +15,11 @@
  */
 
 /**
- * One fixture requirement across `oauth`'s consumers, on the wire (the
- * session-admission ADR's build-order row A3, its acceptance): a requirement
- * that answers `step_up` — with a page — for `oauth.authorize` until the
- * step-up is recorded, `step_up` for the `session` grant, and `unmet` for a
- * token carrier while a flag is set. `/authorize` sends the browser to the
- * page with `redirect_to` and admits once the fixture answers `met`; the
- * `session` grant answers `invalid_grant` with `step_up`; the refresh grant
- * answers `invalid_grant`. One resolver, one router, as a composition wires
- * them.
+ * One fixture requirement across `oauth`'s consumers, on the wire (see ADR
+ * 2026-09-28-session-admission): it answers `step_up`, with a page, for
+ * `oauth.authorize` until the step-up is recorded, `step_up` for the `session`
+ * grant, and `unmet` for a token carrier while a flag is set. One resolver,
+ * one router, as a composition wires them.
  */
 
 import crypto, { createSecretKey } from "node:crypto";

@@ -28,19 +28,13 @@ const EVERY_OUTSIDE_NQSCHAR = new RegExp(OUTSIDE_NQSCHAR.source, "gu");
 
 /**
  * `text` with every character RFC 6749 does not allow in error text replaced
- * by `?`, one per code point.
+ * by `?`, one per code point. For text whose author the response does not
+ * fully control: an echo of client input, a configured value, a grant
+ * policy's description. {@link errorEnvelope} applies it; a writer that builds
+ * its body itself applies it to what it echoes.
  *
- * For text a response carries that its author does not fully control: a
- * description quoting what the client sent (a grant type, a scope, an
- * audience, a token type), a configured value, or a description a grant
- * policy returned. {@link errorEnvelope} applies it to every description it
- * builds; a writer that builds its body itself — a redirect's query, a literal
- * `{ error, error_description }` — applies it to the text it echoes.
- *
- * A value that is not a string — a JavaScript policy can return anything —
- * answers `undefined` rather than being coerced, so the caller falls back to
- * its own default. The overloads keep a caller that passes a string typed
- * `string`.
+ * A non-string (a JavaScript policy can return anything) answers `undefined`,
+ * so the caller falls back to its own default.
  */
 export function sanitizeErrorText(text: string): string;
 export function sanitizeErrorText(text: unknown): string | undefined;
@@ -71,13 +65,10 @@ export function auditErrorText(text: unknown): string | undefined {
 const AUDITED_LIST_MAX_ITEMS = 10;
 
 /**
- * A list a client or a peer chose — the scopes it asked for, the resources it
- * named — as a log line or an audit event records it: still a list, so a query
- * that reads the field as one keeps working, with each entry through
- * {@link auditErrorText} (sanitised, capped at 200 characters) and only the
- * first `maxItems` kept (10 by default). A small, well-formed list comes back
- * as it was. The caller that logs it adds how many entries there were when
- * the list was cut (`kept.length < values.length`), so the line says so.
+ * A client- or peer-chosen list (requested scopes, named resources) as a log
+ * line or audit event records it: still a list, each entry through
+ * {@link auditErrorText}, at most `maxItems` kept (10 by default). A caller
+ * that logs a cut list also logs the original count.
  *
  * `maxItems` must be a positive integer; anything else is a RangeError.
  */
@@ -198,42 +189,22 @@ export interface ErrorEnvelope {
 
 /**
  * Construct an RFC 6749 §5.2 error envelope. Optional fields are omitted
- * (rather than serialized as `undefined`) so JSON consumers see a clean
- * shape — `JSON.stringify({ x: undefined })` does drop the key, but having
- * the helper pre-omit keeps the in-memory object consistent for tests
- * that snapshot the structure with `toEqual`.
+ * rather than set to `undefined`, so `toEqual` snapshots see a clean shape; an
+ * empty `description` or `uri` counts as omitted.
  *
- * Empty-string `description` / `uri` are treated as omissions: RFC 6749
- * §5.2 specifies these as optional human-readable / URI fields, and an
- * empty string conveys no information while still serializing as a
- * present-but-empty value. Callers that need an explicit empty string
- * should construct the envelope literal directly.
+ * Whatever the caller hands in, the output keeps to RFC 6749's characters
+ * (Appendix A.7-A.9):
+ * - `description` is sanitised ({@link sanitizeErrorText}); a non-string is
+ *   dropped, never coerced.
+ * - a malformed `error` ({@link isWellFormedErrorCode}) is sent as
+ *   `server_error` and logged as `error_envelope_code_malformed`. A caller that
+ *   builds a code from input it does not control, and knows its answer is a
+ *   client error, checks the code itself and picks a client-error fallback.
+ * - `uri` is sent only when it is an http(s) URL or a relative reference that
+ *   RFC 3986 parses; any other is dropped (a repaired reference would point
+ *   elsewhere) and logged as `error_envelope_uri_malformed`.
  *
- * The text keeps to RFC 6749's characters (Appendix A.7, A.8), so every
- * writer that goes through here conforms whatever it was handed — a
- * mechanism's retry instruction, a limiter adapter's reason, a configured
- * name:
- *
- * - `description` is sanitised ({@link sanitizeErrorText}): a character
- *   outside `1*NQSCHAR` is sent as `?`. One that is not a string — a
- *   JavaScript caller can pass anything — is dropped like an empty one,
- *   never coerced.
- * - `error` must be well-formed ({@link isWellFormedErrorCode}). A malformed
- *   code is sent as `server_error` and logged through `consoleLogger` as
- *   `error_envelope_code_malformed`, sanitised and capped. A caller that
- *   builds a code from something it does not control, and knows its answer
- *   is a refusal of the client's request, checks the code itself and falls
- *   back to a client-error code (the token-binding middleware does).
- * - `uri` is sent only when it is an http(s) web page or a relative reference
- *   that RFC 3986's grammar parses, in RFC 6749's `error_uri` characters (§5.2,
- *   Appendix A.9). Any other is dropped — a reference with a character
- *   replaced would point somewhere else — and logged as
- *   `error_envelope_uri_malformed`.
- *
- * Contract scope: the three RFC 6749 §5.2 stock fields only (`error`,
- * `error_description`, `error_uri`). Extension fields (e.g. namespaced
- * sub-codes, rate-limit details) are not added here — pass through a
- * separate helper or a literal envelope object.
+ * Only the three stock fields; extension fields go in a literal envelope.
  *
  * @param error       Machine-readable error code (snake_case, e.g. `invalid_grant`).
  * @param description Optional human-readable detail. Empty string is dropped.

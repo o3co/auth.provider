@@ -15,17 +15,12 @@
  */
 
 /**
- * RFC 8707 Stage 2 at the AUTHORIZATION endpoint (#173).
- *
- * The design decision this pins: for `authorization_code`, the audience is
- * decided ONCE at `/authorize` and persisted on the code (C-2 / D-1
- * evaluate-once-at-authorize). So `resource` is forwarded to the policy hook
- * HERE — this is the only place a policy may narrow the audience — and the
- * token endpoint does enforcement only, never re-evaluation.
- *
- * `/authorize` also rejects an unsatisfiable request rather than issuing a
- * code that the token endpoint is guaranteed to refuse later, which would
- * otherwise surface only after the user finished the redirect.
+ * RFC 8707 at the AUTHORIZATION endpoint (see ADR
+ * 2026-07-31-rfc8707-resource-audience-binding). For `authorization_code` the
+ * audience is decided ONCE at `/authorize` and persisted on the code, so
+ * `resource` reaches the policy hook only HERE; the token endpoint enforces,
+ * never re-evaluates. An unsatisfiable request is rejected here, not issued a
+ * code the token endpoint would refuse after the user finished the redirect.
  */
 
 import {
@@ -113,7 +108,7 @@ const authorizeUrl = (params: Record<string, string | string[]>) => {
 	qs.append("client_id", CLIENT_ID);
 	qs.append("redirect_uri", REDIRECT);
 	qs.append("scope", "openid");
-	// #273: PKCE/S256 is mandatory at /authorize for every client.
+	// PKCE/S256 is mandatory at /authorize for every client.
 	qs.append("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
 	qs.append("code_challenge_method", "S256");
 	for (const [k, v] of Object.entries(params)) {
@@ -229,8 +224,7 @@ describe("Stage 2 — /authorize rejects an unsatisfiable resource request", () 
 	});
 
 	it("derives and persists the audience when no policy narrows one", async () => {
-		// Acceptance criterion 1, third bullet, at the authorization endpoint:
-		// the derived audience is what gets persisted on the code, so the token
+		// The derived audience is what gets persisted on the code, so the token
 		// endpoint's later enforcement passes without ever consulting a policy.
 		const captured: Parameters<CodeRepository["createCode"]>[0][] = [];
 		const app = await buildApp({ enabled: true, captureCode: (p) => captured.push(p) });

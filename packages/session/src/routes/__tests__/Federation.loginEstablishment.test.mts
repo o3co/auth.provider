@@ -15,14 +15,12 @@
  */
 
 /**
- * The federation callback's login establishes without asking (the
- * session-admission ADR's D5, build order A6): core builds its
- * `Establishment` from the federation's own facts
- * (`establishWithoutAsking`), no requirement's `admitPrimary` is consulted,
- * and the session is written from that establishment — a requirement that
- * would interrupt a password login does not interrupt a federated one, and
- * the record is what `federatedSessionAuthentication` composes. The rest of
- * the callback's login is pinned, unchanged, by `Federation.test.mts`.
+ * The federation callback's login establishes without asking (ADR
+ * 2026-09-28-session-admission, D5): core builds its `Establishment` from the
+ * federation's own facts (`establishWithoutAsking`), no requirement's
+ * `admitPrimary` is consulted, and the record is what
+ * `federatedSessionAuthentication` composes. The rest of the callback's login
+ * is pinned by `Federation.test.mts`.
  */
 
 import {

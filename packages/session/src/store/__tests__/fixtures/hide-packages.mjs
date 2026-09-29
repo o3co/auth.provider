@@ -9,26 +9,20 @@
  */
 
 // Loaded with `node --import`: makes the packages named in HIDE_PACKAGES
-// (comma-separated) unresolvable, to `import` and to `require` alike, as they
-// are in a deployment that did not install them. The hook stubs nothing and
-// throws nothing of its own: a hidden package is looked up by Node's own
-// resolver from the filesystem root, where no `node_modules` holds it, so the
-// process sees that resolver's real error — `ERR_MODULE_NOT_FOUND` for an
-// import, `MODULE_NOT_FOUND` for a require.
+// (comma-separated) unresolvable to `import` and `require` alike, as in a
+// deployment that did not install them. The hook stubs and throws nothing of
+// its own: a hidden package is looked up by Node's resolver from the
+// filesystem root, so the process sees that resolver's real error —
+// `ERR_MODULE_NOT_FOUND` for an import, `MODULE_NOT_FOUND` for a require.
 //
-// The two need different means. For an import, the hook hands the specifier
-// back with the root as `parentURL`. Node's CommonJS resolution searches from
-// the requiring module whatever `parentURL` says, so for a require (the
-// `require` condition) the hook asks a `require` created at the root instead,
-// which throws — provided NODE_PATH is unset: CommonJS resolution searches it
-// from anywhere, and pnpm sets it for the scripts it runs, so the test starts
-// this process without it.
-//
-// The limit: CommonJS also searches its global folders from anywhere —
-// `~/.node_modules`, `~/.node_libraries` and `$PREFIX/lib/node` — and this
-// hook does not hide a package installed in one of them from `require`. On
-// such a machine the test's require probe reports the package as loaded and
-// fails; it cannot pass with the package visible.
+// An import is handed back with the root as `parentURL`. CommonJS resolution
+// searches from the requiring module whatever `parentURL` says, so a require
+// (the `require` condition) asks a `require` created at the root instead.
+// That needs NODE_PATH unset — CommonJS searches it from anywhere, and pnpm
+// sets it — so the test starts this process without it. CommonJS's global
+// folders (`~/.node_modules`, `~/.node_libraries`, `$PREFIX/lib/node`) are
+// searched from anywhere too: a package installed there is not hidden from
+// `require`, and the test's require probe fails on such a machine.
 //
 // `module.registerHooks` needs Node >= 22.15 or >= 23.5; on an older Node the
 // test that loads this file skips the cases that would, and on CI asserts the

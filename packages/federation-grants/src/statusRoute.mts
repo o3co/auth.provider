@@ -15,34 +15,19 @@
  */
 
 /**
- * `POST /oauth/federation-grants/:grantId/status` (#593, D9).
+ * `POST /oauth/federation-grants/:grantId/status`: a grant's lifecycle, kept
+ * apart from the token route's issuance. See README, "The routes a client
+ * calls", and ADR 2026-09-17-federation-grants-offline-delegation, D9.
  *
- * Status describes a grant's lifecycle. Token answers an issuance request.
- * Keeping them apart is what this file is:
+ * `inspect` only, never `open`, a refresh, the refresh lock or `touch`: opening
+ * a dashboard must not rotate a credential at an upstream, and `lastUsedAt`
+ * must not record a look as a use. Its one write is a backstop revocation it
+ * finds, persisted and audited: one only computed would be computed again by
+ * every later reader and would vanish the day the boundary is lost.
  *
- *  - **`inspect` only.** Never `open`, never a refresh, never the refresh
- *    lock, never `touch`. Calling retrieval from here would rotate a
- *    credential at an upstream because somebody opened a dashboard, and
- *    `lastUsedAt` would record a look as a use.
- *  - **200 for every effective status**, including expired and revoked. A
- *    successful inspection of a grant that has ended is a successful
- *    inspection; answering the token route's 410 would make a dashboard read
- *    "this call failed" for a grant that is simply over.
- *  - **It is not a health check for `/token`.** `inspect` reports whether the
- *    credential authenticates, not whether the upstream will issue something
- *    usable — so `active` does not promise a token, and an ineligible status
- *    can coexist with a perfectly usable cached one.
- *
- * Two things it does write. A backstop it finds is written down, because a
- * revocation only computed would be computed again by every later reader and
- * would vanish the day the boundary is lost. And that write is audited.
- *
- * What it logs: a `503` — the grant store, the boundary, the backstop's write,
- * a key missing from the ring — is one line at error,
- * `federation_grant_status_unavailable`, with `reason` (what the caller was
- * answered), `store` and `step`. A boundary that could not be read for a
- * grant answered from the record is one warn,
- * `federation_grant_status_step_failed`.
+ * A `503` is one line at error, `federation_grant_status_unavailable`, with
+ * `reason`, `store` and `step`. A boundary that could not be read for a grant
+ * answered from the record is one warn, `federation_grant_status_step_failed`.
  */
 
 import {
@@ -208,9 +193,7 @@ export function createFederationGrantStatusHandler(
 			}
 			if (grant.status === "pending") {
 				// NOT terminal. A pending grant has not started rather than
-				// ended, so describing it is the ordinary authorization
-				// question — found by review, which is where this exemption had
-				// quietly grown to cover it.
+				// ended, so describing it is the ordinary authorization question.
 				if (!permitted()) {
 					refusePermission();
 					return;
@@ -247,14 +230,10 @@ export function createFederationGrantStatusHandler(
 			});
 
 			if (status.status === "revoked" && status.reason === "backstop") {
-				// Written down, not merely reported: a revocation that only ever
-				// exists as a computation is recomputed by every later reader and
-				// disappears the day the boundary is lost.
-				// The write's own result, not a narrowing of it: the event below
-				// is built from the record this call ended, and a
-				// reauthorization landing between the `inspect` above and this
-				// write would otherwise have it describe access that was not
-				// the access ended.
+				// Persisted, not merely reported (see the file comment). The event
+				// is built from the record this write returned: a reauthorization
+				// landing between the `inspect` above and this write would
+				// otherwise have it describe access that was not the access ended.
 				let written: FederationGrantWrite;
 				try {
 					written = await options.store.revoke(grantId, "backstop", at);

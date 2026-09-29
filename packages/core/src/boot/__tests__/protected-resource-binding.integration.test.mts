@@ -15,16 +15,12 @@
  */
 
 /**
- * Boot-level coverage for issue #264: the protected-resource sender-constraint
- * middleware must be mounted on every OAuth surface that accepts an access
- * token as a credential, and must be mounted even when the deployment
- * contributes no mechanisms at all.
- *
- * Extended for issue #327: coverage is fail-closed. The middleware guards
- * EVERY route — including routes contributed by modules core has never heard
- * of — except the explicitly exempt token endpoint. A module contributing a
- * new token-accepting route must be guarded by default, not by remembering
- * to update an allowlist in core.
+ * Boot-level coverage for the protected-resource sender-constraint
+ * middleware. It is mounted even when the deployment contributes no
+ * mechanisms, and coverage is fail-closed: it guards EVERY route, including
+ * routes from modules core has never heard of, except the explicitly exempt
+ * token endpoint. A module's new token-accepting route is guarded by default,
+ * not by an allowlist in core.
  */
 
 import express, { type Request, type RequestHandler, Router } from "express";
@@ -91,9 +87,7 @@ const protectedRoutesModule = () =>
 
 /**
  * Stands in for a third-party module contributing a token-accepting route at
- * a mount point core has never heard of (#327). Before the fail-closed
- * inversion this route sat outside the hard-coded allowlist and shipped
- * unguarded by default.
+ * a mount point core has never heard of.
  */
 const extensionResourceModule = () =>
 	defineModule({
@@ -211,8 +205,7 @@ describe("protected-resource sender-constraint mount (#264)", () => {
 
 describe("fail-closed coverage at the extension seam (#327)", () => {
 	it("refuses a bound token replayed as a plain Bearer at a module-contributed route", async () => {
-		// The regression #327 closes: this route is NOT in the old hard-coded
-		// allowlist, so it used to ship unguarded by default.
+		// Core does not know this route, and it is guarded all the same.
 		const app = await bootApp(dpopMech);
 		const res = await request(app)
 			.get("/acme/resource")
@@ -245,9 +238,9 @@ describe("fail-closed coverage at the extension seam (#327)", () => {
 	});
 
 	it("refuses a bound token at a module-contributed route when no mechanisms are contributed", async () => {
-		// Fail-closed twice over: the route is outside the old allowlist AND
-		// the deployment dropped its mechanism module while bound tokens are
-		// still live.
+		// Fail-closed twice over: core does not know the route, AND the
+		// deployment dropped its mechanism module while bound tokens are still
+		// live.
 		const app = await bootApp(null);
 		const res = await request(app)
 			.get("/acme/resource")

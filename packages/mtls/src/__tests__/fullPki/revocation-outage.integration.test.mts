@@ -16,19 +16,18 @@
 
 /**
  * `full-pki` under `on-unavailable = "reject"`, when a revocation source
- * cannot answer — through core's real dispatchers, the real mechanism, and
- * CRL distribution points on real loopback sockets.
+ * cannot answer: through core's real dispatchers, the real mechanism, and CRL
+ * distribution points on real loopback sockets.
  *
- * A source that could not be reached or did not deliver a usable answer (a
- * refused connection, a timeout, an HTTP error, an answer that is not DER, a
- * stale list) is the server's outage, not a verdict on the client's
- * certificate: the mechanism refuses with `unavailable`, the dispatcher
- * answers `503 temporarily_unavailable` and writes the outage's one line at
- * error, and nothing else logs it. It used to be `400 invalid_certificate`,
- * which a client reads as "your certificate is bad". A certificate the list
- * names is still a verdict, and so is one whose revocation cannot be checked
- * for a reason of its own (a distribution point outside the allowlist).
- * Under `"allow"` nothing changes.
+ * A source that could not be reached or gave no usable answer (a refused
+ * connection, a timeout, an HTTP error, an answer that is not DER, a stale
+ * list) is the server's outage, not a verdict on the client's certificate: the
+ * mechanism refuses with `unavailable`, the dispatcher answers
+ * `503 temporarily_unavailable` and writes the outage's one line at error, and
+ * nothing else logs it. A certificate the list names is still a verdict, and
+ * so is one whose revocation cannot be checked for a reason of its own (a
+ * distribution point outside the allowlist). The `"allow"` cases pin that an
+ * outage alone refuses nothing there.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -115,16 +114,13 @@ type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
 
 /**
  * root → intermediate → leaf. The intermediate's CRL (the root's list) is
- * served clean from a live loopback server; the leaf's (the intermediate's
- * list) is `leafCrl`: a refused connection, bytes that are not DER, a clean
- * list, or one naming the leaf. With `leafResponderRefused`, the leaf also
- * names an OCSP responder nothing listens on — for `revocation.mode = "both"`.
- * `extra.leafCn` names the leaf; `extra.morePoints` adds distribution points
- * after the first — one the live server answers 404 (`missing`) or one on a
- * port nothing listens on (`refused`). `extra.intSourcesRefused` points the
- * intermediate's own CRL and OCSP responder at ports nothing listens on;
- * `extra.intRevoked` has the root's list name the intermediate;
- * `extra.leafOrganization` puts an `O=` part before the leaf's `CN=`.
+ * served clean from a live loopback server; the leaf's is `leafCrl`.
+ * `leafResponderRefused` adds a leaf OCSP responder nothing listens on, for
+ * `mode = "both"`. `extra.morePoints` adds leaf distribution points after the
+ * first: one the live server answers 404 (`missing`) or one nothing listens on
+ * (`refused`). `extra.intSourcesRefused` points the intermediate's CRL and
+ * responder at closed ports; `extra.intRevoked` has the root's list name the
+ * intermediate; `extra.leafOrganization` puts an `O=` part before `CN=`.
  */
 const pki = async (
 	leafCrl: LeafCrl,
@@ -594,9 +590,8 @@ describe("revocation.mode = both: the OCSP fallback is logged once it has answer
 
 describe("the outage line's account survives a long subject", () => {
 	it("each source that could not be used is its own member, so a long DN pushes no URL off the line", async () => {
-		// loggableError caps a message at 256 characters. One message holding
-		// the subject and every URL lost the URLs behind a long DN; one short
-		// member per source keeps each within its own cap.
+		// loggableError caps a message at 256 characters; one short member per
+		// source keeps each URL within its own cap, however long the DN.
 		const leafCn = `client-${"x".repeat(230)}`;
 		const { root, int, leaf, leafPoint, morePoints } = await pki("refused", "127.0.0.1", false, {
 			leafCn,

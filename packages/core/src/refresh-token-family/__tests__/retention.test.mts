@@ -18,14 +18,13 @@
  * A revoked family's record is kept until the last token of the family could
  * still be accepted, whatever the family's own lifetime.
  *
- * `isFamilyRevoked` answers "no" for a family whose record is gone, and the
- * record expired with the family — its refresh-token lifetime, set once at
- * creation — because revocation kept that expiry. An access token minted late
- * in the family's life outlives it, and the verifier accepts a token for its
- * clock tolerance past `exp` besides. So revocation extends the record to
- * the later of the family's own expiry and now plus the longest access-token
- * lifetime the configuration allows, plus that tolerance; and a family whose
- * record had already run out is recorded as revoked anyway.
+ * `isFamilyRevoked` answers "no" for a family whose record is gone. An access
+ * token minted late in the family's life outlives the family's own expiry (its
+ * refresh-token lifetime, set once at creation), and the verifier accepts a
+ * token for its clock tolerance past `exp` besides. So revocation extends the
+ * record to the later of the family's own expiry and now plus the longest
+ * access-token lifetime the configuration allows, plus that tolerance; and a
+ * family whose record had already run out is recorded as revoked anyway.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

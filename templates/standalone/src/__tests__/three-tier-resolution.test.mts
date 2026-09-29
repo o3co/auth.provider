@@ -27,7 +27,7 @@ import { resolveConfigPaths } from "../configPath.mjs";
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 // Provide required secrets so AppConfigSchema parse succeeds. These are
-// test-only values — no real keys are embedded here. #282: SESSION_SECRET
+// test-only values — no real keys are embedded here. SESSION_SECRET
 // carries a 256-bit entropy floor, so these clear it (the '.' characters keep
 // them outside the base64 alphabet, so the UTF-8 length is what counts).
 const testEnv = {
@@ -60,9 +60,8 @@ const grants = (config: AppConfig) =>
 describe("three-tier HOCON resolution (env → application.conf → reference.conf)", () => {
 	it("template application.conf wins over reference.conf for grant.enabled", () => {
 		const config = buildResolvedConfig("development");
-		// Template's application.conf sets authorization_code.enabled = true.
-		// This test asserts the resolved value — it remains true whether
-		// reference.conf says false (current secure-default) or true (legacy).
+		// Template's application.conf sets authorization_code.enabled = true,
+		// so the resolved value is true whatever reference.conf says.
 		expect(grants(config).authorization_code?.enabled).toBe(true);
 	});
 
@@ -74,20 +73,15 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	});
 
 	it("env var at template layer can disable a template-enabled grant (precedence: env-override line must be repeated)", () => {
-		// Template enables authorization_code via application.conf. The env-override
-		// line is repeated at the template layer alongside `enabled = true`,
-		// so OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED=false reaches the resolved value.
-		// Without the repeated env line, the substitution at reference.conf is
-		// shadowed by the template's literal `true`.
-		// Note: ts.hocon substitutes env vars as strings, and `oauth.grants` is
-		// `z.object({}).passthrough()` — an open tree each grant module's own
-		// `configSchema` validates — so no shape-walking coercion reaches this
-		// leaf and the string survives to the resolved config. #288 unified the
-		// coercion for every DECLARED boolean in the schema and deliberately
-		// left this one alone: every consumer of a grant's `enabled`
+		// The env-override line is repeated at the template layer alongside
+		// `enabled = true`; without it, reference.conf's substitution is
+		// shadowed by the template's literal `true`. The value stays a string:
+		// `oauth.grants` is `z.object({}).passthrough()` (each grant module's
+		// own `configSchema` validates it), so no coercion reaches this leaf.
+		// That is deliberate: every consumer of a grant's `enabled`
 		// (`GrantRegistry.isEnabled`, `oauthAuthorization`, `oauthSession`)
-		// already reads `true` and `"true"` as enabled and everything else,
-		// `"false"` included, as not-enabled.
+		// reads `true` and `"true"` as enabled and everything else, `"false"`
+		// included, as not-enabled.
 		const config = buildResolvedConfig("development", {
 			OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
 		});
@@ -95,8 +89,8 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	});
 
 	it("reference.conf default for mfa.mode is 'off', and the template installs no MFA module", () => {
-		// The MFA ADR's D19: off until the release that turns it on. Nothing
-		// here consults it yet; the template composes no MFA module.
+		// Core's reference default (ADR 2026-09-25-multi-factor-authentication);
+		// under `off` the template composes no MFA module.
 		const config = buildResolvedConfig("development");
 		expect(config.mfa?.mode).toBe("off");
 		expect(
@@ -136,13 +130,11 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 	});
 
-	// #287 — the audit trail as the shipped artifact resolves it. The section is
-	// declared in core's schema for a load-bearing reason: `AppConfigSchema` is
-	// a plain `z.object` and strips what it does not declare, so an undeclared
+	// The section must be declared in core's schema: `AppConfigSchema` is a
+	// plain `z.object` and strips what it does not declare, so an undeclared
 	// `audit` block would vanish between `parseFile` and `buildModules` and the
-	// sink selector would read `undefined` while the config sat in the file
-	// looking effective. These assertions run the real three-tier merge, so they
-	// fail if either layer stops carrying the key.
+	// sink selector would read `undefined`. These assertions run the real
+	// three-tier merge, so they fail if either layer stops carrying the key.
 	describe("#287: the audit sink as the shipped artifact resolves it", () => {
 		it("resolves audit.sink.type to the template's logger sink with nothing set", () => {
 			const config = buildResolvedConfig("production");
@@ -165,7 +157,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 
 		it("reference.conf's own default is a sink, not a drop", () => {
 			// A consumer that resolves against reference.conf alone still lands on
-			// a sink. #304's sink policy is stdout JSON, never "none", and the
+			// a sink. The sink policy is stdout JSON, never "none", and the
 			// library layer has to hold that on its own — a composition root that
 			// forgets to override it must not thereby lose its audit trail.
 			const referenceOnly = validate(
@@ -176,12 +168,11 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		});
 	});
 
-	// #277 — this is the shape the umbrella E2E (o3co/auth) boots: the shipped
+	// The shape the umbrella E2E (o3co/auth) boots: the shipped
 	// application.conf, `DEPLOYMENT_MODE=multi`, and one shared ioredis socket.
-	// The assertions below are what keep that stack booting: a memory denylist
-	// under `multi` is refused by the replica-safety guard, and NO denylist is
-	// refused by the #277 guard, so the template has to land on "redis" without
-	// the deployment naming it.
+	// A memory denylist under `multi` is refused by the replica-safety guard,
+	// and NO denylist by core's denylist boot guard, so the template has to
+	// land on "redis" without the deployment naming it.
 	describe("#277: access-token revocation as the shipped artifact resolves it", () => {
 		it("resolves accessTokenDenylist.adapter to redis with nothing set", () => {
 			const config = buildResolvedConfig("production");
@@ -202,19 +193,18 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		it("leaves nothing replica-unsafe under the umbrella E2E's environment", async () => {
 			// The environment `o3co/auth`'s tests/docker-compose.yml sets. Under
 			// `DEPLOYMENT_MODE=multi` the replica-safety guard fails boot naming
-			// every in-memory shared store, so the denylist this change adds has to
-			// come out of that environment as the Redis one — from the template's
-			// own config, since the compose file names no denylist variable.
-			// Asked of each manifest, the way the guard does (#455), so a rename
-			// cannot quietly invalidate it and the template's own memory modules
-			// — which no name list in core covers — count too.
+			// every in-memory shared store, so the denylist has to come out as
+			// the Redis one from the template's own config: the compose file
+			// names no denylist variable. Asked of each manifest, as the guard
+			// does, so a rename cannot quietly invalidate it and the template's
+			// own memory modules count too.
 			const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
 			const config = buildResolvedConfig("production", {
 				USER_SESSION_STORES_ADAPTER: "redis",
 				RATE_LIMITER_ADAPTER: "redis",
 				OAUTH_CODE_ADAPTER: "redis",
-				// #456: the federation token store defaults to memory, and the
-				// memory module declares itself replica-unsafe (#455).
+				// The federation token store defaults to memory, and the memory
+				// module declares itself replica-unsafe.
 				FEDERATION_TOKEN_STORE_TYPE: "redis",
 				REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 			});

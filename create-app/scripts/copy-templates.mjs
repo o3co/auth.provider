@@ -9,19 +9,14 @@
  */
 
 // Bundles the templates into this package (`prebuild` / `prepack`): copies
-// every template under `templates/` to `create-app/templates/<name>`
-// (`copyTemplates` in `templates.mjs`, which also says what a template is and
-// stages each one's `.gitignore` under a name npm will publish), and writes
-// `create-app/templates/versions.json` — the version of every published
-// sibling package, which `scaffold()` substitutes for `workspace:*`. The
-// published tarball carries no monorepo, so this copy is what a scaffold is
-// made from. `check-versions-json.mjs` keeps the version list below in step
-// with `packages/`.
-//
-// Verified rather than assumed: `published-package.test.mts` packs this
-// package, scaffolds every template from the tarball, and asserts each
-// scaffolded project has a `.gitignore` — which is how its omission (#407) was
-// found in the first place.
+// every template under `templates/` to `create-app/templates/<name>` (see
+// `copyTemplates` in `templates.mjs`), and writes
+// `create-app/templates/versions.json`, the version of every published sibling
+// package, which `scaffold()` substitutes for `workspace:*`. The published
+// tarball carries no monorepo, so this copy is what a scaffold is made from.
+// `check-versions-json.mjs` keeps the version list below in step with
+// `packages/`; `published-package.test.mts` scaffolds every template from the
+// packed tarball.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -31,16 +26,11 @@ import { copyTemplates } from "./templates.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const destRoot = resolve(__dirname, "../templates");
 
-// NOTE: `reference.conf` is intentionally NOT copied here. It lives in
-// `packages/core/config/reference.conf` and is shipped to consumers via the
-// `@o3co/auth-provider-core` package's `exports` field (`./reference.conf`
-// subpath export, files: ["config", ...]). Each package that ships defaults
-// does the same, and its modules declare the file (#728): the standalone
-// composition root layers core's reference and the ones its loaded modules
-// declare with `coreReference()` / `moduleReferences(modules)`.
-// The template's `config/` directory contains only consumer-facing files
-// (`application.conf`, `development.conf`, `production.conf`) — the
-// per-deployment delta layer, not the library baseline.
+// `reference.conf` is intentionally not copied: each package that ships
+// defaults exports its own (`./reference.conf`), and a composition root layers
+// them with `coreReference()` / `moduleReferences(modules)`. A template's
+// `config/` holds only the per-deployment delta. See ADR
+// 2026-05-13-reference-conf-shipping.
 
 copyTemplates(resolve(__dirname, "../../templates"), destRoot);
 

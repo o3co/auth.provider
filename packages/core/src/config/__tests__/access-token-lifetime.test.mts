@@ -16,15 +16,14 @@
 
 /**
  * The access-token lifetime is two operator values — the DEFAULT every grant
- * mints and the MAX a token-exchange request may ask for — with the original
- * `oauth.accessToken.expiresIn` kept as a deprecated alias of the default.
- *
- * Three layers have to agree on what that means, and each is pinned here:
+ * mints and the MAX a token-exchange request may ask for — with
+ * `oauth.accessToken.expiresIn` a deprecated alias of the default. Three
+ * layers have to agree, and each is pinned here:
  *
  *  - `resolveAccessTokenLifetime`, the one reader every grant goes through,
  *    including for hand-built configs that never met the schema;
  *  - the schema, which fails boot on a default above the max and mirrors the
- *    resolved default onto `expiresIn` for readers written before the split;
+ *    resolved default onto `expiresIn` for readers of that key;
  *  - `reference.conf`, whose shipped literal sits on the deprecated key so an
  *    override of that key in a higher layer keeps deciding the default.
  */

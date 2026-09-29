@@ -15,59 +15,28 @@
  */
 
 /**
- * Redis-backed `DeviceCodeStore` (#433) — what lets the device grant run
- * under `deployment.mode = "multi"`.
- *
- * The in-memory store is refused there, correctly: pending authorizations
- * fork per replica, so the human approves a code on the replica that served
- * the verification page while the device polls one that has never heard of
- * it and is told the code does not exist. This adapter puts the record where
- * every replica reads it, and keeps the port's atomicity by making each
- * operation one Lua script — see `DeviceCodeStoreClient` for what each must
- * guarantee and `makeIoredisClients` for the scripts.
- *
- * ### Two keys, one slot
+ * Redis-backed `DeviceCodeStore`, so the device grant can run under
+ * `deployment.mode = "multi"`: the user approves on one replica while the device
+ * polls another. Each operation is one Lua script (`makeIoredisClients`), which
+ * keeps the port's atomicity; `DeviceCodeStoreClient` states what each must
+ * guarantee.
  *
  *     <keyPrefix>{devauth}:code:<device_code>   HASH    the record
  *     <keyPrefix>{devauth}:user:<user_code>     STRING  the device code
  *
- * The record is keyed by the device code and `approve`/`deny` arrive with the
- * user code, so there is an index — and a script that follows the index to
- * the record touches two keys derived from two independent random values.
- * Redis Cluster runs a script in one slot, so the pair has to hash together.
- * The constant `{devauth}` hash tag does that, at the cost of concentrating
- * every device authorization on one slot. For this flow's volume — a
- * human-initiated ceremony, not per-request traffic — that is an acceptable
- * trade, but it is a real one, which is why it is written here rather than
- * discovered later. The alternative, storing the record twice under each key,
- * would make `approve` and `poll` non-atomic across the pair: precisely what
- * the port forbids.
+ * `approve`/`deny` arrive with the user code and follow the index to the record
+ * in one script, and Redis Cluster runs a script in one slot, so the constant
+ * `{devauth}` tag puts every device authorization on one slot: a real
+ * concentration, acceptable for a human-paced ceremony. Writing the record under
+ * both keys instead would make `approve` and `poll` non-atomic across the pair.
  *
- * ### TTL versus `expiresAtMs`
+ * Expiry is `expiresAtMs` on the caller's clock: `poll` answers `expired` even
+ * inside the TTL. The keys' `PEXPIREAT` deadline, the expiry rounded up to a
+ * whole millisecond, only reclaims records nobody asks about again.
  *
- * Both keys carry the authorization's own expiry as an absolute deadline, so
- * expired records are reclaimed by Redis rather than swept. But the port's
- * contract is the timestamp, not the TTL: `poll` answers `expired` for a
- * record still inside its TTL whose `expiresAtMs` has passed on the caller's
- * clock, and drops it — the conformance suite checks that boundary. The TTL
- * is the safety net for a record nobody asks about again, not the source of
- * truth.
- *
- * So the two may differ, and do for a fractional expiry: `PEXPIREAT` takes
- * whole milliseconds, so the keys' deadline is the expiry rounded up, while
- * the record keeps the exact one `poll` answers from. The script writes the
- * pair before it sets their deadline, so a deadline Redis refuses — a
- * fractional or NaN one — would leave both keys with no TTL; `create` refuses
- * an expiry that is not a finite number before the script runs.
- *
- * ### The record
- *
- * One hash per authorization, every field a string; the scope lists are JSON
- * arrays so a scope value is stored byte-for-byte. A hash rather than a JSON
- * document so the scripts mutate fields in place — `status`, the grown
- * `intervalSeconds`, `lastPolledAtMs` — without re-encoding the whole thing,
- * and without `cjson`'s habit of turning an empty array into an object on
- * the way back out.
+ * The record is a hash of strings, so the scripts update `status`,
+ * `intervalSeconds` and `lastPolledAtMs` in place without a `cjson` round-trip
+ * (which turns an empty array into an object); scope lists are JSON arrays.
  */
 
 import {
@@ -106,13 +75,9 @@ export interface RedisDeviceCodeStoreOptions {
 const DEVICE_CODE_HASH_TAG = "{devauth}";
 
 /**
- * How much a too-fast poll adds to the interval.
- *
- * RFC 8628 §3.5 defines `slow_down` as "the interval MUST be increased by 5
- * seconds for this and all subsequent requests". The same value the memory
- * adapter uses, and the store enforces the increased interval, not just
- * reports it — a server that says `slow_down` while measuring against the
- * original interval is asking for a change it does not itself observe.
+ * How much a too-fast poll adds to the interval. RFC 8628 §3.5: on `slow_down`
+ * "the interval MUST be increased by 5 seconds for this and all subsequent
+ * requests". The store enforces the increased interval, not only reports it.
  */
 const SLOW_DOWN_INCREMENT_SECONDS = 5;
 
@@ -137,10 +102,9 @@ const parseInstant = (value: string | undefined): number | undefined => {
 };
 
 /**
- * This adapter's `toAuthorization` — the Redis counterpart of the memory
- * adapter's — built from hash fields. A field the hash does not hold is
- * `undefined` in the result, and every field is named, so a field this copy
- * forgot is a compile error rather than a drop (#626).
+ * The authorization the hash fields hold; a field the hash lacks is
+ * `undefined`. Every field is named, so one this copy forgets is a compile
+ * error rather than a silent drop.
  */
 const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization => ({
 	userCode: fields.userCode,
@@ -151,9 +115,8 @@ const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization =>
 	status: fields.status,
 	subject: fields.subject,
 	grantedScope: parseScope(fields.grantedScope),
-	// Absent before an approval, and on a record approved before the store
-	// recorded the instant; what a hash holds that is not a finite number
-	// reads as absent too, which a poll under a sessions boundary refuses.
+	// Absent before an approval and on older records; a non-finite value reads
+	// as absent too, which a poll under a sessions boundary refuses.
 	approvedAtMs: parseInstant(fields.approvedAtMs),
 });
 
@@ -181,9 +144,8 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 		kind: "redis",
 
 		async create(input: CreateDeviceAuthorizationInput) {
-			// NaN is never `<= now`, so such a record would read as pending until
-			// Redis reclaimed it — which, with `PEXPIREAT NaN` refused after the
-			// pair was written, it never would.
+			// NaN is never `<= now`, and `PEXPIREAT NaN` fails after the pair is
+			// written, so such a record would read as pending forever.
 			if (!isStorableExpiry(input.expiresAtMs)) {
 				throw new RangeError(
 					`DeviceCodeStore.create: expiresAtMs must be a finite instant within the Date range (got ${String(input.expiresAtMs)})`,
@@ -195,15 +157,12 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 				expiresAtMs: String(input.expiresAtMs),
 				intervalSeconds: String(input.intervalSeconds),
 				status: "pending",
-				// Left out rather than `undefined`: these are the hash fields a client
-				// writes, and a hash has no `undefined` to hold — a third-party client
-				// may write every key it is handed. So this one write is held by the
-				// conformance suite rather than the compiler, unlike #654's consent
-				// client, whose `find` is a field-by-field copy; here the record is
-				// read back generically from `HGETALL`. Truthiness, as before #626,
-				// rather than `=== undefined`: an untyped caller's `null`, `""` or
-				// `false` stays "no scope", instead of being stored as `"null"` or
-				// `""` and failing `approve`. An array — empty included — is kept.
+				// Left out rather than `undefined`: a hash cannot hold `undefined`,
+				// and a third-party client may write every key it is handed (the
+				// conformance suite, not the compiler, holds this write). Truthiness,
+				// not `=== undefined`: an untyped caller's `null`, `""` or `false`
+				// stays "no scope" instead of being stored and failing `approve`. An
+				// array, empty included, is kept.
 				...(input.requestedScope ? { requestedScope: JSON.stringify(input.requestedScope) } : {}),
 			};
 			const created = await client.create(keys, {
@@ -264,18 +223,10 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 	};
 }
 
-/**
- * AdapterFactory builder for runtime-config-driven backend selection
- * (composition pattern §8.4). Consumer registers via:
- *   factory.register("redis", redisDeviceCodeStoreBuilder);
- * Then calls:
- *   factory.create({ type: "redis", client, keyPrefix: "devauth:" });
- */
+/** AdapterFactory builder for runtime-config-driven backend selection. */
 export const redisDeviceCodeStoreBuilder: AdapterBuilder<DeviceCodeStore> = (config, _ctx) => {
 	const c = config as { client?: DeviceCodeStoreClient; keyPrefix?: string };
-	// Same structural guard as `redisChallengeStoreBuilder`: fail at boot
-	// rather than at the first device poll with a cryptic `Cannot read
-	// properties of undefined`.
+	// Fail at boot rather than with a cryptic `TypeError` at the first device poll.
 	if (!c.client) {
 		throw new Error("redisDeviceCodeStoreBuilder: 'client' option is required");
 	}
@@ -286,16 +237,12 @@ export const redisDeviceCodeStoreBuilder: AdapterBuilder<DeviceCodeStore> = (con
 };
 
 /**
- * `defineModule` manifest for the Redis DeviceCodeStore. Static composition
- * path (§8.1). For runtime-config-driven selection use the builder above.
- *
- * Declares no `replicaSafety`, which is the point: a composition
- * that mounts `deviceGrantModule` with this store may declare
- * `deployment.mode = "multi"`. The `deviceCodeStoreClient` slot it requires
- * comes from `makeIoredisClients` (or the standalone's shared clients module).
- *
- * configSchema: top-level key `redisDeviceCodeStore` (module-namespaced per
- * master roadmap §3.5 — NO bare `keyPrefix` top-level key).
+ * `defineModule` manifest for the Redis DeviceCodeStore (static composition;
+ * the builder above is for runtime selection). Declares no `replicaSafety`, so
+ * a composition mounting `deviceGrantModule` with it may declare
+ * `deployment.mode = "multi"`. The `deviceCodeStoreClient` slot comes from
+ * `makeIoredisClients` (or the standalone's shared clients module); config
+ * lives under `redisDeviceCodeStore`, never a bare top-level `keyPrefix`.
  */
 export const redisDeviceCodeStoreModule = defineModule({
 	name: "redis-device-code-store",

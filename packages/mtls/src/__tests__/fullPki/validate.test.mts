@@ -15,13 +15,9 @@
  */
 
 /**
- * `mode = "full-pki"` — the checks #341 enumerated, and the revocation
- * behaviour that is the reason the issue was filed.
- *
- * Each `it` maps to one item on the issue's list, and the revocation block
- * exercises the distinction the issue insists on: "the CRL endpoint is down"
- * and "the certificate is revoked" must be separable, operator-chosen
- * outcomes.
+ * `mode = "full-pki"`: RFC 5280 path validation, algorithm policy and
+ * revocation. The revocation blocks pin that "the CRL endpoint is down" and
+ * "the certificate is revoked" are separable, operator-chosen outcomes.
  */
 
 import type * as pkijs from "pkijs";
@@ -73,7 +69,7 @@ import {
 const NOW = new Date("2027-01-01T00:00:00Z");
 /** The intermediate issues the leaf, so the leaf's CRL is published by it. */
 const INT_CRL_URL = "http://crl.test/int.crl";
-/** A second distribution point on the responder certificate, for the partial-CRL case (#550). */
+/** A second distribution point on the responder certificate, for the partial-CRL case. */
 const SECOND_CRL_URL = "http://crl.test/int-2.crl";
 /** The root issues the intermediate, so the intermediate's CRL comes from the root. */
 const ROOT_CRL_URL = "http://crl.test/root.crl";
@@ -153,12 +149,10 @@ const deferredFetch = (table: Record<string, Uint8Array | number>) => {
  * Yield to queued I/O until `done()` holds or `timeoutMs` passes; true if it
  * held.
  *
- * Bounded by the clock, not by a turn count. The first cut yielded at most
- * 200 `setImmediate` turns, but while a WebCrypto call is on the threadpool
- * the event loop spins through those turns in microseconds — so on a loaded
- * runner under coverage the "first request issued" wait returned before path
- * validation had asked for a CRL, and the concurrency assertion below
- * compared against an empty set. Twice on CI, never locally.
+ * Bounded by the clock, not by a turn count: while a WebCrypto call is on the
+ * threadpool the event loop spins through `setImmediate` turns in
+ * microseconds, so a turn-bounded wait can return on a loaded runner before
+ * path validation has asked for a CRL.
  */
 const settle = async (done: () => boolean, timeoutMs: number): Promise<boolean> => {
 	const deadline = Date.now() + timeoutMs;
@@ -204,9 +198,8 @@ describe("full-pki path validation", () => {
 	});
 
 	it("rejects an unrecognised CRITICAL extension (#341 item 4, RFC 5280 §6.1.2)", async () => {
-		// The narrow mode ignored these, which is the exact opposite of what
-		// "critical" means: the issuer marked the extension as one a validator
-		// must understand before trusting the certificate.
+		// "Critical" marks the extension as one a validator must understand
+		// before trusting the certificate; ignoring it is the exact opposite.
 		const root = await mintCa("Root", 1);
 		const leaf = await mint({
 			cn: "client",
@@ -263,8 +256,8 @@ describe("full-pki path validation", () => {
 	});
 
 	it("enforces excluded name constraints (#341 item 3)", async () => {
-		// A trust anchor constrained to a namespace was treated as unconstrained
-		// by the narrow mode — an intermediate could issue for anything.
+		// An unenforced name constraint lets the constrained CA issue for
+		// anything.
 		const root = await mintCa("Root", 1);
 		const int = await mintIntermediate("Intermediate", 2, root, {
 			extensions: [
@@ -432,7 +425,7 @@ describe("full-pki path validation", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Algorithm policy (#341 item 8)
+// Algorithm policy
 // ---------------------------------------------------------------------------
 
 describe("full-pki algorithm policy", () => {
@@ -540,7 +533,7 @@ describe("full-pki tuning defaults", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Revocation (#341 item 1) — the reason the issue exists
+// Revocation
 // ---------------------------------------------------------------------------
 
 describe("full-pki revocation", () => {
@@ -640,11 +633,9 @@ describe("full-pki revocation", () => {
 	});
 
 	it("under 'allow', a forged CRL is soft-failed with the warn line, not accepted silently", async () => {
-		// Before the signature was checked locally, a forged CRL reached the
-		// engine, whose findCRL answered "no valid CRLs" — a status the
-		// soft-fail flag suppressed — and the certificate passed with no
-		// mtls_revocation_unavailable_allowed line at all. "allow" is a choice
-		// the operator must be able to watch being exercised.
+		// The CRL's signature is checked locally, so a forged one is an
+		// unavailable status with its line, not a silent pass: "allow" is a
+		// choice the operator must be able to watch being exercised.
 		const { root, int, leaf } = await buildChain();
 		const impostor = await mintCa("Impostor", 900);
 		const forged = await mintCrl({ issuer: int, revoked: [], signingKeys: impostor.keys });
@@ -666,11 +657,11 @@ describe("full-pki revocation", () => {
 	});
 
 	it("honours 'allow' in a partial outage: only the certificate whose CRL is down is waved through", async () => {
-		// The common outage shape — the leaf's distribution point is down, the
-		// intermediate's is up. Handing the engine the CRLs that *were* fetched
-		// made it throw noRevocation for the leaf because its issuer carries a
-		// CDP extension, so "allow" rejected. The lookup is now local, per
-		// certificate, and the policy applies to each one on its own.
+		// The common outage shape: the leaf's distribution point is down, the
+		// intermediate's is up. The lookup is local and per certificate (pkijs,
+		// handed only the CRLs that were fetched, throws noRevocation for a leaf
+		// whose issuer carries a CDP extension), so the policy applies to each
+		// certificate on its own.
 		const { root, int, leaf } = await buildChain();
 		const { impl } = stubFetch({ [INT_CRL_URL]: 503, [ROOT_CRL_URL]: await cleanRootCrl(root) });
 		const logger = { warn: vi.fn(), debug: vi.fn() };
@@ -1071,13 +1062,10 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 	};
 
 	it("under 'reject', refuses a certificate one of whose distribution points is down even though another produced a CRL", async () => {
-		// "One point answered" used to be reported as ok, so a point that was
-		// down was skipped silently under the policy whose whole meaning is
-		// "do not guess". This process cannot tell from one fetched CRL that
-		// the CA's other points were redundant — a CA that partitions its
-		// list without saying so publishes exactly this shape — and "reject"
-		// is the operator's instruction not to guess in the permissive
-		// direction.
+		// This process cannot tell from one fetched CRL that the CA's other
+		// points were redundant (a CA that partitions its list without saying
+		// so publishes exactly this shape), and "reject" is the operator's
+		// instruction not to guess in the permissive direction.
 		const { root, int, leaf } = await chainWith(
 			crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
 		);
@@ -1195,10 +1183,10 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		"refuses a certificate the plain point's CRL lists as revoked, beside a partitioned point, under '%s' (#469)",
 		async (onUnavailable) => {
 			// RFC 5280 §4.2.1.13: a point without reasons covers every reason
-			// code, so the plain point's CRL is a complete answer on its own.
-			// Giving up on the extension at the first partitioned point threw
-			// that answer away: a revoked certificate read as "unavailable",
-			// and under "allow" went on working.
+			// code, so the plain point's CRL is a complete answer on its own. A
+			// partitioned point beside it must not discard that answer, or a
+			// revoked certificate reads as "unavailable" and, under "allow",
+			// goes on working.
 			const { root, int, leaf } = await chainWith(
 				distributionPointsExtension([
 					distributionPoint(INT_CRL_URL),
@@ -1341,8 +1329,6 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 	});
 
 	it("names a CRL with an unsupported critical extension under its own reason, and does not re-fetch it within the negative window (#447)", async () => {
-		// Reported as bad_signature, it was never remembered, and cost one
-		// guarded fetch per request under both policies.
 		const { root, int, leaf } = await chainWith(crlDistributionPoints([INT_CRL_URL]));
 		const { impl, calls } = stubFetch({
 			[INT_CRL_URL]: await mintCrl({
@@ -1370,7 +1356,7 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 });
 
 // ---------------------------------------------------------------------------
-// OCSP (#431) — the item #341 left
+// OCSP
 // ---------------------------------------------------------------------------
 
 const INT_OCSP_URL = "http://ocsp.test/int";
@@ -1423,10 +1409,9 @@ const ocspAndCrlChain = () =>
 
 describe("full-pki revocation — the algorithm policy covers revocation material (#470)", () => {
 	it("refuses, under 'reject', a certificate whose CRL is signed with SHA-1, as algorithm_not_permitted", async () => {
-		// The path pass refuses a SHA-1-signed certificate; the revocation
-		// pass used to believe a SHA-1-signed CRL about it. Same policy, same
-		// configuration key, applied to both — and surfaced as an
-		// unavailable status, so on-unavailable decides, not the CRL.
+		// The path pass refuses a SHA-1-signed certificate; the same policy and
+		// configuration key apply to a SHA-1-signed CRL about it, surfaced as
+		// an unavailable status so on-unavailable decides, not the CRL.
 		const { root, int, leaf } = await chainPointing({
 			leaf: [crlDistributionPoints([INT_CRL_URL])],
 			int: [crlDistributionPoints([ROOT_CRL_URL])],
@@ -1867,11 +1852,11 @@ describe("full-pki revocation — mode = both (#431)", () => {
 	});
 
 	it("under both, a CRL that lists the certificate refuses it even when OCSP answered unknown", async () => {
-		// #471 established that a CRL may not turn an `unknown` into "good": it
-		// cannot list a serial the CA never issued, so it cannot exonerate one.
-		// It can still say `revoked`, and a combined mode that refuses fewer
-		// certificates than either of its parts is not a combined mode —
-		// `crl` + `allow` refuses this certificate, so `both` + `allow` must.
+		// A CRL may not turn an `unknown` into "good": it cannot list a serial
+		// the CA never issued, so it cannot exonerate one. It can still say
+		// `revoked`, and a combined mode that refuses fewer certificates than
+		// either of its parts is not a combined mode: `crl` + `allow` refuses
+		// this certificate, so `both` + `allow` must.
 		const { root, int, leaf } = await ocspAndCrlChain();
 		const { impl, calls } = stubFetch({
 			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
@@ -1889,9 +1874,9 @@ describe("full-pki revocation — mode = both (#431)", () => {
 	});
 
 	it("under both with on-unavailable = allow, an OCSP unknown the CRL does not list stays unavailable (#471)", async () => {
-		// The half #471 is about: the CRL is asked, says nothing about this
-		// certificate, and that silence does not become an answer. The status
-		// is still unavailable, and `allow` admits it by policy.
+		// The CRL is asked, says nothing about this certificate, and that
+		// silence does not become an answer. The status is still unavailable,
+		// and `allow` admits it by policy.
 		const { root, int, leaf } = await ocspAndCrlChain();
 		const { impl } = stubFetch({
 			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
@@ -2006,7 +1991,7 @@ describe("full-pki revocation — mode = both (#431)", () => {
 
 	it("applies the CRL's per-point strictness once it has fallen back", async () => {
 		// Fallback lands in the same decision the CRL mode makes: one of the
-		// certificate's points down is a refusal under "reject" (#446).
+		// certificate's points down is a refusal under "reject".
 		const { root, int, leaf } = await chainPointing({
 			leaf: [
 				ocspAia(INT_OCSP_URL),

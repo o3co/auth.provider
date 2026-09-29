@@ -15,44 +15,25 @@
  */
 
 /**
- * boot/freeze-world.mts — Stage 5 of the A2-β boot planner pipeline.
- *
- * Takes the `RegistryWorld` from stage 4, calls `Object.freeze` on the
- * component map, and selectively calls `freeze()` on each registry/collector
- * that exposes one. Emits a `FrozenWorld`.
- *
- * Per A2-β §5.5.
+ * boot/freeze-world.mts: stage 5 of the boot planner, which turns the
+ * `RegistryWorld` into a `FrozenWorld`.
  */
 
 import type { FrozenWorld, RegistryWorld } from "./types.mjs";
 
 /**
- * Stage 5 of the A2-β boot planner pipeline.
+ * Stage 5 of the boot planner. Freezes the component map, so code holding a
+ * reference cannot mutate it, then calls `freeze()` on every collector in
+ * `registry.registries` that has one (the built-in name-keyed collectors,
+ * consumer-defined collectors, `RouteCollector`, and the `ListCollector`s
+ * that define it).
  *
- * Steps:
- * 1. `Object.freeze(registry.material.components)` — the component map is
- *    now structurally immutable. Consumer code that captures a reference
- *    cannot mutate the map.
- * 2. For each `(kind, collector)` in `registry.registries`: if the collector
- *    exposes a `freeze()` method, call it. Skip otherwise. This covers the
- *    built-in name-keyed collectors (`grants` over `GrantRegistry`; the
- *    Map-backed ones for token-exchange validators, federations, federation
- *    redirect policies and MFA factors), consumer-defined collectors,
- *    `RouteCollector` (always has `freeze()`), and the `ListCollector<V>`
- *    instances that define one.
- *
- * `AdapterFactory` is explicitly out of scope per A6+A7 §2.3 — it is
- * composition-root-shaped with no module-init activation boundary and is not
- * stored in `registry.registries`. The boot planner does NOT iterate or freeze
- * any AdapterFactory instance.
- *
- * Per A2-β §5.5.
+ * `AdapterFactory` is not frozen: it is composition-root-shaped, has no
+ * module-init activation boundary, and is not stored in `registry.registries`.
  */
 export function freezeWorld(registry: RegistryWorld): FrozenWorld {
-	// Step 1: structurally immobilise the component map.
 	Object.freeze(registry.material.components);
 
-	// Step 2: call freeze() on every collector that exposes it.
 	for (const [, collector] of registry.registries) {
 		if (typeof (collector as { freeze?: unknown }).freeze === "function") {
 			(collector as { freeze(): void }).freeze();

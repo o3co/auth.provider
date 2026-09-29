@@ -15,14 +15,12 @@
  */
 
 /**
- * End-to-end seam for issue #264: the real DPoP mechanism behind the real
+ * End-to-end seam: the real DPoP mechanism behind the real
  * `protectedResourceBindingMw`, over a real access token carrying the `cnf`
- * the grant would have stamped on it.
- *
- * The unit tests on either side of this seam use fakes — the middleware's
- * tests stub the mechanism, the mechanism's tests call `extract` directly.
- * Neither would catch a mismatch in what the two actually exchange, which is
- * exactly where a sender-constraint bypass would hide.
+ * the grant would have stamped on it. The unit tests on either side use fakes
+ * (the middleware's stub the mechanism, the mechanism's call `extract`
+ * directly), so neither would catch a mismatch in what the two exchange,
+ * which is exactly where a sender-constraint bypass would hide.
  */
 
 import type { Server } from "node:http";
@@ -91,17 +89,14 @@ describe("DPoP at a protected resource (#264)", () => {
 		const app = express();
 
 		// The proof's `htu` must name the URL the request actually reaches, so
-		// the server is started here and reused for every request in the test
-		// rather than letting supertest bind a fresh ephemeral port per call.
-		// Otherwise the positive case could only ever assert "401 or 200", which
-		// would pass just as happily if enforcement were broken.
+		// the server is started here and reused for every request, rather than
+		// supertest binding a fresh port per call (the positive case could then
+		// only assert "401 or 200", which passes with enforcement broken).
 		//
-		// Listening comes BEFORE the middleware is mounted because since #292
-		// the mechanism is built from the deployment's canonical issuer, and
-		// here that issuer is the ephemeral origin the listener just claimed.
-		// Express consults its router per request, so middleware registered
-		// after `listen()` — but before any request is made — is in place for
-		// every call these tests issue.
+		// Listening comes BEFORE the middleware is mounted: the mechanism is
+		// built from the canonical issuer, here the origin the listener just
+		// claimed. Express consults its router per request, so middleware
+		// registered after `listen()`, before any request, serves every call.
 		server = await new Promise<Server>((resolve) => {
 			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
 		});

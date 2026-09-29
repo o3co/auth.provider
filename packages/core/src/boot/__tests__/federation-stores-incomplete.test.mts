@@ -15,27 +15,17 @@
  */
 
 /**
- * Integration tests for the federation-stores-incomplete boot validator
- * (issue #101 TODO-F-1).
+ * Integration tests for the federation-stores-incomplete boot validator.
  *
- * Rule: when config.federations.<name>.enabled === true for any federation,
- * all 6 session/federation/refresh-family slots MUST be wired in the planned
- * component set:
- *   - userSessionStore
- *   - sessionRPRegistry
- *   - sessionFamilyIndex
- *   - sessionFederationIndex
- *   - federationTokenStore
- *   - refreshTokenFamilyRevocation
- *
- * Missing any of the first 5 causes federation routes to 503 at runtime with
- * an opaque error; missing refreshTokenFamilyRevocation causes the routes to
- * never mount at all (see packages/oauth/src/routes.mts logoutSupported /
- * federationTokenSupported gates). Both surface as opaque misconfigurations
- * to the operator; the validator catches them at boot.
- *
- * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05; refreshTokenFamilyRevocation
- * gating added per #103 review.
+ * When `config.federations.<name>.enabled === true` for any federation, all
+ * six session/federation/refresh-family slots MUST be wired in the planned
+ * component set: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
+ * sessionFederationIndex, federationTokenStore and
+ * refreshTokenFamilyRevocation. Without one of the first five, federation
+ * routes answer 503 at runtime with an opaque error; without
+ * refreshTokenFamilyRevocation they never mount (see the logoutSupported /
+ * federationTokenSupported gates in packages/oauth/src/routes.mts). The
+ * validator catches both at boot.
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
@@ -124,10 +114,9 @@ describe("checkFederationStoresWiring", () => {
 		).resolves.toBeDefined();
 	});
 
-	// Multi-channel coverage (multi-agent-review I1+P2 fix): the validator
-	// must consult `bootstrapComponents` and `overrideComponents` in addition
-	// to module `provides`. Without this, composition roots that wire stores
-	// via bootstrap/override are falsely rejected.
+	// The validator consults `bootstrapComponents` and `overrideComponents` as
+	// well as module `provides`, so a composition root that wires stores
+	// through bootstrap/override is not falsely rejected.
 
 	it("does not throw when all 6 stores are supplied via bootstrapComponents", async () => {
 		const bootstrapWithStores = {

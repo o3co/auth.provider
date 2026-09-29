@@ -15,30 +15,20 @@
  */
 
 /**
- * The MFA transaction a login opens (the MFA ADR's D8 and F1 step 2, F3 step
- * 1, as the session-admission ADR's D5 amends them), and the answer the
- * login is interrupted with.
+ * The MFA transaction a login opens, and the answer the login is interrupted
+ * with. See README, "The login's interruption", and ADR
+ * 2026-09-25-multi-factor-authentication, as ADR 2026-09-28-session-admission
+ * amends it.
  *
- * - **Opened after the regeneration**, bound to the session the login route
- *   regenerated — `binding: { kind: "session", id }` (#742) — so the browser
- *   holding the new cookie is the one that may continue; the record carries
- *   the continuation core built — the primary and what earlier requirements
- *   added — never a `user` or `primary` field of its own, and the primary's
- *   subject and `redirectTo`, which the store holds it to.
- * - **Its id is 32 bytes from the CSPRNG, base64url** (D22). It is not a
- *   bearer: every later use compares the whole binding, kind included
- *   (core's `isMfaTransactionBoundTo`).
- * - **Its life is `mfa.transactionTtlSeconds`**, from which `expiresAtMs` is
- *   derived and nothing else — the store has no ceiling of its own (step 3's
- *   obligation).
- * - **The answer is the closed 403 body** core validates: `error`,
- *   `transaction`, `expires_in`, and — for a first binding alone —
- *   `hints.enrollable` and `hints.email_proof`.
- *
- * A store that cannot create it rejects the open, which the route answers as
- * an outage. Reading a transaction back — through the binding, a mismatch
- * read as an unknown id (core's `getBoundMfaTransaction`) — is the routes'
- * (build-order step 8's third part).
+ * Opened after the regeneration and bound to the regenerated session, so the
+ * browser holding the new cookie is the one that may continue. The id is not a
+ * bearer: every later use compares the whole binding, kind included
+ * (`isMfaTransactionBoundTo`). The record carries core's continuation, never a
+ * `user` or `primary` field of its own, and the primary's subject and
+ * `redirectTo`, which the store holds it to. `expiresAtMs` is derived from
+ * `mfa.transactionTtlSeconds` and nothing else; the store has no ceiling of
+ * its own. A store that cannot create it rejects the open, answered as an
+ * outage.
  */
 
 import { randomBytes } from "node:crypto";
@@ -49,10 +39,10 @@ import type {
 	PrimaryContinuation,
 } from "@o3co/auth-provider-core";
 
-/** The bytes of a transaction's id (D22): 256 bits. */
+/** The bytes of a transaction's id: 256 bits. */
 const TRANSACTION_ID_BYTES = 32;
 
-/** The shortest and the longest a transaction may live, in seconds (the step-8 owner decision; the ADR states no bounds). */
+/** The shortest and the longest a transaction may live, in seconds. */
 export const MFA_TRANSACTION_TTL_SECONDS = { min: 60, max: 1800 } as const;
 
 /** A new transaction id: 32 bytes from the CSPRNG, base64url. Never in a URL. */
@@ -66,11 +56,10 @@ export type LoginInterruption =
 			/** The kinds this user may enroll, in registration order: `hints.enrollable`. */
 			readonly enrollable: readonly string[];
 			/**
-			 * Whether the account-email proof comes before the binding (D24):
-			 * `hints.email_proof`. `false` alone until build-order step 9 can
-			 * require one: the transaction records `emailProof: "not_required"`,
-			 * and the answer must not advertise a proof the server does not
-			 * enforce.
+			 * Whether the account-email proof comes before the binding:
+			 * `hints.email_proof`. `false` alone: the transaction records
+			 * `emailProof: "not_required"`, and the answer must not advertise a
+			 * proof the server does not enforce.
 			 */
 			readonly emailProof: false;
 	  };
@@ -136,7 +125,7 @@ export function createLoginTransactions({
 				continuation,
 				redirectTo: continuation.primary.redirectTo,
 				enrollment: firstBinding ? "required" : "none",
-				// The account-email proof (D24) is step 9's: no mail is wired before it.
+				// Never required: no mail is wired for the account-email proof.
 				emailProof: "not_required",
 				acrValues: undefined,
 				challenge: undefined,

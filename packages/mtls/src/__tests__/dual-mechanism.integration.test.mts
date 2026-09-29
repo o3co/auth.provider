@@ -15,23 +15,12 @@
  */
 
 /**
- * dual-mechanism.integration.test.mts
- *
- * End-to-end integration test proving the cross-mechanism dispatch refactor
- * works for real consumers: when both `dpopModule` and `mtlsModule` are
- * installed and a request presents BOTH a DPoP proof AND a forwarded cert
- * header, the configured `DispatchPolicy` arbitrates across modules.
- *
- * Pins the resolution of the Phase 3 mTLS spec §11.4 known limitation:
- *
- *   Before:  each module independently mounted its own `tokenBindingMw`;
- *            the second one silently overwrote `req.tokenBinding`.
- *   After:   core composes ONE `tokenBindingMw` from both modules'
- *            `tokenBindingMechanisms` contributions; dispatch-policy applies
- *            across mechanisms.
- *
- * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
- * for the cross-mechanism design rationale.
+ * With both `dpopModule` and `mtlsModule` installed, a request presenting BOTH
+ * a DPoP proof AND a forwarded cert header is arbitrated across modules by the
+ * configured `DispatchPolicy`: core composes ONE `tokenBindingMw` from both
+ * modules' `tokenBindingMechanisms` contributions, so neither module's binding
+ * silently overwrites the other's `req.tokenBinding`. See ADR
+ * 2026-05-20-token-binding-first-class-abstraction.
  */
 
 import { createHash, X509Certificate } from "node:crypto";
@@ -81,7 +70,7 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 					source: "header",
 					"cert-header": "x-forwarded-client-cert",
 					"cert-header-dialect": "plain-pem",
-					// #280: the header source is only accepted from an
+					// The header source is only accepted from an
 					// allowlisted peer. supertest dials the ephemeral listener
 					// over loopback, which is what the app observes as the
 					// forwarding hop here.
@@ -97,10 +86,10 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**
- * The deployment's canonical issuer, as `makeValidCoreConfig` sets it. Since
- * #292 the DPoP verifier builds the expected `htu` from this rather than from
- * the request's protocol and `Host` — so the proof names it even though the
- * requests below still send `Host: as.example` over plain http.
+ * The deployment's canonical issuer, as `makeValidCoreConfig` sets it. The
+ * DPoP verifier builds the expected `htu` from this, not from the request's
+ * protocol and `Host`, so the proof names it even though the requests below
+ * send `Host: as.example` over plain http.
  */
 const ISSUER_ORIGIN = "https://auth.test";
 
@@ -163,8 +152,7 @@ describe("dpopModule + mtlsModule — cross-mechanism dispatch (refactor §6.4)"
 		const received: Received = {};
 		const handle = await createApp({
 			// Register mtls FIRST to prove DispatchPolicy — not registration
-			// order — picks the winner. Before this refactor, the second
-			// middleware would have silently overwritten req.tokenBinding.
+			// order — picks the winner.
 			modules: [mtlsModule, dpopModule, makeObserverModule(received)],
 			bootstrapComponents: makeBoot({ dispatchPolicy: "intent-explicit" }),
 		});
@@ -292,27 +280,20 @@ describe("dpopModule + mtlsModule — cross-mechanism dispatch (refactor §6.4)"
 });
 
 // ---------------------------------------------------------------------------
-// No-downgrade at the HTTP boundary (#199 R2)
+// No-downgrade at the HTTP boundary
 // ---------------------------------------------------------------------------
 
 /**
- * Every case above presents well-formed material. The interesting case is
- * mixed validity: a **malformed DPoP proof** alongside a **valid mTLS cert**.
+ * Mixed validity: a **malformed DPoP proof** alongside a **valid mTLS cert**.
+ * A request carrying invalid binding material is rejected outright, never
+ * downgraded to the binding that did validate. So anyone who can inject a junk
+ * `DPoP` header into a cert-bearing request kills it, and that is intended.
  *
- * The v0.8.0 audit raised this shape as a possible DoS on legitimate mTLS
- * clients (I2) — an attacker who can inject a junk `DPoP` header into a
- * cert-bearing request kills it. It was closed as intentional: spec §3.6
- * forbids downgrade, so a request carrying invalid binding material is
- * rejected outright rather than quietly falling back to the binding that did
- * validate. The audit's follow-up (R2) was to make that intent test-explicit
- * at the HTTP boundary, since it had only ever been pinned at the middleware
- * level with fake mechanisms.
- *
- * The distinction matters: "rejects the request" and "falls back to mTLS" are
- * both plausible readings of the same code, and only one of them is a
- * downgrade. Pinning it with the real modules means a future refactor that
- * makes DPoP failures non-fatal — which would look like a DoS fix — fails
- * here instead of silently weakening the binding guarantee.
+ * "Rejects the request" and "falls back to mTLS" are both plausible readings
+ * of the same code, and only one is a downgrade. Core's middleware tests pin
+ * the rule with fake mechanisms; this pins it at the HTTP boundary with the
+ * real modules, so a refactor that makes DPoP failures non-fatal (which would
+ * look like a DoS fix) fails here.
  */
 describe("dpopModule + mtlsModule — no downgrade on mixed validity (#199 R2)", () => {
 	it("malformed DPoP + valid mTLS cert → 400, NOT a silent fallback to the mTLS binding", async () => {

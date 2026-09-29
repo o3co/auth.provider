@@ -23,13 +23,9 @@ import type { FederationResult } from "./types.mjs";
 export interface RedirectConfig {
 	/**
 	 * The exact redirect targets a consumer-supplied `redirect_to` may name.
-	 *
 	 * Read by `createFederationRedirectPolicy` (`redirect-policy.mts`), which
 	 * owns the matching rules and the fail-closed behaviour when this is absent
-	 * or empty. `validateRedirect` used to live here and derived its answer from
-	 * `sessionDomain` alone, which meant an unset `sessionDomain` accepted every
-	 * http(s) URL on earth (#278); it was removed rather than tightened so no
-	 * caller can reach the permissive shape.
+	 * or empty.
 	 */
 	redirectAllowlist?: readonly string[];
 	sessionDomain?: string;
@@ -38,14 +34,10 @@ export interface RedirectConfig {
 }
 
 /**
- * Resolves the post-login redirect URL from the session state.
- *
- * - If session has `redirectTo` and `authCallbackUrl` is configured, returns
- *   `authCallbackUrl?redirect_to=<encoded redirectTo>`.
- * - If session has `redirectTo` but `authCallbackUrl` is absent, returns a
- *   misconfiguration error.
- * - If no `redirectTo`, returns `clientUrl` (or a misconfiguration error when
- *   `clientUrl` is also absent).
+ * Resolves the post-login redirect URL from the session state:
+ * `authCallbackUrl?redirect_to=<encoded redirectTo>` when the session has a
+ * `redirectTo`, otherwise `clientUrl`. The URL it needs being unset is a
+ * `500 misconfiguration`.
  */
 export function resolveCallbackRedirect(
 	session: { redirectTo?: string },

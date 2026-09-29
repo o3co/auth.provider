@@ -15,27 +15,24 @@
  */
 
 /**
- * Coverage for the mTLS refresh-token binding matrix — Wave 2 Phase 3 §9.2.
- *
- * Parallel structure to `dpop.refreshToken.integration.test.mts` — the
- * 5-row matrix (mirroring RFC 8705 §4 with a refresh-time enforcement model
- * identical to RFC 9449 §5's DPoP rotation rule) governs how the
- * refresh_token grant correlates the RT's persisted `cnf.x5t#S256` claim
- * with the request-time client certificate presented via `ctx.tokenBinding`:
+ * The mTLS refresh-token binding matrix, parallel to
+ * `dpop.refreshToken.integration.test.mts`. Following RFC 8705 §4, with
+ * RFC 9449 §5's DPoP rotation rule for refresh-time enforcement, the
+ * refresh_token grant correlates the RT's persisted `cnf.x5t#S256` claim with
+ * the client certificate presented via `ctx.tokenBinding`:
  *
  *   RT cnf.x5t#S256 | client cert     | Outcome
- *   no              | no              | row 1: issue plain Bearer (legacy)
+ *   no              | no              | row 1: issue plain Bearer
  *   no              | yes             | row 2: opt-in upgrade — bind new AT (RT bound only for public)
  *   yes             | no              | row 3: reject invalid_grant "requires a client certificate"
  *   yes             | yes, differs    | row 4: reject invalid_grant "does not match refresh_token binding"
  *   yes             | yes, equal      | row 5: rotation preserves binding (AT + RT for public)
  *
  * Plus:
- *   - Compound-cnf rejection (Codex Critical #2): RT carrying BOTH `jkt`
- *     and `x5t#S256` is rejected BEFORE either matrix runs.
- *   - Mechanism-boundary regression: a non-mTLS mechanism emitting an
- *     `{ "x5t#S256": "..." }` confirmation cannot satisfy an mTLS-bound
- *     RT (parallel to PR #185 / Codex Important #2 for DPoP).
+ *   - An RT carrying BOTH `jkt` and `x5t#S256` is rejected BEFORE either
+ *     matrix runs.
+ *   - A non-mTLS mechanism emitting an `{ "x5t#S256": "..." }` confirmation
+ *     cannot satisfy an mTLS-bound RT (the DPoP rule, mirrored).
  */
 
 import { createSecretKey } from "node:crypto";
@@ -148,7 +145,6 @@ const mtlsBinding = (thumbprint: string): TokenBinding => ({
 
 describe("mTLS refresh-token binding matrix — §9.2 (5 rows)", () => {
 	it("row 1: RT plain + no cert → unbound AT, Bearer", async () => {
-		// Pre-mTLS legacy path: RT was never bound, no cert presented.
 		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);
 		const ctx = buildCtx({
@@ -167,9 +163,9 @@ describe("mTLS refresh-token binding matrix — §9.2 (5 rows)", () => {
 	});
 
 	it("row 2 (public client): RT plain + cert → opt-in upgrade, new AT + RT bound", async () => {
-		// Public client opt-in upgrade — cert presented for a previously
-		// unbound RT. Per §9.1's public-client gate the new RT MUST also
-		// carry cnf so a subsequent refresh enforces continuity.
+		// Public client opt-in upgrade: cert presented for an unbound RT. Per
+		// the public-client gate the new RT MUST also carry cnf so a
+		// subsequent refresh enforces continuity.
 		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);
 		const ctx = buildCtx({
@@ -294,12 +290,12 @@ describe("mTLS refresh-token binding matrix — §9.2 (5 rows)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Compound-cnf rejection (Codex Critical #2 — Phase 3 §9.2 pre-matrix)
+// Compound-cnf rejection (before either matrix)
 // ---------------------------------------------------------------------------
 
 describe("mTLS refresh-token compound-cnf rejection", () => {
 	it("RT carrying BOTH cnf.jkt AND cnf.x5t#S256 → reject before either matrix runs", async () => {
-		// Stage 1 supports single-mechanism bindings only. A compound cnf
+		// Only single-mechanism bindings are supported. A compound cnf
 		// could only arise from a bug or attacker-crafted RT; accepting it
 		// would create ambiguous enforcement semantics (which matrix wins?
 		// what if jkt matches but x5t doesn't?). The pre-matrix reject
@@ -349,7 +345,7 @@ describe("mTLS refresh-token compound-cnf rejection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Mechanism-boundary regression (T3c.7 — parallel to PR #185 DPoP rule)
+// Mechanism boundary (parallel to the DPoP rule)
 // ---------------------------------------------------------------------------
 
 describe("mTLS refresh-token mechanism boundary", () => {

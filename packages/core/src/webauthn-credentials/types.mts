@@ -23,32 +23,26 @@ export type AuthenticatorTransport = "ble" | "hybrid" | "internal" | "nfc" | "us
 /**
  * WebAuthn credential record stored per registered passkey.
  *
- * SECURITY (§2.3.2): `userId` is ALSO used as the WebAuthn user-handle
- * (`user.id`) presented to the authenticator. It MUST be opaque and MUST NOT
- * contain PII (email, username, etc.) per WebAuthn §5.4.3. Authenticators
- * persist this value and may sync it across devices.
+ * SECURITY: `userId` is also the WebAuthn user handle (`user.id`) presented
+ * to the authenticator, which persists it and may sync it across devices.
+ * It MUST be opaque and MUST NOT contain PII (email, username, etc.), per
+ * WebAuthn §5.4.3.
  */
 export interface WebAuthnCredential {
 	readonly userId: string;
 	readonly credentialId: string;
 	/**
-	 * Authenticator public key in COSE format. **Logically immutable** —
-	 * callers MUST NOT mutate the returned bytes; doing so corrupts the
-	 * store's view of the credential. (Convention: `Uint8Array` record
-	 * fields are treated as readonly even though TypeScript has no
-	 * `ReadonlyUint8Array` type.)
+	 * Authenticator public key in COSE format. **Logically immutable**:
+	 * callers MUST NOT mutate the bytes, which would corrupt the store's view
+	 * of the credential (TypeScript has no `ReadonlyUint8Array`).
 	 *
-	 * Deliberately a bare `Uint8Array` (= `Uint8Array<ArrayBufferLike>`) and
-	 * NOT `Uint8Array<ArrayBuffer>`. An adapter's natural source for these
-	 * bytes is its driver's `Buffer`, which TypeScript gives the wide
-	 * `Buffer<ArrayBufferLike>` type; narrowing this field would reject that
-	 * at compile time even when an adapter returns an ArrayBuffer-backed
-	 * Buffer. Node also permits SharedArrayBuffer-backed Buffers; both are
-	 * accepted here and copied into a plain ArrayBuffer at verification.
-	 * `@simplewebauthn/server` >= 13.3.2 does require the narrow form, so the
-	 * WebAuthn package copies these bytes at that one call boundary
-	 * (`packages/webauthn/src/internal/verification.mts`) instead. Do not
-	 * "fix" the width here — this port is implemented outside this repo.
+	 * Deliberately the wide `Uint8Array<ArrayBufferLike>`, not
+	 * `Uint8Array<ArrayBuffer>`: an adapter's natural source is its driver's
+	 * `Buffer<ArrayBufferLike>` (possibly SharedArrayBuffer-backed), which the
+	 * narrow form rejects at compile time. `@simplewebauthn/server` needs the
+	 * narrow form, so `packages/webauthn/src/internal/verification.mts`
+	 * copies the bytes at that call. Do not narrow it here: this port is
+	 * implemented outside this repo.
 	 */
 	readonly publicKey: Uint8Array;
 	readonly signCount: number;
@@ -60,30 +54,22 @@ export interface WebAuthnCredential {
 }
 
 /**
- * Storage contract for WebAuthn credential records (spec §2.3.1).
- *
- * Implementations MUST be safe to call concurrently. The {@link updateSignCount}
- * method is the critical path — it MUST be an atomic compare-and-set (CAS) to
- * prevent replay-window races between concurrent verify calls.
- *
- * Throws {@link WebAuthnCredentialStorageError} with the appropriate `reason`
- * discriminator on domain-level failures (see {@link registerCredential}).
+ * Storage contract for WebAuthn credential records. Implementations MUST be
+ * safe to call concurrently; {@link updateSignCount} MUST be an atomic
+ * compare-and-set, to close the replay window between concurrent verifies.
+ * Domain failures throw {@link WebAuthnCredentialStorageError} (see
+ * {@link registerCredential}).
  */
 export interface WebAuthnCredentialStore {
 	readonly kind: string;
 
 	/**
-	 * Atomically insert a new credential record.
+	 * Atomically inserts a new credential record. Of N concurrent calls with
+	 * one `credentialId`, exactly one MUST succeed.
 	 *
-	 * MUST throw `WebAuthnCredentialStorageError({ reason: "duplicate-credential" })`
-	 * if a record with the same `credentialId` already exists. The existing
-	 * record MUST be preserved unchanged — no partial mutation on failure.
-	 *
-	 * Concurrency contract: N concurrent calls with the same `credentialId`
-	 * MUST result in exactly one success and N-1 throws of
-	 * `WebAuthnCredentialStorageError({ reason: "duplicate-credential" })`.
-	 *
-	 * Per spec §2.3.1 + Codex Round 5 P2 (TOCTOU fix).
+	 * @throws WebAuthnCredentialStorageError `duplicate-credential` when the
+	 *   `credentialId` already exists; the existing record MUST be left
+	 *   unchanged.
 	 */
 	registerCredential(record: WebAuthnCredential): Promise<void>;
 
@@ -94,14 +80,11 @@ export interface WebAuthnCredentialStore {
 	listByUserId(userId: string): Promise<readonly WebAuthnCredential[]>;
 
 	/**
-	 * Atomic compare-and-set for signCount (spec §2.3.1, Codex fix #4).
+	 * Atomic compare-and-set: updates `signCount` and `lastUsedAt` only if the
+	 * stored signCount equals `expectedCurrentSignCount` at the write.
 	 *
-	 * Updates `signCount` and `lastUsedAt` IFF the stored signCount equals
-	 * `expectedCurrentSignCount` at the moment of the write.
-	 *
-	 * @returns `true` if the CAS succeeded; `false` if the stored signCount
-	 *   did not match `expectedCurrentSignCount` (concurrent update race).
-	 *   Callers MUST treat `false` as a replay/clone attack signal.
+	 * @returns `false` when it did not match (a concurrent update); callers
+	 *   MUST treat that as a replay/clone attack signal.
 	 */
 	updateSignCount(
 		credentialId: string,
@@ -119,9 +102,9 @@ export interface WebAuthnCredentialStore {
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge
 // ---------------------------------------------------------------------------
-// Per A1 §5.5 comment in challenges/types.mts: the `declare module` block
-// MUST use the PACKAGE NAME ("@o3co/auth-provider-core"), NOT a relative path,
-// so consumer augmentations resolve to the same ComponentMap interface.
+// The `declare module` block MUST name the package ("@o3co/auth-provider-core"),
+// not a relative path, so consumer augmentations resolve to the same
+// ComponentMap interface.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

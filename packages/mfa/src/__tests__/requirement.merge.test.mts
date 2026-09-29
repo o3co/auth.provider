@@ -15,21 +15,15 @@
  */
 
 /**
- * The session-admission ADR's acceptance criterion 4, against the real
- * requirement: the MFA ADR's step-4 table — its D16 and D17 rows, as
- * `decideMfaRequirement` decided them — passes unchanged against core's
- * merge (`admitSession`, D2 step 7) with the `mfa` requirement this package
- * registers, under the mapping D2 states (`mergeAdmission`).
+ * Core's merge rows (`MERGE_ROW_GROUPS` on `@o3co/auth-provider-core/testing`)
+ * against the real `mfa` requirement this package registers: each passes
+ * unchanged through `admitSession`'s merge, under `mergeAdmission`'s mapping.
+ * Core's own merge test runs the same rows against a stand-in. See ADR
+ * 2026-09-28-session-admission, "Acceptance criteria".
  *
- * The rows are core's, one list: `MERGE_ROW_GROUPS` on
- * `@o3co/auth-provider-core/testing`, which core's own merge test runs
- * against a stand-in written to D6's table. What the rule was handed as
- * `secondFactorMethods` is here the factors a composition enables, each
- * declaring its `amrValues` (TOTP, WebAuthn, the email code, recovery
- * codes); the reach is the requirement's own, read from them. Under
- * `mfa.mode = "off"` the MFA module refuses to boot, so no requirement named
- * `mfa` is registered: those rows run against admission with none, which is
- * what a composition without MFA is.
+ * Under `mfa.mode = "off"` the MFA module refuses to boot, so no requirement
+ * named `mfa` is registered: those rows run against admission with none, which
+ * is what a composition without MFA is.
  */
 
 import {
@@ -61,16 +55,15 @@ import { createLoginTransactions } from "#/transactions.mjs";
 import { FACTORS, resolverOver } from "./requirementHarness.mjs";
 
 /**
- * The factors a composition enables, standing for what the rule was handed
- * as `secondFactorMethods` (core's `MERGE_REACH`): the requirement's reach is
- * read from them.
+ * The factors a composition enables, each declaring its `amrValues`, standing
+ * for core's `MERGE_REACH`: the requirement's reach is read from them.
  */
 const FACTOR_SETS: Readonly<Record<MergeFactors, () => MfaFactor[]>> = {
 	/** TOTP, WebAuthn and recovery codes: otp, hwk, swk, recovery, and mfa. */
 	installed: () => [FACTORS.totp(), FACTORS.webauthn(), FACTORS.recovery()],
 	/** TOTP and recovery codes: no factor adds hwk or swk. */
 	withoutWebAuthn: () => [FACTORS.totp(), FACTORS.recovery()],
-	/** The email code alone, which does not add mfa (O7). */
+	/** The email code alone, which does not add mfa. */
 	emailOnly: () => [FACTORS.email()],
 	/** The requirement with no factor enabled: nothing can step a session up. */
 	empty: () => [],
@@ -78,9 +71,9 @@ const FACTOR_SETS: Readonly<Record<MergeFactors, () => MfaFactor[]>> = {
 	none: () => [],
 };
 
-/** `endpoints.mfa.url` as core's reference.conf ships it. */
 /** The issuer each page is registered on, as boot registers it on oauth.jwt.issuer. */
 const ISSUER = "https://auth.test";
+/** `endpoints.mfa.url` as core's reference.conf ships it. */
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
 /** The page as registered: what a step_up admission carries. */
 const REGISTERED_PAGE = { ...PAGE, href: `${ISSUER}/mfa` };

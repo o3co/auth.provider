@@ -16,14 +16,12 @@
 
 /**
  * A keystore that cannot answer is an outage at the token-exchange grant, not
- * a verdict on the `subject_token` or the `actor_token`.
- *
- * The built-in validator rethrows only what core's verifier reports as an
- * outage; a failed key lookup was reported as `kid_unknown`, so the validator
- * returned `null` and the grant answered `400 invalid_request` "subject_token
- * validation failed" — telling the client its token is bad while the server's
- * key service was down. Driven through the real grant and the real validator,
- * with the real keystore whose lookup is made to fail.
+ * a verdict on the `subject_token` or the `actor_token`: `400 invalid_request`
+ * would tell the client its token is bad while the server's key service is
+ * down. The built-in validator rethrows only what core's verifier reports as
+ * an outage, so a failed key lookup has to be reported as one, not as
+ * `kid_unknown`. Driven through the real grant and the real validator, with
+ * the real keystore whose lookup is made to fail.
  */
 
 import {

@@ -15,37 +15,24 @@
  */
 
 /**
- * Access-token sender binding for the webauthn grant (#489).
+ * Access-token sender binding for the webauthn grant. The confirmation the
+ * request carries reaches the access token (RFC 7800 `cnf`) as every other
+ * grant applies it: the member the binding's mechanism owns (core's
+ * `ownedConfirmation`), ungated. Otherwise a `senderConstrained: "dpop"`
+ * client logging in with a passkey would get a *bearer* access token, one
+ * that replays from anywhere once captured. `token_type` describes what was
+ * minted: "DPoP" for a DPoP-bound token (RFC 9449 §5), "Bearer" for an
+ * mTLS-bound one (RFC 8705 §3). The access-token gate is NOT the
+ * refresh-token gate.
  *
- * The grant's access token never carried an RFC 7800 `cnf` claim, so a client
- * registered `senderConstrained: "dpop"` that logged in with a passkey had its
- * DPoP proof verified and then received a *bearer* access token — one that
- * replays from anywhere once captured. #480 had already carried the same
- * request's confirmation into the refresh token, which is what made the
- * asymmetry visible.
- *
- * What is asserted here:
- *   - the confirmation the request already carries reaches the access token,
- *     for both binding kinds, exactly as every other grant applies it — the
- *     member the binding's mechanism owns (core's `ownedConfirmation`),
- *     ungated, and nothing for a binding whose kind owns no member it carries;
- *   - the wire-level `token_type` describes what was minted: "DPoP" for a
- *     DPoP-bound token (RFC 9449 §5), "Bearer" for an mTLS-bound one
- *     (RFC 8705 §3, where the binding travels on the TLS layer);
- *   - the access-token gate is NOT the refresh-token gate: a confidential
- *     client's AT binds while its RT stays unbound by default (#275);
- *   - an unbound request is unchanged, down to the set of response keys.
- *
- * The proofless `senderConstrained` request never reaches this handler: the
+ * A proofless `senderConstrained` request never reaches this handler: the
  * shared grant-dispatch gate in `packages/oauth/src/routes.mts` refuses it
- * with 401 `invalid_client` before any grant handler runs, for every
- * `grant_type` including this one. That refusal is pinned end-to-end in
- * `packages/oauth/src/__tests__/senderConstrained.integration.test.mts`; this
- * grant adds no second copy of the rule.
+ * with 401 `invalid_client` for every `grant_type`, pinned in
+ * `packages/oauth/src/__tests__/senderConstrained.integration.test.mts`.
  *
- * `verifyWebAuthnAssertion` is mocked for the same reason grant.test.mts mocks
- * it: the assertion-verification contract is covered by
- * internal.verification.test.mts and real CBOR/COSE fixtures add nothing here.
+ * `verifyWebAuthnAssertion` is mocked, as in grant.test.mts: its contract is
+ * covered by internal.verification.test.mts, and real CBOR/COSE fixtures add
+ * nothing here.
  */
 
 import {
@@ -258,7 +245,7 @@ describe("createWebAuthnGrant — access-token confirmation (#489)", () => {
 		// The two gates are deliberately different, and this is the case that
 		// proves the AT did not inherit the RT's. RFC 9449 §5 leaves a
 		// confidential client's RT unbound because the client secret is the
-		// refresh-time authenticator (#275 opts a deployment out); nothing of the
+		// refresh-time authenticator (a deployment can opt out); nothing of the
 		// sort applies to the access token, which a resource server checks against
 		// the proof on every call.
 		const tokens = await issue(

@@ -107,17 +107,12 @@ describe("extractConfirmation", () => {
 	});
 
 	it("compound binding (both jkt and x5t#S256 valid) returns jkt — intent-explicit policy", () => {
-		// Spec §1 declares compound binding out of scope for Stage 1.
-		// If both are present (malformed / forged / future), jkt wins,
-		// matching the intent-explicit dispatch policy (spec §3.5).
-		//
-		// Unchanged by #199 I3: the introspect handler now screens compound
-		// cnf with `isCompoundConfirmation` and answers active:false BEFORE
-		// reaching this narrowing, so this branch is no longer load-bearing
-		// there. It is retained because `extractConfirmation` is a public
-		// export whose narrowing contract other composition roots may rely
-		// on — the rejection belongs to the endpoint policy, not to the
-		// claim-shape validator.
+		// Compound binding is unsupported. If both are present (malformed /
+		// forged), jkt wins, matching the intent-explicit dispatch policy.
+		// The claim-shape validator narrows rather than rejects; the surfaces
+		// that vouch reject (introspection answers active:false before this
+		// narrowing). See ADR 2026-05-20-token-binding-first-class-abstraction,
+		// "Compound cnf across the AS surfaces".
 		expect(extractConfirmation({ jkt: "abc", "x5t#S256": "def" })).toEqual({ jkt: "abc" });
 	});
 

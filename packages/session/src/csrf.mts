@@ -15,38 +15,25 @@
  */
 
 /**
- * CSRF protection for the state-changing session routes (#272).
- *
- * Before this module the defence was one `Origin` comparison that called
- * `next()` whenever the header was absent — so any caller able to omit
- * `Origin` walked past it — and the list it compared against was
- * `cors.allowedOrigins`, a resource-sharing policy pressed into service as a
- * trust policy. There was no token to fall back on.
- *
- * Two independent arms replace it:
+ * CSRF protection for the state-changing session routes: two independent arms
+ * (README, "CSRF on the state-changing routes").
  *
  * 1. **A signed double-submit token.** The value lives in a JS-readable cookie
  *    and must be echoed back in a header (or a form field). A cross-site
  *    attacker can neither write the victim's cookie for this origin nor set a
- *    custom header on a cross-site request without a CORS preflight the
- *    provider never grants, so holding a matching pair is evidence the request
- *    was composed by same-site code.
- *
- *    The token is *signed* rather than an opaque random string. A plain
- *    double-submit trusts whatever is in the cookie, which a sibling subdomain
- *    that can write a parent-domain cookie can supply. An HMAC over the value
- *    means only this provider can mint one that verifies. It is stateless on
- *    purpose: `POST /session/login` is reached *before* there is a session to
- *    bind to, and with `saveUninitialized: false` an anonymous visitor has no
- *    stable session id to key against either.
- *
+ *    custom header without a CORS preflight the provider never grants, so a
+ *    matching pair is evidence the request was composed by same-site code.
+ *    The HMAC means only this provider can mint a token that verifies; a plain
+ *    double-submit would trust whatever a sibling subdomain able to write a
+ *    parent-domain cookie put there. It is stateless because
+ *    `POST /session/login` runs before there is a session to bind to, and with
+ *    `saveUninitialized: false` an anonymous visitor has no stable session id.
  * 2. **A strict same-origin `Origin` / `Referer` check** with its own trust
  *    list (`session.csrf.trustedOrigins`), independent of the CORS list.
  *
- * The composed rule is in {@link createCsrfGuard}. {@link createSessionCsrfGuard}
- * is the same rule as core's `CsrfGuard` — the `csrfGuard` slot the session
- * module provides (#728, #710 C4) — beside the navigation rule a flow's
- * start is held to ({@link checkNavigationOrigin}).
+ * {@link createCsrfGuard} composes them. {@link createSessionCsrfGuard} is the
+ * same rule as core's `CsrfGuard`, beside the navigation rule a flow's start is
+ * held to ({@link checkNavigationOrigin}).
  */
 
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
@@ -71,14 +58,11 @@ export const DEFAULT_CSRF_BODY_FIELD = "csrf_token";
 /** Default token lifetime. Two hours: long enough to outlive a login form. */
 export const DEFAULT_CSRF_TTL_SECONDS = 7200;
 /**
- * Ceiling on the token lifetime, in seconds (24 hours).
- *
- * A policy bound rather than a mechanical one. The token exists to outlive a
- * login form sitting open; past a day it stops being that and becomes a
- * long-lived bearer value sitting in a JS-readable cookie. `reference.conf`
- * and the `session.csrf.ttlSeconds` schema restate this number — the schema
- * cannot import it, since `session` depends on `core` and not the reverse, so
- * a test in this package pins the two together.
+ * Ceiling on the token lifetime, in seconds (24 hours). A policy bound: past a
+ * day the token stops outliving a login form and becomes a long-lived bearer
+ * value in a JS-readable cookie. `reference.conf` and the
+ * `session.csrf.ttlSeconds` schema restate this number (`session` depends on
+ * `core`, not the reverse); a test in this package pins the schema to it.
  */
 export const MAX_CSRF_TTL_SECONDS = 86_400;
 
@@ -163,26 +147,17 @@ const TOKEN_SHAPE = /^(\d{1,15})\.([A-Za-z0-9_-]{16,})\.([A-Za-z0-9_-]{16,})$/;
 /**
  * Reject a `ttlSeconds` that would silently disable the token arm.
  *
- * The value is used in arithmetic *and* stringified into the token as its
- * expiry field, so every non-conforming value fails quietly rather than
- * loudly. A decimal mints `7200.5` into the expiry position, which
- * {@link TOKEN_SHAPE} then rejects — so every token the provider issues is
- * unverifiable the instant it is issued, including the one `GET /session/csrf`
- * just handed the caller. A zero or negative value mints tokens that are
- * already expired, which locks out every header-less client with nothing in
- * the configuration visibly wrong. Zero is the one to worry about: HOCON
- * substitutes an empty `SESSION_CSRF_TTL_SECONDS` as `""` and coercion turns
- * that into `0`.
+ * The value is stringified into the token's expiry field. A decimal mints an
+ * expiry {@link TOKEN_SHAPE} rejects, so every token is unverifiable the
+ * instant it is issued; a zero or negative value mints tokens already expired.
+ * Either locks out every header-less client with nothing in the configuration
+ * visibly wrong. Zero is the one to worry about: HOCON substitutes an empty
+ * `SESSION_CSRF_TTL_SECONDS` as `""` and coercion turns that into `0`.
  *
- * The `session.csrf.ttlSeconds` zod schema enforces the same bounds for config
- * that goes through it. This guard is for the config that does not — a
- * hand-built object from a test or an embedder composing its own `AppConfig`
- * never meets the schema, and the failure would surface as "CSRF is broken in
- * production" rather than "boot refused a bad value".
- *
- * It throws rather than rounding or clamping: silently picking a value the
- * operator did not write buys a working system at the cost of hiding their
- * typo, and this one is security configuration.
+ * The `session.csrf.ttlSeconds` schema enforces the same bounds; this guard
+ * covers config that never meets it (a hand-built `AppConfig` from a test or
+ * an embedder). It throws rather than rounding or clamping so that a typo in
+ * security configuration is not hidden.
  */
 const assertValidTtlSeconds = (ttlSeconds: number): void => {
 	if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0 || ttlSeconds > MAX_CSRF_TTL_SECONDS) {
@@ -273,13 +248,12 @@ const normalizeOrigin = (raw: string): string | undefined => {
  * server's own origin and an explicit trust list.
  *
  * Behind a reverse proxy the server origin is only correct when the app sets
- * `trust proxy`; `req.protocol` and `req.host` then read the forwarded values,
- * which is what the browser actually put in `Origin`.
+ * `trust proxy`, so that `req.protocol` and `req.host` read the forwarded
+ * values the browser put in `Origin`.
  *
- * A header that is present but does not parse — `Origin: null` from a
- * sandboxed frame, a relative `Referer` — is `foreign`, not `absent`. Absent
- * means the request carried no origin signal at all; a signal that fails to
- * name this origin is not the same thing.
+ * A header that is present but does not parse (`Origin: null` from a sandboxed
+ * frame, a relative `Referer`) is `foreign`, not `absent`: absent means the
+ * request carried no origin signal at all.
  */
 export const checkRequestOrigin = (
 	req: Request,
@@ -310,10 +284,8 @@ export interface CsrfGuardOptions {
 	readonly csrf: CsrfProtection;
 	/**
 	 * Origins other than the server's own that may satisfy the origin arm.
-	 *
 	 * Deliberately **not** `cors.allowedOrigins`: "this origin may read my
-	 * responses" and "this origin may make me change state" are two decisions,
-	 * and #272 was filed because one list was answering both.
+	 * responses" and "this origin may make me change state" are two decisions.
 	 */
 	readonly trustedOrigins?: readonly string[];
 	readonly logger?: Logger;
@@ -322,20 +294,16 @@ export interface CsrfGuardOptions {
 /**
  * The acceptance rule.
  *
- * - A **foreign** `Origin` / `Referer` is rejected outright, token or no token.
- *   A foreign origin is positive evidence that a browser made this request from
- *   another site; the pre-#272 guard already rejected it and a security fix must
- *   not hand that back. A legitimate non-browser client simply sends no
- *   `Origin`, so nothing that worked before is lost.
- * - A **same-origin or trusted** signal is accepted on its own. This is what
- *   keeps the ordinary browser login form working with no client change.
- * - When **no** origin signal is present — the header-less API client, and the
- *   exact case the old code waved through — a valid double-submit token is
- *   required.
+ * - A **foreign** `Origin` / `Referer` is rejected outright, token or no token:
+ *   it is positive evidence that a browser made this request from another
+ *   site. A legitimate non-browser client sends no `Origin`.
+ * - A **same-origin or trusted** signal is accepted on its own, so the
+ *   ordinary browser login form needs no client change.
+ * - When **no** origin signal is present (the header-less API client), a valid
+ *   double-submit token is required.
  *
  * So the two arms are alternatives for *presence*, and the origin arm is
- * authoritative when it is present. Rejection happens when both are missing, or
- * when either positively contradicts the request.
+ * authoritative when it is present.
  */
 export const createCsrfGuard = ({
 	csrf,
@@ -398,20 +366,19 @@ const judgeRequest = (
 /**
  * Whether a navigation that starts a state-changing flow — the account-link
  * start, a GET a page navigates to — carries positive evidence that the user
- * asked for it on this deployment's own pages (v0.13.0 audit).
+ * asked for it on this deployment's own pages.
  *
- * Fetch Metadata answers first where the browser sends it: `same-origin` is a
- * page of this origin, `none` a typed URL or a bookmark — no page sent the
- * browser — and `cross-site` is refused. `same-site` is not enough on its own:
- * it is the registrable domain, so a user-controlled sibling such as
- * `blog.example.com` sends it too. That, an absent header (a browser predating
- * Fetch Metadata still carries the SameSite=Lax cookie on a cross-site
- * navigation) and a value this code does not know all fall to the origin the
- * request names, held to the same rule as a request that changes state: this
- * origin or one on `trustedOrigins`. A GET navigation sends no `Origin`, so
- * that is the `Referer` — and a missing one is refused, because the navigating
- * page chooses its own referrer policy. A token never counts: a navigation
- * carries none.
+ * Fetch Metadata answers first where the browser sends it: `same-origin` (a
+ * page of this origin) and `none` (a typed URL or a bookmark) are accepted,
+ * `cross-site` is refused. `same-site` is not enough: it is the registrable
+ * domain, so a user-controlled sibling such as `blog.example.com` sends it too.
+ * That, an absent header (a browser predating Fetch Metadata still carries the
+ * SameSite=Lax cookie on a cross-site navigation) and an unknown value fall to
+ * the origin the request names, which must be this origin or one on
+ * `trustedOrigins`. A GET
+ * navigation sends no `Origin`, so that is the `Referer`, and a missing one is
+ * refused because the navigating page chooses its own referrer policy. A token
+ * never counts: a navigation carries none.
  */
 export const checkNavigationOrigin = (
 	req: Request,
@@ -428,25 +395,21 @@ export const checkNavigationOrigin = (
 
 /**
  * The session package's CSRF policy as core's `CsrfGuard` — the `csrfGuard`
- * slot the session module provides (#728, #710 C4), so that device
- * verification and every other state-changing browser route outside this
- * package runs the one policy `/session/login` runs instead of rebuilding it
- * from the session configuration.
+ * slot the session module provides, so that device verification and every
+ * other state-changing browser route outside this package runs the one policy
+ * `/session/login` runs instead of rebuilding it from the session config.
  *
  * - `check` is {@link createCsrfGuard}'s rule as a verdict, and `middleware`
- *   is {@link createCsrfGuard} itself: the same `403 access_denied`, and the
- *   same `csrf_origin_rejected` / `csrf_token_rejected` warn line on
- *   `logger`.
+ *   is {@link createCsrfGuard} itself (same `403 access_denied`, same
+ *   `csrf_origin_rejected` / `csrf_token_rejected` warn line on `logger`).
  * - `checkNavigation` is {@link checkNavigationOrigin} over the same trust
  *   list: the rule the account-link start is held to.
- * - `issue` sets a fresh token as `csrf` does — `csrf`'s cookie, which the
- *   session module names from the session cookie and gives its attributes.
+ * - `issue` sets a fresh token in `csrf`'s cookie, which the session module
+ *   names from the session cookie and gives its attributes.
  *
- * The token's signing key is `csrf`'s. The session module builds `csrf` from
+ * The signing key is `csrf`'s; the session module builds `csrf` from
  * `session.secret` (`createCsrfProtectionFromConfig`), which the session
- * store's module owns; the key is to reach the guard through a narrow slot
- * the session store provides (`csrfTokenSigner`) before the session store's
- * configuration becomes a section of its own (#728).
+ * store's module owns.
  */
 export const createSessionCsrfGuard = ({
 	csrf,
@@ -510,13 +473,11 @@ export interface SessionCsrfConfigSlice {
 /**
  * Build the protection from the `session` config slice.
  *
- * The cookie name is derived as `<session.name>.csrf` rather than configured
- * separately, so it inherits whatever prefix the session cookie already
- * carries. That matters for `__Host-`: the boot guard in `sessionStoreModule`
- * already refuses a `__Host-` session name unless `secure` is on and no domain
- * is set, and deriving from it means the CSRF cookie can never disagree with
- * that verdict — a `__Host-` cookie the browser silently drops would look
- * exactly like a client that forgot to send the token.
+ * The cookie name is derived as `<session.name>.csrf`, so it inherits the
+ * session cookie's prefix. For `__Host-` that means the CSRF cookie cannot
+ * disagree with `sessionStoreModule`'s boot guard (`secure` on, no domain): a
+ * `__Host-` cookie the browser silently drops would look exactly like a client
+ * that forgot to send the token.
  */
 export const createCsrfProtectionFromConfig = (
 	session: SessionCsrfConfigSlice,

@@ -21,16 +21,14 @@ import {
 	subjectRevocationServiceModule,
 } from "#/logout/subjectRevocationService.mjs";
 
-// #626 P2 (D4): the fifth `AnyDeps` site. The provider reads only the slots
-// the module declares, and an optional slot only behind a presence check.
-// Compile-time facts: they fire under vitest's typecheck mode only.
+// The provider reads only the slots the module declares, and an optional slot
+// only behind a presence check. Compile-time facts: they fire under vitest's
+// typecheck mode only.
 //
-// No `keyof` containment here, unlike the grant modules: this provider hands
-// its deps to no factory whole. It builds the options of
+// No `keyof` containment, unlike the grant modules: this provider hands its
+// deps to no factory whole, but builds the options of
 // `createSubjectRevocationService` and `cascadeLogout` field by field, and
-// their keys (`cascadeSession`, `watermarkTtlMs`, `allowKeep`, `sid`, …) are
-// not slots, so there is no second parameter type whose keys could name an
-// undeclared slot. The typed callback is the whole of the guard.
+// those keys are not slots. The typed callback is the whole of the guard.
 
 const REQUIRES = [
 	"config",
@@ -47,8 +45,8 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
-	// What the horizon is sized from (#728): the oauth module's token
-	// settings and the session store's cookie policy.
+	// What the horizon is sized from: the oauth module's token settings and
+	// the session store's cookie policy.
 	"oauthTokenSettings",
 	"sessionCookiePolicy",
 ] as const;

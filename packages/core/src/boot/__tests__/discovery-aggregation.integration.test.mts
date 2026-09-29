@@ -15,27 +15,21 @@
  */
 
 /**
- * boot/__tests__/discovery-aggregation.integration.test.mts
- *
  * Integration tests for the `discoveryMetadata` contribution kind consumed by
- * `assembleApp`. Verifies the aggregator behaviour at the boot-pipeline level:
+ * `assembleApp`:
  *
  *   1. issuer configured + module contributions → core synthesizes the single
  *      `/.well-known/openid-configuration` document. The aggregator owns
  *      `issuer` (trailing-slash normalized) and
  *      `id_token_signing_alg_values_supported` (from `keyStore.algorithm`);
- *      module contributions supply issuer-relative endpoints + literal metadata,
- *      merged across modules.
- *   2. no `providerRoot` contribution → the discovery route is NOT mounted (no
- *      document is served). Since #266 an issuer is always configured, so the
- *      contribution is the only remaining gate at boot.
+ *      modules supply issuer-relative endpoints and literal metadata, merged.
+ *   2. no `providerRoot` contribution → no discovery route is mounted. An
+ *      issuer is always configured, so the contribution is the only gate.
  *
- * What the planner does with values it is given is
- * [`discovery/__tests__/planRoute.test.mts`](../../discovery/__tests__/planRoute.test.mts):
- * since #626 F4 it takes them instead of the boot world, so it no longer needs
- * a boot fixture to be tested at all. What is pinned HERE is the wiring — that
- * `assembleApp` reads the right values out of its own world and converts the
- * planner's error into its own taxonomy.
+ * The planner's handling of the values it is given is pinned in
+ * [`discovery/__tests__/planRoute.test.mts`](../../discovery/__tests__/planRoute.test.mts).
+ * This suite pins the wiring: that `assembleApp` reads the right values out
+ * of its own world and converts the planner's error into its own taxonomy.
  */
 
 import express from "express";
@@ -60,13 +54,9 @@ const keyStoreModule = defineModule({
 
 /**
  * The same slot filled with an ES256 store, so the algorithm the document
- * advertises is one no fixture hard-codes.
- *
- * Every other discovery fixture in the tree is HS256, which left
- * `assembleApp`'s derivation — `keyStore.algorithm` → `signingAlgs` — pinned
- * only against a constant: replacing it with the literal `["HS256"]` passed
- * the whole suite. That derivation is the one reading #626 F4 MOVED, from the
- * planner to the caller, so it is the one that has to be pinned on this side.
+ * advertises is one no fixture hard-codes. Every other discovery fixture is
+ * HS256, where `assembleApp`'s `keyStore.algorithm` → `signingAlgs`
+ * derivation cannot be told from the literal `["HS256"]`.
  */
 const es256KeyStoreModule = defineModule({
 	name: "test:key-store-es256",
@@ -179,10 +169,8 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 
 	it("advertises the algorithm the key store in the slot actually uses, not HS256 (#626 F4)", async () => {
 		// `assembleApp` derives `signingAlgs` from `keyStore.algorithm` and hands
-		// it to the planner. Every other fixture here is HS256, so that
-		// derivation was indistinguishable from a constant — the planner's own
-		// unit test covers the parameter, which is the side the reading moved
-		// FROM. This covers the side it moved to.
+		// it to the planner. The planner's unit test covers the parameter; this
+		// covers the derivation.
 		const handle = await createTestApp({
 			modules: [oauthLikeModule, jwksLikeModule, es256KeyStoreModule],
 			bootstrapComponents: {
@@ -340,8 +328,8 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect(
 			(await request(app).get("/.well-known/oauth-authorization-server/anything")).status,
 		).toBe(404);
-		// A trailing slash still reaches it, as Express's own non-strict
-		// routing did before.
+		// A trailing slash still reaches it, as under Express's non-strict
+		// routing.
 		expect((await request(app).get("/.well-known/oauth-authorization-server/a*b/")).status).toBe(
 			200,
 		);
@@ -363,7 +351,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 
 		expect((await request(app).head("/.well-known/openid-configuration")).status).toBe(200);
 		// A POST to the metadata path is not this route's business; it passes
-		// through, as it did when the route was registered with `router.get`.
+		// through, as it would past a `router.get` route.
 		const posted = await request(app).post("/.well-known/oauth-authorization-server");
 		expect(posted.status).toBe(404);
 		expect(posted.body.error).toBe("not_found");
@@ -372,12 +360,10 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 	});
 
 	it("issuer set but no discoveryMetadata contributions → no route, no boot error", async () => {
-		// A minimal composition that configures an issuer but wires no
-		// discovery-contributing module is not participating in the discovery
-		// aggregator at all — it must boot cleanly and simply not serve a
-		// document (mirrors the pre-aggregator behaviour where discovery was the
-		// oauth module's sole concern). The structural presence contract still
-		// applies the moment ANY module contributes (see buildDocument tests).
+		// A composition that configures an issuer but wires no
+		// discovery-contributing module boots cleanly and serves no document.
+		// The structural presence contract applies the moment ANY module
+		// contributes (see buildDocument tests).
 		const handle = await createTestApp({
 			modules: [keyStoreModule],
 			bootstrapComponents: {
@@ -395,13 +381,11 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 	});
 
 	it("issuer set + JWKS-only contribution (no providerRoot) → no route, no boot error", async () => {
-		// A key-publishing deployment may mount jwksModule WITHOUT the full OAuth
-		// suite, even with an issuer configured (jwks depends only on keyStore).
-		// jwks contributes only the ancillary `jwks_uri` and does NOT set
-		// `providerRoot`, so it does not by itself make the deployment an OpenID
-		// Provider — discovery aggregation must not activate (else boot would fail
-		// on the missing OAuth-required fields). Activation opts in only once a
-		// contribution declares `providerRoot: true`.
+		// A key-publishing deployment may mount jwksModule WITHOUT the OAuth
+		// suite (jwks depends only on keyStore). jwks contributes only
+		// `jwks_uri` and does not set `providerRoot`, so aggregation must not
+		// activate, or boot would fail on the missing OAuth-required fields.
+		// Only a contribution declaring `providerRoot: true` activates it.
 		const handle = await createTestApp({
 			modules: [jwksLikeModule, keyStoreModule],
 			bootstrapComponents: {
@@ -419,11 +403,11 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 	});
 
 	it("fails fast when a module contributes a route colliding with the core discovery path", async () => {
-		// The core-synthesized discovery route is a normal (synthetic) route
+		// The core-synthesized discovery route is a (synthetic) route
 		// contribution advertising `GET /.well-known/openid-configuration`, so it
-		// flows through `checkMaterialisedRouteCollisions` like any other route. A
-		// module advertising the same effective method+path therefore fails the
-		// boot fast as a duplicate — no special-casing, no silent shadowing.
+		// goes through `checkMaterialisedRouteCollisions` like any other route: a
+		// module advertising the same method+path fails boot as a duplicate
+		// instead of being silently shadowed.
 		await expect(
 			createTestApp({
 				modules: [oauthLikeModule, jwksLikeModule, conflictingDiscoveryRouteModule, keyStoreModule],
@@ -436,15 +420,12 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 	});
 
 	it("issuer + providerRoot contributed but jwks_uri missing → boot fails fast (BootError wrapping DiscoveryDocumentError)", async () => {
-		// The migration's headline behavioral contract, pinned at the level it
-		// actually executes. Once a contribution declares `providerRoot: true`,
-		// the discovery planner invokes buildDiscoveryDocument at boot; a
-		// composition that wires the OAuth provider surface + an issuer but omits
-		// the jwks_uri-owning module fails the OIDC-required presence check. The
-		// planner wraps the `DiscoveryDocumentError` in a `BootError`
-		// (reason="discovery-document-invalid", cause=the original) so a discovery
-		// misconfiguration surfaces through the same boot-failure taxonomy as every
-		// other assembleApp error — `instanceof BootError` consumers don't miss it.
+		// Once a contribution declares `providerRoot: true`, the planner runs
+		// buildDiscoveryDocument at boot, so a composition with the OAuth surface
+		// and an issuer but no jwks_uri-owning module fails the OIDC-required
+		// presence check. The `DiscoveryDocumentError` arrives wrapped in a
+		// `BootError` (reason="discovery-document-invalid", cause=the original),
+		// the taxonomy of every other assembleApp error.
 		const err = await createTestApp({
 			// jwksLikeModule deliberately omitted — no module contributes `jwks_uri`.
 			modules: [oauthLikeModule, keyStoreModule],
@@ -463,9 +444,8 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect((err as BootError).reason).toBe("discovery-document-invalid");
 		expect((err as BootError).cause).toBeInstanceOf(DiscoveryDocumentError);
 		expect(String((err as BootError).message)).toMatch(/jwks_uri/);
-		// The whole shape, not only the fields an operator reads first: #626 F4
-		// moved this conversion from the discovery step into `assembleApp` and
-		// claims every field came across unchanged, so every field is pinned.
+		// The whole shape of `assembleApp`'s conversion, not only the fields an
+		// operator reads first.
 		const cause = (err as BootError).cause as DiscoveryDocumentError;
 		expect((err as BootError).message).toBe(`assembleApp: ${cause.message}`);
 		expect((err as BootError).stage).toBe("assembleApp");

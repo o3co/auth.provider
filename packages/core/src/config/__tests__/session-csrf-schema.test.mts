@@ -9,20 +9,18 @@
  */
 
 /**
- * #272 follow-up — `session.csrf.ttlSeconds` was `z.coerce.number()`, which
- * accepts any number at all. Every value it lets through that is not a
- * positive integer breaks the token arm silently rather than loudly:
+ * `session.csrf.ttlSeconds` must be a positive integer. Any other number
+ * breaks the token arm silently rather than loudly:
  *
  * - `0` (which is what HOCON substituting an empty env var coerces to) mints
  *   tokens that are already expired, so the double-submit arm is dead and
  *   every header-less client is locked out with no configuration visibly wrong.
  * - a decimal mints an expiry that fails the token's own shape check, so every
- *   issued token is unverifiable — including the ones the provider just handed
- *   out from `GET /session/csrf`.
+ *   issued token is unverifiable.
  *
  * The schema is the first of two guards; the second is
  * `createCsrfProtection`'s own check, for hand-built configs that never meet
- * zod. Both are pinned — here and in `packages/session/src/__tests__/csrf.test.mts`.
+ * zod. Both are pinned, here and in `packages/session/src/__tests__/csrf.test.mts`.
  */
 
 import { describe, expect, it } from "vitest";

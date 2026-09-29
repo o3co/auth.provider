@@ -47,7 +47,7 @@ const stubConfig: AppConfig = {
 
 /**
  * `stubConfig` with the session slice overridden — the redirect allowlist and
- * the cookie domain are the two keys #405's policy is built from.
+ * the cookie domain are the two keys the `redirect_to` policy is built from.
  */
 const configWith = (session: {
 	readonly domain?: string | null;
@@ -60,10 +60,10 @@ const configWith = (session: {
 
 /**
  * A double-submit pair minted from the same secret and cookie name the router
- * derives from `stubConfig`. Since #272 the state-changing session routes
- * reject a request carrying neither an origin signal nor a token, and
- * `supertest` sends no `Origin` — which is exactly the header-less API client
- * the token arm exists to keep working.
+ * derives from `stubConfig`. The state-changing session routes reject a
+ * request carrying neither an origin signal nor a token, and `supertest`
+ * sends no `Origin` — which is exactly the header-less API client the token
+ * arm exists to keep working.
  */
 const csrf = createCsrfProtection({
 	secret: "test-session-secret",
@@ -133,14 +133,9 @@ function makeLiveUserSessionStore(
 
 /**
  * Build a test express app with the Session router mounted at "/session".
- *
- * userRepository.authenticate controls the login outcome:
- * - resolves to a User object → successful login
- * - resolves to null → invalid credentials (401)
- * - rejects with an Error → user directory outage (503)
- *
- * Returns `capturedSession`: a ref populated by a post-router middleware so
- * tests can assert on `req.session` fields (e.g. `sid`) after a response.
+ * `userRepository.authenticate` resolving to a User logs in, resolving to
+ * null is 401 and rejecting is a user directory outage (503).
+ * `capturedSession` holds `req.session` as the response left it.
  */
 function buildApp(
 	opts: {
@@ -319,10 +314,10 @@ describe("Session routes — POST /session/login", () => {
 			// authTime and expiresAt are present
 			expect(saved.authTime).toBeTruthy();
 			expect(saved.expiresAt).toBeTruthy();
-			// #481: a password login records how the user authenticated (RFC 8176).
+			// A password login records how the user authenticated (RFC 8176).
 			expect((saved as { amr?: unknown }).amr).toEqual(["pwd"]);
-			// The MFA ADR's D9: and that its primary was a password, with no
-			// second factor verified — every field named.
+			// And that its primary was a password, with no second factor verified
+			// — every field named (ADR 2026-09-25-multi-factor-authentication, D9).
 			expect(saved).toHaveProperty("authentication");
 			expect((saved as { authentication?: unknown }).authentication).toStrictEqual({
 				primary: "pwd",
@@ -460,17 +455,13 @@ describe("Session routes — POST /session/login", () => {
 	});
 
 	/**
-	 * #405 — `redirect_to` is held to the same exact-match allowlist #278 gave
-	 * the federation flow, and an absent allowlist is the empty allowlist.
-	 *
-	 * The pre-#405 rule here was "any absolute http(s) URL, narrowed to
-	 * `session.domain` if one is configured". `session.domain` is nullable and
-	 * defaults to null, so the shipped default stored any URL on the internet
-	 * under `req.session.redirectTo` — the exact shape #278 removed one route
-	 * over. Nothing in this repository redirects to that key today, but it is
-	 * declared public on `SessionData`, and an MFA login transaction carries it
-	 * back to the page (`MfaTransaction.redirectTo`), so a validated value is
-	 * what an embedder must be handed.
+	 * `redirect_to` is held to the federation flow's exact-match allowlist, and
+	 * an absent allowlist is the empty allowlist. `session.domain` defaults to
+	 * null, so "any absolute http(s) URL, narrowed to `session.domain`" would
+	 * store any URL on the internet by default. `req.session.redirectTo` is
+	 * public on `SessionData`, and an MFA login transaction carries it back to
+	 * the page (`MfaTransaction.redirectTo`), so an embedder must be handed a
+	 * validated value.
 	 */
 	describe("redirect_to validation (#405)", () => {
 		const reasonOf = (description: unknown): string | undefined =>
@@ -500,7 +491,6 @@ describe("Session routes — POST /session/login", () => {
 			expect(reasonOf(res.body.error_description)).toBe("unsupported-scheme");
 		});
 
-		// The #405 finding itself: this is the request that used to succeed.
 		it("refuses any absolute https URL when no allowlist is configured", async () => {
 			const { app } = buildApp();
 
@@ -638,8 +628,7 @@ describe("Session routes — POST /session/login", () => {
 		});
 	});
 
-	// AS-1 RFC 6749 §5.2 envelope unification — the 3 historically `{message: …}`
-	// error responses on this router migrate to `{error, error_description}`.
+	// The RFC 6749 §5.2 envelope, `{error, error_description}`, with no `message`.
 	describe("AS-1: RFC 6749 §5.2 error envelope", () => {
 		it("CSRF origin mismatch returns 403 access_denied with error_description (no `message`)", async () => {
 			const { app } = buildApp({
@@ -701,9 +690,8 @@ describe("Session routes — POST /session/login", () => {
 	});
 
 	/**
-	 * Issue #272 — the old guard read `Origin` and called `next()` when it was
-	 * missing, so omitting the header skipped the check entirely. `sameSite=lax`
-	 * covers session-riding, but login CSRF (forcing a victim's browser to
+	 * A missing `Origin` must not skip the check. `sameSite=lax` covers
+	 * session-riding, but login CSRF (forcing a victim's browser to
 	 * authenticate as the attacker) needs no cookie of the victim's at all.
 	 */
 	describe("#272: CSRF acceptance rule", () => {
@@ -752,7 +740,7 @@ describe("Session routes — POST /session/login", () => {
 
 		it("accepts a same-origin browser login that carries no token", async () => {
 			const { app } = buildApp();
-			// #556: bound to the loopback address the request dials — a hostless
+			// Bound to the loopback address the request dials — a hostless
 			// listen can share its port with another process's 127.0.0.1 socket.
 			const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
 				const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
@@ -774,9 +762,8 @@ describe("Session routes — POST /session/login", () => {
 		});
 
 		it("no longer grants CSRF trust to cors.allowedOrigins", async () => {
-			// The CORS list is a resource-sharing policy; reusing it as the CSRF
-			// trust list conflated two decisions. Trust is now stated on
-			// `session.csrf.trustedOrigins`.
+			// The CORS list is a resource-sharing policy, not the CSRF trust list:
+			// trust is stated on `session.csrf.trustedOrigins`.
 			const { app } = buildApp({
 				config: {
 					...stubConfig,
@@ -856,7 +843,7 @@ describe("Session routes — POST /session/login", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #296 — subject-keyed session index on local login
+// Subject-keyed session index on local login
 //
 // `revokeAllForSubject` enumerates this index after a credential change, so a
 // session that never lands in it is a session a password reset cannot kill.
@@ -981,16 +968,11 @@ describe("Session routes — subject session index (#296)", () => {
 
 /**
  * `/session/logout` must invalidate the `UserSession` record, not only the
- * cookie.
- *
- * #506 stamped `sid` on the `session` grant's access token and gave
- * `/oauth/introspect` the liveness check `/oauth/userinfo` already ran. Both
- * resolve the `UserSession` record — which this endpoint used to leave alive.
- * So in the BFF / `auth.proxy` injection topology, whose logout is exactly
- * this endpoint, a token minted from the session kept introspecting
- * `active: true` and kept answering at `/userinfo` for its full lifetime
- * after the user logged out. `/oauth/logout` was unaffected; it runs the full
- * cascade. This suite pins the endpoint's own half.
+ * cookie: the `session` grant's access token carries `sid`, and
+ * `/oauth/introspect` and `/oauth/userinfo` check that record's liveness. In
+ * the BFF / `auth.proxy` injection topology, whose logout is this endpoint, a
+ * token minted from the session would otherwise stay live for its full
+ * lifetime. See README, What `POST /session/logout` invalidates.
  */
 describe("Session routes — POST /session/logout invalidates the session record", () => {
 	/** A logged-in bag: what a prior `POST /session/login` leaves behind. */
@@ -1042,7 +1024,7 @@ describe("Session routes — POST /session/logout invalidates the session record
 		const res = await logoutRequest(app);
 
 		expect(res.status).toBe(200);
-		// #296: leaving the entry would have `revokeAllForSubject` enumerate a
+		// Leaving the entry would have `revokeAllForSubject` enumerate a
 		// sid that no longer exists.
 		expect(removeSid).toHaveBeenCalledWith("u-1", "sid-1");
 	});
@@ -1121,7 +1103,7 @@ describe("Session routes — POST /session/logout invalidates the session record
 
 		// A store outage must not turn a logout into a 5xx that leaves the user
 		// holding a live cookie: the cookie is the half this endpoint can always
-		// deliver, and `/authorize`'s R1b liveness check covers the residue.
+		// deliver, and `/authorize`'s liveness check covers the residue.
 		expect(res.status).toBe(200);
 		expect(res.body).toMatchObject({ message: "Logged out successfully" });
 		expect(logger.error).toHaveBeenCalledWith(
@@ -1158,11 +1140,11 @@ describe("Session routes — POST /session/logout invalidates the session record
 		);
 	});
 
-	// The two index removals are the remaining best-effort steps, and their
-	// failure paths were the only lines of `invalidateSessionRecords` no test
-	// reached. Both are hygiene rather than containment — the `UserSession` is
-	// already gone by the time they run — so the contract they have to keep is
-	// that the failure is visible and costs the caller nothing.
+	// The two index removals are the remaining best-effort steps of
+	// `invalidateSessionRecords`. Both are hygiene rather than containment —
+	// the `UserSession` is already gone by the time they run — so the contract
+	// they have to keep is that the failure is visible and costs the caller
+	// nothing.
 	it("does not let a subject-index outage stop the primary invalidation", async () => {
 		const logger = silentLogger();
 		const store = makeLiveUserSessionStore(["sid-1"]);

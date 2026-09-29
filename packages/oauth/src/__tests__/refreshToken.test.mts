@@ -57,10 +57,10 @@ const mockConfig = {
 		accessToken: { expiresIn: 3600 },
 		refreshToken: {
 			expiresIn: 86400,
-			// CC-2 (v0.5.1): default policy for unknown_family is "reject".
+			// Default policy for unknown_family is "reject".
 			unknownFamilyPolicy: "reject",
-			// SF-6 (v0.5.1): default policy for tokens lacking jti or family_id
-			// when rotation is wired is "reject".
+			// Default policy for tokens lacking jti or family_id when rotation
+			// is wired is "reject".
 			legacyRtPolicy: "reject",
 		},
 		grants: {
@@ -77,19 +77,17 @@ const mockDeps: RefreshTokenGrantDeps = {
 	sessionRequirementResolver: resolverForTests([]),
 };
 
-// D-6 (v0.5.1): every test that hits the binding gate must supply both an
-// `aud` (or `azp`) on the signed RT and a matching `authenticatedClient` on
-// the GrantContext. We default both to "client1" so existing tests continue
-// to exercise the same scope/policy/family code paths without per-test
-// boilerplate; tests that need an explicit identity mismatch override the
-// `body.refresh_token` aud or the ctx authenticatedClient.
+// Every test that hits the client-binding gate must supply both an `aud`
+// (or `azp`) on the signed RT and a matching `authenticatedClient` on the
+// GrantContext. Both default to "client1"; a test that needs a mismatch
+// overrides the `body.refresh_token` aud or the ctx authenticatedClient.
 const DEFAULT_CLIENT_ID = "client1";
 
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
 	return (
 		new SignJWT({ sub: "u1", scope: "read write", ...overrides })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
-			// #376: real RTs carry iat (generateToken sets it), and the subject
+			// Real RTs carry iat (generateToken sets it), and the subject
 			// watermark compares against it — a fixture without one would skip
 			// the backstop and never exercise it.
 			.setIssuedAt()
@@ -159,8 +157,8 @@ describe("createRefreshTokenGrant", () => {
 
 		it("D-6: returns 400 invalid_grant when authenticatedClient does not match RT azp/aud", async () => {
 			// Token is bound to "client1" via aud; authenticatedClient is a
-			// different client. The binding gate must reject — accepting it
-			// would let any authenticated client redeem any RT, defeating PB-2.
+			// different client. The binding gate must reject: accepting it
+			// would let any authenticated client redeem any RT.
 			const token = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setIssuer("localhost")
@@ -206,15 +204,15 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("D-6 R-legacy-azp: legacy RT (aud only, no azp) + matching authenticatedClient → 200, new RT emits azp", async () => {
-			// Pre-D-6 tokens carry only `aud`; the binding gate falls back to
+			// For a token carrying only `aud`, the binding gate falls back to
 			// `aud === authenticatedClient.clientId`. The newly minted RT must
-			// emit `azp = authenticatedClient.clientId` so subsequent rotations
-			// no longer rely on the `aud` fallback.
+			// emit `azp = authenticatedClient.clientId` so later rotations do
+			// not rely on the `aud` fallback.
 			const legacyToken = await new SignJWT({ sub: "u1", scope: "read" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setIssuer("localhost")
 				.setAudience("client1")
-				// note: no .azp claim (legacy)
+				// no azp claim
 				.setExpirationTime("24h")
 				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
@@ -258,7 +256,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
-			// Only the new keys are configured, so a grant still reading the
+			// Only the current keys are configured, so a grant reading the
 			// deprecated `expiresIn` would mint a token with no `exp` at all.
 			const handler = createRefreshTokenGrant({
 				...mockDeps,
@@ -410,8 +408,8 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
-			// Express reads `scope=a&scope=b` as an array; the grant called
-			// `.split` on it and the request became a 500.
+			// Express reads `scope=a&scope=b` as an array; calling `.split` on
+			// it would make the request a 500.
 			const { result } = await createRefreshTokenGrant(mockDeps).handle({
 				body: { refresh_token: await makeRefreshToken(), scope: ["read", "write"] },
 				session: {},
@@ -570,13 +568,11 @@ describe("createRefreshTokenGrant", () => {
 			});
 
 			it("RT-OC: typ-less JWT is rejected even when legacyTypAccept=true (AT-as-RT defended)", async () => {
-				// SF-1's legacyTypAccept=true allows a typ-less JWT through the
-				// central verifier. This grant-level gate must STILL reject it
-				// because the token declares no refresh marker (header.typ is
-				// the only accepted marker after M4). Without this guard, any
-				// AT or non-refresh JWT signed with the same key could pass as
-				// a refresh token — that is the AT-as-RT confusion vector the
-				// strict marker check defends against.
+				// legacyTypAccept=true lets a typ-less JWT through the central
+				// verifier. This grant-level gate must STILL reject it because
+				// the token declares no refresh marker (header.typ is the only
+				// accepted one). Without it, any AT or non-refresh JWT signed
+				// with the same key could pass as a refresh token.
 				const typLessUnmarkedToken = await new SignJWT({
 					sub: "u1",
 					azp: DEFAULT_CLIENT_ID,
@@ -667,9 +663,9 @@ describe("createRefreshTokenGrant", () => {
 
 		it("returns invalid_grant/replay_detected when the rotation reports 'replayed'", async () => {
 			const stub = createStubRotation("replayed");
-			// PB-1 (v0.5.1): rotation wired without revocation must fail-closed
-			// to 503. Existing tests that only assert the "replayed" path supply
-			// a noop revocation stub so the request reaches the replay branch.
+			// Rotation wired without revocation fails closed to 503, so a test
+			// asserting only the "replayed" path supplies a noop revocation
+			// stub to reach the replay branch.
 			const noopRevocation = {
 				async revokeFamily() {},
 				async isFamilyRevoked() {
@@ -681,8 +677,8 @@ describe("createRefreshTokenGrant", () => {
 				refreshTokenFamilyRotation: stub,
 				refreshTokenFamilyRevocation: noopRevocation,
 			};
-			// SF-6 (v0.5.1): when rotation is wired the token MUST carry both
-			// jti AND family_id, otherwise the legacy gate fires before rotation.
+			// When rotation is wired the token MUST carry both jti AND
+			// family_id, otherwise the legacy gate fires before rotation.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setIssuer("localhost")
@@ -721,7 +717,7 @@ describe("createRefreshTokenGrant", () => {
 				...mockDeps,
 				refreshTokenFamilyRotation: throwingRotation,
 			};
-			// SF-6 (v0.5.1): token must carry family_id when rotation is wired.
+			// The token must carry family_id when rotation is wired.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setIssuer("localhost")
@@ -748,7 +744,7 @@ describe("createRefreshTokenGrant", () => {
 			// The schema refuses such a value at boot; a configuration built by
 			// hand never meets it. `generateToken` refuses it too, but only after
 			// the rotation has committed — the presented token spent and no token
-			// issued in its place (#449) — and read per request, even a check
+			// issued in its place — and read per request, even a check
 			// ahead of the rotation answers every request with a 500. The grant
 			// reads both lifetimes when it is built instead.
 			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
@@ -820,7 +816,7 @@ describe("createRefreshTokenGrant", () => {
 				...mockDeps,
 				refreshTokenFamilyRotation: stub,
 			};
-			// SF-6 (v0.5.1): token must carry family_id when rotation is wired.
+			// The token must carry family_id when rotation is wired.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setIssuer("localhost")
@@ -858,8 +854,8 @@ describe("createRefreshTokenGrant", () => {
 			},
 		};
 
-		// Helper: a refresh token with both jti and family_id present so SF-6
-		// gate doesn't fire. The replayed outcome is decided by the rotation
+		// Helper: a refresh token with both jti and family_id present so the
+		// legacy-token gate doesn't fire. The replayed outcome is decided by the rotation
 		// stub regardless of the actual jti — the stub is unconditional.
 		async function makeReplayedRt(familyId = "fam-1"): Promise<string> {
 			return new SignJWT({ sub: "u1", scope: "read write", family_id: familyId })
@@ -903,24 +899,20 @@ describe("createRefreshTokenGrant", () => {
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("invalid_grant");
 			expect(result.errorDescription).toBe("replay_detected");
-			// PB-1 Codex Delta 3: assert exact family_id, not expect.any(String).
+			// Exact family_id, not expect.any(String).
 			expect(revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(revokeFamily).toHaveBeenCalledTimes(1);
 		});
 
 		// -------------------------------------------------------------------
-		// #274: the shipped rotation now revokes the family inside the same
+		// The shipped rotation revokes the family inside the same
 		// compare-and-swap that detected the replay, and reports
-		// `familyRevoked: true`. The handler's own revoke was the second half
-		// of a two-write sequence with a race in the middle, so when the
-		// rotation says the family is already dead the handler must not write
-		// again — there must be no second operation for a sibling to slip
-		// past.
+		// `familyRevoked: true`. The handler must then not write again: there
+		// must be no second operation for a sibling to slip past.
 		//
-		// The `replayedRotation` stub above deliberately keeps reporting a
-		// bare `{ outcome: "replayed" }`, so the tests around these two keep
-		// covering the fallback path taken by a custom rotation written
-		// before #274.
+		// The `replayedRotation` stub above reports a bare
+		// `{ outcome: "replayed" }`, so the tests around these two cover the
+		// fallback path of a custom rotation that does not revoke atomically.
 		// -------------------------------------------------------------------
 		const atomicallyRevokedRotation: RefreshTokenFamilyRotation = {
 			async register() {},
@@ -949,8 +941,8 @@ describe("createRefreshTokenGrant", () => {
 				body: { refresh_token: rt },
 			});
 
-			// The wire response is unchanged — this is an internal ordering
-			// fix, not a protocol change.
+			// The wire response is the same either way: this is internal
+			// ordering, not protocol.
 			expect(result.status).toBe(400);
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("invalid_grant");
@@ -961,7 +953,7 @@ describe("createRefreshTokenGrant", () => {
 		it("still audits the revocation when the rotation revoked atomically (#274)", async () => {
 			// The audit signal belongs to the replay, not to which component
 			// performed the write. A SIEM watching for this event must not go
-			// quiet just because the revocation moved into the store.
+			// quiet because the revocation happened in the store.
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
 			const deps: RefreshTokenGrantDeps = {
@@ -1008,8 +1000,8 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 503 when revocation dep is missing (PB-1 Codex Delta 1, fail-closed)", async () => {
-			// Rotation wired but no revocation dep — fail-closed per Delta 1
-			// (silent skip would violate RFC 6819 §5.2.2 compliance guarantee).
+			// Rotation wired but no revocation dep: fail closed, since a silent
+			// skip would break the RFC 6819 §5.2.2 guarantee.
 			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: replayedRotation,
@@ -1374,7 +1366,7 @@ describe("createRefreshTokenGrant", () => {
 			});
 
 			expect(result.status).toBe(200);
-			// SF-6 Codex Delta 3: rotation called with original family_id
+			// Rotation called with the original family_id
 			expect(rotateSpy).toHaveBeenCalledWith(
 				"jti-1",
 				expect.any(String),
@@ -1807,7 +1799,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("succeeds without sid on minted tokens when legacy token has no sid claim (F-3-4-4)", async () => {
-			// Token minted before F-3: only family_id, no sid
+			// A token with only family_id, no sid
 			const token = await makeRefreshToken({ family_id: "fam-legacy" });
 			const handler = createRefreshTokenGrant(mockDeps);
 
@@ -1832,12 +1824,10 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	// F6 coverage boost — patch line for PR #127 (PB-1 + CC-2 + SF-6) that is
-	// reachable only via runtime-cast to a future outcome value not yet in the
-	// `RefreshTokenFamilyRotationOutcome` union. The `default` arm exists as a
-	// runtime invariant so a future outcome added without updating the switch
-	// is rejected with a stable error rather than silently falling through to
-	// token issuance. We exercise it deliberately to pin that contract.
+	// The switch's `default` arm is reachable only by casting to an outcome
+	// not in the `RefreshTokenFamilyRotationOutcome` union. It exists so an
+	// outcome added without updating the switch is rejected with a stable
+	// error rather than silently falling through to token issuance.
 	describe("F6 PR3 patch coverage — exhaustive switch defense-in-depth", () => {
 		it("throws 'unhandled rotation outcome' when rotation returns an unknown outcome variant", async () => {
 			const rotation = {
@@ -1856,7 +1846,7 @@ describe("createRefreshTokenGrant", () => {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotation,
 			};
-			// SF-6: token must carry both jti AND family_id so the legacy
+			// The token must carry both jti AND family_id so the legacy
 			// gate doesn't fire before rotation runs.
 			const token = await new SignJWT({
 				sub: "u1",
@@ -1893,9 +1883,10 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("refuses an RT minted before the subject's watermark with invalid_grant", async () => {
-			// The #322 cascade revokes RT families directly; the watermark is the
-			// backstop for a partial cascade failure. An RT whose iat is at or
-			// before the watermark must not redeem, forcing re-authentication.
+			// The subject-revocation cascade revokes RT families directly; the
+			// watermark is the backstop for a partial cascade failure. An RT
+			// whose iat is at or before the watermark must not redeem, forcing
+			// re-authentication.
 			const handler = createRefreshTokenGrant({
 				...mockDeps,
 				subjectRevocation: makeSubjectRevocation("u1"),
@@ -1937,18 +1928,12 @@ describe("createRefreshTokenGrant", () => {
 	});
 
 	/*
-	 * #408 — a watermark store outage is not a revocation.
-	 *
-	 * The verifier fails closed on an unreachable store, which is right, but it
-	 * reported that as `reason: "revoked"` and this handler mapped every
-	 * verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client
-	 * discards its refresh token on `invalid_grant`, so a transient outage did
-	 * not degrade the service — it force-logged-out every user who refreshed
-	 * during it, while this same handler already answered family-store outages
-	 * with `503 temporarily_unavailable` a few hundred lines below.
-	 *
-	 * Not reachable before #321: the only `SubjectRevocation` adapter was
-	 * in-process and could not fail. It went live the moment a Redis one landed.
+	 * A watermark store outage is not a revocation. The verifier fails closed
+	 * on an unreachable store, and the handler answers it as it answers a
+	 * family-store outage, `503 temporarily_unavailable`, not
+	 * `400 invalid_grant`: per RFC 6749 §5.2 a client discards its refresh
+	 * token on `invalid_grant`, so a transient outage would log out every
+	 * user who refreshed during it.
 	 */
 	describe("subject-revocation store outage (#408)", () => {
 		const outageStore = {
@@ -1981,8 +1966,8 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("matches what a family-store outage already answered", async () => {
-			// The two outages are the same event class on the same endpoint, and
-			// answering them differently is what made this one destructive.
+			// The two outages are the same event class on the same endpoint and
+			// are answered the same way.
 			const result = await refreshWith(outageStore);
 			expect(result.status).toBe(503);
 		});
@@ -2077,9 +2062,9 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 	};
 
 	it("spends no signature when the family store refuses the rotation", async () => {
-		// A lost race — a replay, a revoked family — used to cost two
-		// signatures for tokens that are never issued. With a KMS-backed
-		// signing key that is a billable remote call per lost race.
+		// A lost race (a replay, a revoked family) must not cost signatures
+		// for tokens that are never issued: with a KMS-backed signing key each
+		// is a billable remote call.
 		for (const outcome of ["replayed", "revoked", "unknown_family"] as const) {
 			const store = countingKeyStore();
 			const { result } = await run(
@@ -2112,7 +2097,7 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 	});
 
 	it("signs no longer than the family ceiling the rotation actually committed", async () => {
-		// IH-13: the family TTL is set once at creation and never extended,
+		// The family TTL is set once at creation and never extended,
 		// so a rotation late in a family's life commits a shorter expiry than
 		// it was asked for and reports it as `cappedExpiresAtMs`. A token
 		// signed past that outlives the record that would catch its replay.
@@ -2146,7 +2131,7 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		// The contract (`RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`)
 		// says the reported ceiling drifts FORWARD and asks for a subtracted
 		// margin. Flooring truncates: a true ceiling at …10.998 s reported as
-		// …11.002 s floored to 11 s, two milliseconds past the record.
+		// …11.002 s floors to 11 s, two milliseconds past the record.
 		const store = countingKeyStore();
 		const reported = (Math.floor(Date.now() / 1000) + 42) * 1000 + 2; // just past a second
 		const { result } = await run(
@@ -2165,9 +2150,9 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 	});
 
 	it("refuses rather than issue a refresh token the family ceiling leaves no lifetime for (v0.13.0 audit)", async () => {
-		// `Math.max(0, …)` turned an exhausted family into `expiresIn: 0`: a
-		// 200 carrying a refresh token that was already expired, after the one
-		// presented had been spent. The family reached its lifetime; say so.
+		// An exhausted family must not become `expiresIn: 0`, a 200 carrying
+		// an already-expired refresh token after the presented one was spent.
+		// The family reached its lifetime; say so.
 		const store = countingKeyStore();
 		const { result } = await run(
 			{
@@ -2212,8 +2197,8 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 	it("does not shorten a rotation the family did not cap (review)", async () => {
 		// The store reports the committed ceiling on every rotation; when the
 		// family is younger than the requested lifetime that is exactly the
-		// expiry asked for. The drift margin is for a cap that fired — applied
-		// here it took a second off every refresh token, and refused a
+		// expiry asked for. The drift margin is for a cap that fired; applied
+		// here it would take a second off every refresh token, and refuse a
 		// one-second lifetime as exhausted.
 		const store = countingKeyStore();
 		const { result } = await run(
@@ -2344,8 +2329,8 @@ describe("a signing failure after the rotation commits (#449 audit)", () => {
 		// Reserve-before-sign means the old jti is already consumed when the
 		// signer fails: the client gets nothing, and its retry with the old
 		// token reads as a replay, which revokes the whole family. An
-		// unhandled throw made that an express 500 with no log naming the
-		// family — the one case an operator most needs to find.
+		// unhandled throw would make that an express 500 with no log naming
+		// the family, the one case an operator most needs to find.
 		const { result } = await run(0);
 		expect(result.status).toBe(503);
 		expect("error" in result && result.error).toBe("temporarily_unavailable");
@@ -2398,11 +2383,10 @@ describe("a signing failure after the rotation commits (#449 audit)", () => {
 
 describe("refresh carries how the user authenticated (#481 audit)", () => {
 	// `amr` and `acr` describe the authentication event, which a refresh does
-	// not repeat. The README promised the access token mirrors them "so
-	// auth.policy-verifier or a resource server can gate on them without an
-	// id_token" — but only the authorization_code grant stamped them, so a
-	// policy requiring `amr` to contain `mfa` passed on the first access token
-	// and failed on the first refresh.
+	// not repeat. The access token mirrors them so auth.policy-verifier or a
+	// resource server can gate on them without an id_token (README); a
+	// refresh that dropped them would pass a policy requiring `mfa` in `amr`
+	// on the first access token and fail it on the first refresh.
 	const presentedWith = async (extra: Record<string, unknown>) =>
 		new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1", ...extra })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })

@@ -18,10 +18,10 @@ import type { Response } from "express";
 import { isLoggableReason, loggableError } from "../logging/loggableError.mjs";
 
 /**
- * The response headers a token-binding outcome asks for (#530): a refusal
- * (an error carrying `responseHeaders`) or an accepted binding
- * (`TokenBinding.responseHeaders`). Only string-valued entries count — a
- * mechanism cannot smuggle a non-header through.
+ * The response headers a token-binding outcome asks for: a refusal (an error
+ * carrying `responseHeaders`) or an accepted binding
+ * (`TokenBinding.responseHeaders`). Only string values count, so a mechanism
+ * cannot smuggle a non-header through.
  */
 export const responseHeadersOf = (source: unknown): Readonly<Record<string, string>> => {
 	if (typeof source !== "object" || source === null || !("responseHeaders" in source)) return {};
@@ -63,13 +63,10 @@ export const retryInstructionOf = (err: unknown): string | undefined => {
 };
 
 /**
- * What an outage's log line carries of the refusal
- * (`TokenBindingRefusal.reason` and `.cause`): the mechanism's own name for
- * it when that is a code — the rule `loggableError` keeps a `reason` by,
- * lowercase words joined by `_` or `-`, so a mechanism cannot put free text
- * on the line, as on the verdict's — and the projection of the failure that
- * stopped the verdict when it gives one — never the failure itself, which a
- * store's error can make carry the command it refused.
+ * What an outage's log line carries of the refusal: its `reason` when that is
+ * a code (the `loggableError` rule, so no free text reaches the line), and the
+ * projection of its `cause`, never the cause itself, which a store's error can
+ * make carry the command it refused.
  */
 export const unavailableLogFields = (err: unknown): Record<string, unknown> => {
 	if (typeof err !== "object" || err === null) return {};
@@ -81,17 +78,13 @@ export const unavailableLogFields = (err: unknown): Record<string, unknown> => {
 };
 
 /**
- * What a verdict's log line carries of the refusal — the line a dispatcher
- * writes when a mechanism refused the presented material
- * (`token_binding_proof_invalid`, `protected_resource_binding_proof_invalid`):
- * the refusal's `reason`, when it is a code, beside the refusal's projection
- * as `err`, whose own `cause` is the error that made the mechanism refuse (a
- * parser's, a library's) — never the refusal itself. The whole refusal is
- * projected, not only its cause: a mechanism may give several refusals one
- * `reason` and tell them apart by its own fixed message, and a thrown value
- * with no `reason` at all (a mechanism's bug) is still named by its projection.
- * `reason` follows the projection's rule for a code — lowercase words joined
- * by `_` or `-` — so a mechanism cannot put free text beside it.
+ * What a verdict's log line (`token_binding_proof_invalid`,
+ * `protected_resource_binding_proof_invalid`) carries of the refusal: its
+ * `reason` when that is a code, beside the projection of the whole refusal as
+ * `err`, never the refusal itself. The whole refusal is projected, not only its
+ * cause: a mechanism may share one `reason` across refusals it tells apart by
+ * message, and a thrown value with no `reason` (a mechanism bug) is still
+ * named. The code rule keeps free text off the line.
  */
 export const verdictLogFields = (err: unknown): Record<string, unknown> => {
 	const projected = loggableError(err);

@@ -46,7 +46,7 @@ const makeDeps = (overrides?: Partial<GrantDependencies>) => ({
 
 const mockDeps = makeDeps();
 
-// #260: every /token request reaches a grant through `clientAuthMw`, so
+// Every /token request reaches a grant through `clientAuthMw`, so
 // `ctx.authenticatedClient` is always populated in production. Tests that are
 // not about client authentication itself supply this default so they exercise
 // the same shape the route does.
@@ -58,8 +58,9 @@ const AUTH_CLIENT = {
 
 describe("createSessionGrant — the lifetime it mints with, read when it is built", () => {
 	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
-		// Read per request, a hand-built lifetime failed every token request
-		// with a 500, after client authentication had spent whatever it spends.
+		// Resolved per request, a hand-built lifetime the resolver refuses
+		// would fail every token request with a 500, after client
+		// authentication had spent whatever it spends.
 		for (const accessToken of [
 			{ expiresIn: 1.5 },
 			{ expiresIn: 0 },
@@ -311,8 +312,8 @@ describe("createSessionGrant", () => {
 		});
 
 		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
-			// Express reads `scope=a&scope=b` as an array; the grant called
-			// `.split` on it and the request became a 500.
+			// Express reads `scope=a&scope=b` as an array; calling `.split` on
+			// it would make the request a 500.
 			const handler = createSessionGrant(makeDeps());
 			const { result } = await handler.handle({
 				body: { scope: ["read", "write"] },
@@ -386,14 +387,12 @@ describe("createSessionGrant", () => {
 		});
 
 		// -------------------------------------------------------------------
-		// #260 — the grant must authorize against the *authenticated* client
-		//
+		// The grant must authorize against the *authenticated* client:
 		// `clientAuthMw` runs before every grant on /token and populates
-		// `ctx.authenticatedClient`. When the client authenticates with HTTP
-		// Basic — the canonical transport for a confidential client — its
-		// `client_id` lives in the Authorization header and never appears in
-		// the body, so a grant that reads `body.client_id` to find the client
-		// sees nothing and skips its allowlist entirely.
+		// `ctx.authenticatedClient`. A client authenticating with HTTP Basic
+		// (the canonical transport for a confidential client) has its
+		// `client_id` in the Authorization header, never in the body, so a
+		// grant reading `body.client_id` would skip its allowlist entirely.
 		// -------------------------------------------------------------------
 		describe("#260 — authorization binds to ctx.authenticatedClient", () => {
 			const basicAuthClient = {
@@ -474,10 +473,8 @@ describe("createSessionGrant", () => {
 				expect(result.error).toBe("invalid_client");
 			});
 
-			// #295 pinned "the client repository is not consulted" with a spy on
-			// an injected mock. #331 removed the dependency from the factory
-			// signature entirely, so the type system now enforces what that
-			// test observed and the pin is retired with the parameter.
+			// The factory takes no client repository, so the type system
+			// enforces that none is consulted.
 		});
 
 		it("does not return sessionMutation", async () => {
@@ -498,7 +495,7 @@ describe("createSessionGrant", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #297 — the email-verified gate on the session grant
+// The email-verified gate on the session grant
 // ---------------------------------------------------------------------------
 
 describe("createSessionGrant — email-verified gate (#297)", () => {
@@ -550,13 +547,11 @@ describe("createSessionGrant — email-verified gate (#297)", () => {
 });
 
 /**
- * R3 — the `session` grant's access token must be covered by logout.
- *
- * The grant minted with `generateToken({}, …)`: no `sid`, so nothing linked
- * the token to the browser session it was minted from. Every liveness check
- * downstream (`/userinfo`, `/introspect`) keys on `sid`, so after logout the
- * token stayed valid for the whole access-token lifetime — an hour by
- * default — in exactly the BFF / proxy topology this grant exists to serve.
+ * The `session` grant's access token must be covered by logout: it carries
+ * the browser session's `sid`, which every downstream liveness check
+ * (`/userinfo`, `/introspect`) keys on. Without it the token would stay valid
+ * after logout for the whole access-token lifetime, in exactly the BFF /
+ * proxy topology this grant exists to serve.
  */
 describe("createSessionGrant — sid binds the token to the browser session (R3)", () => {
 	const runWith = async (session: Record<string, unknown>) => {
@@ -605,7 +600,7 @@ describe("createSessionGrant — sid binds the token to the browser session (R3)
 	});
 
 	it("omits sid when the session recorded none", async () => {
-		// A deployment whose login wiring predates `sid` still mints; the claim
+		// A deployment whose login wiring records no `sid` still mints; the claim
 		// is absent rather than present-and-empty, which is what keeps the
 		// liveness checks' "no sid to check" branch distinguishable.
 		const result = await runWith({ isAuthenticated: true, user: { id: "u1" } });

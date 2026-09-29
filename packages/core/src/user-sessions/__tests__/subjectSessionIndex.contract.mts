@@ -24,27 +24,17 @@ const SOON = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
 
 /**
- * Behaviour every {@link SubjectSessionIndex} adapter owes its callers (#321).
+ * Behaviour every {@link SubjectSessionIndex} adapter owes its callers.
  *
- * ## Why membership is compared unordered
+ * Membership is compared unordered. A subject's sessions expire on their own
+ * clocks, so a Redis sorted set scored by expiry lists them in expiry order
+ * and the in-process Map in insertion order. Nothing depends on either
+ * (`revokeAllForSubject` only cascades over the list), and requiring one would
+ * force an adapter to carry a second index.
  *
- * `SessionFamilyIndex`'s contract pins insertion order, and can: every member
- * of a sid-keyed index shares the one session's expiry, so a sorted set keyed
- * by expiry preserves the order things were added in. A subject's sessions
- * expire on their own clocks, so the natural Redis encoding — score = expiry —
- * returns them in expiry order, and the in-process Map returns them in
- * insertion order. Neither is wrong, and nothing depends on either:
- * `revokeAllForSubject` enumerates the list to cascade over it. Requiring one
- * order would force an adapter to carry a second index for nobody.
- *
- * ## Why the expiry cases use past dates rather than fake timers
- *
- * A distributed adapter's clock is the Redis server's, which `vi.useFakeTimers`
- * cannot move. Every expiry case here is therefore expressed as "already
- * expired at write time", which both a Map and a sorted-set score answer the
- * same way. Adapter-specific ageing behaviour — an entry that expires *while*
- * the index holds it — is tested per adapter, where each can reach its own
- * clock.
+ * Expiry cases use dates already past at write time, not fake timers, which
+ * cannot move a Redis server's clock. An entry that expires while the index
+ * holds it is tested per adapter, where each can reach its own clock.
  */
 export function runSubjectSessionIndexContract(factory: SubjectSessionIndexFactory): void {
 	/** Membership without ordering — see the module comment. */
@@ -103,9 +93,9 @@ export function runSubjectSessionIndexContract(factory: SubjectSessionIndexFacto
 		});
 
 		it("refuses an expiresAt that is not a valid date, and records nothing", async () => {
-			// An Invalid Date's time is NaN, which is never `<= now`: the memory
-			// index listed such a session for ever, and Redis was asked to score a
-			// member NaN. A caller fault.
+			// An Invalid Date's time is NaN, which is never `<= now`: a memory
+			// index would list the session for ever, and Redis would be asked to
+			// score a member NaN. A caller fault.
 			const index = await factory();
 			await expect(index.addSid("u1", "s1", new Date(Number.NaN))).rejects.toThrow(RangeError);
 			expect(await sids(index, "u1")).toEqual([]);

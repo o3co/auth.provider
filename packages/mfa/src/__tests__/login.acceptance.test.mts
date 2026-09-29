@@ -15,25 +15,12 @@
  */
 
 /**
- * The login's interruption through the composed application (the MFA ADR's
- * F1 steps 1–2 and F3 step 1, as the session-admission ADR's D5 amends
- * them): `createApp` with the session package's login, the MFA package's
- * modules and core's memory MFA stores, driven by a supertest agent holding
- * the cookie jar.
- *
- * - `required`, a factor on record → `403 mfa_required` with the closed body
- *   (`error`, `transaction`, `expires_in`), the express session regenerated
- *   and the transaction bound to the id the browser now holds, carrying the
- *   login's continuation; no `UserSession` is written;
- * - `required`, no record → `403 mfa_enrollment_required`, with
- *   `hints.enrollable` and `hints.email_proof`;
- * - `optional`, no record → `200`, the session written as it always was;
- * - the factor store down → `503` once, one error line, nothing written —
- *   no `UserSession`, no transaction;
- * - the transaction store down at the open → `503`, the regenerated cookie
- *   session dropped, one error line, no `UserSession`;
- * - a session id the browser held before the login — planted — is not the
- *   one the transaction is bound to, and is dead afterwards (D27).
+ * The login's interruption through the composed application: `createApp` with
+ * the session package's login, the MFA package's modules and core's memory MFA
+ * stores, driven by a supertest agent holding the cookie jar. The cases are
+ * the ones their names state. See ADR 2026-09-25-multi-factor-authentication,
+ * flows "Password login → second factor → session" and "First login with no
+ * factor", as ADR 2026-09-28-session-admission ("Establishment") amends them.
  */
 
 import {

@@ -16,15 +16,11 @@
 
 /**
  * The guard that every configuration leaf a module reads takes the string an
- * environment variable arrives as (#728). HOCON substitutes `${?VAR}` as a
- * string, always, and boot's one composed parse is plain Zod — the HOCON
- * library's bridge, which coerced a bare `z.boolean()` / `z.number()` leaf on
- * the way into the standalone template's pre-parse, is no longer on the path.
- *
- * A module's `configSchema` and section schema read what core's transitional
- * base made of the configuration, so a leaf of theirs is covered when the base
- * declares the same path with a leaf that reads a string (and coerces it
- * first); otherwise the module's own leaf must read it.
+ * environment variable arrives as. HOCON substitutes `${?VAR}` as a string,
+ * always, and boot's composed parse is plain Zod, which does not coerce a
+ * bare `z.boolean()` or `z.number()`. A module's leaf is covered when core's
+ * transitional base declares the same path with a leaf that reads a string
+ * (and coerces it first); otherwise the module's own leaf must read it.
  */
 
 import type { z } from "zod";

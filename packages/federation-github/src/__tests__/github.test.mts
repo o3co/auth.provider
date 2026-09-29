@@ -14,9 +14,8 @@
  * e-mail choice, the scope translation, `expiresAt`, logout and `mapClaims`.
  * How `/user` becomes the profile's `sub` is `github.user.test.mts`.
  *
- * Nothing here mocks the library. A stubbed openid-client once let every case
- * pass while no real GitHub login could: the stub handed back a `/user` body
- * the real library refuses.
+ * Nothing here mocks the library: a stub can hand back a `/user` body the
+ * real library refuses, and pass every case while no real login could.
  */
 
 import { createHash } from "node:crypto";
@@ -425,7 +424,7 @@ describe("createGithubProvider", () => {
 describe("config.fetch — a proxy, or a test seam", () => {
 	it("sends the token request, /user and /user/emails through the configured fetch, never the global one", async () => {
 		// A deployment behind an egress proxy hands the adapter the fetch that
-		// reaches GitHub; the Google, Apple and OIDC adapters already take one.
+		// reaches GitHub, as it does the Google, Apple and OIDC adapters.
 		const refused: string[] = [];
 		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
 			refused.push(String(input instanceof Request ? input.url : input));

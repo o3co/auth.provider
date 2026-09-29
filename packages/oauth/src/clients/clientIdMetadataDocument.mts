@@ -15,62 +15,28 @@
  */
 
 /**
- * Client ID Metadata Documents (#529) —
- * draft-ietf-oauth-client-id-metadata-document, the client registration the
- * MCP authorization spec (2026-07-28) makes the SHOULD for hosted clients now
- * that Dynamic Client Registration is deprecated there.
+ * Client ID Metadata Documents (draft-ietf-oauth-client-id-metadata-document):
+ * a client identifies itself with an `https` URL, and the JSON document at
+ * that URL is its registration. This module fetches, validates and caches
+ * such documents and returns a `PublicClient` (auth method `none`, PKCE S256,
+ * never first-party, so consent always applies).
  *
- * A client identifies itself with an `https` URL, and the document at that
- * URL *is* its registration: `client_id` (the URL itself), `redirect_uris`,
- * `client_name`, `client_uri`, and the rest of the RFC 7591 vocabulary. This
- * module fetches, validates and caches such documents and hands back the
- * `PublicClient` the rest of the server already knows how to treat — a
- * public client (`token_endpoint_auth_method: none`, PKCE S256 required),
- * never first-party, so it goes through the consent step (#527).
+ * Before any fetch: an id that is not a document URL, or whose host fails the
+ * operator's `allowedHosts`/`deniedHosts`, is "not a client" (`null`), and
+ * every address the host resolves to must be public (RFC 6890) — the draft's
+ * SSRF guard. Rebinding between check and connect is a residual the draft
+ * accepts; the host lists are the operator's lever against it.
  *
- * ## What is refused before anything is fetched
+ * The fetch follows no redirects (the draft forbids it), has a timeout, caps
+ * bytes on both `Content-Length` and the stream (a hostile host omits the
+ * header), and accepts only `200` with JSON.
  *
- * A `client_id` that is not a document URL — not `https`, no path, a
- * fragment, credentials, dot segments, a query string, an IP literal, a
- * loopback name — is simply "not a client" (`findById` → `null`), and so is a
- * host outside the operator's `allowedHosts` or inside `deniedHosts`. Then
- * the name is resolved and every address it resolves to must be public:
- * one inside an RFC 6890 special-use range (the cloud metadata endpoint, a
- * private network, this host) refuses the whole lookup. That is the SSRF
- * guard the draft requires, and it runs before the socket opens. A
- * rebinding between the check and the connect is the residual the draft
- * accepts as well; the allow/deny lists are the operator's lever against it.
- *
- * ## The fetch
- *
- * `GET`, no redirects followed (a 3xx is an error — the draft is explicit),
- * a timeout, a byte cap checked on `Content-Length` first and on the stream
- * second (a hostile host omits the header), and only `200` with a JSON body
- * counts. Errors and invalid documents are never cached; a valid one is
- * cached per URL for `Cache-Control: max-age` bounded above by
- * `cacheMaxAgeMs`, with an `ETag` revalidated by `If-None-Match` when it
- * expires. Concurrent lookups of one URL share one fetch.
- *
- * ## The document
- *
- * `client_id` must equal the URL by simple string comparison; `redirect_uris`
- * must be a non-empty list of URIs this server would accept at registration
- * (`checkRedirectUri`); `token_endpoint_auth_method`, when present, must be
- * `none` — a shared-secret method is forbidden by the draft, and
- * `private_key_jwt` is refused because the draft's client is one that proves
- * nothing beyond holding its own URL: the keys would have to come from the
- * same attacker-authored document that names them, so the method would
- * authenticate the document rather than the client. This server does support
- * `private_key_jwt` for registered clients (#484); `client_secret` must be
- * absent; `grant_types` must include
- * `authorization_code` and only its RFC 7591 companions survive;
- * `response_types` must admit `code`. `scope` is intersected with the
- * operator's `allowedScopes` ceiling, and `allowedAudiences` — the resource
- * servers this authorization server protects — is the operator's too: a
- * document says who the client is, never what it may reach.
- *
- * A pre-registered client with the same `client_id` wins; the document is
- * not fetched.
+ * `token_endpoint_auth_method` must be `none`: shared secrets are forbidden by
+ * the draft, and `private_key_jwt` would take its keys from the same
+ * attacker-authored document, authenticating the document, not the client.
+ * Scopes are intersected with `allowedScopes`; audiences are the operator's
+ * alone — a document says who the client is, never what it may reach. A
+ * pre-registered client with the same id wins.
  */
 
 import { promises as dns } from "node:dns";
@@ -165,15 +131,10 @@ export function isClientIdMetadataDocumentUrl(clientId: string): boolean {
 	if (url.search !== "" || clientId.endsWith("?")) return false;
 	if (url.pathname.split("/").some((segment) => segment === "." || segment === "..")) return false;
 	if (isIP(url.hostname) !== 0 || url.hostname.startsWith("[")) return false;
-	// A trailing dot is the DNS root — `client.example.` and `client.example`
-	// resolve to one host, and TLS accepts the certificate issued for the
-	// undotted name — but it survives `new URL(...).href` unchanged, so the
-	// canonical-form check above passes it. The host policy compares strings:
-	// `allowedHosts` fails closed on the dotted spelling (it matches nothing)
-	// while `deniedHosts` failed open, so a denied host was reachable by
-	// adding one character. Refused here rather than normalised, because a
-	// client id is a string a document has to echo exactly, and there is no
-	// reason for one to carry the root label.
+	// A trailing dot (the DNS root) survives canonicalisation and reaches the
+	// same host, but the host policy compares strings, so `deniedHosts` would
+	// fail open. Refused rather than normalised: a document must echo its
+	// client id exactly.
 	if (url.hostname.endsWith(".")) return false;
 	if (isLoopbackHostname(url.hostname)) return false;
 	return true;
@@ -187,38 +148,25 @@ const hostMatches = (patterns: readonly string[] | undefined, hostname: string):
 	});
 
 /**
- * How long a cached registration outlives a revalidation this server could
- * not complete — a DNS blip, a 5xx, a timeout.
- *
- * The distinction #408 draws, applied to the cache: refusing a client
- * because someone else's server is down tells the caller their credential
- * is bad when the truth is an outage. On a cold lookup there is nothing to
- * serve and `null` is the only answer; on a warm one the registration this
- * server already validated is a better answer than breaking a working
- * client. A document the server **rejected** is not this: that client
- * stopped being a client, and its entry goes immediately.
+ * How long a cached registration outlives a revalidation that failed for a
+ * reason that is not the document's (DNS, 5xx, timeout): an outage at the
+ * client's host is not a verdict on the client. A rejected document is
+ * evicted immediately.
  */
 export const DEFAULT_CIMD_STALE_IF_ERROR_MS = 5 * 60 * 1000;
 
 /**
- * How long a refusal is remembered.
- *
- * Failures were never cached, so every distinct URL-shaped `client_id` cost
- * a DNS resolution, a TLS handshake and a GET on **every** request: an
- * unauthenticated caller could pin sockets against a tarpit of its own, or
- * point this server's address at a third party and have it re-fetch a 404
- * indefinitely. Short, because a client that fixes its document must not be
- * locked out for the life of the process.
+ * How long a refusal is remembered. Without it, every distinct URL-shaped
+ * `client_id` costs a DNS lookup, TLS handshake and GET per request, which an
+ * unauthenticated caller can aim at a tarpit or a third party. Short, so a
+ * client that fixes its document is not locked out for long.
  */
 export const DEFAULT_CIMD_NEGATIVE_CACHE_MS = 60 * 1000;
 
 /**
- * How many documents may be fetched at once, across every client id.
- *
- * De-duplication was per URL, so distinct ids fanned out without limit and
- * N slow hosts held N sockets for the whole timeout each. The cap makes the
- * outbound cost of an unauthenticated request bounded rather than
- * proportional to how many ids the caller can invent.
+ * How many documents may be fetched at once across every client id, so the
+ * outbound cost of unauthenticated requests is bounded however many ids a
+ * caller invents.
  */
 export const DEFAULT_CIMD_MAX_CONCURRENT_FETCHES = 8;
 
@@ -419,10 +367,7 @@ export function createClientIdMetadataDocumentResolver(
 	const staleIfErrorMs = opts.staleIfErrorMs ?? DEFAULT_CIMD_STALE_IF_ERROR_MS;
 	const negativeCacheMs = opts.negativeCacheMs ?? DEFAULT_CIMD_NEGATIVE_CACHE_MS;
 	const maxConcurrentFetches = opts.maxConcurrentFetches ?? DEFAULT_CIMD_MAX_CONCURRENT_FETCHES;
-	/**
-	 * Refusals, bounded the same way documents are. An entry here means
-	 * `not a client`, with an expiry.
-	 */
+	/** Refused client ids, with the instant each refusal expires. */
 	const refusals = new Map<string, number>();
 	/** Slots for an in-flight fetch; a waiter takes one when it is released. */
 	let inFlightFetches = 0;
@@ -441,11 +386,8 @@ export function createClientIdMetadataDocumentResolver(
 	};
 	const cache = new Map<string, CacheEntry>();
 	/**
-	 * Bounded, because an unauthenticated caller chooses the keys: every
-	 * distinct `client_id` URL that resolves to a valid document would
-	 * otherwise hold a `PublicClient` until it expired. Oldest insertion
-	 * first, as in the CRL and OCSP caches — the bound exists so the map
-	 * cannot grow without limit, not to maximise hits.
+	 * Bounded because an unauthenticated caller chooses the keys. Evicts the
+	 * oldest insertion: the bound caps memory, it does not maximise hits.
 	 */
 	const remember = (clientId: string, entry: CacheEntry): void => {
 		if (cache.size >= maxCacheEntries && !cache.has(clientId)) {
@@ -455,11 +397,7 @@ export function createClientIdMetadataDocumentResolver(
 		cache.set(clientId, entry);
 	};
 
-	/**
-	 * A refusal, remembered briefly and bounded the same way documents are —
-	 * the keys are the caller's here too, so a caller inventing ids must not be
-	 * able to grow this map without limit either.
-	 */
+	/** A refusal, bounded like the document cache: the caller chooses these keys too. */
 	const rememberRefusal = (clientId: string): void => {
 		if (refusals.size >= maxCacheEntries && !refusals.has(clientId)) {
 			const oldest = refusals.keys().next();
@@ -504,14 +442,9 @@ export function createClientIdMetadataDocumentResolver(
 		}
 		if (res.status !== 200) {
 			await res.body?.cancel().catch(() => undefined);
-			// A verdict on the document, or a verdict on the day the client's
-			// server is having? A 4xx and a refused redirect say the
-			// registration is not there or not one we will follow — the client's
-			// own problem, and cached as a refusal. A 5xx or a 429 says their
-			// server could not answer, which is exactly what `staleIfErrorMs`
-			// exists to ride out; classifying it as a rejection would delete the
-			// warm registration this server already validated and refuse a
-			// working client for the length of someone else's outage.
+			// A 4xx or refused redirect is a verdict on the document (a refusal);
+			// a 5xx or 429 is the client's server failing to answer, which
+			// `staleIfErrorMs` rides out instead of evicting a validated registration.
 			const transient = res.status >= 500 || res.status === 429;
 			const message = `document fetch answered ${res.status}`;
 			throw transient ? new Error(message) : new DocumentRejected(message);
@@ -577,12 +510,9 @@ export function createClientIdMetadataDocumentResolver(
 				// client, so what was remembered of it goes now.
 				cache.delete(clientId);
 			} else if (cached !== undefined && staleIfErrorMs > 0) {
-				// An outage is not a verdict on the client (#408). The
-				// registration this server already validated is served for a
-				// bounded window rather than breaking a working client because
-				// someone else's server is down. `expiresAt` moves, so the window
-				// does not renew itself indefinitely: the next revalidation is
-				// attempted when it lapses, and only a success resets the clock.
+				// An outage is not a verdict on the client: serve the validated
+				// registration for a bounded window. `expiresAt` moves so the next
+				// request retries; only a success extends `staleDeadline`.
 				const staleUntil = Math.min(now() + staleIfErrorMs, cached.staleDeadline);
 				if (staleUntil > now()) {
 					remember(clientId, { ...cached, expiresAt: staleUntil });
@@ -622,8 +552,8 @@ export function createClientIdMetadataDocumentResolver(
 
 /**
  * A {@link ClientRepository} that answers pre-registered clients from `inner`
- * first and Client ID Metadata Documents second (#529). `authenticate` is
- * `inner`'s alone: a document never carries a secret.
+ * first and Client ID Metadata Documents second. `authenticate` is `inner`'s
+ * alone: a document never carries a secret.
  */
 export function withClientIdMetadataDocuments(
 	inner: ClientRepository,

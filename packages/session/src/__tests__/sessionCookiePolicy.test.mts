@@ -15,24 +15,13 @@
  */
 
 /**
- * The session store module's `sessionCookiePolicy` (#728): the session
- * cookie's attributes — name, `secure`, `sameSite`, domain and the session's
- * lifetime — for a module that sets a cookie of its own beside the
- * session's, or sizes what must outlive a session.
- *
- * - It keeps core's contract (`sessionCookiePolicyContract`) over the
- *   configurations the session store accepts: the fixture's `__Host-`
- *   cookie, a cookie scoped to a domain, and one sent cross-site.
- * - It is the cookie express-session is given: the same attributes, and a
- *   `null` domain read as a host-only cookie.
- * - No session section yields a policy that breaks core's contract: what
- *   would break it is refused. That is everything the session store refuses
- *   of the cookie, with the store's message — a `__Host-` name that is not
- *   secure, or that names a domain, an empty one included — and more the
- *   store does not refuse yet: a name that is not a cookie name, a
- *   `__Secure-` name or a `SameSite=None` cookie that is not secure, a
- *   lifetime out of range (core's schema refuses the last two first).
- * - The session store module provides it.
+ * The session store module's `sessionCookiePolicy`: the session cookie's
+ * attributes (name, `secure`, `sameSite`, domain, the session's lifetime) for
+ * a module that sets a cookie of its own beside the session's, or sizes what
+ * must outlive a session. It is the cookie express-session is given, and no
+ * session section yields a policy that breaks core's contract: what would
+ * break it is refused, which is everything the session store refuses of the
+ * cookie, with the store's message, and more the store does not refuse yet.
  */
 
 import type { AppConfig, SessionCookiePolicy } from "@o3co/auth-provider-core";

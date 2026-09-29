@@ -15,38 +15,17 @@
  */
 
 /**
- * Public test-helper surface for `@o3co/auth-provider-core`.
- *
- * Exposed via the `./testing` subpath in `package.json#exports`. Consumer
- * test code (sibling packages, downstream applications, OSS adopters) may
- * import from here; production runtime code MUST NOT — the symbols here
- * are intended for fixtures and integration tests only.
- *
- * A2-γ spec §6.1 + §7 prescribes this subpath; PR α (orthogonal
- * schema/default cleanup) lands the initial export surface (config-fixture
- * factories). `createTestApp` / `TestInspect` are added in this PR
- * (Phase 9 caller migration). `createFakeIdp` is the fake OpenID Provider the
- * federation adapters' tests run the real `openid-client` against.
- *
- * Stability: identifiers exported here follow the same semver discipline
- * as the main `.` export — additions are minor, signature changes are
- * major.
+ * Public test-helper surface for `@o3co/auth-provider-core`, exposed via the
+ * `./testing` subpath. Test code (sibling packages, downstream applications)
+ * may import from here; production runtime code MUST NOT. Exports follow the
+ * same semver discipline as the main `.` export.
  */
 
 /**
- * Internal `GrantRegistry` class re-exported through the `./testing`
- * subpath for OAuth/integration tests that construct a registry directly
- * (rather than through `createApp` + module-based `contributes.grants`).
- *
- * The public re-export from `@o3co/auth-provider-core` (the package root)
- * was removed per AS-8 / A2-γ §3.3. Production code MUST NOT
- * import these symbols — wire grants on a module's `defineModule`
- * manifest and let the boot planner own the registry.
- *
- * This re-export exists solely so existing OAuth route tests that depend
- * on direct registry construction can continue to compile without a
- * mass-refactor to the module-based pattern. New tests SHOULD prefer the
- * `createApp` / module-based wiring.
+ * `GrantRegistry` for tests that construct a registry directly rather than
+ * through `createApp` and a module's `contributes.grants`. Not on the package
+ * root: production code wires grants on a module's manifest and lets the
+ * boot planner own the registry. New tests SHOULD prefer module wiring.
  */
 export { GrantRegistry, GrantRegistryError } from "../grants/registry.mjs";
 export {
@@ -67,7 +46,7 @@ export {
 } from "../session-admission/testing/requirement.contract.mjs";
 export { resolverForTests } from "../session-admission/testing/resolver.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
-// #728: the check a package runs over its own config/reference.conf.
+// The check a package runs over its own config/reference.conf.
 export { unreadableModuleLeaves } from "./environmentLeaves.mjs";
 export {
 	createFakeIdp,
@@ -138,7 +117,7 @@ export {
 	type TestRateLimiter,
 	type TestRateLimiterOptions,
 } from "./slots/rateLimiter.mjs";
-// The slots through which modules share what one of them owns (#728): each
+// The slots through which modules share what one of them owns: each
 // slot's contract suite, and a test double a consumer's tests fill the slot
 // with instead of importing the owner's package.
 export {

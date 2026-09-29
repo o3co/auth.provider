@@ -15,21 +15,12 @@
  */
 
 /**
- * R4 — a resource server must be able to introspect its own tokens.
- *
- * `/oauth/introspect` pinned `expectedAudience` to the calling client's
- * `clientId`. With RFC 8707 resource indicators in use every access token
- * carries `aud: <resource URI>`, so a resource server asking about a token
- * issued *for it* got `active: false` unless it happened to be registered
- * under a `client_id` equal to the resource URI. Registering a client whose
- * id IS the resource URI is what made it work live — which is a workaround,
- * not a design.
- *
- * The pin is now the calling client's `allowedAudiences` ∪ `{clientId}`: the
- * set of audiences that client is already trusted to be associated with, the
- * same ceiling every issuing grant derives an audience within. It is a
- * widening of exactly that set and of nothing else, which is what the
- * negative cases below are here to hold.
+ * A resource server must be able to introspect its own tokens. With RFC 8707
+ * resource indicators every access token carries `aud: <resource URI>`, so
+ * `/oauth/introspect` pins `expectedAudience` to the calling client's
+ * `allowedAudiences` ∪ `{clientId}`: the audiences that client is already
+ * trusted to be associated with, the same ceiling every issuing grant derives
+ * an audience within — and nothing wider, which the negative cases hold.
  */
 
 import { createSecretKey } from "node:crypto";
@@ -165,7 +156,7 @@ describe("/oauth/introspect — audience pin (R4)", () => {
 	});
 
 	it("still accepts a token whose aud is the calling client's own id", async () => {
-		// The pre-fix behaviour, preserved: `clientId` stays in the set.
+		// `clientId` stays in the set.
 		const app = await buildApp();
 		const token = await mintAccessToken({ audience: RS_CLIENT_ID });
 
@@ -176,7 +167,7 @@ describe("/oauth/introspect — audience pin (R4)", () => {
 	});
 
 	it("refuses a token for an audience the caller is not associated with", async () => {
-		// The widening is exactly `allowedAudiences ∪ {clientId}`. A resource
+		// The set is exactly `allowedAudiences ∪ {clientId}`. A resource
 		// URI outside that set is another party's token.
 		const app = await buildApp();
 		const token = await mintAccessToken({ audience: OTHER_RESOURCE });
@@ -249,8 +240,8 @@ describe("/oauth/introspect — audience pin (R4)", () => {
 
 	it("the bearer self-introspection fall-through still records jwt_verify_aud_skipped", async () => {
 		// That path establishes no calling-client identity, so there is no set
-		// to pin against and the verifier records the gap. Widening the pin
-		// must not quietly close that hole by pretending an identity exists.
+		// to pin against and the verifier records the gap. The audience set
+		// must not hide that gap by pretending an identity exists.
 		const logger = createMockLogger();
 		const app = await buildApp(logger);
 		const token = await mintAccessToken({ audience: RESOURCE });

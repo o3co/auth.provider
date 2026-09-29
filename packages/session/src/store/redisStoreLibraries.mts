@@ -64,25 +64,22 @@ const INSTALL_COMMAND = "npm install redis@^6.2.1 connect-redis@^10.0.0";
 /**
  * Load `redis` and `connect-redis`, or fail without losing a failure:
  *
- * - A library that is not installed is named, in one message for both —
- *   rather than the resolver's bare "Cannot find package", which says neither
- *   that the package is an optional peer of this one nor which setting asked
- *   for it. The resolver's error is the cause.
+ * - A library that is not installed is named, in one message for both, with
+ *   the install command, the setting that asked for it and that it is an
+ *   optional peer of this package. The resolver's error is the cause.
  * - When the other library failed for a different reason, the message says so
  *   and that failure is the cause instead: the message already names what is
- *   missing, and the other failure is what it cannot restate.
+ *   missing.
  * - A single failure of any other kind is rethrown unchanged; two are thrown
- *   together as an `AggregateError` whose message is fixed text naming both
- *   packages. The failures themselves are its `errors`, whole, and a log line
- *   gets them where core's loggableError projects the members: their text is
- *   never copied into the message, where it would travel on as a plain string
- *   past every projection.
+ *   together as an `AggregateError` with fixed text naming both packages and
+ *   the failures, whole, as its `errors`, where core's loggableError projects
+ *   them. Their text is never copied into the message, where it would travel
+ *   on as a plain string past every projection.
  *
- * What a message is for comes first: the names and the install command, then
- * the explanation. createApp prefixes the route factory's error with
- * `Module "session-store" route factory failed: `, and a log line keeps
- * 256 characters of a message (core's LOGGED_STRING_MAX_LENGTH); the install
- * command and what failed are inside them for every combination
+ * The names and the install command come first: createApp prefixes the route
+ * factory's error with `Module "session-store" route factory failed: `, and a
+ * log line keeps 256 characters of a message (core's LOGGED_STRING_MAX_LENGTH);
+ * the install command and what failed stay inside them for every combination
  * (`redisStoreLibraries.test.mts`).
  *
  * @param imports — how each library is loaded; the default imports it.

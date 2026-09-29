@@ -25,13 +25,11 @@ const isPositiveInteger = (value: unknown): value is number =>
  * `limit`, and a positive whole `windowSeconds` that ends within ECMAScript's
  * Date range (core's `isStorableLifetime`).
  *
- * Each refusal is a budget that is not the one written. A zero window is an
- * `EXPIRE key 0`, which deletes the counter, and an in-process bucket that
- * resets on every check: it never limits anything. A limit of zero or less
- * denies everything. NaN and fractions are not budgets. A window past the Date
- * range has no end any clock reaches: Redis refuses the `EXPIRE` after its
- * `INCR` has run (#269's shape), and an in-process bucket would reset at an
- * Invalid Date.
+ * Each refusal is a budget that is not the one written: a zero window
+ * (`EXPIRE key 0`, or an in-process bucket reset on every check) never
+ * limits; a limit of zero or less denies everything; past the Date range,
+ * Redis refuses the `EXPIRE` after its `INCR` has run and an in-process
+ * bucket would reset at an Invalid Date.
  */
 export const isUsableRateLimitSpec = (value: unknown): value is RateLimitSpec => {
 	if (typeof value !== "object" || value === null) return false;
@@ -44,12 +42,11 @@ export const isUsableRateLimitSpec = (value: unknown): value is RateLimitSpec =>
 };
 
 /**
- * A value as a refusal shows it, with its type: a string quoted, a number as
- * it prints (`NaN` included), a BigInt with its `n`, a function as
- * `[function]` (never its source), anything else as JSON. `String()` showed
- * the string "20" as 20, which read as a refusal of a usable number. What
- * JSON cannot write — a circular object, one whose `toJSON` answers nothing,
- * a Symbol — falls back to `String()`, so the refusal is still given.
+ * A value as a refusal shows it, with its type: a string quoted (so `"20"`
+ * does not read as a usable number), a number as it prints (`NaN` included),
+ * a BigInt with its `n`, a function as `[function]` (never its source),
+ * anything else as JSON, or `String()` where JSON cannot write it (a circular
+ * object, a `toJSON` that answers nothing, a Symbol).
  */
 export const shownConfigValue = (value: unknown): string => {
 	switch (typeof value) {
@@ -99,13 +96,10 @@ export const configuredNumber = (value: unknown): number | undefined => {
  *
  * For a seed and anything else that reads a budget from its own config key
  * (`oauth.deviceAuthorization.rateLimit`,
- * `webauthn.rateLimit.authenticationOptions`). Each field is read as the
- * key's schema coerces it, so a numeric string is its number. A key that was given is a
- * configuration someone wrote, a hand-built one included, so it is refused
- * rather than skipped: skipped, the route ran on the limiter's default
- * instead. The message names the key and says what it must be, not which
- * limiter would have refused it. A key that was not given is the caller's
- * to handle: it is not a refusal.
+ * `webauthn.rateLimit.authenticationOptions`). Each field is read as the key's
+ * schema coerces it. A given key, hand-built config included, is refused
+ * rather than skipped, since skipping it runs the route on the limiter's
+ * default. A key not given is the caller's to handle.
  */
 export function requireUsableConfiguredRateLimitSpec(key: string, value: unknown): RateLimitSpec {
 	const spec = readConfiguredRateLimitSpec(value);
@@ -138,13 +132,11 @@ export const readConfiguredRateLimitSpec = (value: unknown): RateLimitSpec | und
  * {@link isUsableRateLimitSpec} does not accept: each entry of `limits`, and
  * `defaultLimit`. `undefined` is "not given", and nothing else is.
  *
- * Refused, never dropped. A dropped spec let the adapter's default budget
- * apply in its place, a looser one than the operator wrote. On the device
- * verification route that is the budget RFC 8628 §5.1 sizes the user code
- * against. Every adapter calls this, so one configuration is one budget,
+ * Refused, never dropped: a dropped spec lets the adapter's looser default
+ * apply (on device verification, the budget RFC 8628 §5.1 sizes the user code
+ * against). Every adapter calls this, so one configuration is one budget
  * whichever adapter is mounted. The zod schemas refuse the same values at the
- * config boundary; this is for the builder paths and the hand-built configs
- * that never pass them.
+ * config boundary; this covers builder paths and hand-built configs.
  */
 export function assertUsableRateLimitSpecs(
 	who: string,

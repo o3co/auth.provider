@@ -15,14 +15,13 @@
  */
 
 /**
- * redirect-uri.test.mts — the registered-redirect-URI shape vocabulary
- * (#395, from #293 item 1).
+ * redirect-uri.test.mts — the registered-redirect-URI shape vocabulary.
  *
- * The two clauses the #395 falsification pass promoted to requirements are
- * pinned here by name: parse-then-check (the tab-smuggled `javascript:` case)
- * and the deliberate absence of a legacy dotless-scheme escape hatch.
+ * Two requirements are pinned by name: parse-then-check (the tab-smuggled
+ * `javascript:` case) and the deliberate absence of a legacy dotless-scheme
+ * escape hatch.
  *
- * `matchesRegisteredRedirectUri` (#483) is the runtime half — the /authorize
+ * `matchesRegisteredRedirectUri` is the runtime half — the /authorize
  * allowlist comparison, exact everywhere except the RFC 8252 §7.3 loopback
  * port.
  */
@@ -62,8 +61,7 @@ describe("checkRedirectUri (#395)", () => {
 
 	it("parse-then-check: a tab-smuggled scheme is judged by its PARSED form", () => {
 		// WHATWG URL strips ASCII tab/newline, so this parses with scheme
-		// `javascript` — a raw prefix match would have missed it (#395's
-		// falsification clause 1).
+		// `javascript` — a raw prefix match would miss it.
 		expect(reason("java\tscript:alert(1)")).toBe("executable-scheme");
 		expect(reason("JAVASCRIPT:alert(1)")).toBe("executable-scheme");
 	});
@@ -74,7 +72,7 @@ describe("checkRedirectUri (#395)", () => {
 	});
 
 	it("refuses dotless legacy custom schemes — no escape hatch, deliberately", () => {
-		// #395's falsification clause 2: a documented capability decision.
+		// A documented capability decision.
 		expect(reason("myapp://callback")).toBe("scheme-not-reverse-domain");
 		const rejection = checkRedirectUri("myapp://callback");
 		expect(rejection && describeRedirectUriRejection(rejection)).toContain("reverse-domain");
@@ -89,7 +87,7 @@ describe("checkRedirectUri (#395)", () => {
 	it("refuses raw control characters that the parser would strip", () => {
 		// WHATWG strips tab/newline/CR, but runtime redirect_uri matching is
 		// EXACT — a registration these survive into can never match a request.
-		// Refused at boot instead of becoming a dead entry (Copilot on #399).
+		// Refused at boot instead of becoming a dead entry.
 		expect(reason("https://app.example/\ncb")).toBe("control-characters");
 		expect(reason("https://app.example/\tcb")).toBe("control-characters");
 		expect(reason("https://app.example/cb\r")).toBe("control-characters");
@@ -142,13 +140,11 @@ describe("matchesRegisteredRedirectUri (#483)", () => {
 	});
 
 	it("relaxes the port and NOTHING else — no URL normalization rides along", () => {
-		// The carve-out is a port comparison, not a URL-equivalence one. The
-		// first shape here parsed to the same `href` while this compared
-		// normalized URLs, which widened the allowlist by exactly the URIs a
-		// native app controls: dot segments, `\` as a separator, scheme case,
-		// and an elided empty path all collapsed into a registered entry.
-		// The equality therefore runs on the ORIGINAL strings with only the
-		// port removed.
+		// The carve-out is a port comparison, not a URL-equivalence one.
+		// Comparing normalized URLs would widen the allowlist by exactly the
+		// URIs a native app controls: dot segments, `\` as a separator, scheme
+		// case and an elided empty path all collapse into a registered entry.
+		// So the equality runs on the ORIGINAL strings with only the port removed.
 		const registered = "http://127.0.0.1/cb";
 		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080/a/../cb")).toBe(false);
 		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080/./cb")).toBe(false);

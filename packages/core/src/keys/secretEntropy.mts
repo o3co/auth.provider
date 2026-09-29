@@ -14,12 +14,9 @@
  * limitations under the License.
  */
 /**
- * Minimum-entropy checks for operator-supplied shared secrets (#282).
- *
- * Two secrets in this library are HMAC keys in everything but name — the
- * HS256 JWT signing secret and the express-session cookie signing secret —
- * and before #282 both were accepted at any non-zero length. A one-character
- * secret is trivially brute-forced offline, and for the JWT secret that
+ * Minimum-entropy checks for operator-supplied shared secrets: the HS256 JWT
+ * signing secret and the express-session cookie secret, HMAC keys in all but
+ * name. A short secret is brute-forced offline, and for the JWT secret that
  * yields the ability to MINT tokens, not merely to read them.
  */
 
@@ -50,24 +47,15 @@ function hexByteLength(value: string): number | undefined {
 }
 
 /**
- * Decoded byte length if `value` is a well-formed base64 / base64url string,
- * else undefined.
+ * Decoded byte length if `value` is well-formed base64 / base64url, else
+ * undefined.
  *
- * Deliberately hand-rolled rather than delegated to `Buffer.from(v, "base64")`:
- * Node's decoder is lenient — it silently drops characters outside the
- * alphabet — so `Buffer.from("not a secret!!", "base64").length` answers for a
- * string that is not base64 at all, and answers *small*, which would reject
- * perfectly good passphrases.
- *
- * Padding is held to the same standard as the alphabet. An encoder emits zero,
- * one or two `=`, and only where the body length calls for it: one after a
- * 3-character final group, two after a 2-character one. `"abcd===="` and
- * `"abcd="` are therefore not base64 at all, and this returns undefined for
- * them so `measureSecretEntropyBytes` falls back to the raw-bytes reading.
- * Trimming any run of `=` would instead turn a passphrase that merely ends in
- * equals signs into a "valid" base64 body and score it three-quarters of its
- * real length — fail-closed, but a usability trap with no security to show
- * for it.
+ * Hand-rolled because Node's `Buffer.from(v, "base64")` silently drops
+ * characters outside the alphabet, so it measures non-base64 strings, and
+ * small, rejecting good passphrases. Padding is held to the same standard:
+ * only the zero, one or two `=` the body length calls for. `"abcd="` is not
+ * base64 and falls back to the raw-bytes reading; trimming any `=` run would
+ * score a passphrase ending in `=` at three-quarters of its length.
  */
 function base64ByteLength(value: string): number | undefined {
 	// Count the trailing '=' run without assuming it is well-formed.
@@ -87,26 +75,16 @@ function base64ByteLength(value: string): number | undefined {
 }
 
 /**
- * Estimate how many bytes of key material a configured secret actually
- * carries.
+ * Estimates how many bytes of key material a configured secret carries: the
+ * SMALLEST plausible reading of the string, because that is the one an
+ * attacker uses. `openssl rand -hex 16` gives 32 characters but 16 bytes; a
+ * 32-character base64 body is 24 bytes. The conservative reading also suits
+ * values never meant as an encoding: a 32-character `[A-Za-z0-9]` password
+ * scores 24 bytes and genuinely carries only ~190 bits.
  *
- * The answer is the SMALLEST plausible reading of the string, because that is
- * the one an attacker gets to use. `openssl rand -hex 16` produces a
- * 32-*character* value that is only 16 *bytes* of randomness; counting its
- * characters would wave through a key with half the intended strength. The
- * same reasoning applies to base64: a 32-character base64 body is 24 bytes.
- *
- * The conservative reading is also right for values that were never meant as
- * an encoding. A 32-character password drawn from `[A-Za-z0-9]` reads as
- * base64 here and scores 24 bytes — and it genuinely carries only ~190 bits,
- * because 62 possibilities per character is ~5.95 bits, not 8. Treating
- * printable-ASCII characters as a full byte each is the optimistic error, and
- * this function does not make it.
- *
- * What it cannot see is structure: a 40-character English sentence measures
- * 40 bytes and carries far less. The floor is a check on key *length*, not a
- * substitute for generating the key randomly — which is what the failure
- * message tells the operator to do.
+ * It cannot see structure: a 40-character English sentence measures 40 bytes
+ * and carries far less. The floor checks key length; it does not replace
+ * generating the key randomly, which the failure message tells the operator.
  */
 export function measureSecretEntropyBytes(secret: string): number {
 	const candidates = [

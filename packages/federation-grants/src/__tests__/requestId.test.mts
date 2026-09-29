@@ -15,22 +15,14 @@
  */
 
 /**
- * `x-request-id` on every exit this package owns (#593, D18).
- *
- * It arrives in slice 4 rather than with the first audit event because both
- * routes and the background audit bridge need it at once: a refresh that
- * persists after the HTTP response is the reason the correlation has to be the
- * *request's*, not one the late worker mints for itself — an ID generated
- * there cannot be connected to the call that started the rotation.
- *
- * It is caller-controlled metadata and nothing else: never authentication,
- * never an idempotency key, never a lock key, never a trusted identifier of a
- * person. That is why the accepted shape is narrow and an unusable value is
- * replaced rather than repaired — trimming an invalid value into a valid one
- * would echo attacker-chosen bytes into an operator's logs.
- *
- * The disabled routes are the ones that exist in this commit, and the rule is
- * the same on every exit, so they are where it is pinned.
+ * `x-request-id` on every exit this package owns (the federation-grants ADR,
+ * D18; README, "`x-request-id`"). The correlation is the *request's*, not one a
+ * late worker mints, so a refresh persisted after the HTTP response can be tied
+ * to the call that started the rotation. It is caller-controlled metadata and
+ * nothing else, so the accepted shape is narrow and an unusable value is
+ * replaced rather than repaired: trimming an invalid value into a valid one
+ * would echo attacker-chosen bytes into an operator's logs. The rule is the
+ * same on every exit, so it is pinned on the disabled routes.
  */
 
 import type { BootstrapMap } from "@o3co/auth-provider-core";
@@ -64,14 +56,11 @@ const boot = async () => {
 };
 
 /**
- * The header as Node types it — `string | string[] | undefined` — rather than
- * as Express delivers it.
- *
- * Node joins duplicate occurrences of an ordinary header into one
- * comma-separated string, so the array never reaches this through an HTTP
- * request, and the end-to-end test below can only observe the joined form. The
- * rule is the same for both and is stated once, here, where the array can
- * actually be passed: no element of it is a value that one caller chose.
+ * The header as Node types it (`string | string[] | undefined`), not as
+ * Express delivers it. Node joins duplicate occurrences of an ordinary header
+ * into one comma-separated string, so the end-to-end test below sees only the
+ * joined form; the array is passed here. The rule is the same for both: no
+ * element is a value one caller chose.
  */
 describe("resolveRequestId", () => {
 	it("takes a value that matches the accepted shape", () => {

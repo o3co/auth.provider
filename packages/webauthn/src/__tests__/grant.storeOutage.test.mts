@@ -15,22 +15,16 @@
  */
 
 /**
- * The webauthn grant's answer when a store it needs cannot answer.
- *
- * The credential lookup, the challenge ceremony and the sign-count update
- * used to reach the token route's terminal handler unwrapped — a `500` logged
- * as an unhandled error, never as the outage it was — and a family store that
- * could not register the refresh token's family was a `503` nobody logged. A
- * store that cannot answer is the server's outage: `503
- * temporarily_unavailable`, logged once at error level as
- * `webauthn_grant_store_unavailable` with `store`, `step` and the error's
- * projection — never a verdict on the passkey, and never a token.
+ * The webauthn grant's answer when a store it needs (credential lookup,
+ * challenge ceremony, sign-count update, refresh-token family) cannot answer.
+ * That is the server's outage: `503 temporarily_unavailable`, logged once at
+ * error level as `webauthn_grant_store_unavailable` with `store`, `step` and
+ * the error's projection. Never a verdict on the passkey, and never a token.
  *
  * Driven through the grant `webauthnModule` contributes, over core's memory
  * credential store, challenge store, replay seen-set and ceremony, with one
- * method replaced by one that throws. `verifyWebAuthnAssertion` is mocked as
- * in `grant.test.mts`: the assertion check has its own tests, and a real
- * ceremony fixture adds nothing to what a store outage does.
+ * method replaced by one that throws. `verifyWebAuthnAssertion` is mocked as in
+ * `grant.test.mts`: the assertion check has its own tests.
  */
 
 import {

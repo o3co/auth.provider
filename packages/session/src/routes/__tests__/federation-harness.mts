@@ -15,16 +15,12 @@
  */
 
 /**
- * Test harness for the federation routes, with the one thing
- * `Federation.test.mts`'s older shim does not model: a real per-session
- * `cookie` attribute bag, emitted as a `Set-Cookie` header on the way out.
- *
- * `form_post` federations turn on a cross-site POST callback, and the whole
- * question that raises — does the session cookie actually reach the callback? —
- * is a question about cookie attributes. A shim that hard-codes
- * `res.cookie("sid", id, { httpOnly: true })` cannot answer it, so this one
- * carries the session's own `cookie` object through to the response the way
- * express-session does.
+ * Test harness for the federation routes, modelling what the shim in
+ * `Federation.test.mts` does not: a real per-session `cookie` attribute bag,
+ * carried through to a `Set-Cookie` header the way express-session does.
+ * Whether the session cookie reaches a `form_post` federation's cross-site
+ * POST callback is a question about cookie attributes, which a shim that
+ * hard-codes `res.cookie("sid", id, { httpOnly: true })` cannot answer.
  */
 
 import type {
@@ -77,7 +73,7 @@ export const HARNESS_ISSUER = "https://as.example.com";
 
 /**
  * Records held by the shim's express-session `Store`, keyed exactly as the
- * route keys them. The federation transaction records land here (#494).
+ * route keys them. The federation transaction records land here.
  */
 export type HarnessRecordStore = Map<string, unknown>;
 
@@ -124,10 +120,9 @@ function makeSessionObject(
 	store.set(key, entry);
 	const session: Record<string, unknown> = {
 		...entry.data,
-		// The attribute bag express-session exposes as `req.session.cookie`, and
-		// Shared by reference with the store entry, so anything a route wrote
-		// there would survive to the response — which is how this harness can
-		// still show that nothing writes there any more.
+		// The attribute bag express-session exposes as `req.session.cookie`,
+		// shared by reference with the store entry, so anything a route wrote
+		// there would survive to the response, where a test can see it.
 		cookie: entry.cookie,
 		save(cb?: (err: unknown) => void) {
 			const current = (req as unknown as { session: Record<string, unknown> }).session;
@@ -141,13 +136,7 @@ function makeSessionObject(
 			// `Store.prototype.regenerate` destroys the record and calls
 			// `store.generate`, which builds a brand-new session AND a brand-new
 			// `new Cookie(cookieOptions)` from the DEPLOYMENT's configuration.
-			//
-			// The data goes and so do the cookie attributes. This harness used to
-			// model the opposite — attributes carried across the regenerate — and
-			// that mismodelling is a direct reason #494 went unnoticed: it made a
-			// relaxed cookie look like something one success path tidied up, when
-			// in reality regenerate is the only thing that ever reset it and it
-			// runs on the success path alone.
+			// The data goes and so do the cookie attributes.
 			store.set(key, { data: {}, cookie: defaultCookie() });
 			const fresh = makeSessionObject(store, key, req);
 			(req as unknown as { session: Record<string, unknown> }).session = fresh;
@@ -264,7 +253,7 @@ export function makePermissivePolicy() {
 export type HarnessApp = {
 	app: express.Express;
 	store: HarnessSessionStore;
-	/** Federation transaction records, as the route wrote them (#494). */
+	/** Federation transaction records, as the route wrote them. */
 	records: HarnessRecordStore;
 	userSessionStore: ReturnType<typeof makeUserSessionStore>;
 	federationTokenStore: ReturnType<typeof makeFederationTokenStore>;

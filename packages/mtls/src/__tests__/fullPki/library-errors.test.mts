@@ -15,17 +15,14 @@
  */
 
 /**
- * What `full-pki` writes when a library refuses revocation material — pkijs
- * parsing a CRL or an OCSP response, WebCrypto checking a signature, the
- * platform fetch reaching a responder — against the real libraries.
- *
- * A refusal's `detail` is this package's own fixed text, which the operator's
- * log line and the refusal carry; the library's error travels beside it as
- * `err`, core's `loggableError` projection, on the result and on the one line
- * that reports it. The library's message is its reading of bytes a CA, a
- * responder or a network path handed over, and it used to be copied into
- * `detail`. Which limit fired is read from what the library says in a
- * structured way — a status, an error code — never from its message.
+ * What `full-pki` writes when a real library (pkijs parsing a CRL or an OCSP
+ * response, WebCrypto checking a signature, the platform fetch) refuses
+ * revocation material. `detail` is this package's own fixed text; the
+ * library's message, its reading of bytes a CA, responder or network path
+ * handed over, stays out of it. The library's error travels beside it as `err`
+ * (core's `loggableError` projection), on the result and on the one line that
+ * reports it. Which limit fired is read from what the library says in a
+ * structured way (a status, an error code), never from its message.
  */
 
 import { createServer, type Server } from "node:http";

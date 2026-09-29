@@ -15,26 +15,19 @@
  */
 
 /**
- * The application session cookie's attributes, across a **real**
- * `express-session` store round trip (#494).
- *
- * Every other federation test in this package runs on a hand-written session
- * shim. A shim can model whatever it likes about `req.session.cookie`, and the
- * one in `federation-harness.mts` modelled it wrongly — which is precisely why
- * no test caught a start leg that permanently relaxed the session cookie of
- * any browser a third party could point at `GET /oauth/federation/:name`.
- *
- * So this file uses the real middleware and the real `MemoryStore`, and asks
- * the only question that matters: after a `form_post` federation starts, is
- * the session that comes **back out of the store** still the deployment's
- * `SameSite=Strict; secure=false` session?
+ * The application session cookie's attributes across a **real**
+ * `express-session` store round trip. The other federation tests run on a
+ * hand-written session shim, which can model `req.session.cookie` however it
+ * likes; this file uses the real middleware and `MemoryStore` and checks that,
+ * after a `form_post` federation starts, the session loaded back out of the
+ * store is still the deployment's `SameSite=Strict; secure=false` session.
  *
  * `Store.prototype.createSession` rebuilds the cookie on every load with
- * `new Cookie(sess.cookie)`, and that constructor copies every own key of what
- * it is handed. So anything a route writes onto `req.session.cookie` is
- * serialised into the store and restored on every later request — for the life
- * of the session, in MemoryStore and in Redis alike. Nothing in the start leg
- * may write there.
+ * `new Cookie(sess.cookie)`, which copies every own key it is handed, so
+ * anything a route writes onto `req.session.cookie` is restored on every later
+ * request for the life of the session, in MemoryStore and Redis alike.
+ * Nothing in the start leg may write there: a third party can point any
+ * browser at `GET /oauth/federation/:name`.
  */
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
@@ -131,10 +124,9 @@ function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp 
 			secret: "test-secret-of-at-least-32-bytes-length!",
 			resave: false,
 			saveUninitialized: false,
-			// `rolling` is what makes the re-issue test below able to assert
-			// anything at all: without it express-session emits no `Set-Cookie`
-			// on an unmodified session, so a test looking for one finds nothing
-			// under the fix *and* nothing under the bug (#502).
+			// Without `rolling`, express-session emits no `Set-Cookie` on an
+			// unmodified session, so the re-issue test below would find none
+			// with or without the fault it pins.
 			rolling,
 			store,
 			cookie: { ...SESSION_COOKIE },
@@ -279,14 +271,8 @@ describe("the application session cookie survives a form_post federation start (
 		// A forced `secure: true` does not merely mislabel the cookie: express-session
 		// stops emitting `Set-Cookie` at all when the session's cookie is Secure and
 		// the hop is not TLS, so the session silently stops being delivered.
-		//
-		// #502: this test used to guard its assertion with `if (sessionHeader)`,
-		// and on an unmodified session express-session emits no `Set-Cookie` at
-		// all — so the guard was false in the fixed tree and in the buggy one
-		// alike, and the assertion never ran. `rolling: true` forces the re-issue,
-		// and the header is now required rather than inspected if present:
-		// `sessionSetCookie` throws when it is missing, which is exactly the
-		// symptom the bug produces.
+		// `rolling: true` forces the re-issue, and the header is required, not
+		// inspected if present: `sessionSetCookie` throws when it is missing.
 		const { app } = buildRealApp({ rolling: true });
 
 		const primed = await request(app).get("/prime");
@@ -329,9 +315,8 @@ describe("the application session cookie survives a form_post federation start (
 		const keys = await storeKeys(store);
 		const transactionKeys = keys.filter((k) => k.startsWith(FEDERATION_TRANSACTION_KEY_PREFIX));
 		expect(transactionKeys).toHaveLength(1);
-		// No new component slot was invented for this: the record shares the
-		// store the deployment already points at Redis, and the prefix is what
-		// keeps a transaction from ever being loadable as a session.
+		// The record shares the store the deployment already points at Redis;
+		// the prefix keeps a transaction from ever being loadable as a session.
 		expect(keys).toHaveLength(2);
 	});
 

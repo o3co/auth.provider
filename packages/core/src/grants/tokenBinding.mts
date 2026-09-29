@@ -15,36 +15,29 @@ import type { Confirmation } from "./confirmation.mjs";
 
 /**
  * Sender-constrained binding established by a transport-layer mechanism.
- * Core owns only the cross-cutting shape (discriminator + `cnf` claim);
- * mechanism packages extend with their own evidence fields. See Wave 2
- * Token-binding Cluster spec §4.2.
+ * Core owns the cross-cutting shape (discriminator + `cnf` claim); mechanism
+ * packages add their own evidence fields. See ADR
+ * 2026-05-20-token-binding-first-class-abstraction.
  *
- * Extension boundary: downstream MAY add a new `kind` and evidence
- * fields by extending this interface; the `confirmation` claim itself
- * MUST be one of the variants in `Confirmation` (RFC 7800 / IANA
- * registry domain). Adding a new confirmation variant (e.g. RFC 9421
- * `jwk` confirmation) is a core semver-minor change, not a
- * downstream-only extension.
+ * Downstream may add a `kind` and evidence fields, but `confirmation` must be
+ * a `Confirmation` variant (RFC 7800 / IANA registry); a new variant is a
+ * core semver-minor change.
  *
  * A binding binds only through the member its `kind` owns in core's
- * `BINDING_PROFILES` (`ownedConfirmation`, `grants/confirmationMatch.mts`):
- * every grant stamps that member and nothing else. A binding with none — a
- * new `kind` core has no profile for, or a known kind presenting another
- * kind's member — binds nothing: a token requested with it is issued
- * unbound and advertised as Bearer, and a client whose
- * `senderConstrained.required` allows its kind is refused at dispatch
- * (`invalid_request`) rather than downgraded. So a new kind that is meant
- * to bind tokens lands its profile in core first.
+ * `BINDING_PROFILES` (`grants/confirmationMatch.mts`). One without (a kind
+ * core has no profile for, or another kind's member) binds nothing: the token
+ * is issued unbound as Bearer, and a client whose `senderConstrained.required`
+ * allows its kind is refused `invalid_request` rather than downgraded. A new
+ * kind that should bind tokens lands its profile in core first.
  */
 export interface TokenBinding {
 	readonly kind: string;
 	readonly confirmation: Confirmation;
 	/**
-	 * Headers the HTTP answer to this request should carry (#530) — a DPoP
-	 * mechanism configured for server-provided nonces hands the current nonce
-	 * back on every accepted proof (`DPoP-Nonce`, RFC 9449 §8), so a client
-	 * learns of a rotation before it needs to. The token-binding middlewares
-	 * set them; a mechanism with nothing to say leaves this out.
+	 * Headers the HTTP answer to this request should carry, set by the
+	 * token-binding middlewares: a DPoP mechanism with server-provided nonces
+	 * returns the current `DPoP-Nonce` on every accepted proof (RFC 9449 §8),
+	 * so a client learns of a rotation before it needs to.
 	 */
 	readonly responseHeaders?: Readonly<Record<string, string>>;
 }

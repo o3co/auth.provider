@@ -74,34 +74,24 @@ const requireNonEmpty = (value: unknown, field: string): string => {
  * party signs with the `.p8` key it downloaded from the Apple Developer
  * portal.
  *
- * Apple is the only IdP in this repo whose client secret is not a string a
- * config file can hold. The assertion is:
- *
  * ```text
  * header  { alg: "ES256", kid: <Key ID> }
  * payload { iss: <Team ID>, sub: <Services ID>, aud: "https://appleid.apple.com",
  *           iat: <now>, exp: <now + lifetime ≤ 6 months> }
  * ```
  *
- * The returned function is the `FederationClientSecret` callable form the
- * session package resolves per token exchange. It caches the signed JWT and
- * re-signs only once the cached one comes within
- * {@link APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS} of `exp` — the framework
- * deliberately does not cache, because only this module knows when its secret
- * expires.
+ * The returned function is the `FederationClientSecret` callable the session
+ * package resolves per token exchange. It caches the signed JWT and re-signs
+ * only within {@link APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS} of `exp` (the
+ * framework does not cache: only this module knows when its secret expires).
+ * Concurrent callers share one in-flight signature; a failed one leaves the
+ * cache untouched so the next call retries. Whenever `options.privateKey`
+ * reads differently from what the held key was imported from, the key is
+ * re-imported and the cached secret dropped, so a `.p8` rotated under a
+ * running process takes effect on the next token exchange.
  *
- * Concurrent callers share one in-flight signature rather than each starting
- * their own, and a failed signature leaves the cache untouched so the next
- * call retries instead of inheriting a poisoned entry. The key is imported
- * once per distinct key material: whenever `options.privateKey` reads
- * differently from what the held key was imported from, the key is
- * re-imported and the cached secret dropped (#498), so a `.p8` rotated
- * under a running process takes effect on the next token exchange rather
- * than at the next restart.
- *
- * Validation is at construction where it can be (a boot-time misconfiguration
- * should fail at boot) and at signing where it must be (the key material is
- * read late by design).
+ * Validation is at construction where it can be, and at signing where it
+ * must be (the key material is read late by design).
  */
 export function createAppleClientSecret(options: AppleClientSecretOptions): () => Promise<string> {
 	const teamId = requireNonEmpty(options.teamId, "teamId");
@@ -123,12 +113,10 @@ export function createAppleClientSecret(options: AppleClientSecretOptions): () =
 
 	/**
 	 * Everything that belongs to one key material: the imported key, the
-	 * secret signed with it, and the signature in flight. #498: a key memoised
-	 * on success alone recovers from broken → repaired but never from valid →
-	 * rotated — a leaked `.p8` revoked and replaced under a running process
-	 * would keep signing with the old one until a restart. Tying the cache and
-	 * the in-flight signature to the generation, rather than to the resolver,
-	 * is what makes rotation safe while a signature is in progress: a caller
+	 * secret signed with it, and the signature in flight. A key memoised on
+	 * success alone would never notice valid → rotated, so a revoked `.p8`
+	 * would keep signing until a restart. Tying the cache and the in-flight
+	 * signature to the generation makes rotation safe mid-signature: a caller
 	 * arriving after the rotation gets the new generation's signature, and the
 	 * old one, when it completes, commits to a generation nothing reads.
 	 */

@@ -21,24 +21,9 @@ import type {
 } from "@o3co/auth-provider-core";
 
 // ---------------------------------------------------------------------------
-// Backing client contracts for Redis adapters in this package.
-//
-// These interfaces describe the methods the adapters consume, expressed in
-// Redis protocol terms (`hSet`, `zAdd`, `pttl`, `multi`/`watch`/`exec`, etc.).
-// They live in `@o3co/auth-provider-redis` rather than in core because the
-// shape is intrinsically Redis-flavoured: a consumer wiring a non-Redis
-// backend (DynamoDB, Postgres, etcd, ...) writes their own contracts and
-// adapters, not implementations of these.
-//
-// Each interface ships with a `declare module "@o3co/auth-provider-core"`
-// augmentation that adds the matching backing-client slot to ComponentMap,
-// so consumers wiring redis backends via `bootstrapComponents` get the slot
-// types whenever they import from this package.
-//
-// Per Phase 10 addendum §3 (the "backing client interface" pattern: narrow
-// per-purpose Redis-command contracts owned by the adapter package) +
-// v0.5.0 pre-tag interface review S3 (the decision that core does not
-// declare them). Both resolve in docs/design-campaign-index.md.
+// Per-purpose backing-client contracts for the Redis adapters in this
+// package, in Redis-command terms (see README, "Backing-client contract").
+// Each has a slot in the ComponentMap augmentation at the end of this file.
 // ---------------------------------------------------------------------------
 
 // --- ChallengeStoreClient --------------------------------------------------
@@ -56,14 +41,13 @@ export interface ChallengeStoreClient {
 // --- AccessTokenDenylistClient ---------------------------------------------
 
 /**
- * Backing client for AccessTokenDenylist adapters (#277). Adapter
- * implementations (`createRedisAccessTokenDenylist`) consume exactly these
- * methods.
+ * Backing client for AccessTokenDenylist adapters
+ * (`createRedisAccessTokenDenylist`).
  *
  * `set` is the plain PX form with no `NX`: re-revoking a jti is idempotent and
  * last-write-wins on the expiry, matching the memory adapter. That is also why
- * this is a separate interface from {@link ReplaySeenSetClient}, whose whole
- * contract turns on the `NX` return value.
+ * this is separate from {@link ReplaySeenSetClient}, whose whole contract
+ * turns on the `NX` return value.
  */
 export interface AccessTokenDenylistClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
@@ -89,18 +73,10 @@ export interface ReplaySeenSetClient {
 export interface RefreshTokenFamilyMultiClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): RefreshTokenFamilyMultiClient;
 	/**
-	 * Execute the queued commands.
-	 *
-	 * **MUST reject when any queued command failed.** A driver that reports
-	 * per-command errors inside the reply — ioredis resolves with one
-	 * `[error, result]` tuple per command and does not reject, because `EXEC`
-	 * itself succeeded — has to be adapted here, or a refused write is handed
-	 * to the caller as a success. The pipelines in this package pair a mutation
-	 * with the expiry that bounds it, so a swallowed failure is a key stranded
-	 * with no TTL: the shape #269 already paid for once.
-	 *
-	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
-	 * which the refresh-token-family CAS loop reads as "conflict, retry".
+	 * Execute the queued commands. Same contract as
+	 * {@link SessionSidSortedSetMultiClient.exec}: MUST reject when any queued
+	 * command failed; `null` is the WATCH-abort signal, which the CAS loop
+	 * reads as "conflict, retry".
 	 */
 	exec(): Promise<unknown[] | null>;
 }
@@ -108,7 +84,7 @@ export interface RefreshTokenFamilyMultiClient {
 /**
  * Backing client for RefreshTokenFamilyStore adapters. The `duplicate()` method
  * returns a `DisposableRefreshTokenFamilyClient` bound to a new underlying
- * connection, required for WATCH/MULTI/EXEC CAS isolation per A3 §7.2.
+ * connection, required for WATCH/MULTI/EXEC CAS isolation.
  */
 export interface RefreshTokenFamilyClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
@@ -135,16 +111,13 @@ export interface DisposableRefreshTokenFamilyClient
 // --- UserSessionStoreClient ------------------------------------------------
 
 /**
- * Backing client for UserSessionStore adapters. Declares only `set`, `get`,
- * `del` and `replaceIfUnchanged` — the exact methods
+ * Backing client for UserSessionStore adapters: exactly the methods
  * `createRedisUserSessionStore` consumes.
  *
  * `set` has two overloads:
- *  - plain PX form (no condition): always succeeds with `"OK"` per Redis
- *    `SET key value PX ms` protocol; never returns null.
- *  - PX+NX form: atomic insert-only, used by `create`; mirrors
- *    ChallengeStore.issue and RefreshTokenFamilyStore.registerFamily.
- *    Returns `"OK"` on insert, `null` when the key already existed.
+ *  - plain PX form: always `"OK"` (Redis `SET key value PX ms`), never null.
+ *  - PX+NX form: atomic insert-only, used by `create`. Returns `"OK"` on
+ *    insert, `null` when the key already existed.
  */
 export interface UserSessionStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
@@ -157,14 +130,13 @@ export interface UserSessionStoreClient {
 	 * when it replaced; `false`, and nothing written, when the key held
 	 * anything else or nothing.
 	 *
-	 * The step-up capability's write (`recordSecondFactor`, the MFA ADR's D9):
-	 * the adapter reads the session, computes the next one in JavaScript and
-	 * writes it through this, re-reading when it loses — the refresh-token
-	 * family's compare-and-set, as one call. A GET then a SET would let two
-	 * step-ups in flight each overwrite the other's factor; a write that set
-	 * a new expiry, or none, would change how long the session lives.
-	 * `makeIoredisClients` answers it with a script (`SET … KEEPTTL`, Redis
-	 * 6.0+).
+	 * The step-up write (`recordSecondFactor`; ADR
+	 * 2026-09-25-multi-factor-authentication, D9): the adapter reads the
+	 * session, computes the next one and writes it through this, re-reading
+	 * when it loses. A GET then a SET would let two step-ups in flight each
+	 * overwrite the other's factor; a write that set a new expiry, or none,
+	 * would change how long the session lives. `makeIoredisClients` answers it
+	 * with a script (`SET … KEEPTTL`, Redis 6.0+).
 	 */
 	replaceIfUnchanged(key: string, expected: string, next: string): Promise<boolean>;
 }
@@ -178,37 +150,14 @@ export interface SessionRPRegistryMultiClient {
 	hSet(key: string, field: string, value: string): SessionRPRegistryMultiClient;
 	pExpireAt(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
 	/**
-	 * Safely set the key's expiry under concurrent writes (D-10 / CR-3).
-	 *
-	 * Effective semantics:
-	 *   - If the key has no TTL, set it to `msTimestamp` (first-write case).
-	 *   - If the key has a TTL ≥ `msTimestamp`, leave it unchanged
-	 *     (truncation prevented under stale-`expiresAt` races).
-	 *   - If the key has a TTL < `msTimestamp`, raise it to `msTimestamp`
-	 *     (legitimate extension allowed).
-	 *
-	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair (Redis 7.0+
-	 * flags). A bare `PEXPIREAT … GT` is insufficient: Redis treats a
-	 * non-volatile key as having infinite TTL for `GT`, so the GT clause
-	 * silently no-ops on first write. The NX clause covers that bootstrap
-	 * gap; the GT clause provides the truncation guard once a TTL exists.
-	 *
-	 * Requires Redis 7.0+. v0.5.1 pins the floor to Redis 7.2 LTS.
+	 * Safely set the key's expiry under concurrent writes; see
+	 * {@link SessionSidSortedSetMultiClient.pExpireGT} for the NX+GT semantics.
 	 */
 	pExpireGT(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
 	/**
-	 * Execute the queued commands.
-	 *
-	 * **MUST reject when any queued command failed.** A driver that reports
-	 * per-command errors inside the reply — ioredis resolves with one
-	 * `[error, result]` tuple per command and does not reject, because `EXEC`
-	 * itself succeeded — has to be adapted here, or a refused write is handed
-	 * to the caller as a success. The pipelines in this package pair a mutation
-	 * with the expiry that bounds it, so a swallowed failure is a key stranded
-	 * with no TTL: the shape #269 already paid for once.
-	 *
-	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
-	 * which the refresh-token-family CAS loop reads as "conflict, retry".
+	 * Execute the queued commands. Same contract as
+	 * {@link SessionSidSortedSetMultiClient.exec}: MUST reject when any queued
+	 * command failed; `null` is the WATCH-abort signal, not a failure.
 	 */
 	exec(): Promise<unknown[] | null>;
 }
@@ -222,7 +171,7 @@ export interface SessionRPRegistryClient {
 	 * Remove the key, reclaiming its memory on a background thread (Redis
 	 * `UNLINK`). This key holds every relying party registered against one
 	 * session and is deleted during logout; `DEL` would free all of them
-	 * inline on the connection every other adapter shares (#291).
+	 * inline on the connection every other adapter shares.
 	 */
 	unlink(key: string): Promise<number>;
 	hSet(key: string, field: string, value: string): Promise<number>;
@@ -230,10 +179,10 @@ export interface SessionRPRegistryClient {
 	 * Cursor-based iteration over the hash's field/value pairs (Redis
 	 * `HSCAN`), yielding one pair at a time.
 	 *
-	 * Replaces `hVals`, whose reply size was bounded by nothing but how many
-	 * relying parties a session had accumulated (#291). `HSCAN` guarantees
-	 * that a field present for the whole iteration is returned at least once,
-	 * so a field may be yielded more than once and consumers must de-duplicate.
+	 * Cursor-based because a whole-hash reply grows with however many relying
+	 * parties a session has accumulated. `HSCAN` guarantees that a field
+	 * present for the whole iteration is returned at least once, so a field
+	 * may be yielded more than once and consumers must de-duplicate.
 	 */
 	hScanIterator(
 		key: string,
@@ -253,22 +202,17 @@ export interface SessionRPRegistryClient {
 export interface SessionSidSortedSetMultiClient {
 	pExpireAt(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
 	/**
-	 * Safely set the key's expiry under concurrent writes (D-10 / CR-3).
+	 * Safely set the key's expiry under concurrent writes:
+	 *   - no TTL → set it to `msTimestamp` (first write);
+	 *   - TTL ≥ `msTimestamp` → leave it unchanged (no truncation under
+	 *     stale-`expiresAt` races);
+	 *   - TTL < `msTimestamp` → raise it to `msTimestamp`.
 	 *
-	 * Effective semantics:
-	 *   - If the key has no TTL, set it to `msTimestamp` (first-write case).
-	 *   - If the key has a TTL ≥ `msTimestamp`, leave it unchanged
-	 *     (truncation prevented under stale-`expiresAt` races).
-	 *   - If the key has a TTL < `msTimestamp`, raise it to `msTimestamp`
-	 *     (legitimate extension allowed).
-	 *
-	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair (Redis 7.0+
-	 * flags). A bare `PEXPIREAT … GT` is insufficient: Redis treats a
-	 * non-volatile key as having infinite TTL for `GT`, so the GT clause
-	 * silently no-ops on first write. The NX clause covers that bootstrap
-	 * gap; the GT clause provides the truncation guard once a TTL exists.
-	 *
-	 * Requires Redis 7.0+. v0.5.1 pins the floor to Redis 7.2 LTS.
+	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair. A bare
+	 * `PEXPIREAT … GT` is insufficient: Redis treats a non-volatile key as
+	 * having infinite TTL for `GT`, so it silently no-ops on first write; the
+	 * NX clause covers that gap. Requires Redis 7.0+ (the tested floor is
+	 * 7.2 LTS).
 	 */
 	pExpireGT(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
 	zAdd(
@@ -285,7 +229,7 @@ export interface SessionSidSortedSetMultiClient {
 	 * itself succeeded — has to be adapted here, or a refused write is handed
 	 * to the caller as a success. The pipelines in this package pair a mutation
 	 * with the expiry that bounds it, so a swallowed failure is a key stranded
-	 * with no TTL: the shape #269 already paid for once.
+	 * with no TTL.
 	 *
 	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
 	 * which the refresh-token-family CAS loop reads as "conflict, retry".
@@ -303,7 +247,7 @@ export interface SessionSidSortedSetClient {
 	 * Remove the key, reclaiming its memory on a background thread (Redis
 	 * `UNLINK`). This key holds every refresh-token family (or federation)
 	 * linked to one session and is deleted during logout; `DEL` would free all
-	 * of them inline on the connection every other adapter shares (#291).
+	 * of them inline on the connection every other adapter shares.
 	 */
 	unlink(key: string): Promise<number>;
 	multi(): SessionSidSortedSetMultiClient;
@@ -315,33 +259,22 @@ export interface SessionSidSortedSetClient {
 	 * Members between the two inclusive ranks, in ascending score order.
 	 *
 	 * Callers page by rank rather than passing `0, -1`: the reply size of a
-	 * whole-set read grows with how heavily linked the session is (#291).
+	 * whole-set read grows with how heavily linked the session is.
 	 */
 	zRange(key: string, start: number, stop: number): Promise<string[]>;
 	zRem(key: string, member: string): Promise<number>;
 }
 
-// --- Subject-keyed clients (#321) ------------------------------------------
+// --- Subject-keyed clients -------------------------------------------------
 
 /**
- * Backing client for the `SubjectSessionIndex` adapter (#321).
- *
- * A **new** interface rather than a widening of {@link SessionSidSortedSetClient},
- * for two reasons. Widening would be a breaking change for every custom
- * implementation of that interface — the call #269 already faced — and it would
- * push score-range operations onto the sid-keyed adapters, which have no use
- * for them: every member of a sid-keyed set shares the one session's expiry, so
- * a single key-level TTL retires the whole set at once and `zRange` by rank is
- * all they ever need.
- *
- * A subject-keyed set cannot make that assumption. One subject's sessions
- * expire on their own clocks, so "the live ones" is a score range and pruning
- * is a score range — which is exactly why `createMemorySidSortedSet` was not
- * reused on the in-process side either.
- *
- * The score is the member's **expiry in epoch milliseconds**, so
- * `zRangeByScore(key, now, "+inf")` is precisely "sessions still live" and
- * `zRemRangeByScore(key, "-inf", now)` is precisely the GC sweep.
+ * Backing client for the `SubjectSessionIndex` adapter. Unlike a sid-keyed
+ * set ({@link SessionSidSortedSetClient}), whose members share one session's
+ * expiry and one key-level TTL, one subject's sessions expire on their own
+ * clocks, so "the live ones" and pruning are score ranges. The score is the
+ * member's **expiry in epoch milliseconds**: `zRangeByScore(key, now,
+ * "+inf")` is "sessions still live" and `zRemRangeByScore(key, "-inf", now)`
+ * is the GC sweep.
  */
 export interface SubjectSessionIndexClient {
 	multi(): SubjectSessionIndexMultiClient;
@@ -351,38 +284,31 @@ export interface SubjectSessionIndexClient {
 	 * **evaluating "has passed" against the store's own clock**.
 	 *
 	 * One operation rather than a range-remove plus a range-read, because the
-	 * boundary has to be a single value and it must not be the calling
-	 * replica's `Date.now()`. Scores are written from whichever replica handled
-	 * the login; comparing them against whichever replica handles the read is
-	 * two host clocks, and the skew between them drops live sessions early or
+	 * boundary has to be a single value and must not be the calling replica's
+	 * `Date.now()`: scores are written by whichever replica handled the login,
+	 * and judging them on another replica's clock drops live sessions early or
 	 * keeps expired ones listed. The store is the one clock every replica
-	 * shares, which is the whole reason this index moved off in-process state.
+	 * shares.
 	 */
 	pruneExpiredAndList(key: string): Promise<string[]>;
 	zRem(key: string, member: string): Promise<number>;
 	/**
 	 * Remove the key, reclaiming its memory on a background thread (Redis
-	 * `UNLINK`).
-	 *
-	 * `UNLINK` and not `DEL` for the reason #291 established: this key holds
-	 * every live session of one subject, and `removeBySubject` is called on the
-	 * credential-change path, on the connection every other adapter in this
-	 * package shares. `DEL` frees every member inline — a latency spike during
-	 * a password reset, paid by every other caller on the socket.
+	 * `UNLINK`). This key holds every live session of one subject, and
+	 * `removeBySubject` runs on the credential-change path, on the connection
+	 * every adapter in this package shares; `DEL` would free every member
+	 * inline — a latency spike during a password reset, paid by every other
+	 * caller on the socket.
 	 */
 	unlink(key: string): Promise<number>;
 }
 
 /**
  * Pipeline half of {@link SubjectSessionIndexClient}, carrying the **write**
- * path only.
- *
- * A member and the key expiry that bounds it are queued together, because a
- * mutation whose expiry silently failed is a key stranded with no TTL — the
- * shape #269 paid for. Reads are not pipelined: `exec` hands back the driver's
- * raw reply, and having the adapter reach into it would put one driver's
- * `[error, result]` tuple shape into code that is supposed to be
- * vendor-agnostic.
+ * path only. A member and the key expiry that bounds it are queued together,
+ * because a mutation whose expiry silently failed is a key stranded with no
+ * TTL. Reads are not pipelined: parsing `exec`'s raw reply would put one
+ * driver's `[error, result]` tuple shape into vendor-agnostic code.
  */
 export interface SubjectSessionIndexMultiClient {
 	zAdd(key: string, entry: { score: number; value: string }): SubjectSessionIndexMultiClient;
@@ -393,16 +319,15 @@ export interface SubjectSessionIndexMultiClient {
 }
 
 /**
- * Backing client for the `SubjectRevocation` adapter (#321).
+ * Backing client for the `SubjectRevocation` adapter.
  *
- * `setWatermarkMonotonic` is **not** `set(key, value, "PX", ttl)`, even though
- * the value is one string and the shape looks like it should be. The watermark
- * is monotonic: two credential changes in quick succession, the second computed
- * on a replica whose clock is behind, must not move the line backwards and
+ * The boundary write is **not** a plain `SET`: the watermark is monotonic.
+ * Two credential changes in quick succession, the second computed on a
+ * replica whose clock is behind, must not move the line backwards and
  * resurrect every token the first one killed. A last-writer-wins `SET` does
  * exactly that, and a client-side read-compare-write loses the same race one
- * round-trip later. The comparison therefore happens **on the server**, in one
- * command, and the same guard covers the entry's own expiry — shortening an
+ * round-trip later, so the comparison happens **on the server**, in one
+ * command. The same guard covers the entry's own expiry: shortening an
  * in-force watermark would retire the line while tokens it must refuse are
  * still presentable.
  */
@@ -410,26 +335,18 @@ export interface SubjectRevocationClient {
 	get(key: string): Promise<string | null>;
 	/**
 	 * Atomically advance one or both of a subject's revocation boundaries on
-	 * one key, monotonically, and retain the record for as long as either needs
-	 * (#593, D13).
-	 *
-	 * Replaces `setWatermarkMonotonic`, which could express only one boundary.
-	 * It is a deliberate break rather than an addition: a driver that kept the
-	 * old method and silently ignored a `mode` argument would answer every
-	 * sessions-only stamp by revoking the subject's grants, which is precisely
-	 * the operation the caller asked not to perform.
+	 * one key, monotonically, and retain the record for as long as either
+	 * needs (ADR 2026-09-17-federation-grants-offline-delegation, D13).
 	 *
 	 * - `mode: "all"` advances both boundaries to `max(existing, beforeMs)`,
-	 *   each taken independently. This is `revokeBefore`, and it is what every
-	 *   caller written before #593 means.
+	 *   each taken independently. This is `revokeBefore`.
 	 * - `mode: "sessions"` advances the sessions boundary alone and leaves the
 	 *   grants boundary exactly as it was, including absent.
 	 *
 	 * The retained expiry is the largest of the key's current expiry, the
 	 * caller's `expiresAtMs`, and — when a grants boundary is in force — that
-	 * boundary plus `grantRetentionMs`. A key with no expiry keeps none.
-	 *
-	 * An **expired** key is absent, so the guard does not resurrect a lapsed
+	 * boundary plus `grantRetentionMs`. A key with no expiry keeps none. An
+	 * **expired** key is absent, so the guard does not resurrect a lapsed
 	 * record's larger values.
 	 *
 	 * Resolves with the stored value, exactly as written.
@@ -446,66 +363,52 @@ export interface SubjectRevocationClient {
 // --- FederationTokenStoreClient --------------------------------------------
 
 /**
- * Backing client for FederationTokenStore adapters. Declares `get`, `set`
- * (two overloads: PX form, and PX+NX form for atomic insert-only),
- * single-key `del`, variadic `unlink` for the batched removal in
- * `removeBySid`, the SET primitives backing the per-session key index
- * (`sAddWithTtl` / `sRem` / `sScanIterator`), `scanIterator` for the legacy
- * keyspace-scan migration fallback, and `compareAndDelete` for atomic
+ * Backing client for FederationTokenStore adapters: `get`, `set` (PX form,
+ * always `"OK"`; PX+NX form for atomic insert-only, `null` when the key
+ * already existed), single-key `del`, variadic `unlink` for the batched
+ * removal in `removeBySid`, the SET primitives backing the per-session key
+ * index (`sAddWithTtl` / `sRem` / `sScanIterator`), `scanIterator` for the
+ * legacy keyspace-scan migration fallback, and `compareAndDelete` for atomic
  * advisory-lock release.
- *
- * The plain-PX `set` overload always succeeds with `"OK"` per Redis
- * `SET key value PX ms` protocol; the PX+NX overload returns `"OK"` on
- * insert or `null` when the key already existed.
  */
 export interface FederationTokenStoreClient {
 	get(key: string): Promise<string | null>;
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	/**
-	 * Remove one key (Redis `DEL`).
-	 *
-	 * Single-key by signature, not just by convention: the two callers left —
-	 * `delete(sid, name)` and the corrupt-envelope self-heal in `get` — each
-	 * remove exactly one small string, where `DEL`'s inline free costs nothing.
-	 * Everything that removes more than one key at a time goes through `unlink`
-	 * below. A variadic `del` would leave the choice open at each call site,
-	 * which is how the batched removal came to block the shared connection in
-	 * the first place (#291).
+	 * Remove one key (Redis `DEL`). Single-key by signature, not just by
+	 * convention: its callers — `delete(sid, name)` and the corrupt-envelope
+	 * self-heal in `get` — each remove one small string, where `DEL`'s inline
+	 * free costs nothing, and anything removing more goes through `unlink`. A
+	 * variadic `del` would leave that choice open at each call site.
 	 */
 	del(key: string): Promise<number>;
 	/**
 	 * Remove `keys`, reclaiming their memory on a background thread (Redis
-	 * `UNLINK`).
-	 *
-	 * `removeBySid` deletes a whole session's federation records at once, on
-	 * the connection every other adapter in this package shares. `DEL` frees
-	 * every value inline, so that batch is time the server spends serving
-	 * nobody — a latency spike on an end-user logout, paid by every other
-	 * caller on the socket. `UNLINK` returns as soon as the keys are
-	 * unreferenced.
+	 * `UNLINK`). `removeBySid` deletes a whole session's federation records at
+	 * once, on the connection every adapter in this package shares; `DEL`
+	 * would free every value inline — a latency spike on an end-user logout,
+	 * paid by every other caller on the socket.
 	 */
 	unlink(...keys: string[]): Promise<number>;
 	/**
 	 * Add `member` to the SET at `key` and ensure the key expires no earlier
 	 * than `ttlMs` from now — **atomically**, as one indivisible operation.
 	 *
-	 * The pair must not be separable, for the reason `RateLimiterClient`
-	 * documents at length below: a process death between the add and the
-	 * expiry leaves the key with **no TTL at all**, and this key is a session's
-	 * federation index — a persistent one outlives the session it describes and
-	 * accumulates forever.
+	 * The pair must not be separable (see `RateLimiterClient`): a process death
+	 * between the add and the expiry leaves this session's federation index
+	 * with **no TTL at all**, outliving the session and accumulating forever.
 	 *
 	 * Required expiry behaviour, matching the `PEXPIRE … NX` + `PEXPIRE … GT`
-	 * pair the sid-keyed session adapters use (D-10):
-	 *   - key has no TTL → set it (first-write bootstrap; a bare `GT` no-ops
-	 *     here, because Redis treats a non-volatile key as infinite-TTL)
+	 * pair the sid-keyed session adapters use:
+	 *   - key has no TTL → set it (a bare `GT` no-ops here, because Redis
+	 *     treats a non-volatile key as infinite-TTL)
 	 *   - key has a nearer TTL → raise it
 	 *   - key has a further TTL → leave it alone
 	 *
-	 * The index must outlive every envelope it points at, and every envelope
-	 * write resets that envelope's expiry to `ttlMs` from now, so the newest
-	 * write always carries the furthest deadline.
+	 * The index must outlive every envelope it points at; every envelope write
+	 * resets that envelope's expiry to `ttlMs` from now, so the newest write
+	 * always carries the furthest deadline.
 	 *
 	 * @param ttlMs Relative expiry in milliseconds — the store's configured
 	 *   TTL, not the access token's expiry.
@@ -527,15 +430,13 @@ export interface FederationTokenStoreClient {
 	 * Atomically compare the value stored at `key` to `expectedValue` and
 	 * delete the key only on match.
 	 *
-	 * This is the only safe lock-release primitive: a plain `del(key)` after a
-	 * separate `get(key)` has a race window between the two commands during
-	 * which a TTL-expired holder can evict a freshly-acquired lock owned by
-	 * another caller. Implementations MUST use a server-side atomic mechanism
-	 * — Lua `EVAL` on Redis standalone / Sentinel, or a transaction-equivalent
-	 * primitive on Cluster-mode deployments where `EVAL` is disabled.
-	 *
-	 * Built-in `makeIoredisClients()` implements this via a Lua compare-and-
-	 * delete script with `EVALSHA` caching and `EVAL` fallback on `NOSCRIPT`.
+	 * The only safe lock-release primitive: a `get(key)` then a `del(key)`
+	 * leaves a window in which a TTL-expired holder can evict a lock another
+	 * caller has just acquired. Implementations MUST use a server-side atomic
+	 * mechanism — Lua `EVAL` on Redis standalone / Sentinel, or a
+	 * transaction-equivalent primitive on Cluster deployments where `EVAL` is
+	 * disabled. `makeIoredisClients()` uses a Lua compare-and-delete script
+	 * with `EVALSHA` caching and `EVAL` fallback on `NOSCRIPT`.
 	 *
 	 * @param key - The Redis key to check and conditionally delete.
 	 * @param expectedValue - The value the caller expects to find at `key`.
@@ -549,26 +450,17 @@ export interface FederationTokenStoreClient {
 // --- RateLimiterClient -----------------------------------------------------
 
 /**
- * Backing client for RateLimiter adapters. Declares one method, because the
- * increment and its expiry have to happen together (#269).
- *
- * This used to be `incr` + `expire`, with the limiter calling `expire` only
- * when `incr` returned 1. A process death or an `expire` error in between left
- * the key with **no TTL at all**, so it never reset: every later window saw a
- * count above the limit and that key's client was 429'd permanently. The
- * `failMode` policy could not save it either — the check itself succeeded, it
- * just kept answering "denied".
- *
- * Collapsing the pair into one method moves atomicity from the caller's
- * discipline into the contract, where an implementation cannot get it wrong by
- * omission.
+ * Backing client for RateLimiter adapters. One method, because the increment
+ * and its expiry have to happen together: with a separate `expire`, a process
+ * death or an `expire` error in between leaves the key with **no TTL at
+ * all**, so it never resets and that key's client is 429'd permanently — and
+ * `failMode` cannot help, since the check itself succeeds. One method puts
+ * atomicity in the contract, where an implementation cannot omit it.
  */
 export interface RateLimiterClient {
 	/**
 	 * Increment `key`'s counter and return the new value, ensuring the key
-	 * carries a TTL — **atomically**, as one indivisible operation.
-	 *
-	 * Required behaviour:
+	 * carries a TTL — **atomically**, as one indivisible operation:
 	 *
 	 *   - increment the counter, creating the key at 1 when absent
 	 *   - if the key has no expiry, set it to `ttlSeconds`
@@ -577,12 +469,10 @@ export interface RateLimiterClient {
 	 *     stream of traffic hold a counter open indefinitely
 	 *   - return the post-increment count
 	 *
-	 * Setting the expiry when it is *missing* rather than only when the count
-	 * is 1 is what repairs a key already stranded without one — a count-based
-	 * guard never fires for such a key, because its count never returns to 1.
-	 *
-	 * Lua is the obvious implementation (see `makeIoredisClients`) but is not
-	 * required; anything indivisible satisfies the contract.
+	 * Setting the expiry when it is *missing*, rather than when the count is 1,
+	 * repairs a key already stranded without one, whose count never returns to
+	 * 1. Lua is the obvious implementation (see `makeIoredisClients`);
+	 * anything indivisible satisfies the contract.
 	 *
 	 * @param ttlSeconds Window length. Always a positive integer — callers
 	 *   reject non-positive specs, because `EXPIRE key 0` deletes the key and
@@ -591,17 +481,14 @@ export interface RateLimiterClient {
 	incrementWithTtl(key: string, ttlSeconds: number): Promise<number>;
 
 	/**
-	 * `incrementWithTtl`, also reporting the key's remaining window (#458).
-	 *
-	 * Same required behaviour, plus: return the counter key's `PTTL` after
-	 * the increment, read in the same indivisible step. The limiter turns it
-	 * into `RateLimitDecision.resetAt`, and the guard turns that into the
-	 * `Retry-After` on a 429 — which behind Redis was missing altogether,
-	 * while the memory adapter had it.
+	 * `incrementWithTtl`, also returning the counter key's `PTTL` after the
+	 * increment, read in the same indivisible step. The limiter turns it into
+	 * `RateLimitDecision.resetAt`, and the guard turns that into the
+	 * `Retry-After` on a 429.
 	 *
 	 * Optional so a custom client written against the one-method contract
 	 * keeps compiling and working; a limiter given such a client reports no
-	 * reset time, which is exactly what it reported before.
+	 * reset time.
 	 */
 	incrementWithTtlAndPttl?(key: string, ttlSeconds: number): Promise<RateLimitIncrement>;
 }
@@ -617,15 +504,11 @@ export interface RateLimitIncrement {
 // --- CodeRepositoryClient --------------------------------------------------
 
 /**
- * Backing client for CodeRepository adapters. Declares only the four Redis
- * commands `RedisCodeRepository` consumes: `set` with PX expiry (always
- * succeeds with `"OK"`), unconditional `get`, atomic `getDel` (Redis 6.2+),
- * and unconditional `del`.
- *
- * Per OR-9 (Wave 5d). The repository is rewritten in v0.5.1 to consume an
- * externally-provided typed wrapper instead of constructing its own
- * node-redis client; aligns with the per-purpose client convention
- * established by D-2 v2 and consumed via `bootstrapComponents`.
+ * Backing client for CodeRepository adapters: the four Redis commands
+ * `RedisCodeRepository` consumes — `set` with PX expiry (always `"OK"`),
+ * unconditional `get`, atomic `getDel` (Redis 6.2+), and unconditional
+ * `del`. The repository consumes this externally provided wrapper (via
+ * `bootstrapComponents`) instead of constructing its own client.
  */
 export interface CodeRepositoryClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
@@ -634,7 +517,7 @@ export interface CodeRepositoryClient {
 	del(key: string): Promise<number>;
 }
 
-// --- DeviceCodeStoreClient (#433) ------------------------------------------
+// --- DeviceCodeStoreClient -------------------------------------------------
 
 /**
  * Where one device authorization lives: `codeKeyPrefix + deviceCode` holds
@@ -727,19 +610,16 @@ export type DeviceCodePollReply =
 	| { readonly kind: "approved"; readonly fields: DeviceCodeRecordFields };
 
 /**
- * Backing client for the `DeviceCodeStore` adapter (#433).
+ * Backing client for the `DeviceCodeStore` adapter.
  *
- * Five semantic operations rather than a raw `eval`, the shape
- * {@link RateLimiterClient} and {@link SubjectSessionIndexClient} use: the
- * port's contract is that `create`, `approve`/`deny` and `poll` are
- * **indivisible**, and a contract expressed as the Redis commands to issue
- * would leave that indivisibility to the caller's discipline. Lua is the
- * obvious implementation (see `makeIoredisClients`) but not required —
- * anything atomic that reads and writes the pair satisfies this.
- *
- * Each operation says what it must guarantee. The one that matters most is
- * `poll`: as `HGETALL` then `DEL`, two concurrent polls both observe
- * `approved`, and one human approval becomes two access tokens.
+ * Semantic operations rather than a raw `eval`, as {@link RateLimiterClient}
+ * and {@link SubjectSessionIndexClient}: `create`, `approve`/`deny` and
+ * `poll` must be **indivisible**, and a contract expressed as Redis commands
+ * would leave that to the caller's discipline. Lua is the obvious
+ * implementation (see `makeIoredisClients`) but not required — anything
+ * atomic that reads and writes the pair satisfies this. `poll` matters most:
+ * as `HGETALL` then `DEL`, two concurrent polls both observe `approved`, and
+ * one human approval becomes two access tokens.
  */
 export interface DeviceCodeStoreClient {
 	/**
@@ -782,10 +662,9 @@ export interface DeviceCodeStoreClient {
 	 * Required behaviour, in this order:
 	 *
 	 *   - absent → `not_found`
-	 *   - `expiresAtMs <= nowMs` → `expired`, and the pair is deleted. This is
-	 *     measured against the caller's clock, not the key's TTL: the port's
-	 *     contract is the timestamp, and a record still inside its TTL must
-	 *     answer `expired` once the timestamp has passed.
+	 *   - `expiresAtMs <= nowMs` → `expired`, and the pair is deleted. Measured
+	 *     against the caller's clock, not the key's TTL: a record still inside
+	 *     its TTL must answer `expired` once the timestamp has passed.
 	 *   - polled within `intervalSeconds` of the previous poll → `slow_down`,
 	 *     with `intervalSeconds` grown by `slowDownIncrementSeconds` **and
 	 *     written back**, so the next gate measures against the grown value
@@ -806,7 +685,7 @@ export interface DeviceCodeStoreClient {
 	remove(keys: DeviceCodeKeyspace, deviceCode: string): Promise<void>;
 }
 
-// --- ConsentStoreClient (#561) ---------------------------------------------
+// --- ConsentStoreClient ----------------------------------------------------
 
 /**
  * A consent record as it lives in Redis: one hash per (`sub`, `clientId`),
@@ -826,7 +705,7 @@ export interface ConsentRecordFields {
 	readonly grantedAt: string;
 	/**
 	 * Epoch milliseconds; `undefined` when the hash holds none — until revoked.
-	 * A required key (#626): a client whose `find` forgot to pass the field on
+	 * A required key: a client whose `find` forgot to pass the field on
 	 * would have the adapter read a consent meant to lapse as one until revoked
 	 * — unless, as `makeIoredisClients`' script does, `find` already refuses a
 	 * record past its expiry.
@@ -843,7 +722,7 @@ export interface GrantConsentInput {
 	/**
 	 * The new record's expiry. `undefined`, the record is until revoked and the
 	 * key carries **no** TTL afterwards — whatever an earlier grant set is
-	 * removed. A required key (#626): a store that forgot to pass it would
+	 * removed. A required key: a store that forgot to pass it would
 	 * record every consent until revoked.
 	 */
 	readonly expiry:
@@ -861,17 +740,15 @@ export interface GrantConsentInput {
 }
 
 /**
- * Backing client for the `ConsentStore` adapter (#561).
+ * Backing client for the `ConsentStore` adapter.
  *
- * Semantic operations rather than commands, the shape
- * {@link DeviceCodeStoreClient} uses, because `grant` is the port's union:
- * as `HGET` then `HSET` from the client, two browsers consenting to
- * different scopes at once each write back what they read, and one grant is
- * lost. Lua is the obvious implementation (see `makeIoredisClients`) but not
- * required — anything indivisible over the one key satisfies this.
- *
- * Every operation touches exactly the one key it is handed, so this client
- * needs no hash tag to run on Cluster.
+ * Semantic operations rather than commands, as {@link DeviceCodeStoreClient},
+ * because `grant` is the port's union: as `HGET` then `HSET` from the client,
+ * two browsers consenting to different scopes at once each write back what
+ * they read, and one grant is lost. Lua is the obvious implementation (see
+ * `makeIoredisClients`) but anything indivisible over the one key satisfies
+ * this. Every operation touches exactly the one key it is handed, so this
+ * client needs no hash tag to run on Cluster.
  */
 export interface ConsentStoreClient {
 	/**
@@ -887,15 +764,16 @@ export interface ConsentStoreClient {
 	 * union of `input.scopes` and those of the record already there — only if
 	 * that record is still live at `input.nowMs` and well-formed (`scopes` a
 	 * JSON array of strings, `grantedAt` a number); an expired or corrupt one
-	 * contributes nothing, as `find` reports it absent. `grantedAt` and the expiry are the new record's, and so is the
-	 * key's TTL: set from `expiry.ttlMs`, or removed when there is no expiry.
+	 * contributes nothing, as `find` reports it absent. `grantedAt` and the
+	 * expiry are the new record's, and so is the key's TTL: set from
+	 * `expiry.ttlMs`, or removed when there is no expiry.
 	 */
 	grant(key: string, input: GrantConsentInput): Promise<void>;
 	/** Remove the record. Resolves whether there was one. */
 	revoke(key: string): Promise<boolean>;
 }
 
-// --- PendingConsentStoreClient (#561) --------------------------------------
+// --- PendingConsentStoreClient ---------------------------------------------
 
 /**
  * Where parked consent requests live: `recordKeyPrefix + challenge` holds a
@@ -935,7 +813,7 @@ export interface ParkPendingConsentInput {
 }
 
 /**
- * Backing client for the `PendingConsentStore` adapter (#561).
+ * Backing client for the `PendingConsentStore` adapter.
  *
  * Semantic operations, for the reason {@link DeviceCodeStoreClient} gives:
  * `consume` is the port's reason to exist — as a `GET` then a `DEL`, two
@@ -980,28 +858,20 @@ export interface PendingConsentStoreClient {
 	discard(keys: PendingConsentKeyspace, challenge: string, record: string): Promise<boolean>;
 }
 
-// ---------------------------------------------------------------------------
-// ComponentMap augmentations: backing-client slots consumed by redis adapters.
-//
-// These augmentations are visible to any TypeScript consumer that imports
-// from `@o3co/auth-provider-redis`. Consumers wiring redis backends via
-// `bootstrapComponents` get the slot types automatically.
-// ---------------------------------------------------------------------------
-
-// --- FederationGrantStoreClient (#593) -------------------------------------
+// --- FederationGrantStoreClient -------------------------------------------
 
 /**
  * A federation grant as it lives in Redis: one HASH per grant, every field a
- * string, beside one STRING holding the sealed credential (#593, D16). The
- * field names are part of the contract, because the scripts read them by name.
+ * string, beside one STRING holding the sealed credential (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D16). The field names are
+ * part of the contract, because the scripts read them by name.
  *
- * Two fields are arithmetic rather than record: `retentionMs` is the
- * tombstone retention as it was when the grant was created, and `expiresAtMs`
- * repeats the authorization's expiry outside the authenticated text. They
- * decide what Redis reclaims and what a write may touch — never what a caller
- * is told. Every answer is judged on the authenticated text, so a `expiresAtMs`
- * someone rewrote in the keyspace can make a key linger; it cannot make a
- * credential be disclosed past the expiry the upstream consented to.
+ * Two fields are arithmetic rather than record: `retentionMs` (the tombstone
+ * retention when the grant was created) and `expiresAtMs` (the
+ * authorization's expiry, outside the authenticated text). They decide what
+ * Redis reclaims and what a write may touch — never what a caller is told,
+ * which is judged on the authenticated text; a rewritten `expiresAtMs` can
+ * make a key linger, not disclose a credential past the consented expiry.
  */
 export interface FederationGrantHashFields {
 	/** The layout's own version, so a later one can be told apart rather than misread. */
@@ -1099,15 +969,12 @@ export interface NoteFederationGrantRefreshFailureInput {
 	readonly kind: string;
 	readonly rowMs: number;
 	/**
-	 * `undefined` when the upstream gave no `Retry-After`. A required key (#626),
-	 * as `upstreamCode` is: a store that forgot to pass one would leave a
+	 * `undefined` when the upstream gave no `Retry-After`. A required key, as
+	 * `upstreamCode` is: a store that forgot to pass one would leave a
 	 * `rate_limited` stamp with the default backoff where the upstream's
 	 * `Retry-After` was longer (both held to the ceiling), or lose the code
-	 * that says the user has to come back.
-	 *
-	 * Both keys are always present now, so a client tells "none" by the value
-	 * (`=== undefined`), as `makeIoredisClients` does — not by whether the key
-	 * is there.
+	 * that says the user has to come back. A client tells "none" by the value
+	 * (`=== undefined`), as `makeIoredisClients` does, not by the key.
 	 */
 	readonly retryAfterSeconds: number | undefined;
 	/** For `rejected`: the upstream's error code. `undefined` otherwise. */
@@ -1122,19 +989,18 @@ export interface FederationGrantSnapshot {
 }
 
 /**
- * The indivisible steps the Redis federation grant store is built from
- * (#593, D16). Every method here is one round trip, and every write is one
- * script: a guard evaluated in the client and a write sent after it would let
- * a concurrent activation, refresh or revocation land in between.
+ * The indivisible steps the Redis federation grant store is built from.
+ * Every method here is one round trip, and every write is one script: a
+ * guard evaluated in the client and a write sent after it would let a
+ * concurrent activation, refresh or revocation land in between.
  *
- * A refused write says `null` and nothing else. The record may change again
- * before the caller looks, so the port has it re-read and re-evaluated (D2),
- * and a reason here would oblige two adapters to agree on which precondition
+ * A refused write says `null` and nothing else: the record may change again
+ * before the caller looks, so the port has it re-read and re-evaluated, and
+ * a reason here would oblige two adapters to agree on which precondition
  * wins when several fail at once.
  *
- * Keys are passed in whole rather than built here: the store owns the layout,
- * and a script that discovered key names inside Lua would not be safe to run
- * on a Cluster.
+ * Keys are passed in whole: the store owns the layout, and a script that
+ * discovered key names inside Lua would not be safe to run on a Cluster.
  */
 export interface FederationGrantStoreClient {
 	/**
@@ -1213,7 +1079,7 @@ export interface FederationGrantStoreClient {
 	): Promise<FederationGrantHashFields | null>;
 	/**
 	 * Stamps a failed refresh on an `active` grant at `expectedVersion`,
-	 * counting the stamps in a row, and bumps no version (D12). The version is
+	 * counting the stamps in a row, and bumps no version. The version is
 	 * still compared: a failure that outlived its refresh must not install a
 	 * backoff over a credential written since. Never dated back, and an equal
 	 * instant counts onward.
@@ -1252,7 +1118,7 @@ export interface FederationGrantStoreClient {
 }
 
 /**
- * What an intent admission answered (#593, D16, slice 6). `unchanged` is the
+ * What an intent admission answered. `unchanged` is the
  * retry of a write whose answer the caller lost: the same record, already
  * there, its deadline untouched and its place against the bound not taken
  * twice.
@@ -1270,20 +1136,18 @@ export interface FederationGrantConsentAnswered {
 }
 
 /**
- * Vendor-facing half of acquisition's records (#593, D16, slice 6): semantic
- * operations rather than commands, because each one is a single guarded script.
+ * Vendor-facing half of acquisition's records: semantic operations rather
+ * than commands, because each one is a single guarded script.
  *
  * Every key one of these touches is derived inside the script from `prefix`,
- * which ends in the constant `{intents}` hash tag — so a script may reach the
- * consent an intent points at, or the transaction under a stored state, without
- * the caller naming a key it does not know yet, and every key it reaches is in
- * the same Cluster slot. Nothing here spans this keyspace and a grant's
- * (`fg:{<id>}:…`): supersession is enforced by the grant's own current-intent
- * pointer, and core orders the two writes.
+ * which ends in the constant `{intents}` hash tag, so a script may reach the
+ * consent an intent points at, or the transaction under a stored state,
+ * without the caller naming a key it does not know yet, all in one Cluster
+ * slot. Nothing here spans this keyspace and a grant's (`fg:{<id>}:…`).
  *
  * The records travel as text this package's codec produced. A driver neither
- * reads nor writes their fields; what the scripts compare are the flat fields
- * beside them — a deadline, a binding, a connection, a pair — so that no script
+ * reads nor writes their fields; the scripts compare only the flat fields
+ * beside them — a deadline, a binding, a connection, a pair — so no script
  * has to parse JSON to decide anything.
  */
 export interface FederationGrantIntentStoreClient {
@@ -1365,13 +1229,13 @@ export interface FederationGrantIntentStoreClient {
 	finishIntent(prefix: string, handle: string, nowMs: number): Promise<void>;
 }
 
-// --- MfaFactorStoreClient (the MFA ADR's D7) --------------------------------
+// --- MfaFactorStoreClient --------------------------------------------------
 
 /**
  * What a Redis server says about keeping what it is written — read at boot
- * by the two MFA store modules (the MFA ADR's D12). Each part is `undefined`
- * when it could not be read: the server refused the question (`refusal`), or
- * answered without the value.
+ * by the two MFA store modules (ADR 2026-09-25-multi-factor-authentication,
+ * D12). Each part is `undefined` when it could not be read: the server
+ * refused the question (`refusal`), or answered without the value.
  */
 export interface RedisDurability {
 	/** `INFO memory`'s `maxmemory_policy`, or `CONFIG GET maxmemory-policy` where INFO does not say. */
@@ -1398,20 +1262,19 @@ export interface MfaFactorRecordUpdateInput {
 }
 
 /**
- * Backing client for the `MfaFactorStore` adapter (the MFA ADR's D7): one
- * hash per subject, a field per factor.
+ * Backing client for the `MfaFactorStore` adapter (ADR
+ * 2026-09-25-multi-factor-authentication, D7): one hash per subject, a field
+ * per factor.
  *
  * A factor's value is three lines — `<version>\n<fixed>\n<mutable>` — where
  * `<version>` is decimal text and `<fixed>` and `<mutable>` are one line of
- * JSON each (`JSON.stringify` never writes a raw line feed). The split is what
- * lets `update` be one indivisible step that never decodes the JSON: it
- * compares the version as text, keeps the fixed part byte for byte, and
- * writes the new version and mutable part beside it. A script that decoded
- * and re-encoded the record would change it — `cjson` writes an empty array
- * as `{}` — so none does.
- *
- * Every operation touches the one key it is handed, so this client needs no
- * hash tag to run on Cluster.
+ * JSON each (`JSON.stringify` never writes a raw line feed). The split lets
+ * `update` be one indivisible step that never decodes the JSON: it compares
+ * the version as text, keeps the fixed part byte for byte, and writes the
+ * new version and mutable part beside it. A script that decoded and
+ * re-encoded the record would change it (`cjson` writes an empty array as
+ * `{}`), so none does. Every operation touches the one key it is handed, so
+ * this client needs no hash tag to run on Cluster.
  */
 export interface MfaFactorStoreClient {
 	/** Every field of the hash at `key` and its value (`HGETALL`); `{}` when there is none. */
@@ -1430,14 +1293,14 @@ export interface MfaFactorStoreClient {
 	/** Remove the whole hash (`DEL`). Idempotent. */
 	removeAll(key: string): Promise<void>;
 	/**
-	 * What the server says about keeping what it is written (D12). A reply
+	 * What the server says about keeping what it is written. A reply
 	 * that refuses a question leaves that part unread; any other reply error,
 	 * and a server that cannot be asked at all, rejects.
 	 */
 	durability(): Promise<RedisDurability>;
 }
 
-// --- MfaTransactionStoreClient (the MFA ADR's D8, D21, D25) -----------------
+// --- MfaTransactionStoreClient --------------------------------------------
 
 /** What an update writes, as the transaction's hash keeps it. */
 export interface MfaTransactionUpdateInput {
@@ -1457,7 +1320,7 @@ export interface MfaTransactionUpdateInput {
 }
 
 /**
- * A subject's lock-state keys (D21). Both carry the subject's hash tag: every
+ * A subject's lock-state keys. Both carry the subject's hash tag: every
  * operation on the state is one script over the two.
  */
 export interface MfaSubjectKeys {
@@ -1502,22 +1365,21 @@ export interface NoteMfaExemptSuccessInput {
 }
 
 /**
- * Backing client for the `MfaTransactionStore` adapter (the MFA ADR's D8,
- * D21, D25).
+ * Backing client for the `MfaTransactionStore` adapter (ADR
+ * 2026-09-25-multi-factor-authentication, D8, D21, D25).
  *
- * Semantic operations, for the reason the other stores' clients give: every
- * one the port calls atomic is a read, a decision and a write, which Redis
- * makes one step only as a script (see `makeIoredisClients`). A transaction's
- * hash is written and read by the adapter; the operations here read its
- * `version`, `incarnation`, `attempts`, `challenge` and `expiresAtMs` fields
- * by name, and never decode its `record`.
+ * Semantic operations: every one the port calls atomic is a read, a decision
+ * and a write, which Redis makes one step only as a script (see
+ * `makeIoredisClients`). The operations here read a transaction's `version`,
+ * `incarnation`, `attempts`, `challenge` and `expiresAtMs` fields by name,
+ * and never decode its `record`.
  *
- * The subject state's decisions — D21's backoff, weekly budget, hard limit
- * and trusted browsers — are the port's rules, judged on the caller's
- * `nowMs`; what is reclaimed is judged on the server's clock, never later
- * than a day after it stops counting (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). A
- * stored value an operation cannot read is refused with an error, never read
- * as a state that holds nothing.
+ * The subject state's decisions — backoff, weekly budget, hard limit and
+ * trusted browsers — are the port's rules, judged on the caller's `nowMs`;
+ * what is reclaimed is judged on the server's clock, never later than a day
+ * after it stops counting (`MFA_CLOCK_SKEW_ALLOWANCE_MS`). A stored value an
+ * operation cannot read is refused with an error, never read as a state that
+ * holds nothing.
  */
 export interface MfaTransactionStoreClient {
 	/**
@@ -1546,10 +1408,10 @@ export interface MfaTransactionStoreClient {
 	 * a count that is not a number — the transaction is deleted and the
 	 * attempts it had are answered with `ok: false`. No transaction, or one
 	 * gone at `nowMs` — at or past the deadline its `expiresAtMs` field holds
-	 * as decimal text, or holding none that is a finite number — `{ ok:
-	 * false, attempts: 0 }`, spending
-	 * nothing: the store's clock is the transaction's, whatever the server's
-	 * says, and the key is left to its deadline on the server's.
+	 * as decimal text, or holding none that is a finite number — is
+	 * `{ ok: false, attempts: 0 }`, spending nothing: the store's clock is the
+	 * transaction's, whatever the server's says, and the key is left to its
+	 * deadline on the server's.
 	 */
 	reserveAttempt(
 		key: string,
@@ -1564,31 +1426,36 @@ export interface MfaTransactionStoreClient {
 	takeChallenge(key: string, expectedVersion: string, nowMs: number): Promise<string | null>;
 	/** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
 	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
-	/** D21's `reserveSubjectAttempt`, one script over both keys. */
+	/** The port's `reserveSubjectAttempt`, one script over both keys. */
 	reserveSubjectAttempt(
 		keys: MfaSubjectKeys,
 		input: ReserveMfaSubjectAttemptInput,
 	): Promise<ReserveMfaSubjectAttemptReply>;
-	/** D21's `settleSubjectAttempt`, one script over both keys; a reservation not in flight changes nothing. */
+	/** The port's `settleSubjectAttempt`, one script over both keys; a reservation not in flight changes nothing. */
 	settleSubjectAttempt(
 		keys: MfaSubjectKeys,
 		reservation: string,
 		outcome: MfaSubjectAttemptOutcome,
 	): Promise<void>;
-	/** D21's `noteExemptSuccess`, one script over both keys. */
+	/** The port's `noteExemptSuccess`, one script over both keys. */
 	noteExemptSuccess(keys: MfaSubjectKeys, input: NoteMfaExemptSuccessInput): Promise<void>;
 	/** Remove both keys. */
 	clearSubjectState(keys: MfaSubjectKeys): Promise<void>;
-	/** Record the email-proof requirement (D25) at `key`, with no TTL. Idempotent. */
+	/** Record the email-proof requirement at `key`, with no TTL. Idempotent. */
 	requireEmailProof(key: string): Promise<void>;
 	/** Whether the requirement is recorded at `key`. */
 	emailProofRequired(key: string): Promise<boolean>;
 	/** Remove the requirement at `key` (`DEL`); resolves whether this call removed it. */
 	consumeEmailProof(key: string): Promise<boolean>;
-	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are (D12). */
+	/** As `MfaFactorStoreClient.durability`: the requirement must be kept as the factors are. */
 	durability(): Promise<RedisDurability>;
 }
 
+// ---------------------------------------------------------------------------
+// ComponentMap augmentations: backing-client slots consumed by redis adapters,
+// visible to any TypeScript consumer that imports from
+// `@o3co/auth-provider-redis`.
+// ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStoreClient?: ChallengeStoreClient;

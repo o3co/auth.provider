@@ -15,54 +15,29 @@
  */
 
 /**
- * Where work that outlives an answer is kept until a shutdown has waited for
- * it (#593, D12).
+ * Keeps work that outlives an answer until a shutdown has waited for it.
  *
- * `retrieveFederationGrantToken` takes a `background(work)` seam and hands it
- * everything it deliberately does not make a caller wait for: letting go of
- * the refresh lock, telling the audit sink what happened, recording a use, and
- * — when the caller was answered at the soft deadline — the refresh itself,
- * which goes on holding the lock until its result is persisted. Every one of
- * those is a write the upstream has already accepted. A process that exits
- * when the last HTTP response is flushed drops the rotated refresh token on
- * the floor, and the next request presents a credential the IdP has retired.
+ * `retrieveFederationGrantToken` hands its `background(work)` seam what it does
+ * not make a caller wait for: the refresh-lock release, the audit event, the use
+ * record and, when the caller was answered at the soft deadline, the refresh
+ * itself. Each is a write the upstream already accepted; a process that exits
+ * before it lands loses the rotated refresh token, and the next request presents
+ * a credential the IdP has retired.
  *
- * So this is one object per application, with three jobs:
+ * One registry per application: `register` tracks tails, `admit` tracks requests
+ * let in but not yet answered (their tails are not registered yet), and `drain`
+ * refuses new operations and waits until both are empty. The drain rechecks
+ * because settling work registers more work (a release, then its audit).
  *
- *  - **register** what may outlive an answer, which is core's seam;
- *  - **admit** the requests that have been let in but not answered, because
- *    core has not had the chance to register their tails yet, and an empty
- *    registry does not mean there is nothing to wait for;
- *  - **drain** — refuse new operations, then wait until both are empty.
+ * Not durable, no delivery guarantee, no SIGKILL protection, and it bounds
+ * nothing: the host's cleanup budget does (at least 45 seconds when this package
+ * is mounted; the standalone default is ten).
  *
- * The drain rechecks rather than awaiting one snapshot: finishing work
- * registers further work (a release, then the audit of what it released), so
- * a single `Promise.all` over the set as it stood returns while the tail of a
- * tail is still outstanding.
- *
- * What this is NOT: durable job execution, guaranteed audit delivery, or any
- * protection against SIGKILL. It bounds nothing by itself either — core bounds
- * its own waits, and an adapter whose read can hang needs its own I/O timeout.
- * The host's cleanup budget is what stops a pathological tail from holding a
- * shutdown open; a deployment mounting this package wants at least 45 seconds
- * of it, against a standalone default of ten.
- *
- * ### The one thing a drain cannot wait for
- *
- * Core deliberately keeps ONE thing out of this registry (D12): the wait for a
- * refresh lock that the call gave up on. That wait may never end, and what is
- * handed over here has to settle — so core watches it separately and hands
- * over the RELEASE only if the lock later arrives. When a store is slow enough
- * that the lock arrives after the drain has finished, the release is registered
- * into a registry nobody is waiting for any more.
- *
- * Measured by review, and worth being exact about: the answer was already sent
- * and nothing is lost. What is left behind is a refresh lock nobody released,
- * which stands for its `refreshLockTtlMs` (thirty seconds by default) — and
- * during that window every other replica's `/token` for that grant waits
- * `lockWaitMs` and answers `503 temporarily_unavailable/lock_timeout`. A
- * larger host cleanup allowance does not help, because the drain has already
- * returned. What helps is a store whose lock acquisition is bounded.
+ * A lock wait the call gave up on is kept out, because it may never settle; core
+ * registers only the release, if the lock arrives. If it arrives after the drain
+ * has finished, the lock stands for `refreshLockTtlMs` and every replica's
+ * `/token` for that grant answers `503 temporarily_unavailable/lock_timeout`
+ * meanwhile. Only a store whose lock acquisition is bounded avoids that.
  */
 
 /**
@@ -71,14 +46,10 @@
  */
 export interface FederationGrantBackground {
 	/**
-	 * Track `work` that may outlive the answer it belongs to. This is the
-	 * `background` seam of `RetrieveFederationGrantTokenDeps`.
-	 *
-	 * Accepted while closing, deliberately: the work a drain is waiting for is
-	 * exactly what registers the next piece of it. Accepted AFTER the drain has
-	 * finished too, where it is tracked and simply not waited for — an
-	 * abandoned lock that arrives late is the case, and refusing it there would
-	 * turn "not waited for" into "not released at all".
+	 * Track `work` that may outlive its answer: the `background` seam of
+	 * `RetrieveFederationGrantTokenDeps`. Accepted while closing (awaited work
+	 * registers the next piece) and after the drain (tracked, not awaited), so a
+	 * late-arriving abandoned lock is still released.
 	 */
 	register(work: Promise<void>): void;
 	/**
@@ -101,9 +72,10 @@ export interface FederationGrantBackground {
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		/**
-		 * Where work that outlives an answer is kept until a shutdown has
-		 * waited for it. One per application; see this file's header for why
-		 * it is a component rather than a `lifecycleRegistrar` callback.
+		 * Work that outlives an answer, kept until a shutdown has waited for it.
+		 * One per application. A component, because `AppHandle.dispose()` runs
+		 * component cleanups before `lifecycleRegistrar` callbacks, so the drain
+		 * finishes before an adapter closes the client a pending write needs.
 		 */
 		readonly federationGrantBackground: FederationGrantBackground;
 	}
@@ -113,29 +85,18 @@ declare module "@o3co/auth-provider-core" {
 const swallow = (): undefined => undefined;
 
 export function createFederationGrantBackground(): FederationGrantBackground {
-	/**
-	 * Both kinds of outstanding thing, as promises: registered work, and one
-	 * promise per admitted operation that its release resolves. Holding them
-	 * in one set is what lets the drain treat "a request that has not answered"
-	 * and "a write that has not landed" as the same question.
-	 */
+	/** Registered work plus one promise per admitted operation, resolved by its release. */
 	const pending = new Set<Promise<void>>();
 	let closing = false;
 	let draining: Promise<void> | undefined;
 
 	const track = (work: Promise<void>): void => {
-		// Neither outcome is this registry's to have an opinion about. Core
-		// promises what it hands over never rejects and reports its own
-		// failures through `report`; a hand-mounted handler has no such
-		// discipline, and the answer the tail belongs to was sent long ago, so
-		// failing the shutdown over it would be an AggregateError for something
-		// nobody is waiting for.
+		// Outcomes are ignored: core reports its own failures, and a rejection from a
+		// hand-mounted handler must not fail a shutdown over an answer already sent.
 		const entry = work.then(swallow, swallow);
 		pending.add(entry);
-		// For the process that never shuts down: a provider serving traffic
-		// registers a tail per refresh, and a set nothing is ever removed from
-		// is a leak. The drain does not depend on this — it forgets what it has
-		// awaited itself, for the reason given there.
+		// Without this a long-running process leaks one entry per refresh. The drain
+		// does not rely on it.
 		void entry.then(() => {
 			pending.delete(entry);
 		});
@@ -164,16 +125,9 @@ export function createFederationGrantBackground(): FederationGrantBackground {
 			if (draining !== undefined) return draining;
 			closing = true;
 			draining = (async () => {
-				// Take a batch, wait for it, forget it, and go again while
-				// anything new has arrived: see the file header for why one
-				// snapshot is not enough.
-				//
-				// The drain removes what it awaited rather than leaving that to
-				// `track`, so that it terminates on its own terms. A loop that
-				// re-reads a set nothing removes from would spin on the
-				// microtask queue for ever without ever yielding to a timer —
-				// a shutdown that hangs rather than fails, which is the worse
-				// of the two and the harder one to diagnose.
+				// Repeat until no new work arrived. The drain deletes what it awaited
+				// itself: re-reading a set nothing removes from would spin on the
+				// microtask queue for ever and hang the shutdown.
 				for (let batch = [...pending]; batch.length > 0; batch = [...pending]) {
 					await Promise.all(batch);
 					for (const entry of batch) pending.delete(entry);

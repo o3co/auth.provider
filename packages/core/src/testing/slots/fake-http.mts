@@ -16,16 +16,12 @@
 
 /**
  * The request and response the slot contract suites drive a component over,
- * without a server: the part of Express's a component of these slots is
- * held to. A request carries its headers (`headers`, `get`), its
- * own origin (`protocol`, `host`, `hostname`), a path, a parsed body,
- * and an express session — `session` with `regenerate` and `save` as
- * express-session has them, and `sessionID` — whose regenerations and saves
- * are counted. A response records `status`, `json` / `send` / `end`, the
- * headers `set` / `setHeader` / `header` / `append` / `vary` / `type`
- * wrote, `sendStatus`, each `cookie` it was given and each `clearCookie`. A
- * component that needs more of Express than this is outside the contracts.
- * Not on the testing entry.
+ * without a server: the part of Express a component of these slots is held
+ * to. A request carries headers, its own origin, a path, a parsed body and
+ * an express session (`regenerate`, `save`, `sessionID`) whose regenerations
+ * and saves are counted. A response records its status, body, headers and
+ * cookies. A component that needs more of Express than this is outside the
+ * contracts. Not on the testing entry.
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";

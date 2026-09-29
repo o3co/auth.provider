@@ -54,20 +54,15 @@ function entryFor(
 }
 
 /**
- * One module per OIDC instance (#524).
- *
- * Unlike the single-tenant Google/GitHub/Apple modules this is a factory:
- * a deployment brokering login to two issuers lists
- * `oidcFederationModule("okta")` and `oidcFederationModule("keycloak")`,
- * and each contributes `federations.<name>` (the provider, built at boot —
- * discovery included, so a failure refuses boot) and
- * `federationRedirectPolicies.<name>` from its entry in
+ * One module per OIDC instance, a factory unlike the single-tenant
+ * Google/GitHub/Apple modules: `oidcFederationModule("okta")` and
+ * `oidcFederationModule("keycloak")` each contribute `federations.<name>`
+ * (built at boot, discovery included, so a failure refuses boot) and
+ * `federationRedirectPolicies.<name>` from their entry in
  * `oidcFederationConfigs`. The name is the `:name` route segment and the
- * prefix of the identity handed to the Store (`<name>:<sub>`). The module is
- * named `federation-oidc-<name>`: kebab-case (#728) for a federation name of
- * lower-case letters, digits and hyphens; a name with an upper-case letter,
- * a dot or an underscore, which a federation name may carry, gives a module
- * name that is not.
+ * prefix of the identity handed to the Store (`<name>:<sub>`). The module
+ * name, `federation-oidc-<name>`, is kebab-case only when the federation name
+ * is lower-case letters, digits and hyphens.
  */
 export function oidcFederationModule(name: string): Module {
 	checkFederationName(name);
@@ -232,11 +227,10 @@ function readSection(name: string, slice: Slice): OidcProviderConfig {
  * The `oidcFederationConfigs` slot from the `federations` config section:
  * every enabled section whose `type` is `oidc`, flat or nested (the shapes
  * `extractFederationSection` accepts), checked field by field so a typo is a
- * boot refusal naming `federations.<name>.<field>` rather than a provider
- * running with one fewer setting than the operator wrote down. The map has
- * no prototype, and every name is checked before it becomes a key: a
- * section the config parser named `__proto__` is refused by name rather
- * than assigned through the prototype setter.
+ * boot refusal naming `federations.<name>.<field>`. The map has no prototype,
+ * and every name is checked before it becomes a key: a section named
+ * `__proto__` is refused by name rather than assigned through the prototype
+ * setter.
  */
 export function readOidcFederationConfigs(
 	federations: Record<string, unknown> | undefined,

@@ -19,13 +19,11 @@
  * `createApp` returns answers for an error a route let through.
  *
  * The OAuth, session and WebAuthn routers parse their bodies and have no
- * error handler of their own, and no module is obliged to catch everything.
- * Only the standalone template mounted a terminal handler after the router,
- * so a composition root that mounted `handle.router` alone answered a body
- * parser's refusal, and any error that escaped a route, with Express's final
- * handler: an HTML page, with the stack outside production, where V8's JSON
- * error quotes the body it could not parse. The router now ends in core's
- * own handler.
+ * error handler of their own, and no module is obliged to catch everything,
+ * so the router ends in core's own handler. A composition root that mounts
+ * `handle.router` alone must not fall through to Express's final handler: an
+ * HTML page, with the stack outside production, where V8's JSON error quotes
+ * the body it could not parse.
  */
 
 import express, { Router } from "express";

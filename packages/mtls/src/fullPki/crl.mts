@@ -15,146 +15,45 @@
  */
 
 /**
- * CRL retrieval, freshness and caching for `mode = "full-pki"`.
+ * CRL retrieval, verification, freshness and caching for `mode = "full-pki"`.
+ * `pkijs` is only handed CRLs; fetching (under `fetchGuard.mts`), parsing,
+ * checking and caching happen here. The engine is never given revocation
+ * material: it reads "no CRLs" as "not revoked", so unavailability is its own
+ * outcome and the caller applies `on-unavailable` to each certificate.
  *
- * `pkijs` is given CRLs; it does not go and get them. Everything between
- * "this certificate names a distribution point" and "here is a CRL this
- * issuer actually published" lives here: reading the extension, fetching
- * under the guards in `fetchGuard.mts`, parsing, **verifying the signature
- * against the issuing CA**, judging freshness, and caching so a busy token
- * endpoint does not re-fetch per request.
+ * Checks on a fetched CRL, in order:
+ * 1. Critical extensions, scope and signature algorithm. These judge only the
+ *    bytes' structure and can only refuse, so they are safe to remember on
+ *    unverified bytes (a pinned refusal is bounded like an injected 503).
+ *    They precede the signature because pkijs's `verify` answers `false` for
+ *    an unknown critical extension, indistinguishable from a forgery.
+ * 2. The signature, against the issuer's key; the issuer's `keyUsage`, when
+ *    present, must include `cRLSign` (RFC 5280 §6.3.3). Nothing is cached or
+ *    returned before it verifies: one forged CRL injected over plain http
+ *    would otherwise refuse every client until the entry expired.
+ *    `bad_signature` is never cached, so it pins neither refusal nor
+ *    acceptance.
+ * 3. Freshness (`nextUpdate`).
  *
- * ### Why the signature is checked here and not left to the engine
+ * Concurrent lookups of one URL share a fetch, and an unusable URL (except
+ * `bad_signature`) is remembered for `CRL_NEGATIVE_CACHE_TTL_MS`, so an outage
+ * costs one probe per window rather than one guarded fetch per request.
  *
- * The engine does verify a CRL's signature — but only when it is finally
- * consulted, which is after this module has already decided whether to cache
- * the bytes. A CRL that is cached first and verified later is a forged CRL
- * that stays in memory for up to `cache-ttl-seconds`: one injected response
- * over the plain-http transport most distribution points use would refuse
- * every client of that distribution point until the entry expired. So
- * nothing is stored, and nothing is returned, until the signature verifies
- * against the key of the certificate's issuer and that issuer's `keyUsage`
- * (when present) includes `cRLSign` (RFC 5280 §6.3.3). A failure is its own
- * outcome, `bad_signature`, and is deliberately never cached in either
- * direction: it must not pin a refusal, and it must not pin an acceptance.
+ * Partitioned, delta and indirect CRLs (`reasons`, `cRLIssuer`,
+ * `issuingDistributionPoint`, `deltaCRLIndicator`) are not implemented. pkijs
+ * accepts those extensions and then ignores them, reading a partial list as
+ * complete, so each is recognised and reported as unsupported. An unsupported
+ * distribution point is skipped, not fatal: a point without `reasons` covers
+ * every reason code (§4.2.1.13). A base CRL carrying `freshestCRL` is used as
+ * complete as of its `thisUpdate`; the delta is not fetched.
  *
- * ### One fetch per distribution point, not one per request
- *
- * A cache miss on a busy token endpoint is many requests missing at once,
- * and an outage is a miss on every request for as long as it lasts. Two
- * bounds keep that from becoming one guarded fetch per request, each holding
- * a connection for up to `fetch-timeout-ms`:
- *
- *  - concurrent lookups of the same URL share one in-flight fetch;
- *  - a URL that could not be used — unreachable, unparseable, serving a CRL
- *    that is stale or undated, or serving one this resolver does not process
- *    (an unsupported critical extension, a delta, a scoped CRL, a signature
- *    algorithm outside the policy) — is remembered as unavailable for
- *    `CRL_NEGATIVE_CACHE_TTL_MS`, so a stuck endpoint costs one probe per
- *    window rather than one per request. `bad_signature` is exempt, per the
- *    section above.
- *
- * The last group is why a CRL's extensions are inspected *before* its
- * signature (#447). pkijs's `verify` answers `false` for a critical extension
- * outside its own list — indistinguishable from a forged signature — and
- * `bad_signature` is never remembered, so a CA publishing such a CRL cost one
- * guarded fetch per request under both policies, with the window unable to
- * help. Inspecting first gives the outcome its own name. Remembering it on
- * bytes that have not been verified is safe for the same reason remembering
- * `unparseable` is: the decision depends only on the bytes' structure, and it
- * is only ever a decision *not* to use the CRL. Nothing an attacker injects
- * can pin an acceptance this way, and a pinned refusal is bounded by the
- * window exactly as an injected 503 already is.
- *
- * ### The algorithm policy applies to the CRL too (#470)
- *
- * `validate.mts` refuses a certificate signed with an algorithm outside
- * `signature-algorithms`; pkijs, asked to verify a CRL, accepts
- * `sha1WithRSAEncryption` and `ecdsa-with-SHA1` as readily as it accepts a
- * certificate's, so a SHA-1-signed CRL was believed about a certificate that
- * a SHA-1 signature would have refused. The CRL's `signatureAlgorithm` — the
- * field pkijs verifies with — is checked against the same policy, before the
- * signature itself, and the outcome is `algorithm_not_permitted`. It is
- * remembered for the negative window like `unsupported_critical_extension`,
- * not exempted like `bad_signature`: the decision is on the OID the bytes
- * name, not on whether they verify, so an injected response can pin at most
- * a bounded refusal, which an injected 503 already can; and the algorithm is
- * a property of the CA's own material, identical on every fetch until the
- * CA changes it, so not remembering it would cost one guarded fetch per
- * request under both policies — the pattern #447 closed. The issuer's key
- * size is not re-checked here: the issuer is on the validated path, and the
- * path pass has already held it to `min-rsa-key-bits`.
- *
- * ### What a CRL may say about its own scope
- *
- * RFC 5280 lets a CA split its revocation information: by reason code across
- * several distribution points (`reasons` on the point, `onlySomeReasons` on
- * the CRL), by certificate type or by distribution point
- * (`issuingDistributionPoint`), into a base CRL plus deltas
- * (`deltaCRLIndicator`), or by delegating publication to another issuer
- * (`cRLIssuer`, `indirectCRL`). pkijs accepts every one of those extensions
- * as well-known and then ignores them — `isCertificateRevoked` compares
- * serial numbers — so a CRL saying "user certificates only" or "changes since
- * base 41" would be read as the complete list for any certificate at all.
- * None of them is implemented here. Each is *recognised* and reported as
- * unsupported, so that `on-unavailable` applies, rather than half-honoured
- * (#446). A `freshestCRL` pointer is the one exception: the base CRL that
- * carries it is complete as of its own `thisUpdate`, so it is used as such
- * and the delta it points to is simply not fetched.
- *
- * An unsupported *distribution point* is skipped, not fatal. A point without
- * `reasons` covers every reason code (§4.2.1.13), so a plain HTTP point
- * beside a partitioned or indirect one is a complete answer by itself; the
- * unsupported point is reported alongside the CRLs the usable points
- * yielded, exactly as a point that was down is, and the caller's policy
- * decides whether the gap matters. Only a certificate with no usable point
- * left is unavailable for it (#469).
- *
- * ### The failure that matters
- *
- * `pkijs` skips its revocation block entirely when it is handed no CRLs. So
- * "the CRL server was down" and "the certificate is not revoked" arrive at
- * the engine as the same input and produce the same verdict: valid. Whether
- * that is acceptable is an operator's decision about their threat model, not
- * something a library gets to make silently — so this module reports
- * unavailability as its own outcome, and the caller applies the configured
- * `on-unavailable` policy to each certificate on the path itself; the engine
- * is never handed revocation material at all. A certificate may also name
- * several distribution points; the lookup reports the ones it could not use
- * alongside the CRLs it did obtain, and leaves it to the caller whether a
- * partial answer is an answer — under `"reject"` it is not.
- *
- * ### What an unavailability says
- *
- * A `reason` from `CrlUnavailableReason` and a `detail` in this module's own
- * words. When a library threw on the way — pkijs parsing the CRL, WebCrypto
- * checking its signature, the platform fetch — its error rides beside them as
- * `cause`, as it was thrown, and never as text in `detail`: the library's
- * message is its reading of bytes a CA or a network path handed over, and a
- * log line carries only core's `loggableError` projection of it. Where
- * several points are summed up in one lookup, `reason` and `cause` are the
- * last failure's, together.
- *
- * ### An outage, or the certificate's shape
- *
- * An unavailability is marked `outage` when the source did not deliver a
- * usable answer: it could not be fetched for a reason of its own
- * (`isSourceFailure` in `fetchGuard.mts`: unreachable, timed out, an HTTP
- * error, a redirect, an answer too large or of the wrong type), it answered
- * with bytes that are not a CRL (`unparseable`), or its list is out of date
- * (`stale`). Each is a fault of the source or of this server's configuration,
- * never a verdict on the certificate, and a client cannot cause any. Some
- * clear on retry — a refused connection, a timeout, a 5xx, a truncated
- * answer, a list the CA has not yet republished; some need an operator — a
- * 404 or 410 (the CA moved or dropped its list), an answer larger than
- * `max-response-bytes`, a redirect (never followed), an answer of the wrong
- * media type (a proxy or portal in the way). Everything else — no or an
- * unsupported distribution point, a URL the guard will not fetch, a CRL of a
- * shape or algorithm this resolver does not accept, a signature that does not
- * verify — is not. A lookup that sums several points up is an outage only
- * when every point it could not use was one. The validator answers an outage
- * under `on-unavailable = "reject"` as the server's (503), and anything else
- * as a verdict on the certificate.
+ * An unavailability has a stable `reason`, a `detail` in this module's own
+ * words, and any library error as `cause` — never as text in `detail`, since
+ * it describes bytes a CA or network path supplied. It is marked `outage` when
+ * the source failed (`isSourceFailure`, `unparseable`, `stale`) rather than
+ * the certificate's shape; a lookup over several points is an outage only if
+ * every failed point was. Under `on-unavailable = "reject"` the validator
+ * answers an outage as 503 and anything else as a verdict on the certificate.
  */
 
 import { createHash } from "node:crypto";
@@ -184,15 +83,10 @@ const GENERAL_NAME_URI = 6;
 
 /**
  * Why a certificate's revocation status could not be determined. Values are
- * stable — audit logs read them.
- *
- * The `unsupported_*` reasons are shapes RFC 5280 permits and this resolver
- * recognises but does not implement: a distribution point that partitions by
- * reason or names another issuer, a delta or scoped CRL, a critical extension
- * nothing here processes. Each is reported rather than read as authoritative
- * (#446, #447). `algorithm_not_permitted` is a CRL signed with an algorithm
- * outside `oauth.mtls.full-pki.signature-algorithms` — the same policy the
- * path is held to (#470).
+ * stable — audit logs read them. The `unsupported_*` reasons are shapes RFC
+ * 5280 permits that this resolver recognises but does not implement.
+ * `algorithm_not_permitted` is a CRL signed outside
+ * `oauth.mtls.full-pki.signature-algorithms`, the path's own policy.
  */
 export type CrlUnavailableReason =
 	| "no_distribution_point"
@@ -209,7 +103,7 @@ export type CrlUnavailableReason =
 /**
  * One distribution point that yielded no usable CRL, and why: a URI that was
  * tried and failed, or a point of a shape this resolver does not implement,
- * named by its first URI and never tried (#469).
+ * named by its first URI and never tried.
  */
 export interface CrlPointUnavailable {
 	readonly url: string;
@@ -227,10 +121,9 @@ export type CrlLookup =
 			readonly crls: readonly pkijs.CertificateRevocationList[];
 			/**
 			 * Distribution points that yielded no CRL — one entry per URI tried,
-			 * and one per unsupported point that was not — empty when every
-			 * point the certificate names was used. A lookup can be `ok` and
-			 * incomplete at once; whether that is an answer is the caller's
-			 * `on-unavailable` decision, not this module's (#446, #469).
+			 * and one per unsupported point — empty when every point was used.
+			 * A lookup can be `ok` and incomplete at once; whether that is an
+			 * answer is the caller's `on-unavailable` decision.
 			 */
 			readonly unavailable: readonly CrlPointUnavailable[];
 	  }
@@ -254,14 +147,10 @@ export const describeUnavailable = (points: readonly CrlPointUnavailable[]): str
 	points.map((point) => `${point.url}: ${point.reason} (${point.detail})`).join("; ");
 
 /**
- * How long a distribution point that could not be used is remembered as
- * unavailable, in milliseconds.
- *
- * Not a configuration knob, deliberately. The window exists to absorb a
- * burst — a cache expiry or an outage must not turn into one fetch per
- * request, each waiting up to `fetch-timeout-ms` on the token endpoint's
- * critical path — not to remember the outage: a CA that comes back must be
- * noticed in seconds, not in the hours `cache-ttl-seconds` is measured in.
+ * How long an unusable distribution point is remembered, in milliseconds.
+ * Not configurable: it absorbs a burst (no fetch per request on the token
+ * endpoint's critical path), and a CA that recovers must be noticed in
+ * seconds, not in the hours `cache-ttl-seconds` is measured in.
  */
 export const CRL_NEGATIVE_CACHE_TTL_MS = 30_000;
 
@@ -271,10 +160,9 @@ export type CrlDistributionPoints =
 			/** One entry per usable distribution point: that point's HTTP(S) URIs, in order. */
 			readonly points: readonly (readonly string[])[];
 			/**
-			 * Distribution points of a shape this resolver does not implement —
-			 * carrying `reasons` or `cRLIssuer` — one entry per point, never
-			 * fetched. Reported beside the usable points so the caller can
-			 * count them as gaps under `"reject"` (#469).
+			 * Distribution points carrying `reasons` or `cRLIssuer`, one entry per
+			 * point, never fetched. Reported beside the usable points so the
+			 * caller can count them as gaps under `"reject"`.
 			 */
 			readonly unsupported: readonly CrlPointUnavailable[];
 	  }
@@ -297,12 +185,10 @@ const httpUrls = (point: pkijs.DistributionPoint): readonly string[] => {
 };
 
 /**
- * Why a distribution point is one this resolver does not implement. With
- * `reasons`, no single CRL is the complete answer and the reasons-mask
- * bookkeeping of RFC 5280 §6.3.3 is not implemented; with `cRLIssuer`, the
- * CRL is signed by someone other than the certificate's issuer, and the
- * signature here is verified against the issuer only. Either read as complete
- * would be a partial or foreign list standing in for the whole (#446).
+ * Why a distribution point is unsupported. With `reasons`, no single CRL is
+ * the complete answer (RFC 5280 §6.3.3 reasons-mask bookkeeping is not
+ * implemented); with `cRLIssuer`, the CRL is signed by someone other than the
+ * certificate's issuer, the only key verified here.
  */
 const unsupportedPointDetail = (point: pkijs.DistributionPoint): string | null => {
 	if (point.reasons !== undefined) {
@@ -321,34 +207,18 @@ const unsupportedPointDetail = (point: pkijs.DistributionPoint): string | null =
 };
 
 /**
- * Read the distribution points a certificate advertises, one URI list per
- * usable point, plus the points this resolver does not implement.
+ * Read the distribution points a certificate advertises: one URI list per
+ * usable point, plus the unsupported points. Names within one point are
+ * alternatives for the same CRL (RFC 5280 §4.2.1.13); separate points are
+ * not, so a point is reported only when none of its names answered.
  *
- * The shape is kept rather than flattened because it carries meaning:
- * several names within one point are alternative ways to obtain the *same*
- * CRL (RFC 5280 §4.2.1.13), while separate points are not known to be. The
- * resolver tries a point's names until one answers, and reports a point none
- * of whose names did.
- *
- * Only absolute HTTP(S) URIs are kept. A point with none — an LDAP URI, a
- * directory name, a name relative to the issuer — is one this resolver
- * cannot consult at all, so it is left out rather than counted as failed: a
- * directory-backed CA that lists an LDAP point beside an HTTP one must not
- * become unavailable under `"reject"` for it. A certificate left with no
- * point is `no_distribution_point`, an honest "cannot check" rather than a
- * silent pass.
- *
- * A point carrying `reasons` or `cRLIssuer` is skipped, never fetched, and
- * reported as `unsupported_distribution_point` — beside the usable points,
- * not instead of them. A point *without* `reasons` covers every reason code
- * (§4.2.1.13), so a plain point beside a partitioned or indirect one is a
- * complete answer on its own; giving up on the whole extension at the first
- * unsupported point discarded that answer, and read a revoked certificate
- * as merely "unavailable" (#469). Whether the skipped point is a gap is the
- * caller's `on-unavailable` decision. Only a certificate left with no usable
- * point is `unsupported_distribution_point` as a whole. The point is named
- * by its first HTTP(S) URI in the audit line; one with no such URI is still
- * reported, since the shape, not the transport, is what is unsupported.
+ * Only absolute HTTP(S) URIs are kept. A point with none (LDAP, a directory
+ * name) is left out rather than counted as failed, so an LDAP point beside an
+ * HTTP one does not make a certificate unavailable under `"reject"`. A point
+ * carrying `reasons` or `cRLIssuer` is reported as
+ * `unsupported_distribution_point` beside the usable points, never fetched;
+ * a plain point beside it still answers for every reason code. Only a
+ * certificate with no usable point fails as a whole.
  */
 export const crlDistributionPoints = (certificate: pkijs.Certificate): CrlDistributionPoints => {
 	const extension = certificate.extensions?.find(
@@ -442,17 +312,10 @@ export interface CrlResolverOptions {
 	 */
 	readonly cacheTtlSeconds: number;
 	/**
-	 * The signature-algorithm policy the validated path is held to, applied
-	 * to each CRL's signature as well (#470). See the module header.
-	 *
-	 * Optional, defaulting to `DEFAULT_ALGORITHM_POLICY` — the same strict
-	 * policy the config resolves to when the operator sets nothing. This is
-	 * a security fix on a public interface, so a consumer who constructs a
-	 * resolver directly and upgrades without touching their code must *get*
-	 * the fix rather than opt into it. The default is fail-closed: omitting
-	 * the field can only make the check stricter, never weaker, so no
-	 * existing caller is silently left unprotected. `validate.mts` passes
-	 * the operator's configured policy explicitly.
+	 * The signature-algorithm policy the validated path is held to, applied to
+	 * each CRL's signature too. Defaults to `DEFAULT_ALGORITHM_POLICY`, the
+	 * strict policy, so omitting it can only make the check stricter;
+	 * `validate.mts` passes the configured policy.
 	 */
 	readonly algorithms?: AlgorithmPolicy;
 	/** Bound on cache size, so a large trust set cannot grow it without limit. */
@@ -461,13 +324,11 @@ export interface CrlResolverOptions {
 
 export interface CrlResolver {
 	/**
-	 * Fetch (or reuse) the CRLs covering `certificate` — one per distribution
-	 * point it names — verified against `issuer`, the certificate that issued
-	 * it, i.e. the next element up the validated path. Only a CRL whose
-	 * signature verifies against `issuer`'s key is ever returned or cached.
-	 * Concurrent calls for the same distribution point share one fetch, and a
-	 * distribution point that could not be used is not retried within
-	 * `CRL_NEGATIVE_CACHE_TTL_MS`.
+	 * Fetch (or reuse) the CRLs covering `certificate`, one per distribution
+	 * point, verified against `issuer` (the next certificate up the validated
+	 * path). Only a CRL whose signature verifies against `issuer`'s key is
+	 * returned or cached. Concurrent calls for one point share a fetch, and an
+	 * unusable point is not retried within `CRL_NEGATIVE_CACHE_TTL_MS`.
 	 */
 	resolve(certificate: pkijs.Certificate, issuer: pkijs.Certificate, now: Date): Promise<CrlLookup>;
 	/** Entry count, usable and remembered-unavailable alike — for tests and for a future metric. */
@@ -524,20 +385,12 @@ const verifySignature = async (
 };
 
 /**
- * Whether the CRL claims a scope this resolver can honour.
- *
- * RFC 5280 §6.3.3 (b) has a validator match a CRL's
- * `issuingDistributionPoint` against the certificate and the point it was
- * fetched from, and (c) combine a delta with its base. Neither is
- * implemented. A CRL stating a scope narrower than "everything this issuer
- * issued" is reported as unsupported rather than read as complete, and so is
- * a delta, which by definition lists only the changes since a base this
- * resolver has not fetched. pkijs accepts both extensions as well-known and
- * then ignores them, so without this check a CRL saying "user certificates
- * only" was authoritative for an intermediate (#446).
- *
- * Neither extension is looked up by criticality: both MUST be critical per
- * the RFC, but a CA that marks one non-critical has still scoped its CRL.
+ * Whether the CRL claims a scope this resolver can honour. RFC 5280 §6.3.3
+ * (b) (matching `issuingDistributionPoint`) and (c) (combining a delta with
+ * its base) are not implemented, so a scoped CRL or a delta is reported as
+ * unsupported rather than read as complete. Both extensions are detected
+ * regardless of criticality: a CA that marks one non-critical has still
+ * scoped its CRL.
  */
 const checkScope = (
 	crl: pkijs.CertificateRevocationList,
@@ -729,9 +582,8 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		}
 
 		// Extensions before the signature, so that a CRL this resolver cannot
-		// use is named as such and remembered — see the module header (#447).
-		// Nothing the CRL *says* is acted on here, only what it is shaped
-		// like, and the answer is at most "do not use it".
+		// use is named as such and remembered — see the module header. Only
+		// its shape is judged, and the answer is at most "do not use it".
 		const critical = checkCrlCriticalExtensions(loaded.crl);
 		if (!critical.ok) {
 			remember(url, { reason: "unsupported_critical_extension", detail: critical.detail }, now);
@@ -743,12 +595,9 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 			return { ok: false, reason: "unsupported_crl_scope", detail: scope.detail };
 		}
 
-		// The signature *algorithm* before the signature, for the same reason
-		// the extensions are: this is a decision on the OID the CRL names,
-		// not on whether it verifies, and the answer is only ever "do not
-		// use it" — so it is safe to remember on unverified bytes, and it
-		// is remembered, or a CA that signs with SHA-1 would cost one
-		// guarded fetch per request (see the module header, #470).
+		// The signature algorithm before the signature, for the same reason:
+		// a refusal on the OID the CRL names, safe to remember, and remembered
+		// so a SHA-1 CA does not cost one guarded fetch per request.
 		// `signatureAlgorithm` is the field pkijs verifies with; RFC 5280
 		// §5.1.1.2 requires the tbsCertList copy to match it.
 		const algorithm = checkSignatureAlgorithm(
@@ -777,12 +626,10 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 
 		const fresh = freshness(loaded.crl, now);
 		if (!fresh.ok) {
-			// Not stored as usable. The failure is remembered for the negative
-			// window only, so a responder that has stopped publishing costs one
-			// probe per window rather than one per request — and is noticed
-			// within seconds once it publishes again.
-			// A list past its `nextUpdate` is the source's outage — the CA has not
-			// published — where a list with none at all is its shape.
+			// Not stored as usable; remembered for the negative window only, so
+			// a source that stopped publishing is noticed within seconds once it
+			// resumes. A list past its `nextUpdate` is the source's outage (the CA
+			// has not published); one with none at all is its shape.
 			const failure = {
 				reason: fresh.reason,
 				detail: fresh.detail,
@@ -809,9 +656,8 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 
 			const issuerId = issuerKeyId(issuer);
 			const crls: pkijs.CertificateRevocationList[] = [];
-			// A point of a shape this resolver does not implement is a point
-			// that yielded no CRL, reported with the rest — nothing about it
-			// is fetched, and the usable points are still consulted (#469).
+			// Unsupported points are reported with the rest, never fetched; the
+			// usable points are still consulted.
 			const unavailable: CrlPointUnavailable[] = [...points.unsupported];
 
 			for (const urls of points.points) {

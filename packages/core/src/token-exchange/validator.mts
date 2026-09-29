@@ -15,13 +15,10 @@
  */
 
 /**
- * The token-exchange validator port (#626 P1).
- *
- * What `oauth-token-exchange` registers as an
- * `exchangeTokenValidators` contribution and what the boot planner hands
- * back are one type, which they could not be while the contract lived in
- * that package: core may not import it. The grant that consumes a
- * validator still lives there; only the contract is here.
+ * The token-exchange validator port. `oauth-token-exchange` registers
+ * validators as `exchangeTokenValidators` contributions and the boot planner
+ * hands them back; the contract lives in core because core may not import
+ * that package. The consuming grant stays there.
  */
 
 /**
@@ -42,70 +39,43 @@ export interface ExchangeTokenValidationContext {
 
 export interface ExchangeTokenValidator {
 	/**
-	 * Validates a token presented in a Token Exchange request.
+	 * Validates a token presented in a Token Exchange request. Register one
+	 * validator per `subject_token_type` / `actor_token_type` URI.
 	 *
-	 * Consumers register one validator per `subject_token_type` / `actor_token_type`
-	 * URI.
-	 *
-	 * Return contract:
-	 *   - Returning `null` signals a validation failure — the grant handler will
-	 *     respond with `invalid_request` (RFC 8693 §2.2.2), described as
-	 *     `subject_token validation failed` / `actor_token validation failed`.
-	 *   - Throwing signals an infrastructure failure (e.g. Redis unavailable) —
-	 *     the grant handler will respond with `temporarily_unavailable` (503).
-	 *
-	 * The `context.role` hints whether the token is being presented as the
-	 * `subject` (token being exchanged) or `actor` (delegation actor).
-	 * Validators MAY apply different rules per role (e.g. stricter issuer
-	 * allowlist for actor) but SHOULD default to identical validation.
+	 * Return `null` for a validation failure (answered `invalid_request`, RFC
+	 * 8693 §2.2.2); throw for an infrastructure failure (answered
+	 * `temporarily_unavailable`, 503). Validators MAY apply different rules per
+	 * `context.role` (e.g. a stricter issuer allowlist for actors) but SHOULD
+	 * default to identical validation.
 	 */
 	validate(token: string, context: ExchangeTokenValidationContext): Promise<ValidatedToken | null>;
 }
 
 /**
- * Structured representation of a validated exchange token.
+ * A validated exchange token. The structured fields are the canonical values
+ * the grant handler consumes and MUST equal their projections in `claims`
+ * (the raw payload, for policy hooks' custom claim forwarding) when both are
+ * present; validators enforce this.
  *
- * The structured fields (`sub`, `scope`, `aud`, `familyId`, `act`) are the
- * canonical values the grant handler consumes. `claims` carries the raw JWT
- * payload for policy hooks that need custom claim forwarding.
- *
- * Invariant: structured fields are projections of `claims`. When both are
- * present they MUST be equal. Validators are responsible for enforcing this.
- * `familyId` is populated for a token carrying one of this provider's
- * refresh-token families in its `family_id` claim, whatever token type the
- * validator is registered for; see the field list below.
- *
- * Required fields:
- *   - `sub`: mandatory. Used as the subject of the newly issued token.
- *   - `claims`: mandatory (may be empty `{}`). Passed to policy hooks for
- *     custom claim forwarding.
- *
- * Optional fields (populate when known):
- *   - `scope`: enables scope narrowing. Absent means no declared scope.
+ *   - `sub` (required): the subject of the issued token.
+ *   - `claims` (required, may be `{}`).
+ *   - `scope`: enables scope narrowing; absent means no declared scope.
  *   - `aud`: enables aud propagation for single-aud subjects.
- *   - `familyId`: the token's refresh-token family, for a token this
- *     provider issued under one. The grant handler checks it against this
- *     provider's family store (refusing the token when none is wired) and
- *     copies it into the issued token, so a later family revocation reaches
- *     that token too. A family left only in `claims` is neither checked nor
- *     inherited. Leave it unset for foreign tokens, whose families this
- *     provider's store does not hold; an empty string counts as unset.
- *   - `sid`: the `UserSession` the token was issued under, for a token this
- *     provider minted from a browser session — its `sid`, or the
- *     `liveness_sid` of a token that was itself exchanged (`livenessSidOf`).
- *     The grant handler checks that the session is still live against this
- *     provider's user-session store (when one is wired) and carries it into
- *     the issued token as `liveness_sid` — a liveness link, never a `sid`
- *     (`grants/sessionClaims.mts`) — so a logout that ends the subject
- *     token's session ends the exchanged token too.
- *     A `sid` left only in `claims` is neither checked nor inherited. Leave
- *     it unset for foreign tokens: another issuer's `sid` names no session
- *     this provider's store holds. An empty string counts as unset.
- *   - `act`: nested actor chain from a prior exchange. The grant handler
- *     preserves this when applicable (RFC 8693 §4.1).
- *   - `may_act`: structured delegation constraint from the subject token. The
- *     grant handler reads the raw `claims.may_act` value so validators can
- *     preserve malformed claims for fail-closed handling.
+ *   - `familyId`: this provider's refresh-token family, for a token issued
+ *     under one. Checked against the family store (refused when none is
+ *     wired) and copied into the issued token, so a family revocation reaches
+ *     it too.
+ *   - `sid`: the `UserSession` this provider minted the token from (its `sid`,
+ *     or an exchanged token's `liveness_sid`). Checked for liveness when a
+ *     user-session store is wired, and carried into the issued token as
+ *     `liveness_sid`, never `sid`, so a logout ends the exchanged token too.
+ *   - `act`: nested actor chain from a prior exchange (RFC 8693 §4.1).
+ *   - `may_act`: the subject's delegation constraint. The handler reads the
+ *     raw `claims.may_act`, so a malformed claim is handled fail-closed.
+ *
+ * `familyId` and `sid` left only in `claims` are neither checked nor
+ * inherited. Leave them unset (an empty string counts as unset) for foreign
+ * tokens, whose families and sessions this provider's stores do not hold.
  */
 export interface ValidatedToken {
 	readonly sub: string;

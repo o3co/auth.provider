@@ -17,14 +17,10 @@
 /**
  * A `private_key_jwt` client assertion whose `exp`, `iat` or `nbf` is not a
  * date is refused as the client's malformed assertion — `401 invalid_client`,
- * logged as `numeric_date` — before any expiry is computed from it.
- *
- * jose checks only that a NumericDate claim is a number, and JSON's `1e400`
- * parses to Infinity. The lifetime and age checks happened to refuse an
- * infinite `exp` or `iat`, under reasons that describe a finite one; an
- * `nbf` of `-1e400` was accepted. Driven through the real verifier with the
- * real memory seen-set; assertions are signed over raw claim JSON, because
- * jose refuses to produce a non-finite claim.
+ * logged as `numeric_date` — before any expiry is computed from it. jose
+ * checks only that a NumericDate claim is a number, and JSON's `1e400` parses
+ * to Infinity. Assertions are signed over raw claim JSON, because jose
+ * refuses to produce a non-finite claim.
  */
 
 import { randomUUID } from "node:crypto";

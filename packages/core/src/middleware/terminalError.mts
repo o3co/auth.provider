@@ -16,49 +16,30 @@
 
 /*
  * The last handler on the router `createApp` returns: the answer to an error
- * a route let through, whatever module contributed the route.
+ * any route let through. Routers need not catch everything they can throw;
+ * without this, such an error reaches the host's final handler (Express's
+ * renders HTML, with the stack outside production, where V8's JSON error
+ * quotes the body it could not parse).
  *
- * The OAuth, session and WebAuthn routers parse their own bodies and have no
- * error handler, and no module is obliged to catch everything it can throw.
- * Such an error left the router for whatever the host had after it — Express's
- * final handler unless the host copied the standalone template's: an HTML
- * page, with the stack outside production, where V8's JSON error quotes the
- * body it could not parse. `assembleApp` mounts this after every route, so
- * the router answers its own errors, as the device-grant and federation-grant
- * routers already answer theirs inside themselves:
+ * - A body parser's refusal (`http-errors`, `expose: true`, 4xx) is the
+ *   client's mistake: an RFC 6749 §5.2 envelope with a fixed description,
+ *   logged nowhere since a client can send one at will. `413 body_too_large`,
+ *   `415 unsupported_encoding`, `400 malformed_body`, and `400 malformed_path`
+ *   for a path parameter Express could not decode. Only `expose`, `status`,
+ *   `type` and `code` are read, never the message, which quotes the body.
+ * - Any other exposed 4xx keeps its status as `request_refused`, logged
+ *   nowhere, with the one header its status owes (a 401's `WWW-Authenticate`,
+ *   a 405's `Allow`) when the value fits in a header.
+ * - Anything else is `500 server_error`, logged once as
+ *   `unhandled_request_error` with the `loggableError` projection, never the
+ *   error itself, whose fields can carry what a store or a peer said.
+ * - After headers went out: logged the same way with `headersSent: true`; a
+ *   response still being written has its connection closed, without the final
+ *   handler's stack dump to stderr.
  *
- * - A body parser's refusal is the client's mistake, answered in RFC 6749
- *   §5.2's envelope with a fixed description and logged nowhere (a client can
- *   send one at will): body-parser's errors are `http-errors` with `expose:
- *   true` and a 4xx `status` — a body over the limit or with too many
- *   parameters is `413 body_too_large`, a charset or `Content-Encoding` it
- *   cannot decode `415 unsupported_encoding`, and what it could not read as
- *   sent `400 malformed_body` — by body-parser's own `type`
- *   (`entity.parse.failed`, `entity.verify.failed`, `request.aborted`,
- *   `request.size.invalid`, `querystring.parse.rangeError`) or, for a body
- *   that does not decompress, the decoder's `code` (zlib's `Z_…` for gzip
- *   and deflate, Node's `ERR__ERROR_FORMAT_…` for brotli). A path parameter Express could
- *   not decode is `400 malformed_path`. Only `expose`, `status`, `type` and
- *   `code` are read, never the message, which quotes the body. Any other
- *   `expose`d 4xx — a 400 included — is an `http-errors` refusal that says
- *   it is the client's (a 404, a 401): it keeps its status, answered
- *   `invalid_request` / `request_refused`, logged nowhere, with the one
- *   header its status owes the client when the refusal carries it (a 401's
- *   `WWW-Authenticate`, a 405's `Allow`, up to 1 KiB; a longer value, or one
- *   no header can hold, is dropped).
- * - Anything else is `500 server_error` (`unexpected_error`), logged once at
- *   error as `unhandled_request_error` with `endpoint` (the path, through
- *   `auditErrorText`) and the error's `loggableError` projection — never the
- *   error, whose fields can carry what a store or a peer said.
- * - A response whose headers already went out cannot be answered: it is
- *   logged the same way, with `headersSent: true`, and — while it is still
- *   being written — its connection closed, as Express's final handler would
- *   close it, without the final handler's printing the error's whole stack to
- *   stderr. A response already ended is left as it is.
- *
- * Every answer carries `Cache-Control: no-store` and `Pragma: no-cache`. The handler never throws:
- * every read of the error is guarded (`guardedRead`), since a throw here would
- * go on to the host's final handler.
+ * Every answer carries `Cache-Control: no-store` and `Pragma: no-cache`. Never
+ * throws: every read of the error is guarded, since a throw here would reach
+ * the host's final handler.
  */
 
 import type { ErrorRequestHandler } from "express";

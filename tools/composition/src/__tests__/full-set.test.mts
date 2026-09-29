@@ -21,36 +21,25 @@
  * contracts that only exist when all of them meet — the added modules' boot,
  * discovery and each added feature's switch, their flows, their body limits
  * in both mount orders (with `Content-Length` and chunked), and one outage
- * per added store under the #685 rule.
+ * per added store under the outage rule (`describeOutages`, from the
+ * template's fixture).
  *
- * The template's own suite (`templates/standalone/src/__tests__/
- * all-modules-composition.test.mts`) pins its composition, and ships in every
- * scaffold. This file does not repeat it. It checks what the added modules
- * contribute — their routes, grants, discovery metadata, body rules and store
- * outages — and re-checks a template contract only where the added modules
- * can change the answer: the token endpoint's body rule, now that two more
- * routers mount beneath `/oauth`, and the logger every module that answers a
+ * The template's own suite (`all-modules-composition.test.mts`) pins its
+ * composition; this file re-checks a template contract only where the added
+ * modules can change the answer: the token endpoint's body rule, with two
+ * more routers beneath `/oauth`, and the logger every module that answers a
  * request must receive. `full-set.redis.test.mts` boots the same set on real
  * Redis under `deployment.mode = "multi"`.
  *
- * The MFA package is installed as a deployment installs it — `mfaModules`
- * over core's memory MFA stores (Redis in `full-set.redis.test.mts`),
- * `mfa.mode = "optional"`, a key of the deployment's own — so the `mfa`
- * requirement registers beside the two a deployment writes
- * (`deployment:requirement-page`, `deployment:requirement-bare`, in the
- * fixture). All three are registered, declared and said at boot here, and
- * refused when the declaration disagrees — the session-admission ADR's D7
- * through the template's boot; a password login that both fixtures interrupt is
- * resumed through each requirement's completion route and established once
- * (D5, its acceptance criterion 2), the `mfa` requirement establishing for a
- * subject with no factor under `optional`; and a subject who holds one is
- * interrupted by it. The step-up flows they could start are the consumers'
- * and the MFA package's suites, not this one.
+ * The MFA package is installed as a deployment installs it (`mfaModules` over
+ * the MFA stores, `mfa.mode = "optional"`, a key of the deployment's own), so
+ * the `mfa` requirement registers beside the fixture's two (ADR
+ * 2026-09-28-session-admission). The step-up flows they could start are the
+ * consumers' and the MFA package's suites, not this one.
  *
  * `it.fails` marks a contract the full set breaks today; its entry names the
  * defect, and the fix that mends it turns the case red. An outage case pins
- * only the part of the #685 rule that is broken, and asserts the rest
- * (`describeOutages`, from the template's fixture).
+ * only the part of the rule that is broken, and asserts the rest.
  */
 
 import { createHash, generateKeyPairSync, sign, X509Certificate } from "node:crypto";
@@ -160,8 +149,7 @@ const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-dpop": ["dpop"],
 	"@o3co/auth-provider-federation-apple": ["federation-apple"],
 	"@o3co/auth-provider-federation-github": ["federation-github"],
-	// Private until the template wires it (the MFA ADR's build-order step
-	// 20): mfaModules, over core's memory MFA stores.
+	// mfaModules, over core's memory MFA stores.
 	"@o3co/auth-provider-mfa": [
 		"mfa-totp-factor",
 		"mfa",
@@ -309,7 +297,7 @@ describe("the full set boots together", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The configuration (#728)
+// The configuration
 // ---------------------------------------------------------------------------
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -358,9 +346,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 	it("keeps each added package's switch as the deployment wrote it (#472, #496)", async () => {
 		const { config } = await boot();
 		const on = config as unknown as Record<string, unknown>;
-		// #472: the device grant's `enabled = true` reached nothing once.
 		expect(valueAt(on, "oauth.deviceAuthorization.enabled")).toBe(true);
-		// #496: DPoP, mTLS and WebAuthn reported themselves switched off.
 		expect(valueAt(on, "oauth.dpop.enabled")).toBe(true);
 		expect(valueAt(on, "oauth.mtls.enabled")).toBe(true);
 		expect(valueAt(on, "oauth.mtls.trusted-proxies")).toEqual(["loopback"]);
@@ -416,7 +402,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 });
 
 // ---------------------------------------------------------------------------
-// Session requirements (the session-admission ADR's D7)
+// Session requirements (ADR 2026-09-28-session-admission)
 // ---------------------------------------------------------------------------
 
 /** Boots the full set expecting the planner to refuse it, and hands back the refusal. */
@@ -966,10 +952,10 @@ describe("every added module's primary route answers in the one app", () => {
 	});
 
 	it("DPoP: the device's poll with a proof gets a token bound to its key, advertised as DPoP (RFC 9449 §5)", async () => {
-		// The real DPoP mechanism beside the device grant. The grant stamped the
-		// proof's `cnf.jkt` and the envelope said Bearer, so a DPoP-aware device
-		// presented the token as a bearer token, which a resource server that
-		// enforces the binding refuses (§7.1).
+		// The real DPoP mechanism beside the device grant. A token bound by
+		// `cnf.jkt` must be advertised as DPoP: told Bearer, a DPoP-aware device
+		// presents it as a bearer token, which a resource server that enforces
+		// the binding refuses (§7.1).
 		const { app } = await boot();
 		const started = await request(app)
 			.post("/oauth/device_authorization")
@@ -1277,8 +1263,8 @@ describe("session admission at the link start and WebAuthn registration (the ses
 describe("token exchange: a token exchanged from a session-bound token ends with the session", () => {
 	// The session grant's token carries the browser session's `sid` and no
 	// family, so a logout reaches it only through the UserSession record that
-	// introspection reads. The exchange dropped the `sid`: the token it issued
-	// from that one stayed active after the logout, for the rest of its life.
+	// introspection reads. A token exchanged from it must keep that link, or it
+	// stays active after the logout for the rest of its life.
 
 	/** Signed in, a session-grant token for the web client, and the gateway's exchange of it. */
 	const sessionAndExchange = async (app: Express) => {
@@ -1639,8 +1625,8 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		answer: { status: 503, error: "temporarily_unavailable" },
 		event: "webauthn_ceremony_store_unavailable",
 	},
-	// The session-admission ADR's acceptance criterion 2: a store outage is
-	// 503 at every consumer of admission — here the two this package set adds.
+	// A store outage is 503 at every consumer of admission — here the two this
+	// package set adds.
 	{
 		module: "session",
 		slot: "userSessionStore",

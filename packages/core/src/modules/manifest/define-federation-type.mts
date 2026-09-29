@@ -15,18 +15,15 @@
  */
 
 /**
- * The way to author a `federationTypes` declaration (#728): a helper that ties
- * the factory's entry to the schema.
+ * The way to author a `federationTypes` declaration: a helper that ties the
+ * factory's entry to the schema.
  *
- * Inside `defineModule({ … })` the `federationTypes` record fixes the entry's
- * type at `unknown` — TypeScript cannot infer a type per key of a record, and
- * the factory is a method, bivariant in its entry — so a schema producing
- * `{ issuer }` would pair with a factory typed for `{ clientId }` unnoticed.
- * The helper infers `E` from `entrySchema` and types the factory's entry with
- * it, checked the strict way (the factory is a property here, not a method).
- * `Deps` is given, not inferred: inside an inferring `defineModule` call a
- * nested call cannot pick the module's deps up, so the declaring module names
- * them (`ProviderDeps<…>`, or the part the factory reads).
+ * Inside `defineModule({ … })` the record fixes the entry at `unknown` (no
+ * per-key inference, and a method is bivariant in its entry), so a schema for
+ * `{ issuer }` could pair with a factory typed for `{ clientId }` unnoticed.
+ * The helper infers `E` from `entrySchema` and checks the factory, a property
+ * here, strictly. `Deps` is written, not inferred: a nested call inside an
+ * inferring `defineModule` cannot pick up the module's deps.
  */
 
 import type { z } from "zod";
@@ -38,9 +35,8 @@ import type {
 } from "./contributes-map.mjs";
 
 /**
- * A `federationTypes` declaration as the helper takes it: the schema, and a
- * factory whose entry is the schema's output — a function property, so the
- * pairing is checked contravariantly rather than bivariantly.
+ * A `federationTypes` declaration as the helper takes it. The factory is a
+ * function property, so its pairing with the schema is checked contravariantly.
  */
 export interface FederationTypeDeclaration<Deps, E> {
 	readonly entrySchema: z.ZodType<E>;

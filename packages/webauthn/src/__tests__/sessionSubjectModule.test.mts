@@ -15,18 +15,15 @@
  */
 
 /**
- * `webauthnSessionSubjectModule` (the session-admission ADR's D8, build order
- * A5): the bridge from the browser's cookie session to `req.webauthnSubject`,
- * which the registration routes require, as a module the deployment installs
- * instead of writing — reading the session through core's admission as
- * `webauthn.register` (graded `credential_change`).
+ * `webauthnSessionSubjectModule`: the bridge from the browser's cookie session
+ * to `req.webauthnSubject`, which the registration routes require, as a module
+ * the deployment installs instead of writing. It reads the session through
+ * core's admission as `webauthn.register` (graded `credential_change`). See
+ * ADR 2026-09-28-session-admission.
  *
- * Pinned: the manifest (what it requires, what it may be given, the one
- * route and where it is mounted); each admission outcome's answer — a
- * subject from the deployment's mapper on `admitted`, `503` on `unavailable`,
- * `403 step_up_required` on `step_up`, no subject otherwise, so the routes
- * answer their `401`; what the requirements are asked; the mapper's answer
- * held to the subject's shape.
+ * Each admission outcome's answer: a subject from the deployment's mapper on
+ * `admitted`, `503` on `unavailable`, `403 step_up_required` on `step_up`, and
+ * no subject otherwise, so the routes answer their `401`.
  */
 
 import {
@@ -417,8 +414,8 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 			error: "step_up_required",
 			error_description: "Registering a passkey requires a step-up first",
 			requirement: "fixture",
-			// The shape every consumer answers (the session-admission ADR's D8, as
-			// amended): the page as registered, resolved on the issuer, its params
+			// The shape every consumer answers (ADR 2026-09-28-session-admission):
+			// the page as registered, resolved on the issuer, its params
 			// on the query, no return parameter — the account page knows where it
 			// comes back to. The module is handed no config: nothing here reads
 			// the issuer.

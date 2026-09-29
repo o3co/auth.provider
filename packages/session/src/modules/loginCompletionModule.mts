@@ -15,19 +15,18 @@
  */
 
 /**
- * The tail of a login as the `loginCompletion` slot (#728; the
- * session-admission ADR's D5), for a requirement's completion — the MFA
+ * The tail of a login as the `loginCompletion` slot (see ADR
+ * 2026-09-28-session-admission), for a requirement's completion — the MFA
  * package's — to establish the session or answer an interruption without
  * importing this package.
  *
  * Its own module, not the session module's, because it answers with the
- * deployment's `csrfGuard` (core's contract; the MFA ADR's D27): the guard
- * the session module provides, or one a composition put in the slot in its
- * place (`overrideComponents`). A provider in the session module could not
- * require the slot its own module fills — boot refuses the self-cycle — and
- * would bind a guard of its own, whose tokens a substituted guard refuses.
- * Load it beside the session module in a composition whose requirements
- * complete a login.
+ * deployment's `csrfGuard`: the session module's, or one a composition put in
+ * the slot in its place (`overrideComponents`). A provider in the session
+ * module could not require the slot its own module fills (boot refuses the
+ * self-cycle) and would bind a guard of its own, whose tokens a substituted
+ * guard refuses. Load it beside the session module in a composition whose
+ * requirements complete a login.
  */
 
 import { type AppConfig, type CsrfGuard, defineModule } from "@o3co/auth-provider-core";
@@ -40,8 +39,8 @@ export const loginCompletionModule = defineModule<
 >({
 	name: "login-completion",
 	requires: ["config", "userSessionStore", "csrfGuard"],
-	// #296: a composition that has not adopted subject-level revocation has
-	// no index to record the session in, as for the session routes.
+	// A composition without subject-level revocation has no index to record
+	// the session in, as for the session routes.
 	optional: ["subjectSessionIndex"],
 	provides: {
 		loginCompletion: (deps) =>

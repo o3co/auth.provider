@@ -15,22 +15,9 @@
  */
 
 /**
- * boot/plan-boot.mts — Stage 2 of the A2-β boot planner pipeline.
- *
- * Accepts `ValidatedManifests` (output of stage 1), `bootstrapComponents`,
- * and `overrideComponents`; runs five ordered steps:
- *  1. Build dependency graph
- *  2. Cycle detection (Tarjan's SCC)
- *  3. Topological sort (Kahn's algorithm, declaration-order tie-breaker)
- *  4. Per-component activation closure (contribute/override roots + eager seeds)
- *  5. Build `providerActivations` and `depsBlueprint`
- *
- * Returns a `BootPlan` on success. Throws `BootError` with
- * `reason: "circular-dependency"` on the first detected cycle.
- *
- * The stage is **pure**: same inputs → same output / same error.
- *
- * Per A2-β §5.2.
+ * boot/plan-boot.mts: stage 2 of the boot planner. Turns `ValidatedManifests`
+ * into a `BootPlan` (dependency graph, cycle detection, init order and the
+ * per-component activation closure); see `planBoot` for the steps.
  */
 
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
@@ -47,26 +34,21 @@ import { BootError } from "./types.mjs";
 
 // ---------------------------------------------------------------------------
 // Step 1 — Build dependency graph
-// Per A2-β §5.2 step 1.
 // ---------------------------------------------------------------------------
 
 /**
- * An adjacency-list dependency graph. Edges represent "A depends on B"
- * (A `requires` a component key that B `provides`).
- * Bootstrap and override keys are pre-seeded as virtual providers —
- * requirements satisfied by them produce no edges.
- *
- * Per A2-β §5.2 step 1.
+ * Adjacency-list dependency graph: an edge A → B means A requires a component
+ * key B provides. Bootstrap and override keys are virtual providers, and the
+ * requirements they satisfy produce no edges.
  * @internal
  */
 interface DependencyGraph {
 	/** All module names (nodes), in input declaration order. */
 	readonly nodeOrder: readonly string[];
 	/**
-	 * Adjacency list: for each module name, the set of module names it
-	 * depends on (i.e. whose provides must run before this module's requires
-	 * are satisfied). Edges from requires + optional (optional only when
-	 * satisfiable by another module, not by bootstrap/override).
+	 * For each module, the modules it depends on: edges from `requires`, and
+	 * from `optional` only when another module (not bootstrap/override)
+	 * provides the key.
 	 */
 	readonly adj: ReadonlyMap<string, ReadonlySet<string>>;
 	/** Reverse adjacency: for each module, who depends on it. */
@@ -74,10 +56,8 @@ interface DependencyGraph {
 }
 
 /**
- * Build the dependency graph from `ValidatedManifests` plus the set of keys
- * that are pre-seeded as virtual providers (bootstrap + override keys).
- *
- * Per A2-β §5.2 step 1.
+ * Builds the dependency graph; `virtualKeys` are the bootstrap and override
+ * keys.
  * @internal
  */
 function buildDependencyGraph(
@@ -96,10 +76,8 @@ function buildDependencyGraph(
 	const providers = validated.providers;
 
 	/**
-	 * Add a directed edge from `from` (the requiring module) to `to` (the
-	 * providing module). Self-edges (from === to) are intentionally allowed so
-	 * that Tarjan's SCC + the cycle-detection escalation check can detect
-	 * self-cycles and throw `BootError reason="circular-dependency"`.
+	 * Adds an edge from the requiring module to the providing one. Self-edges
+	 * are kept so cycle detection reports a module that depends on itself.
 	 */
 	function addEdge(from: string, to: string): void {
 		// biome-ignore lint/style/noNonNullAssertion: nodeOrder is built from validated.modules, adj and radj entries are pre-seeded
@@ -133,15 +111,11 @@ function buildDependencyGraph(
 
 // ---------------------------------------------------------------------------
 // Step 2 — Cycle detection via Tarjan's SCC algorithm
-// Per A2-β §5.2 step 2.
 // ---------------------------------------------------------------------------
 
 /**
- * Tarjan's strongly-connected-components algorithm.
- * Returns an array of SCCs; each SCC is an array of module names.
- * Non-trivial SCCs (size > 1) and self-loops are the cycles.
- *
- * Per A2-β §5.2 step 2.
+ * Tarjan's strongly-connected-components algorithm; each SCC is a list of
+ * module names. Non-trivial SCCs (size > 1) and self-loops are the cycles.
  * @internal
  */
 function tarjanSCC(
@@ -198,10 +172,9 @@ function tarjanSCC(
 }
 
 /**
- * Given a non-trivial SCC (a cycle), reconstruct the spec-shaped cycle chain:
- * `{ module, requires, satisfiedBy }[]` — "A requires key X (provided by B)".
- *
- * Per A2-β §6.1 CircularDependencyDetails.cycle normative shape.
+ * Rebuilds a non-trivial SCC as the chain `CircularDependencyDetails.cycle`
+ * carries: `{ module, requires, satisfiedBy }[]`, "A requires key X
+ * (provided by B)".
  * @internal
  */
 function buildCycleChain(
@@ -278,10 +251,8 @@ function buildCycleChain(
 }
 
 /**
- * Detect cycles in the dependency graph and throw `BootError` with
- * `reason: "circular-dependency"` if a non-trivial SCC or self-loop is found.
- *
- * Per A2-β §5.2 step 2.
+ * Throws `BootError` `reason: "circular-dependency"` on a non-trivial SCC or
+ * a self-loop.
  * @internal
  */
 function detectCycles(graph: DependencyGraph, validated: ValidatedManifests): void {
@@ -332,19 +303,12 @@ function detectCycles(graph: DependencyGraph, validated: ValidatedManifests): vo
 
 // ---------------------------------------------------------------------------
 // Step 3 — Topological sort (Kahn's algorithm)
-// Per A2-β §5.2 step 3.
 // ---------------------------------------------------------------------------
 
 /**
- * Kahn's algorithm topological sort with declaration-order tie-breaking.
- *
- * When multiple modules are simultaneously ready (in-degree = 0), they are
- * sorted by their manifest declaration order (input array index). This makes
- * `initOrder` deterministic across identical input lists.
- *
- * Precondition: the graph is a DAG (cycle detection has already run).
- *
- * Per A2-β §5.2 step 3.
+ * Kahn's algorithm. Modules ready at the same time are taken in manifest
+ * declaration order, so `initOrder` is deterministic. The graph must be a DAG
+ * (cycle detection has run).
  * @internal
  */
 function topologicalSort(graph: DependencyGraph, validated: ValidatedManifests): readonly string[] {
@@ -354,10 +318,8 @@ function topologicalSort(graph: DependencyGraph, validated: ValidatedManifests):
 		declOrder.set(validated.modules[i].manifest.name, i);
 	}
 
-	// inDegree[node] = number of other modules this node depends on
-	// (i.e. the count of outgoing requires/optional edges from this node).
-	// Kahn's algorithm pops nodes whose inDegree drops to 0, then walks the
-	// reverse adjacency to decrement dependents.
+	// A node's in-degree counts the modules it depends on (its outgoing
+	// edges); taking a node decrements its dependents via the reverse adjacency.
 	const inDegree = new Map<string, number>();
 	for (const node of graph.nodeOrder) {
 		inDegree.set(node, graph.adj.get(node)?.size ?? 0);
@@ -394,15 +356,11 @@ function topologicalSort(graph: DependencyGraph, validated: ValidatedManifests):
 
 // ---------------------------------------------------------------------------
 // Step 4 — Per-component activation closure
-// Per A2-β §5.2 step 4.
 // ---------------------------------------------------------------------------
 
 /**
- * Activation closure result: a set of `(moduleName, componentKey)` pairs to
- * materialise, plus a set that entered ONLY via eager-seed (not via require
- * chain). The intersection of the two sets gives "entered via both paths".
- *
- * Per A2-β §5.2 step 4.
+ * The `(moduleName, componentKey)` pairs to materialise, and those that
+ * entered only as eager seeds, never through a require chain.
  * @internal
  */
 interface ActivationClosure {
@@ -413,18 +371,10 @@ interface ActivationClosure {
 }
 
 /**
- * Compound key for activation closure sets.
- *
- * PRECONDITION: module names MUST NOT contain `"::"` (the chosen separator),
- * and componentKey MUST be a string (not a symbol with a colliding description).
- * Both invariants hold for v0.5.0 since: (a) module names are author-supplied
- * identifiers conventionally lowercase-hyphen-only, and (b) ComponentKey is
- * `keyof ComponentMap` which is currently string-only across all v0.5.0 slots.
- *
- * If a future spec extension introduces symbol-keyed ComponentMap slots or
- * relaxes the module-name convention, replace this string-encoded compound
- * with a `Map<string, Set<ComponentKey>>` keyed by module name.
- *
+ * Compound key for the closure sets. Assumes module names never contain
+ * `"::"` (they are lowercase-hyphen identifiers by convention) and component
+ * keys are strings (`ComponentMap` has no symbol keys). If either stops
+ * holding, key the sets by module name (`Map<string, Set<ComponentKey>>`).
  * @internal
  */
 function closureKey(module: string, componentKey: ComponentKey): string {
@@ -432,22 +382,11 @@ function closureKey(module: string, componentKey: ComponentKey): string {
 }
 
 /**
- * Compute the per-component activation closure.
- *
- * Closure roots:
- * - Modules with any non-empty `contributes` or `overrides` entries (Theme E).
- *
- * Eager seeds:
- * - Every component K where `lifecycle[K].eager === true` in any module.
- *
- * Expansion:
- * - If (module, K) is in the closure, walk that module's `requires` (and
- *   optional) edges recursively.
- *
- * Non-eager sibling rule: a module is NOT all-or-nothing — each (module, key)
- * pair is evaluated independently.
- *
- * Per A2-β §5.2 step 4.
+ * Computes the per-component activation closure. Its roots are the modules
+ * with any `contributes` or `overrides` entry, and its eager seeds the
+ * components with `lifecycle[K].eager === true`; from each, the module's
+ * `requires` and `optional` edges are walked recursively. A module is not
+ * all-or-nothing: each (module, key) pair is decided on its own.
  * @internal
  */
 function computeActivationClosure(
@@ -529,21 +468,13 @@ function computeActivationClosure(
 }
 
 // ---------------------------------------------------------------------------
-// Steps 5 + 6 — Build providerActivations and depsBlueprint
-// Per A2-β §5.2 steps 5 + 6.
+// Step 5 — Build providerActivations and depsBlueprint
 // ---------------------------------------------------------------------------
 
 /**
- * Build the `providerActivations` list and `depsBlueprint` map.
- *
- * `providerActivations` is in topological + declaration-order (initOrder) with
- * one entry per (module, key) pair that is in the activation closure.
- *
- * `depsBlueprint` covers every module that:
- * - has any contributes/overrides entries, OR
- * - has any in-closure provides keys.
- *
- * Per A2-β §5.2 steps 5 + 6.
+ * Builds `providerActivations`, one entry per in-closure (module, key) pair
+ * in init order, and `depsBlueprint`, covering every module with a
+ * contributes or overrides entry or an in-closure provided key.
  * @internal
  */
 function buildPlanOutputs(
@@ -591,27 +522,18 @@ function buildPlanOutputs(
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 2 of the A2-β boot planner pipeline.
+ * Stage 2 of the boot planner. Pure: the same inputs give the same output or
+ * the same error.
  *
- * Takes `ValidatedManifests` (from stage 1), `bootstrapComponents`, and
- * `overrideComponents`; runs the dependency graph, cycle detection, topological
- * sort, per-component activation closure, and emits a `BootPlan`.
- *
- * The function is **pure**: same inputs → same output / same error.
- *
- * Steps:
- * 1. Build dependency graph — nodes = modules, edges from requires + optional
- *    (advisory). Bootstrap/override keys are pre-seeded virtual providers.
- * 2. Cycle detection — Tarjan's SCC; non-trivial SCCs or self-loops throw
- *    `BootError` with `reason: "circular-dependency"`, `stage: "planBoot"`.
- * 3. Topological sort — Kahn's algorithm with declaration-order tie-breaker.
- * 4. Per-component activation closure — closure roots = modules with any
- *    contributes/overrides; eager seeds = `lifecycle[K].eager === true`; both
- *    walk the requires graph recursively. Non-eager siblings do NOT piggy-back.
- * 5. Build `providerActivations` (per-component, not per-module) and
+ * 1. Dependency graph: modules are nodes, edges come from requires and
+ *    optional keys; bootstrap and override keys are virtual providers.
+ * 2. Cycle detection (Tarjan's SCC): a cycle or self-loop throws `BootError`
+ *    `reason: "circular-dependency"`, `stage: "planBoot"`.
+ * 3. Topological sort (Kahn's), ties broken by declaration order.
+ * 4. Per-component activation closure from the contribute/override roots and
+ *    the eager seeds; non-eager siblings do not come along.
+ * 5. `providerActivations` (per component, not per module) and
  *    `depsBlueprint` (lookup keys, not values).
- *
- * Per A2-β §5.2.
  */
 export function planBoot(
 	validated: ValidatedManifests,
@@ -624,19 +546,14 @@ export function planBoot(
 		...(Object.keys(overrideComponents ?? {}) as ComponentKey[]),
 	]);
 
-	// Step 1: Build dependency graph. Per A2-β §5.2 step 1.
 	const graph = buildDependencyGraph(validated, virtualKeys);
 
-	// Step 2: Cycle detection. Per A2-β §5.2 step 2.
 	detectCycles(graph, validated);
 
-	// Step 3: Topological sort (Kahn's + declaration-order tie-breaker). Per A2-β §5.2 step 3.
 	const initOrder = topologicalSort(graph, validated);
 
-	// Step 4: Per-component activation closure. Per A2-β §5.2 step 4.
 	const closure = computeActivationClosure(validated, virtualKeys);
 
-	// Steps 5 + 6: Build providerActivations and depsBlueprint. Per A2-β §5.2 steps 5 + 6.
 	const { providerActivations, depsBlueprint } = buildPlanOutputs(initOrder, validated, closure);
 
 	return {

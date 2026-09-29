@@ -46,8 +46,8 @@ const minBootstrap = {
 } satisfies Record<string, unknown> as BootstrapMap;
 
 // ---------------------------------------------------------------------------
-// In-test stub helpers — satisfy collector contracts without importing real
-// collector implementations (which do not exist yet in Phase 4 Task 3).
+// In-test stub helpers — satisfy collector contracts without importing the
+// real collector implementations.
 // ---------------------------------------------------------------------------
 
 function stubHandler(): never {
@@ -94,8 +94,8 @@ function makeStubRouteCollector() {
 describe("validateManifests — a module factory listed without being called", () => {
 	// A factory such as `deviceGrantModule({ config })` is assignable to
 	// `Module` uncalled: a function has a `name`, and that is the one field
-	// `Module` requires. Listed that way it contributed nothing — no grant, no
-	// route, no check — and boot succeeded without a word.
+	// `Module` requires. Listed that way it would contribute nothing — no
+	// grant, no route, no check — and boot would succeed without a word.
 	const lateModule = (_params: { readonly config: unknown }) => defineModule({ name: "late" });
 
 	it("refuses the entry, naming it and saying to call it", () => {
@@ -365,23 +365,10 @@ describe("validateManifests — step 4: missing-required-component", () => {
 	});
 
 	it("branching graph: path follows the chain that actually reaches the failing module, not the lex-smallest dead end", () => {
-		// Branching scenario the previous greedy lex-smallest walk produced an
-		// inconsistent diagnostic for. Per Claude S2 (multi-agent review).
-		//
-		// Structure:
-		//   - root: requires [cfgD, cfgC]   (lex-sorted: cfgC, cfgD)
-		//   - DeadEnd: provides cfgD        (lex-smallest from root → DeadEnd)
-		//   - A: provides cfgC, requires cfgB
-		//   - F: provides cfgB, requires cfgE   ← cfgE is the missing key
-		//
-		// The chain that reaches F is root → A → F (via cfgC → cfgB).
-		// The greedy walk would pick cfgC first (lex-smallest) — which is
-		// correct here only because cfgC < cfgD by accident; the real test is
-		// that the path does NOT terminate at DeadEnd. To force the bug,
-		// reorder root.requires so the greedy walk visits the dead end first
-		// when sorting picks cfgD before cfgC. Easiest: name the dead-end
-		// providing key cfgA (lex-smallest of all) so root.requires = [cfgA,
-		// cfgC] sorts to [cfgA, cfgC] and greedy DFS visits DeadEnd first.
+		// root requires cfgA (from DeadEnd, lex-smallest) and cfgC (from A);
+		// A requires cfgB from F, which requires the missing cfgE. A greedy
+		// lex-smallest walk would visit DeadEnd first; the path must follow
+		// root → A → F instead.
 		const F = defineModule({
 			name: "F",
 			requires: ["cfgE"],
@@ -665,14 +652,10 @@ describe("validateManifests — step 8: override-target-missing", () => {
 	});
 
 	it("accepts an override targeting an entry pre-seeded in a consumer-supplied name-keyed collector", () => {
-		// Per multi-agent review (Codex P2): the consumer extension path lets
-		// an integrator pre-load entries into a custom name-keyed collector
-		// before passing it to validateManifests. A module that overrides such
-		// a pre-seeded entry MUST be allowed — apply-contributions step 2 will
-		// route the override through `collector.replace(name, value)` and the
-		// seeded entry satisfies that contract. Without this carve-out, the
-		// validate stage rejects a structurally-valid extension scenario that
-		// the apply stage would happily handle.
+		// An integrator may pre-load entries into a custom name-keyed collector
+		// before passing it to validateManifests. Overriding such an entry MUST
+		// be allowed: apply-contributions routes the override through
+		// `collector.replace(name, value)`, which the seeded entry satisfies.
 		const preSeededCollector = makeStubNameCollector();
 		preSeededCollector.register("preloaded_entry", { v: "from-host" });
 
@@ -852,14 +835,9 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 	});
 
 	it("CoreConfigSchema is enforced even when zero modules declare configSchema (Codex P2-A)", () => {
-		// Codex P2-A regression: previously, when no module declared a
-		// configSchema, validateAndComposeConfig early-returned the raw
-		// bootstrap.config without parsing CoreConfigSchema. A boot app
-		// composed only of schema-less modules could thus pass through
-		// missing/invalid `oauth` or `http` sections silently. This test
-		// asserts the gap is closed: an invalid config (missing required
-		// `oauth` object) must throw `config-validation-failed` even with
-		// zero configSchema-declaring modules.
+		// With no module declaring a configSchema, CoreConfigSchema is still
+		// parsed: a config missing the required `oauth` object must throw
+		// `config-validation-failed`.
 		const noSchema = defineModule({ name: "no-schema" });
 		try {
 			validateManifests({
@@ -884,10 +862,9 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 	});
 
 	it("propagates parsed config through bootstrapComponents even with zero configSchema modules", () => {
-		// Companion to the regression above: with zero configSchema modules and
-		// a minimal valid config, the parsed config (which now carries no
-		// schema-injected values per ADR 2026-04-30 — defaults live in hocon)
-		// must still flow into bootstrapComponents intact.
+		// With zero configSchema modules and a minimal valid config, the parsed
+		// config (no schema-injected values: defaults live in hocon, ADR
+		// 2026-04-30) must still flow into bootstrapComponents intact.
 		const noSchema = defineModule({ name: "no-schema" });
 		const result = validateManifests({
 			modules: [noSchema],
@@ -898,14 +875,11 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 	});
 
 	it("preserves top-level extra config keys not in any schema (Codex P2 strip-unknown regression)", () => {
-		// Codex P2 finding on commit 270914f5: CoreConfigSchema's top-level
-		// z.object strips unknown keys. With zero module-declared schemas, a
-		// host environment passing a full AppConfig (with session, repositories,
-		// rateLimit, etc.) would have those sections silently dropped, leaving
-		// `handle.components.config` typed as AppConfig but runtime-shaped as
-		// CoreConfig. Since #728 the composed parse lays the base's output over
-		// what was written, so a key no schema declares is kept at every depth
-		// — and a section core mirrors, when present, is parsed by its schema.
+		// CoreConfigSchema's top-level z.object strips unknown keys, which would
+		// leave a host's full AppConfig runtime-shaped as CoreConfig. The
+		// composed parse lays the base's output over what was written, so a key
+		// no schema declares is kept at every depth — and a section core
+		// mirrors, when present, is parsed by its schema.
 		const noSchema = defineModule({ name: "no-schema" });
 		const result = validateManifests({
 			modules: [noSchema],
@@ -967,13 +941,10 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 	});
 
 	it("does NOT throw at validate when a static route's before targets an id that may be produced by a factory route in another module", () => {
-		// Per multi-agent review (Codex P2): factory routes return their
-		// RouteContribution at materialise time, so their `id` is opaque at
-		// validate-stage. Rejecting unknown refs here would block the
-		// documented mixed static/factory route ordering scenario. When at
+		// A factory route's `id` is opaque until it is materialised. When at
 		// least one module has a factory-shaped route entry, validate-stage
-		// defers all unknown-ref checks to assembleApp's mount-order pass
-		// (§5.6 step 1) which sees the full materialised id set.
+		// defers all unknown-ref checks to assembleApp's mount-order pass,
+		// which sees the full materialised id set.
 		const consumer = defineModule({
 			name: "consumer",
 			contributes: {
@@ -1006,16 +977,14 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Step 13 — parsed config carried forward (MUST-FIX 1 regression test)
+// Step 13 — parsed config carried forward
 // ---------------------------------------------------------------------------
 
 describe("validateManifests — step 13: parsed config carried forward in bootstrapComponents", () => {
 	it("substitutes the parsed config (with Zod defaults applied) into bootstrapComponents", () => {
-		// Use an independent namespace ("myModule") so the module schema adds a
-		// new optional key with a default to the composed schema. The key is
-		// absent from the input config; Zod applies the default during parse.
-		// The returned bootstrapComponents.config must carry the parsed value
-		// (with the default applied) so downstream stages see it.
+		// "myModule" is absent from the input config; the returned
+		// bootstrapComponents.config must carry the parsed value, with Zod's
+		// default applied, so downstream stages see it.
 		const defaultTimeout = 42;
 		const m = defineModule({
 			name: "cfg",
@@ -1084,7 +1053,6 @@ describe("validateManifests — happy path", () => {
 
 // ---------------------------------------------------------------------------
 // Consumer-defined kinds — collector.kind discriminant dispatch
-// (parallel to Task 6 fixup applied in apply-contributions.mts)
 // ---------------------------------------------------------------------------
 
 describe("validateManifests — consumer-defined kinds (spec §5.4 + §5.1 step 6/11)", () => {

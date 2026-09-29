@@ -15,33 +15,22 @@
  */
 
 /**
- * The cookie session's store failing, through the real stack.
+ * The cookie session's store failing, through the real stack
+ * (`sessionStoreModule` mounts express-session over connect-redis); the rules
+ * are in README, "Browser session store": a load that fails is `503
+ * temporarily_unavailable` before the route runs, a save or expiry refresh
+ * that fails after the route answered leaves the answer standing, one error
+ * line either way; a record that cannot be read is absent, one warn.
  *
- * `sessionStoreModule` mounts express-session over connect-redis. When that
- * store could not load a request's session, express-session handed the error
- * to `next(err)` and the request ended in the terminal handler as an
- * unlogged-as-outage `500`; when it could not save the session (or refresh its
- * expiry) after the route answered, the error reached Express's final handler,
- * which printed its stack and dropped the connection. A store that cannot
- * answer is the server's outage: `503 temporarily_unavailable` before the
- * route runs, one error line either way.
+ * A route that meets the same store failing answers its own `503`, logs its
+ * own line and drops the request's session, so express-session does not
+ * write to the failing store again as the response ends (a regenerated
+ * session's save, whose failure it does not track, or the expiry refresh of a
+ * session the request carried a cookie for) and report the same outage twice.
+ * These cases pin that the store sees one write.
  *
- * A route that meets the same store failing answers its own `503` and logs
- * its own line; express-session must not then write the session again when
- * the response ends — it would save a regenerated session (whose `save`
- * express-session does not track, so a failed one is tried again), and
- * refresh the expiry of a session the request carried a cookie for (a failed
- * save included), each time waiting on the same store and reporting the same
- * outage a second time. Every route drops the request's session after such an
- * outage, and these cases pin that the store sees one write.
- *
- * A record the store holds but cannot be read is not an outage: it is read as
- * absent, so the browser starts a fresh session, and is logged once as a
- * warn.
- *
- * Booted through `createApp`: the real module, the real express-session and
- * the real connect-redis, over a node-redis client faked in memory (the one
- * seam), whose commands can be made to fail.
+ * Booted through `createApp` with the real express-session and connect-redis,
+ * over a node-redis client faked in memory (the one seam).
  */
 
 import {

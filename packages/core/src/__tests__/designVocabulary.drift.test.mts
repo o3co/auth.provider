@@ -15,27 +15,17 @@
  */
 
 /**
- * designVocabulary.drift.test.mts — the design-vocabulary map, executable
- * (#370).
- *
- * `docs/design-vocabulary.md` binds each top-down design concept to the one
- * bottom-up module that implements it. This suite is the enforcement half:
- * for every mapped concept with a greppable definition signature, it walks
- * every package's shipped source and fails when the signature is *defined*
- * anywhere but the mapped home.
- *
- * Why this exists: the 38-commit campaign review (2026-08-28) found that
- * design erosion in this repo does not live in files — it lives in
- * vocabularies. `isLoopbackHostname` was defined twice under identical doc
- * comments with different behavior (#364), one commit after the decision not
- * to unify was written down. Per-PR review cannot catch a second definition
- * it never sees; a drift guard can. Same pattern as the #288 env-var drift
- * guards: the property is owned by a test, not by everyone's memory.
+ * Enforces `docs/design-vocabulary.md`, which binds each design concept to the
+ * one module that implements it. For every mapped concept with a greppable
+ * definition signature, walks every package's shipped source and fails when
+ * the signature is *defined* anywhere but the mapped home. Design erosion
+ * lives in vocabularies, not files: per-PR review cannot catch a second
+ * definition it never sees.
  *
  * Adding a row: implement the concept in ONE module, add it to
  * `docs/design-vocabulary.md`, and add its definition signature here.
  * Re-exports (`export { x } from ...`) and imports deliberately do not match
- * the definition patterns — consumers may re-export the mapped home freely.
+ * the definition patterns: consumers may re-export the mapped home freely.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -267,7 +257,8 @@ const VOCABULARY: readonly VocabularyRow[] = [
 	},
 	{
 		// Kept in the grants boundary's home, which admission imports: moving
-		// it under `session-admission/` would close an import cycle (D10).
+		// it under `session-admission/` would close an import cycle
+		// (session-admission ADR, D10).
 		concept:
 			"the subject-revocation boundary as it is read against an instant (the session-admission ADR's D2, D10)",
 		home: "packages/core/src/federation-grants/effective-status.mts",
@@ -492,8 +483,8 @@ function walk(dir: string, out: string[]): void {
 /**
  * Shipped sources allowed to call `grantPolicy.evaluate(` other than the home,
  * each with why. A grant that consults the policy anywhere else re-implements
- * the home's fail-closed rules inline — which is how `refresh_token` carried a
- * full copy the definition-only guard above could not see (v0.13.0 audit).
+ * the home's fail-closed rules inline, which the definition-only guard above
+ * cannot see.
  */
 const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reason: string }>> = {
 	"packages/oauth/src/routes/authorize.mts": {
@@ -547,12 +538,10 @@ const requirementRuleCalls = (source: string): string[] => {
 /**
  * A call to the acr selection that does not build its `amr` with
  * `requirementSession(` inside its own arguments. The selection reads a
- * session only as the D9 reading makes it (the MFA ADR's step-4 amendment):
- * an input built from the record's own `amr` would, after the upstream
- * split, let an untrusted upstream value meet an `acr`. Building it inline is
- * what makes that checkable here — admission's own call is written that way
- * — and a value built elsewhere and passed by name is flagged too, so a
- * reviewer sees it.
+ * session only as the D9 reading (MFA ADR) makes it: an input built from the
+ * record's own `amr` would, given the upstream split, let an untrusted
+ * upstream value meet an `acr`. Building it inline makes that checkable here;
+ * a value built elsewhere and passed by name is flagged too.
  */
 const withoutRequirementSession = (source: string): string[] =>
 	requirementRuleCalls(source).filter((args) => !/\brequirementSession\s*\(/.test(args));
@@ -936,14 +925,12 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 const SESSION_RECORD_FIELDS: ReadonlySet<string> = new Set(["amr", "authentication"]);
 
 /**
- * The functions that take an `amr` — as an option, an argument or a token
- * claim — matched by the name they are called by: a token minter
- * (`generateToken`, whose payload is the token's claims, the id_token's
- * `generateIdToken`, and the key store's `sign`, which takes the claims
- * both build — see {@link CLAIMS_ONLY_TAKERS}), the amr composer, a store's `create` and the step-up
- * (`recordSecondFactor`, `sessionAfterSecondFactor`, `checkSecondFactorEvent`),
- * and the acr selection (`selectAcr`). A spread into an
- * object handed to one of them copies a record's own `amr` without naming it.
+ * The functions that take an `amr` (as an option, an argument or a token
+ * claim), matched by the name they are called by: the token minters
+ * `generateToken` and `generateIdToken`, the key store's `sign`, which takes
+ * the claims both build (see {@link CLAIMS_ONLY_TAKERS}), the amr composer, a
+ * store's `create`, the step-up and the acr selection. A spread into an object
+ * handed to one of them copies a record's own `amr` without naming it.
  * `create` is also other factories' name: their spreads are pinned like reads.
  */
 const AMR_TAKERS: ReadonlySet<string> = new Set([
@@ -986,47 +973,38 @@ interface SessionRecordRead {
  * The reads of a field named `amr` or `authentication` in `source`, each with
  * its line and its text (whitespace removed, so formatting does not move it):
  *
- * - a property access on any receiver (`x.amr`, `x?.authentication`, a call's
- *   or an awaited read's), written as the access;
+ * - a property access on any receiver, written as the access;
  * - an element access by the literal name (`x["amr"]`, `` x?.[`amr`] ``), and
  *   `Reflect.get(x, "amr")`, written as the expression;
- * - a destructuring — by declaration, by parameter, or by assignment
- *   (`({ amr } = s)`, `for ({ amr } of …)`) — renamed or not, the key a
- *   literal or a computed literal (`{ ["amr"]: a }`), written as
- *   `{key}=source`;
- * - a spread into an object handed to a function that takes an `amr`
- *   ({@link AMR_TAKERS}), unless it spreads only literals or a choice
- *   between them, written as `...` and what is spread (a call as its callee).
+ * - a destructuring by declaration, parameter or assignment, renamed or not,
+ *   the key a literal or a computed literal, written as `{key}=source`;
+ * - a spread into an object handed to one of {@link AMR_TAKERS}, unless it
+ *   spreads only literals or a choice between them, written as `...` and
+ *   what is spread (a call as its callee).
  *
  * A spread of a local, and a local handed whole to such a function, is
  * followed to the declaration the language resolves it to, in the same file:
  * a spread of anything but literals in its initializer is reported (and
- * followed in turn), and — for a local used whole — so is an initializer that
- * is not an object literal (`o=initializer`), so re-initialising a pinned
- * local from a session fails. The key store's `sign` is checked through its
- * object argument and the locals named in it (`sign({ claims })`), and a
- * local handed whole to it is followed for its spreads only. A taker's
- * argument that is a call to something else (`formatObject({ … })`) is
- * looked through to what that call is handed, through any number of such
- * calls.
+ * followed in turn), and for a local used whole so is an initializer that is
+ * not an object literal (`o=initializer`). The key store's `sign` is checked through its object
+ * argument and the locals named in it; a local handed whole to it is followed
+ * for its spreads only. A taker's argument that is a call to something else
+ * (`formatObject({ … })`) is looked through, through any number of such calls.
  *
- * Read with TypeScript's parser, so a comment or a string that names the
- * field is not a read, and neither is an object literal written for a store,
- * a type or an interface member. By shape, never by what the receiver is
- * called.
+ * Parsed with TypeScript, so a comment or a string that names the field is not
+ * a read, and neither is an object literal written for a store, a type or an
+ * interface member. Matched by shape, never by the receiver's name.
  *
- * What it does not follow is left to review, and to a branded type for a
- * vouched `amr` planned for a later change: a local it cannot resolve here (a
- * parameter, a loop variable, an import, a value built in another function
- * or file); a reassigned `let`, or a `var` hoisted from an inner block, whose
- * value is not the one it was declared with; a callee reached under another name (an alias, a method taken
- * off its object); a copy that is not a spread (`Object.assign`,
- * `structuredClone`); a cast that relabels a record; and reflection with a
- * key that is not a literal. A consumer reads a session through
- * `sessionAuthentication` / `vouchedAmr`
- * (`core/src/user-sessions/authentication.mts`), because the record's own
- * `amr` still holds an untrusted IdP's values in a session written before the
- * upstream split.
+ * Left to review: a local it cannot resolve here (a parameter, a loop
+ * variable, an import, a value built in another function or file); a
+ * reassigned `let`, or a `var` hoisted from an inner block, whose value is not
+ * the one it was declared with; a callee reached under another name; a copy
+ * that is not a spread (`Object.assign`, `structuredClone`); a cast that
+ * relabels a record; and reflection with a key that is not a literal. A
+ * consumer reads a session through `sessionAuthentication` / `vouchedAmr`
+ * (`core/src/user-sessions/authentication.mts`), because a session written
+ * before the upstream split still holds an untrusted IdP's values in its own
+ * `amr`.
  */
 function sessionRecordReads(source: string, fileName = "scan.mts"): SessionRecordRead[] {
 	const kind = /\.(?:js|mjs|cjs)$/.test(fileName) ? ts.ScriptKind.JS : ts.ScriptKind.TS;
@@ -1644,14 +1622,14 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 
 	it("builds the acr selection's amr with requirementSession at every call site, admission's own included", () => {
 		// Outside tests. Admission's own call is held to it too: the guard has
-		// no home exemption, so the one product caller D2 leaves is checked.
+		// no home exemption.
 		const calls = listShippedSources()
 			.map(
 				(file) =>
 					[relative(repoRoot, file).split(sep).join("/"), readFileSync(file, "utf8")] as const,
 			)
 			.filter(([, source]) => requirementRuleCalls(source).length > 0);
-		// Not vacuous: admission selects the acr, and so does /authorize until A3.
+		// Not vacuous: admission selects the acr.
 		expect(calls.map(([rel]) => rel)).toContain(REQUIREMENT_RULE_HOME);
 		const offenders = Object.fromEntries(
 			calls

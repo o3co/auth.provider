@@ -22,19 +22,14 @@ export type AccessTokenScheme =
 /**
  * The auth schemes that carry an access token as the credential.
  *
- * `Bearer` is RFC 6750 §2.1. The rest are the per-binding presentation
- * schemes from `BINDING_PROFILES` — today only `DPoP` (RFC 9449 §7.1,
- * which requires a DPoP-bound access token to be presented under its own
- * scheme rather than as a Bearer token; that separation is what lets a
- * resource refuse a bound token that arrives without its proof, issue
- * #264). Deriving the set from the profiles keeps "schemes we parse" and
- * "schemes a binding demands" in sync by construction when a
- * `Confirmation` variant is added.
+ * `Bearer` is RFC 6750 §2.1. The rest are the per-binding presentation schemes
+ * from `BINDING_PROFILES`, today only `DPoP` (RFC 9449 §7.1 requires a
+ * DPoP-bound token to be presented under its own scheme, which lets a resource
+ * refuse a bound token that arrives without its proof). Deriving the set from
+ * the profiles keeps the parsed schemes in step with the bindings.
  *
- * Which of the schemes a given token is *allowed* to use is decided by
- * `protectedResourceBindingMw` against the token's `cnf` claim, not here:
- * this module only answers "is there an access token in this header, and
- * what is it?" so every protected resource extracts it the same way.
+ * Which scheme a given token may use is decided by
+ * `protectedResourceBindingMw` against its `cnf` claim, not here.
  */
 const ACCESS_TOKEN_SCHEMES: ReadonlySet<string> = new Set([
 	"bearer",
@@ -48,21 +43,17 @@ export interface AccessTokenAuthorization {
 
 /**
  * Split an `Authorization` header value into the (lowercased) access-token
- * scheme and the token it carries, or `null` when the header carries no
- * access token — absent, malformed, a different scheme (`Basic` client
- * authentication is the case that occurs), or a scheme with an empty
- * credential.
+ * scheme and the token it carries, or `null` when the header carries no access
+ * token: absent, malformed, a different scheme (e.g. `Basic` client
+ * authentication), or an empty credential.
  *
- * The scheme is matched as a whole token, not as a prefix: `BearerToken
- * xyz` is a different scheme and returns `null`, where
- * `startsWith("Bearer ")` would have been fooled by `Bearer` + any suffix
- * only if it also matched the space — but the surrounding endpoints
- * previously used both `startsWith` and case-insensitive regexes, so
- * pinning one behaviour in one place removes the drift.
+ * The scheme is matched as a whole token, not a prefix: `BearerToken xyz` is a
+ * different scheme and returns `null`. Every protected resource parses through
+ * here so the behaviour cannot drift between endpoints.
  *
- * Callers that only need the token use {@link parseAccessTokenHeader};
- * this variant exists for `protectedResourceBindingMw`, which must also
- * check the scheme against the binding the token's `cnf` names.
+ * Callers that only need the token use {@link parseAccessTokenHeader}; this
+ * variant exists for `protectedResourceBindingMw`, which must also check the
+ * scheme against the binding the token's `cnf` names.
  */
 export const parseAccessTokenAuthorization = (
 	authorization: string | undefined,

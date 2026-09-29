@@ -4,51 +4,28 @@
  */
 
 /**
- * Redis-backed `FederationTokenStore`.
- *
- * ## What is written under `${keyPrefix}${sid}:${federationName}` (#293)
- *
- * One JSON wrapper carrying a format version and the record:
+ * Redis-backed `FederationTokenStore`. `${keyPrefix}${sid}:${federationName}`
+ * holds one JSON wrapper:
  *
  * ```
  * mode = "required"         { "v": 2, "c": "<AES-256-GCM ciphertext of the JSON envelope>" }
  * mode = "allow-plaintext"  { "v": 2, "p": { ...envelope } }
  * ```
  *
- * The *whole* envelope — `accessToken`, `refreshToken`, `idToken`,
- * `expiresAtMs`, `tokenType`, `scope`, `grantedScope` — is one ciphertext.
- * Earlier releases encrypted the three token fields individually and wrote
- * the rest beside them in clear (#293), which was made urgent by a field that
- * was to hold the upstream IdP's raw token response, `rawParams`. That field
- * is gone — nothing in this repository ever wrote it, and filled it would have
- * been a second copy of the tokens (#645 follow-up). An envelope written by
- * something that did fill it is still read; the field is ignored and not
- * written back. `tokenType` and `scope` are
- * low-sensitivity, but nothing reads the stored record without decrypting
- * it — `get` → `fromEnvelope` is the only reader; the per-session index
- * under `${keyPrefix}idx:` is separate and carries only federation names.
- * One ciphertext per record is simpler and closes the class rather than the
- * instance. Under `mode = "allow-plaintext"` the envelope stays plain JSON
- * inside the same wrapper; that mode is refused outside development by
- * `validateEncryptionMode`.
+ * The whole envelope is one ciphertext, not only its token fields, so no part
+ * of a record is readable without decrypting it; the per-session index under
+ * `${keyPrefix}idx:` holds only federation names. `allow-plaintext` is refused
+ * outside development by `validateEncryptionMode`.
  *
- * The ciphertext is bound to the Redis key it lives under — AES-GCM
- * additional authenticated data = `${keyPrefix}${sid}:${federationName}` —
- * so a value copied to another session's key (or another federation's, or
- * another prefix) fails authentication and is handled as corrupt rather than
- * read as that session's tokens.
+ * The AES-GCM additional authenticated data is the record's Redis key, so a
+ * value copied under another session's, federation's or prefix's key fails
+ * authentication and is treated as corrupt.
  *
- * ### Legacy records
- *
- * A record without the `v: 2` wrapper (recognisable by `accessToken` at the
- * top level) is the pre-#293 per-field shape. `get` treats it exactly like
- * corrupt JSON or a decrypt failure: the key and its index member are
- * removed and `null` is returned, which the session layer turns into
- * re-authentication. There is deliberately no dual-read path — it would keep
- * the plaintext-readable code alive — and no in-place migration: no
- * deployment had written these records outside development when the format
- * changed. Operator consequence: records written before this version are
- * dropped on first read and the user re-federates.
+ * A record without the `v: 2` wrapper (the older per-field shape, with
+ * `accessToken` at the top level) is treated like corrupt JSON or a failed
+ * decrypt: `get` removes the key and its index member and answers `null`, and
+ * the user re-federates. There is deliberately no dual-read path, which would
+ * keep plaintext-readable code alive.
  */
 
 import {
@@ -83,68 +60,46 @@ export interface RedisFederationTokenStoreOptions {
 	encryption: EncryptionConfig;
 	keyPrefix?: string;
 	/**
-	 * Redis key TTL in seconds. This is the upper bound on how long a federation
-	 * token record persists; it MUST exceed the upstream federation refresh_token
-	 * lifetime so that refresh flows (F-6) can still retrieve the refresh_token
-	 * after the access_token has expired.
-	 *
-	 * Do NOT tie this TTL to `tokens.expiresAt` (the access_token expiry) —
-	 * access_token expiry is kept inside the envelope for F-6 to consult at
-	 * retrieval time, but the record itself lives until this store TTL elapses.
-	 *
-	 * Default: 86400 seconds (24 hours). Spec Section 5.2. A positive finite
-	 * number, or construction throws; a fractional one is rounded up to a whole
-	 * millisecond, since `PX` takes nothing else.
+	 * Redis key TTL in seconds: how long a record persists. It MUST exceed the
+	 * upstream refresh_token lifetime, so a refresh can still read the
+	 * refresh_token after the access_token has expired; do not tie it to
+	 * `tokens.expiresAt`, which the envelope keeps for the refresh flow.
+	 * Default 86400 (24 h). A positive finite number, or construction throws; a
+	 * fractional one is rounded up to a whole millisecond (`PX` takes no other).
 	 */
 	ttl?: number;
 	/**
-	 * **Migration flag (#291), scheduled for removal.** Keep the legacy
-	 * `SCAN MATCH ${keyPrefix}${sid}:*` sweep as a fallback at the end of
-	 * `removeBySid`, in addition to the per-session key index.
+	 * **Migration flag, scheduled for removal.** After the index-driven removal,
+	 * `removeBySid` also sweeps `SCAN MATCH ${keyPrefix}${sid}:*` to catch
+	 * records written before the per-session index existed; without it their
+	 * upstream refresh tokens outlive the logout until the store TTL. While on,
+	 * every `removeBySid` scans the keyspace once.
 	 *
-	 * Records written by v0.9.x and earlier have no index entry, so an index-
-	 * only `removeBySid` would walk straight past them and leave a logged-out
-	 * session's upstream refresh tokens sitting in Redis until the store TTL
-	 * expired them. The fallback closes that window on an upgrade.
+	 * Turn it off once `ttl` has elapsed since the last replica running a release
+	 * without the index stopped writing, or at once on a Redis that held no
+	 * federation records before the upgrade. The flag, the scan path and
+	 * `FederationTokenStoreClient.scanIterator` go away together (see CHANGELOG).
 	 *
-	 * It is also what the flag costs: while enabled, every `removeBySid` still
-	 * performs one keyspace scan, which is the O(keyspace) work #291 is about.
-	 * The index-driven removal runs first regardless, so the deletes are always
-	 * bounded; the scan is a safety net, not the mechanism.
-	 *
-	 * **When to turn it off**: once no session predating the upgrade can still
-	 * exist — that is, once `ttl` (default 24 h) has elapsed since the last
-	 * replica running the previous release stopped writing. Set it to `false`
-	 * then, and logout stops touching the keyspace at all. A deployment whose
-	 * Redis had no federation records before the upgrade (a fresh database, or
-	 * `federationTokenStore` newly enabled) can set it to `false` immediately.
-	 *
-	 * **When it will be removed**: the flag and the scan path go away together
-	 * once the migration window has closed — see CHANGELOG for the release that
-	 * performs the removal. At that point `scanIterator` also leaves
-	 * `FederationTokenStoreClient`.
-	 *
-	 * Default: `true` — an upgrade that changes no configuration must not
-	 * silently orphan tokens.
+	 * Default `true`: an upgrade that changes no configuration must not orphan
+	 * tokens.
 	 */
 	scanFallback?: boolean;
 	/**
-	 * The name the deployment selected its configuration by (#473) — see
-	 * {@link EncryptionGuardContext}. Read only by the `allow-plaintext`
-	 * guard, in addition to `NODE_ENV`; omit it and `NODE_ENV` is the sole
-	 * signal, as before.
+	 * The name the deployment selected its configuration by (see
+	 * {@link EncryptionGuardContext}). Read only by the `allow-plaintext` guard,
+	 * beside `NODE_ENV`; omitted, `NODE_ENV` is the sole signal.
 	 */
 	environment?: string;
 	/**
-	 * `deployment.mode` from the application config (#473). `"multi"` refuses
-	 * `allow-plaintext` in every environment; the module reads it off the
-	 * config it is handed, a direct caller passes it here.
+	 * `deployment.mode` from the application config. `"multi"` refuses
+	 * `allow-plaintext` in every environment; the module reads it off its
+	 * config, a direct caller passes it here.
 	 */
 	deploymentMode?: string;
 	/**
-	 * Where the `allow-plaintext` guard's notice goes (#473): the module
-	 * passes its optional `logger` slot, the builder its context's. Absent,
-	 * `consoleLogger`. The store logs nothing else.
+	 * Where the `allow-plaintext` guard's notice goes: the module passes its
+	 * optional `logger` slot, the builder its context's. Absent, `consoleLogger`.
+	 * The store logs nothing else.
 	 */
 	logger?: Logger;
 }
@@ -152,57 +107,51 @@ export interface RedisFederationTokenStoreOptions {
 const DEFAULT_TTL_SECONDS = 86400;
 
 /**
- * Keys removed per `UNLINK`, and members requested per `SSCAN` / `SCAN`
- * round-trip. Bounds the size of any single command `removeBySid` issues on
- * the shared connection, so neither a heavily-linked session nor a large
- * keyspace turns one logout into one enormous command.
+ * Keys per `UNLINK` and members per `SSCAN` / `SCAN` round-trip, so neither a
+ * heavily linked session nor a large keyspace turns one logout into one
+ * enormous command on the shared connection.
  */
 const REMOVE_BATCH_SIZE = 100;
 
 /**
- * The record as it exists inside {@link StoredRecord}: every field in clear.
- * Under `mode = "required"` this object only ever exists as the plaintext
- * side of one AES-256-GCM operation — it is never written to Redis as-is
- * (#293).
+ * The record inside {@link StoredRecord}, every field in clear. Under
+ * `mode = "required"` it exists only as the plaintext side of one AES-256-GCM
+ * operation, never written to Redis as-is.
  */
 interface Envelope {
 	accessToken: string;
 	refreshToken: string | undefined;
 	idToken: string | undefined;
 	/**
-	 * `number` = absolute epoch-ms of access token expiry. `null` = upstream provider
-	 * issued no finite expiry (e.g. GitHub OAuth Apps classic). Stored as explicit
-	 * `null` (JSON-round-trippable) so F-6 refresh logic can distinguish "no expiry"
-	 * from "unknown / missing field" on future schema migrations.
+	 * Absolute epoch-ms of access-token expiry, or `null` when the upstream
+	 * issued no finite expiry (e.g. GitHub OAuth Apps). An explicit `null`, so
+	 * "no expiry" stays distinct from a missing field.
 	 */
 	expiresAtMs: number | null;
 	/**
-	 * Every field is a required key, like `FederationTokens`'s own: this
-	 * envelope is the shape the store writes, and a projection into it that
-	 * forgot a field would otherwise compile and drop it — `tokenType` failing
-	 * open (#645), the others each costing something. JSON drops an `undefined`
-	 * value, so on the wire an unset key is still absent, and `isEnvelope`
-	 * reads it as optional.
+	 * Every field is a required key, like `FederationTokens`'s, so a projection
+	 * that forgets one fails to compile rather than dropping it (a dropped
+	 * `tokenType` fails open). JSON drops `undefined`, so an unset key is absent
+	 * on the wire, and `isEnvelope` reads it as optional.
 	 */
 	tokenType: string | undefined;
 	scope: string | undefined;
-	/** #647 — the link-time ceiling; `undefined` on a record written before it. */
+	/** The link-time scope ceiling; `undefined` on older records. */
 	grantedScope: string | undefined;
 }
 
 /**
- * Format version of {@link StoredRecord}. Version 1 is the pre-#293 per-field
- * shape, which had no version marker at all; bump this when the wrapper
- * changes shape again, and let `open` refuse what it does not know.
+ * Format version of {@link StoredRecord} (the unversioned per-field shape
+ * counts as 1). Bump it when the wrapper changes shape; `open` refuses any
+ * other.
  */
 const RECORD_VERSION = 2;
 
 /**
- * What is actually written to Redis — see the module docblock. `c` under
- * `mode = "required"`, `p` under `mode = "allow-plaintext"`. A store in one
- * mode does not read the other's shape: a `p` record under `required` would
- * be a plaintext-readable path in production, and a `c` record under
- * `allow-plaintext` has no key to be read with.
+ * What is written to Redis (see the file header): `c` under `required`, `p`
+ * under `allow-plaintext`. Neither mode reads the other's shape: a `p` record
+ * under `required` would be a plaintext-readable path in production, and a `c`
+ * record under `allow-plaintext` has no key to be read with.
  */
 type StoredRecord =
 	| { v: typeof RECORD_VERSION; c: string }
@@ -215,18 +164,11 @@ const isOptionalString = (v: unknown): v is string | undefined =>
 	v === undefined || typeof v === "string";
 
 /**
- * Minimal shape check on the inner envelope, applied after the wrapper has
- * been unwrapped or decrypted (PR #450 review). Checking only the wrapper
- * let a malformed inner envelope — an array, no `accessToken`,
- * `expiresAtMs: "soon"` — reach `fromEnvelope`, which returned
- * `{ accessToken: undefined, expiresAt: Invalid Date }` instead of
- * throwing; `get`'s self-heal then never ran and the corrupt record was
- * served on every read. Rejecting it here routes it into the same delete +
- * index-drop as corrupt JSON.
- *
- * `expiresAtMs` must be present: `null` is the explicit "no finite expiry"
- * and a missing field is the "unknown" the `Envelope` doc keeps distinct
- * from it. Hand-written rather than zod so the read path stays
+ * Shape check on the inner envelope, after unwrapping or decrypting. Without
+ * it a malformed envelope (an array, no `accessToken`, `expiresAtMs: "soon"`)
+ * would reach `fromEnvelope`, which does not throw, and be served on every read
+ * instead of taking `get`'s self-heal. `expiresAtMs` must be present (`null`
+ * means "no finite expiry"). Hand-written, not zod, to keep the read path
  * dependency-free.
  */
 function isEnvelope(value: unknown): value is Envelope {
@@ -245,19 +187,17 @@ function isEnvelope(value: unknown): value is Envelope {
 	) {
 		return false;
 	}
-	// `rawParams` is no longer a field. An envelope that carries one — written
-	// before it was removed — is read, and the field is ignored.
+	// An envelope carrying the retired `rawParams` field is read; the field is
+	// ignored and not written back.
 	return true;
 }
 
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
 ): FederationTokenStore & SupportsLock {
-	// OR-12: hard production guard MUST run before any encryption-key parsing
-	// so the same gate fires regardless of which entry point a consumer picks.
-	// It runs here and only here — the builder and the module reach it through
-	// this factory — so its notice is written once per store (the OR-12 spec's
-	// M2 calibration delta put it here for direct callers of this factory).
+	// The production guard runs before any key parsing, and only here: the
+	// builder and the module reach it through this factory, so every entry
+	// point is gated and its notice is written once per store.
 	validateEncryptionMode("federation-tokens", opts.encryption.mode, {
 		environment: opts.environment,
 		deploymentMode: opts.deploymentMode,
@@ -290,42 +230,33 @@ export function createRedisFederationTokenStore(
 	const scanFallback = opts.scanFallback ?? true;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
 
-	// #291: per-session key index. One SET per sid holding the federation
-	// names attached to it, so `removeBySid` can name the keys it must delete
-	// instead of hunting for them. Its own sub-namespace, like `lock:` below,
-	// keeps it clear of the `${prefix}${sid}:*` envelope keyspace — the
-	// migration fallback matches that pattern and must not sweep up indexes
-	// belonging to other sessions.
-	//
-	// This shares the constraint `lock:` has carried since D-9: a sid equal to
-	// a sub-namespace token ("idx", "lock") would make the two layouts
-	// ambiguous. Sids are opaque generated identifiers, so this is a bound on
-	// what may be passed in rather than a case to handle.
+	// Per-session key index: one SET per sid naming its federations, so
+	// `removeBySid` deletes named keys instead of scanning. Its own `idx:`
+	// sub-namespace (like `lock:`) keeps it out of the `${prefix}${sid}:*`
+	// pattern the scan fallback sweeps. A sid equal to a sub-namespace token
+	// ("idx", "lock") would make the layouts ambiguous; sids are opaque
+	// generated identifiers, so that bounds what may be passed in.
 	const index = createRedisSidSet({
 		client: opts.client,
 		keyPrefix: `${prefix}idx:`,
 		scanCount: REMOVE_BATCH_SIZE,
 	});
 
-	// Advisory lock: uses a separate key namespace (lock:) so lock keys never
-	// collide with token envelope keys. The lock client shim bridges from
-	// FederationTokenStoreClient's positional set form to the options-object
-	// form that RedisLockClient requires (internal to this package).
+	// Advisory lock under its own `lock:` namespace. The shim bridges
+	// FederationTokenStoreClient's positional `set` to the options-object form
+	// RedisLockClient takes.
 	const lockKeyPrefix = `${prefix}lock:`;
 	const lock = createRedisLock({
 		client: {
 			set: (key, value, o) => {
-				// RedisLockClient uses options-object form; bridge to positional form.
 				if (o?.NX && o.PX !== undefined) {
 					return opts.client.set(key, value, "PX", o.PX, "NX") as Promise<string | null>;
 				}
 				if (o?.PX !== undefined) {
 					return opts.client.set(key, value, "PX", o.PX) as Promise<string | null>;
 				}
-				// CR-5 fix: unknown option shape is a programming error, not a silent
-				// no-op. The pre-D-9 silent `Promise.resolve(null)` fallback caused
-				// the lock acquire loop to spin until timeout when the bridge was
-				// passed a non-standard option shape.
+				// An unknown option shape is a programming error; answering `null`
+				// would spin the acquire loop until timeout.
 				throw new Error(
 					"FederationTokenStore lock bridge: unrecognized set() option shape. " +
 						"Expected { PX: number } or { PX: number, NX: true }.",
@@ -358,9 +289,8 @@ export function createRedisFederationTokenStore(
 	});
 
 	/**
-	 * Wrap an envelope for the wire (#293). `key` is the Redis key the record
-	 * is about to be written under; under `mode = "required"` it is the AAD
-	 * the ciphertext is bound to.
+	 * Wrap an envelope for the wire. `key` is the Redis key it is written under,
+	 * and under `mode = "required"` the AAD the ciphertext is bound to.
 	 */
 	const seal = (key: string, env: Envelope): string => {
 		const record: StoredRecord =
@@ -374,13 +304,10 @@ export function createRedisFederationTokenStore(
 	};
 
 	/**
-	 * Inverse of `seal`. Throws on anything that is not a record this store
-	 * wrote in its own mode — corrupt JSON, the pre-#293 per-field shape, a
-	 * plaintext record under `mode = "required"`, a ciphertext under
-	 * `mode = "allow-plaintext"`, a ciphertext sealed for another key, or a
-	 * wrapper whose inner envelope is not one (`isEnvelope`) — and `get`
-	 * turns every throw into the same self-heal. One read path, no shape
-	 * sniffing: a legacy record is not "migrated", it is dropped.
+	 * Inverse of `seal`. Throws on anything but a record this store wrote in its
+	 * own mode (corrupt JSON, the unversioned per-field shape, the other mode's
+	 * shape, a ciphertext sealed for another key, a malformed envelope); `get`
+	 * turns every throw into the same self-heal.
 	 */
 	const open = (key: string, raw: string): Envelope => {
 		const record = JSON.parse(raw) as Partial<Record<"v" | "c" | "p", unknown>> | null;
@@ -396,11 +323,9 @@ export function createRedisFederationTokenStore(
 			}
 			inner = JSON.parse(decryptTokenField(record.c, opts.encryption.key, key));
 		}
-		// The wrapper says whose record this is; this says whether what is
-		// inside can be handed to `fromEnvelope` at all. Under `required` the
-		// AEAD tag already vouches that these are bytes this store sealed, so
-		// a mismatch here is a bug or a hand-edited dev record — either way
-		// the self-heal is the right answer, not an Invalid Date.
+		// Under `required` the AEAD tag vouches that this store sealed these
+		// bytes, so a mismatch here is a bug or a hand-edited dev record; the
+		// self-heal is still the answer, not an Invalid Date.
 		if (!isEnvelope(inner)) {
 			throw new Error("FederationTokenStore redis: malformed envelope");
 		}
@@ -408,21 +333,13 @@ export function createRedisFederationTokenStore(
 	};
 
 	const writeEnv = async (sid: string, name: string, env: Envelope) => {
-		// Index BEFORE the envelope. A failure between the two then leaves an
-		// index member pointing at a key that does not exist — harmless, the
-		// removal path unlinks missing keys without complaint. The other order
-		// would leave an envelope nothing knows about, which is precisely the
-		// orphan this index exists to prevent.
-		//
-		// This costs the write path one extra round-trip. That is the trade
-		// #291 makes: a write happens once when a federation is linked, while
-		// the read it pays for happens on every logout and used to be
-		// O(the entire keyspace).
+		// Index before the envelope: a failure between them leaves an index
+		// member naming a missing key, which removal tolerates, where the other
+		// order would leave an envelope nothing knows about.
 		await index.add(sid, name, storeTtlMs);
-		// Redis TTL is the store lifetime (session upper bound), NOT the access
-		// token's expiresAt. The access token's expiry is preserved inside the
-		// envelope so F-6 consumers can decide to refresh; the record itself
-		// must outlive the access_token so the refresh_token remains available.
+		// The key TTL is the store lifetime, not the access token's expiry
+		// (kept in the envelope): the refresh_token must outlive the access
+		// token.
 		const key = k(sid, name);
 		await opts.client.set(key, seal(key, env), "PX", storeTtlMs);
 	};
@@ -448,26 +365,19 @@ export function createRedisFederationTokenStore(
 		async get(sid, name) {
 			const key = k(sid, name);
 			const v = await opts.client.get(key);
-			// Absent is the only clean miss. An empty string is a value Redis
-			// can hold and `open` cannot read, so it goes through the same
-			// self-heal as corrupt JSON below — the `!v` shortcut this replaced
-			// answered `null` and left the key and its index member in place
-			// (#473).
+			// Only absence is a clean miss: an empty string is a value `open`
+			// cannot read, so it takes the same self-heal as corrupt JSON.
 			if (v === null) return null;
 			try {
 				return fromEnvelope(open(key, v));
 			} catch {
-				// Corrupt JSON, a decrypt failure (rotated encryption key, or a
-				// ciphertext sealed for another key — #293 AAD), or the pre-#293
-				// per-field record: self-heal by deleting the key, mirroring the
-				// UserSessionStore redis adapter. Otherwise operators see repeated
-				// silent failures and key/crypto mismatches surface as "missing
-				// tokens" — hard to debug. Returning null after delete signals
-				// re_authentication.
+				// Corrupt JSON, a failed decrypt (rotated key, or a ciphertext
+				// sealed for another key) or an unversioned record: delete the key,
+				// as the UserSessionStore adapter does, rather than fail silently on
+				// every read. `null` then means re-authenticate.
 				await opts.client.del(key);
-				// Drop the index member too: the envelope it named is gone, and
-				// an index that outlives its records makes `removeBySid` do work
-				// for keys that cannot exist.
+				// Drop the index member too, so `removeBySid` does no work for a
+				// key that cannot exist.
 				await index.remove(sid, name);
 				return null;
 			}
@@ -476,10 +386,8 @@ export function createRedisFederationTokenStore(
 			await writeEnv(sid, name, toEnvelope(tokens));
 		},
 		async removeBySid(sid) {
-			// #291: the session's own index names the keys, so this is O(the
-			// session's federations) rather than O(the keyspace). Read in
-			// SSCAN pages and unlinked in bounded batches, so neither half
-			// grows with how heavily linked the session is.
+			// The session's index names the keys: O(its federations), read in
+			// SSCAN pages and unlinked in bounded batches.
 			await unlinkBatched(
 				(async function* () {
 					for await (const name of index.members(sid)) yield k(sid, name);
@@ -488,11 +396,8 @@ export function createRedisFederationTokenStore(
 			await index.removeBySid(sid);
 
 			if (!scanFallback) return;
-			// Migration fallback — see `scanFallback` in the options doc. Records
-			// written before the index existed have no member naming them, so
-			// they are only reachable by the pattern scan the index replaced.
-			// SCAN (cursor-based) rather than KEYS (O(N), blocking), and the
-			// same bounded UNLINK batches.
+			// Migration fallback (see `scanFallback`): records written before the
+			// index are reachable only by pattern. SCAN, not KEYS (O(N), blocking).
 			await unlinkBatched(
 				opts.client.scanIterator({ MATCH: sidPattern(sid), COUNT: REMOVE_BATCH_SIZE }),
 			);
@@ -508,24 +413,12 @@ export function createRedisFederationTokenStore(
 }
 
 /**
- * AdapterFactory builder. Consumer wires:
- *   factory.register("redis", redisFederationTokenStoreBuilder);
- *
- * `config` shape:
- *   { client: FederationTokenStoreClient,
- *     encryption: EncryptionConfig | { mode?: "required" | "allow-plaintext", key?: Buffer | string },
- *     keyPrefix?: string,
- *     ttl?: number,
- *     scanFallback?: boolean,
- *     environment?: string,
- *     deploymentMode?: string }
- *
- * Encryption defaults: mode = "required", key MUST be 32 bytes: a Buffer, or
- * canonical base64 (core's `decodeSealingKey`: no whitespace, the standard
- * alphabet, its padding). Any other mode than the two is refused by the
- * store's guard. `mode = "allow-plaintext"` emits a startup warning and is
- * intended for dev/test only (per spec §5); `environment` and `deploymentMode`
- * are what the guard on it reads (#473, {@link EncryptionGuardContext}).
+ * AdapterFactory builder. `encryption.mode` defaults to `"required"`, whose key
+ * MUST be 32 bytes: a Buffer, or canonical base64 (core's `decodeSealingKey`:
+ * no whitespace, the standard alphabet, its padding). The store's guard refuses
+ * any other mode than the two; `allow-plaintext` warns at startup and is for
+ * dev/test only. `environment` and `deploymentMode` are what that guard reads
+ * ({@link EncryptionGuardContext}).
  */
 export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStore> = (
 	config,
@@ -544,12 +437,10 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		throw new Error("federationTokenStore.redis: 'client' option is required");
 	}
 	const clientObj = cfg.client as Record<string, unknown>;
-	// `compareAndDelete` is required by the advisory-lock release path (D-9);
-	// `unlink` and the three SET primitives by the per-session key index
-	// (#291). Validate them here so a custom client missing one fails at
-	// builder time with a clear message rather than at first logout with an
-	// obscure `TypeError` — on the path whose whole job is to make sure a
-	// logged-out session's upstream tokens are gone.
+	// `compareAndDelete` releases the advisory lock; `unlink` and the three SET
+	// primitives serve the per-session index. Checked here so a custom client
+	// missing one fails at build time, not with a `TypeError` at first logout,
+	// the path that must remove a logged-out session's upstream tokens.
 	const requiredMethods = [
 		"get",
 		"set",
@@ -569,10 +460,9 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		);
 	}
 	const mode = cfg.encryption?.mode ?? "required";
-	// OR-12: the hard production guard runs once, in the store factory below,
-	// with the context's logger. Nothing here can fail first: it acts only on
-	// `allow-plaintext`, and that mode reads no key. A second call here wrote
-	// the guard's notice twice per build.
+	// The production guard runs once, in the store factory, with the context's
+	// logger. Nothing here can fail first: it acts only on `allow-plaintext`,
+	// which reads no key.
 	const guard: EncryptionGuardContext = {
 		environment: cfg.environment,
 		deploymentMode: cfg.deploymentMode,
@@ -618,12 +508,10 @@ const redisFederationTokenStoreConfigSchema = z.object({
 			ttl: z.number().positive().default(86400),
 			encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
 			encryptionKey: z.string().optional(),
-			// #291 migration flag — see `RedisFederationTokenStoreOptions.scanFallback`
-			// for what it costs while on and when to turn it off. Read from the
-			// string a `${?VAR}` carries (#288, #728): an exported-but-empty
-			// variable reads as `false` under the house rule, turning the
-			// migration safety net off, where before #728 it was refused — set it
-			// to `true` or `false`, never empty.
+			// Migration flag; see `RedisFederationTokenStoreOptions.scanFallback`.
+			// Read from the string a `${?VAR}` carries: an exported-but-empty
+			// variable reads as `false`, turning the safety net off, so set it to
+			// `true` or `false`, never empty.
 			scanFallback: coerceBooleanFromEnv.default(true),
 		})
 		.default({
@@ -634,9 +522,7 @@ const redisFederationTokenStoreConfigSchema = z.object({
 		}),
 });
 
-/**
- * What a composition root tells the module that its config cannot (#473).
- */
+/** What a composition root tells the module that its config cannot. */
 export interface RedisFederationTokenStoreModuleOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
@@ -648,25 +534,16 @@ export interface RedisFederationTokenStoreModuleOptions {
 }
 
 /**
- * `defineModule` manifest for the redis FederationTokenStore, built for one
- * composition root. Static composition path; for runtime-config-driven
- * backend selection use the builder above with the AdapterFactory pattern.
+ * `defineModule` manifest for the Redis FederationTokenStore, built for one
+ * composition root (static composition; the builder above is for runtime
+ * selection). Config lives under `redisFederationTokenStore`; the key is its
+ * `encryptionKey` (canonical base64), which operators set through
+ * `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
  *
- * configSchema: top-level key `redisFederationTokenStore` (module-namespaced
- * per master roadmap §3.5).
- *
- * `requires`: needs `federationTokenStoreClient` (per-purpose slot declared
- * in `@o3co/auth-provider-core`'s `federation-tokens/types.mts`) and
- * `config`. Encryption key is read from
- * `redisFederationTokenStore.encryptionKey` (canonical base64) — operators set
- * it via env var `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
- *
- * The `allow-plaintext` guard (#473) reads `deployment.mode` off the config
- * and the selected environment off `options` — the module cannot know how the
- * composition root chose its config file, so the root says so here rather
- * than this package learning the standalone's `CONFIG_ENV` convention. Its
- * notice goes to the optional `logger` slot, so it reaches the deployment's
- * log with every other line (`consoleLogger` when the slot is empty).
+ * The `allow-plaintext` guard reads `deployment.mode` off the config and the
+ * selected environment off `options`, since only the composition root knows
+ * how it chose its config file. Its notice goes to the optional `logger` slot
+ * (`consoleLogger` when empty).
  */
 export function redisFederationTokenStoreModuleFor(
 	options: RedisFederationTokenStoreModuleOptions = {},
@@ -708,7 +585,7 @@ export function redisFederationTokenStoreModuleFor(
 
 /**
  * The module with no environment named: the plaintext guard reads `NODE_ENV`
- * and `deployment.mode` (#473). A composition root that selects its config by
- * another name builds its own with {@link redisFederationTokenStoreModuleFor}.
+ * and `deployment.mode`. A composition root that selects its config by another
+ * name builds its own with {@link redisFederationTokenStoreModuleFor}.
  */
 export const redisFederationTokenStoreModule = redisFederationTokenStoreModuleFor();

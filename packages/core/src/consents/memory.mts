@@ -24,8 +24,8 @@ import {
 } from "./types.mjs";
 
 /**
- * Re-exported from where it was first declared: the bound is the port's
- * since a shared adapter holds it too (#561), not this adapter's.
+ * Re-exported here; the bound is the port's, not this adapter's, since a
+ * shared adapter holds it too.
  */
 export { PENDING_CONSENT_PER_SESSION_LIMIT };
 
@@ -36,17 +36,14 @@ export interface MemoryConsentStore extends ConsentStore {
 }
 
 /**
- * In-process Map-backed {@link ConsentStore} (#527).
+ * In-process Map-backed {@link ConsentStore}. Bounded by population: one
+ * record per (`sub`, `clientId`), so it grows with users × clients, never
+ * with time, and nothing here needs expiry to be reclaimed. An expired record
+ * is dropped when it is next read; `grant` overwrites in place.
  *
- * Bounded by population: one record per (`sub`, `clientId`), so it grows with
- * users × clients and never with time — unlike a jti denylist there is
- * nothing here that only expiry can reclaim. An expired record is dropped
- * when it is next read; `grant` overwrites in place.
- *
- * Single-replica only. Consent forks per replica: a "yes" recorded on one
- * replica is asked for again on every other, which is why the module that
- * provides this declares itself replica-unsafe and `deployment.mode = "multi"`
- * refuses it by name.
+ * Single-replica only: a "yes" recorded on one replica is asked for again on
+ * every other, so the module that provides this declares itself
+ * replica-unsafe and `deployment.mode = "multi"` refuses it by name.
  */
 export function createMemoryConsentStore(): MemoryConsentStore {
 	const records = new Map<string, ConsentRecord>();
@@ -114,18 +111,15 @@ export interface MemoryPendingConsentStore extends PendingConsentStore {
 const PENDING_SWEEP_FLOOR = 1024;
 
 /**
- * In-process Map-backed {@link PendingConsentStore} (#552).
+ * In-process Map-backed {@link PendingConsentStore}. `consume` reads and
+ * deletes with no `await` between them, the atomic step the port asks for.
+ * Bounded by traffic, not population (one record per parked request, gone
+ * when answered or expired): an expired record is dropped when next touched,
+ * and the whole map is swept once it has grown past a floor and doubled
+ * since, so abandoned pages do not accumulate without a timer of our own.
  *
- * `consume` reads and deletes with no `await` between them, which in a
- * single-threaded process is the atomic step the port asks for. Bounded by
- * traffic rather than population — one record per parked request, gone when
- * answered or expired — so an expired record is dropped when it is next
- * touched, and the whole map is swept when it has grown past a floor and
- * doubled since, which keeps abandoned pages from accumulating without a
- * timer of our own.
- *
- * Single-replica only, for the same reason as the consent store it is
- * provided with: a challenge parked on one replica is unknown to every other.
+ * Single-replica only, like the consent store it is provided with: a
+ * challenge parked on one replica is unknown to every other.
  */
 export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 	const records = new Map<string, PendingConsentRecord>();

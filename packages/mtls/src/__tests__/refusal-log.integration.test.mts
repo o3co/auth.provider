@@ -19,12 +19,10 @@
  * through the real composition: `mtlsModule` booted by core's `createApp`,
  * core's token-binding dispatcher answering the refusal.
  *
- * The extractor states the refusal — an `MtlsError` with its `reason` and,
- * when a parser refused the material, that parser's error as `cause` — and
- * the dispatcher's one verdict line, `token_binding_proof_invalid`, carries
- * the `reason` and the refusal's projection (its `cause` projected inside
- * it). Before, the line carried the mechanism and the code alone, so what
- * was wrong with the header reached no log at all.
+ * The extractor states the refusal (an `MtlsError` with its `reason` and,
+ * when a parser refused the material, that parser's error as `cause`); the
+ * dispatcher's one verdict line, `token_binding_proof_invalid`, carries the
+ * `reason` and the refusal's projection, its `cause` projected inside it.
  */
 
 import { readFileSync } from "node:fs";

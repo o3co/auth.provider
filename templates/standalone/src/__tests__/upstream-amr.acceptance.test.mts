@@ -17,20 +17,14 @@
 /**
  * What an upstream IdP asserted about its own login counts only for a
  * federation configured with `federations.<name>.trustUpstreamAmr = true`
- * (the MFA ADR's D13), end to end: a federated login through the session
- * routes, `/oauth/authorize` with `acr_values`, and `/oauth/token`, on the
- * standalone as a deployment composes it (`buildModules`), with a federation
- * whose IdP asserts `mfa` and `hwk`.
- *
- * - By default the values are kept apart: the session records `amr`
- *   `["fed"]` and the IdP's values in `authentication.upstreamAmr`; an
- *   `acr` entry only they could meet is withheld from discovery and answered
- *   `unmet_authentication_requirements` — the drop and the split read the
- *   same switch, in the same release — and no token carries them.
- * - Trusted, they are recorded beside `fed`, meet the entry, and are stamped.
- *
- * The session routes and `oauth` read the switch separately (neither
- * package depends on the other); this is where the two meet.
+ * (ADR 2026-09-25-multi-factor-authentication), end to end: a federated login
+ * through the session routes, `/oauth/authorize` with `acr_values`, and
+ * `/oauth/token`, on the standalone as a deployment composes it
+ * (`buildModules`), with a federation whose IdP asserts `mfa` and `hwk`.
+ * By default they are kept in `authentication.upstreamAmr` and an `acr` entry
+ * only they could meet is withheld; trusted, they are recorded beside `fed`.
+ * The session routes and `oauth` read the switch separately (neither package
+ * depends on the other); this is where the two meet.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -317,8 +311,8 @@ describe("an upstream IdP's amr counts only for a federation that trusts it (the
 		const { app, userSessionStore } = deployment;
 
 		const discovery = await request(app).get("/.well-known/openid-configuration");
-		// The entry only the IdP's `mfa` could meet is dropped in the release
-		// that stops recording it: no deployment advertises what it cannot meet.
+		// The entry only the IdP's `mfa` could meet is dropped, since that `mfa`
+		// is not recorded: no deployment advertises what it cannot meet.
 		expect(discovery.body.acr_values_supported).toEqual([FED_ACR]);
 
 		const cookies = await signInThroughPartner(app);

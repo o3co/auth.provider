@@ -70,11 +70,10 @@ const describeKid = (kid: unknown): string =>
 
 /**
  * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
- * not registered in the keystore. Callers (notably the SF-1 central JWT
- * verifier) check for it — by class, or by this `name` when a composition
- * holds two copies of the package — so SIEM pipelines can distinguish
- * attacker-fabricated kids from operator-rotation expiry, and neither from a
- * keystore that cannot answer. Building one never throws, whatever `kid` is.
+ * not registered. The central JWT verifier recognises it by class, or by this
+ * `name` when a composition holds two copies of the package, so SIEM can tell
+ * fabricated kids from rotation expiry and from a keystore that cannot
+ * answer. Building one never throws, whatever `kid` is.
  */
 export class UnknownKidError extends Error {
 	override readonly name = "UnknownKidError";
@@ -110,42 +109,31 @@ export interface KeyStore {
 	 */
 	sign(options: SignJwtOptions): Promise<string>;
 	/**
-	 * Returns the current signing kid as a fallback for verifying
-	 * legacy/malformed tokens that lack a `kid` header. **Do not use for
-	 * rotation-safe lookup** — for rotation, pass the token's own `kid` to
-	 * `getVerificationKey(kid)`.
-	 *
-	 * **MUST be synchronous and cheap**. Remote-sign adapters (KMS/HSM)
-	 * must cache the current kid locally and return it without any remote
-	 * call. Never exposes private key material. A throw here is read the way
-	 * a throw from `getVerificationKey` is: the keystore cannot answer
-	 * (`verification_key_unavailable`).
+	 * The current signing kid, the fallback for verifying tokens that lack a
+	 * `kid` header. Not for rotation-safe lookup: pass the token's own `kid`
+	 * to `getVerificationKey`. MUST be synchronous and cheap: remote-sign
+	 * adapters (KMS/HSM) cache the current kid locally. A throw here reads as
+	 * the keystore being unable to answer (`verification_key_unavailable`).
 	 */
 	getSigningKidFallback(): string;
 	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
 	getVerificationKeys(): Promise<ManagedKey[]>;
 	/**
-	 * Specific kid's public key.
+	 * The public key for `kid`. The contract `verifyJwt` relies on:
 	 *
-	 * The contract the central verifier (`verifyJwt`) relies on:
-	 *
-	 * - A `kid` this keystore does not hold MUST be refused with
-	 *   {@link UnknownKidError}, and a retired one with {@link ExpiredKidError}.
-	 *   Those are findings about the token — refused `kid_unknown` /
-	 *   `kid_expired`, as the client's fault.
-	 * - Any other throw means the keystore cannot answer. The verifier reports
-	 *   it as `verification_key_unavailable`, which every route answers `503
-	 *   temporarily_unavailable` and logs as an outage — so throwing anything
-	 *   else for a kid that merely looks wrong turns the client's token into
-	 *   the server's outage.
-	 * - `kid` is untrusted input: the token's own header value, read before any
-	 *   signature is checked. The verifier hands over only a string of at most
-	 *   `MAX_KID_LENGTH` characters with no control character, but any other
-	 *   character may be in it — a `/`, a `?`, a `..`. An adapter
-	 *   that looks keys up remotely (a KMS, an HSM, a JWKS endpoint) MUST
-	 *   check it against its own key naming before it reaches that system —
-	 *   never interpolated unchecked into a URL, a path or a query — and
-	 *   answer one that fails the check with {@link UnknownKidError}.
+	 * - A `kid` this keystore does not hold MUST throw {@link UnknownKidError},
+	 *   a retired one {@link ExpiredKidError}: findings about the token
+	 *   (`kid_unknown` / `kid_expired`), the client's fault.
+	 * - Any other throw means the keystore cannot answer
+	 *   (`verification_key_unavailable`, answered `503` and logged as an
+	 *   outage), so throwing anything else for a kid that merely looks wrong
+	 *   turns the client's token into the server's outage.
+	 * - `kid` is untrusted input read before the signature is checked: at most
+	 *   `MAX_KID_LENGTH` characters with no control character, otherwise
+	 *   anything (`/`, `?`, `..`). An adapter that looks keys up remotely (KMS,
+	 *   HSM, JWKS endpoint) MUST check it against its own key naming before it
+	 *   reaches that system, never interpolate it unchecked into a URL, path or
+	 *   query, and answer a failed check with {@link UnknownKidError}.
 	 */
 	getVerificationKey(kid: string): Promise<KeyLike>;
 }
@@ -239,19 +227,14 @@ export interface SymmetricPreviousSecret {
 /**
  * Creates an HS256 KeyStore that resolves the verification key by `kid`.
  *
- * **Does not enforce the #282 entropy floor.** This is the low-level
- * primitive; the floor belongs at the config boundary, which is
- * `registerBuiltinKeyStores`' `"local"` builder (and `AppConfigSchema` for
- * `session.secret`). A composition root that calls this directly with an
- * operator-supplied secret owns the check — `assertSecretEntropy` from
- * `./secretEntropy.mjs` is exported from the package root for exactly that.
+ * Does not enforce the secret entropy floor: that belongs at the config
+ * boundary (the `"local"` builder of `registerBuiltinKeyStores`, and
+ * `AppConfigSchema` for `session.secret`). A composition root passing an
+ * operator-supplied secret here applies `assertSecretEntropy` itself.
  *
- * Rotation (IH-9): when `previousSecrets` is non-empty, the keystore can
- * verify tokens signed by an older key whose `kid` is recorded in that
- * array. Issuance always uses the current `secret`/`kid`. Lookup is by
- * the JWT `kid` header — the keystore returns the matching key directly,
- * never trial-verifies across multiple keys, mirroring the asymmetric
- * `previousKeys` rotation path.
+ * Rotation: `previousSecrets` verify tokens whose `kid` names an older key;
+ * issuance always uses the current `secret`/`kid`. Lookup is by `kid`, never
+ * trial verification across keys, as with the asymmetric `previousKeys`.
  */
 export function createSymmetricKeyStore(
 	secret: string,
@@ -320,15 +303,12 @@ export function createSymmetricKeyStore(
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot declaration (per A2-α §6.1)
+// ComponentMap slot declaration
 //
-// `keyStore` is a core component produced by a composition-root-local module
-// (e.g. `keyStoreModule` in A2-γ §3.8 standalone template). Modules that
-// need the KeyStore to sign or verify tokens declare `requires: ["keyStore"]`
-// and receive the instance through the typed DI graph.
-//
-// Per A2-γ §3.2.3 / §3.2.2 / §3.2.1: oauthSessionModule, oauthAuthorization-
-// Module, and oauthModule all require keyStore in their defineModule manifests.
+// `keyStore` is a core component provided by a composition-root module (e.g.
+// the standalone template's `keyStoreModule`). Modules that sign or verify
+// tokens declare `requires: ["keyStore"]` and receive it through the typed DI
+// graph.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

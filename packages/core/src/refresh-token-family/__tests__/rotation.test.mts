@@ -12,8 +12,8 @@ const FUTURE = (): number => Date.now() + 60_000;
 
 /**
  * Wrap a store so the test can count how many `updateFamily` round-trips a
- * single `rotate` costs. #274 is precisely a "one operation or two?" question,
- * so the count is the assertion — not an implementation detail.
+ * single `rotate` costs. Replay handling must be one operation, not two, so
+ * the count is the assertion — not an implementation detail.
  */
 const counting = (
 	store: RefreshTokenFamilyStore,
@@ -100,17 +100,12 @@ describe("createRefreshTokenFamilyRotation", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// #274: replay detection and family revocation are ONE compare-and-swap.
-	//
-	// Before this, `rotate` aborted the CAS on replay and left revocation to
-	// the caller as a second write. Between those two writes a sibling holding
-	// the still-active token could rotate and walk away with tokens, partially
-	// defeating the whole-family revocation RFC 6819 §5.2.2.3 requires.
-	//
-	// The fix is structural, so the assertions are structural: the replay path
-	// must cost exactly ONE store operation, and the family must already be
-	// revoked by the time `rotate` returns. There is then no second write for
-	// anything to race with.
+	// Replay detection and family revocation are ONE compare-and-swap. With
+	// revocation as a second write, a sibling holding the still-active token
+	// could rotate between the two and walk away with tokens, partially
+	// defeating the whole-family revocation RFC 6819 §5.2.2.3 requires. So the
+	// replay path must cost exactly ONE store operation, and the family must
+	// already be revoked by the time `rotate` returns.
 	// -----------------------------------------------------------------------
 	describe("#274: replay detection and family revocation are one atomic write", () => {
 		it("revokes the family in the SAME updateFamily call that detects the replay", async () => {
@@ -133,7 +128,7 @@ describe("createRefreshTokenFamilyRotation", () => {
 			const after = await store.findFamily("fam-1");
 			expect(after?.revoked).toBe(true);
 			// The replaying jti is NOT installed as active, and the jti that was
-			// active at revocation time is retained for audit (A3 §5.1).
+			// active at revocation time is retained for audit.
 			expect(after?.activeJti).toBe("jti-1");
 		});
 
@@ -178,8 +173,7 @@ describe("createRefreshTokenFamilyRotation", () => {
 		});
 
 		it("two concurrent redemptions of the same token: exactly one rotates, and the family ends revoked", async () => {
-			// The race #274 describes, expressed at the rotation surface: two
-			// requests redeem the same refresh token. One is a legitimate
+			// Two requests redeem the same refresh token. One is a legitimate
 			// rotation; the other is, by definition, a replay. Whichever order
 			// the store serialises them in, exactly one may succeed and the
 			// family MUST be revoked once the loser is classified.
@@ -224,12 +218,11 @@ describe("createRefreshTokenFamilyRotation", () => {
 		});
 
 		it("a sibling holding the freshly-rotated token cannot rotate once a replay has been classified", async () => {
-			// The concrete attack the two-write version allowed: the replay is
-			// detected, and before the family is revoked the sibling redeems the
-			// currently-active token successfully. With detection and revocation
-			// fused, the sibling's rotation is either ordered BEFORE the replay
-			// classification (and is a legitimate rotation) or sees a revoked
-			// family. It can never land in between.
+			// The attack a separate revocation write would allow: after the replay
+			// is detected and before the family is revoked, the sibling redeems the
+			// currently-active token. With detection and revocation fused, the
+			// sibling's rotation is either ordered BEFORE the replay classification
+			// (and is a legitimate rotation) or sees a revoked family.
 			const store = createMemoryRefreshTokenFamilyStore();
 			const rotation = createRefreshTokenFamilyRotation({
 				refreshTokenFamilyStore: store,
@@ -291,18 +284,14 @@ describe("createRefreshTokenFamilyRotation", () => {
 		expect(Object.isFrozen(unknown)).toBe(true);
 	});
 
-	// IH-13 (v0.5.1): RT family expiresAtMs is set ONCE at creation and
-	// never extended on rotation (OAuth 2.1 BCP §4.14.1 absolute expiry).
-	// `Math.min(requestedExpiresAtMs, current.expiresAtMs)` enforces the
-	// ceiling. The committed value is exposed via the optional
-	// `cappedExpiresAtMs` field on the "rotated" outcome.
+	// RT family expiresAtMs is set ONCE at creation and never extended on
+	// rotation (OAuth 2.1 BCP §4.14.1 absolute expiry):
+	// `Math.min(requestedExpiresAtMs, current.expiresAtMs)` is the committed
+	// value, exposed via the optional `cappedExpiresAtMs` on "rotated".
 	//
-	// Test stability (Copilot review on PR #126): all ceilings here use
-	// `>= 60s` so loaded CI runners cannot lazy-GC the family between
-	// `register` and `rotate`/`findFamily`. The cap logic does not depend
-	// on the absolute ceiling value — only on the relative ordering of
-	// `ceiling` vs the rotation's requested expiry — so a 60s ceiling is
-	// equivalent to a 1s ceiling for what these tests assert.
+	// All ceilings here are `>= 60s` so loaded CI runners cannot lazy-GC the
+	// family between `register` and `rotate`/`findFamily`; the cap depends
+	// only on the ordering of `ceiling` vs the requested expiry.
 	describe("IH-13: absolute expiry cap (no sliding window)", () => {
 		it("does not extend family expiresAtMs on rotation when caller requests later expiry", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
@@ -314,9 +303,8 @@ describe("createRefreshTokenFamilyRotation", () => {
 			const ceiling = Date.now() + 60_000; // 60s ceiling — CI-safe; see describe block comment
 			await rotation.register("jti-1", "fam-1", ceiling);
 
-			// Caller requests rotation with a much-later expiry (sliding-window
-			// behaviour pre-IH-13). After the cap, the stored value MUST NOT
-			// exceed the original ceiling.
+			// Caller requests rotation with a much-later expiry (a sliding
+			// window); the stored value MUST NOT exceed the original ceiling.
 			const later = Date.now() + 86_400_000; // 1 day
 			const out = await rotation.rotate("jti-1", "jti-2", "fam-1", later);
 

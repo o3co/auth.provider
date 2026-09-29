@@ -15,14 +15,12 @@
  */
 
 /**
- * The login's MFA transaction (the MFA ADR's D8 and F1 step 2, F3 step 1, as
- * the session-admission ADR's D5 amends them): opened after the login route
- * regenerated the express session, bound to that session's id, carrying the
- * continuation core built — never a `user` or `primary` field of its own —
- * and living `mfa.transactionTtlSeconds`, from which its expiry is derived
- * and nothing else. Its id is 32 bytes from the CSPRNG, base64url (D22). The
- * answer is the closed 403 body: `error`, `transaction`, `expires_in`, and —
- * for a first binding alone — `hints.enrollable` and `hints.email_proof`.
+ * The login's MFA transaction: opened after the login route regenerated the
+ * express session, bound to that session's id, carrying the continuation core
+ * built (never a `user` or `primary` field of its own), and living
+ * `mfa.transactionTtlSeconds`, its expiry derived from that alone. See ADR
+ * 2026-09-25-multi-factor-authentication, as ADR 2026-09-28-session-admission
+ * amends it.
  */
 
 import {

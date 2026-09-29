@@ -15,19 +15,15 @@
  */
 
 /**
- * What a key id must look like — the one rule for a `kid` a keystore is
+ * What a key id must look like: the one rule for a `kid` a keystore is
  * configured with and a `kid` header `verifyJwt` will look up.
  *
- * RFC 7515 §4.1.4 makes `kid` a case-sensitive string and bounds nothing. The
- * kids this server issues are short, operator-chosen names
- * (`oauth.jwt.signingKey`'s `kid`, `v0` by default). `verifyJwt` refuses a
- * header `kid` that is not well-formed as `kid_unknown` before any keystore
- * sees it, so a keystore of your own never receives an unbounded or
- * unprintable, attacker-chosen value to look up. And because the keystores
- * and `oauth.jwt.signingKey` refuse such a kid when they are built, a token
- * this server signed always carries a kid it will look up: a configured kid
- * the verifier refused would have made every token the server signed fail
- * as the client's fault.
+ * RFC 7515 §4.1.4 bounds nothing; the kids this server issues are short,
+ * operator-chosen names (`v0` by default). `verifyJwt` refuses a malformed
+ * header `kid` as `kid_unknown` before any keystore sees it, so a custom
+ * keystore never gets an unbounded or unprintable attacker-chosen value. The
+ * keystores refuse such a kid when built, so a token this server signed
+ * always carries a kid it will look up.
  */
 
 import {

@@ -20,23 +20,12 @@ import type { NextFunction, Request, RequestHandler, Response, Router } from "ex
 import { collectDefaultMetrics, Gauge, Histogram, Registry } from "prom-client";
 
 /**
- * Route label for a request.
- *
- * Express only fills `req.route` once a handler has matched, and the label has
- * to be **bounded**: labelling by `req.path` would mint a new time series per
- * distinct URL, and this server's paths carry opaque values (`/oauth/authorize`
- * query state, 404 probes from the internet). An unbounded label set is the
- * classic way to take Prometheus down with the thing that was supposed to
- * watch it. Unmatched requests collapse to a single `unmatched` bucket.
- */
-/**
- * Method label, bounded to the methods this server can actually serve.
- *
- * `req.method` is attacker-controlled: Node's HTTP parser accepts any valid
- * token, so `FOO` and `M000001` reach here as readily as `GET`. Each distinct
- * value would mint a fresh histogram child carrying every bucket — the same
- * unbounded-cardinality failure {@link routeLabel} guards against, one label
- * over, and reachable without any access to `/metrics` itself.
+ * Method label, bounded to the methods this server can serve. `req.method` is
+ * attacker-controlled (Node's HTTP parser accepts any valid token, so `FOO`
+ * reaches here as readily as `GET`), and each distinct value would mint a
+ * histogram child carrying every bucket: the unbounded cardinality
+ * {@link routeLabel} guards against, reachable without any access to
+ * `/metrics`.
  */
 const KNOWN_METHODS = new Set([
 	"GET",
@@ -54,6 +43,13 @@ function methodLabel(req: Request): string {
 	return KNOWN_METHODS.has(req.method) ? req.method : "other";
 }
 
+/**
+ * Route label for a request, which must be **bounded**: labelling by
+ * `req.path` would mint a time series per distinct URL, and this server's
+ * paths carry opaque values (`/oauth/authorize` query state, 404 probes from
+ * the internet). Express fills `req.route` only once a handler has matched;
+ * unmatched requests collapse to a single `unmatched` bucket.
+ */
 function routeLabel(req: Request): string {
 	const route = (req as Request & { route?: { path?: string } }).route?.path;
 	if (typeof route === "string" && route.length > 0) {
@@ -92,29 +88,11 @@ export interface Metrics {
 }
 
 /**
- * Prometheus metrics for the standalone provider.
- *
- * What this publishes is chosen from what an operator cannot otherwise see.
- * Before it, a degraded provider offered stderr lines and the load balancer's
- * 5xx graph — no way to distinguish "rate limiter is failing closed" from
- * "Redis-backed code repository is gone" without grepping container logs, and
- * no latency series to alert on at all.
- *
- * - `http_request_duration_seconds` — histogram by method, bounded route, and
- *   status. Carries request rate, error rate and latency in one series, which
- *   is the whole RED method.
- * - `auth_dependency_up` — 1/0 per readiness probe, sampled at scrape time.
- *   This is the series that separates "Redis is gone" from "the app is slow",
- *   and it reuses the probes the builders already registered rather than
- *   inventing a second notion of what this deployment depends on.
- * - Node process defaults (event-loop lag, heap, GC, handles) under the
- *   `auth_provider_` prefix.
- *
- * Deliberately not here yet: rate-limiter fail-closed counts and audit-sink
- * drops. Both happen inside `@o3co/auth-provider-core` and neither is
- * observable from the composition root today; counting them needs a metrics
- * hook in core (`BuilderContext` already reserves `metrics`) rather than
- * something this file can reach.
+ * Prometheus metrics for the standalone provider: the request-duration
+ * histogram (request rate, error rate and latency in one series),
+ * `auth_dependency_up` per readiness probe, sampled at scrape time, and Node
+ * process defaults under the `auth_provider_` prefix. What each answers, and
+ * what is not published yet, is in the template README, "Metrics".
  */
 export function createMetrics(): Metrics {
 	const registry = new Registry();
@@ -134,12 +112,11 @@ export function createMetrics(): Metrics {
 		const endTimer = requestDuration.startTimer();
 		let observed = false;
 		// Both terminal events, with a guard, rather than `finish` alone.
-		// `finish` covers every response the server completes — including ones
-		// produced by an error handler, and `req.route` is populated by then. But
-		// a client or proxy that disconnects mid-handler emits `close` WITHOUT
-		// `finish`, and those are disproportionately the slow and failing requests
-		// that RED metrics exist to surface; counting only `finish` would drop
-		// them from both the rate and the latency series.
+		// `finish` covers every response the server completes, an error
+		// handler's included, with `req.route` populated by then; but a client or
+		// proxy that disconnects mid-handler emits `close` WITHOUT `finish`, and
+		// those are disproportionately the slow and failing requests RED metrics
+		// exist to surface.
 		const observe = () => {
 			if (observed) return;
 			observed = true;

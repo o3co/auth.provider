@@ -16,13 +16,12 @@
 
 /**
  * A `temporarily_unavailable` answer carries the reported failure it was
- * turned from (`failure`), so that the route answering it can log the outage
- * once, with its cause — and a failure the answer did not carry is still
- * reported, for the route to log as what it absorbed.
- *
- * The failure is the very object the `report` seam was handed, and it is not
- * enumerable: nothing that serialises or spreads the answer — a response, an
- * audit event — can carry what an upstream or a store put on the error.
+ * turned from (`failure`), so the route answering it can log the outage once,
+ * with its cause; a failure the answer did not carry is still reported, for
+ * the route to log as what it absorbed. The failure is the very object the
+ * `report` seam was handed, and is not enumerable: nothing that serialises or
+ * spreads the answer (a response, an audit event) can carry what an upstream
+ * or a store put on the error.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -307,7 +306,7 @@ describe("retrieveFederationGrantToken — the cause a 503 was turned from", () 
 			const result = await settled();
 			expect(result).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
 			expect(failureOf(result)).toMatchObject({ during: "upstream", error: down });
-			// Stamped as an outage, as before: what changed is the answer, not the wait.
+			// Stamped as an outage, so the backoff is an outage's.
 			expect((await h.store.find("g-1", at(HOUR)))?.refreshFailure).toMatchObject({
 				kind: "unavailable",
 			});

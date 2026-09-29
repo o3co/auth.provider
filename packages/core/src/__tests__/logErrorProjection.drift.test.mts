@@ -15,136 +15,82 @@
  */
 
 /**
- * logErrorProjection.drift.test.mts — no log line in the workspace's source
- * hands a logger a caught error as it is.
+ * No log line in the workspace's source hands a logger a caught error as it
+ * is: every logger call passes it through `loggableError(...)`, and never the
+ * error, nor anything read off it. A store's or a library's error carries
+ * whatever the system it talked to said, and a deployment chooses its logger
+ * (core README, "Logger").
  *
- * A store's or a library's error carries whatever the system it talked to
- * said: ioredis puts the refused command on `err.command.args` (under
- * `encryption.mode = "allow-plaintext"`, a token record), openid-client puts
- * the token answer it refused on `cause.cause.body`, a JSON parser quotes its
- * input in `message`. A logger that serialises the whole error writes all of
- * it out, and a deployment chooses its logger. So every logger call passes a
- * caught error through `loggableError(...)` — the projection core owns — and
- * never the error, nor anything read off it.
- *
- * What it flags, per file: a name bound as a caught error — `catch (x)`,
- * `.catch((x) => …)` / `.catch(x => …)` / `.catch(function (x) …)`,
- * `.on("error", (x) => …)` / `.once(…)`, the error-named first parameter of
- * a callback passed as an argument (node-style: `save((err) => …)`,
- * `get(key, function (err, value) …)`), the first parameter of an Express
- * error handler (`(err, req, res, next)`, whatever the names but the last's
- * `next`, typed or not — `Request<P, B>`, `(err?: unknown) => void` — and
- * followed by an arrow or a body, so a call's arguments are not one), and an
- * error-named value awaited from a helper
- * (`const consumeErr = await …`) — used anywhere in the arguments of a
- * logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
- * `console.`) other than as an object key, as the argument of
- * `loggableError(...)` (or of a projection `OTHER_PROJECTIONS` accepts in
- * that file), or as another object's field (`result.err`); inside a template
- * literal's `${…}` too. A name that merely looks like an error — a policy's
- * `error` code — is not flagged.
- *
- * What it does not see (known holes, left to review):
- * - an error that reaches a log call under a name none of those bound in
- *   that file: a callback parameter or an awaited value not named like an
- *   error (`(failure) => …`, `(e) => …` outside a `.catch` or an `error`
- *   listener, `const outcome = await …`), a re-bound value
+ * Rule 1 flags a name bound as a caught error ({@link CATCH_BINDINGS},
+ * {@link errorHandlerNames}) used anywhere in the arguments of a logger call
+ * ({@link LOGGER_CALL}), inside a template literal's `${…}` too, other than
+ * as an object key, as the argument of `loggableError(...)` (or of a
+ * projection {@link OTHER_PROJECTIONS} accepts in that file), or as another
+ * object's field (`result.err`). A name that merely looks like an error (a
+ * policy's `error` code) is not flagged. Known holes, left to review:
+ * - an error under a name none of those bound in that file: a callback
+ *   parameter or an awaited value not named like an error (`(e) => …`
+ *   outside a `.catch` or an `error` listener), a re-bound value
  *   (`const failure = err`), an `allSettled` result's `reason`;
- * - an error flattened into a value before the call (`const reason =
- *   err.message`, then `{ reason }`). The second rule below closes the
- *   common shapes of this by flagging the flattening itself, wherever it is,
- *   since the string it makes can travel into another file: `x.message`
- *   read behind an `instanceof Error` test, or a subclass's
- *   (`instanceof TypeError`) — `x instanceof Error ? x.message`,
- *   `x instanceof Error && x.message`, `if (x instanceof Error) return
- *   x.message`, braced or not — and `(x as Error).message` or
- *   `(x as TypeError).message`. Not flagged, and left to review: a bare
- *   `err.message` or `err?.message` with no such test or cast, a cast to a
- *   structural type (`(x as { message: string }).message`), and
- *   `String(err)`, `` `${err}` `` and `err.toString()` — each reads the
- *   message, but a regex cannot tell it from the same read of a non-error;
- * - an error handed to a helper that logs it: `refuse(…, { err })`, a
- *   failure reporter. The call site is not a logger call, and the helper's
- *   own log line sees only its parameter (`{ reason, ...context }`), not a
- *   caught error — so such a helper projects what it is handed itself, as
- *   oauth's client-assertion `refuse()` does, with a context typed to the
- *   fields it may log;
+ * - an error flattened into a value before the call (rule 2 flags the common
+ *   shapes);
+ * - an error handed to a helper that logs it (`refuse(…, { err })`): the
+ *   helper's own log line sees only its parameter, so such a helper projects
+ *   what it is handed itself, as oauth's client-assertion `refuse()` does,
+ *   with a context typed to the fields it may log;
  * - a logger reached some other way (a destructured `warn`, `logger[level]`,
- *   a bound `const log = logger.warn.bind(logger)`), and an audit sink or a
- *   deployment's callback (`report`), which are not loggers;
- * - an Express error handler whose parameter list runs past 400
- *   characters, or whose default values hold what the bracket scan reads
- *   as a bracket: a string, template or regex literal with a bracket or a
- *   comma in it, a `<` comparison (it opens a bracket no `>` closes) or a
- *   `>` comparison (it closes one early). Its first parameter is not
- *   bound; a return type longer than 200 characters hides it too;
+ *   a bound method), and an audit sink or a deployment's callback, which are
+ *   not loggers;
+ * - an Express error handler whose parameter list runs past 400 characters,
+ *   whose default values hold what the bracket scan reads as a bracket (a
+ *   string, template or regex literal with a bracket or a comma in it, a `<`
+ *   or `>` comparison), or whose return type is longer than 200 characters:
+ *   its first parameter is not bound;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
  *
- * A third rule reads each logger call's first argument. A call that opens
- * with a string or template literal and passes anything after it is flagged
- * in every source tree: pino, the standalone's logger, treats what follows a
- * string as printf arguments and drops them when the message has no
- * placeholder, so the error such a line carries never reaches the log. In
- * the trees this change reworks (`STRING_FIRST_EVERYWHERE`) any string-first
- * call is flagged, alone or not: a line there is object-first with an event
- * name. `STRING_FIRST_ALLOWED` lists the calls that stay, with the reason. It
- * sees only a literal: a message held in a variable or built by a call
- * (`logger.warn(message)`, `logger.warn(describe(x))`) is not flagged.
+ * Rule 2 flags a caught error flattened to its text, wherever it is
+ * ({@link FLATTENED_ERROR_TEXT}), but for the sites
+ * {@link FLATTENING_ALLOWED} lists.
  *
- * A fourth rule reads the same logger calls, and every `emitAuditEvent(...)`,
- * for the request itself: `req.body`, `req.query`, `req.params`, `req.path`,
- * `req.originalUrl`, `req.url`, `req.baseUrl`, `req.headers`,
- * `req.rawHeaders`, `req.cookies`, `req.signedCookies`, `req.hostname`,
- * `req.host`, `req.subdomains`, `req.ip`, `req.ips`, `req.get(…)`,
- * `req.header(…)` or any bracket access (`req["path"]`) — on `req` or a
- * member path ending in it (`ctx.req`), behind `!` or `?.`, inside a
- * template literal's `${…}` too —
- * anywhere but inside the parentheses of `auditErrorText(...)` or
- * `auditErrorList(...)`. What a
- * caller sent is put on a line sanitised and capped: a log line and an audit
- * event are read by systems that split on a line break, and neither may be
- * made unbounded by a caller. `req.ip` is the caller's too: behind `trust
- * proxy` it is what the caller wrote in `X-Forwarded-For`. The two
- * exceptions are an audit event's own `ip` and `userAgent`, written as
- * `ip: req.ip` and `userAgent: req.get("user-agent")` directly in the event
- * `emitAuditEvent(...)` is handed (not nested in `details`): core's
- * `recordAuditEvent`, which `emitAuditEvent` and every other built-in
- * emitter hand their events to, bounds those two fields itself (`ip` an
- * address or nothing, `userAgent` sanitised and capped),
- * and the fifth rule pins that nothing else writes a sink. What it does not
- * see, and each site's own tests pin instead: a request value read into a
- * name first (`const name = req.params.name`, the rate-limit guard's `ip`),
- * a receiver not named `req`, a value derived from one (a list of the
- * caller's resources, a parsed body's field), and an audit event built
- * anywhere but `emitAuditEvent` (federation-grants' bridge takes its events
- * from core and from its routes, sanitises what it forwards itself, and
- * hands them to `recordAuditEvent`).
+ * Rule 3 reads each logger call's first argument. A call that opens with a
+ * string or template literal and passes anything after it is flagged in every
+ * source tree: pino, the standalone's logger, treats what follows a string as
+ * printf arguments and drops them when the message has no placeholder. In
+ * {@link STRING_FIRST_EVERYWHERE} any string-first call is flagged, alone or
+ * not. {@link STRING_FIRST_ALLOWED} lists the calls that stay. It sees only a
+ * literal: a message held in a variable or built by a call is not flagged.
  *
- * A fifth rule reads every source for a sink written directly —
- * `sink.record(…)`, `auditSink.record(…)`, `options.sink?.record(…)`,
- * `sink!.record(…)`, `(sink as AuditSink).record(…)`, `sink?.record?.(…)`,
- * `sinks[i].record(…)` — and
- * allows it only in core's `audit/factory.mts`, where `recordAuditEvent`
- * bounds an event's `ip` and `userAgent` before the sink is handed it. Every
- * built-in event reaches its sink through it: `emitAuditEvent` detached, or
- * `recordAuditEvent` itself where the emitter waits on the sink. It sees a
- * receiver named `sink` or `…Sink`; a sink held under another name is left
- * to review.
+ * Rule 4 flags a read of the request itself ({@link REQUEST_READ}) in a logger
+ * call or an `emitAuditEvent(...)`, inside a template literal's `${…}` too,
+ * anywhere but inside `auditErrorText(...)` or `auditErrorList(...)`: a log
+ * line and an audit event are read by systems that split on a line break, and
+ * neither may be made unbounded by a caller. `req.ip` is the caller's too:
+ * behind `trust proxy` it is what the caller wrote in `X-Forwarded-For`. The
+ * exceptions are an audit event's own `ip` and `userAgent`
+ * ({@link EVENT_REQUEST_FIELD}): core's `recordAuditEvent`, which every
+ * built-in emitter hands its events to, bounds those two fields itself, and
+ * rule 5 pins that nothing else writes a sink. Not seen, and pinned by each
+ * site's own tests instead: a request value read into a name first
+ * (`const name = req.params.name`), a receiver not named `req`, a value
+ * derived from one (a parsed body's field), and an audit event built
+ * anywhere but `emitAuditEvent` (federation-grants' bridge sanitises what it
+ * forwards itself and hands it to `recordAuditEvent`).
  *
- * A sixth rule reads the arguments of every error built in a file that
- * binds a caught error (`new …Error(…)`, a BootError's `message:` among
- * them): the caught error's text flattened into them — `String(err)`,
- * `err.message`, the error in a template's `${…}` — is flagged, since the
- * error built from it is printed message first wherever it ends up.
- * `THROWN_FLATTENING_ALLOWED` lists the sites that stay, with the reason.
+ * Rule 5 allows a sink written directly ({@link SINK_WRITE}) only in core's
+ * `audit/factory.mts`, where `recordAuditEvent` bounds an event's `ip` and
+ * `userAgent` before the sink is handed it.
  *
- * Where it looks is `SOURCE_ROOTS` below: every workspace package's `src`
- * and the standalone template's, tests (`__tests__`) left out. A package
- * added under `packages/` or `templates/` fails "names every workspace
- * source tree" until it is listed. `create-app` and `tools/` are not held to
- * it: they depend on none of these packages, and what they print is for the
- * person running them.
+ * Rule 6 flags a caught error's text flattened into the arguments of an error
+ * built in a file that binds that error ({@link ERROR_CONSTRUCTION}), since
+ * the error built from it is printed message first wherever it ends up.
+ * {@link THROWN_FLATTENING_ALLOWED} lists the sites that stay.
+ *
+ * {@link SOURCE_ROOTS} is every workspace package's `src` and the standalone
+ * template's, tests (`__tests__`) left out. A package added under `packages/`
+ * or `templates/` fails "names every workspace source tree" until it is
+ * listed. `create-app` and `tools/` are not held to it: they depend on none of
+ * these packages, and what they print is for the person running them.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -475,27 +421,26 @@ function workspaceSourceTrees(): string[] {
 }
 
 /**
- * The shape the rule above cannot follow: a caught error flattened to its
- * text, which then travels as an ordinary string, often into another file,
- * and reaches a log line nobody would read as holding an error. Flagged:
- * `.message` (optionally chained, on a name or a member path) read right
- * after an `instanceof` test of `Error` or any `…Error` class — as a
- * ternary's `?`, after `&&`, or as the `return` an `if` makes, braced or
- * not — and `(x as Error).message` or `(x as TypeError).message`, through
- * any chain of `as` casts ending in such a class. Not flagged, and not
- * distinguishable by a regex from the same read of a non-error: a bare
- * `err.message` or `err?.message`, `(x as { message: string }).message`,
- * `String(err)`, `` `${err}` ``, `err.toString()`.
- * Core's readiness runner did this: each failed probe's `err.message` went into
- * the report the readiness route logs. The flattening is the part a file can
- * be read for, so it is what is flagged, wherever it is; a site that
- * legitimately needs the text (a message it throws, with the original kept as
- * `cause`) is listed here with the reason. Each entry allows exactly that many
- * sites in its file, so a new one fails and a removed one fails as stale.
+ * Rule 2: a caught error flattened to its text, which then travels as an
+ * ordinary string, often into another file, and reaches a log line nobody
+ * would read as holding an error. The flattening is what a file can be read
+ * for, so it is flagged wherever it is. Flagged: `.message` (optionally
+ * chained, on a name or a member path) read right after an `instanceof` test
+ * of `Error` or any `…Error` class (as a ternary's `?`, after `&&`, or as the
+ * `return` an `if` makes, braced or not), and `(x as Error).message` or
+ * `(x as TypeError).message`, through any chain of `as` casts ending in such
+ * a class. Not flagged, since a regex cannot tell them from the same read of
+ * a non-error: a bare `err.message` or `err?.message`,
+ * `(x as { message: string }).message`, `String(err)`, `` `${err}` ``,
+ * `err.toString()`.
  */
 const FLATTENED_ERROR_TEXT =
 	/\binstanceof\s+\w*Error\s*\)?\s*(?:\?|&&|\{?\s*return)\s*(?:[A-Za-z_$][\w$]*\??\.)+message\b|\(\s*[A-Za-z_$][\w$.]*(?:\s+as\s+[\w$]+)*\s+as\s+\w*Error\s*\)\s*\??\.message\b/g;
 
+/**
+ * The flattenings that stay: a site that needs the text (a message it throws,
+ * with the original kept as `cause`), each file's count exact, with why.
+ */
 const FLATTENING_ALLOWED: ReadonlyArray<{
 	readonly file: string;
 	readonly sites: number;
@@ -522,26 +467,21 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 ];
 
 /**
- * The third shape: a caught error's text in the message of an error built
- * from it — in the arguments of any `new <Name>Error(…)`, a BootError's
- * `message:` among them, whether that error is thrown or handed on
- * (`reject(…)`, `next(…)`). A boot failure and a thrown refusal are printed
- * whole, message first, so text flattened into one is text in the log the
- * process ends in: the boot planner's `String(thrownValue)` put a parser's
- * quoted input, a Redis reply's arguments and a thrown string there.
+ * Rule 6: a caught error's text in the message of an error built from it, in
+ * the arguments of any `new <Name>Error(…)` (a BootError's `message:` among
+ * them), whether that error is thrown or handed on (`reject(…)`, `next(…)`).
+ * A boot failure and a thrown refusal are printed whole, message first, so
+ * text flattened into one is text in the log the process ends in.
  *
  * Flagged, for a name the file binds as a caught error: `String(x)`,
  * `JSON.stringify(x)`, `inspect(x)` / `util.inspect(x, …)`, `x.message`,
- * `x.stack` and `x.toString()` (optionally chained, and through a cast of
- * any type text: `(x as Error).message`, `(x as Error | undefined)?.message`,
- * `(x as { message: string }).message`), `"…" + x` and `x + "…"`, and —
- * inside a template's `${…}` — the error itself. Not flagged: `x` as a value elsewhere (`{ cause: x }`,
- * `originalError: x`), a field of it that is not its text
- * (`x.issues.length`, `x.code`), `x` handed to the rules that name an error
- * without its text (`failureSummary`, `failureDetail`, `uncappedDetail`,
- * `loggableError`). Not seen, and left to review: the message built into a
- * variable first (`const text = String(err); throw new Error(text)`), and
- * `new Error(err)`, whose argument is converted by the constructor.
+ * `x.stack` and `x.toString()` (optionally chained, and through a cast of any
+ * type text), `"…" + x` and `x + "…"`, and the error itself inside a
+ * template's `${…}`. Not flagged: `x` as a value elsewhere (`{ cause: x }`),
+ * a field of it that is not its text (`x.code`), `x` handed to
+ * {@link TEXTLESS_NAMINGS}. Not seen, left to review: the message built into
+ * a variable first (`const text = String(err); throw new Error(text)`), and
+ * `new Error(err)`, whose argument the constructor converts.
  */
 const ERROR_CONSTRUCTION = /\bnew\s+(?:[A-Z][\w$]*)?Error\s*\(/g;
 
@@ -635,9 +575,8 @@ const THROWN_FLATTENING_ALLOWED: ReadonlyArray<{
 ];
 
 /**
- * The trees this change reworks: every logger call in them is object-first.
- * Elsewhere only the string-first call that passes more (the one pino loses
- * the rest of) is flagged.
+ * The trees where every logger call is object-first. Elsewhere only a
+ * string-first call that passes more (pino drops the rest) is flagged.
  */
 const STRING_FIRST_EVERYWHERE: readonly string[] = [
 	"packages/core/src",
@@ -787,7 +726,7 @@ describe("a caught error reaches a logger only through loggableError", () => {
 
 	describe("the guard sees the shapes it exists for, and no others", () => {
 		// A self-check against a guard that silently matches nothing, or that
-		// refuses another PR's code for a name it happens to use.
+		// refuses unrelated code for a name it happens to use.
 		const flags = (source: string): boolean => sitesIn(source).length > 0;
 
 		it.each([

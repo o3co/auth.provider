@@ -15,28 +15,10 @@
  */
 
 /**
- * boot/apply-contributions.mts — Stage 4 of the A2-β boot planner pipeline.
- *
- * Takes the `ComponentWorld` from stage 3 plus the merged
- * `ContributionCollectorMap`, and:
- *   - Step 0: prepares synthetic read-side projections (`grantHandlerResolver`,
- *     `tokenExchangeValidatorResolver`, `federationProviders`,
- *     `federationRedirectPolicyResolver`, `mfaFactorResolver`,
- *     `sessionRequirementResolver`) into the working component map before any
- *     factory runs.
- *   - Step 2: iterates modules in `BootPlan.initOrder`, pre-scanning for
- *     collector conflicts, then invoking name-keyed contribution factories and
- *     routing results to `collector.register` or `collector.replace`.
- *   - Step 2b: the session-requirement checks of the session-admission ADR's
- *     D3 and D7, once every name-keyed contribution has registered and before
- *     any list-shaped factory reads a requirement's reach — each reach and
- *     page, the name `mfa` bound to core's MFA ports, the declaration
- *     `sessionRequirements.expected`, `mfa.mode` asking for a requirement that
- *     is not installed — and the boot line `session_requirements_registered`.
- *   - Step 3: iterates modules in input-array order, invoking list-shaped
- *     contribution factories and routing results to `collector.append`.
- *
- * Per A2-β §5.4.
+ * boot/apply-contributions.mts: stage 4 of the boot planner. Runs every
+ * module's contribution factories against the `ComponentWorld` from stage 3
+ * and fills the `ContributionCollectorMap`; the steps are listed on
+ * {@link applyContributions}.
  */
 
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
@@ -84,18 +66,12 @@ import { BootError } from "./types.mjs";
  * Build a typed deps object for a module from the working component map,
  * using the module's DepsBlueprint from the plan.
  *
- * `requires` keys MUST be present — if they are missing it means an invariant
- * was violated by an earlier stage (validate-manifests step 4 or planBoot's
- * activation closure). Missing required key throws a plain Error (programmer
- * error, not a BootError). Mirrors materialize-components.buildDeps for
- * symmetric defence-in-depth at the contribution-factory boundary.
- *
- * `optional` keys may be absent; they are included as `undefined`.
- * `section`, the module's own configuration section parsed at stage 1
- * (#728), is set as `deps.section` when the module declares one, and the key
- * is absent otherwise.
- *
- * Per A2-β §5.4 step 2 (deps materialisation from ComponentWorld).
+ * A missing `requires` key means an earlier stage (validate-manifests or
+ * planBoot's activation closure) broke an invariant, so it throws a plain
+ * Error, not a BootError; this mirrors materialize-components.buildDeps as
+ * defence in depth. `optional` keys may be absent and are included as
+ * `undefined`. `deps.section`, the module's own configuration section parsed
+ * at stage 1, is set only when the module declares one.
  * @internal
  */
 function buildDeps(
@@ -123,10 +99,8 @@ function buildDeps(
 }
 
 /**
- * Run cleanup records in REVERSE order (best-effort). Returns any errors
- * encountered so they can be collected into `details.cleanupErrors`.
- *
- * Per A2-β §5.4 step 2 (partial rollback on factory failure) and §5.3.
+ * Run cleanup records in REVERSE order (best-effort), the partial rollback
+ * after a factory failure. Returns the errors for `details.cleanupErrors`.
  * @internal
  */
 async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Promise<
@@ -151,12 +125,9 @@ async function runCleanupsReverse(cleanupRecords: readonly CleanupRecord[]): Pro
 
 /**
  * Instantiate a stable read-side `GrantHandlerResolver` backed by the given
- * `NameKeyedCollector`. The resolver's `get` / `entries` read through to the
- * collector at call time; the collector need not be populated yet when the
- * resolver reference is created.
- *
- * Per A2-β §5.4 step 0: lazy read-through means factories that capture this
- * resolver in their closure see the fully-populated view at request time.
+ * `NameKeyedCollector`. `get` / `entries` read through at call time, so a
+ * factory that captures the resolver before the collector is populated sees
+ * the full view at request time.
  * @internal
  */
 function makeGrantHandlerResolver(collector: NameKeyedCollector<unknown>): GrantHandlerResolver {
@@ -169,8 +140,6 @@ function makeGrantHandlerResolver(collector: NameKeyedCollector<unknown>): Grant
 /**
  * Instantiate a stable read-side `TokenExchangeValidatorResolver` backed by
  * the given `NameKeyedCollector`.
- *
- * Per A2-β §5.4 step 0.
  * @internal
  */
 function makeTokenExchangeValidatorResolver(
@@ -184,14 +153,10 @@ function makeTokenExchangeValidatorResolver(
 }
 
 /**
- * Instantiate a stable `ReadonlyMap`-shaped view of a federation collector,
- * in the collector's own value type — `unknown` used to be laundered through
- * here into the `federationProviders` slot's declared type (#626 P1).
- * Reads through at call time via the collector's `entries()`. Backed by a
- * live `Map` snapshot taken on each access so that `ReadonlyMap` typed
- * return values (including iterator shapes) are satisfied correctly.
- *
- * Per A2-β §5.4 step 0: `federations → federationProviders` projection.
+ * Instantiate a stable `ReadonlyMap`-shaped view of a federation collector
+ * (the `federationProviders` projection), in the collector's own value type.
+ * Reads through at call time, each access over a fresh `Map` snapshot so the
+ * `ReadonlyMap` return shapes (iterators included) hold.
  * @internal
  */
 function makeFederationProviders<T>(collector: NameKeyedCollector<T>): ReadonlyMap<string, T> {
@@ -220,15 +185,9 @@ function makeFederationProviders<T>(collector: NameKeyedCollector<T>): ReadonlyM
 }
 
 /**
- * Instantiate a stable collector-backed read-through view of the
- * `federationRedirectPolicies` collector — structurally
- * `ReadonlyMap<string, unknown>` whose delegates read from the live collector
- * at call time.
- *
- * Per A5 §8.1: the view reference is stable from step 0 onward; collector
- * contents become fully populated after applyContributions step 2.
- * NOT a snapshot — reads through at request time.
- * Mirrors `makeFederationProviders` in shape.
+ * Instantiate a stable read-through view of the `federationRedirectPolicies`
+ * collector, shaped like `makeFederationProviders`. The reference is stable
+ * from step 0; its contents are complete after step 2.
  * @internal
  */
 function makeFederationRedirectPolicyResolver(
@@ -279,7 +238,7 @@ function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>):
 
 /**
  * Instantiate a stable read-side `RateLimitBudgetResolver` over the
- * `rateLimitBudgets` collector (#728). A prefix whose factory answered
+ * `rateLimitBudgets` collector. A prefix whose factory answered
  * `null` — switched off by its module's settings — is registered in the
  * collector, so a second contribution of it is still a duplicate, and is
  * absent from what the resolver answers. Reads through at call time, like
@@ -308,15 +267,14 @@ const projectionGates = new WeakMap<object, { open: boolean }>();
 
 /**
  * A projection that refuses a read of its contents while its gate is closed.
- * Read during stage 3 it would be empty — the contributions behind it
- * register in stage 4 — so a provider that computed something from it then
- * would keep an empty answer; the read throws instead, and the boot is
- * refused (`provides-factory-failed`). Only the view's own members — `get`,
- * `entries`, a map view's `size` and iterator — are its contents: `then`
- * (which `await` reads; it answers `undefined`, so the view is not
- * thenable), `Symbol.toStringTag`, `Symbol.toPrimitive` and what
- * `Object.prototype` supplies pass, so a factory may hold, await, return or
- * print it. Reading it at request time is the contract.
+ * During stage 3 it would be empty (its contributions register in stage 4),
+ * and a provider that computed from it would keep an empty answer; the read
+ * throws instead and the boot is refused (`provides-factory-failed`). Only
+ * the view's own members (`get`, `entries`, a map view's `size` and
+ * iterator) are guarded. `then` answers `undefined`, so the view is not
+ * thenable, and `Symbol.toStringTag`, `Symbol.toPrimitive` and
+ * `Object.prototype` members pass, so a factory may hold, await, return or
+ * print it.
  */
 function readableFromStage4<T extends object>(view: T, key: string, gate: { open: boolean }): T {
 	return new Proxy(view, {
@@ -342,25 +300,18 @@ export function openSyntheticProjections(components: Record<string, unknown>): v
 }
 
 /**
- * Step 0 — prepareSyntheticProjections.
- *
- * For each name-keyed collector that has a corresponding synthetic
- * `ComponentMap` projection, instantiate a stable read-side resolver and
- * write it into the working component map under the synthetic key.
- *
- * Only injects the resolver if the corresponding collector is present in the
- * `contributionKinds` map. Does NOT inject `undefined`.
+ * Step 0: for each name-keyed collector present in `contributionKinds` that
+ * has a synthetic `ComponentMap` projection, write a stable read-side
+ * resolver into the working component map under the synthetic key (never
+ * `undefined`).
  *
  * `createApp` runs it before stage 3 (`materializeComponents`), so a
  * `provides` factory that requires a synthetic key is handed the projection
- * the world keeps, which fills as stage 4 registers the contributions. A
- * provider holds it and reads it at request time: a read while the provides
- * factories run throws (see `readableFromStage4`) and refuses the boot,
- * rather than answer an empty view. A projection already in the map is kept,
- * so the pass in stage 4 does not replace the object a provider holds; that
- * pass opens them for reading (`openSyntheticProjections`).
- *
- * Per A2-β §5.4 step 0.
+ * that fills as stage 4 registers the contributions; reading it while the
+ * provides factories run throws (`readableFromStage4`). A projection already
+ * in the map is kept, so stage 4's pass does not replace the object a
+ * provider holds; that pass opens them for reading
+ * (`openSyntheticProjections`).
  * @internal
  */
 export function prepareSyntheticProjections(
@@ -417,8 +368,8 @@ export function prepareSyntheticProjections(
 	}
 	// The session-requirement resolver is branded by its home: the object the
 	// planner records is the gated view a consumer is handed, so `admitSession`
-	// knows it and a home-made object forges nothing (the session-admission
-	// ADR's D1).
+	// knows it and a home-made object forges nothing (ADR
+	// 2026-09-28-session-admission).
 	if (
 		sessionRequirements !== undefined &&
 		!Object.hasOwn(components, "sessionRequirementResolver")
@@ -435,7 +386,7 @@ export function prepareSyntheticProjections(
 
 /**
  * The issuer the pages a requirement declares are registered on: the
- * `oauthTokenSettings` slot's when the composition holds it (#728), otherwise
+ * `oauthTokenSettings` slot's when the composition holds it, otherwise
  * `oauth.jwt.issuer` as the parsed configuration carries it; `undefined` when
  * it is not a non-empty string.
  */
@@ -445,26 +396,23 @@ const issuerOf = (components: Readonly<Record<string, unknown>>): string | undef
 };
 
 /**
- * The value a name-keyed contribution registers, or a `RangeError` — which
- * the caller reports as a failed contribution factory — for one its kind's
- * projection could not answer for:
+ * The value a name-keyed contribution registers, or a `RangeError` (reported
+ * as a failed contribution factory) for one its kind's projection could not
+ * answer for:
  *
- * - an `mfaFactors` factor whose `kind` is not the key it is contributed or
- *   overridden under — the resolver answers by key, and a record's kind is
- *   read back through it, so a factor filed under another kind would verify
- *   that kind's records. `null` (switched off by its configuration) passes,
- *   and stays claimed;
- * - a `sessionRequirements` value that is `null` — a requirement is switched
- *   off by not installing it, never by answering nothing — or whose `name`
- *   is not the key; what registers is the copy `registeredRequirement`
- *   makes, its page held to the issuer's origin (the session-admission ADR's
- *   D3). Its `reach` is not read here: the end of the name-keyed pass reads
- *   it once (`checkSessionRequirements`);
+ * - an `mfaFactors` factor whose `kind` is not its key: the resolver answers
+ *   by key and a record's kind is read back through it, so a misfiled factor
+ *   would verify another kind's records;
+ * - a `sessionRequirements` value that is `null` (a requirement is switched
+ *   off by not installing it) or whose `name` is not the key. What registers
+ *   is the copy `registeredRequirement` makes, its page held to the issuer's
+ *   origin; its `reach` is read later (`checkSessionRequirements`);
  * - a `rateLimitBudgets` budget no limiter can apply as written
- *   (`isUsableRateLimitSpec`) — a string, `undefined` and fractions included
- *   (#728). What registers is a frozen copy of the budget's `limit` and
- *   `windowSeconds`, each read once here — the copy that was validated; `null` (switched off by its module's
- *   settings) passes, and stays claimed. The prefix was held at stage 1.
+ *   (`isUsableRateLimitSpec`). What registers is the frozen copy that was
+ *   validated.
+ *
+ * `null` (switched off by configuration) passes for `mfaFactors` and
+ * `rateLimitBudgets` and keeps the name claimed.
  * @internal
  */
 function checkNameKeyedValue(
@@ -480,7 +428,7 @@ function checkNameKeyedValue(
 				`mfaFactors "${name}": the factor's kind must be the key it is contributed under`,
 			);
 		}
-		// The values the MFA requirement's reach is recomputed from (D3): held
+		// The values the MFA requirement's reach is recomputed from: held
 		// here, so a factor written in JavaScript fails as a contribution, not
 		// as a raw TypeError at the end of the pass.
 		const amrValues = (value as { amrValues?: unknown }).amrValues;
@@ -552,9 +500,9 @@ interface RequirementRegistration {
 	readonly requirement: RegisteredRequirement;
 }
 
-/** The three ports an MFA implementation is wired to (the session-admission ADR's D3). */
+/** The three ports an MFA implementation is wired to. */
 const MFA_PORTS = ["mfaFactorResolver", "mfaFactorStore", "mfaTransactionStore"] as const;
-/** The remediation the MFA requirement's step-up route admits with (D4). */
+/** The remediation the MFA requirement's step-up route admits with. */
 const MFA_STEP_UP = "mfa.step_up";
 
 /**
@@ -590,33 +538,25 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
 	a.size === b.size && [...a].every((value) => b.has(value));
 
 /**
- * Step 2b (the session-admission ADR's D3, D7): over every registered
- * session requirement, once the name-keyed pass is done and before any
- * list-shaped factory reads a reach —
+ * Step 2b: once the name-keyed pass is done and before any list-shaped
+ * factory reads a reach, check every registered session requirement (see ADR
+ * 2026-09-28-session-admission):
  *
- * - each `reach`, read once (`sealRegisteredReach`): a Set of non-empty
- *   strings, no primary's marker, a second-factor value under the name `mfa`
- *   alone, a page when the reach is not empty, and empty under any name but
- *   `mfa` in this release — `contribute-factory-failed`, naming the module
- *   and the requirement — and sealed on the registered
- *   copy as a frozen snapshot, which is what the resolver answers from then
- *   on: the `acr` drop and admission read what was checked here;
- * - the name `mfa`, reserved and bound to core's MFA ports: accepted only
- *   from a module whose `requires` lists `mfaFactorResolver`, `mfaFactorStore`
- *   and `mfaTransactionStore`, whose reach equals what core recomputes from
- *   the enabled factors, and whose `remediations` include `mfa.step_up` —
- *   `contribute-factory-failed`, naming the module;
- * - `mfa.mode` other than `off` with no requirement named `mfa` —
- *   `session-requirement-missing`, before the declaration is compared, so a
- *   composition that asks for MFA without the module is told to install it;
- * - the declaration: whenever a module requires or reads
- *   `sessionRequirementResolver`, `sessionRequirements.expected` must be the
- *   set of registered names — `session-requirements-undeclared`;
+ * - seal each `reach` with `sealRegisteredReach`, which holds its rules, so
+ *   the `acr` drop and admission read what was checked;
+ * - accept the reserved name `mfa` only from a module that requires every one
+ *   of `MFA_PORTS`, reaches what core recomputes from the enabled factors,
+ *   and declares `mfa.step_up` among its remediations;
+ * - refuse `mfa.mode` other than `off` with no `mfa` requirement
+ *   (`session-requirement-missing`), before the declaration, so the
+ *   composition is told to install the module;
+ * - when a module requires or reads `sessionRequirementResolver`, require
+ *   `sessionRequirements.expected` to be the set of registered names
+ *   (`session-requirements-undeclared`).
  *
- * and the one boot line, `session_requirements_registered` at info with each
- * requirement's name, module and remediations in order, when a consumer or a
- * requirement is installed. A failure runs the stage-3 cleanups first, as a
- * failed factory does.
+ * A refused requirement is `contribute-factory-failed`. Logs
+ * `session_requirements_registered` at info when a consumer or a requirement
+ * is installed. A failure runs the stage-3 cleanups first.
  * @internal
  */
 async function checkSessionRequirements(
@@ -780,12 +720,9 @@ async function checkSessionRequirements(
 
 /**
  * Return the collector for `kind` from the `ContributionCollectorMap`, or
- * `undefined` when the kind has no entry. Typed as the union of all three
- * collector shapes so callers can narrow via `collector.kind`.
- *
- * Per A2-β §5.4: routing MUST use `collector.kind` as discriminant so that
- * consumer-defined kinds (added via `declare module` augmentation) are
- * handled correctly without a hardcoded set lookup.
+ * `undefined` when the kind has no entry. Routing MUST narrow on
+ * `collector.kind`, never a hardcoded set, so consumer-defined kinds (added
+ * via `declare module` augmentation) are handled too.
  * @internal
  */
 function collectorFor(
@@ -800,24 +737,18 @@ function collectorFor(
 }
 
 /**
- * Warn when a deployment runs BOTH token-binding surfaces (#199 I4).
+ * Warn when a deployment runs BOTH token-binding surfaces.
  *
  * `assembleApp` mounts the composed `tokenBindingMw` (synthesized from
- * `tokenBindingMechanisms`) on `/oauth/token` first, and `grantMiddleware`
- * contributions after. `tokenBindingMw` assigns `req.tokenBinding` without
- * guarding an already-populated field, so a `tokenBindingMw` arriving through
- * `grantMiddleware` runs last and **always** wins — the configured
- * `dispatch-policy` on the composed surface never decides anything.
+ * `tokenBindingMechanisms`) on `/oauth/token` before the `grantMiddleware`
+ * contributions. `tokenBindingMw` overwrites `req.tokenBinding`, so one
+ * arriving through `grantMiddleware` **always** wins and the configured
+ * `dispatch-policy` decides nothing, with no error or other signal. This is
+ * what a half-finished move to `tokenBindingMechanisms` looks like.
  *
- * That is the shape of an incomplete v0.7 → v0.8 migration: the consumer
- * adopted `tokenBindingMechanisms` but left their old `grantMiddleware`
- * wiring in place. It produces no error and no behavioral signal, which is
- * exactly why it needs a boot-time warning.
- *
- * Deliberately silent when only the legacy surface is present — that is a
- * working pre-migration deployment, not an override — and when the
- * `grantMiddleware` contributions are ordinary middleware (rate limiters,
- * body pre-processing), which the slot is equally intended for.
+ * Silent when only the `grantMiddleware` surface is present (a working
+ * deployment, not an override) and when the `grantMiddleware` contributions
+ * are ordinary middleware (rate limiters, body pre-processing).
  * @internal
  */
 function warnOnTokenBindingSurfaceOverlap(
@@ -857,37 +788,25 @@ function warnOnTokenBindingSurfaceOverlap(
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 4 of the A2-β boot planner pipeline.
+ * Stage 4 of the boot planner: fills the merged `ContributionCollectorMap`
+ * (built-in defaults + consumer overrides) from the stage-3 `ComponentWorld`.
  *
- * Takes the `ComponentWorld` from stage 3 plus the merged
- * `ContributionCollectorMap` (built-in defaults + consumer overrides; the
- * orchestrator at Task 9 performs the merge before calling this function).
+ *   0. `prepareSyntheticProjections`: stable read-side resolvers over the
+ *      name-keyed collectors, fully populated by request time.
+ *   2. Name-keyed pass, in `BootPlan.initOrder`: a pre-scan refuses a
+ *      duplicate or a missing override target before any of the module's
+ *      factories runs, so a failing module leaves no side effect; factories
+ *      then feed `collector.register` (contributes) or `collector.replace`
+ *      (overrides).
+ *   2b. `checkSessionRequirements`, before a list-shaped factory reads a
+ *      requirement's reach.
+ *   3. List-shaped pass, in INPUT-ARRAY order: `collector.append` (dedup by
+ *      reference is the collector's job); routes are wrapped as
+ *      `CollectedRouteContribution` with a `declarationIndex`.
  *
- * Steps:
- *   0. `prepareSyntheticProjections` — inject stable read-side resolvers for
- *      `grants`, `tokenExchangeValidators`, `federations`,
- *      `federationRedirectPolicies`, `mfaFactors` into the working
- *      component map so contribution factories can capture resolver references
- *      that are fully populated at request time.
- *   2. Name-keyed pass (in `BootPlan.initOrder`):
- *        - Pre-scan phase: validate no duplicate/missing-target in collector
- *          state BEFORE running any factory for this module, so a module
- *          whose contribution set fails midway leaves no factory side effect
- *          behind.
- *        - Materialize+register phase: invoke factories, route to
- *          `collector.register` (contributes) or `collector.replace` (overrides).
- *   3. List-shaped pass (in INPUT-ARRAY order):
- *        - auditHooks / grantPolicyHooks: invoke factory, call `collector.append`
- *          (dedup by reference identity is the collector's responsibility).
- *        - routes: invoke factory or take static value; wrap as
- *          `CollectedRouteContribution`; assign `declarationIndex`.
- *
- * On factory throw: wrap as `BootError reason="contribute-factory-failed"`,
- * `cause = thrown`, `stage = "applyContributions"`, its message naming the
- * thrown value by `failureSummary` (never `String(thrown)`). Run stage-3
- * cleanups from `material.cleanups` in REVERSE before propagating.
- *
- * Per A2-β §5.4.
+ * A throwing factory becomes `BootError` `contribute-factory-failed` (`cause`
+ * the thrown value, message via `failureSummary`, never `String(thrown)`),
+ * after the stage-3 cleanups in `material.cleanups` run in reverse.
  */
 export async function applyContributions(
 	material: ComponentWorld,
@@ -901,20 +820,19 @@ export async function applyContributions(
 	const components = material.components as Record<string, unknown>;
 
 	// ---------------------------------------------------------------------------
-	// Step 0: prepareSyntheticProjections. Per A2-β §5.4 step 0.
+	// Step 0: prepareSyntheticProjections.
 	// ---------------------------------------------------------------------------
 	prepareSyntheticProjections(components, contributionKinds);
 	openSyntheticProjections(components);
 
-	// Modules that mounted a `tokenBindingMw` through the legacy v0.7
-	// `grantMiddleware` slot. Collected here because module provenance is only
-	// in scope inside the loop below — `ListCollector` keeps values, not the
-	// module that contributed them. Evaluated after the loop (#199 I4).
+	// Modules that mounted a `tokenBindingMw` through the `grantMiddleware`
+	// slot. Collected here because module provenance is only in scope inside
+	// the loop below (`ListCollector` keeps values, not their module), and
+	// evaluated after it.
 	const legacyTokenBindingModules: string[] = [];
 
 	// ---------------------------------------------------------------------------
 	// Step 2: Name-keyed pass in BootPlan.initOrder.
-	// Per A2-β §5.4 step 2.
 	// ---------------------------------------------------------------------------
 
 	for (const moduleName of material.plan.initOrder) {
@@ -931,7 +849,7 @@ export async function applyContributions(
 
 		// Collect name-keyed contributes + overrides entries for this module.
 		// Routing uses collector.kind === "name-keyed" so that consumer-defined
-		// kinds (not in any hardcoded set) are handled correctly. Per A2-β §5.4.
+		// kinds (not in any hardcoded set) are handled correctly.
 		const nameKeyedContributes = validatedModule.normalised.contributesEntries.filter(
 			(e) => collectorFor(contributionKinds, e.kind)?.kind === "name-keyed",
 		);
@@ -1059,15 +977,14 @@ export async function applyContributions(
 
 	// ---------------------------------------------------------------------------
 	// Step 2b: the session-requirement checks and the boot line, once every
-	// name-keyed contribution has registered (the session-admission ADR's D3,
-	// D7) and before a list-shaped factory reads a requirement's reach.
+	// name-keyed contribution has registered and before a list-shaped factory
+	// reads a requirement's reach.
 	// ---------------------------------------------------------------------------
 
 	await checkSessionRequirements(material, components, contributionKinds.sessionRequirements);
 
 	// ---------------------------------------------------------------------------
 	// Step 3: List-shaped pass in INPUT-ARRAY order.
-	// Per A2-β §5.4 step 3.
 	// ---------------------------------------------------------------------------
 
 	const routes: CollectedRouteContribution[] = [];
@@ -1085,7 +1002,7 @@ export async function applyContributions(
 
 		// List-shaped and list-routes pass: dispatch on collector.kind.
 		// Handles built-in list kinds (auditHooks, grantPolicyHooks) AND any
-		// consumer-defined list-shaped kinds — per A2-β §5.4 step 3.
+		// consumer-defined list-shaped kinds.
 		for (const entry of validatedModule.normalised.contributesEntries) {
 			const collector = collectorFor(contributionKinds, entry.kind);
 			if (collector === undefined) continue;
@@ -1178,9 +1095,7 @@ export async function applyContributions(
 	// ---------------------------------------------------------------------------
 	// Build registries map: kind → collector reference. Stage 5 uses this to
 	// call freeze() on each collector that exposes it.
-	// Per A2-β §5.4 output.
 	// ---------------------------------------------------------------------------
-	// (see warnOnTokenBindingSurfaceOverlap above)
 	const registries = new Map<ContributionKind, unknown>();
 	for (const [kind, collector] of Object.entries(contributionKinds)) {
 		if (collector !== undefined) {

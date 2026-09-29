@@ -15,18 +15,13 @@
  */
 
 /**
- * The stage-1 check registry (#368).
- *
- * validate-manifests had accreted hand-numbered fractional steps (7.5,
- * 13.5–13.10) threaded into `validateManifests` inside nested blocks —
- * adding a wiring guard meant choosing a fraction and finding the right
- * brace. The checks are now two ordered registries (pre-config and
+ * The stage-1 check registry: two ordered registries, pre-config and
  * post-config, split by the config-parse stage that produces the value the
- * post-config guards read), and adding a guard is appending a row.
+ * post-config guards read. Adding a guard is appending a row.
  *
- * Behavior is pinned elsewhere: validate-manifests.test.mts and the
- * per-guard suites assert every check's semantics and first-violation
- * ordering. This suite pins the registry's own shape.
+ * This suite pins the registry's own shape. validate-manifests.test.mts and
+ * the per-guard suites assert each check's semantics and first-violation
+ * ordering.
  */
 import { describe, expect, it } from "vitest";
 import {

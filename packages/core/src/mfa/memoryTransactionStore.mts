@@ -15,40 +15,26 @@
  */
 
 /**
- * The in-process {@link MfaTransactionStore}: development and a single
- * replica. A transaction started on one replica is unknown to the one that
- * receives the verification, and the attempt limits are counted per replica.
+ * The in-process {@link MfaTransactionStore}, for development and a single
+ * replica: a transaction started on one replica is unknown to another, and
+ * attempt limits count per replica. Each operation is one synchronous `Map`
+ * step, so atomic; stored and returned values are copies.
  *
- * Every operation is one synchronous step on a `Map`, with no `await` between
- * its read and its write, so each is atomic. What it stores and what it hands
- * out are copies.
+ * Transactions expire on this store's clock (`now`, default the wall clock);
+ * subject state is judged on the times callers pass, the sweep included (it
+ * uses the latest). Sweeps run on writes, paced like the challenge store's,
+ * and drop subject state once nothing in it can hold an attempt again (see
+ * `prune`; the consecutive run lasts until a success). The email-proof
+ * requirement the operator reset records is not lock state: only its
+ * consumption at the next first binding removes it.
  *
- * A transaction expires on this store's clock (`now`, the wall clock unless
- * given); the subject state is judged on the time each caller passes, as the
- * port requires — the sweep too, which reads the latest time a caller passed
- * and never this store's clock. Expired transactions are swept as the store is
- * written to, paced like the challenge store's sweep, and a subject's state is
- * dropped once nothing in it can hold an attempt again: a failure and a trust
- * are kept {@link MFA_CLOCK_SKEW_ALLOWANCE_MS} after they stop counting, and a
- * failure in the consecutive run is kept until a success ends the run. The
- * email-proof requirement the operator reset records is kept apart from the
- * lock state: no sweep and no `clearSubjectState` removes it, only its
- * consumption at the next first binding.
- *
- * It holds at most `maxEntries` transactions. A transaction is opened at every
- * password login that needs a second factor and at every step-up or enrollment
- * a session starts, and one the user abandons is never presented again: the
- * sweep bounds the store by time, and the login rate decides its size. At the
- * cap the store reclaims what has expired, no more often than the sweep floor,
- * and if it is still full refuses the new transaction with
- * {@link MfaTransactionStoreFullError}, a store fault. It never evicts a live
- * transaction, which would end the ceremony of a user already typing a code.
- * The subject state is not counted: it is keyed by subjects, which only a
- * login the Store accepted creates, not by values a caller can mint — though
- * where the Store lets anyone sign up, anyone can mint subjects, and a run is
- * kept until a success ends it. The cap is global: one account can open as
- * many transactions as the login rate limit lets it, so the coordinator bounds
- * the transactions one session holds.
+ * At most `maxEntries` transactions are held. At the cap the store reclaims
+ * expired entries (no more often than the sweep floor) and, if still full,
+ * refuses with {@link MfaTransactionStoreFullError}, never evicting a live
+ * transaction (that would end the ceremony of a user typing a code). Subject
+ * state is uncapped: only a login the Store accepted creates a subject (an
+ * open sign-up lets anyone mint them). The cap is global, so the coordinator
+ * bounds the transactions one session holds.
  */
 
 import { createHash, randomBytes } from "node:crypto";
@@ -80,10 +66,9 @@ export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL = 1_000;
 export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MIN_SWEEP_INTERVAL_MS = 10_000;
 
 /**
- * The most transactions the in-process store holds by default. A transaction
- * carries the login's `User` snapshot, so it is larger than a challenge or a
- * seen `jti`, and the cap is lower than theirs. Within the ten-minute default
- * lifetime it is about 170 new transactions a second on one replica — more
+ * The default cap. A transaction carries the login's `User` snapshot, so the
+ * cap is lower than the challenge and `jti` stores'. Over the ten-minute default
+ * lifetime it allows about 170 new transactions a second on one replica, more
  * password logins than one process verifies.
  */
 export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES = 100_000;
@@ -92,21 +77,19 @@ export interface MemoryMfaTransactionStoreOptions extends AmortizedSweepOptions 
 	/** The clock a transaction expires by, in epoch milliseconds. Default `Date.now`. */
 	readonly now?: () => number;
 	/**
-	 * The most transactions the store holds, expired-but-unswept ones included;
-	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES} when absent. A
-	 * value that is not a positive whole number, or is above 2^24 (the most
-	 * entries a `Map` holds), is a `RangeError`, never read as no cap.
+	 * The most transactions held, expired-but-unswept included; default
+	 * {@link DEFAULT_MEMORY_MFA_TRANSACTION_STORE_MAX_ENTRIES}. Anything but a
+	 * positive whole number up to 2^24 (a `Map`'s limit) is a `RangeError`,
+	 * never read as no cap.
 	 */
 	readonly maxEntries?: number;
 }
 
 /**
- * What `create` throws when the store is at its cap and none of its
- * transactions has expired: a store fault, as a Redis store's refused write
- * at `maxmemory` is — not the port's refusal of a bad expiry (a `RangeError`),
- * which a caller reads as something it did. The MFA routes answer it `503
- * temporarily_unavailable`. `reason` is `"full"`, which a logged projection
- * keeps.
+ * Thrown by `create` at the cap when nothing has expired. A store fault, like a
+ * Redis write refused at `maxmemory`, not a `RangeError` (which a caller reads
+ * as its own mistake); the MFA routes answer `503 temporarily_unavailable`.
+ * `reason` survives in a logged projection.
  */
 export class MfaTransactionStoreFullError extends Error {
 	readonly reason = "full" as const;
@@ -257,7 +240,7 @@ export function createMemoryMfaTransactionStore(
 	);
 	const transactions = new Map<string, MfaTransaction>();
 	const subjects = new Map<string, SubjectState>();
-	/** Subjects whose next first binding requires the email proof (D25): no expiry, never swept. */
+	/** Subjects whose next first binding requires the email proof: no expiry, never swept. */
 	const emailProofRequired = new Set<string>();
 	/** The order of the next reservation. */
 	let nextSeq = 0;
@@ -305,12 +288,10 @@ export function createMemoryMfaTransactionStore(
 	}
 
 	/**
-	 * What the state no longer needs at `nowMs`, judged no later than this
-	 * store's clock — so a caller whose clock runs far ahead, on this subject
-	 * or another, erases nothing — and minus {@link MFA_CLOCK_SKEW_ALLOWANCE_MS},
-	 * so one ahead of the store by less than that erases nothing either: the
-	 * failures and trusts that ended before, and the reservations nothing
-	 * counts any more. What is kept still counts only at a caller's own time.
+	 * Drops ended failures and trusts, and reservations nothing counts. The
+	 * horizon is `nowMs` capped at this store's clock, minus
+	 * {@link MFA_CLOCK_SKEW_ALLOWANCE_MS}, so a caller whose clock runs ahead
+	 * erases nothing. What is kept still counts only at a caller's own time.
 	 */
 	function prune(state: SubjectState, nowMs: number, policy?: MfaLockoutPolicy): void {
 		const horizon = Math.min(nowMs, clock()) - MFA_CLOCK_SKEW_ALLOWANCE_MS;
@@ -366,8 +347,7 @@ export function createMemoryMfaTransactionStore(
 			if (live(record.id, nowMs) !== undefined) {
 				throw new Error("an MFA transaction with this id already exists");
 			}
-			// At the cap: reclaim what has expired, no more often than the sweep
-			// floor, and refuse if the store is still full. See the file header.
+			// At the cap: reclaim expired entries, then refuse if still full.
 			if (transactions.size >= maxEntries) {
 				if (schedule.due()) sweep(nowMs);
 				if (transactions.size >= maxEntries) throw new MfaTransactionStoreFullError(maxEntries);

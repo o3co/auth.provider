@@ -15,14 +15,12 @@
  */
 
 /**
- * What the mechanism throws when a parser refuses its input — a trust anchor
- * at boot, a forwarded header, a PEM block, a DER certificate, a peer chain:
- * the failure in fixed words, the parser's own error as `cause`.
- *
- * The parser's message is its reading of what it was handed, and what it was
- * handed here is a client's certificate or header, or an operator's file. It
- * used to be cast `(err as Error)` and copied into the message, with nothing
- * kept as `cause`; the message goes wherever the refusal goes.
+ * What the mechanism throws when a parser refuses its input (a trust anchor
+ * at boot, a forwarded header, a PEM block, a DER certificate, a peer chain):
+ * the failure in fixed words, the parser's own error as `cause`. The parser's
+ * message is its reading of a client's certificate or header, or an
+ * operator's file, so it stays out of the message, which goes wherever the
+ * refusal goes.
  */
 
 import { readFileSync } from "node:fs";

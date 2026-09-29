@@ -9,8 +9,8 @@
  */
 
 /**
- * Issue #296 — the watermark only revokes anything if `verifyJwt` honours it.
- * This is the seam between "a credential change recorded a moment" and "the
+ * The subject-revocation watermark only revokes anything if `verifyJwt`
+ * honours it. This is the seam between "a credential change recorded a moment" and "the
  * tokens issued before it stop working".
  */
 
@@ -46,7 +46,7 @@ const verify = (
 		expectedIssuer: ISSUER,
 		// The bundle form even when the store may be undefined: this suite
 		// plays the role of a token-accepting surface, and those always
-		// forward what the composition wired (#367).
+		// forward what the composition wired.
 		revocation: { subjectRevocation },
 		...(opts.subjectRevocationSkewMs === undefined
 			? {}
@@ -105,10 +105,9 @@ describe("verifyJwt — subject revocation watermark (#296)", () => {
 	});
 
 	it("fails closed when the store throws", async () => {
-		// An unreachable backend must not read as "not revoked" — the same
-		// stance the jti denylist takes. Since #408 the *reason* separates the
-		// outage from a finding (see the outage suite below); the refusal
-		// itself is unchanged and is what this pins.
+		// An unreachable backend must not read as "not revoked", the same
+		// stance the jti denylist takes. The *reason* separates the outage from
+		// a finding (see the outage suite below); this pins the refusal.
 		const token = await mint({ sub: "u1" });
 		const broken: SubjectRevocation = {
 			kind: "broken",
@@ -161,17 +160,13 @@ describe("verifyJwt — the watermark needs both `sub` and `iat` to mean anythin
 });
 
 /*
- * #408 — a store outage is not a revocation.
- *
- * Failing closed on an unreachable store is right, but reporting it as
- * `reason: "revoked"` makes it indistinguishable from a real one. The refresh
- * grant maps every verification error to `400 invalid_grant`, and per RFC 6749
- * §5.2 a client discards its refresh token on that — so a transient outage did
- * not degrade the service, it force-logged-out every user who refreshed during
- * it. A distinct reason is what lets a caller answer `503` instead.
- *
- * Not reachable before #321, which is why it shipped: the only adapter was
- * in-process and could not fail. It became live the moment a Redis one existed.
+ * A store outage is not a revocation. Failing closed on an unreachable store
+ * is right, but reporting it as `reason: "revoked"` makes it
+ * indistinguishable from a real one. The refresh grant maps every
+ * verification error to `400 invalid_grant`, on which a client discards its
+ * refresh token (RFC 6749 §5.2), so a transient outage would log out every
+ * user who refreshed during it. A distinct reason lets a caller answer `503`
+ * instead.
  */
 describe("verifyJwt — subject revocation store outage (#408)", () => {
 	it("reports a consult failure as revocation_unavailable, not revoked", async () => {
@@ -205,18 +200,16 @@ describe("verifyJwt — subject revocation store outage (#408)", () => {
 });
 
 /*
- * #408 (related) — cross-replica clock skew around the watermark.
+ * Cross-replica clock skew around the watermark. Without an allowance the
+ * comparison is `iat <= floor(watermark / 1000)`: inclusive, but only to the
+ * same second. A minting replica whose clock runs a second or more ahead of
+ * the one that wrote the watermark stamps `iat` past it, so tokens minted
+ * *just before* the credential change would survive it.
  *
- * The comparison is `iat <= floor(watermark / 1000)`: inclusive, but only to
- * the same second. A minting replica whose clock runs a second or more ahead
- * of the replica that wrote the watermark stamps `iat` past it, so tokens
- * minted *just before* the credential change survive it — the exact case the
- * inclusive comparison exists to catch, one second further out.
- *
- * The fix is not `clockSkewMs`. That defaults to five minutes (RFC 8725 §3.10,
- * for `exp`/`nbf`), and applying it here would refuse every token minted in
- * the five minutes after a reset — including the one from the re-login the
- * reset sends the user to. The allowance is its own small value.
+ * The allowance is its own small value, not `clockSkewMs`: that defaults to
+ * five minutes (RFC 8725 §3.10, for `exp`/`nbf`), and here it would refuse
+ * every token minted in the five minutes after a reset, including the one
+ * from the re-login the reset sends the user to.
  */
 describe("verifyJwt — watermark clock skew (#408)", () => {
 	const withWatermark = async (watermarkSec: number) => {
@@ -226,7 +219,7 @@ describe("verifyJwt — watermark clock skew (#408)", () => {
 	};
 
 	it("refuses a token one second past the watermark by default", async () => {
-		// The finding: a replica one second ahead used to mint survivors.
+		// A replica one second ahead must not mint survivors.
 		const nowSec = Math.floor(Date.now() / 1000);
 		const store = await withWatermark(nowSec - 10);
 		const token = await mint({ sub: "u1", iatSeconds: nowSec - 9 });

@@ -15,7 +15,7 @@
  */
 
 /**
- * Where a configuration path lands in a Zod schema (#728): the schema that
+ * Where a configuration path lands in a Zod schema: the schema that
  * parses the value at a dot path, found by walking the schema's objects and
  * the wrappers a configuration schema puts around them. Two readers use it:
  * the transitional reader's picked schema (`pickConfigSchema`, what a
@@ -105,14 +105,13 @@ export function schemasAtPath(schema: z.ZodType, path: readonly string[]): z.Zod
 const ENVIRONMENT_COERCERS = new WeakSet<object>();
 
 /**
- * Names `schema` as one of core's environment coercers (#728) —
- * `coerceBooleanFromEnv`, and each `durationFromEnv` — whose preprocess
- * reads the string a `${?VAR}` carries into the type its schema takes, so
- * `readsEnvironmentString` trusts it. Tagged rather than probed: a probe
- * ("false", "1") would run the schema's own bounds and refinements, and
- * report a leaf that refuses `"1"` as too small as one that cannot read a
- * string; the tag is the evidence, given where the coercer is written. Any
- * other preprocess is judged by the schema it hands on. Answers `schema`.
+ * Names `schema` as one of core's environment coercers (`coerceBooleanFromEnv`,
+ * each `durationFromEnv`), whose preprocess reads the string a `${?VAR}`
+ * carries into the type its schema takes, so `readsEnvironmentString` trusts
+ * it. Tagged rather than probed: a probe ("false", "1") would run the
+ * schema's own bounds and refinements, and report a leaf that refuses `"1"`
+ * as too small as one that cannot read a string. Any other preprocess is
+ * judged by the schema it hands on. Answers `schema`.
  * @internal
  */
 export function environmentCoercer<T extends z.ZodType>(schema: T): T {
@@ -121,18 +120,17 @@ export function environmentCoercer<T extends z.ZodType>(schema: T): T {
 }
 
 /**
- * Whether `schema` reads the string an environment variable arrives as:
- * `true` for a string, an enum, a template literal, a literal one of whose
- * values is a string, any, unknown and every `z.coerce.*` scalar (and for the
- * containers a leaf sits in); `false` for every other type — a plain boolean,
- * number, bigint or date, null, NaN, a symbol, a custom schema, a type it
- * does not know — seen through its wrappers, a lazy schema, both sides of an
- * intersection, and for a union only when none of its members reads a string. A `z.preprocess` counts only as far as there is evidence:
- * one of core's environment coercers (`environmentCoercer`) reads it, and any
- * other is judged by the schema it hands on — its function sees the string
- * first, but may do nothing with it (`z.preprocess((v) => v, z.boolean())`
- * refuses `"false"`). A `z.coerce.number()`, a string, an enum or anything
- * else reads it.
+ * Whether `schema` reads the string an environment variable arrives as, seen
+ * through its wrappers, a lazy schema and both sides of an intersection:
+ * `true` for a string, an enum, a template literal, a literal with a string
+ * value, any, unknown, every `z.coerce.*` scalar, and the containers a leaf
+ * sits in; `false` for every other type (a plain boolean, number, bigint or
+ * date, null, NaN, a symbol, a custom schema, a type it does not know), and
+ * for a union only when no member reads a string. A `z.preprocess` counts
+ * only on evidence: one of core's environment coercers (`environmentCoercer`)
+ * reads it, and any other is judged by the schema it hands on, since its
+ * function may do nothing with the string (`z.preprocess((v) => v,
+ * z.boolean())` refuses `"false"`).
  */
 export function readsEnvironmentString(schema: z.ZodType): boolean {
 	if (ENVIRONMENT_COERCERS.has(schema)) return true;
@@ -305,19 +303,18 @@ function declaredDefault(schema: z.ZodType): { readonly value: unknown } | undef
 }
 
 /**
- * The schema of `paths` alone inside `schema` (#728, transitional): each path's
- * own schema, as `schema` declares it at that path — wrappers, coercions,
- * checks and transforms included — under objects that hold only the picked
- * keys. An ancestor of a picked path is optional, unless `schema` declares a
- * default for it: then an absent ancestor reads as that default does (a
- * picked `mfa.mode` with no `mfa` section is the section's default mode). What
- * a composition root parses before it knows its modules: the switches it
- * reads, and nothing a package's `reference.conf` may complete later. A path
- * under another picked path is covered by it.
+ * The schema of `paths` alone inside `schema` (transitional), what a
+ * composition root parses before it knows its modules: each path's own
+ * schema as `schema` declares it there (wrappers, coercions, checks and
+ * transforms included), under objects that hold only the picked keys. An
+ * ancestor of a picked path is optional unless `schema` declares a default
+ * for it; then an absent ancestor reads as that default (a picked `mfa.mode`
+ * with no `mfa` section is the section's default mode). A path under another
+ * picked path is covered by it.
  *
- * A path `schema` does not declare as one schema — a key no object on the way
+ * A path `schema` does not declare as one schema (a key no object on the way
  * declares, one a union offers several schemas for, or one beneath a value
- * the schema transforms as a whole — is a `RangeError` naming it and, for a
+ * the schema transforms whole) is a `RangeError` naming it and, for a
  * transform, the shorter path to read.
  */
 export function pickConfigSchema(schema: z.ZodType, paths: readonly string[]): z.ZodObject {

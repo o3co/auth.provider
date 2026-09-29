@@ -15,21 +15,14 @@
  */
 
 /**
- * The contract suite every session requirement's tests run (the
- * session-admission ADR's D3): `sessionRequirementContract(input)` answers
- * one case per rule, each a name and an async `run` that throws when the
- * rule is broken — so a test file runs them with its own runner
- * (`it.each(cases)("$name", ({ run }) => run())`) and nothing here depends
- * on one. What it holds a requirement to: its name is its key, and a
- * fixture is never named `mfa`; its `reach` and `stepUpPage` are what boot
- * accepts (`sealRegisteredReach`, `checkStepUpPage`) — the reach empty
- * unless the name is `mfa`, in this release — its `remediations`
- * are names, each once; its `hintKeys` are hint names; admission never
- * calls its `admit` with a dead session or for a declared remediation; its
- * `admit` answers a verdict, a `step_up` only with a page registered; an
- * outage is thrown, never answered `met`; and an interruption's answer
- * passes the body core validates, so it carries no reserved key and no
- * hint with an address. Published on `@o3co/auth-provider-core/testing`.
+ * The contract suite every session requirement's tests run:
+ * `sessionRequirementContract(input)` answers one case per rule, each a name
+ * and an async `run` that throws when the rule is broken, so a test file runs
+ * them with its own runner (`it.each(cases)("$name", ({ run }) => run())`).
+ * It holds a requirement to what boot registers and seals, to answering
+ * verdicts (a `step_up` only with a page, an outage thrown, never `met`), to
+ * never being asked over a dead session or for a declared remediation, and
+ * to interruption answers that pass core's closed body.
  */
 
 import assert from "node:assert/strict";
@@ -62,12 +55,10 @@ export interface RequirementContractInput {
 	/** Whether the requirement under test is a fixture: a fixture is never named `mfa`. */
 	readonly fixture: boolean;
 	/**
-	 * The issuer its page is registered on: held to the issuer's origin and
-	 * resolved on it, as boot registers it on `oauth.jwt.issuer`. When absent,
-	 * an absolute page is held to its shape alone and resolved on itself, and
-	 * a path page is refused — registration has nothing to resolve it on — so
-	 * every case that registers the requirement fails: pass the issuer for a
-	 * requirement whose page is a path.
+	 * The issuer its page is registered on, as boot registers it on
+	 * `oauth.jwt.issuer`. When absent, an absolute page is held to its shape
+	 * alone and a path page is refused, so every case fails: pass the issuer
+	 * for a requirement whose page is a path.
 	 */
 	readonly issuer?: string;
 	/** A fresh requirement for each case, so no case sees another's state. */
@@ -126,7 +117,7 @@ const counting = (
 
 const VERDICTS: ReadonlySet<string> = new Set(["met", "reauthenticate", "step_up", "unmet"]);
 
-/** The cases of D3's contract over the requirement `input` describes. */
+/** The contract's cases over the requirement `input` describes. */
 export function sessionRequirementContract(
 	input: RequirementContractInput,
 ): readonly ContractCase[] {
@@ -169,9 +160,8 @@ export function sessionRequirementContract(
 		},
 		{
 			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
-			// Registration validates the page (`checkStepUpPage`, on the issuer
-			// when one is given); the seal boot runs holds the reach to its
-			// rules — their one home.
+			// Registration validates the page; the seal boot runs holds the reach
+			// to its rules.
 			run: async () => {
 				sealRegisteredReach(registeredRequirement(build(), issuer));
 			},
@@ -249,9 +239,9 @@ export function sessionRequirementContract(
 					[requirement],
 					issuer === undefined ? {} : { issuer },
 				);
-				// The action core issued for the route (D4), to the object that
-				// registered — the module's own — not through the resolver: a
-				// literal would be normalised to credential_change and asked.
+				// The action core issued for the route, to the object that
+				// registered, not through the resolver: a literal would be
+				// normalised to credential_change and asked.
 				const issued =
 					issuedRemediationActions(requirement)?.[remediation.slice(requirement.name.length + 1)];
 				assert.ok(issued !== undefined, `core issued no action for "${remediation}"`);

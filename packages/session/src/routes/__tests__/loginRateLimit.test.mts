@@ -15,15 +15,12 @@
  */
 
 /**
- * Issue #270 — `/session/login`'s brute-force limiter was express-rate-limit's
- * per-process MemoryStore. Behind a load balancer every replica kept its own
- * buckets, so the configured 20 / 15 min became 20 × replicas and reset on
- * every deploy; the OAuth endpoints had a shared Redis-backed limiter and this
- * one had no adapter at all.
- *
- * These tests pin the route onto the shared `RateLimiter` component, and pin
- * the fallback that keeps a deployment wiring no limiter from silently losing
- * brute-force protection altogether.
+ * `/session/login`'s brute-force limiter. A per-process store behind a load
+ * balancer gives every replica its own buckets, so the configured 20 / 15 min
+ * becomes 20 × replicas and resets on every deploy. These tests pin the route
+ * onto the shared `RateLimiter` component, and pin the fallback that keeps a
+ * deployment wiring no limiter from silently losing brute-force protection
+ * altogether.
  */
 
 import type {
@@ -55,7 +52,7 @@ const stubConfig = {
 } as unknown as AppConfig;
 
 /**
- * Since #272 the CSRF guard runs ahead of the rate-limit guard, so every
+ * The CSRF guard runs ahead of the rate-limit guard, so every
  * request here has to clear it or these tests measure the wrong 403.
  */
 const csrf = createCsrfProtection({
@@ -202,9 +199,8 @@ describe("/session/login rate limiting — limiter failure (#270)", () => {
 	});
 
 	it("emits rate_limit.unavailable when an audit sink is wired (#325)", async () => {
-		// Pre-#325 only the OAuth endpoints emitted this event on a limiter
-		// outage — a drift the shared guard reconciles. The sink is optional;
-		// compositions wiring none lose nothing they had.
+		// The shared guard emits this event on a limiter outage, as the OAuth
+		// endpoints do. The sink is optional.
 		const events: AuditEvent[] = [];
 		const sink: AuditSink = {
 			kind: "spy",
@@ -259,12 +255,10 @@ describe("/session/login rate limiting — fallback (#270)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #474 — the per-process fallback sat outside the replica guard. A deployment
-// that declared `deployment.mode = "multi"` and wired no shared limiter got the
-// warning above and a limiter whose buckets were per replica: the configured
-// 20 / 15 min was 20 × replicas, exactly what #270 fixed for the wired case.
-// Under `"multi"` the route refuses to mount instead; `"single"` is silent,
-// like the guard; unset keeps the warning.
+// The per-process fallback under the replica guard. Under
+// `deployment.mode = "multi"` with no shared limiter, its buckets would be per
+// replica, so the route refuses to mount; `"single"` is silent, like the
+// guard; unset keeps the warning.
 // ---------------------------------------------------------------------------
 
 describe("/session/login rate limiting — fallback under deployment.mode (#474)", () => {

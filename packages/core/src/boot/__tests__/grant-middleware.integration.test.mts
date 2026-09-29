@@ -9,24 +9,16 @@
  */
 
 /**
- * boot/__tests__/grant-middleware.integration.test.mts
+ * Integration tests for the `grantMiddleware` contribution kind:
  *
- * Integration tests for the `grantMiddleware` contribution kind.
- *
- * Verifies:
- *   1. Cross-loop ordering — a factory returning a non-null RequestHandler is
- *      invoked and its handler runs BEFORE a `routes` contribution mounted at
- *      `/oauth` (the bundled oauthModule's mountPath). This pins the
- *      structural ordering claim that makes the kind useful for DPoP / mTLS:
- *      the middleware MUST inspect the request before the OAuth /token
- *      handler runs.
- *   2. Null-skip — a factory returning null is invoked (so it can decide
- *      disabled-by-config) but no handler is mounted; the routes contribution
- *      sees the request without any pre-route middleware running.
- *   3. Module-registration order — when two modules contribute
- *      `grantMiddleware`, the first-registered fires first.
- *
- * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+ *   1. A factory's non-null RequestHandler runs BEFORE a `routes`
+ *      contribution mounted at `/oauth` (the bundled oauthModule's
+ *      mountPath). DPoP / mTLS rely on this: the middleware MUST inspect the
+ *      request before the OAuth /token handler runs.
+ *   2. A factory returning null is invoked (so it can decide
+ *      disabled-by-config) but no handler is mounted.
+ *   3. When two modules contribute `grantMiddleware`, the first-registered
+ *      fires first.
  */
 
 import express, { type RequestHandler, Router } from "express";
@@ -47,10 +39,9 @@ const minBoot = {
 } satisfies Record<string, unknown> as BootstrapMap;
 
 // ---------------------------------------------------------------------------
-// Fixture: build a routes contribution that mounts a `/token` handler under
-// `/oauth` — mirrors the bundled oauthModule's mountPath shape so the test
-// exercises the actual cross-loop ordering claim against the real grant-
-// dispatch path (`/oauth/token`).
+// Fixture: a routes contribution mounting a `/token` handler under `/oauth`,
+// the bundled oauthModule's shape, so ordering is checked against the real
+// grant-dispatch path (`/oauth/token`).
 // ---------------------------------------------------------------------------
 
 function tokenRouteContribution(record: (label: string) => void) {

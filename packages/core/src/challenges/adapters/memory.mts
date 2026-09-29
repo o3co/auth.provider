@@ -34,30 +34,24 @@ export const DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL = 1_000;
 
 /**
  * The least time, in milliseconds, between two sweeps, whatever the issue
- * rate.
- *
- * The write interval alone does not bound how often the O(size) scan runs:
- * WebAuthn authentication options are asked for without a credential, so a
- * client that asks fast enough would reach the interval every few
- * milliseconds and make each request pay for a full scan. With a ten-second
- * floor the scans are at
- * most one per ten seconds, and the resident set grows by at most the
- * challenges that expire inside those ten seconds.
+ * rate. The write interval alone does not bound how often the O(size) scan
+ * runs: WebAuthn authentication options are asked for without a credential,
+ * so a fast client could reach the interval every few milliseconds and make
+ * each request pay for a full scan. The floor allows one scan per ten seconds
+ * at most, and the resident set grows by at most the challenges expiring in
+ * that time.
  */
 export const DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS = 10_000;
 
 /**
- * The most challenges the store holds by default.
- *
- * The store fills at `maxEntries / window` challenges a second, the window
- * being the ceremony's (`webauthn.challengeTtlMs`, 120 s by default): at a
- * million that is over 8 000 options requests a second held for two minutes,
- * more than one process serves, and the authentication options route is
- * behind a per-IP rate limit besides. The memory it bounds is about 180 MB.
- * A longer window lowers the rate that fills it in proportion.
- * `memoryChallengeStoreModule` reads the cap from
- * `challengeStore.memory.maxEntries`; past one replica, use the Redis
- * challenge store.
+ * The most challenges the store holds by default. The store fills at
+ * `maxEntries / window` challenges a second (the ceremony's window,
+ * `webauthn.challengeTtlMs`, 120 s by default): at a million, over 8 000
+ * options requests a second held for two minutes, more than one process
+ * serves, and the authentication options route is rate-limited per IP
+ * besides. The memory it bounds is about 180 MB. `memoryChallengeStoreModule`
+ * reads the cap from `challengeStore.memory.maxEntries`; past one replica,
+ * use the Redis challenge store.
  */
 export const DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES = 1_000_000;
 
@@ -105,43 +99,34 @@ export interface MemoryChallengeStore extends ChallengeStore {
 }
 
 /**
- * In-process Map-backed ChallengeStore. Atomicity comes from the Node.js
- * single-event-loop guarantee: synchronous Map.get → check → Map.set/Map.delete
- * blocks contain NO `await`, so concurrent calls cannot interleave at micro-
- * task boundaries.
+ * In-process Map-backed ChallengeStore. Atomic because each synchronous
+ * Map.get → check → Map.set/Map.delete block contains no `await`, so
+ * concurrent calls cannot interleave on the single event loop.
  *
  * ## Why the sweep exists
  *
  * An expired challenge is dropped when its (scope, value) is looked up again,
- * and a challenge nobody finishes is never looked up again: a WebAuthn prompt
- * the user closes, an options request a client repeats. Lazy reclamation
- * alone therefore left one entry per abandoned ceremony resident until the
- * process restarted — and authentication options are asked for without a
- * credential, so anyone could grow the map.
- *
- * The sweep is the replay seen-set's, paced by the same schedule
- * (`single-use/sweep.mts`): amortized on the writing `issue`, once
- * `sweepInterval` writes have accumulated and at least `minSweepIntervalMs`
- * has passed on the monotonic clock since the last one. A refused `issue` — a
- * duplicate, an expiry already past or not a number — writes nothing and pays
- * nothing. The guarantee is bounded growth, not zero-lag reclamation: an
- * expired challenge is dropped within an interval, and `find` / `consume` /
- * `issue` keep answering correctly for one that has not been swept yet.
+ * and a challenge nobody finishes (a closed WebAuthn prompt, a repeated
+ * options request) never is. Lazy reclamation alone would keep one entry per
+ * abandoned ceremony until restart, and authentication options are asked for
+ * without a credential, so anyone could grow the map. The sweep follows the
+ * replay seen-set's schedule (`single-use/sweep.mts`): amortized on the
+ * writing `issue`, once `sweepInterval` writes have accumulated and at least
+ * `minSweepIntervalMs` has passed on the monotonic clock. A refused `issue`
+ * writes nothing and pays nothing. Growth is bounded, reclamation is not
+ * immediate: `find` / `consume` / `issue` answer correctly for an expired
+ * challenge not yet swept.
  *
  * ## Why it has a cap, and refuses at it
  *
- * The sweep bounds the store by time, not by count: what it holds is the
- * challenges issued within their window, so the issue rate — anyone's, for
- * authentication options — and the configured window decide its size.
- * `maxEntries` bounds it. At the cap the store first reclaims what has
- * expired, at most once per sweep floor, so a flood that holds it at the cap
- * does not make every issue a full scan; if it is still full it refuses the
- * new challenge with {@link ChallengeStoreFullError}, a store fault. It never
- * evicts a live challenge to make room: that would fail the ceremony of a
- * user already in front of their authenticator, and a consumed challenge
- * frees its slot at once. A duplicate is still answered as a duplicate.
- *
- * Per A1 §7.1.
+ * The sweep bounds the store by time, not count, so the issue rate (anyone's,
+ * for authentication options) and the window decide its size; `maxEntries`
+ * bounds it. At the cap the store first reclaims what has expired, at most
+ * once per sweep floor, so a flood at the cap does not make every issue a
+ * full scan; still full, it refuses with {@link ChallengeStoreFullError}, a
+ * store fault. It never evicts a live challenge: that would fail the
+ * ceremony of a user already at their authenticator, and a consumed
+ * challenge frees its slot at once. A duplicate is still answered as one.
  */
 export function createMemoryChallengeStore(
 	options: MemoryChallengeStoreOptions = {},

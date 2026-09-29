@@ -16,14 +16,10 @@
 
 /**
  * Canonical (scope, value) → string encoding shared by every ChallengeStore /
- * ReplaySeenSet adapter. The length-prefix form prevents delimiter-collision
- * between e.g. ("ab", "cd") and ("abcd", "") so different (scope, value) pairs
- * NEVER share an internal key.
- *
- * Length unit is JS String.prototype.length (UTF-16 code units). The absolute
- * value is irrelevant; what matters is that all adapters compute identically.
- *
- * Per A1 §7.3.
+ * ReplaySeenSet adapter. The length prefixes keep e.g. ("ab", "cd") and
+ * ("abcd", "") apart, so different pairs NEVER share an internal key.
+ * Lengths are UTF-16 code units; what matters is that every adapter computes
+ * them identically.
  */
 export function canonicalKey(scope: string, value: string): string {
 	return `${scope.length}:${scope}|${value.length}:${value}`;

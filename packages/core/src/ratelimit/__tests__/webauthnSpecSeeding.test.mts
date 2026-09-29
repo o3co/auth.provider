@@ -18,12 +18,10 @@
  * `POST /oauth/webauthn/authentication/options` limits under
  * `webauthn-authentication-options:ip:<ip>`, and its budget is configured at
  * `webauthn.rateLimit.authenticationOptions` (reference default 30 / 60 s).
- * Only the route's per-process fallback was built from it: a shared limiter,
- * which a scaled deployment must wire, resolved the prefix from its own
- * `limits`, found nothing, and served its 60 / 60 s default on an
- * unauthenticated route. Same fix as `login` (#270) and
- * `device_verification` (#448): seeded, unless the operator declared the
- * prefix explicitly.
+ * A shared limiter, which a scaled deployment must wire, resolves the prefix
+ * from its own `limits`, so the budget is seeded there unless the operator
+ * declared the prefix explicitly; unseeded, this unauthenticated route would
+ * get the limiter's 60 / 60 s default.
  */
 
 import { describe, expect, it } from "vitest";

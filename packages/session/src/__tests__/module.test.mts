@@ -37,7 +37,7 @@ import { describe, expect, it, vi } from "vitest";
 import { sessionModule } from "#/module.mjs";
 
 // ---------------------------------------------------------------------------
-// Shared test-only stubs (per A5 §10.1 typed-slot const-Module pattern)
+// Shared test-only stubs (typed-slot const Modules)
 // ---------------------------------------------------------------------------
 
 const fakeUserRepository: UserRepository = {
@@ -102,15 +102,10 @@ const sessionFederationIndexModule = defineModule({
 });
 
 /**
- * Stub modules for `sessionRPRegistry`, `sessionFamilyIndex`, and
- * `refreshTokenFamilyRevocation`. These slots are oauth-package concerns (not
- * provided by sessionModule or any session-package module), but the boot-time
- * `federation-stores-incomplete` validator requires them whenever any
- * federation is enabled in config (the validator stays aligned with route-level
- * gating in packages/oauth/src/routes.mts logoutSupported /
- * federationTokenSupported). Tests that enable a federation must include these
- * stubs so the guard passes and the session-level validations under test can
- * fire.
+ * Stubs for three oauth-package slots that no session-package module
+ * provides. The boot-time `federation-stores-incomplete` validator requires
+ * them whenever any federation is enabled in config, so a test that enables
+ * one includes them for the session-level validations under test to fire.
  */
 const sessionRPRegistryModule = defineModule({
 	name: "test:session-rp-registry",
@@ -161,19 +156,15 @@ const baseTestModules = [
 	userSessionStoreModule,
 	federationTokenStoreModule,
 	sessionFederationIndexModule,
-	// Required by the boot-time `federation-stores-incomplete` validator whenever
-	// any federation is enabled in config. These are oauth-package concerns;
-	// the session-package tests use stubs so the guard passes and session-level
-	// validations under test can fire. Per issue #101 TODO-F-1, plus #103 review
-	// (refreshTokenFamilyRevocation added so validator matches route-level gating).
+	// Oauth-package stubs for the `federation-stores-incomplete` validator (above).
 	sessionRPRegistryModule,
 	sessionFamilyIndexModule,
 	refreshTokenFamilyRevocationModule,
 ];
 
 // ---------------------------------------------------------------------------
-// Static manifest assertions (Codex-recommended: keep structural assertions
-// for declarative shape; HTTP / integration tests cover behavior)
+// Static manifest assertions: declarative shape only; the HTTP and boot
+// tests cover behaviour
 // ---------------------------------------------------------------------------
 
 describe("sessionModule (static manifest)", () => {
@@ -194,8 +185,8 @@ describe("sessionModule (static manifest)", () => {
 				"federationRedirectPolicyResolver",
 			]),
 		);
-		// Amendment 5 (§1.1.5): `sessionRPRegistry` and `sessionFamilyIndex` are
-		// oauth-package concerns, MUST NOT appear in sessionModule.requires.
+		// `sessionRPRegistry` and `sessionFamilyIndex` are oauth-package concerns
+		// and MUST NOT appear in sessionModule.requires.
 		expect(sessionModule.requires).not.toContain("sessionRPRegistry");
 		expect(sessionModule.requires).not.toContain("sessionFamilyIndex");
 		// …and this is also the pin on how far `POST /session/logout` cascades.
@@ -308,7 +299,7 @@ describe("auditSink absence policy (#363)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// A consumer of session admission (the session-admission ADR's D1, D8)
+// A consumer of session admission (ADR 2026-09-28-session-admission, D1, D8)
 // ---------------------------------------------------------------------------
 
 describe("sessionModule — the link routes are a consumer of session admission", () => {
@@ -320,7 +311,7 @@ describe("sessionModule — the link routes are a consumer of session admission"
 		expect(sessionModule.optional).toContain("subjectRevocation");
 		expect(sessionModule.requires).not.toContain("subjectRevocation");
 		// Identity, not shape: the declared-absence guard compares policies per
-		// key, and the two subject-revocation slots are one capability (#406).
+		// key, and the two subject-revocation slots are one capability.
 		expect(sessionModule.absencePolicies?.subjectRevocation).toBe(
 			SUBJECT_REVOCATION_ABSENCE_POLICY,
 		);

@@ -15,16 +15,10 @@
  */
 
 /**
- * boot/__tests__/create-app.test.mts — Orchestrator-level tests.
- *
- * Covers:
- *   1. Happy path: minimal manifest boots — one module providing one slot,
- *      no contributes, no routes. `createApp(...)` resolves to an `AppHandle`.
- *   2. Each stage's representative error reaches the caller with the correct
- *      `stage` field (5 stages that can fail: validateManifests, planBoot,
- *      materializeComponents, applyContributions, assembleApp).
- *
- * Per A2-β §6.2 / §6.4 / §9.
+ * Orchestrator-level tests for `createApp`: a minimal manifest resolves to an
+ * `AppHandle`, and each stage's representative error reaches the caller with
+ * the correct `stage` (validateManifests, planBoot, materializeComponents,
+ * applyContributions, assembleApp).
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -154,10 +148,10 @@ function expectOneCleanupFailureLine(
 	expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
 }
 
-// Per ADR 2026-04-30: schema is a pure type contract; defaults live in
-// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
-// fixture supplies a minimal schema-valid baseline (intentionally
-// diverges from reference.conf — see makeValidCoreConfig docstring).
+// Per ADR 2026-04-30-config-schema-strict-defaults-from-hocon, defaults live
+// in HOCON and validateAndComposeConfig parses CoreConfigSchema, so the
+// fixture supplies a minimal schema-valid baseline (it diverges from
+// reference.conf on purpose; see makeValidCoreConfig).
 const minBoot = {
 	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,
@@ -218,8 +212,8 @@ function makeStubListCollector<V = unknown>() {
  * Stub ContributionCollectorMap for tests that do not exercise contribution
  * kinds. `mfaFactors` and `sessionRequirements` are left to the built-in
  * collectors: a host collector for either is refused by `createApp` before
- * the kinds are merged (`session-requirement-kind-guarded`, the
- * session-admission ADR's D3).
+ * the kinds are merged (`session-requirement-kind-guarded`; see ADR
+ * 2026-09-28-session-admission).
  */
 function makeStubCollectors(): ContributionCollectorMap {
 	return {
@@ -259,22 +253,18 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		});
 
 		expect(handle).toBeDefined();
-		// AppHandle is frozen (Theme D)
+		// AppHandle is frozen
 		expect(Object.isFrozen(handle)).toBe(true);
 		// components map is accessible and contains the bootstrap keys
 		expect(handle.components).toBeDefined();
-		// config is now the parsed (CoreConfigSchema-validated) result —
-		// not the raw bootstrap reference. See validateAndComposeConfig
-		// substitution per Codex P2-A hardening. The `port: 3000` value
-		// comes from the makeValidCoreConfig fixture; per ADR 2026-04-30
-		// the schema layer no longer carries a default for it.
+		// config is the parsed (CoreConfigSchema-validated) result, not the raw
+		// bootstrap reference (see validateAndComposeConfig). `port: 3000` comes
+		// from the makeValidCoreConfig fixture: the schema carries no default.
 		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 		// The slot provided by the module is materialised (eager activation)
 		expect(handle.components.slotCA).toBe(42);
-		// router is present
 		expect(handle.router).toBeDefined();
-		// dispose is a function
 		expect(typeof handle.dispose).toBe("function");
 	});
 
@@ -289,11 +279,9 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		expect(Object.isFrozen(handle)).toBe(true);
 		expect(Object.isFrozen(handle.components)).toBe(true);
 		// Bootstrap components are present in the frozen component map.
-		// config is now the parsed (CoreConfigSchema-validated) result —
-		// not the raw bootstrap reference. See validateAndComposeConfig
-		// substitution per Codex P2-A hardening. The `port: 3000` value
-		// comes from the makeValidCoreConfig fixture; per ADR 2026-04-30
-		// the schema layer no longer carries a default for it.
+		// config is the parsed (CoreConfigSchema-validated) result, not the raw
+		// bootstrap reference (see validateAndComposeConfig). `port: 3000` comes
+		// from the makeValidCoreConfig fixture: the schema carries no default.
 		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 	});
@@ -465,7 +453,7 @@ describe("createApp — 6. stage 6 error: route-order-cycle → stage: assembleA
 });
 
 // ---------------------------------------------------------------------------
-// 7. D-5 boot-failure LifecycleRegistrar drain
+// 7. Boot-failure LifecycleRegistrar drain
 // ---------------------------------------------------------------------------
 
 describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {

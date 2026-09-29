@@ -22,28 +22,20 @@ import { resolveJwksPath } from "./path.mjs";
 import { createRouter as createJwksRouter } from "./router.mjs";
 
 /**
- * JWKS publishing module. Contributes the `/.well-known/jwks.json` route
- * (or the `oauth.jwt.jwksPath` override) so every provider that signs
- * tokens exposes its verification keys for offline validation by verifiers
- * (BFFs, RPs).
+ * JWKS publishing module: contributes the `/.well-known/jwks.json` route (or
+ * `oauth.jwt.jwksPath`) so verifiers (BFFs, RPs) can validate tokens offline.
  *
- * Unlike OIDC discovery (issuer-gated, contributed by the oauth module),
- * JWKS publishing is a key-management concern: it depends ONLY on the
- * `keyStore` and is mounted whenever the provider signs tokens, independent
- * of whether an OIDC issuer is configured. For HS256 (symmetric) the route
- * answers `404 jwks_not_published` with `Cache-Control: no-store` (#282) —
- * the secret is never published, and an empty key set would read to a
- * verifier as "a provider with no keys" and get cached as such. This comment
- * described the pre-#282 empty set until #458.
+ * Unlike OIDC discovery (issuer-gated, in the oauth module), it depends only
+ * on the `keyStore` and is mounted whenever the provider signs tokens. For
+ * HS256 the route answers `404 jwks_not_published` with `Cache-Control:
+ * no-store`: the secret is never published, and an empty set would be cached
+ * by verifiers as "a provider with no keys".
  *
- * The route registers an absolute path, so the contribution mounts at "/"
- * to avoid path doubling.
+ * The route registers an absolute path, so the contribution mounts at "/".
  *
- * `express` is resolved lazily inside the (async) route factory via
- * `createRequire` rather than a static import. core declares `express` as
- * an OPTIONAL peer dependency; a static import would make
- * `@o3co/auth-provider-core` fail to load for non-HTTP consumers that omit
- * this module from their manifest. Mirrors the peer-resolution pattern in
+ * `express` is resolved lazily via `createRequire`: it is an optional peer
+ * dependency of core, and a static import would stop core loading for
+ * non-HTTP consumers that omit this module. Same pattern as
  * `boot/assemble-app.mts`.
  */
 export const jwksModule = defineModule({
@@ -58,12 +50,9 @@ export const jwksModule = defineModule({
 				const config = deps.config as {
 					oauth?: { jwt?: { jwksPath?: unknown; jwksCacheMaxAge?: unknown } };
 				};
-				// Resolve the path once and use it for BOTH the router registration
-				// and the route advertisement, so the boot collision checker can
-				// detect a second module claiming the same effective GET <jwksPath>
-				// (the router mounts at "/", so effective path === jwksPath). Without
-				// the advertisement the JWKS route could be silently shadowed and the
-				// advertised `jwks_uri` would resolve to the wrong handler.
+				// One path for both the router and the route advertisement, so the
+				// boot collision checker catches a second module claiming GET
+				// <jwksPath>, which would otherwise shadow the route `jwks_uri` names.
 				const path = resolveJwksPath(config);
 				return {
 					id: "jwks",
@@ -77,12 +66,9 @@ export const jwksModule = defineModule({
 				};
 			},
 		],
-		// OIDC discovery `jwks_uri` is a key-management concern owned by this
-		// module, so jwks contributes it rather than the oauth module guessing
-		// the path. Resolved through the same `resolveJwksPath` the route above
-		// uses, so the advertised URI and the registered route can never drift.
-		// The aggregator prefixes this issuer-relative path with the issuer and
-		// only emits the document when an issuer is configured.
+		// `jwks_uri` is owned here and resolved through the same `resolveJwksPath`
+		// as the route, so the two cannot drift. The aggregator prefixes it with
+		// the issuer and emits the document only when an issuer is configured.
 		discoveryMetadata: [
 			(deps) => {
 				const config = deps.config as { oauth?: { jwt?: { jwksPath?: unknown } } };

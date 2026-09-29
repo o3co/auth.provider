@@ -15,19 +15,12 @@
  */
 
 /**
- * End-to-end boot integration test for `appleFederationModule`, mirroring
- * `federation-google`'s.
- *
- * Boots the const Module through `createApp` alongside a bootstrap module
- * supplying `appleFederationConfig`, and asserts the A5 pairing invariant
- * materialises both contributions in `handle.components`:
- *
- * - `federationProviders.get("apple")` — the upstream OIDC protocol provider
- * - `federationRedirectPolicyResolver.get("apple")` — the redirect policy
- *
- * It also asserts the one thing this federation adds to that shape: the
- * provider reaches the route layer still declaring `responseMode:
- * "form_post"`, which is what mounts the POST callback for it.
+ * Boots `appleFederationModule` through `createApp` beside a module supplying
+ * `appleFederationConfig`, and asserts the pairing invariant materialises
+ * both contributions in `handle.components`: `federationProviders.get("apple")`
+ * (the upstream OIDC provider) and `federationRedirectPolicyResolver.get("apple")`
+ * (the redirect policy). The provider also reaches the route layer still
+ * declaring `responseMode: "form_post"`, which mounts its POST callback.
  */
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";

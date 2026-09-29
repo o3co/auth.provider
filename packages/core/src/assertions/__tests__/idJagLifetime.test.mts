@@ -15,23 +15,19 @@
  */
 
 /**
- * An ID-JAG may run at most an hour past now — the ceiling the
- * `private_key_jwt` verifier already holds a client assertion to — and one
- * that runs longer is refused before its `jti` is recorded.
- *
- * Every ID-JAG `jti` is remembered until the assertion's `exp`, so an `exp`
- * with no upper bound is a replay record with none either: a year-long
- * assertion is a year-long key in the seen-set, per assertion presented.
- * RFC 7523 §3 lets the authorization server reject an `exp` "unreasonably
- * far in the future", and the ID-JAG draft (§4.4.1) applies RFC 7521 §5.2's
- * processing and sets no number of its own; this server's number is the one
- * it already uses for client assertions and for an ID-JAG's `iat` age.
+ * An ID-JAG may run at most an hour past now (the ceiling the
+ * `private_key_jwt` verifier already holds a client assertion to), and one
+ * that runs longer is refused before its `jti` is recorded. Every ID-JAG `jti`
+ * is remembered until the assertion's `exp`, so an `exp` with no upper bound
+ * is a replay record with none either. RFC 7523 §3 lets the authorization
+ * server reject an `exp` "unreasonably far in the future"; the ID-JAG draft
+ * (§4.4.1) applies RFC 7521 §5.2's processing and sets no number of its own,
+ * so this server uses the one it already uses for client assertions and for
+ * an ID-JAG's `iat` age.
  *
  * The ceiling allows the entry's clock tolerance, as every other time check
- * here does: an IdP whose clock runs a little ahead mints an hour-long
- * ID-JAG whose `exp` is a little past an hour from this server's now. A
- * refusal says why in the log (`jwt_bearer_assertion_refused`), since the
- * grant answers every refusal the same `invalid_grant`.
+ * here does. A refusal says why in the log (`jwt_bearer_assertion_refused`),
+ * since the grant answers every refusal with the same `invalid_grant`.
  */
 
 import { generateKeyPairSync } from "node:crypto";

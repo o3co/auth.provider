@@ -16,13 +16,10 @@
 
 /**
  * The one log line for a {@link ClientRepository} that could not answer.
- *
- * Every route and grant that looks a client up answers a repository that
- * throws with `503 temporarily_unavailable` ("client repository unavailable")
- * — the store's outage, never the client's fault. Each also writes this line,
- * at error level, so the outage is seen where it is answered and reads the same
- * wherever it happened: client authentication, `/authorize`, token exchange,
- * the federation token route.
+ * Every route and grant that looks a client up answers a throwing repository
+ * with `503 temporarily_unavailable` (the store's outage, never the client's
+ * fault) and writes this line at error level, so the outage reads the same
+ * wherever it happened.
  *
  * @see ClientRepository
  */

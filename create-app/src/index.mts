@@ -103,12 +103,10 @@ export const scaffold = (
 		filter: (source) => shouldCopyTemplateEntry(source, templateDir),
 	});
 
-	// #407: npm drops a file literally named `.gitignore` from a published
-	// package, so `copy-templates.mjs` stages it dot-less and it is restored
-	// here. Without it the first `git add .` in a scaffolded project commits
-	// the `.env` and the signing key the README's own setup steps say to
-	// create — and it would have shipped that way silently, because the file
-	// is present in the repository and only missing from the tarball.
+	// npm drops a file literally named `.gitignore` from a published package,
+	// so `copy-templates.mjs` stages it dot-less and it is restored here.
+	// Without it the first `git add .` in a scaffolded project commits the
+	// `.env` and the signing key the README's setup steps create.
 	const stagedGitignore = resolve(targetDir, "gitignore");
 	if (existsSync(stagedGitignore)) {
 		renameSync(stagedGitignore, resolve(targetDir, ".gitignore"));
@@ -118,12 +116,9 @@ export const scaffold = (
 	const pkgPath = resolve(targetDir, "package.json");
 	const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
 	pkg.name = projectName;
-	// `"private": true` is deliberately KEPT (o3co/auth.policy-verifier#126
-	// item 4, same code in both scaffolders). The scaffold is an identity
-	// provider — keys, config, policy — and deleting the field made an
-	// accidental `npm publish` succeed by default. Publishing a scaffolded
-	// service is the rare intent; the operator who has it states it by
-	// removing the field.
+	// `"private": true` is deliberately kept: the scaffold is an identity
+	// provider (keys, config, policy), so an accidental `npm publish` must fail
+	// by default. An operator who means to publish removes the field.
 
 	// Replace all workspace:* references with per-package published versions
 	const versions = getPackageVersions();
@@ -146,11 +141,9 @@ export const scaffold = (
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 
 	// pnpm ≥10.29 reads `onlyBuiltDependencies` only from pnpm-workspace.yaml,
-	// in single-package projects too — the template's former package.json
-	// `pnpm` block is silently ignored (#360). The template cannot ship the
-	// file: inside the monorepo it would shadow the workspace root for anyone
-	// running pnpm from the template directory. So the scaffold writes it,
-	// mirroring the allowlist the workspace root keeps for the same dependency.
+	// even in single-package projects. The template cannot ship the file:
+	// inside the monorepo it would shadow the workspace root. So the scaffold
+	// writes it, mirroring the workspace root's allowlist.
 	writeFileSync(
 		resolve(targetDir, "pnpm-workspace.yaml"),
 		[
@@ -179,26 +172,20 @@ export type LockfileResult =
 const LOCKFILE_ARGS = ["install", "--lockfile-only", "--ignore-workspace"] as const;
 
 /**
- * Launchers tried in order. `pnpm` on PATH is the common case; `corepack pnpm`
- * answers the machine that has Node's bundled corepack but no global pnpm.
- * The fallback fires only on ENOENT — the one launch error a different
- * launcher can answer. A non-zero exit (offline, private registry,
- * unpublished version) would fail identically through any launcher, and
- * EACCES-shaped errors surface as themselves rather than as "package manager
- * missing".
+ * Launchers tried in order: `pnpm` on PATH, then `corepack pnpm` for a machine
+ * with Node's bundled corepack but no global pnpm. Only ENOENT falls through to
+ * the next launcher; a non-zero exit would fail identically through any of
+ * them, and other launch errors surface as themselves.
  */
 const LOCKFILE_LAUNCHERS: readonly (readonly string[])[] = [["pnpm"], ["corepack", "pnpm"]];
 
 /**
- * Resolve the scaffolded project's dependency graph into `pnpm-lock.yaml`.
- *
- * This is what makes the template's `pnpm install --frozen-lockfile` build
- * possible: the lockfile cannot be shipped with the template, because the
- * dependency set it would pin does not exist until `scaffold` has replaced
- * every `workspace:*` with a published version (#289). It is therefore
- * resolved once, here, against the rewritten `package.json`. Best-effort by
- * design — it needs a package manager and a reachable registry — so failure
- * is a result, not a throw.
+ * Resolve the scaffolded project's dependency graph into `pnpm-lock.yaml`,
+ * which the template's `pnpm install --frozen-lockfile` build needs. The
+ * lockfile cannot ship with the template: the dependency set it pins exists
+ * only after `scaffold` has replaced every `workspace:*`. Best-effort (it needs
+ * a package manager and a reachable registry), so failure is a result, not a
+ * throw.
  */
 export const generateLockfile = (targetDir: string): LockfileResult => {
 	const attempts: string[] = [];

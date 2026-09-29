@@ -17,21 +17,8 @@ import type { ProviderDeps } from "../provider.mjs";
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
 test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements + rateLimitBudgets + federationTypes", () => {
-	// Per A2-α §4.1 baseline declares 7 kinds. A5 (Phase 7) adds
-	// `federationRedirectPolicies` via `declare module` augmentation in the
-	// session package. Wave 2 Phase 1 retro (Phase 2 DPoP spec §11.1) adds
-	// `grantMiddleware` as the 8th kind. Cross-mechanism dispatch refactor
-	// (Wave 2 Phase 3 follow-up) adds `tokenBindingMechanisms` as the 9th
-	// kind so multiple binding-mechanism modules can compose into a single
-	// `tokenBindingMw` with a unified `DispatchPolicy`. The OIDC discovery
-	// aggregator adds `discoveryMetadata` as the 10th kind so endpoint-owning
-	// modules contribute their slice of the
-	// `/.well-known/openid-configuration` document, which core synthesizes.
-	// The session-admission ADR's D3 adds `sessionRequirements` as the 11th:
-	// the requirements every consumer of a browser session asks through
-	// admission. #728 adds `rateLimitBudgets` as the 12th — the budgets each
-	// module owns for its rate-limit prefixes — and `federationTypes` as the
-	// 13th: the federation types a package handles, keyed by type.
+	// `federationRedirectPolicies` is absent: the session package adds it
+	// through `declare module` augmentation.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
@@ -68,7 +55,7 @@ test("Name-keyed kinds are readonly records", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Wave 2 Token-binding Cluster — Phase 1 retro: grantMiddleware kind
+// grantMiddleware kind
 // ---------------------------------------------------------------------------
 
 test("ContributesMap includes grantMiddleware kind (Wave 2 Phase 1 retro)", () => {
@@ -91,8 +78,8 @@ test("grantMiddleware is list-shaped (factory array)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #728: a module's rate-limit budgets, and what a federation contribution
-// declares it handles
+// A module's rate-limit budgets, and what a federation contribution declares
+// it handles
 // ---------------------------------------------------------------------------
 
 test("rateLimitBudgets is name-keyed by prefix, each factory answering a budget or null", () => {

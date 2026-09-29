@@ -15,18 +15,13 @@ export function createFederationTokenStoreFactory(): FederationTokenStoreFactory
 
 /**
  * Registers the built-in in-memory FederationTokenStore. The "redis" backend
- * was relocated to `@o3co/auth-provider-redis` in Phase 10; consumers wire
- * it via:
- *
- *   import { redisFederationTokenStoreBuilder } from "@o3co/auth-provider-redis";
- *   factory.register("redis", redisFederationTokenStoreBuilder);
- *
- * Or use the declarative `redisFederationTokenStoreModule` in their `modules`
- * array.
+ * is in `@o3co/auth-provider-redis`: register its
+ * `redisFederationTokenStoreBuilder` as "redis", or add
+ * `redisFederationTokenStoreModule` to `modules`.
  *
  * @param factory - the FederationTokenStore factory to populate.
- * @param logger - structured logger for the dev/test warning emitted at
- *                 builder invocation. Defaults to `consoleLogger`.
+ * @param logger - receives the dev/test warning when the builder runs.
+ *                 Defaults to `consoleLogger`.
  */
 export function registerBuiltinFederationTokenStores(
 	factory: FederationTokenStoreFactory,

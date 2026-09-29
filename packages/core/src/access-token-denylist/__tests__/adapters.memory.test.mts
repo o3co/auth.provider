@@ -18,18 +18,12 @@ afterEach(() => {
 });
 
 /*
- * #293 item 6 — the in-memory denylist grew without bound.
- *
- * `add` never pruned, and `has` only ever dropped the one jti it was asked
- * about. So an entry was reclaimed only if someone happened to present that
- * exact token again after it expired — which, for a token that was revoked, is
- * precisely the request that stops coming. Every revocation was a permanent
- * Map entry on a long-running single-process deployment.
- *
- * The sibling in-memory stores are bounded by what they key on: the rate
- * limiter caps buckets and evicts, the subject stores are keyed by subject.
- * This one is keyed by jti, so nothing bounds it but time — which means the
- * sweep has to be its own, not a side effect of a lucky read.
+ * Bounded growth. `has` drops only the jti it is asked about, and a revoked
+ * token is precisely the one that stops being presented, so reclaiming on
+ * read alone would keep every revocation forever. The sibling in-memory
+ * stores are bounded by what they key on (the rate limiter caps buckets, the
+ * subject stores key by subject); this one is keyed by jti, so nothing bounds
+ * it but time, and it sweeps on its own.
  */
 describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () => {
 	/** Fill the denylist with `count` entries expiring `ttlMs` from now. */
@@ -45,9 +39,6 @@ describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () 
 	};
 
 	it("reclaims expired entries that nobody asks about again", async () => {
-		// The leak, stated: a revoked token is exactly the one that stops being
-		// presented, so lazy-on-read GC never fires for it. Under the old
-		// implementation the first thousand would still all be resident here.
 		vi.useFakeTimers();
 		const denylist = createMemoryAccessTokenDenylist();
 		await fill(denylist, DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL, 1_000, "dead");
@@ -58,11 +49,9 @@ describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () 
 	});
 
 	it("bounds the resident set at live entries plus one sweep interval", async () => {
-		// The actual guarantee, and worth stating as its own case: the sweep is
-		// amortized, so expired entries are reclaimed *within* an interval
-		// rather than the instant they expire. Growth is bounded; it is not
-		// zero-lag, and a test that pretended otherwise would be pinning
-		// something the design does not promise.
+		// The sweep is amortized: expired entries are reclaimed within an
+		// interval, not the instant they expire. Growth is bounded, not
+		// zero-lag.
 		vi.useFakeTimers();
 		const denylist = createMemoryAccessTokenDenylist({ sweepInterval: 10 });
 		await fill(denylist, 100, 1_000, "dead");
@@ -72,15 +61,12 @@ describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () 
 	});
 
 	it("keeps every live entry when it sweeps", async () => {
-		// A sweep that drops a live jti un-revokes a token, which is worse than
-		// the leak it is fixing.
+		// A sweep that drops a live jti un-revokes a token.
 		//
-		// The interval is set small ON PURPOSE. With the default (1000) the
-		// trigger add never reaches a sweep, so `has("dead-0")` would answer
-		// `false` through the lazy read path and the assertions would pass with
-		// the sweep broken — or deleting live entries. Asserting on `size`
-		// rather than on `has` for the same reason: `has` deletes what it finds
-		// expired, so reading through it hides whether the sweep ran.
+		// The small interval is deliberate: with the default (1000) the trigger
+		// adds never reach a sweep, and the assertions would pass with the sweep
+		// broken. `size` is asserted rather than `has` because `has` deletes
+		// what it finds expired, which hides whether the sweep ran.
 		vi.useFakeTimers();
 		const denylist = createMemoryAccessTokenDenylist({ sweepInterval: 5 });
 		await fill(denylist, 10, 600_000, "live");
@@ -118,8 +104,8 @@ describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () 
 	});
 
 	it("exposes its size so an operator can see the bound holding", async () => {
-		// The whole failure mode was invisible; a deployment had no way to tell
-		// a denylist doing its job from one that had been growing for a month.
+		// Without it a deployment cannot tell a denylist doing its job from one
+		// that keeps growing.
 		const denylist = createMemoryAccessTokenDenylist();
 		expect(denylist.size).toBe(0);
 		await denylist.add("jti-1", Date.now() + 600_000);

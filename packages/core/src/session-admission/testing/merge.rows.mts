@@ -15,21 +15,12 @@
  */
 
 /**
- * The rows of the session-admission ADR's acceptance criterion 4, as data:
- * the MFA ADR's step-4 table — its D16 and D17 rows, as
- * `decideMfaRequirement` decided them — each a request, a session, the
- * `mfa.mode` and the factors a composition enables, and the decision the rule
- * answered. Core's merge test runs them against a stand-in written to D6's
- * table, the MFA package's against the requirement it registers, so the two
- * are held to one list. Published on `@o3co/auth-provider-core/testing` for
- * that test alone; nothing here runs a test.
- *
- * Four rows' inputs are re-expressed from the rule's: the rule was handed a
- * session's `amr` and an `authentication`, admission reads a stored record,
- * so a "primary unknown" row is a record with no primary's marker in its
- * `amr` and a pre-upgrade row a record without `authentication` — the
- * expectations are the rows' own. `mergeAdmission` is D2's stated mapping of
- * a row's decision onto the admission.
+ * The rows of the session-admission ADR's acceptance criterion 4 (the MFA
+ * ADR's step-4 table), as data: a request, a session, the `mfa.mode` and
+ * enabled factors, and the expected decision in the MFA rule's vocabulary,
+ * which `mergeAdmission` maps onto an `Admission`. Core's merge test runs
+ * them against a stand-in, the MFA package's against the requirement it
+ * registers, so both are held to one list. Nothing here runs a test.
  */
 
 import type { MfaMode } from "../../mfa/mode.mjs";
@@ -42,10 +33,10 @@ const PHR = "urn:o3co:acr:phr";
 const PWD = "urn:example:pwd";
 const KBA = "urn:example:kba";
 
-/** The `acr` values the rows ask for: the template's two (D15, O9), one only a password meets, and one nothing installed produces. */
+/** The `acr` values the rows ask for: the template's two, one only a password meets, and one nothing installed produces. */
 export const MERGE_ACR = Object.freeze({ MFA, PHR, PWD, KBA });
 
-/** The template's table (D15), `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
+/** The template's table, `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
 export const MERGE_ACR_TABLE: AcrTable = readAcrTable({
 	[MFA]: ["mfa"],
 	[PHR]: [["hwk"], ["swk"]],
@@ -63,18 +54,18 @@ export const MERGE_REACH = Object.freeze({
 	installed: new Set(["otp", "hwk", "swk", "recovery", "mfa"]) as ReadonlySet<string>,
 	/** TOTP and recovery codes: no factor adds `hwk` or `swk`. */
 	withoutWebAuthn: new Set(["otp", "recovery", "mfa"]) as ReadonlySet<string>,
-	/** Email codes alone, which do not add `mfa` (O7). */
+	/** Email codes alone, which do not add `mfa`. */
 	emailOnly: new Set(["email"]) as ReadonlySet<string>,
 	/** The requirement with no factor enabled: nothing can step a session up. */
 	empty: new Set<string>() as ReadonlySet<string>,
-	/** No factor at all (the rule's "no coordinator"): nothing can step a session up. */
+	/** No factor at all: nothing can step a session up. */
 	none: new Set<string>() as ReadonlySet<string>,
 });
 
 /** The factors a row's composition enables, by name. */
 export type MergeFactors = keyof typeof MERGE_REACH;
 
-/** The MFA ADR's step-4 decision, as `decideMfaRequirement` answered it: a row's expectation. */
+/** A row's expected decision, in the MFA rule's vocabulary. */
 export type MergeDecision =
 	| { readonly outcome: "met"; readonly acr: string | undefined }
 	| { readonly outcome: "reauthenticate" }
@@ -125,9 +116,9 @@ const federatedSession = (amr: readonly string[], upstreamAmr?: readonly string[
 	record(amr, { primary: "fed", federation: "google", upstreamAmr, mfaAt: undefined });
 
 /**
- * A record written before `UserSession.authentication` existed: read the one
- * way every consumer does (D9), split as it is read — `pwd` or `fed` in its
- * `amr` names the primary, anything else is a primary that cannot be told.
+ * A record without `UserSession.authentication`, read the way every
+ * consumer reads it: `pwd` or `fed` in its `amr` names the primary, anything
+ * else is a primary that cannot be told.
  */
 const recorded = (amr: readonly string[]): UserSession => record(amr, undefined);
 
@@ -135,7 +126,7 @@ const recorded = (amr: readonly string[]): UserSession => record(amr, undefined)
 const primaryOf = (primary: string, amr: readonly string[]): UserSession =>
 	record(amr, { primary, federation: undefined, upstreamAmr: undefined, mfaAt: undefined });
 
-/** The rows, by group: D17's, the baseline beside `acr_values` (D16), and any-of entries with step-up targets (D15, D16). */
+/** The rows, by group: the MFA ADR's rows, the baseline beside `acr_values`, and any-of entries with step-up targets. */
 export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 	{
 		title: "the merge — D17's rows (acceptance criterion 4)",
@@ -353,9 +344,9 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "unmet", requirement: "acr" },
 			},
 			{
-				// The rule's row read `{ authentication: undefined, amr: ["pwd"] }`,
-				// an input no record makes (D9 reads `pwd` as the primary): a record
-				// whose primary cannot be told carries no primary's marker.
+				// The ADR's row reads `{ authentication: undefined, amr: ["pwd"] }`,
+				// an input no record makes (`pwd` names the primary): a record whose
+				// primary cannot be told carries no primary's marker.
 				row: "a request no value of which the table carries is unmet before an unknown primary is re-authenticated",
 				mode: "required",
 				session: recorded(["hwk"]),
@@ -417,7 +408,7 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 				expected: { outcome: "met", acr: undefined },
 			},
 			{
-				// The rule's row read `{ authentication: undefined, amr: ["pwd", "hwk"] }`
+				// The ADR's row reads `{ authentication: undefined, amr: ["pwd", "hwk"] }`
 				// (see above): a record whose primary cannot be told carries no
 				// primary's marker, and its `amr` is weighed as it is.
 				row: "an unknown primary outside required is weighed on its amr alone",
@@ -493,12 +484,11 @@ export const MERGE_ROW_GROUPS: readonly MergeRowGroup[] = [
 ];
 
 /**
- * D2's stated mapping of a row's decision onto the admission, for the
- * requirement named `mfa` stepping up to `page` — as registered, its `href`
- * resolved on the issuer: the rule's `requirement:
- * "acr"` is `"acr"`, its `requirement: "baseline"` is `"mfa"`, and its
- * `step_up.requirement` is `whenStillUnmet` — `"acr"` → `"unmet"`,
- * `"baseline"` → the requirement's own `"reauthenticate"`.
+ * The ADR's mapping of a row's decision onto the admission, for the
+ * requirement named `mfa` stepping up to the registered `page`: `requirement:
+ * "acr"` stays `"acr"`, `"baseline"` becomes `"mfa"`, and a `step_up`'s
+ * requirement becomes `whenStillUnmet` (`"acr"` → `"unmet"`, `"baseline"` →
+ * `"reauthenticate"`).
  */
 export function mergeAdmission(
 	expected: MergeDecision,

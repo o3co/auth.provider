@@ -15,26 +15,16 @@
  */
 
 /**
- * The subject's grants boundary, as the module wires it (#593, D13).
- *
- * A grant outlives the session it was made in, so the thing that makes a
- * subject-wide revocation reach it is the backstop: every disclosure is
- * compared against a watermark for that subject. A deployment with no
- * subject-revocation capability has no watermark — and the whole question here
- * is what it should do about that.
- *
- * Slice 5 answers it at boot: a deployment with no capability, or with one
- * that carries only the boundary #296 shipped, does not start. `boot.test.mts`
- * holds those refusals. What is left here is what boot cannot establish — what
- * a backend will say about a subject when it is asked — and which of the two
- * boundaries the answer is read from.
- *
- * That last part is the whole of D13 from a disclosure's point of view. The
- * grants boundary and the sessions boundary move independently: a subject-wide
- * revocation asked to keep this subject's grants advances the sessions one
- * alone. Reading that one here would end the grants an operator's policy just
- * chose to keep, and the feature would look implemented while doing the
- * opposite.
+ * The subject's grants boundary, as the module wires it (the federation-grants
+ * ADR, D13). A grant outlives the session it was made in, so a subject-wide
+ * revocation reaches it through the backstop: every disclosure is compared
+ * against a watermark for that subject. A deployment with no subject-revocation
+ * capability, or one with no grants boundary, does not start (`boot.test.mts`).
+ * What is left here is what boot cannot establish: what a backend says about a
+ * subject when asked, and which of the two boundaries the answer is read from.
+ * They move independently: a subject-wide revocation asked to keep this
+ * subject's grants advances the sessions boundary alone, so reading that one
+ * here would end the grants an operator's policy chose to keep.
  */
 
 import type {
@@ -237,11 +227,9 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 
 describe("the grants boundary the module wires", () => {
 	it("refuses an answer that is neither a date nor null, on both routes", async () => {
-		// Found by review. `null` is a statement — nothing was revoked for this
-		// subject — and an adapter that answers `undefined` has made none. The
-		// two routes read it through the same bridge, so they cannot disagree:
-		// before this, `/status` reported `active` while `/token` on the same
-		// input failed closed.
+		// `null` is a statement (nothing was revoked for this subject), and an
+		// adapter that answers `undefined` has made none. The two routes read it
+		// through the same bridge, so they cannot disagree.
 		const { handle, app } = await boot({ grants: "malformed" });
 
 		const described = await request(app)
@@ -318,7 +306,7 @@ describe("the grants boundary the module wires", () => {
 			.send({ sub: SUBJECT });
 
 		// 410 and not 403: the backstop does not merely refuse the disclosure,
-		// it writes the revocation the boundary implies (D13), so the grant is
+		// it writes the revocation the boundary implies, so the grant is
 		// over from then on for everyone.
 		expect(response.status).toBe(410);
 		expect(response.body.error).toBe("grant_revoked");

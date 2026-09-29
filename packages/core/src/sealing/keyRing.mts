@@ -56,17 +56,15 @@ export const isSealingKeyId = (id: unknown): id is string =>
  * Refuses, as a `RangeError`, a ring no envelope could be sealed or opened
  * under: a key ID outside the rule, a duplicate ID, or a key that is not a
  * Buffer of {@link SEALING_KEY_BYTES} bytes (a string of that length would be
- * used as its UTF-8 bytes). A ring is a setting, and one that is given but
- * unusable is refused rather than worked around. An empty ring passes;
- * whether one may be empty is the caller's to say (it can open nothing and
- * seal nothing).
+ * used as its UTF-8 bytes). A given but unusable ring is refused, not worked
+ * around. An empty ring passes; whether one may be empty is the caller's to
+ * say.
  *
- * `setting` names the ring in the refusal, as its reader knows it: the
- * configuration key it was read from (`federationGrants.encryptionKeys`), or the option
- * it was passed as. Every refusal names the entry by its index and none
- * quotes an ID: an operator who swapped an ID and its key would otherwise
- * see the key in a boot error, and passing the ID rule does not make an ID
- * safe to quote (a 32-byte key in hex, or in unpadded base64url, passes).
+ * `setting` names the ring in the refusal as its reader knows it (e.g.
+ * `federationGrants.encryptionKeys`, or an option name). A refusal names the
+ * entry by index and never quotes an ID: an operator who swapped an ID and
+ * its key would see the key in a boot error, and a 32-byte key in hex or
+ * unpadded base64url passes the ID rule.
  */
 export function checkSealingKeyRing(ring: SealingKeyRing, setting: string): void {
 	const seen = new Set<string>();
@@ -90,13 +88,13 @@ export function checkSealingKeyRing(ring: SealingKeyRing, setting: string): void
 
 /**
  * A configured key as key material: canonical base64 of exactly
- * {@link SEALING_KEY_BYTES} bytes, or `undefined`. The caller refuses the
- * `undefined`, naming the configuration key it read.
+ * {@link SEALING_KEY_BYTES} bytes, or `undefined`, which the caller refuses
+ * naming the configuration key it read.
  *
  * `Buffer.from(…, "base64")` ignores embedded whitespace and drops what it
  * cannot decode, so a value is read only if re-encoding gives it back
- * exactly: a key pasted out of a file with its newline, or wrapped by a
- * secret manager, is not the value an operator checked.
+ * exactly: a key pasted with its newline, or wrapped by a secret manager, is
+ * not the value an operator checked.
  */
 export function decodeSealingKey(encoded: string): Buffer | undefined {
 	if (typeof encoded !== "string" || /\s/.test(encoded)) return undefined;

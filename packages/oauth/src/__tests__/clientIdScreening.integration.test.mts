@@ -16,21 +16,17 @@
 
 /**
  * A `client_id` that cannot name a client is refused as the client's fault
- * before the client repository is asked.
- *
- * A repository outage is now `503`, so a repository that throws on input it
- * cannot handle — a SQL driver refusing a NUL byte, an HTTP store refusing a
- * URL too long — would turn a client's malformed `client_id` into the
- * server's outage. RFC 6749 Appendix A.1 makes `client_id` `*VSCHAR`: no
- * control character can be part of one. So a `client_id` carrying a control
- * character, or longer than `MAX_CLIENT_ID_LENGTH`, is `invalid_client` at
- * client authentication (a secret or an assertion) and at `/authorize`, and
- * the repository never sees it. `/authorize` also answered a repository that
- * could not answer `500 server_error`, unlogged; it is `503` like client
- * authentication's. The id a `client_repository_unavailable` line records is
- * the client's input, so it is sanitised and capped.
- *
- * Driven through the real router (`createOAuthRouter`).
+ * before the client repository is asked. A repository outage is `503`, so a
+ * repository that throws on input it cannot handle (a SQL driver refusing a
+ * NUL byte, an HTTP store refusing a URL too long) would turn a malformed
+ * `client_id` into the server's outage. RFC 6749 Appendix A.1 makes
+ * `client_id` `*VSCHAR`, so one carrying a control character, or longer than
+ * `MAX_CLIENT_ID_LENGTH`, is `invalid_client` at client authentication (a
+ * secret or an assertion) and at `/authorize`, unseen by the repository.
+ * `/authorize` answers a repository that cannot answer `503`, logged, like
+ * client authentication. The id a `client_repository_unavailable` line records
+ * is the client's input, so it is sanitised and capped. Driven through the
+ * real router (`createOAuthRouter`).
  */
 
 import {

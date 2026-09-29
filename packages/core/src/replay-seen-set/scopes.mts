@@ -17,14 +17,12 @@
 /*
  * The seen-set scopes a store treats apart from the others.
  *
- * DPoP records every proof it sees under `dpop-proof:<jkt>`, before the
- * token endpoint's rate limit and before a protected resource verifies the
- * access token, so anyone can make it write. The in-process seen-set lets
- * those records fill only {@link DPOP_PROOF_REPLAY_SHARE} of its cap, and
- * keeps the rest for the consumers whose writes follow an authentication or
- * a rate limit (`private_key_jwt`, ID-JAG, WebAuthn). The prefix lives here,
- * where the store reads it, and `@o3co/auth-provider-dpop` writes under it.
- * It is part of the stored key an operator sees in Redis.
+ * DPoP records every proof under `dpop-proof:<jkt>` before any rate limit or
+ * access-token check, so anyone can make it write. The in-process seen-set
+ * lets those records fill only {@link DPOP_PROOF_REPLAY_SHARE} of its cap and
+ * keeps the rest for consumers that write after authentication or a rate
+ * limit. `@o3co/auth-provider-dpop` writes under the prefix; it is part of
+ * the stored key an operator sees in Redis.
  */
 
 /** The scope prefix DPoP records its proofs under: `dpop-proof:<jkt>`. */

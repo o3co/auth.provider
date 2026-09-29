@@ -17,33 +17,21 @@
 /**
  * DPoP proof verifier — `createDPoPMechanism` factory.
  *
- * Implements the RFC 9449 §6 validation sequence (15 steps) for the
- * token endpoint. Step ordering follows the spec's taxonomy:
+ * Checks, in order:
+ *   1. one `DPoP` header value (`null` when absent)
+ *   2. `parseProof`: structure, JWK screening, claims, `jkt` thumbprint
+ *   3. alg allowlist, then signature (importJWK + jwtVerify)
+ *   4. htm, then htu (both sides normalized; the expected origin is the
+ *      configured `oauth.jwt.issuer`, never the request's forwarded
+ *      protocol / Host)
+ *   5. iat window
+ *   6. server-provided nonce, when required; `ath` at a protected resource
+ *   7. replay: one atomic `markSeen` on core's `ReplaySeenSet` under
+ *      `dpop-proof:<jkt>`, kept for `replayTtlSeconds`
  *
- *   Step 1:  DPoP header presence check  (null when absent)
- *   Step 2:  Single header value         (throw on comma)
- *   Steps 3–9, 13: parseProof (structural + JWK + claims + jkt thumbprint)
- *   Step 5:  alg whitelist               (after parseProof, uses proof.alg)
- *   Step 8:  Signature verification      (importJWK + jwtVerify)
- *   Step 10: htm match
- *   Step 11: htu match (both sides normalized). The expected URL's origin is
- *            the configured `oauth.jwt.issuer`, never the request's forwarded
- *            protocol / Host (#292).
- *   Step 12: iat window
- *   Step 14: Replay check — one atomic `markSeen` on core's `ReplaySeenSet`
- *            under `dpop-proof:<jkt>`, kept for `replayTtlSeconds`. A store
- *            that cannot be read (`replay_store_unavailable`), is full
- *            (`replay_store_full`: core's in-process set holding DPoP's share
- *            of its cap) or breaks its own contract (`replay_store_fault`)
- *            refuses the proof as the server's fault — answered 503
- *            `temporarily_unavailable` — never as an invalid proof and never
- *            by leaking a raw Redis error.
- *   Step 15: Return TokenBinding
- *
- * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 + 13 and
- * reuses the `jkt` already computed there (no re-derive in this layer).
- *
- * Per Wave 2 Phase 2 spec §6 + §8 factory contract.
+ * A replay store that fails refuses the proof as the server's fault (503
+ * `temporarily_unavailable`, see `DPoPError.code`), never as an invalid proof
+ * and never by leaking a raw Redis error.
  */
 
 import {
@@ -75,17 +63,12 @@ export interface DPoPMechanismOptions {
 	/**
 	 * The deployment's canonical issuer — `oauth.jwt.issuer`. Its **origin**
 	 * (scheme, host, port) is the authority half of the `htu` every proof is
-	 * checked against.
+	 * checked against. Required, and required to be a canonical issuer URL.
 	 *
-	 * Required, and required to be a canonical issuer URL (#292). Before that
-	 * the expected `htu` was reconstructed from `req.protocol` and the `Host`
-	 * header, both of which `X-Forwarded-Proto` / `X-Forwarded-Host` rewrite
-	 * whenever Express `trust proxy` is on — so a caller who could reach the
-	 * process past the edge chose the value its own proof had to match, and
-	 * satisfied both halves of the comparison at once. The issuer is a property
-	 * of the deployment and cannot be moved by a request, which is the whole
-	 * reason it is the right source. Same reasoning as #266/#307, which stopped
-	 * deriving `iss` from `Host`.
+	 * Not `req.protocol` and `Host`: `X-Forwarded-Proto` / `X-Forwarded-Host`
+	 * rewrite both whenever Express `trust proxy` is on, so a caller who could
+	 * reach the process past the edge would choose the value its own proof had
+	 * to match. No request can move the issuer.
 	 */
 	readonly issuer: string;
 	/**
@@ -109,39 +92,28 @@ export interface DPoPMechanismOptions {
 	 */
 	readonly algWhitelist?: readonly string[];
 	/**
-	 * How long, in seconds, a proof's replay record is kept. Default: 300
-	 * (5 minutes). A positive finite number; construction refuses anything
-	 * else, because every record's expiry is computed from it.
+	 * How long, in seconds, a proof's replay record is kept. Default: 300. A
+	 * positive finite number; construction refuses anything else, because
+	 * every record's expiry is computed from it.
 	 *
-	 * MUST be at least **`2 × iatWindowSeconds + 1`**, not `iatWindowSeconds`.
+	 * MUST be at least **`2 × iatWindowSeconds + 1`**. The iat check is
+	 * `Math.abs(floor(now) - iat) > W`: symmetric around `iat` and truncated to
+	 * whole seconds, so a proof with `iat = T` is accepted until real time
+	 * `T + W + 1` (exclusive). Its replay entry is written only after that check
+	 * passes, so at real time `T - W` at the earliest, and expiry is half-open at
+	 * `firstSeen + TTL` (the memory seen-set holds a record live only while
+	 * `expiresAtMs > now`; Redis gets the same relative `PX` window). Covering
+	 * the accepted interval needs `T - W + TTL >= T + W + 1`, i.e.
+	 * `TTL >= 2W + 1`; at exactly `2W` the proof stays acceptable for up to a
+	 * second after its entry dies.
 	 *
-	 * The `iat` check is `Math.abs(now - iat) > iatWindowSeconds` against
-	 * `now = Math.floor(Date.now() / 1000)`, so the acceptance window is
-	 * symmetric around `iat` AND truncated to whole seconds: a proof with
-	 * `iat = T` keeps being accepted while `floor(now) <= T + W`, i.e. until
-	 * real time `T + W + 1` (exclusive) — very nearly a second past `T + W`.
-	 *
-	 * A replay entry is written only after the window check passes (step 14
-	 * follows step 12), so the earliest it can be created is real time
-	 * `T - W`. It is written with `expiresAtMs = firstSeen + TTL` (the Redis
-	 * seen-set turns that back into the same relative `PX` window), and expiry
-	 * is half-open — the memory seen-set treats a record as live only while
-	 * `expiresAtMs > now` — so the entry is already gone at `firstSeen + TTL`.
-	 *
-	 * Covering the whole accepted interval therefore requires
-	 * `T - W + TTL >= T + W + 1`, i.e. `TTL >= 2W + 1`. At exactly `2W` the
-	 * entry dies at `T + W` while the proof stays acceptable for up to another
-	 * second — a real, if narrow, replay window.
-	 *
-	 * The defaults (60 / 300) satisfy this with margin. A mechanism
-	 * constructed below the requirement logs `dpop_replay_ttl_below_window`
-	 * (warn, carrying `iatWindowSeconds`, `replayTtlSeconds` and
-	 * `requiredTtlSeconds`).
+	 * Below the requirement the mechanism logs `dpop_replay_ttl_below_window`
+	 * (warn, with `iatWindowSeconds`, `replayTtlSeconds`, `requiredTtlSeconds`).
 	 */
 	readonly replayTtlSeconds?: number;
 	readonly logger?: Logger;
 	/**
-	 * Server-provided nonce (RFC 9449 §8 / §9, #530). Absent, no nonce is asked
+	 * Server-provided nonce (RFC 9449 §8 / §9). Absent, no nonce is asked
 	 * for and `iat` skew is the only freshness control. `"as"` asks at the
 	 * token endpoint; `"as+rs"` also at protected resources — the mechanism
 	 * tells the two apart by whether it was handed a bound access token.
@@ -163,13 +135,10 @@ const DEFAULT_ALG_WHITELIST: readonly string[] = ["ES256", "ES384", "EdDSA", "RS
 
 /**
  * The signature and MAC algorithm names in IANA's "JSON Web Signature and
- * Encryption Algorithms" registry: a closed vocabulary, so a refused alg in
- * it can be named on a log line without a client choosing what the line
- * says. Anything else — a JWE key-management name (`RSA-OAEP`, `dir`)
- * included — is logged as `unregistered`. Checked against the registry as
- * last updated 2026-05-22; a name registered later reads `unregistered`
- * until it is added here, which costs a log line its precision and nothing
- * else.
+ * Encryption Algorithms" registry (as of 2026-05-22): a closed vocabulary, so
+ * a refused alg in it can be named on a log line without a client choosing
+ * what the line says. Anything else — a JWE key-management name
+ * (`RSA-OAEP`, `dir`) included — is logged as `unregistered`.
  */
 const REGISTERED_JWS_ALGS: ReadonlySet<string> = new Set([
 	// RFC 7518 §3.1
@@ -202,50 +171,40 @@ const REGISTERED_JWS_ALGS: ReadonlySet<string> = new Set([
 const DEFAULT_IAT_WINDOW_SECONDS = 60;
 const DEFAULT_REPLAY_TTL_SECONDS = 300;
 
-// The seen-set scope a proof's `jti` is recorded under, per key, is core's
-// `DPOP_PROOF_REPLAY_SCOPE_PREFIX`: `dpop-proof:<jkt>`. The seen-set is
-// shared with other consumers (`client-assertion:<client_id>`, `webauthn:*`,
-// and `jwt-bearer:id-jag:<issuer>` where a composition hands the jwt-bearer
+// A proof's `jti` is recorded under core's `DPOP_PROOF_REPLAY_SCOPE_PREFIX`:
+// `dpop-proof:<jkt>`. The seen-set is shared with other consumers
+// (`client-assertion:<client_id>`, `webauthn:*`, and
+// `jwt-bearer:id-jag:<issuer>` where a composition hands the jwt-bearer
 // verifier the same set), and its canonical key is length-prefixed, so no
 // record of theirs can collide with one of these. Core owns the prefix
-// because its in-process seen-set reads it: DPoP proofs may fill only a
-// share of that set's cap. The scope is part of the stored key an operator
-// can see in Redis, and the tests pin the literal.
+// because its in-process seen-set caps DPoP proofs at a share of its size.
+// The scope is visible in Redis keys, and the tests pin the literal.
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 // The effective request URL for htu comparison is the configured origin plus
-// `req.originalUrl` — `buildCanonicalRequestUrl`, the shared vocabulary this
-// package's #292 fix established (home: core/src/net/request-url.mts, since
-// #356 grew a second consumer). The origin is fixed at construction from
-// `oauth.jwt.issuer`; the query string rides along because `normalizeHtu`
-// strips it uniformly from both sides.
+// `req.originalUrl` (core's `buildCanonicalRequestUrl`). The origin is fixed
+// at construction from `oauth.jwt.issuer`; the query string rides along
+// because `normalizeHtu` strips it from both sides.
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
 /**
- * Create a DPoP `TokenBindingMechanism` for use with `tokenBindingMw`.
- *
- * The returned mechanism:
- *   - Returns `null` when the `DPoP` header is absent (non-DPoP request).
- *   - Throws `DPoPError` for any proof invalidity.
- *   - Returns `{ kind: "dpop", confirmation: { jkt } }` on success.
- *
- * The `jkt` in the confirmation is the RFC 7638 SHA-256 thumbprint of the
- * proof's JWK, computed by `parseProof` (Sub-PR 2a) — not re-derived here.
- *
- * Per Wave 2 Phase 2 spec §8 (factory contract) + §6 (validation sequence).
+ * Create a DPoP `TokenBindingMechanism` for use with `tokenBindingMw`. The
+ * mechanism returns `null` when the `DPoP` header is absent, throws
+ * `DPoPError` for any invalid proof, and returns
+ * `{ kind: "dpop", confirmation: { jkt } }` on success, `jkt` being the
+ * RFC 7638 thumbprint `parseProof` computed.
  */
 export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBindingMechanism => {
-	// #292: the expected `htu` comes from the deployment's identity, not from
-	// the request. Validate it here rather than at first use — a mechanism that
-	// cannot name its own origin would otherwise fail every proof at runtime
-	// with `htu_mismatch`, which reads as a client bug rather than a
-	// misconfiguration.
+	// The expected `htu` comes from the deployment's identity, not from the
+	// request. Validate it here rather than at first use: a mechanism that
+	// cannot name its own origin would fail every proof with `htu_mismatch`,
+	// which reads as a client bug rather than a misconfiguration.
 	const issuerRejection = checkCanonicalIssuer(options.issuer);
 	if (issuerRejection !== null) {
 		throw new Error(
@@ -277,20 +236,13 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 		);
 	}
 
-	// Replay entries must outlive the acceptance window they protect. The iat
-	// check is symmetric AND second-truncated (`Math.abs(floor(now) - iat) > W`),
-	// so a proof stays acceptable until real time `T + W + 1` (exclusive),
-	// while its entry starts at first sighting — possibly the earliest edge,
-	// `T - W` — and expires half-open at `firstSeen + TTL`. Hence `2W + 1`,
-	// not `2W`: at exactly `2W` the entry dies a second early. See the
-	// `replayTtlSeconds` docs for the derivation.
-	// Warn rather than throw: the failure is a weakened replay guarantee under
-	// clock skew, not an unusable configuration, and refusing to construct
-	// would break deployments that are running today.
+	// Replay entries must outlive the acceptance window they protect: at least
+	// `2W + 1` (derivation at `DPoPMechanismOptions.replayTtlSeconds`). Warn
+	// rather than throw: the failure is a weakened replay guarantee under clock
+	// skew, not an unusable configuration, and refusing to construct would break
+	// running deployments.
 	const requiredTtlSeconds = iatWindowSeconds * 2 + 1;
 	if (replayTtlSeconds < requiredTtlSeconds) {
-		// A proof can outlive its replay entry and be replayed while still
-		// inside its acceptance window: `requiredTtlSeconds` is 2W + 1.
 		logger?.warn(
 			{ iatWindowSeconds, replayTtlSeconds, requiredTtlSeconds },
 			"dpop_replay_ttl_below_window",
@@ -300,32 +252,25 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 	return {
 		kind: "dpop",
 		/**
-		 * `true` — DPoP is an explicit application-layer construction: the
-		 * client intentionally presents the `DPoP` header. Per cluster spec
-		 * §3.5, explicit-intent mechanisms win over ambient-intent mechanisms
-		 * (mTLS) in `intent-explicit` dispatch mode.
+		 * DPoP is explicit-intent: the client deliberately presents the `DPoP`
+		 * header, so it wins over ambient mechanisms (mTLS) in `intent-explicit`
+		 * dispatch mode.
 		 */
 		intentExplicit: true,
 
 		extract: async (req: Request, ctx?: TokenBindingExtractContext) => {
-			// Step 1 (spec §6): DPoP header presence.
 			const header = req.get("dpop");
 			if (header === undefined) {
 				return null; // non-DPoP request — no binding
 			}
 
-			// Step 2 (spec §6): Only a single DPoP header value is permitted.
 			if (header.includes(",")) {
 				throw new DPoPError("multiple_headers", "Multiple DPoP header values presented");
 			}
 
-			// Steps 3–9 (spec §6): Structural validation + JWK screening + jkt.
-			// `parseProof` is async (computes jkt via SubtleCrypto in proof.mts).
-			// The flat DPoPProof shape from Sub-PR 2a: proof.jwk, proof.alg, proof.jkt.
 			const proof = await parseProof(header);
 
-			// Step 5 (spec §6): Algorithm allowlist check.
-			// parseProof ensures alg is a non-empty string; whitelist check is here.
+			// parseProof ensures alg is a non-empty string; the allowlist is here.
 			if (!algWhitelist.includes(proof.alg)) {
 				// The alg is the client's: named on the line only when it is a
 				// registered one, and never in the refusal's message.
@@ -339,8 +284,6 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				throw new DPoPError("alg_not_allowed", "alg is not an accepted DPoP algorithm");
 			}
 
-			// Step 8 (spec §6): Signature verification.
-			// Import the public key from proof.jwk (flat field from Sub-PR 2a).
 			try {
 				const publicKey = await importJWK(proof.jwk, proof.alg);
 				await jwtVerify(header, publicKey, { typ: "dpop+jwt" });
@@ -353,7 +296,6 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				throw new DPoPError("signature_invalid", "DPoP proof signature verification failed");
 			}
 
-			// Step 10 (spec §6): HTTP method match.
 			if (proof.claims.htm.toUpperCase() !== req.method.toUpperCase()) {
 				throw new DPoPError("htm_mismatch", "DPoP proof htm does not match request method", {
 					expected: req.method.toUpperCase(),
@@ -361,12 +303,8 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				});
 			}
 
-			// Step 11 (spec §6): HTTP URI match — both sides normalized per §7.
-			// `normalizeHtu` throws when either URL contains userinfo (the
-			// reconstruction drops `username`/`password`, which would otherwise
-			// let `https://attacker:pwn@as.example/...` equality-match the
-			// server-built URL after canonicalization). Wrap so the contract
-			// stays inside `DPoPError`.
+			// Both sides normalized. `normalizeHtu` throws when either URL contains
+			// userinfo (see there); wrap so the contract stays inside `DPoPError`.
 			let expectedHtu: string;
 			let presentedHtu: string;
 			try {
@@ -390,7 +328,6 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				});
 			}
 
-			// Step 12 (spec §6): iat acceptance window.
 			const nowSec = Math.floor(Date.now() / 1000);
 			const drift = Math.abs(nowSec - proof.claims.iat);
 			if (drift > iatWindowSeconds) {
@@ -404,7 +341,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				);
 			}
 
-			// #530: the server-provided nonce, checked before the replay store is
+			// The server-provided nonce, checked before the replay store is
 			// consulted — a proof refused here is one the client is about to
 			// present again with the nonce filled in, and it must not have spent
 			// its jti. `ctx` is what a protected resource hands over; its absence
@@ -434,24 +371,17 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				}
 			}
 
-			// RFC 9449 §7.1: at a protected resource the proof MUST carry an
-			// `ath` binding it to the access token it accompanies. Without it,
-			// a proof captured alongside one request authorises any other
-			// stolen token presented with it — the `htm`/`htu`/`iat` checks
-			// above say nothing about *which* token the proof is for.
+			// RFC 9449 §7.1: at a protected resource the proof MUST carry an `ath`
+			// binding it to the access token it accompanies; without it, a proof
+			// captured alongside one request authorises any other stolen token.
 			//
-			// Ordered BEFORE the replay check on purpose. A proof whose `ath`
-			// does not match is not a legitimate use of its `jti`, so it must
-			// not consume the replay slot: an attacker who intercepts a proof
-			// could otherwise burn its `jti` by submitting it with a
-			// mismatched token and have the client's own request rejected as
-			// a replay. Checking the pair's coherence first keeps the replay
-			// store recording only proofs that were actually honoured.
+			// Checked before the replay record, so a mismatched `ath` does not spend
+			// the `jti`: an attacker who intercepts a proof could otherwise burn it
+			// with a mismatched token and have the client's own request refused as a
+			// replay.
 			//
-			// `ctx` absent = the token-endpoint profile (§5), where no access
-			// token exists yet. A stray `ath` there is ignored rather than
-			// rejected: there is nothing for it to contradict, and failing the
-			// grant over a pointless claim would break clients for no gain.
+			// `ctx` absent = the token endpoint (§5), where no access token exists
+			// yet; a stray `ath` there is ignored, having nothing to contradict.
 			if (ctx !== undefined) {
 				const { ath } = proof.claims;
 				if (ath === undefined) {
@@ -472,29 +402,20 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				}
 			}
 
-			// Step 13 (spec §6): JKT — already computed by parseProof (Sub-PR 2a).
-			// Do NOT re-compute: proof.jkt is the canonical value.
+			// proof.jkt is the canonical value; do not re-compute it.
 			const { jkt } = proof;
 
-			// Step 14 (spec §6): Replay check — one atomic check-and-mark of the
-			// (jkt, jti) pair in the seen-set: `markSeen` answers true only to
-			// the call that wrote the record, so of two concurrent requests
-			// carrying the same proof exactly one is accepted. Kept for
-			// `replayTtlSeconds` from now, which the iat window above bounds
-			// (see `DPoPMechanismOptions.replayTtlSeconds`). The deadline is
-			// absolute: an adapter turns it into a remaining life when it writes
-			// (Redis sends `PX` = deadline − its own now), so time spent reaching
-			// the store does not shorten the record below the window.
+			// One atomic check-and-mark of the (jkt, jti) pair: `markSeen` answers
+			// true only to the call that wrote the record, so of two concurrent
+			// requests carrying the same proof exactly one is accepted. The deadline
+			// is absolute (Redis sends `PX` = deadline − its own now), so time spent
+			// reaching the store does not shorten the record below the window.
 			//
-			// Wrapped so that transport faults (Redis ECONNREFUSED, etc.)
-			// surface as `replay_store_unavailable` rather than leaking a raw
-			// infrastructure error. That refusal is an outage, not a verdict:
-			// the proof may be perfectly good, so it carries
-			// `temporarily_unavailable` and the `unavailable` description, which
-			// the token endpoint and a protected resource answer 503 — not RFC
-			// 9449's `invalid_dpop_proof`, which says the proof was found
-			// invalid. Either way the proof is refused: an unrecorded proof is
-			// never accepted.
+			// A transport fault (Redis ECONNREFUSED, etc.) is an outage, not a
+			// verdict: `replay_store_unavailable`, answered 503
+			// `temporarily_unavailable` rather than RFC 9449's `invalid_dpop_proof`,
+			// and never the raw error. Either way an unrecorded proof is never
+			// accepted.
 			let fresh: boolean;
 			try {
 				fresh = await replaySeenSet.markSeen(
@@ -519,23 +440,18 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 						{ cause: err },
 					);
 				}
-				// The seen-set's own contract errors — `expired-at-issue`, which a
-				// record computed from a positive TTL cannot earn, and RangeError
-				// for a non-finite expiry, which construction rules out — mean the
-				// set is broken. That is the server's fault, not the proof's, so
-				// it takes the outage's wire answer (503, the proof refused
-				// unrecorded) rather than a rethrow, which core's dispatcher would
-				// answer `400 invalid_dpop_proof` and log only as a failed proof.
-				// Its own reason (`replay_store_fault`) keeps operator triage off
-				// Redis health: the fix is in the composition.
+				// The seen-set's own contract errors (`expired-at-issue`, which a
+				// positive TTL cannot earn, and RangeError for a non-finite expiry,
+				// which construction rules out) mean the set is broken: the server's
+				// fault, so the outage's answer (503, proof refused unrecorded) rather
+				// than a rethrow, which core's dispatcher would answer
+				// `400 invalid_dpop_proof`. `replay_store_fault` keeps triage off Redis
+				// health: the fix is in the composition.
 				//
-				// Either way the error goes upward as the refusal's `cause`, and
-				// this mechanism logs nothing of its own: core's dispatcher that
-				// answers the 503 owns the outage's one line
-				// (`token_binding_unavailable` / `protected_resource_binding_unavailable`),
-				// with this refusal's `reason` and the cause's projection — never
-				// the error, which ioredis makes carry the refused command, the
-				// record's key included.
+				// In every case the error goes upward as the refusal's `cause` and this
+				// mechanism logs nothing: core's dispatcher answering the 503 logs the
+				// cause's projection, never the error, on which ioredis puts the
+				// refused command, the record's key included.
 				if (err instanceof ChallengeStorageError || err instanceof RangeError) {
 					throw new DPoPError(
 						"replay_store_fault",
@@ -563,10 +479,8 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				);
 			}
 
-			// Step 15 (spec §6): Return the sender-constrained token binding.
-			// Confirmation shape is the RFC 7800 `cnf.jkt` variant only (Stage 1).
-			// The `proof` object is NOT forwarded — sub-PR 2c reads only
-			// `tokenBinding.confirmation.jkt` for cnf claim issuance.
+			// The RFC 7800 `cnf.jkt` confirmation; the `proof` object is not
+			// forwarded.
 			return {
 				kind: "dpop",
 				confirmation: { jkt },

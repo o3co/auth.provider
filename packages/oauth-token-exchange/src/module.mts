@@ -30,19 +30,11 @@ import {
 } from "./validator/selfIssuedAccessToken.mjs";
 
 /**
- * Token Exchange config-slice schema. Refines `oauth.jwt.issuer` from
- * CoreConfigSchema's permissive `z.string().optional()` to a required
- * non-empty string — the built-in self-issued validator compares a
- * token's issuer with it and throws when built without one, so an empty
- * value is refused here, at boot, as config-validation-failed (Copilot
- * review on PR #100, Critical).
- *
- * Parsed by boot's composed parse (#728; validate-manifests step 13) over
- * what core's base made of the configuration, so `oauth.jwt.issuer:
- * z.string().min(1)` holds on top of the base's schema, and any boot whose
- * configured `issuer` is missing or empty fails with
- * `BootError(reason: "config-validation-failed")` before the validator
- * factory is invoked.
+ * Token Exchange config slice: requires a non-empty `oauth.jwt.issuer`, which
+ * core's base schema leaves optional. The built-in self-issued validator
+ * compares a token's issuer with it, so a missing or empty issuer fails boot
+ * with `BootError(reason: "config-validation-failed")` before the validator
+ * factory runs.
  */
 const tokenExchangeConfigSchema = z.object({
 	oauth: z.object({
@@ -52,34 +44,6 @@ const tokenExchangeConfigSchema = z.object({
 	}),
 });
 
-/**
- * Declarative manifest for OAuth 2.0 Token Exchange (RFC 8693).
- *
- * Per A2-γ §3.3: replaces the v0.4.x GrantModule(addModule) shape with a
- * defineModule(...) that contributes both:
- *  - the token_exchange grant handler (consumes the planner's
- *    `tokenExchangeValidatorResolver` synthetic), and
- *  - the built-in self-issued access_token validator (one entry in the
- *    contributes.tokenExchangeValidators record).
- *
- * Consumer-defined validators come from sibling modules via
- * contributes.tokenExchangeValidators per A2-α §4.5; the planner enforces
- * duplicate-token-type rejection at boot time (Theme C registry semantics).
- *
- * Caller surface: `tokenExchangeModule` is now a static module value, no
- * longer a factory taking validatorRegistry / clientRepository — both flow
- * through the typed DI graph.
- *
- * There is no mutable validator registry (the v0.4.x
- * ExchangeTokenValidatorRegistry was removed per §3.3); core's boot planner
- * collects the contributions and projects a TokenExchangeValidatorResolver
- * view at activation time.
- *
- * Theme B (one responsibility per module: grant + built-in validator),
- * Theme C (no synthetic-key redeclaration; planner registers contributions),
- * Theme D (immutability — no addModule mutation, no consumer-facing freeze),
- * Theme E (typed deps; no lazy registry-getter closure).
- */
 const REQUIRES = [
 	"tokenExchangeValidatorResolver",
 	"clientRepository",
@@ -87,31 +51,25 @@ const REQUIRES = [
 	"config",
 ] as const;
 const OPTIONAL = [
-	// Read by the grant alone, which owns the refresh-token family rule for
-	// the subject_token and the actor_token (`familyRefusal` in grant.mts):
-	// a revoked family answers `family_revoked`, and a family-bearing token
-	// is refused when this slot is absent. The built-in validator below is
-	// deliberately not handed the slot — when it was, it refused a revoked
-	// family first with an opaque `null`, and the grant's answer never
-	// reached a deployment.
+	// Read by the grant alone (`familyRefusal` in grant.mts) for the
+	// subject_token and actor_token: a revoked family answers
+	// `family_revoked`, and a family-bearing token is refused when this slot
+	// is absent. The built-in validator is not handed the slot, since its
+	// opaque `null` would pre-empt the grant's answer.
 	"refreshTokenFamilyRevocation",
-	// The token-exchange grant reads deps.grantPolicy to enforce the CP-18
-	// fail-closed policy gate. Sibling grants (auth-code, refresh-token)
-	// declare grantPolicy in oauthAuthorizationModule; without declaring
-	// it here, token-exchange would silently sit outside CP-18 enforcement
-	// while sibling grants are gated.
+	// The grant enforces the fail-closed grant-policy gate, as the sibling
+	// grants in oauthAuthorizationModule do; undeclared, token exchange would
+	// silently sit outside it.
 	"grantPolicy",
-	// SF-1: forwarded to the central JWT verifier so verifier rejection /
-	// aud-skip warnings emit through the operator's structured logger
-	// rather than being silently dropped.
+	// Forwarded to the JWT verifier so its rejection and aud-skip warnings
+	// reach the operator's logger.
 	"logger",
-	// #367: a subject_token is an access token presented as a credential,
-	// so the exchange consults the same revocation stores every other
-	// token-accepting surface does — otherwise revoking an AT and then
-	// exchanging it launders the revocation away. Declaring
-	// `accessTokenDenylist` here also enrolls this module in the #277
-	// boot guard: a composition mounting token exchange must wire a
-	// denylist or declare `oauth.revocation.accessToken = "unsupported"`.
+	// A subject_token is an access token presented as a credential, so the
+	// exchange consults the same revocation stores as every other
+	// token-accepting surface; otherwise exchanging a revoked AT would
+	// launder the revocation. Declaring `accessTokenDenylist` also enrols this
+	// module in the boot guard: the composition must wire a denylist or
+	// declare `oauth.revocation.accessToken = "unsupported"`.
 	"accessTokenDenylist",
 	"subjectRevocation",
 	// Read by the grant alone (`sessionRefusal` in grant.mts): a subject or
@@ -120,32 +78,37 @@ const OPTIONAL = [
 	// the one ends the other. Optional as it is on `oauthModule`: without a
 	// store no surface judges a `sid`.
 	"userSessionStore",
-	// What the oauth module provides of `oauth {}` (#728): the lifetimes the
-	// grant mints within, and the issuer and `legacyTypAccept` the validator
-	// holds a subject token to. Read from the configuration when no module
-	// provides it, as before.
+	// What the oauth module provides of `oauth {}`: the lifetimes the grant
+	// mints within, and the issuer and `legacyTypAccept` the validator holds a
+	// subject token to. Read from the configuration when no module provides it.
 	"oauthTokenSettings",
 ] as const;
 
-/**
- * The deps every contribution of {@link tokenExchangeModule} receives:
- * exactly its `requires` / `optional`, typed (#626 P2).
- */
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
+/**
+ * The deps every contribution of {@link tokenExchangeModule} receives:
+ * exactly its `requires` / `optional`, typed.
+ */
 export type TokenExchangeModuleDeps = ProviderDeps<Requires, Optional>;
 
+/**
+ * Declarative manifest for OAuth 2.0 Token Exchange (RFC 8693): contributes
+ * the `token_exchange` grant and the built-in self-issued `access_token`
+ * validator. Sibling modules contribute further validators through
+ * `contributes.tokenExchangeValidators`; the boot planner rejects duplicate
+ * token types and projects them as the grant's
+ * `tokenExchangeValidatorResolver`.
+ */
 export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 	name: "oauth-token-exchange",
 	configSchema: tokenExchangeConfigSchema,
 	requires: REQUIRES,
 	optional: OPTIONAL,
-	// #375: same policy constant as oauthModule — an unfilled denylist slot
-	// must be declared with oauth.revocation.accessToken = "unsupported".
-	// #406: subject-level revocation is optional to wire, not optional to
-	// decide. Its absence must be declared with
-	// oauth.revocation.subject = "unsupported", or a credential change
-	// silently invalidates nothing that was already issued.
+	// Same policies as oauthModule: an unfilled denylist slot must be declared
+	// with oauth.revocation.accessToken = "unsupported", and an unfilled
+	// subject-revocation slot with oauth.revocation.subject = "unsupported",
+	// or a credential change silently invalidates nothing already issued.
 	absencePolicies: {
 		accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
@@ -155,17 +118,14 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 			[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: TokenExchangeModuleDeps) =>
 				createTokenExchangeGrant({
 					...deps,
-					// No cast since #626 P1: core's
-					// `TokenExchangeValidatorResolver.get()` returns the contract this
-					// grant reads, because the contract is core's.
+					// Core's resolver returns the contract this grant reads; no cast.
 					tokenExchangeValidatorResolver: deps.tokenExchangeValidatorResolver,
 				}),
 		},
 		tokenExchangeValidators: {
 			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) => {
-				// The slot whole, checked first, when the composition holds it
-				// (#728); the configuration's keys when not — never one beside
-				// the other.
+				// The `oauthTokenSettings` slot whole, checked, when the composition
+				// holds it; the configuration's keys when not. Never a mix.
 				const settings =
 					deps.oauthTokenSettings === undefined
 						? undefined
@@ -174,16 +134,10 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 					keyStore: deps.keyStore,
 					issuer: settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer,
 					// No `refreshTokenFamilyRevocation`: the grant owns the family
-					// check — see the optional-keys comment above.
-					// #367: revocation stores, forwarded like every other
-					// token-accepting surface. See the optional-keys comment above.
+					// check (see OPTIONAL).
 					accessTokenDenylist: deps.accessTokenDenylist,
 					subjectRevocation: deps.subjectRevocation,
-					// SF-1: thread legacyTypAccept through so the operator's
-					// HOCON / env-var override governs the validator. Without
-					// this, the validator's `?? true` fallback masked any
-					// explicit `legacyTypAccept = false` configuration — the
-					// strict mode would not actually engage at this site.
+					// The operator's setting, not the validator's own default.
 					legacyTypAccept:
 						settings === undefined
 							? deps.config.oauth.jwt.legacyTypAccept

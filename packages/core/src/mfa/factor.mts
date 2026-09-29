@@ -16,19 +16,15 @@
 
 /**
  * The contract a second factor implements, and what the coordinator hands it
- * (`packages/core/docs/adr/2026-09-25-multi-factor-authentication.md`, D7).
+ * (ADR 2026-09-25-multi-factor-authentication).
  *
  * A factor never sees a key, a store or a transaction. The coordinator opens
- * the subject's records, hands the factor their data decoded, seals what the
- * factor returns and writes it; it keeps what a factor carries between two
- * requests of one ceremony on the transaction, sealed or digested. Where a
- * factor must keep a code it compares and never recovers (D11: an email code,
- * a recovery code), the coordinator digests it under the key ring for the
- * factor ({@link MfaDigests}), so the ring stays with the coordinator too.
- * That keeps sealing in one place, and lets a package implement a factor
- * without depending on the package that coordinates them: a factor arrives as
- * an `mfaFactors` contribution keyed by its kind, and is read back through
- * the synthetic `mfaFactorResolver`.
+ * the subject's records, seals and writes what the factor returns, keeps
+ * per-ceremony state on the transaction, and digests codes that are compared
+ * but never recovered ({@link MfaDigests}). So sealing stays in one place and a
+ * factor package need not depend on the coordinator: a factor arrives as an
+ * `mfaFactors` contribution keyed by its kind, read back through the synthetic
+ * `mfaFactorResolver`.
  */
 
 /**
@@ -39,10 +35,9 @@
 export type MfaFactorData = Readonly<Record<string, unknown>>;
 
 /**
- * What a factor keeps between two requests of one ceremony — a challenge and
- * its verification, or the start and the end of an enrollment. The coordinator
- * keeps it on the transaction, sealed or digested. JSON, as
- * {@link MfaFactorData} is.
+ * What a factor keeps between two requests of one ceremony (a challenge and its
+ * verification, or the two halves of an enrollment). The coordinator keeps it
+ * on the transaction, sealed or digested. JSON, like {@link MfaFactorData}.
  */
 export type MfaFactorState = Readonly<Record<string, unknown>>;
 
@@ -55,7 +50,7 @@ export interface MfaEnrolledFactor {
 	readonly data: MfaFactorData;
 }
 
-/** A keyed digest and the id of the ring key it was made under (D11). */
+/** A keyed digest and the id of the ring key it was made under. */
 export interface MfaKeyedDigest {
 	readonly keyId: string;
 	readonly digest: string;
@@ -63,20 +58,17 @@ export interface MfaKeyedDigest {
 
 /**
  * What comparing a value with a stored digest found. `key_unavailable`: the
- * key the digest names has left the ring, so the value cannot be judged — the
- * factor is unreadable, which the coordinator answers `503` with one
- * `mfa_factor_unreadable` line (D11), never as a wrong code.
+ * digest's key has left the ring, so the value cannot be judged; the
+ * coordinator answers `503` (`mfa_factor_unreadable`), never a wrong code.
  */
 export type MfaDigestMatch = "match" | "mismatch" | "key_unavailable";
 
 /**
- * Keyed digests under the MFA key ring, made by the coordinator so that a
- * factor never holds a key (D11). A code that is compared and never recovered
- * is kept as one: an email code over `[transactionId, factorId, code]`, a
- * recovery code over its normalised form. Each digest carries its key id, so
- * rotating the ring never makes a code unverifiable while that key stays in
- * the ring — a key leaves it only once no sealed data and no stored digest
- * names it.
+ * Keyed digests under the MFA key ring, made by the coordinator so a factor
+ * never holds a key. For codes compared but never recovered: an email code over
+ * `[transactionId, factorId, code]`, a recovery code over its normalised form.
+ * Each digest names its key id; a key leaves the ring only once no sealed data
+ * and no stored digest names it.
  */
 export interface MfaDigests {
 	/**
@@ -86,10 +78,9 @@ export interface MfaDigests {
 	 */
 	digest(parts: readonly string[]): MfaKeyedDigest;
 	/**
-	 * Whether `parts` digest to `stored` under the key `stored` names,
-	 * compared in constant time: `match` or `mismatch`, and `key_unavailable`
-	 * when that key has left the ring — which a factor answers as an outage
-	 * (it throws, and the coordinator answers `503`), never as `invalid`.
+	 * Whether `parts` digest to `stored` under the key `stored` names, compared
+	 * in constant time. A factor treats `key_unavailable` as an outage (it
+	 * throws; the coordinator answers `503`), never as `invalid`.
 	 */
 	matchesDigest(parts: readonly string[], stored: MfaKeyedDigest): MfaDigestMatch;
 }
@@ -99,10 +90,9 @@ export interface MfaCeremonyContext {
 	/** The subject the ceremony is for: `User.id`. */
 	readonly subject: string;
 	/**
-	 * The MFA transaction this call belongs to — to bind a digest to it (D11),
-	 * never to store. Every call has one: a call outside a login or step-up —
-	 * self-service enrollment, regenerating recovery codes (F4) — runs under an
-	 * `enroll` transaction the coordinator opens for it.
+	 * The MFA transaction this call belongs to, for binding a digest to it, never
+	 * for storage. A call outside a login or step-up (self-service enrollment,
+	 * regenerating recovery codes) runs under an `enroll` transaction.
 	 */
 	readonly transactionId: string;
 	/** The time the coordinator judges this request by, in epoch milliseconds. */
@@ -127,12 +117,11 @@ export interface MfaVerifyContext extends MfaCeremonyContext {
 	/** Every factor of this kind the subject holds, the named one among them. */
 	readonly factors: readonly MfaEnrolledFactor[];
 	/**
-	 * The state the factor's `challenge` returned for this transaction:
-	 * **taken** from it — read and cleared in one step, so it answers one
-	 * verification — by default (WebAuthn, F7); **read**, and left for the
-	 * next attempt, for a factor whose `reusableChallenge` is true (an email
-	 * code stands until a re-send replaces it or the transaction is consumed,
-	 * F5). `undefined` when none is pending or the factor needs no challenge.
+	 * The state `challenge` returned for this transaction. By default it is
+	 * **taken** (read and cleared in one step, so it answers one verification,
+	 * as WebAuthn needs); with `reusableChallenge` it is **read** and left for
+	 * the next attempt (an email code stands until a re-send or the transaction
+	 * is consumed). `undefined` when none is pending or none is needed.
 	 */
 	readonly state: MfaFactorState | undefined;
 	/** The proof as the request carried it. The factor reads it and refuses what it cannot read as `malformed`. */
@@ -168,7 +157,7 @@ export type MfaVerification =
 			readonly ok: false;
 			/**
 			 * `sign_count_regression`: a WebAuthn counter that did not increase
-			 * over the stored one — a possible clone, refused and audited (F7, D28).
+			 * over the stored one; a possible clone, refused and audited.
 			 */
 			readonly reason: "invalid" | "expired" | "replayed" | "malformed" | "sign_count_regression";
 	  };
@@ -186,37 +175,32 @@ export interface MfaFactor {
 	/** The kind its records carry (`MfaFactorRecord.kind`), and the key it is contributed under. */
 	readonly kind: string;
 	/**
-	 * Every `amr` value a verification of this factor may add (D14), declared
-	 * once: what `amrFor` answers for any record is among them. The MFA
-	 * requirement's reach and the drop of unsatisfiable `acr` entries are
-	 * computed from it at boot (the session-admission ADR's D3, D6) — the
-	 * list the MFA ADR's D8 assumed for `secondFactorMethods`. Non-empty
-	 * strings, never a primary's marker, never `mfa`: `addsMfa` says that.
+	 * Every `amr` value a verification of this factor may add; `amrFor` answers a
+	 * subset. Boot computes the MFA requirement's reach and drops unsatisfiable
+	 * `acr` entries from it (ADR 2026-09-28-session-admission). Non-empty
+	 * strings, never a primary's marker, never `mfa` (`addsMfa` says that).
 	 */
 	readonly amrValues: readonly string[];
-	/** The `amr` values a verification adds (D14). May depend on the factor's data: a WebAuthn credential is `hwk` or `swk`. */
+	/** The `amr` values a verification adds. May depend on the factor's data: a WebAuthn credential is `hwk` or `swk`. */
 	amrFor(data: MfaFactorData): readonly string[];
-	/** Whether a verification also adds `mfa` (D14). */
+	/** Whether a verification also adds `mfa`. */
 	readonly addsMfa: boolean;
 	/** Whether holding one satisfies "this user has MFA". Recovery codes do not. */
 	readonly counting: boolean;
-	/** Whether a verification's proof can be guessed, and so is held to the subject lock (D21). Enrollment proofs never are. */
+	/** Whether a verification's proof can be guessed, and so is held to the subject lock. Enrollment proofs never are. */
 	readonly guessable: boolean;
 	/** What the page may show about one factor so the user can pick it (a masked address). Never a secret. */
 	describe(data: MfaFactorData): { readonly hint?: string };
 	/**
-	 * Whether this user can enroll one — the email factor needs an address on
-	 * the account (F3, F5); a kind a user cannot enroll is not offered. Absent:
-	 * every user can. Answers; never throws, which the coordinator would read
-	 * as an outage.
+	 * Whether this user can enroll one (the email factor needs an address on the
+	 * account); a kind a user cannot enroll is not offered. Absent: every user
+	 * can. Must not throw: the coordinator reads a throw as an outage.
 	 */
 	enrollable?(user: Readonly<Record<string, unknown>>): boolean;
 	/**
 	 * Whether the pending challenge stays on the transaction across attempts
-	 * until a new one replaces it (an email code, F5). Absent or false — the
-	 * default, which fails closed — a verification takes it, so one challenge
-	 * answers one verification (WebAuthn, F7). See
-	 * {@link MfaVerifyContext.state}.
+	 * until a new one replaces it (an email code). Absent or false, the
+	 * fail-closed default, a verification takes it. See {@link MfaVerifyContext.state}.
 	 */
 	readonly reusableChallenge?: boolean;
 	/** Prepare a verification: send a code, answer WebAuthn request options. Absent for a factor that needs none. */

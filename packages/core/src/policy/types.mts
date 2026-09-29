@@ -59,17 +59,7 @@ export type GrantPolicyDecision =
 			readonly errorDescription?: string;
 	  };
 
-/**
- * Adapter primitive for grant-policy hooks.
- *
- * NOTE: this name previously coexisted with a contributes-map placeholder
- * (`type GrantPolicyHook = unknown`) at
- * `packages/core/src/modules/manifest/contributes-map.mts`. The v0.5.1
- * AS-7 collision resolution renamed that placeholder to
- * `GrantPolicyHookContribution`, freeing this name for the canonical
- * interface; the `*Base` deprecation alias previously exposed alongside
- * was removed.
- */
+/** Adapter primitive for grant-policy hooks. */
 export interface GrantPolicyHook {
 	readonly kind: string;
 	evaluate(request: GrantPolicyRequest, ctx: GrantPolicyContext): Promise<GrantPolicyDecision>;
@@ -78,11 +68,8 @@ export interface GrantPolicyHook {
 export type GrantPolicyHookFactory = AdapterFactory<GrantPolicyHook>;
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot declaration (per A2-α §6.1)
-//
-// `grantPolicy` is an optional component consumed by oauthModule routes
-// (POST /oauth/token grantPolicy.evaluate gate). When absent, grant
-// authorization proceeds with the default policy (allow-all).
+// ComponentMap slot: `grantPolicy`, the optional gate oauthModule's
+// POST /oauth/token calls. Absent, grant authorization allows all.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

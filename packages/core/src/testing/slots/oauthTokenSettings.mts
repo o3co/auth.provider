@@ -15,16 +15,12 @@
  */
 
 /**
- * The contract suite of the `oauthTokenSettings` slot (#728) and its test
- * double. `oauthTokenSettingsContract(input)` answers one case per rule, as
- * `sessionRequirementContract` does: a name and an async `run` that throws
- * when the value breaks the rule. What it holds the settings to is what the
- * configuration schema holds `oauth {}` to, resolved: a canonical issuer,
- * lifetimes within the one-year ceiling with the access-token default not
- * above its max, every switch a boolean, no token-binding setting — those
- * are core's — and the whole frozen. `createTestOAuthTokenSettings` answers the fixture
- * configuration's settings, resolved, with any member replaced; it checks
- * nothing, so a test of a broken value builds it here. Published on
+ * The contract suite of the `oauthTokenSettings` slot and its test double.
+ * `oauthTokenSettingsContract(input)` holds the settings to what the
+ * configuration schema holds `oauth {}` to, resolved; token-binding
+ * settings are core's, never the slot's. `createTestOAuthTokenSettings`
+ * answers the fixture configuration's settings with members replaced; it
+ * checks nothing, so a test of a broken value builds it here. Published on
  * `@o3co/auth-provider-core/testing`.
  */
 

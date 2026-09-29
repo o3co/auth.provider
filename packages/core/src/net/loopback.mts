@@ -15,66 +15,36 @@
  */
 
 /**
- * The loopback-hostname vocabulary — one definition, shared by everything in
- * this repository that carves `http://` out for hosts whose traffic never
- * leaves the machine (#364).
+ * The loopback-hostname vocabulary: the one definition for everything that
+ * allows `http://` toward hosts whose traffic never leaves the machine
+ * (`checkSecureEndpoint` for store endpoints; `checkRedirectShape` for
+ * federation redirects, local development and RFC 8252 §7.3 native-client
+ * listeners). `createAppleProvider` reads it the other way round and refuses a
+ * loopback return URL at boot, because Apple refuses one even over `https`:
+ * the predicate answers "is this loopback", not "is this allowed".
  *
- * Consumers today:
+ * Copies of this predicate drift; `core/src/__tests__/designVocabulary.drift.test.mts`
+ * fails a second definition (map row in `docs/design-vocabulary.md`).
  *
- *   - **`checkSecureEndpoint`** (`@o3co/auth-provider-foundation`, #285):
- *     Store endpoints carry plaintext credentials, so `http://` is refused —
- *     except toward a loopback host, where there is no path to eavesdrop on.
- *   - **`checkRedirectShape`** (`@o3co/auth-provider-session`, #278): federation
- *     redirect targets must be `https://` — except a loopback host, which is
- *     where a native client's RFC 8252 §7.3 listener and local development
- *     live, and neither can obtain a certificate.
- *   - **`createAppleProvider`** (`@o3co/auth-provider-federation-apple`, #479):
- *     the same predicate read the other way round. Apple refuses a loopback
- *     return URL even over `https`, so the federation carves loopback *out* at
- *     boot rather than letting the authorization endpoint answer the first
- *     login with an opaque `invalid_request`. Worth stating here, because it
- *     shows the vocabulary answers "is this loopback", not "is this allowed".
- *
- * The first two print the same operator-facing promise — "localhost,
- * 127.0.0.0/8, [::1]" — and before this module each backed it with its own copy of the
- * predicate. The copies drifted within one commit of being written (one
- * accepted unbracketed `::1`, the other did not) under doc comments that were
- * still identical, which is the failure mode #292 moved the trusted-proxy
- * vocabulary here to prevent. The map row lives in
- * `docs/design-vocabulary.md`; the drift guard in
- * `core/src/__tests__/designVocabulary.drift.test.mts` fails any second
- * definition.
- *
- * This predicate answers "does this hostname NAME the loopback interface" —
- * a vocabulary question about a string. It is deliberately not merged with
- * `trusted-proxy.mts`'s `loopback` named range, which answers "does this
- * socket ADDRESS fall inside 127.0.0.0/8 or ::1/128" via `BlockList` — an
- * address-matching question that never sees `localhost` and never sees
- * brackets. Same concept, two representations; each home states the other.
+ * It answers whether a hostname NAMES the loopback interface. It is
+ * deliberately separate from `trusted-proxy.mts`'s `loopback` range, which
+ * matches socket ADDRESSES via `BlockList` and never sees `localhost` or
+ * brackets.
  */
 
 /** Dotted-quad IPv4, the only numeric form the WHATWG URL parser emits. */
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 /**
- * Whether `hostname` names an address that never leaves the machine.
+ * Whether `hostname` names an address that never leaves the machine:
+ * - `localhost`, exact (`URL.hostname` is already lowercased; a raw
+ *   `LOCALHOST` is a typo, not an intent);
+ * - IPv6 loopback both as `URL.hostname` reports it (`[::1]`) and raw (`::1`);
+ * - the whole `127.0.0.0/8` block as a dotted quad (`127.0.0.53` too).
  *
- * Accepted forms:
- *
- *   - `localhost` (exact — `URL.hostname` has already lowercased a URL host,
- *     and a raw config value spelled `LOCALHOST` is a typo, not an intent);
- *   - IPv6 loopback both as `URL.hostname` reports it (`[::1]`, always
- *     bracketed) and as a raw hostname outside a URL (`::1`) — both denote
- *     the same address, and accepting only one form is exactly how the
- *     pre-#364 copies drifted;
- *   - the whole `127.0.0.0/8` block as a dotted quad — `127.0.0.53`
- *     (systemd-resolved) and friends are as local as `127.0.0.1`.
- *
- * IPv4 shorthand (`127.1`) and full-form IPv6 (`0:0:0:0:0:0:0:1`) are
- * deliberately NOT accepted: `URL.hostname` normalizes both before they get
- * here, so a value still in that shape did not come from a URL — and
- * accepting textual variants open-endedly is how a comparison becomes a
- * parser.
+ * IPv4 shorthand (`127.1`) and full-form IPv6 are NOT accepted: `URL.hostname`
+ * normalizes both, so such a value did not come from a URL, and accepting
+ * textual variants open-endedly turns a comparison into a parser.
  */
 export function isLoopbackHostname(hostname: string): boolean {
 	if (hostname === "localhost") return true;
@@ -82,7 +52,6 @@ export function isLoopbackHostname(hostname: string): boolean {
 
 	const v4 = IPV4.exec(hostname);
 	if (v4 === null) return false;
-	// The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1.
 	const octets = [v4[1], v4[2], v4[3], v4[4]].map(Number);
 	return octets[0] === 127 && octets.every((o) => o <= 255);
 }

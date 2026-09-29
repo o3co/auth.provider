@@ -64,13 +64,10 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-// Session data type augmentation
-//
-// D-1 (v0.5.1): `code_client_id`, `code_redirect_uri`, `granted_scopes` were
-// removed because /authorize no longer writes identity binding into the
-// session — `Code.client_id` and `Code.redirect_uri` carry it instead. `code`
-// is retained because the /token grant clears it from in-flight pre-v0.5.1
-// sessions (see authorization.mts `sessionMutation.clear`).
+// Session data type augmentation. /authorize writes no identity binding into
+// the session (`Code.client_id` and `Code.redirect_uri` carry it); `code` is
+// kept because the /token grant clears it from older sessions (see
+// authorization.mts `sessionMutation.clear`).
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { logUnsatisfiableAcrValues, vouchableAcrValues } from "./acrValues.mjs";
@@ -101,13 +98,11 @@ import { refuseVerificationUnavailable } from "./verificationUnavailable.mjs";
  * A grant's `error` alone does not tell its refusals apart — token exchange
  * answers a malformed request and a stolen, unproven bound token alike with
  * `invalid_request` (RFC 8693 §2.2.2) — while the description names the check
- * that refused. The route's own refusals carry a `reason` code; a handler's
- * carries its description, the same text the client was sent. Some
- * descriptions quote client input (a requested scope, audience or token
- * type), so it is recorded through core's `auditErrorText`: sanitised and
- * capped, the cut marked with `...`, to keep what a client can put into the
- * audit stream bounded. A description that is empty or not a string — a
- * JavaScript policy's deny can carry anything — falls back to the code.
+ * that refused. Some descriptions quote client input, so it is recorded
+ * through core's `auditErrorText` (sanitised and capped) to bound what a
+ * client can put into the audit stream. A description that is empty or not a
+ * string — a JavaScript policy's deny can carry anything — falls back to the
+ * code.
  */
 const auditReason = (error: string, errorDescription: unknown): string =>
 	auditErrorText(errorDescription) || auditErrorText(error);
@@ -126,29 +121,17 @@ declare module "express-session" {
 /**
  * Every path this router serves, its sub-routers' included — the only
  * requests whose bodies it parses. The logout, federation-token and consent
- * routes are listed only when their stores are wired and the routes are
- * mounted, so a deployment's own route at one of those paths receives its
- * body unread too.
+ * routes are listed only when mounted, so a deployment's own route at one of
+ * those paths receives its body unread too.
  *
- * The router is mounted at `/oauth`, a prefix other modules mount routes
- * under too (the device grant, federation grants, WebAuthn, a deployment's
- * own). Parsers that ran for every request beneath it consumed those
- * routes' request streams whenever this router was mounted ahead of them,
- * and `body-parser` does not parse a body twice — so another route's own
- * parser, limit and media types silently never ran, and what it received
- * depended on the order the modules were listed in. Scoped to exactly these
- * paths — a route (`router.all`), not `router.use`, which would match every
- * path beneath each one, `/token/custom` as well as `/token` — a request
- * this router does not own passes through with its body unread.
- *
- * Every route here gets exactly what it got before: JSON and urlencoded
- * (`extended: false`), Express's default limits, ahead of anything else.
- * `bodyParsing.test.mts` discovers the router's routes with every surface
- * mounted and with none, asserts this list equals them, and checks both
- * directions — each mounted route is parsed, each unmounted one is not, nor
- * a path beneath a mounted one — so a route added without its path here, a
- * path left here without its route, or parsers that match by prefix, fail
- * there.
+ * Other modules mount routes under `/oauth` too (the device grant,
+ * federation grants, WebAuthn, a deployment's own), and `body-parser` does
+ * not parse a body twice: parsers running for every request beneath `/oauth`
+ * would consume those routes' streams, and their own parser, limit and media
+ * types would silently never run, depending on module order. Hence a route
+ * on exactly these paths (`router.all`), not `router.use`, which would also
+ * match `/token/custom`. `bodyParsing.test.mts` holds this list to the
+ * router's routes.
  *
  * @internal Exported for that test only; not part of the package's API.
  */
@@ -202,7 +185,7 @@ export const createOAuthRouter = async (
 		/**
 		 * Where `/oauth/token` looks a `grant_type` up. Only `get` is read —
 		 * `grant_types_supported` is derived in `module.mts` from the planner's
-		 * resolver, not from this one — so this is the contract (#626): the
+		 * resolver, not from this one — so this is the contract: the
 		 * planner's `GrantHandlerResolver` satisfies it, and so does a test's
 		 * bare `GrantRegistry`.
 		 */
@@ -215,10 +198,10 @@ export const createOAuthRouter = async (
 		auditSink?: AuditSink;
 		grantPolicy?: GrantPolicyHook;
 		refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
-		/** Wave 1 — RFC 7009 access-token revocation. Optional: when absent, AT revocation is a warn-logged no-op. */
+		/** RFC 7009 access-token revocation. Optional: when absent, AT revocation is a warn-logged no-op. */
 		accessTokenDenylist?: AccessTokenDenylist;
 		/**
-		 * #296 — per-subject access-token watermark. The subject-level companion
+		 * Per-subject access-token watermark. The subject-level companion
 		 * to `accessTokenDenylist`: the denylist revokes a token the client named,
 		 * this revokes every token a subject held as of a credential change, which
 		 * cannot be expressed as a set of jtis. Forwarded to every surface that
@@ -232,32 +215,32 @@ export const createOAuthRouter = async (
 		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
 		/**
-		 * #484: the `jti` single-use record for `private_key_jwt` client
+		 * The `jti` single-use record for `private_key_jwt` client
 		 * assertions, consulted by every client-authenticated endpoint here.
 		 * Optional to wire; an assertion request without it is `server_error`.
 		 */
 		replaySeenSet?: ReplaySeenSet;
 		/**
-		 * #527: where an end-user's consent to a client that is not first-party
+		 * Where an end-user's consent to a client that is not first-party
 		 * is recorded. Optional: without it `/authorize` refuses such clients
 		 * and the consent endpoints are not mounted.
 		 */
 		consentStore?: ConsentStore;
 		/**
-		 * #552: where a request is parked while the consent page asks, consumed
+		 * Where a request is parked while the consent page asks, consumed
 		 * by exactly one answer. Wired with `consentStore`: the bundled memory
 		 * module provides both, and this router refuses one without the other.
 		 */
 		pendingConsentStore?: PendingConsentStore;
 		/**
-		 * #728: the deployment's login page and its `redirect_to` protocol —
-		 * the `loginEntry` slot the session module provides. Optional: the
-		 * oauth module boots without the session module, and `/authorize` then
-		 * reads `endpoints.login.url` per request, as it always did.
+		 * The deployment's login page and its `redirect_to` protocol — the
+		 * `loginEntry` slot the session module provides. Optional: the oauth
+		 * module boots without the session module, and `/authorize` then reads
+		 * `endpoints.login.url` per request.
 		 */
 		loginEntry?: LoginEntry;
 		/**
-		 * #529: the seams of the Client ID Metadata Document fetch (`fetch`,
+		 * The seams of the Client ID Metadata Document fetch (`fetch`,
 		 * `lookup`, `now`), for tests. Everything else about the feature comes
 		 * from `oauth.clientIdMetadataDocuments` in the config.
 		 */
@@ -266,26 +249,25 @@ export const createOAuthRouter = async (
 		 * Getter for the installed federation providers Map. Defaults to
 		 * `() => undefined` (no federation) when not provided.
 		 *
-		 * It is read twice. **Once when `createOAuthRouter` is called**, so it must
-		 * already answer every federation the composition installs by then: whether
-		 * a federation is installed decides which acr entries this composition can
-		 * satisfy (`./acrValues.mts`), and a map that fills later leaves those
-		 * entries dropped. `oauthModule` passes `() => deps.federationProviders`,
-		 * which the boot planner has filled before any route factory runs (federations
-		 * are name-keyed contributions, registered before the list-shaped `routes`).
-		 * And again at request time, by the federation logout and token routes.
+		 * Read **once when `createOAuthRouter` is called**, so it must already
+		 * answer every federation the composition installs: installed federations
+		 * decide which acr entries are satisfiable (`./acrValues.mts`), and a map
+		 * that fills later leaves those entries dropped. `oauthModule`'s map is
+		 * filled by the boot planner before any route factory runs (federations
+		 * are name-keyed contributions, registered before `routes`). Read again
+		 * at request time by the federation logout and token routes.
 		 */
 		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 		/**
-		 * The registered session requirements (the session-admission ADR's
-		 * D1, D6, D8): what every consumer of admission in this router —
-		 * `/authorize`, the consent step — reads its session through, and what
-		 * a step-up can add, which decides which acr entries this composition
-		 * can satisfy (`./acrValues.mts`). `oauthModule` passes the synthetic
-		 * key `sessionRequirementResolver`, which the boot planner has filled
-		 * before any route factory runs. Required: a router built by hand
-		 * without one, or with one the planner (or `resolverForTests`) did not
-		 * build, is refused here (core's `checkResolver`).
+		 * The registered session requirements (see ADR
+		 * 2026-09-28-session-admission): what every consumer of admission in
+		 * this router — `/authorize`, the consent step — reads its session
+		 * through, and what a step-up can add, which decides which acr entries
+		 * this composition can satisfy (`./acrValues.mts`). `oauthModule` passes
+		 * the synthetic key `sessionRequirementResolver`, filled by the boot
+		 * planner before any route factory runs. A router built by hand without
+		 * one, or with one the planner (or `resolverForTests`) did not build, is
+		 * refused here (core's `checkResolver`).
 		 */
 		requirements: SessionRequirementResolver;
 		logger?: Logger;
@@ -294,29 +276,25 @@ export const createOAuthRouter = async (
 	checkResolver(requirements, "createOAuthRouter");
 	const router = express.Router();
 
-	// #328: every `oauth.*` knob this router consumes is resolved exactly once,
-	// here, at router composition. `resolveOAuthOptions` owns the defensive
-	// reads for hand-built configs that never passed the zod schema — see its
-	// JSDoc for the per-field defaults (which are unchanged: the strict
-	// `=== true` opt-in for #297 `requireEmailVerified`, SF-1
-	// `legacyTypAccept` left optional for sub-routers to default). The
-	// /authorize handler receives the whole object (routes/authorize.mts).
+	// Every `oauth.*` knob this router consumes is resolved exactly once,
+	// here, at router composition; see `resolveOAuthOptions` for the defensive
+	// reads and per-field defaults. The /authorize handler receives the whole
+	// object (routes/authorize.mts).
 	const options = resolveOAuthOptions(config, logger);
-	// The MFA ADR's D15: `/authorize` answers `acr_values` only from the entries
-	// this composition can satisfy — the same table discovery advertises — and
-	// an entry dropped is said once, here, at composition.
+	// `/authorize` answers `acr_values` only from the entries this composition
+	// can satisfy — the same table discovery advertises — and an entry dropped
+	// is said once, here, at composition (ADR
+	// 2026-09-25-multi-factor-authentication).
 	// What the registered requirements can add to a session by a step-up: read
-	// once here, after every name-keyed contribution registered (D6).
+	// once here, after every name-keyed contribution registered.
 	const reach = stepUpReach(Array.from(requirements.entries(), ([, r]) => r));
 	const acrValues = vouchableAcrValues(options.acrValues, getFederationProviders(), config, reach);
 	logUnsatisfiableAcrValues(acrValues.dropped, reach, logger);
-	// #266: `iss` is a property of the deployment, never of a request. The token
-	// endpoint used to compute `config.oauth.jwt.issuer ?? req.get("host")`, so an
-	// unconfigured deployment behind a trusted proxy minted tokens whose issuer the
-	// caller chose. A canonical issuer is now required, and it is the only source —
-	// resolved once at router-creation time so no request path can reach a fallback.
-	// It also populates the `realm` parameter on `WWW-Authenticate: Basic`
-	// challenges (RFC 7235 §2.2).
+	// `iss` is a property of the deployment, never of a request: a fallback to
+	// the `Host` header would let a caller choose the issuer of its tokens. A
+	// canonical issuer is required and is the only source, resolved once here
+	// so no request path can reach a fallback. It also populates the `realm`
+	// parameter on `WWW-Authenticate: Basic` challenges (RFC 7235 §2.2).
 	const issuerRejection = checkCanonicalIssuer(options.issuer);
 	if (issuerRejection) {
 		throw new Error(
@@ -325,19 +303,17 @@ export const createOAuthRouter = async (
 	}
 	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
 	const canonicalIssuer = options.issuer as string;
-	// #529: Client ID Metadata Documents. Pre-registered clients answer first;
-	// a client_id that is an https URL is then resolved from the document it
-	// names, under the operator's ceilings. One repository for every
-	// endpoint below — /authorize, /token, /revoke — so a document client is
-	// the same client everywhere.
+	// Client ID Metadata Documents. Pre-registered clients answer first; a
+	// client_id that is an https URL is then resolved from the document it
+	// names, under the operator's ceilings. One repository for every endpoint
+	// below — /authorize, /token, /revoke — so a document client is the same
+	// client everywhere.
 	//
-	// Wired only where such a client could finish a flow: every document
-	// client is by definition not first-party, so `/authorize` refuses it
-	// without a consent store. The discovery document already withholds
-	// `client_id_metadata_document_supported` for that reason; the repository
-	// has to follow, or each request resolves a name and makes a guarded
-	// outbound HTTPS fetch before the refusal — an amplification surface in a
-	// configuration where no request can ever succeed.
+	// Wired only with a consent store, the gate discovery applies: a document
+	// client is never first-party, so `/authorize` refuses it without one, and
+	// resolving it anyway would make each request a guarded outbound HTTPS
+	// fetch before the refusal — an amplification surface where no request
+	// can succeed.
 	const cimd = options.clientIdMetadataDocuments;
 	const clientRepository: ClientRepository =
 		cimd.enabled && consentStore !== undefined
@@ -362,7 +338,7 @@ export const createOAuthRouter = async (
 	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
-	// #484: `private_key_jwt` on every client-authenticated endpoint: the
+	// `private_key_jwt` on every client-authenticated endpoint: the
 	// assertion's `aud` may name the issuer or this token endpoint.
 	const tokenEndpoint = `${canonicalIssuer}/oauth/token`;
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
@@ -382,15 +358,12 @@ export const createOAuthRouter = async (
 		tokenEndpoint,
 	});
 
-	// #325: the check + outage policy (OR-5 failMode, CP-10 context, AS-2 429
-	// envelope) lives in core's `createRateLimitGuard`, shared with the
-	// `/session/login` brute-force guard — one implementation of the security
-	// throttles instead of two hand-synchronized copies. These endpoints now
-	// also emit RFC RateLimit-* headers like `/session/login` does; no
+	// The check and outage policy (failMode, context, 429 envelope) live in
+	// core's `createRateLimitGuard`, shared with the `/session/login`
+	// brute-force guard. These endpoints emit RFC RateLimit-* headers too; no
 	// `headerFallback` is passed because no per-endpoint spec is configured
-	// here, so the guard only advertises what the adapter actually reported.
-	// The slot is optional: when no `rateLimiter` is wired the routes degrade
-	// gracefully (no rate limiting applied), as before.
+	// here, so the guard advertises only what the adapter reported. Without a
+	// `rateLimiter` the routes apply no rate limiting.
 	const rateLimitGuard = (tag: string): RequestHandler =>
 		rateLimiter
 			? createRateLimitGuard({
@@ -402,7 +375,7 @@ export const createOAuthRouter = async (
 				})
 			: (_req, _res, next) => next();
 
-	// #284: one handler instance behind both methods, so a check can never be
+	// One handler instance behind both methods, so a check can never be
 	// mounted on GET and forgotten on POST.
 	const authorizeHandler = createAuthorizeHandler({
 		clientRepository,
@@ -411,20 +384,19 @@ export const createOAuthRouter = async (
 		auditSink,
 		logger,
 		issuer: canonicalIssuer,
-		// #728: the session module's login entry when a module provides it;
+		// The session module's login entry when a module provides it;
 		// otherwise the login page read from the configuration per request.
 		login: loginEntry ?? loginTripFromConfig(() => config.endpoints.login.url),
-		// #527: the consent page, read like the login page. The default lives
+		// The consent page, read like the login page. The default lives
 		// in HOCON; a hand-built config without the key falls back the same way.
 		consentUrl: () => config.endpoints.consent?.url ?? "/consent",
 		consentStore,
 		pendingConsentStore,
 		oauth: { ...options, acrValues: acrValues.table },
-		// The session-admission ADR's D8: `/authorize` reads the cookie's
-		// session through admission with the router's own slots — the durable
-		// store (optional, as the slot is: a composition without session-backed
-		// login wires none), the subject-revocation boundary (change 4: applied
-		// here when it is wired) and the resolver.
+		// `/authorize` reads the cookie's session through admission with the
+		// router's own slots — the durable store (optional, as the slot is: a
+		// composition without session-backed login wires none), the
+		// subject-revocation boundary (applied when wired) and the resolver.
 		userSessionStore,
 		subjectRevocation,
 		requirements,
@@ -432,14 +404,11 @@ export const createOAuthRouter = async (
 
 	/**
 	 * Introspection that could not verify the token because the keystore or a
-	 * revocation store did not answer. RFC 7662 §2.2's `active: false` is a
-	 * statement about the token — "not active" — and an outage is not one: a
-	 * resource server told the token is inactive refuses its client with
-	 * `invalid_token`, and the client discards a credential that may be
-	 * perfectly good. So the answer is HTTP's own `503`, which vouches for
-	 * nothing and is still fail-closed — a resource server cannot read it as
-	 * `active: true`. Audited as `introspect.store_unavailable`, the event
-	 * this endpoint already raises for a store outage.
+	 * revocation store did not answer: `503`, never RFC 7662 §2.2's
+	 * `active: false`, which is a statement about the token and would send
+	 * the client to discard a credential that may be perfectly good. Audited
+	 * as `introspect.store_unavailable`. See README, "Introspection: which
+	 * tokens a caller may ask about".
 	 */
 	const answerIntrospectionUnavailable = (
 		req: Request,
@@ -509,10 +478,8 @@ export const createOAuthRouter = async (
 		!!refreshTokenFamilyRevocation;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
-	// Symmetry with logoutSupported: gates on all 4 sibling stores even
-	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
-	// §8.1 composition-root invariant (now structurally enforced in
-	// createApp — when ANY is wired, ALL are wired).
+	// Gated like logoutSupported, though it consumes only some of these
+	// stores: createApp enforces that when ANY is wired, ALL are wired.
 	const federationTokenSupported =
 		!!userSessionStore &&
 		!!sessionRPRegistry &&
@@ -521,7 +488,7 @@ export const createOAuthRouter = async (
 		!!federationTokenStore &&
 		!!refreshTokenFamilyRevocation;
 
-	// #527 / #552: mounted below only with both consent stores; one without
+	// Mounted below only with both consent stores; one without
 	// the other is refused there. Decided once, here, for the parsers and the
 	// mount alike — and by truthiness, so a JS caller's `null` is no store
 	// rather than a parser scoped to a route that is never mounted.
@@ -539,7 +506,7 @@ export const createOAuthRouter = async (
 		)
 		.post(
 			"/token",
-			// D-6 ordering: rate limit BEFORE client auth so repeated unauthenticated
+			// Rate limit BEFORE client auth so repeated unauthenticated
 			// hits cannot escape rate limiting via the clientAuthMw rejection path
 			// (and so DoS amplification through repository lookups is bounded).
 			rateLimitGuard("token"),
@@ -557,7 +524,7 @@ export const createOAuthRouter = async (
 					});
 					// RFC 6749 §5.2: a missing required parameter is `invalid_request`;
 					// `unsupported_grant_type` is reserved for a value the server does
-					// not support (#293 item 10). The next branch keeps that one.
+					// not support, which the next branch answers.
 					return res.status(400).json({
 						error: "invalid_request",
 						error_description: "grant_type must be a non-empty string",
@@ -579,7 +546,7 @@ export const createOAuthRouter = async (
 					});
 				}
 
-				// D-6: `clientAuthMw` populates `req.oauthClient` after RFC 6749 §2.3
+				// `clientAuthMw` populates `req.oauthClient` after RFC 6749 §2.3
 				// authentication. Grant handlers consult `ctx.authenticatedClient`
 				// rather than the raw body so identity flows are not body-spoofable.
 				const ctx = {
@@ -599,7 +566,7 @@ export const createOAuthRouter = async (
 								allowedGrantTypes: req.oauthClient.allowedGrantTypes,
 								allowedAudiences: req.oauthClient.allowedAudiences,
 								senderConstrained: req.oauthClient.senderConstrained,
-								// #273: the authorization-code grant applies the same
+								// The authorization-code grant applies the same
 								// per-client PKCE method list `/authorize` applied when
 								// it minted the code, so the opt-in has to travel with
 								// the authenticated identity.
@@ -607,25 +574,19 @@ export const createOAuthRouter = async (
 							}
 						: null,
 				};
-				// Shared grant-dispatch allowedGrantTypes enforcement (#268).
-				// Mounted at dispatch for the same reason as the sender-constraint
-				// check below: it runs once for every grant_type before the
-				// concrete handler, so every grant — including one registered
-				// later through `GrantFactory` — inherits it without opting in.
-				// Enforcement used to be per-handler, and only `client_credentials`
-				// and the WebAuthn grant had opted in, which meant a client
-				// registered for one grant could exercise all the others and the
-				// registration's restriction was void.
+				// allowedGrantTypes is enforced at dispatch, like the
+				// sender-constraint check below: it runs once for every grant_type
+				// before the concrete handler, so every grant — including one
+				// registered later through `GrantFactory` — inherits it without
+				// opting in.
 				//
-				// Absence of the field is "no policy declared", not "deny": the
-				// grants that ignored it predate it, so denying here would revoke
-				// every grant from every registration written before it existed.
+				// Absence of the field is "no policy declared", not "deny", so a
+				// registration written before the field existed keeps its grants.
 				// A deployment that has audited its registrations flips that with
-				// `oauth.requireGrantTypeAllowlist` (#311), which is read once at
-				// composition and applies to both enforcement points.
-				// Handlers that declare `requiresExplicitGrantAllowlist` compose a
-				// stricter deny-by-absence rule on top (#326, enforced just before
-				// the handler runs below), so machine-to-machine access is still
+				// `oauth.requireGrantTypeAllowlist`, read once at composition for
+				// both enforcement points. Handlers that declare
+				// `requiresExplicitGrantAllowlist` add deny-by-absence on top (just
+				// before the handler runs, below), so machine-to-machine access is
 				// never acquired by omission.
 				//
 				// RFC 6749 §5.2 `unauthorized_client`: "The authenticated client is
@@ -651,12 +612,10 @@ export const createOAuthRouter = async (
 					});
 				}
 
-				// Shared grant-dispatch senderConstrained enforcement (Wave 2
-				// Token-binding Cluster spec §4.8 step 2). This runs once for
-				// every grant_type before the concrete handler, so custom
-				// grants registered via GrantFactory inherit the check for
-				// free. No-op when the client did not opt into a sender
-				// constraint — zero behavior change for v0.7.x consumers.
+				// senderConstrained enforcement at dispatch: runs once for every
+				// grant_type before the concrete handler, so custom grants
+				// registered via GrantFactory inherit the check. No-op when the
+				// client did not opt into a sender constraint.
 				const sc: SenderConstraint | undefined = ctx.authenticatedClient?.senderConstrained;
 				if (sc?.required) {
 					// Use truthy check (not `=== undefined`) so a custom downstream
@@ -680,14 +639,12 @@ export const createOAuthRouter = async (
 						// the router-scope `canonicalIssuer` (config only) through the
 						// same filter `clientAuthMw` uses.
 						//
-						// The `Basic` challenge scheme is retained: this response is
-						// `invalid_client` + 401, and RFC 6749 §5.2 requires a
-						// challenge matching the scheme the client used when it
-						// authenticated via the Authorization header. Whether
-						// `invalid_client` is the right code for "authenticated fine,
-						// but presented no token binding" is a separate, breaking
-						// question (#199 M3) — changing the challenge without changing
-						// the error code would just make the pair non-conformant.
+						// `Basic` challenge: this response is `invalid_client` + 401,
+						// and RFC 6749 §5.2 requires a challenge matching the scheme
+						// the client authenticated with via the Authorization header.
+						// Whether `invalid_client` is the right code here is a
+						// separate, breaking question; changing the challenge alone
+						// would make the pair non-conformant.
 						return res
 							.status(401)
 							.set("WWW-Authenticate", `Basic realm="${resolveRealm(canonicalIssuer)}"`)
@@ -753,29 +710,21 @@ export const createOAuthRouter = async (
 							);
 					}
 				}
-				// #326: deny-by-absence for handlers that declare
+				// Deny-by-absence for handlers that declare
 				// `requiresExplicitGrantAllowlist`. The base check above admits an
 				// absent allowlist ("no policy declared"); a strict handler refuses
 				// exactly that case, so the grant is never acquired by omission.
-				// Enforcement used to be hand-rolled inside `client_credentials`
-				// and the WebAuthn grant — the next machine-to-machine grant had
-				// to know that folklore to stay safe. The flag makes strictness a
-				// property of the handler contract and this the single place both
-				// rules compose.
-				//
-				// Three deliberate shape choices:
+				// Strictness is a property of the handler contract, and this is the
+				// single place both rules compose.
 				// - Position: after the sender-constraint gate, immediately before
-				//   the handler — exactly where the deleted per-grant checks ran —
-				//   so no dispatch-level rule changes relative order.
-				// - Skip when `authenticatedClient` is null: the deleted checks
-				//   never fired without a client (client_credentials rejects null
-				//   itself with `invalid_client`; WebAuthn deliberately serves
-				//   unauthenticated passkey callers).
-				// - The denial is threaded through the shared result path below
-				//   (not an early `res.json`), so it is audited like any grant's
-				//   refusal. Its description is the base check's above, word for
-				//   word — `client is not authorized for grant_type '<type>'` — so a
-				//   client cannot tell which of the two rules refused it.
+				//   the handler.
+				// - Skipped when `authenticatedClient` is null: client_credentials
+				//   rejects null itself with `invalid_client`, and WebAuthn
+				//   deliberately serves unauthenticated passkey callers.
+				// - The denial goes through the shared result path below (not an
+				//   early `res.json`), so it is audited like any grant's refusal.
+				//   Its description is the base check's, word for word, so a client
+				//   cannot tell which of the two rules refused it.
 				const strictAllowlistDenial: GrantHandlerResult | null =
 					handler.requiresExplicitGrantAllowlist === true &&
 					ctx.authenticatedClient !== null &&
@@ -805,8 +754,8 @@ export const createOAuthRouter = async (
 					await emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "token.issued",
-						// D-6: prefer the authenticated client over the raw body — body
-						// `client_id` is no longer authoritative once `clientAuthMw` runs.
+						// Prefer the authenticated client over the raw body — body
+						// `client_id` is not authoritative once `clientAuthMw` runs.
 						clientId: req.oauthClient?.clientId,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
@@ -834,23 +783,20 @@ export const createOAuthRouter = async (
 				// passed through by core's policy evaluation, can carry anything.
 				const errorDescription = sanitizeErrorText(result.errorDescription);
 				if (errorDescription) errorBody.error_description = errorDescription;
-				// The session-admission ADR's D8: a grant whose session can be met
-				// by a step-up names the requirement beside `invalid_grant`, so an
-				// updated client can offer it (the MFA ADR's D16 row) — beside
-				// `invalid_grant` alone, the one error it qualifies. A requirement's
-				// name, held to the same character set as `error`: core refuses to
-				// register one outside it (the same `isWellFormedErrorCode`), and a
-				// grant built by hand may set any `step_up`, so it is checked again.
+				// A grant whose session can be met by a step-up names the
+				// requirement beside `invalid_grant`, the one error it qualifies, so
+				// an updated client can offer it (ADR 2026-09-28-session-admission).
+				// A requirement's name is held to the same character set as `error`:
+				// core refuses to register one outside it (the same
+				// `isWellFormedErrorCode`), and a grant built by hand may set any
+				// `step_up`, so it is checked again.
 				const stepUp = error === "invalid_grant" ? stepUpOf(result) : undefined;
 				if (stepUp !== undefined && isWellFormedErrorCode(stepUp)) errorBody.step_up = stepUp;
-				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
-				// The token endpoint is not a protected resource (RFC 6750 §3 applies to
-				// resource servers, not authorization endpoints), and `clientAuthMw`
-				// already set the appropriate `WWW-Authenticate: Basic realm="..."`
-				// challenge for client-auth failures upstream. Setting Bearer here
-				// clobbered that more-correct value for any grant returning 401
-				// (e.g., the new `ctx.authenticatedClient === null` branch). RFC 6749
-				// §5.2 token-endpoint error responses do not mandate WWW-Authenticate.
+				// Do NOT inject `WWW-Authenticate: Bearer` here: the token endpoint
+				// is not a protected resource (RFC 6750 §3), and `clientAuthMw`
+				// already set the `WWW-Authenticate: Basic realm="..."` challenge
+				// for client-auth failures, which Bearer would clobber for any grant
+				// returning 401. RFC 6749 §5.2 does not mandate WWW-Authenticate.
 				await emitAuditEvent(auditSink, {
 					timestamp: new Date(),
 					type: "token.issued.failure",
@@ -872,11 +818,10 @@ export const createOAuthRouter = async (
 			(_req, res, next) => {
 				// Every introspection response is token metadata — `active`, and on
 				// the positive path scope/sub/exp — so an intermediary caching one
-				// keeps serving yesterday's liveness after a revocation (#293 item
-				// 2). Same header pair the token endpoint sets on issuance
-				// (RFC 6749 §5.1). Ahead of the rate-limit guard, deliberately: the
-				// guard's own 429/503 exits end the chain without calling next(),
-				// and "every exit" includes those.
+				// keeps serving yesterday's liveness after a revocation. Same header
+				// pair the token endpoint sets on issuance (RFC 6749 §5.1). Ahead of
+				// the rate-limit guard, whose 429/503 exits end the chain without
+				// calling next().
 				res.set("Cache-Control", "no-store");
 				res.set("Pragma", "no-cache");
 				next();
@@ -898,18 +843,18 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 					try {
-						// SF-1: token-as-credential self-intro — calling-client identity is not yet
-						// established (introspectClientAuthMw is skipped on this fall-
-						// through path), so audience pinning is deferred. alg / iss /
-						// typ + signature are still pinned by the central verifier.
-						// Wave 1 (C4): denylist consulted so revoked ATs cannot serve
-						// as their own introspection credential.
+						// Token-as-credential self-intro — calling-client identity is not
+						// established (introspectClientAuthMw is skipped on this
+						// fall-through path), so audience pinning is deferred. alg / iss /
+						// typ + signature are still pinned by the central verifier, and
+						// the denylist is consulted so revoked ATs cannot serve as their
+						// own introspection credential.
 						await verifyJwt(credentialToken, keyStore, {
 							type: "access_token",
 							expectedIssuer: canonicalIssuer,
 							legacyTypAccept: legacyTypAcceptOpt ?? false,
-							// #296/#367: token-accepting surface — forward what the
-							// composition wired, jti denylist and subject watermark both.
+							// Token-accepting surface — forward what the composition
+							// wired, jti denylist and subject watermark both.
 							revocation: { denylist: accessTokenDenylist, subjectRevocation },
 							logger,
 						});
@@ -921,7 +866,7 @@ export const createOAuthRouter = async (
 						if (isVerificationUnavailable(cause)) {
 							return answerIntrospectionUnavailable(req, res, cause);
 						}
-						// SF-8: distinguish non-access-token typ rejections so SIEM
+						// Distinguish non-access-token typ rejections so SIEM
 						// can spot a refresh / id token presented as a Bearer
 						// credential. RFC 7662 §2.2 forbids leaking the typ to the
 						// caller — the audit log carries the signal instead.
@@ -947,31 +892,17 @@ export const createOAuthRouter = async (
 					return res.status(200).json({ active: false });
 				}
 				try {
-					// SF-1: bind aud to the calling client when introspectClientAuthMw
-					// has identified them; for the bearer-self-intro fall-through path
-					// the identity is unknown and the verifier records the gap via
-					// `jwt_verify_aud_skipped`.
-					// Wave 1 (C4): denylist consulted so revoked ATs report active:false.
+					// Bind aud to the calling client when introspectClientAuthMw has
+					// identified it; on the bearer-self-intro fall-through path the
+					// identity is unknown and the verifier records the gap via
+					// `jwt_verify_aud_skipped`. The denylist is consulted so revoked
+					// ATs report active:false.
 					//
-					// R4: the pin is the calling client's `allowedAudiences` ∪
-					// `{clientId}`, not `clientId` alone. With RFC 8707 resource
-					// indicators in use every access token carries `aud: <resource
-					// URI>`, so pinning the client id made a resource server unable
-					// to introspect the tokens issued FOR it — `active: false`
-					// unless it happened to be registered under a `client_id` equal
-					// to the resource URI, which is a workaround, not a design.
-					// (`auth.proxy`'s `CLIENT_ID`/`CLIENT_SECRET` validation mode
-					// walked into the same wall.)
-					//
-					// The widened set is not a new trust decision: it is exactly the
-					// ceiling every issuing grant already derives an audience within
-					// (`clientCredentials.mts`, `refreshToken.mts`,
-					// `routes/authorize.mts` all bound derivation by
-					// `allowedAudiences ∪ {clientId}`). A caller can therefore only
-					// see tokens for audiences it was already registered to be
-					// associated with; an audience outside that set still answers
-					// `active: false`, and so do unknown, expired, revoked and
-					// other-issuer tokens, which this pin never governed.
+					// The pin is the calling client's `allowedAudiences` ∪
+					// `{clientId}` — the ceiling every issuing grant already derives
+					// an audience within — so a resource server can introspect the
+					// tokens issued FOR it under RFC 8707. See README, "The audience
+					// pin is `allowedAudiences` ∪ `{client_id}`".
 					const expectedAudiences = req.oauthClient
 						? [...(req.oauthClient.allowedAudiences ?? []), req.oauthClient.clientId]
 						: null;
@@ -980,17 +911,17 @@ export const createOAuthRouter = async (
 						expectedIssuer: canonicalIssuer,
 						...(expectedAudiences ? { expectedAudience: expectedAudiences } : {}),
 						legacyTypAccept: legacyTypAcceptOpt ?? false,
-						// #296/#367: token-accepting surface — forward what the
-						// composition wired, jti denylist and subject watermark both.
+						// Token-accepting surface — forward what the composition
+						// wired, jti denylist and subject watermark both.
 						revocation: { denylist: accessTokenDenylist, subjectRevocation },
 						logger,
 					});
 					const { payload } = verified;
 
-					// TODO-F-3: cascading revoke (RFC 7009 §2.1 SHOULD). When a refresh_token
-					// family has been revoked, all access_tokens minted under the same
-					// authorization grant must introspect as inactive. family_id claim is
-					// optional — legacy tokens without it still succeed (no cascade available).
+					// Cascading revoke (RFC 7009 §2.1 SHOULD): once a refresh_token family
+					// is revoked, every access_token minted under the same authorization
+					// grant introspects as inactive. family_id is optional — older tokens
+					// without it still succeed (no cascade available).
 					const rawFamilyId = (payload as Record<string, unknown>).family_id;
 					const familyId =
 						typeof rawFamilyId === "string" && rawFamilyId.length > 0 ? rawFamilyId : null;
@@ -1021,39 +952,15 @@ export const createOAuthRouter = async (
 						}
 					}
 
-					// R3: session liveness — the same read `/oauth/userinfo` and the
-					// refresh grant already perform, and the missing third leg of
-					// the set this handler consults. Without it a token whose
-					// browser session has been logged out still introspected as
-					// `active: true`, so a resource server that trusts
-					// introspection (the BFF / proxy topology, where the `session`
-					// grant's token now carries `sid`) kept honouring it for the
-					// rest of the access-token lifetime.
-					//
-					// Both logout endpoints are covered, by the one read: the
-					// record resolved here is deleted by `/oauth/logout`'s cascade
-					// and by `/session/logout` alike. What they revoke AROUND it
-					// still differs — only `/oauth/logout` revokes refresh-token
-					// families — so a session that also holds a refresh token is
-					// not fully ended by the session endpoint. That difference is
-					// invisible from here; this check answers for the access token
-					// in hand, not for the family behind it.
-					//
-					// Coverage, stated so the check is not read as more than it
-					// is: it binds only callers that ASK. A resource server
-					// validating the JWT offline — signature and `exp`, no
-					// introspection — sees no logout at any point and accepts the
-					// token until it expires. Self-contained tokens are like that;
-					// the lever there is a short lifetime, not this read.
-					//
-					// Cost: one extra store read per introspection of a
-					// `sid`-carrying token. Tokens without `sid` — client
-					// credentials, jwt-bearer, anything minted outside a browser
-					// session — do not pay it, and neither does a deployment that
-					// wires no `userSessionStore`.
-					//
-					// Fail-closed on a store throw, for the reason the family
-					// check states: 503, the outage it is, never `active: false`.
+					// Session liveness — the same read `/oauth/userinfo` and the
+					// refresh grant perform. Without it a token whose browser session
+					// was logged out would introspect as `active: true`, and a
+					// resource server that trusts introspection (the BFF / proxy
+					// topology) would honour it for the rest of its lifetime. It
+					// answers for the access token in hand, not for the refresh-token
+					// family behind it. Fail-closed on a store throw: 503, never
+					// `active: false`. See README, "Revoked families and ended
+					// sessions".
 					//
 					// The session is the token's own `sid` or, for a token-exchange
 					// result, its `liveness_sid` (core's `livenessSidOf`): a derived
@@ -1089,24 +996,18 @@ export const createOAuthRouter = async (
 					const rawClientId = claims.client_id;
 					const clientId = typeof rawClientId === "string" ? rawClientId : azp;
 					const scope = typeof claims.scope === "string" ? claims.scope : undefined;
-					// SF-8 + Wave 2: token_type follows the bound-token's confirmation.
-					// DPoP-bound tokens (cnf.jkt present) return "DPoP" per RFC 9449 §5;
-					// mTLS-bound tokens keep "Bearer" per RFC 8705 §3 (cnf.x5t#S256 does
-					// not change the wire-level token type). Bearer tokens have no cnf
-					// and return "Bearer". `extractConfirmation` validates member types
-					// (rejects empty-string thumbprints, non-string variants); see
+					// token_type follows the confirmation: "DPoP" for cnf.jkt (RFC 9449
+					// §5); "Bearer" for mTLS-bound tokens (RFC 8705 §3: cnf.x5t#S256
+					// does not change the wire-level type) and unbound ones.
+					// `extractConfirmation` validates member types; see
 					// types/introspect.mts.
-					// #199 I3: refuse to vouch for a token carrying an ambiguous
-					// compound cnf (both `jkt` and `x5t#S256`). This AS cannot mint
-					// one — a grant emits a single mechanism's confirmation — so it
-					// signals a forgery or a bug. Narrowing it to the intent-explicit
-					// winner would report a binding that was never issued, and
-					// dropping the cnf while keeping `active: true` would be worse
-					// still: the RS would treat a bound token as a plain bearer token
-					// and enforce nothing. Fail closed instead, matching the refresh
-					// path's structural reject (`grants/refreshToken.mts`).
-					// RFC 7662 §2.2 permits `active: false` for any token the AS
-					// declines to vouch for.
+					// A compound cnf (both `jkt` and `x5t#S256`) is refused: this AS
+					// cannot mint one, so it signals a forgery or a bug. Reporting
+					// either member would claim a binding never issued, and dropping
+					// the cnf while keeping `active: true` would let the RS treat a
+					// bound token as plain bearer. Fail closed, as the refresh path
+					// does (`grants/refreshToken.mts`); RFC 7662 §2.2 permits
+					// `active: false` for any token the AS declines to vouch for.
 					if (isCompoundConfirmation(claims.cnf)) {
 						logger.warn(
 							{ reason: "compound_cnf", site: "introspect_body", jti },
@@ -1136,13 +1037,11 @@ export const createOAuthRouter = async (
 					if (isVerificationUnavailable(cause)) {
 						return answerIntrospectionUnavailable(req, res, cause);
 					}
-					// SF-8: same non-access-token signal as the bearer path above.
-					// `active: false` is required by RFC 7662 §2.2 regardless of
-					// rejection reason; audit log carries the typ-mismatch signal.
-					// Symmetric with the bearer-self-intro catch: only `reason
-					// === "typ"` triggers `introspect_non_access_token`. All other
-					// rejection reasons emit `jwt_verify_rejected` from the
-					// central verifier; SIEM rules should NOT double-count.
+					// Same non-access-token signal as the bearer path above:
+					// `active: false` whatever the reason (RFC 7662 §2.2), and only
+					// `reason === "typ"` logs `introspect_non_access_token`; other
+					// reasons already emit `jwt_verify_rejected` from the central
+					// verifier, so SIEM rules should NOT double-count.
 					if (cause instanceof JwtVerificationError && cause.reason === "typ") {
 						logger.warn(
 							{ reason: "non_access_token", site: "introspect_body" },
@@ -1153,17 +1052,13 @@ export const createOAuthRouter = async (
 				}
 			},
 		)
-		// GET /authorize — the RFC 6749 §4.1 authorization-code sequence lives in
-		// routes/authorize.mts (#328), one step per concern. The #325 rate-limit
-		// guard is mounted ahead of it, same position the inline handler ran its
-		// check; the handler consumes the composition-time-resolved `options` —
-		// no request re-reads config.
-		// #284: OIDC Core §3.1.2.1 — "Authorization Servers MUST support the use
-		// of the HTTP GET and POST methods". POST is how an RP sends a request
-		// too large for a URL, and standard libraries reach for it. The handler
-		// reads its parameters through one accessor (`authorizeParams`), so both
-		// methods run the identical sequence of checks rather than a POST path
-		// that quietly skips one. The router already parses form bodies.
+		// /authorize — the RFC 6749 §4.1 authorization-code sequence lives in
+		// routes/authorize.mts, behind the rate-limit guard; the handler
+		// consumes the composition-time `options`, so no request re-reads config.
+		// OIDC Core §3.1.2.1: "Authorization Servers MUST support the use of the
+		// HTTP GET and POST methods". The handler reads its parameters through
+		// one accessor (`authorizeParams`), so both methods run the identical
+		// sequence of checks.
 		.get("/authorize", rateLimitGuard("authorize"), authorizeHandler)
 		.post("/authorize", rateLimitGuard("authorize"), authorizeHandler);
 
@@ -1236,31 +1131,22 @@ export const createOAuthRouter = async (
 	}
 
 	// RFC 7009 — Token Revocation endpoint. Always mounted; what it does with
-	// an ACCESS token comes from `oauth.revocation.accessToken` (#277).
-	//
-	// `readAccessTokenRevocationMode` reports an UNDECLARED key as `undefined`
-	// rather than defaulting it here, which hands `createRevokeRouter` two
-	// distinguishable cases:
+	// an ACCESS token comes from `oauth.revocation.accessToken`, which
+	// `readAccessTokenRevocationMode` reports as `undefined` when undeclared,
+	// so `createRevokeRouter` can tell apart:
 	//   - declared `"denylist"` with no `accessTokenDenylist` → it THROWS, and a
-	//     deployment claiming a capability it cannot perform fails to build.
+	//     deployment claiming a capability it cannot perform fails to build;
 	//   - undeclared with no denylist → it reports `unsupported_token_type`
-	//     rather than a 200 that revokes nothing.
-	// Whether the second case should have been allowed to boot at all is core's
-	// boot validator's call (step 13.9), which reads omission as `"denylist"`
-	// and refuses the composition — so through `createApp` that case never
-	// reaches here, and this layer covers composition roots that call
-	// `createOAuthRouter` directly.
-	//
+	//     rather than a 200 that revokes nothing (through `createApp`, core's
+	//     boot validator already refuses this composition).
 	// Refresh-token revocation is independent of the mode and of the denylist.
 	//
-	// Throttled like `/token`, `/introspect` and `/authorize`, which it was
-	// not: RFC 7009 §2.1 lets a public client revoke its own tokens, so this
-	// is an unauthenticated entry point that reaches the client repository on
-	// every attempt — and with Client ID Metadata Documents on, that
-	// repository performs an outbound document fetch. Mounted as a guard
-	// route ahead of the router, because `createRevokeRouter` owns the
-	// `/revoke` path itself — `router.all`, matching `/revoke` exactly, not
-	// `router.use`, which would throttle every path beneath it too.
+	// Throttled like `/token`, `/introspect` and `/authorize`: RFC 7009 §2.1
+	// lets a public client revoke its own tokens, so this unauthenticated
+	// entry point reaches the client repository on every attempt (with Client
+	// ID Metadata Documents on, an outbound fetch). A guard route ahead of
+	// `createRevokeRouter`, which owns the path: `router.all` matches `/revoke`
+	// exactly, where `router.use` would throttle every path beneath it too.
 	router.all("/revoke", rateLimitGuard("revoke"));
 	router.use(
 		createRevokeRouter(express, {
@@ -1271,21 +1157,18 @@ export const createOAuthRouter = async (
 			accessTokenRevocation: readAccessTokenRevocationMode(config),
 			logger,
 			issuer: canonicalIssuer,
-			// #484: private_key_jwt at /oauth/revoke, verified as at /oauth/token.
+			// private_key_jwt at /oauth/revoke, verified as at /oauth/token.
 			replaySeenSet,
 			tokenEndpoint,
 		}),
 	);
 
-	// #527: the consent step's endpoints, mounted only when a store is wired.
+	// The consent step's endpoints, mounted only when a store is wired.
 	// Without one there is nothing to record, and `/authorize` refuses the
-	// clients that would need it.
-	//
-	// #552: the step records consent in the one store and parks every request
-	// in the other, so a composition with one and not the other — in either
-	// direction — is refused here, where the operator can read why, rather
-	// than at the first third-party `/authorize`. The bundled memory module
-	// provides both.
+	// clients that would need it. The step records consent in one store and
+	// parks every request in the other, so a composition with one and not the
+	// other — in either direction — is refused here, where the operator can
+	// read why, rather than at the first third-party `/authorize`.
 	if (!consentStore !== !pendingConsentStore) {
 		const [wired, missing] = consentStore
 			? ["consentStore", "pendingConsentStore"]
@@ -1302,8 +1185,8 @@ export const createOAuthRouter = async (
 				clientRepository,
 				auditSink,
 				logger,
-				// #527 review: the same reading `/authorize` makes, through
-				// admission with the same slots (the session-admission ADR's D8).
+				// The same reading `/authorize` makes, through admission with the
+				// same slots.
 				userSessionStore,
 				subjectRevocation,
 				requirements,

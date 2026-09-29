@@ -15,15 +15,14 @@
  */
 
 /**
- * The MFA budgets a shared limiter resolves by prefix (the MFA ADR's D21):
- * `mfa`, the flood guard on every `/session/mfa` POST, from
- * `mfa.rateLimit.routes` (reference default 60 per 300 s); and `mfa-email`,
- * the sends to one subject, from `mfa.factors.email.sendLimit` (5 per
- * 3600 s). Their budgets live in the MFA section, so a limiter would serve
- * its own default for them unless they are seeded — the gap `login` (#270),
- * `device_verification` (#448) and `webauthn-authentication-options` closed
- * the same way. An operator's own entry for a prefix wins; a key not given
- * seeds nothing; a key given but unusable is refused, naming the key.
+ * The MFA budgets a shared limiter resolves by prefix (see ADR
+ * 2026-09-25-multi-factor-authentication): `mfa`, the flood guard on every
+ * `/session/mfa` POST, from `mfa.rateLimit.routes` (reference default 60 per
+ * 300 s); and `mfa-email`, the sends to one subject, from
+ * `mfa.factors.email.sendLimit` (5 per 3600 s). Their budgets live in the MFA
+ * section, so a limiter would serve its own default for them unless they are
+ * seeded. An operator's own entry for a prefix wins; a key not given seeds
+ * nothing; a key given but unusable is refused, naming the key.
  */
 
 import { describe, expect, it } from "vitest";

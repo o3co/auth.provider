@@ -16,15 +16,13 @@
 
 /**
  * `federationGrants.connections.<name>` read into the connections the domain
- * rules take (#593, D4/D6/D15).
+ * rules take (the federation-grants ADR, D4/D6/D15).
  *
- * Core's `FederationGrantConnection` says reading it from configuration is the
- * package's job, and this is that job. Everything it refuses, it refuses at
- * boot, for one reason repeated: what a connection decides — which upstream
- * account a grant is pinned to, how much residual access it may carry, which
- * environment it belongs to — is decided once, at the moment a user consents,
- * and then lives for as long as the grant does. A misconfiguration found at
- * the first request has already been written into somebody's grant.
+ * Everything refused here is refused at boot: what a connection decides —
+ * which upstream account a grant is pinned to, how much residual access it may
+ * carry, which environment it belongs to — is fixed when a user consents and
+ * lives as long as the grant, so a misconfiguration found at the first
+ * request has already been written into somebody's grant.
  */
 
 import type { FederationGrantConnection } from "@o3co/auth-provider-core";
@@ -54,7 +52,7 @@ interface FederationEntry {
  * schema reads them. Restated structurally rather than imported as a Zod
  * schema because this value arrives inside a `z.record`, which the HOCON
  * bridge does not descend into — so it is a string here whatever the schema
- * did elsewhere (#288).
+ * did elsewhere.
  */
 const boolean = (value: unknown, name: string, key: string): boolean => {
 	if (typeof value === "boolean") return value;
@@ -84,8 +82,7 @@ const absoluteUri = (value: unknown, name: string, key: string): string => {
 	}
 	// `new URL()` parses `javascript:alert(1)` perfectly happily, and userinfo
 	// in a value this provider echoes to an upstream is a credential in a
-	// place nobody will look for one. Review found both; `callbackURL` already
-	// refused them and `resource` did not.
+	// place nobody will look for one.
 	if (url.protocol !== "https:" && url.protocol !== "http:") {
 		return refuse(name, `${key} must be an http or https URI`);
 	}
@@ -142,13 +139,13 @@ const authorizationParams = (value: unknown, name: string): Readonly<Record<stri
 		if (key === "__proto__") {
 			// An own `__proto__` survives a spread and is lost to an assignment,
 			// so two stores keeping the same intent would disagree about it. No
-			// authorization server defines the name (Copilot).
+			// authorization server defines the name.
 			return refuse(name, 'authorizationParams may not set "__proto__"');
 		}
 		if (RESERVED_DELEGATED_AUTHORIZATION_PARAMS.has(key)) {
-			// The exclusion slice 2 applies at the point of use, applied here at
-			// boot: setting one of these from configuration is not customising
-			// the flow, it is taking over its security parameters (D17).
+			// The exclusion applied at the point of use, applied here at boot:
+			// setting one of these from configuration is not customising the
+			// flow, it is taking over its security parameters.
 			return refuse(name, `authorizationParams may not set "${key}" — this provider owns it`);
 		}
 		if (typeof param !== "string") {
@@ -161,9 +158,10 @@ const authorizationParams = (value: unknown, name: string): Readonly<Record<stri
 };
 
 /**
- * #611: the id_token claims check 5 hands the Store. Refused at boot by the
- * adapter's own rule, so a list the adapter would refuse at the callback — a
- * name the protocol owns, a repeat — is found before a user consents.
+ * The id_token claims the linked-identity check hands the Store. Refused at
+ * boot by the adapter's own rule, so a list the adapter would refuse at the
+ * callback — a name the protocol owns, a repeat — is found before a user
+ * consents.
  */
 const identityClaims = (value: unknown, name: string): readonly string[] => {
 	if (value === undefined) return [];
@@ -177,12 +175,10 @@ const identityClaims = (value: unknown, name: string): readonly string[] => {
 const DECIMAL = /^\d+$/;
 
 /**
- * A whole positive number of seconds.
- *
- * The type is checked before the value, for the reason review gave: `Number(x)`
- * read `true` as one second and `[5]` as five, and a fraction is not something
- * an upstream's `expires_in` — whole seconds, by RFC 6749 §4.2.2 — can be
- * compared with.
+ * A whole positive number of seconds. The type is checked before the value:
+ * `Number(x)` reads `true` as one second and `[5]` as five, and a fraction
+ * cannot be compared with an upstream's `expires_in` (whole seconds, RFC 6749
+ * §4.2.2).
  */
 const seconds = (value: unknown, name: string, key: string): number => {
 	const parsed =
@@ -254,8 +250,8 @@ export function resolveFederationGrantConnections(
 		}
 		const boundary = entry.boundary;
 		if (typeof boundary !== "string" || boundary === "") {
-			// Required, so that isolation between environments is not opt-in
-			// (D13): a boundary nobody set is a boundary everything shares.
+			// Required, so that isolation between environments is not opt-in: a
+			// boundary nobody set is a boundary everything shares.
 			refuse(name, "boundary must name the environment this connection belongs to");
 		}
 		resolved.set(name, {

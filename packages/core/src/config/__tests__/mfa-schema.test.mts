@@ -15,17 +15,16 @@
  */
 
 /**
- * The MFA configuration core owns (the MFA ADR's D19): `mfa.mode`, the
- * deployment's step-up page at `endpoints.mfa.url`, the two store switches a
- * composition root installs MFA's stores from, and the Redis stores' key
- * prefixes, which the Redis package's modules read.
+ * The MFA configuration core owns (ADR 2026-09-25-multi-factor-authentication):
+ * `mfa.mode`, the deployment's step-up page at `endpoints.mfa.url`, the two
+ * store switches a composition root installs MFA's stores from, and the Redis
+ * stores' key prefixes, which the Redis package's modules read.
  *
- * `mfa.mode` is `"off"` by reference default and admits its three values
- * (the session-admission ADR's D7 lifted the step-3 lock): whether a mode
- * other than `off` is honoured is boot's to refuse — `session-requirement-missing`
- * when no requirement named `mfa` is registered — so an operator who wrote
- * `required` never believes their logins ask for a second factor. A value
- * that is none of the three is refused here, naming its key.
+ * `mfa.mode` is `"off"` by reference default and admits its three values; one
+ * that is none of the three is refused here, naming its key. Whether a mode
+ * other than `off` is honoured is boot's to refuse (`session-requirement-missing`
+ * when no requirement named `mfa` is registered), so an operator who wrote
+ * `required` never believes their logins ask for a second factor.
  */
 
 import { fileURLToPath } from "node:url";
@@ -117,9 +116,9 @@ describe("the MFA configuration core owns (D19)", () => {
 
 	it('reads a configuration with no mfa section, or no mode, as mode "off"', () => {
 		// A hand-built composition root that never wrote the key boots with MFA
-		// off: "off" is the default in the schema as well as in reference.conf,
-		// and stays so (the session-admission ADR's D7 re-decided O2: the
-		// template and create-app flip their own default, core keeps its).
+		// off: "off" is the default in the schema as well as in reference.conf.
+		// The template and create-app flip their own default; core keeps its
+		// (ADR 2026-09-28-session-admission).
 		const { mfa: _absent, ...withoutMfa } = makeValidCoreConfig() as Record<string, unknown>;
 		expect((CoreConfigSchema.parse(withoutMfa) as { mfa?: { mode?: string } }).mfa?.mode).toBe(
 			"off",

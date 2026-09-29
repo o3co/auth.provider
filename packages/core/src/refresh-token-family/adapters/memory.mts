@@ -44,21 +44,13 @@ const requireFiniteExpiry = (expiresAtMs: number, operation: string): void => {
 /**
  * Memory-backed RefreshTokenFamilyStore.
  *
- * Atomicity argument (single-process, single-event-loop):
- *   - All read/check/write sequences inside `registerFamily` and
- *     `updateFamily` are SYNCHRONOUS — there is no `await` between the
- *     Map.get (or Map.has) and the Map.set (or Map.delete). Node's
- *     microtask queue cannot interleave non-async work, so concurrent
- *     callers do not race.
- *   - CAS conflict cannot occur (no cross-instance concurrency); the
- *     memory adapter therefore never throws "conflict-exhausted".
+ * Atomic within one process: every read/check/write in `registerFamily` and
+ * `updateFamily` is synchronous, with no `await` between the Map read and the
+ * Map write, so concurrent callers cannot interleave. With no cross-instance
+ * concurrency there is no CAS conflict, so it never throws
+ * `conflict-exhausted`.
  *
- * Lazy GC: an expired entry is removed on the next access via getLive().
- * An expiry that is not a finite number is refused on the way in (see
- * `requireFiniteExpiry`), since NaN is never `<= now` and such a family would
- * be live for ever.
- *
- * Per A3 §7.1.
+ * Expired entries are removed lazily, on the next access via `getLive()`.
  */
 export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 	const families = new Map<string, Entry>();
@@ -101,22 +93,16 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 			}
 			const decision = updater(current);
 			if (decision.action === "abort") {
-				// #274: `reason` is echoed verbatim and interpreted nowhere in this
-				// adapter — classification belongs to the wrapper layer (A3 §5.1).
-				//
-				// Spread conditionally rather than writing `reason: decision.reason`:
-				// `reason` is OPTIONAL, and an unconditional assignment puts the key
-				// on the object holding `undefined`, which is a different value from
-				// an absent key to `in`, `Object.keys`, `toStrictEqual` and anything
-				// serialising the result. The contract says omitted, so omit it.
+				// `reason` is echoed verbatim; classification belongs to the wrapper
+				// layer. Spread conditionally: `reason` is optional, and a key holding
+				// `undefined` differs from an absent key to `in`, `Object.keys`,
+				// `toStrictEqual` and serialisation.
 				return { outcome: "aborted", ...withReason(decision.reason) };
 			}
 			const next = decision.family;
 			requireFiniteExpiry(next.expiresAtMs, "updateFamily");
-			// Fail-closed parity with registerFamily: an updater that commits a
-			// family with expiresAtMs <= now() would store a dead-on-arrival entry
-			// (lazy-GC'd on next read) and silently diverge from the Redis
-			// adapter's behavior. Symmetric throw aligns both adapters.
+			// Fail closed as registerFamily does, and as the Redis adapter does
+			// here: committing `expiresAtMs <= now()` would store a dead entry.
 			if (next.expiresAtMs <= Date.now()) {
 				throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 			}

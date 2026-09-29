@@ -15,13 +15,9 @@
  */
 
 /**
- * The planner as a function of its inputs (#626 F4).
- *
- * It could not be tested this way before: it took `assembleApp`'s frozen world
- * and cast three readings out of it, so every case needed a boot fixture and
- * the two activation conditions were only ever exercised through a whole boot.
- * Now the same conditions are three values, and what `assembleApp` does with the
- * result is the integration test's business:
+ * The discovery planner as a function of its inputs: the issuer, the
+ * signing-algorithm reader and the contribution reader. What `assembleApp`
+ * does with the result is the integration test's business:
  * [`boot/__tests__/discovery-aggregation.integration.test.mts`](../../boot/__tests__/discovery-aggregation.integration.test.mts).
  */
 
@@ -99,7 +95,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 		expect(route).not.toBeNull();
 		expect(route?.id).toBe("core:oidc-discovery");
 		expect(route?.mountPath).toBe("/");
-		// #528: both well-known forms, one handler, so the two cannot differ.
+		// Both well-known forms, one handler, so the two cannot differ.
 		expect(route?.routes.map((r) => r.path)).toEqual([
 			"/.well-known/openid-configuration",
 			"/.well-known/oauth-authorization-server",
@@ -110,12 +106,11 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 		["nothing", undefined],
 		["the empty string", ""],
 	])("declines when the issuer is %s", (_label, issuer) => {
-		// #266 made `oauth.jwt.issuer` required at the schema boundary, so this
-		// is unreachable through boot. The guard is for a caller that arrives
-		// with a config that never passed the schema — a hand-built `AppConfig`
-		// through `bootstrapComponents`, which is not checked at the boundary it
-		// crosses — which is why it is pinned here rather than through a boot
-		// fixture that cannot be built.
+		// `oauth.jwt.issuer` is required at the schema boundary, so this is
+		// unreachable through boot. The guard is for a config that never passed
+		// the schema (a hand-built `AppConfig` through `bootstrapComponents`,
+		// which is not checked at the boundary it crosses), so it is pinned here
+		// rather than through a boot fixture that cannot be built.
 		expect(plan({ issuer })).toBeNull();
 	});
 
@@ -131,9 +126,9 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 		["nothing claims to be a provider", { metadata: [jwksOnly] }],
 	])("does not read the signing algorithms when %s", (_label, input) => {
 		// The key store is a slot a host may fill with an object of its own. A
-		// deployment that serves no discovery document never read its
-		// algorithm before #626 F4, and does not now: the reader is only called
-		// once both activation conditions have passed.
+		// deployment that serves no discovery document does not read its
+		// algorithm: the reader is only called once both activation conditions
+		// have passed.
 		let read = false;
 		const planned = planDocument({
 			...input,
@@ -148,9 +143,9 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 	});
 
 	it("does not read the contributions when no issuer is configured (#650)", () => {
-		// The collector is host-supplied, and before #626 F4 it was iterated only
-		// once an issuer had been found. Reading it first would run host code
-		// on a deployment that serves no document — and could throw there.
+		// The collector is host-supplied. Reading it before an issuer is found
+		// would run host code on a deployment that serves no document, and
+		// could throw there.
 		let read = false;
 		const planning = planDocument({
 			issuer: undefined,
@@ -230,11 +225,10 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 	});
 
 	it("treats what raises while the builder reads a contribution as the builder's (#650)", () => {
-		// The line is the builder, and this pins which side a contribution
-		// getter the builder reads falls on: the builder's, as it did before
-		// #626 F4 — the old catch wrapped the same call. Moving it (by
-		// snapshotting the contributions first) would change behaviour, so
-		// that is a decision for its own change, made on purpose.
+		// The line is the builder: a contribution getter the builder reads
+		// falls on the builder's side. Moving it (by snapshotting the
+		// contributions first) would change behaviour, so that is a decision
+		// for its own change, made on purpose.
 		const failure = new DiscoveryDocumentError("thrown by an endpoints getter");
 		const planning = planDocument({
 			metadata: [

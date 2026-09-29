@@ -15,31 +15,30 @@
  */
 
 /**
- * Redis {@link MfaFactorStore} (the MFA ADR's D7): enrolled second factors,
- * one hash per subject.
+ * Redis {@link MfaFactorStore}: enrolled second factors, one hash per subject.
  *
  * ```text
  * <keyPrefix>{<subject>}   HASH   field <factor id> → the record
  * ```
  *
  * `<subject>` and `<factor id>` are base64url of their JSON
- * (`internal/mfa-keys.mts`). A subject's factors are one key, so every
- * operation touches one key and a Cluster spreads subjects across its slots.
- * No key carries a TTL: an enrolled factor does not expire, and a key with a
- * TTL is one a `volatile-*` eviction policy may drop (D12).
+ * (`internal/mfa-keys.mts`). Every operation touches the subject's one key, so
+ * a Cluster spreads subjects across its slots. No key carries a TTL: an
+ * enrolled factor does not expire, and a `volatile-*` eviction policy may drop
+ * a key with a TTL.
  *
- * A record is `<version>\n<fixed>\n<mutable>` — the version as decimal text,
- * then one line of JSON for what never changes after `create` (id, subject,
- * kind, binding, createdAt) and one for what `update` replaces (data, label,
- * lastUsedAt). The split is what lets the compare-and-set be one script that
- * never decodes the JSON (`MfaFactorStoreClient`). `data` is sealed by the
- * coordinator before it arrives (D11) and is kept byte for byte.
+ * A record is `<version>\n<fixed>\n<mutable>`: the version as decimal text,
+ * one JSON line for what never changes after `create` (id, subject, kind,
+ * binding, createdAt) and one for what `update` replaces (data, label,
+ * lastUsedAt), so the compare-and-set is one script that never decodes the
+ * JSON (`MfaFactorStoreClient`). `data` arrives sealed by the coordinator and
+ * is kept byte for byte.
  *
- * A stored value this adapter cannot read back as the record it wrote under
- * that subject and field is refused with an error that quotes nothing it
- * read: "only zero records open a first binding" (F3), so a record read as
- * absent would downgrade the account. It is an outage, never "no factor"
- * (D12, D28).
+ * A stored value that does not read back as the record written under that
+ * subject and field is refused with an error quoting nothing it read: an
+ * outage, never "no factor". Only zero records open a first binding, so a
+ * record read as absent would downgrade the account.
+ * See the MFA ADR (2026-09-25-multi-factor-authentication), D7 and D12.
  */
 
 import {
@@ -261,20 +260,17 @@ const moduleConfigSchema = z.object({
 });
 
 /**
- * `defineModule` manifest for the Redis {@link MfaFactorStore} (the MFA ADR's
- * D7, D10, D12, D19): `mfaFactorStore` off the `mfaFactorStoreClient` slot —
- * the shared socket `makeIoredisClients` wraps, or a dedicated database or
- * instance, which D12 prefers — with its keys under
- * `redisMfaFactorStore.keyPrefix` (`mfaf:`).
+ * `defineModule` manifest for the Redis {@link MfaFactorStore}:
+ * `mfaFactorStore` off the `mfaFactorStoreClient` slot (the shared socket
+ * `makeIoredisClients` wraps or, preferably, a dedicated database or
+ * instance), with its keys under `redisMfaFactorStore.keyPrefix` (`mfaf:`).
  *
  * Declares no `replicaSafety`: every replica reads the one store, so a
  * composition with it may declare `deployment.mode = "multi"`. Before it
- * provides the store it runs D12's durability check against the server
+ * provides the store it runs the durability check
  * (`internal/mfa-durability.mts`): an `allkeys-*` eviction policy refuses the
- * boot (`mfa-factor-store-evictable`); RDB snapshots without AOF
- * (`mfa_factor_store_lossy`), no persistence (`mfa_factor_store_volatile`)
- * and a server that refuses `CONFIG` (`mfa_factor_store_durability_unchecked`)
- * are each one warning on the `logger` slot, or on `consoleLogger`.
+ * boot (`mfa-factor-store-evictable`), and each warning goes to the `logger`
+ * slot, or to `consoleLogger`.
  */
 export const redisMfaFactorStoreModule = defineModule({
 	name: "redis-mfa-factor-store",

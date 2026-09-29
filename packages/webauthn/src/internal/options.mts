@@ -15,30 +15,21 @@
  */
 
 /**
- * Internal WebAuthn options-generation helpers (spec §2.4).
+ * Internal WebAuthn options-generation helpers: thin wrappers around
+ * `@simplewebauthn/server`'s `generateRegistrationOptions` and
+ * `generateAuthenticationOptions` that
+ *   1. encode `userId` as bytes (WebAuthn §5.4.3: `user.id` is an opaque byte
+ *      sequence, no PII; README, "SECURITY — `userId` opacity");
+ *   2. pass `undefined` rather than `[]` for an empty `allowCredentials`, the
+ *      discoverable-credentials flow;
+ *   3. map `attestationPreference = "indirect"` to `"none"`, since
+ *      SimpleWebAuthn's `attestationType` accepts only
+ *      `'direct' | 'enterprise' | 'none'`;
+ *   4. set `authenticatorSelection.residentKey = "preferred"`;
+ *   5. require an ArrayBuffer-backed `challenge` (see the field docs below).
  *
- * Thin wrappers around `@simplewebauthn/server`'s `generateRegistrationOptions`
- * and `generateAuthenticationOptions` that:
- *   1. Map `WebAuthnConfig` fields to SimpleWebAuthn's parameter shape.
- *   2. Encode `userId` as a Uint8Array via TextEncoder (WebAuthn §5.4.3 —
- *      user.id is an opaque byte sequence, no PII per spec §2.3.2).
- *   3. Enable discoverable-credentials flow when `allowCredentials` is empty
- *      (pass `undefined` instead of `[]` per SimpleWebAuthn convention).
- *   4. Map `attestationPreference = "indirect"` → `"none"` because
- *      SimpleWebAuthn v13.1.1 removed "indirect" from its server-side API
- *      (`attestationType` accepts only `'direct' | 'enterprise' | 'none'`).
- *   5. Set `authenticatorSelection.residentKey = "preferred"` to enable
- *      discoverable credentials by default (WebAuthn §2.4).
- *   6. Require an ArrayBuffer-backed `challenge` (see the field docs below).
- *      SimpleWebAuthn >= 13.3.2 types its byte inputs as `Uint8Array<ArrayBuffer>`
- *      rather than the `Uint8Array<ArrayBufferLike>` default, i.e. it will not
- *      accept a view onto a SharedArrayBuffer.
- *
- * NOT exported from the package barrel — internal use only, except
- * `WEBAUTHN_ALGORITHM_IDS`, which the barrel re-exports as the statement of
- * the algorithm pin.
- *
- * Cross-refs: Plan T26 / spec §2.4 / WebAuthn §5.4.3 / §2.3.2
+ * NOT exported from the package barrel, except `WEBAUTHN_ALGORITHM_IDS`,
+ * which the barrel re-exports as the statement of the algorithm pin.
  */
 
 import type { WebAuthnCredential } from "@o3co/auth-provider-core";
@@ -55,22 +46,17 @@ import type { WebAuthnConfig } from "../config.mjs";
 /**
  * The public-key algorithms this provider offers at registration and accepts
  * at verification: EdDSA (-8), ES256 (-7), RS256 (-257), most preferred
- * first.
+ * first (README, "Dependency: SimpleWebAuthn").
  *
  * Stated here rather than left to `@simplewebauthn/server`, whose default is
- * a mutable module-level array that 14.0.0 prepends ML-DSA-44 to whenever
- * the runtime reports support for it. Two things follow from that, and
- * neither belongs in a dependency bump: what an authenticator is offered
- * would depend on the Node build the provider happens to run on, and a
- * credential registered under an algorithm one deployment can verify may
- * reach another that cannot. A credential outlives the process that
- * registered it, so the set is a decision, not a default.
+ * a mutable module-level array it prepends ML-DSA-44 to whenever the runtime
+ * reports support: what an authenticator is offered would depend on the Node
+ * build, and a credential registered under an algorithm one deployment can
+ * verify may reach another that cannot. A credential outlives the process
+ * that registered it, so the set is a decision, not a default.
  *
- * Adopting ML-DSA-44 deliberately is #554.
- *
- * Frozen, and exported on the barrel: the library's default was a mutable
- * array anything could push to, and the design vocabulary guards this as the
- * one definition (a second literal `supportedAlgorithmIDs` fails CI). A
+ * Frozen, and exported on the barrel. The design vocabulary guards this as
+ * the one definition (a second literal `supportedAlgorithmIDs` fails CI). A
  * registration outside the set is refused as `algorithm_not_allowed`.
  */
 export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = Object.freeze([-8, -7, -257]);
@@ -81,26 +67,21 @@ export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = Object.freeze([-8, -7, 
 
 export async function generateRegistrationOptionsForUser(args: {
 	readonly config: WebAuthnConfig;
-	/** Opaque user handle per WebAuthn §5.4.3 / spec §2.3.2. No PII stored here. */
+	/** Opaque user handle per WebAuthn §5.4.3. No PII stored here. */
 	readonly userId: string;
 	readonly userName: string;
 	readonly userDisplayName: string;
 	readonly excludeCredentials: readonly WebAuthnCredential[];
 	/**
-	 * Ceremony challenge, ArrayBuffer-backed.
-	 *
-	 * `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array` (which since
-	 * TypeScript 5.7 means `Uint8Array<ArrayBufferLike>` and so admits a
-	 * SharedArrayBuffer backing) because `@simplewebauthn/server` >= 13.3.2
-	 * requires the non-shared form. Both callers build this with
-	 * `crypto.getRandomValues(new Uint8Array(32))`, which already produces
-	 * exactly this type — the bare annotation was widening a value that was
-	 * never actually wide.
+	 * Ceremony challenge, ArrayBuffer-backed: `@simplewebauthn/server` requires
+	 * the non-shared form, and a bare `Uint8Array` (`Uint8Array<ArrayBufferLike>`)
+	 * admits a SharedArrayBuffer backing. Both callers build it with
+	 * `crypto.getRandomValues(new Uint8Array(32))`, which has exactly this type.
 	 */
 	readonly challenge: Uint8Array<ArrayBuffer>;
 }): Promise<PublicKeyCredentialCreationOptionsJSON> {
-	// SimpleWebAuthn v13.1.1 removed "indirect" from attestationType.
-	// Map "indirect" → "none" (least-privilege fallback).
+	// SimpleWebAuthn's attestationType has no "indirect": map it to "none"
+	// (least-privilege fallback).
 	const attestationType =
 		args.config.attestationPreference === "indirect"
 			? ("none" as const)
@@ -130,8 +111,7 @@ export async function generateRegistrationOptionsForUser(args: {
 		authenticatorSelection: {
 			userVerification: args.config.userVerification,
 			// residentKey: "preferred" enables discoverable credentials by default
-			// per WebAuthn §2.4 / spec §2.4. Deployers needing strict passkey-only
-			// enforcement may override to "required" via a future config field.
+			// per WebAuthn §2.4.
 			residentKey: "preferred",
 		},
 		challenge: args.challenge,
@@ -150,17 +130,7 @@ export async function generateAuthenticationOptionsForUser(args: {
 	 * so the client browser prompts the user to pick an available passkey).
 	 */
 	readonly allowCredentials: readonly WebAuthnCredential[];
-	/**
-	 * Ceremony challenge, ArrayBuffer-backed.
-	 *
-	 * `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array` (which since
-	 * TypeScript 5.7 means `Uint8Array<ArrayBufferLike>` and so admits a
-	 * SharedArrayBuffer backing) because `@simplewebauthn/server` >= 13.3.2
-	 * requires the non-shared form. Both callers build this with
-	 * `crypto.getRandomValues(new Uint8Array(32))`, which already produces
-	 * exactly this type — the bare annotation was widening a value that was
-	 * never actually wide.
-	 */
+	/** Ceremony challenge, ArrayBuffer-backed, as for registration. */
 	readonly challenge: Uint8Array<ArrayBuffer>;
 }): Promise<PublicKeyCredentialRequestOptionsJSON> {
 	return swGenAuth({

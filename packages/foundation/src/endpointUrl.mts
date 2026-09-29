@@ -15,50 +15,24 @@
  */
 
 /**
- * Transport validation for the Store endpoints `HttpUserRepository` posts to.
+ * Transport validation for the Store endpoints `HttpUserRepository` posts to:
+ * `https://`, or `http://` to a loopback host only (`localhost`,
+ * `127.0.0.0/8`, `[::1]`), because these endpoints receive plaintext user
+ * credentials. See README, Constructor validation.
  *
- * These endpoints receive **plaintext user credentials** — a password on
- * `authenticateUrl`, a bearer-ish token on `authenticateByTokenUrl`. An
- * `http://` URL therefore does not merely weaken the connection, it publishes
- * the credential to every hop on the path. A single mistyped environment
- * variable was enough to do that, and nothing anywhere refused it (#285).
- *
- * ## The loopback carve-out
- *
- * `http://` is accepted for **loopback hosts only** — `localhost`, anything in
- * `127.0.0.0/8`, and `[::1]`. Traffic to a loopback address never leaves the
- * machine, so there is no path to eavesdrop on, and requiring TLS there would
- * force every local development setup and every in-process test fixture to
- * provision a certificate for no security gain. Any other host — including a
- * private-range address such as `10.0.0.5` or a service name on a container
- * network — must use `https://`: those cross a network the deployment does not
- * control end to end, and "internal" is not a synonym for "encrypted".
- *
- * The rule matches `oauth.jwt.issuer`'s (`checkCanonicalIssuer` in
- * `@o3co/auth-provider-core`) so operators meet one policy, not two. It is kept
- * separate rather than reused because the constraints genuinely differ: an
- * issuer may not carry a query string or fragment (OIDC Discovery derives the
- * metadata URL from it), while a Store endpoint is an ordinary POST target for
- * which `?tenant=acme` is legitimate. The loopback *predicate* the carve-out
- * runs on, though, is shared vocabulary: `isLoopbackHostname` comes from
- * `@o3co/auth-provider-core` (`net/loopback`, #364), the same definition the
- * session redirect policy consumes, so the carve-outs cannot drift apart.
- *
- * ## What a message names of an endpoint
- *
- * Every failure the repository throws names the endpoint it was talking to,
- * and every caller logs what it throws. A message names the endpoint by its
- * origin and path alone ({@link endpointForMessage}): a query string is
- * accepted in a Store URL, and a deployment may carry a credential there
- * (`?api_key=…`) despite the README's advice, so the query never reaches a
- * message — nor does a fragment, which no request sends anyway.
+ * Kept separate from `oauth.jwt.issuer`'s rule (core's `checkCanonicalIssuer`)
+ * because an issuer may not carry a query string, while a Store endpoint may.
+ * The loopback predicate is core's `isLoopbackHostname`, the session redirect
+ * policy's too, so the carve-outs cannot drift apart. A message names an
+ * endpoint by origin and path alone ({@link endpointForMessage}): a query may
+ * carry a credential, and every caller logs what the repository throws.
  */
 
 import { isLoopbackHostname } from "@o3co/auth-provider-core";
 
 // Re-exported unchanged: this module's callers (and its tests) read the
 // predicate as part of the endpoint-validation surface. The definition lives
-// in core (#364) — re-exporting is the sanctioned way to surface it.
+// in core.
 export { isLoopbackHostname };
 
 /** Why a candidate endpoint was rejected, phrased for a boot-time error. */
@@ -159,14 +133,12 @@ export function assertSecureEndpoint(value: unknown, field: string): string {
 }
 
 /**
- * `url` as a message names it: its origin and path — `https://store.example
- * /authenticate`, as the WHATWG URL parser normalises them (a default port
- * dropped, scheme and host lower-cased, an IPv6 literal in brackets) — and
- * never its query or fragment, which may carry a credential. Anything that is
- * not an http or https URL is named by what it is not: its origin would be
- * `"null"` and its "path" the rest of it (`data:…`, `mailto:…`), and the
- * constructor refuses such a Store URL anyway — but a caller can hand
- * `StoreCredentialRefusedError` anything.
+ * `url` as a message names it: its origin and path, as the WHATWG URL parser
+ * normalises them (`https://store.example/authenticate`), and never its query
+ * or fragment, which may carry a credential. Anything that is not an http or
+ * https URL is named by what it is not, since its origin would be `"null"` and
+ * its path the rest of it (`data:…`): the constructor refuses such a Store URL,
+ * but a caller can hand `StoreCredentialRefusedError` anything.
  */
 export function endpointForMessage(url: string): string {
 	try {

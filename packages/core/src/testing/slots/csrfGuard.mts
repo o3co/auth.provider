@@ -15,44 +15,34 @@
  */
 
 /**
- * The contract suite of the `csrfGuard` slot (#728, #710) and its test
- * double.
+ * The contract suite of the `csrfGuard` slot and its test double.
  *
- * `csrfGuardContract(input)` drives a guard over the fake requests of
- * `fake-http.mts`, served on one origin, and holds it to the session
- * package's rules.
+ * `csrfGuardContract(input)` drives a guard over `fake-http.mts` requests on
+ * one origin and holds it to the session package's rules:
  *
- * - **A request** (`check`, `middleware`, #272): an `Origin` — or, without
- *   one, a `Referer` — that names another origin (`null`, another scheme,
- *   another host) is refused whatever the request carries, a valid token
- *   or a same-origin `Referer` included — the `Origin` is authoritative; one that names this origin, or the trusted origin the input
- *   names, is accepted without a token; with neither, the token decides.
- *   Absent is refused. The one `issue` set is accepted, echoed in
- *   `headerName` or in `bodyField` when the guard names one. One that does
- *   not match its cookie, one with no cookie beside it, one with a
- *   character of its middle or its end changed (sent as cookie and header
- *   alike: an unsigned token passes a comparison of the two), and one the
- *   guard did not sign are refused; with `withClock`, so is one past its
- *   lifetime — the suite moves the clock 400 days on, past any lifetime a
- *   session keeps. `check` never throws on a malformed cookie, `Origin` or
- *   `Referer`; the middleware runs the route exactly when `check` accepts,
- *   answering `403 access_denied` otherwise.
- * - **A navigation** (`checkNavigation`, the link start): `Sec-Fetch-Site`
- *   `same-origin` or `none` is accepted, `cross-site` refused whatever the
- *   `Referer`; otherwise the `Origin` or `Referer` decides as above, and a
- *   navigation that names neither is refused — a token never counts.
- * - **The token's cookie** (`issue`): named `cookieName`, readable by
- *   script, on path `/`; secure and host-only under a `__Host-` name,
- *   secure under `__Secure-`; and with `sessionCookie`, secure, same-site
- *   and scoped as the session cookie is.
- * - **The guard** is frozen.
+ * - Requests (`check`, `middleware`): an `Origin` (or, without one, a
+ *   `Referer`) naming another origin is refused whatever else the request
+ *   carries, since the `Origin` is authoritative; one naming this origin or
+ *   the input's trusted origin is accepted without a token; with neither, the
+ *   token decides. Accepted: the token `issue` set, echoed in `headerName` or
+ *   `bodyField`. Refused: no token, one not matching its cookie or without
+ *   one, a tampered one (sent as cookie and header alike, since an unsigned
+ *   token passes their comparison), one the guard did not sign, and with
+ *   `withClock` an expired one. `check` never throws on malformed input; the
+ *   middleware runs the route exactly when `check` accepts, else answers
+ *   `403 access_denied`.
+ * - Navigations (`checkNavigation`, the link start): `Sec-Fetch-Site`
+ *   `same-origin` / `none` is accepted and `cross-site` refused; otherwise
+ *   `Origin` or `Referer` decides as above, and naming neither is refused. A
+ *   token never counts.
+ * - The token cookie (`issue`): named `cookieName`, script-readable, path `/`;
+ *   secure and host-only under `__Host-`, secure under `__Secure-`; with
+ *   `sessionCookie`, secure, same-site and scoped like the session cookie.
+ * - The guard is frozen.
  *
- * Without `withClock` the suite does not check a token's expiry: a clock
- * cannot be set in a provider that does not take one.
- *
- * `createTestCsrfGuard` keeps these rules with a signing key of its own,
- * drawn when it is built, beside the session cookie it is given (the
- * fixture's by default). Published on `@o3co/auth-provider-core/testing`.
+ * `createTestCsrfGuard` keeps these rules with its own signing key beside the
+ * given session cookie (the fixture's by default). Published on
+ * `@o3co/auth-provider-core/testing`.
  */
 
 import assert from "node:assert/strict";

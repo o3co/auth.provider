@@ -16,19 +16,13 @@
 
 /**
  * The `/session` routes for a browser's own login and logout — `GET /csrf`,
- * `POST /login`, `POST /logout` — with the CSRF guard and the login rate limit
- * in front of them. A password login verifies the credentials against
- * `UserRepository`, then asks core's session admission before anything is
- * written (`admitPrimary`, the session-admission ADR's D5): when every
- * registered requirement answers `establish`, it establishes the session
- * through `establishSession` (`../establish-session.mts`), the tail it shares
- * with the federation callback, and answers with a fresh CSRF token; when a
- * requirement interrupts, it regenerates the express session, leaves it
- * unauthenticated, opens the requirement's ceremony bound to the regenerated
- * session, saves it, and answers the requirement's `403`. A logout
- * invalidates the records the session owns before destroying the cookie
- * session. The package README says what each route answers and what a logout
- * reaches.
+ * `POST /login`, `POST /logout` — behind the CSRF guard and the login rate
+ * limit. A password login verifies credentials, then asks session admission
+ * (`admitPrimary`) before anything is written: if every requirement
+ * establishes, `establishSession` writes the session and a fresh CSRF token
+ * is returned; if one interrupts, its ceremony is opened on a regenerated,
+ * unauthenticated session and its `403` answered. A logout invalidates the
+ * records the session owns before destroying the cookie session.
  */
 
 import {
@@ -105,22 +99,13 @@ export const createRouter = (
 		config: AppConfig;
 		userSessionStore?: UserSessionStore;
 		/**
-		 * Subject-keyed index of live sessions (#296).
-		 *
-		 * Written on every login so a credential change can enumerate what to
-		 * revoke. Without it `revokeAllForSubject` has nothing to find and the
-		 * whole mechanism is inert, which is why its absence is reported rather
-		 * than assumed.
+		 * Subject-keyed index of live sessions, written on every login so a
+		 * credential change can enumerate what to revoke.
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
 		/**
-		 * Upstream-IdP tokens held for the session, dropped on logout.
-		 *
-		 * The federation *routes* have always taken this store; the logout
-		 * handler takes it too so ending a session also drops what the session
-		 * accumulated at the IdP. Optional here for the same reason
-		 * `userSessionStore` is: a composition that federates nothing wires
-		 * none, and the handler simply has nothing to remove.
+		 * Upstream-IdP tokens held for the session, dropped on logout. Optional:
+		 * a composition that federates nothing wires none.
 		 */
 		federationTokenStore?: FederationTokenStore;
 		/**
@@ -130,48 +115,31 @@ export const createRouter = (
 		 */
 		sessionFederationIndex?: SessionFederationIndex;
 		/**
-		 * Shared rate limiter for the login brute-force guard.
-		 *
-		 * `/session/login` used to run express-rate-limit's per-process
-		 * MemoryStore. Behind a load balancer every replica kept its own
-		 * buckets, so the configured limit was really limit × replicas and it
-		 * reset on every deploy — while the OAuth endpoints already had a
-		 * Redis-backed limiter this route could not reach (#270).
-		 *
-		 * When omitted the router builds a private in-memory limiter with the
-		 * same spec and warns, so a deployment that wires no limiter keeps the
-		 * protection it had rather than losing it — but is told the guard is
-		 * per-process.
+		 * Shared rate limiter for the login brute-force guard, so the limit holds
+		 * across replicas. Omitted, the router builds a per-process in-memory
+		 * limiter with the same spec and warns (or refuses under
+		 * `deployment.mode = "multi"`).
 		 */
 		rateLimiter?: RateLimiter;
 		/**
-		 * Structured pipeline for the login guard's `rate_limit.unavailable`
-		 * emission during a limiter outage (#325 — the OAuth endpoints emitted
-		 * it, this route did not; the shared guard emits it on both). Optional:
-		 * when absent no audit events are emitted, matching the OAuth routers'
-		 * treatment of the slot.
+		 * Receives the login guard's `rate_limit.unavailable` event during a
+		 * limiter outage. Absent: no audit events.
 		 */
 		auditSink?: AuditSink;
 		/** Session TTL in milliseconds. Default: 24h. */
 		sessionTtlMs?: number;
 		logger?: Logger;
 		/**
-		 * CSRF mechanism for the state-changing session routes (#272).
-		 *
-		 * Built from the `session` config slice when omitted. Inject one to
-		 * share a single instance with routes this router does not own — the
-		 * token is signed, not stored, so two instances built from the same
-		 * secret already accept each other's tokens; the slot exists so a
-		 * composition root can also *issue* tokens from its own pages.
+		 * CSRF mechanism for the state-changing routes; built from the `session`
+		 * config slice when omitted. Tokens are signed, not stored, so instances
+		 * built from one secret accept each other's; inject one so a composition
+		 * root can issue tokens from its own pages.
 		 */
 		csrf?: CsrfProtection;
 		/**
-		 * The registered session requirements (the session-admission ADR's D1,
-		 * D5): the synthetic key `sessionRequirementResolver`, which
-		 * `sessionModule` passes, or `resolverForTests` in a test. Required: a
-		 * password login asks them through `admitPrimary` before anything is
-		 * written, and a missing resolver, or one the boot planner did not
-		 * build, is refused here, at construction (core's `checkResolver`).
+		 * The registered session requirements, asked through `admitPrimary`
+		 * before a password login writes anything. Required: a missing resolver,
+		 * or one the boot planner did not build, is refused at construction.
 		 */
 		requirements: SessionRequirementResolver;
 	},
@@ -180,10 +148,8 @@ export const createRouter = (
 	const router = express.Router();
 
 	/**
-	 * What the login hands `admitPrimary`: the resolver, and the logger its
-	 * outage is logged on. `admitPrimary` reads nothing else — the session
-	 * store and the revocation boundary are the consumers' of a session that
-	 * already exists — and the vouchable table is empty, as nothing is
+	 * What the login hands `admitPrimary`. The revocation boundary concerns
+	 * sessions that already exist, and the acr table is empty since nothing is
 	 * selected.
 	 */
 	const admissionDeps: AdmissionDeps = {
@@ -195,14 +161,11 @@ export const createRouter = (
 		auditSink,
 	};
 
-	// #272: the previous guard read `Origin`, and called `next()` when it was
-	// absent. `sameSite=lax` covers session-riding, but login CSRF — forcing a
-	// victim's browser to authenticate into an attacker-controlled account —
-	// needs none of the victim's cookies, so "no Origin header" was a complete
-	// bypass of the only check on the route. The trust list was
-	// `cors.allowedOrigins`, which answers a different question; CSRF trust is
-	// now stated on `session.csrf.trustedOrigins`. See `../csrf.mjs` for the
-	// acceptance rule.
+	// Login CSRF (forcing a victim to authenticate into an attacker's account)
+	// needs none of the victim's cookies, so `sameSite=lax` does not cover it
+	// and a missing `Origin` must not bypass the check. CSRF trust is
+	// `session.csrf.trustedOrigins`, not `cors.allowedOrigins`; the acceptance
+	// rule is in `../csrf.mjs`.
 	const sessionSlice = config.session as unknown as SessionCsrfConfigSlice;
 	const csrfProtection = csrf ?? createCsrfProtectionFromConfig(sessionSlice);
 	const verifyCsrf = createCsrfGuard({
@@ -211,26 +174,19 @@ export const createRouter = (
 		logger,
 	});
 
-	// The login guard now runs on the same `RateLimiter` component the OAuth
-	// endpoints use, so a deployment that wires the Redis adapter gets one
-	// shared bucket set across replicas instead of one per process (#270).
-	//
-	// `login` is the key prefix by which an adapter resolves this route's spec;
-	// it is the example key in `RateLimiter.check`'s own contract. Both bundled
-	// adapters seed `limits.login` from `config.rateLimit.login`, so the
-	// documented window and limit apply without the operator restating them.
+	// The login guard runs on the same `RateLimiter` as the OAuth endpoints,
+	// so a shared adapter gives one bucket set across replicas. `login` is the
+	// key prefix adapters resolve the spec by; the bundled ones seed it from
+	// `config.rateLimit.login`.
 	const loginLimitSpec = {
 		limit: config.rateLimit.login.limit,
 		windowSeconds: Math.max(1, Math.ceil(config.rateLimit.login.windowMs / 1000)),
 	};
 	if (rateLimiter === undefined) {
-		// #474: the per-process fallback below is replica-unsafe state of the
-		// same kind the boot guard refuses (#271), and it sat outside the guard
-		// because it is built here rather than declared on a manifest. Read the
-		// same three-state switch: "multi" refuses — the configured limit would
-		// really be limit × replicas, reset on every deploy — "single" is silent,
-		// unset warns. Thrown from a route factory, the planner wraps this as
-		// `contribute-factory-failed` with this error as its `cause`.
+		// The per-process fallback is replica-unsafe state, so the deployment
+		// mode decides: "multi" refuses at boot (the limit would really be
+		// limit × replicas, reset on every deploy), "single" is silent, unset
+		// warns. The planner wraps this throw as `contribute-factory-failed`.
 		const deploymentMode = config.deployment?.mode;
 		if (deploymentMode === "multi") {
 			throw new BootError({
@@ -261,17 +217,10 @@ export const createRouter = (
 			defaultLimit: loginLimitSpec,
 		});
 
-	// #325: the check + outage policy is core's `createRateLimitGuard`, shared
-	// with the OAuth endpoints — same `failMode` read from the same config key:
-	// a Redis outage should not mean "login sheds load" here and "login lets
-	// everything through" there. The guard also emits the
-	// `rate_limit.unavailable` audit event during an outage, which this route's
-	// hand-rolled copy of the policy did not.
-	//
-	// `RateLimit-*` are emitted as they were under express-rate-limit
-	// (`standardHeaders: true`); since #325 the OAuth endpoints emit them too.
-	// `headerFallback` backs the headers with the documented login spec when
-	// the adapter reports no applied limit / reset of its own.
+	// The check and outage policy are core's `createRateLimitGuard`, shared
+	// with the OAuth endpoints (same `failMode`, same `rate_limit.unavailable`
+	// audit event). `RateLimit-*` headers fall back to the documented login
+	// spec when the adapter reports none.
 	const loginRateLimit = createRateLimitGuard({
 		limiter: loginLimiter,
 		tag: "login",
@@ -281,19 +230,10 @@ export const createRouter = (
 		headerFallback: loginLimitSpec,
 	});
 
-	// #405: `redirect_to` is held to the same exact-match, fail-closed allowlist
-	// #278 gave the federation entry point, and for the same reason. The rule
-	// this replaced was the pre-#278 one verbatim — any absolute http(s) URL,
-	// narrowed to the cookie domain only when one was configured — so with
-	// `session.domain` at its `null` default the route stored any URL on the
-	// internet under `req.session.redirectTo`. Nothing in this repository
-	// redirects to that key today, but it is declared on `SessionData`, and an
-	// MFA login transaction carries it back to the page (`MfaTransaction.redirectTo`),
-	// so what an embedder reads back has to be a value the deployment named.
-	//
-	// Built here rather than per request so a dead allowlist entry (a typo, or
-	// a target outside `session.domain`) fails boot instead of refusing logins
-	// at runtime with nothing in the config looking wrong.
+	// `redirect_to` is held to the same exact-match, fail-closed allowlist as
+	// the federation entry point: it is stored on the session and carried back
+	// to pages (e.g. `MfaTransaction.redirectTo`), so it must be a value the
+	// deployment named. Built once so a dead allowlist entry fails boot.
 	const redirectPolicy = createRedirectAllowlistValidator({
 		redirectAllowlist: config.session.redirectAllowlist,
 		sessionDomain: config.session.domain,
@@ -302,73 +242,26 @@ export const createRouter = (
 	});
 
 	/**
-	 * Invalidates the server-side records a logging-out session owns.
+	 * Invalidates the server-side records a logging-out session owns, so tokens
+	 * bound to its `sid` stop introspecting `active` and answering at
+	 * `/userinfo`.
 	 *
-	 * Why this exists: `/session/logout` used to call `req.session.destroy` and
-	 * nothing else, so the `UserSession` record its `sid` named stayed alive.
-	 * #506 stamped `sid` on the `session` grant's access token and gave
-	 * `/oauth/introspect` the liveness check `/oauth/userinfo` already ran —
-	 * both resolve that record. With it alive, a token minted from a
-	 * logged-out session kept introspecting `active: true` and kept answering
-	 * at `/userinfo` for its full lifetime, in exactly the BFF / proxy
-	 * topology whose logout IS this endpoint. `/oauth/logout` was unaffected;
-	 * it runs the full cascade.
+	 * Narrower than `/oauth/logout`'s cascade by layering: `cascadeLogout`
+	 * lives in the oauth package, which this package must not depend on. This
+	 * deletes what the session module owns: the `UserSession` record (primary:
+	 * every liveness check resolves it), its subject-index entry, and the
+	 * session's federation tokens and index (hygiene: unreachable once the
+	 * record is gone, but holding upstream refresh tokens at rest).
+	 * Refresh-token families are NOT revoked: a refresh token from an
+	 * `/authorize` flow is revoked only by `/oauth/logout`.
 	 *
-	 * SCOPE — deliberately narrower than `/oauth/logout`'s cascade, and the
-	 * line is a layering fact, not an oversight. `cascadeLogout` lives in
-	 * `@o3co/auth-provider-oauth`; this package depends only on core, and the
-	 * two are siblings (`packages/oauth/src/routes/logout.mts` records the
-	 * same edge as forbidden in the other direction). Reaching the cascade
-	 * would mean either taking a dependency on oauth or writing a second
-	 * implementation of a documented algorithm — the drift
-	 * `docs/design-vocabulary.md` exists to prevent. So this endpoint
-	 * invalidates what the session module's own dependency set already owns:
-	 *
-	 *   - `userSessionStore.delete` — PRIMARY. The record every liveness check
-	 *     resolves; deleting it is what closes the reported gap.
-	 *   - `subjectSessionIndex.removeSid` — symmetry with the login's rollback
-	 *     (`../establish-session.mts`), which already pairs these two. A
-	 *     surviving entry has `revokeAllForSubject` (#296) enumerate a sid that
-	 *     no longer exists.
-	 *   - `federationTokenStore` / `sessionFederationIndex` `removeBySid` —
-	 *     hygiene rather than containment: once the `UserSession` record is
-	 *     gone the federation-token endpoint cannot resolve the session, so
-	 *     the entries are already unreachable. Removed because leaving them to
-	 *     TTL keeps upstream-IdP refresh tokens at rest for no reason.
-	 *
-	 * NOT done here: refresh-token family revocation, and the RP-registry /
-	 * family-index cleanup that goes with it. Those need
-	 * `refreshTokenFamilyRevocation`, `sessionFamilyIndex` and
-	 * `sessionRPRegistry`, which this module declares none of — `module.mts`
-	 * records the latter two as oauth-package concerns. It is a real
-	 * difference and an operator has to know it: a browser that logged in
-	 * here and then ran an `/authorize` → `authorization_code` flow holds a
-	 * refresh token whose family only `/oauth/logout` revokes. The `session`
-	 * grant itself issues no refresh token, so the topology this fix is for
-	 * has no family to revoke. Both READMEs and the operator runbook state
-	 * which endpoint reaches what.
-	 *
-	 * ORDERING — primary invalidation FIRST, then best-effort hygiene, then
-	 * the cookie. This inverts `cascadeLogout`'s §6.2 order (fanout first,
-	 * `delete` last) on purpose: §6.2 defers the delete so a FAILED cascade
-	 * stays retryable through the sid it did not erase, and this endpoint
-	 * offers no retry of these steps — it never reports their failure to the
-	 * caller, and once the cookie is destroyed the caller has lost the sid. With retry off the table the
-	 * remaining criterion is which failure hurts most, and that is the one
-	 * that leaves a token still honoured. So the delete runs first and is not
-	 * conditional on the hygiene that follows.
-	 *
-	 * FAILURE — every step here is best-effort and logged, never propagated:
-	 * an outage of these stores must not turn a logout into a 5xx that leaves
-	 * the user holding a live cookie — the cookie is the half this endpoint can
-	 * always deliver, and a 5xx would invite a retry of work that partly
-	 * succeeded. The residue of a failed delete is covered from the other side
-	 * — `/authorize` refuses a session whose `sid` does not resolve, and a
-	 * store that cannot answer `delete` will not answer `get` either, which the
-	 * introspection and userinfo liveness checks both fail closed on. The one
-	 * exception is the cookie's own destroy, in the route: when the cookie
-	 * store cannot destroy the browser session the user is not logged out, so
-	 * that answers `503` and the client retries.
+	 * The delete runs first, unlike the cascade's delete-last order: that order
+	 * keeps a failed cascade retryable, but this endpoint offers no retry, so
+	 * the failure to avoid is a token still honoured. Every step is best effort
+	 * and logged, never propagated: a store outage must not turn logout into a
+	 * 5xx while the cookie, the half this endpoint can always deliver,
+	 * survives. A failed delete is covered by the liveness checks failing
+	 * closed.
 	 */
 	const invalidateSessionRecords = async (sid: string, sub: string | undefined): Promise<void> => {
 		if (userSessionStore) {
@@ -408,15 +301,11 @@ export const createRouter = (
 	};
 
 	/**
-	 * A store `/session/login` cannot do without could not answer — the user
-	 * directory, the `UserSession` record, the cookie session's regeneration
-	 * or save, or an interrupting requirement's `open` (its own record, under
-	 * the requirement's name, step `open`):
-	 * the server's outage, never a verdict on the credentials. One line at
-	 * error level, `login_store_unavailable`, `store` naming which and `step`
-	 * the operation, with the error's projection — never the error, which can
-	 * carry what the store was sent — and never the username. The caller
-	 * answers `503 temporarily_unavailable`.
+	 * A store `/session/login` cannot do without could not answer (user
+	 * directory, `UserSession`, cookie session regenerate/save, or an
+	 * interrupting requirement's `open`): the server's outage, never a verdict
+	 * on the credentials. Logged once as `login_store_unavailable` with the
+	 * error's projection — never the error or the username. Answered `503`.
 	 */
 	const loginStoreUnavailable = (
 		store: "user_repository" | "user_session" | "cookie_session" | RequirementName,
@@ -428,11 +317,8 @@ export const createRouter = (
 	};
 
 	/**
-	 * A best-effort rollback step of a login that failed after its
-	 * `UserSession` was created could not run: one warn, `login_cleanup_failed`,
-	 * with `store`, `step`, the `sid` and the error's projection.
-	 * `establishSession` runs the rest of the rollback, and the login's own
-	 * answer stands.
+	 * A best-effort rollback step failed after the `UserSession` was created:
+	 * one warn, `login_cleanup_failed`. The login's own answer stands.
 	 */
 	const loginCleanupFailed = (
 		store: "user_session" | "subject_session_index",
@@ -492,12 +378,9 @@ export const createRouter = (
 
 				const redirectTo = req.body.redirect_to as string | undefined;
 
-				// The session-admission ADR's D5: the user is verified and nothing is
-				// written — the point every registered requirement is asked, over the
-				// primary core builds from this login's facts (`recorded` is the
-				// password kind's; a route cannot hand one in). An outage is logged
-				// once, by admission, and answered as one; an interruption is the
-				// requirement's ceremony.
+				// The user is verified and nothing is written yet: ask every
+				// registered requirement over the primary core builds from this
+				// login's facts. An outage is logged once, by admission.
 				const admission = await admitPrimary(
 					admissionDeps,
 					passwordPrimary({
@@ -514,12 +397,10 @@ export const createRouter = (
 					return res.status(503).json(admissionUnavailable(admission.store));
 				}
 				if (admission.outcome === "interrupt") {
-					// A requirement interrupted the login: regenerate, open its
-					// ceremony bound to the regenerated session, save, and answer its
-					// `403` with a fresh CSRF token — or `503`, the cookie session
-					// dropped, logged once as `login_store_unavailable`
-					// (`../answer-interruption.mts`, which a requirement's completion
-					// calls too). No `UserSession` is written here.
+					// A requirement interrupted: regenerate, open its ceremony on the
+					// regenerated session, save, and answer its `403` with a fresh
+					// CSRF token — or `503` with the cookie session dropped. No
+					// `UserSession` is written.
 					await answerInterruption(admission, {
 						req,
 						res,
@@ -531,18 +412,11 @@ export const createRouter = (
 					return;
 				}
 
-				// Every requirement answered `establish`. The tail of the login — the
-				// `UserSession` record, its subject-index entry, the express session's
-				// regeneration, its authenticated state and its save — is
-				// `establishSession`'s (`../establish-session.mts`), shared with the
-				// federation callback, and it writes the establishment's primary: for
-				// a password login (#481, the MFA ADR's D9) `amr` `["pwd"]` (RFC 8176),
-				// primary `pwd`, no second factor verified — composed by core, never
-				// here. What this route adds is its own log vocabulary: a store that
-				// could not answer is one error line, `login_store_unavailable`, and a
-				// rollback step that failed one warn, `login_cleanup_failed`. The login
-				// answers `503`, with everything written rolled back and the request's
-				// cookie session dropped.
+				// Every requirement answered `establish`: `establishSession` writes
+				// the establishment's primary (`amr` `["pwd"]`, RFC 8176, composed by
+				// core). This route supplies its log vocabulary
+				// (`login_store_unavailable`, `login_cleanup_failed`); a failure is
+				// `503` with everything rolled back.
 				const established = await establishSession(admission.establishment, {
 					req,
 					...(userSessionStore === undefined ? {} : { userSessionStore }),
@@ -586,10 +460,8 @@ export const createRouter = (
 			},
 		)
 		.post("/logout", verifyCsrf, async (req: Request, res: Response) => {
-			// Read the session's identifiers BEFORE destroying it: `destroy`
-			// empties the bag, so a handler that reads `sid` afterwards has
-			// nothing left to invalidate. This is the whole reason the endpoint
-			// used to invalidate nothing but the cookie.
+			// Read the session's identifiers before destroying it: `destroy`
+			// empties the bag.
 			const rawSid = req.session.sid;
 			const sid = typeof rawSid === "string" && rawSid.length > 0 ? rawSid : undefined;
 			const rawSub = req.session.user?.id;
@@ -603,13 +475,10 @@ export const createRouter = (
 				req.session.destroy((err: unknown) => resolve(err ?? null));
 			});
 			if (destroyErr) {
-				// The cookie store could not destroy the browser session: its
-				// outage, answered as one so the client retries. The records are
-				// already gone by now, so the surviving cookie buys nothing:
-				// `/authorize`'s R1b check treats an `isAuthenticated` session whose
-				// `sid` no longer resolves as unauthenticated, and
-				// `/oauth/introspect` and `/oauth/userinfo` refuse the tokens it
-				// minted.
+				// The cookie store could not destroy the browser session: `503` so
+				// the client retries. The records are already gone, so the surviving
+				// cookie is refused at `/authorize` and its tokens at
+				// `/oauth/introspect` and `/oauth/userinfo`.
 				logger.error(
 					{
 						...(sid === undefined ? {} : { sid }),

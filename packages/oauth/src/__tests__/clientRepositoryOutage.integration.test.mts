@@ -16,20 +16,15 @@
 
 /**
  * A client repository that cannot answer is the server's outage at every
- * client-authenticated endpoint, never `invalid_client`.
- *
- * Client authentication answered a lookup that threw — `findById` or
- * `authenticate`, for a secret or a `private_key_jwt` assertion — with `401
- * invalid_client`: "client authentication failed" (RFC 6749 §5.2), which a
- * client reads as a bad secret or a revoked registration. The client did
- * nothing wrong, and the request is refused either way, so the answer is
- * `503 temporarily_unavailable`, logged at error level with the error's
- * projection.
+ * client-authenticated endpoint, never `invalid_client`. A lookup that throws
+ * (`findById` or `authenticate`, for a secret or a `private_key_jwt`
+ * assertion) is `503 temporarily_unavailable`, logged at error level with the
+ * error's projection: `401 invalid_client` (RFC 6749 §5.2) would read to the
+ * client as a bad secret or a revoked registration.
  *
  * Driven through the real router (`createOAuthRouter`) at `/oauth/token`,
- * `/oauth/introspect` and `/oauth/revoke`, with a repository whose lookup
- * rejects. The control: a client the working repository does not know is
- * still `401 invalid_client`.
+ * `/oauth/introspect` and `/oauth/revoke`. The control: a client the working
+ * repository does not know is still `401 invalid_client`.
  */
 
 import { randomUUID } from "node:crypto";

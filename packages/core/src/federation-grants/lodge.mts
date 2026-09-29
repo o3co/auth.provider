@@ -15,49 +15,32 @@
  */
 
 /**
- * Lodging an intent (#593, D6, D16, slice 6): the one place that orders the two
- * writes an acquisition makes, and the rules a backend's request is held to
- * before either is made.
+ * Lodging a federation-grant intent: the one place that orders the two writes
+ * an acquisition makes, and the rules a backend's request is held to first.
  *
- * ## The order, and why it is this one
+ * Order: (1) the intent store admits the intent, reserving its place against
+ * the bound; (2) the grant store creates the `pending` grant naming it, or names
+ * it on the grant being renewed. Intent first because the bound is the only
+ * admission control in front of `createPending`; the other way round, every
+ * refused admission would already have left a pending record.
  *
- * 1. the intent store admits the intent — reserving its place against the
- *    bound;
- * 2. the grant store creates the `pending` grant naming it, or names it on the
- *    existing grant being renewed.
+ * An interruption leaves:
+ * - after the first write only: an orphan intent that no grant names, so it
+ *   fails `isCurrentIntent`, activates nothing and lapses with its deadline;
+ * - a refused second write: the intent is closed, unreachable through consent;
+ * - a second write whose answer was lost: `isCurrentIntent` is asked, and a
+ *   write that landed is kept (the flow may be in front of the user). A `false`
+ *   is never a reason to name the handle again: `nameIntent` is not safely
+ *   retryable once a newer intent may have superseded this one.
  *
- * Intent first, because the bound is the only admission control in front of
- * `createPending`. The other way round, every refused admission would already
- * have left a pending record behind, and the bound would cap nothing.
+ * Diagnostics ride non-enumerable properties (`carry.mts`), so nothing that
+ * serialises an answer carries them: a `storage` refusal's `failure`, every
+ * answer's `absorbed` store errors it does not stand for, and a
+ * `connection_not_configured` refusal's `connection`.
  *
- * What an interruption leaves:
- *
- * - after the first write, before the second: an orphan intent. It cannot pass
- *   `isCurrentIntent` — no grant names it — so it activates nothing, and it
- *   lapses with its deadline;
- * - a second write the store refused: the intent is closed, so nothing can
- *   reach it through a consent;
- * - a second write whose answer was lost: asked, not assumed.
- *   `isCurrentIntent` says whether it landed, and a write that landed is kept —
- *   undoing it would destroy a flow that may already be in front of the user.
- *   A `false` is never a reason to name the handle again: `nameIntent` is not
- *   safely retryable once a newer intent may have superseded this one.
- *
- * A `storage` refusal carries what failed (`failure`): which store, what it
- * was asked, what it threw or refused — for the route answering the 503 to
- * log once. Any answer, a success included, carries every store error it
- * does not itself stand for (`absorbed`): a second write that threw and
- * landed all the same, the question after one that could not be asked, a
- * pointer write whose re-read decided the answer, an intent that could not
- * be closed — for the route to log as what they are. A
- * `connection_not_configured` refusal carries the connection it is about
- * (`connection`). None of the three is enumerable (`carry.mts`).
- *
- * ## What it does not do
- *
- * It contacts no upstream, creates no consent, writes no credential, looks up
- * or provisions no local user, and establishes no session. `sub` is an
- * assertion here; the connect flow is what proves it (D7).
+ * It contacts no upstream, creates no consent, writes no credential, touches
+ * no local user and establishes no session. `sub` is an assertion here; the
+ * connect flow proves it.
  */
 
 import { randomBytes } from "node:crypto";
@@ -110,7 +93,7 @@ export interface FederationGrantLodgingDeps {
 	readonly now?: () => Date;
 	/** 256 bits, base64url. A seam for tests; the default is `randomBytes(32)`. */
 	readonly randomId?: () => string;
-	/** The subject's GRANTS boundary (D13) — never the sessions one. */
+	/** The subject's GRANTS boundary — never the sessions one. */
 	readonly grantsRevokedBefore: (subject: string) => Promise<Date | null>;
 	readonly revocationSkewMs: number;
 	/** `federationGrants.maxExpiresIn`, in milliseconds, as retrieval reads it. */
@@ -196,16 +179,11 @@ export interface FederationGrantLodgingFailure {
 }
 
 /**
- * A store error a lodging's answer does not stand for. None changes the
- * answer; each is for a logger, never for a response:
- *
- * - a second write (`create_pending`, `name_intent`) that threw and landed all
- *   the same, or whose re-read decided the answer instead;
- * - the question after a second write that threw (`is_current_intent`), when
- *   it could not be asked;
- * - the intent the lodging could not close after a failed write
- *   (`finish_intent`) — best effort: it can activate nothing, since no grant
- *   names it, and its deadline ends it.
+ * A store error a lodging's answer does not stand for. None changes the answer,
+ * and each is for a logger, never a response: a second write that threw yet
+ * landed (or whose re-read decided the answer), an `is_current_intent` question
+ * that could not be asked, or an intent that could not be closed after a failed
+ * write (best effort: no grant names it, and its deadline ends it).
  */
 export interface FederationGrantLodgingStepFailure {
 	readonly store: "federation_grant" | "federation_grant_intent";
@@ -244,7 +222,7 @@ export type FederationGrantReauthorizationResult =
 			/**
 			 * The grant's effective status, unchanged: a renewal does not make it
 			 * pending, and does not end a starvation — `upstream_token_ineligible`
-			 * is what a grant admitted for `scope_exceeded` still reads (#616).
+			 * is what a grant admitted for `scope_exceeded` still reads.
 			 */
 			readonly status: FederationGrantRenewableStatus;
 	  })
@@ -261,7 +239,7 @@ export type FederationGrantReauthorizationResult =
 					readonly revokedBy: FederationGrantRevokedBy;
 					/** Whether THIS call wrote the revocation — what decides whether it is audited. */
 					readonly revokedNow: boolean;
-					/** The record the write returned, when `revokedNow`: what the audit of it describes (D18). */
+					/** The record the write returned, when `revokedNow`: what the audit of it describes. */
 					readonly revoked?: FederationGrant;
 			  }
 			| {
@@ -477,7 +455,7 @@ async function close(
 
 /**
  * Lodges a first-time intent: validates what the client asked for, admits the
- * intent, and creates the `pending` grant that names it (D6, D16).
+ * intent, and creates the `pending` grant that names it.
  */
 export async function lodgeFederationGrantIntent(
 	deps: FederationGrantLodgingDeps,
@@ -606,10 +584,10 @@ async function secondWrite(
 }
 
 /**
- * Lodges a renewal of an existing grant (D6): ownership, then the revocation
- * backstop before anything else is asked of it (D13), then what a renewal can
- * and cannot mend, then the client's current permission and its request — and
- * only then the two writes.
+ * Lodges a renewal of an existing grant: ownership, then the revocation
+ * backstop before anything else is asked of it, then what a renewal can and
+ * cannot mend, then the client's current permission and its request, and only
+ * then the two writes.
  */
 export async function lodgeFederationGrantReauthorization(
 	deps: FederationGrantLodgingDeps,
@@ -668,7 +646,7 @@ function statusOf(
 	});
 }
 
-/** The statuses a renewal is admitted from, which its 201 reports unchanged (D6, #616). */
+/** The statuses a renewal is admitted from, which its 201 reports unchanged. */
 export type FederationGrantRenewableStatus =
 	| "active"
 	| "reauthorization_required"
@@ -680,14 +658,12 @@ type Admission =
 	| { readonly refused: ReauthorizationRefusal };
 
 /**
- * What a reauthorization cannot mend, as the answer it gets — or the status it
- * is admitted from, for what D6 admits: `active`, `reauthorization_required`,
- * and (#616) a grant starved of scope. An IdP that accumulates consent answers
- * a narrower grant's refresh with a wider grant's scopes, and a wider consent
- * is exactly the remedy; the other ineligibilities — a lifetime, a type, a
- * shape no consent changes — are refused as ever, and judged as they read
- * NOW, not as a marker was left: a maximum no token can satisfy outranks an
- * old scope marker. The admitted status is what the 201 reports, unchanged.
+ * What a reauthorization cannot mend, as the answer it gets, or the status it is
+ * admitted from: `active`, `reauthorization_required`, or a grant starved of
+ * scope (an IdP that accumulates consent answers a narrower grant's refresh
+ * with wider scopes, and a wider consent is the remedy). Other ineligibilities
+ * are refused, judged as they read now: a maximum no token can satisfy
+ * outranks an old scope marker. The 201 reports the admitted status unchanged.
  */
 function admission(
 	status: ReturnType<typeof effectiveFederationGrantStatus>,

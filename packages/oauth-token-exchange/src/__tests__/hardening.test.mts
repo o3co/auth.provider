@@ -15,17 +15,17 @@
  */
 
 /**
- * Hardening of the RFC 8693 exchange grant: the five gaps closed together
- * because each one alone leaves the escalation reachable through another.
+ * Hardening of the RFC 8693 exchange grant, five rules that hold together
+ * because each one alone leaves the escalation reachable through another:
  *
  * (a) the calling client's own `allowedScopes` is a ceiling on the granted
  *     scope, not merely the subject token's scope;
  * (b) `may_act` binds the impersonation exchange too, where the calling
  *     client is the actor and no `actor_token` is presented;
- * (c) the grant denies by absence of `allowedGrantTypes` (#326);
- * (d) the issued token's lifetime never exceeds the subject token's
- *     (RFC 8693 §2.2.1), and a lifetime the request asks for with
- *     `expires_in` never exceeds `oauth.accessToken.maxExpiresIn`;
+ * (c) the grant denies by absence of `allowedGrantTypes`;
+ * (d) the issued lifetime never exceeds the subject token's (RFC 8693
+ *     §2.2.1), and a requested `expires_in` never exceeds
+ *     `oauth.accessToken.maxExpiresIn`;
  * (e) a DPoP-bound issued token is advertised as `token_type: "DPoP"`
  *     (RFC 9449 §5), not as a Bearer token its own resource server refuses.
  */
@@ -283,7 +283,7 @@ describe("token exchange — may_act on the impersonation path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// (c) deny-by-absence of allowedGrantTypes (#326)
+// (c) deny-by-absence of allowedGrantTypes
 // ---------------------------------------------------------------------------
 
 describe("token exchange — deny-by-absence of allowedGrantTypes (#326)", () => {
@@ -456,10 +456,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 });
 
 describe("token exchange — a request may ask for its lifetime with expires_in", () => {
-	/**
-	 * Default 600 s, max 1800 s: room on both sides of the default, and a
-	 * default unlike the 300 s the handler used to fall back to.
-	 */
+	/** Default 600 s, max 1800 s: room on both sides, and unlike `mockConfig`'s 300 s. */
 	const lifetimeConfig = {
 		oauth: {
 			...mockConfig.oauth,

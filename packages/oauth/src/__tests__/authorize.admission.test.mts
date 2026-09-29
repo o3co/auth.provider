@@ -15,16 +15,13 @@
  */
 
 /**
- * `/authorize` on session admission (the session-admission ADR's D8, the
- * `/authorize` row): the cookie flag first, with no store read; one
- * `admitSession` after the client and the parameters are validated;
- * freshness (`max_age`, `prompt=login`) decided on the session the verdict
- * carries before the verdict is acted on; and each outcome mapped to the
- * protocol's answer. The seven pinned changes are each a test named for the
- * change; the step-up trip — the page, `redirect_to`, the ask's
- * `stepUpAskedAt` per requirement, `prompt=none` — is driven with a fixture
- * requirement through `resolverForTests`. The endpoint's other suites keep
- * pinning what did not change.
+ * `/authorize` on session admission (ADR 2026-09-28-session-admission, D8,
+ * the `/authorize` row): the cookie flag first, with no store read; one
+ * `admitSession` after the client and the parameters are validated; freshness
+ * (`max_age`, `prompt=login`) decided on the session the verdict carries
+ * before the verdict is acted on; each outcome mapped to the protocol's
+ * answer. Tests prefixed (1)–(7) pin the ADR's changes of those numbers. The
+ * step-up trip is driven with a fixture requirement through `resolverForTests`.
  */
 
 import crypto from "node:crypto";
@@ -285,7 +282,7 @@ const loginRedirectTo = (res: request.Response): URL => {
 	return new URL(decodeURIComponent(location.split("redirect_to=")[1] as string));
 };
 
-/** The error redirect this endpoint answers with past A-1 validation. */
+/** The error redirect this endpoint answers once `redirect_uri` is trusted. */
 const redirectParams = (res: request.Response): URLSearchParams => {
 	expect(res.status).toBe(302);
 	const location = new URL(res.headers.location as string);

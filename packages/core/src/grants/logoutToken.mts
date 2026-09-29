@@ -44,18 +44,10 @@ export interface GenerateLogoutTokenOptions {
 export const BACKCHANNEL_LOGOUT_EVENT_URI = "http://schemas.openid.net/event/backchannel-logout";
 
 /**
- * Generates a signed logout_token JWT (OIDC Back-Channel Logout 1.0 §2.4).
- *
- * Claim composition:
- *   - iss, sub, aud (required)
- *   - iat, exp (seconds since epoch; default TTL 300s)
- *   - jti (unique token identifier)
- *   - events: { [BACKCHANNEL_LOGOUT_EVENT_URI]: {} } (required by spec)
- *   - sid (session identifier; included by default, omit with includeSid: false)
- *
- * Spec constraints enforced:
- *   - nonce MUST NOT be present (§2.4)
- *   - typ header set to "logout+jwt"
+ * Generates a signed logout_token JWT (OIDC Back-Channel Logout 1.0 §2.4):
+ * iss, sub, aud, iat, exp (default TTL 300s), jti, the required backchannel
+ * `events` member, and `sid` unless `includeSid: false`. Never a `nonce`
+ * (§2.4). Header `typ: "logout+jwt"`.
  */
 export async function generateLogoutToken(opts: GenerateLogoutTokenOptions): Promise<Token> {
 	if ((opts.includeSid ?? true) && opts.sid !== undefined && opts.sid === "") {

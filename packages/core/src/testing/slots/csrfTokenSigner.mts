@@ -15,34 +15,24 @@
  */
 
 /**
- * The contract suite of the `csrfTokenSigner` slot (#728) and its test
- * double.
+ * The contract suite of the `csrfTokenSigner` slot and its test double.
  *
  * `csrfTokenSignerContract(input)` holds a signer to what the `csrfGuard`
  * provider relies on: `sign` answers a non-empty base64url signature (it sits
- * between a token's `.` separators), the same one for the same payload;
- * `verify` accepts it, and refuses a signature changed in its middle or at
- * its end, shortened or lengthened, one signed for another payload, and one
- * another signer — `input.other`, built with another key — signed, the two
- * signers answering differently; `verify` never throws, an empty,
- * non-base64url or wrong-length signature, or a value that is not a string,
- * being `false`; the signer is a plain object, its prototype
- * `Object.prototype` or `null`, that carries `sign` and `verify` alone, own
- * or inherited — no key, no secret — and is frozen. Given `sessionSecret`,
- * the secret the signer was built from, the suite also checks that the key
- * was derived for this purpose: a signature is not an HMAC-SHA256 of the
- * payload under the secret itself, in any encoding a cookie signature is
- * written in, and the secret does not show when the signer is printed. Which
- * derivation is not checked: it is the owner's (`CsrfTokenSigner`), and a
- * provider that must verify tokens an earlier one issued pins it in its own
- * tests.
+ * between a token's `.` separators), the same for the same payload; `verify`
+ * accepts it and refuses one altered, shortened or lengthened, one for
+ * another payload, and one by another key (`input.other`); `verify` never
+ * throws, answering `false` for anything malformed; the signer is a frozen
+ * plain object carrying `sign` and `verify` alone, no key or secret. Given
+ * `sessionSecret`, it also checks the key was derived for this purpose: a
+ * signature is not an HMAC-SHA256 of the payload under the secret itself, in
+ * any encoding a cookie signature uses, and the secret does not show when the
+ * signer is printed. Which derivation is the owner's; a provider that must
+ * verify tokens an earlier one issued pins it in its own tests.
  *
- * That `verify` compares in constant time is the contract too, and is not
- * checked: a timing difference is not something a unit suite can measure
- * reliably.
- *
- * `createTestCsrfTokenSigner` keeps these rules with a random key drawn when
- * it is built. Published on `@o3co/auth-provider-core/testing`.
+ * Constant-time `verify` is part of the contract but not checked: a unit
+ * suite cannot measure timing reliably. `createTestCsrfTokenSigner` keeps
+ * these rules with a random key.
  */
 
 import assert from "node:assert/strict";

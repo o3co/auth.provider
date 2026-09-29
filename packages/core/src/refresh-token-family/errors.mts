@@ -19,17 +19,14 @@
  *
  * - `duplicate-family`: registerFamily called for an existing familyId
  *   (RNG collision or programming bug; surfaces loudly).
- * - `expired-at-issue`: register/issue path detected `expiresAt <= now()`
- *   at call time; the storage layer fails closed.
- * - `conflict-exhausted`: updateFamily's CAS retry budget exhausted under
- *   sustained contention; load-shedding signal.
- * - `corrupt-data`: stored value failed Zod schema validation on
- *   deserialization (truncated JSON, missing required fields, wrong
- *   field types, or unknown fields from a schema migration). The
- *   family is treated as non-existent/unreadable; callers must NOT
- *   trust the partial value. Per TS-M1 (Wave 5g).
- *
- * Per A3 §5.4 + TS-M1.
+ * - `expired-at-issue`: the register/issue path saw `expiresAt <= now()`;
+ *   the storage layer fails closed.
+ * - `conflict-exhausted`: updateFamily's CAS retry budget ran out under
+ *   sustained contention; a load-shedding signal.
+ * - `corrupt-data`: the stored value failed schema validation on
+ *   deserialization (truncated JSON; missing, mistyped or unknown fields).
+ *   The family is treated as unreadable; callers must NOT trust the partial
+ *   value.
  */
 export type RefreshTokenStorageErrorReason =
 	| "duplicate-family"
@@ -38,12 +35,9 @@ export type RefreshTokenStorageErrorReason =
 	| "corrupt-data";
 
 /**
- * Single error class for `RefreshTokenFamilyStore` domain failures.
- * Mirrors A1's `ChallengeStorageError` shape: discriminated `reason` field,
- * native ES2022 `cause` for chaining underlying adapter errors, default
- * message templated from `reason`.
- *
- * Per A3 §5.4.
+ * Single error class for `RefreshTokenFamilyStore` domain failures, shaped
+ * like `ChallengeStorageError`: a discriminated `reason`, native ES2022
+ * `cause` for chaining adapter errors, and a default message from `reason`.
  */
 export class RefreshTokenStorageError extends Error {
 	readonly reason: RefreshTokenStorageErrorReason;

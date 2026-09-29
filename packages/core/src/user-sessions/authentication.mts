@@ -15,26 +15,22 @@
  */
 
 /**
- * How a session was established and what this provider vouches for, read the
- * one way every consumer of a session reads them (the MFA ADR's D9): the
- * requirements a session admission asks (`../session-admission/`), whose
- * input `requirementSession` builds; `/token` and the `session` grant, which
- * stamp `vouchedAmr`. And what each login path records, so the write
- * and the read are one design: `passwordSessionAuthentication`,
- * `federatedSessionAuthentication`, and whether a federation's upstream IdP's
- * `amr` counts at all (`federationTrustsUpstreamAmr`, D13).
+ * How a session was established and what this provider vouches for, read
+ * one way by every consumer (session admission through `requirementSession`,
+ * `/token` and the `session` grant through `vouchedAmr`), beside what each
+ * login path records (`passwordSessionAuthentication`,
+ * `federatedSessionAuthentication`, `federationTrustsUpstreamAmr`), so the
+ * write and the read are one design. See ADR
+ * 2026-09-25-multi-factor-authentication.
  *
- * A session written since the build order's step 5 says how it was
- * established (`authentication`), and its `amr` holds only what this provider
- * vouches for: the federation callback kept an untrusted IdP's values apart
- * as it wrote the session. One written before carries no such key, and is
- * split as it is read: `fed` makes it federated, and every value beside `fed`
- * is what an upstream IdP asserted — kept for the record, never vouched for,
- * whether or not that federation is trusted now, because the session does not
- * say which federation wrote it; else `pwd` makes it a password login, whose
- * values are all this provider's own; else its primary cannot be told. No
- * such session has a second factor on record. So a pre-upgrade session is
- * never read as more trusted than it was written.
+ * A session carrying `authentication` holds in `amr` only what this
+ * provider vouches for. One written before that key is split as it is read:
+ * `fed` makes it federated and every other value an upstream IdP's, never
+ * vouched for, whatever that federation's trust is now, because the session
+ * does not say which federation wrote it; else `pwd` makes it a password
+ * login; else its primary cannot be told. It has no second factor on
+ * record. A pre-upgrade session is never read as more trusted than it was
+ * written.
  */
 
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
@@ -60,7 +56,7 @@ export function copySessionAuthentication(
  * How `session` was established, or `undefined` when that cannot be told — a
  * session written before the `authentication` key whose `amr` names neither a
  * federation nor a password. The baseline re-authenticates such a session
- * rather than guess (D16). A copy: nothing done to the answer reaches the
+ * rather than guess. A copy: nothing done to the answer reaches the
  * session.
  */
 export function sessionAuthentication(session: UserSession): SessionAuthentication | undefined {
@@ -109,7 +105,7 @@ export interface RecordedAuthentication {
 }
 
 /**
- * What `POST /session/login` records (D9): `amr` `["pwd"]` (RFC 8176), primary
+ * What `POST /session/login` records: `amr` `["pwd"]` (RFC 8176), primary
  * `pwd`, no second factor verified yet.
  */
 export function passwordSessionAuthentication(): RecordedAuthentication {
@@ -125,18 +121,13 @@ export function passwordSessionAuthentication(): RecordedAuthentication {
 }
 
 /**
- * What a federation callback records (D9, D13), for the federation named
- * `federation` whose upstream IdP asserted `upstreamAmr`:
- *
- * - `trusted` (`federationTrustsUpstreamAmr`): the IdP's values beside `fed`
- *   in `amr`, where tokens carry them and `acr` is matched against them — as
- *   #481 recorded every federation's.
- * - otherwise: `amr` is `fed` alone, and the IdP's values are kept in
- *   `authentication.upstreamAmr` for the record, where nothing stamps them or
- *   reads them for `acr`.
- *
- * `upstreamAmr` is kept apart only when there is something to keep. The
- * values are copied.
+ * What a federation callback records for the federation named `federation`,
+ * whose upstream IdP asserted `upstreamAmr`. When `trusted`
+ * (`federationTrustsUpstreamAmr`), the IdP's values sit beside `fed` in
+ * `amr`, where tokens carry them and `acr` is matched against them;
+ * otherwise `amr` is `fed` alone and the values, if any, are kept in
+ * `authentication.upstreamAmr` for the record, where nothing stamps them or
+ * reads them for `acr`. The values are copied.
  */
 export function federatedSessionAuthentication(login: {
 	readonly federation: string;
@@ -157,12 +148,11 @@ export function federatedSessionAuthentication(login: {
 
 /**
  * Whether `ms` is an instant a session may take as when a second factor was
- * verified, judged on the store's clock `nowMs`: at or after the epoch, and no
+ * verified, on the store's clock `nowMs`: at or after the epoch, and no
  * further ahead than the clock skew tolerated between hosts
- * (`DEFAULT_CLOCK_SKEW_MS`, five minutes — the tolerance the JWT verifier
- * gives an `iat` another host stamped ahead of it). Clocks are NTP-synced
- * (D22); one further ahead is no clock's reading. What is accepted is still
- * recorded no later than `nowMs` (`notAfter`): never a time still to come.
+ * (`DEFAULT_CLOCK_SKEW_MS`, the JWT verifier's `iat` tolerance). Clocks are
+ * NTP-synced; one further ahead is no clock's reading. What is accepted is
+ * still recorded no later than `nowMs` (`notAfter`).
  */
 const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
 	Number.isFinite(ms) && ms >= 0 && ms <= nowMs + DEFAULT_CLOCK_SKEW_MS;
@@ -171,17 +161,14 @@ const isRecordableVerificationTime = (ms: number, nowMs: number): boolean =>
 const notAfter = (ms: number, nowMs: number): Date => new Date(Math.min(ms, nowMs));
 
 /**
- * Refuse, with a `RangeError`, an event that is not a second factor's (D9):
- * no values, one that is not a non-empty string, a primary's marker (`pwd`,
- * `fed` — a second factor must not change the primary the baseline is decided
- * on, as `composeAmr` holds a factor to), `mfa` with no value of the factor's
- * own beside it (`mfa` comes from a factor that adds it, D14, and alone names
- * no factor that was verified), or a time that is not a valid date at or
- * after the epoch, or further ahead of `nowMs` — the store's clock — than the
- * clock skew tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`). What
- * `recordSecondFactor` checks before it
- * reads anything, in every bundled store. The message names what is wrong
- * and quotes nothing but a primary's marker.
+ * Refuses, with a `RangeError`, an event that is not a second factor's: no
+ * values; a value that is not a non-empty string; a primary's marker (`pwd`,
+ * `fed`: a second factor must not change the primary the baseline is
+ * decided on); `mfa` alone (it comes beside a factor's own values, and alone
+ * names no factor); or a time `isRecordableVerificationTime` refuses on
+ * `nowMs`, the store's clock. Every bundled store's `recordSecondFactor`
+ * runs this before it reads anything. The message quotes nothing but a
+ * primary's marker.
  */
 export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number): void {
 	const amr: unknown = event?.amr;
@@ -212,22 +199,19 @@ export function checkSecondFactorEvent(event: SecondFactorEvent, nowMs: number):
 }
 
 /**
- * What a store records as a session's `authentication` (D9): the value it was
- * given, checked, answered as a copy — and a store records what this answers,
- * never its own input. Refused, with a `RangeError`, is what `SessionAuthentication`
- * does not admit — so the two bundled stores refuse the same values, rather
- * than one copying a string's characters as a list and the other writing an
- * envelope it then reads as corrupt. `undefined` is a session written as one
- * from before the key; else an object with a non-empty string `primary`, a
- * `federation` that is a string or `undefined`, an `upstreamAmr` that is a
- * list of strings or `undefined`, and an `mfaAt` that is `undefined` or a
- * `Date` at or after the epoch and no further ahead of `nowMs`, the store's
- * clock, than the clock skew tolerated between hosts. The message names the
- * session and the field, and quotes nothing of the value.
+ * What a store records as a session's `authentication`: the value given,
+ * checked, answered as a copy whose `mfaAt` is no later than `nowMs`, the
+ * store's clock (a time a little ahead is a clock, but kept as it came it
+ * would count as recent for longer than it is). Every bundled store's
+ * `create` records this answer, never its own input, so both refuse the
+ * same values.
  *
- * What it answers is a copy, its `mfaAt` no later than `nowMs`: a time a
- * little ahead is a clock, but recorded as it came it would count as recent
- * for longer than it is. What every bundled store's `create` records.
+ * `undefined` is a session written as one from before the key; anything
+ * else must be what `SessionAuthentication` admits, its `mfaAt` passing
+ * `isRecordableVerificationTime`.
+ *
+ * @throws RangeError naming the session and the field, quoting nothing of
+ *   the value.
  */
 export function recordableSessionAuthentication(
 	sid: string,
@@ -275,21 +259,18 @@ export function recordableSessionAuthentication(
 }
 
 /**
- * What a session records once a second factor was verified in it (D9) — the
- * computation both bundled stores' `recordSecondFactor` write, so they cannot
- * differ. `amr`: what the session vouches for (`vouchedAmr`), then the
- * event's values, each once, in insertion order. `authentication`: the
- * session's (`sessionAuthentication`) with `mfaAt` the later of the two —
- * each first brought to no later than `nowMs`, the store's clock, so nothing
- * recorded is still to come, and a stored `mfaAt` a replica whose clock ran
- * ahead wrote is repaired here rather than kept as the later for as long.
+ * What a session records once a second factor was verified in it; both
+ * bundled stores' `recordSecondFactor` write this, so they cannot differ.
+ * `amr`: `vouchedAmr(session)`, then the event's values, each once, in
+ * order. `authentication`: `sessionAuthentication(session)` with `mfaAt`
+ * the later of the two, each first capped at `nowMs`, the store's clock, so
+ * nothing recorded is still to come and a stored `mfaAt` from a replica
+ * whose clock ran ahead is repaired rather than kept.
  *
- * A session written before `authentication` existed is split here, first: a
- * pre-upgrade `["hwk", "fed"]` plus TOTP becomes `amr` `["fed", "otp", "mfa"]`
- * and `upstreamAmr` `["hwk"]` — never `["hwk", "fed", "otp", "mfa"]`, whose
- * `hwk`, an untrusted IdP's word, would meet `phr`. `null` for one whose
- * primary cannot be told. The event is checked (`checkSecondFactorEvent`)
- * against `nowMs`, the store's clock.
+ * A pre-upgrade session is split first: `["hwk", "fed"]` plus TOTP becomes
+ * `amr` `["fed", "otp", "mfa"]` and `upstreamAmr` `["hwk"]`, so an untrusted
+ * IdP's `hwk` never meets `phr`. `null` for one whose primary cannot be
+ * told. The event is checked first (`checkSecondFactorEvent`).
  */
 export function sessionAfterSecondFactor(
 	session: UserSession,
@@ -312,13 +293,12 @@ export function sessionAfterSecondFactor(
 }
 
 /**
- * What a session requirement is asked about `session` (the MFA ADR's D16,
- * the session-admission ADR's D3): how it was established and what it
- * vouches for, through the two readers above — or `null` when there is no
- * session (no `sid`, or no `UserSessionStore`). Admission builds it here and
- * nowhere else, and its own `acr` selection reads the `amr` from it: one
- * built from the record's own `amr` would let a value an untrusted IdP
- * asserted in a pre-upgrade session meet an `acr`.
+ * What a session requirement is asked about `session`: how it was
+ * established and what it vouches for, through the two readers above, or
+ * `null` when there is no session (no `sid`, or no `UserSessionStore`).
+ * Admission builds it here and nowhere else, and its `acr` selection reads
+ * the `amr` from it: one built from the record's own `amr` would let a
+ * value an untrusted IdP asserted in a pre-upgrade session meet an `acr`.
  */
 export function requirementSession(session: UserSession | null): RequirementSession | null {
 	if (session === null) return null;
@@ -327,11 +307,10 @@ export function requirementSession(session: UserSession | null): RequirementSess
 
 /**
  * What a session requirement is asked about a token that carries no live
- * session (the session-admission ADR's D2 step 5, D9): the primary read from
- * the token's `amr` — `fed` makes it federated, else `pwd` a password login,
- * else it cannot be told, as a token issued before #481 carries no `amr` at
- * all — no second factor on record, and the `amr` as vouched, since a token
- * is minted from `vouchedAmr` and carries nothing an IdP asserted. Copied.
+ * session: the primary read from the token's `amr` (`fed`, else `pwd`, else
+ * unknown, as for an older token that carries no `amr`), no second factor
+ * on record, and the `amr` as vouched, since a token is minted from
+ * `vouchedAmr` and carries nothing an IdP asserted. Copied.
  */
 export function requirementSessionFromAmr(amr: readonly string[] | undefined): RequirementSession {
 	const held = amr === undefined ? [] : [...amr];
@@ -350,25 +329,21 @@ export function requirementSessionFromAmr(amr: readonly string[] | undefined): R
 }
 
 /**
- * Whether federation `name`'s upstream IdP's `amr` counts (the MFA ADR's
- * D13): `federations.<name>.trustUpstreamAmr`, beside `enabled` in both of a
- * section's shapes — the switch written inside the nested shape's
- * sub-section is a `RangeError` saying so. `true`, on a section whose own
- * `enabled` is `true`, records what the IdP asserted in the session's `amr`
- * beside `fed`, where tokens carry it and `acr` is matched against it; absent
- * or `false` keeps it apart, for the record only, and so does any switch on a
- * section that is not enabled — nothing signs a user in through it. The
- * refusals come first, so a disabled section's unusable switch still refuses
- * the composition rather than waiting for the federation to be enabled. A value that is
- * given but is neither is a `RangeError` naming the key and quoting nothing
- * of the value — read as either answer, a typo would decide what this
- * provider vouches for. Core's schema coerces the spellings an environment
- * variable delivers before this reads it; a hand-built configuration meets
- * this refusal instead.
+ * Whether federation `name`'s upstream IdP's `amr` counts: only when
+ * `federations.<name>.trustUpstreamAmr` is `true` beside `enabled: true`,
+ * in either section shape. Then the IdP's values sit in the session's `amr`
+ * beside `fed`, where tokens carry them and `acr` is matched against them;
+ * otherwise they are kept apart, for the record only.
  *
- * Read at composition by the federation callback, which writes the split,
- * and by the `acr` drop, which counts a trusted federation as able to
- * produce any value — one reading, so the two cannot disagree.
+ * A non-boolean value, or the switch inside the nested shape's sub-section,
+ * is a `RangeError` naming the key and quoting nothing of the value: read
+ * either way, a typo would decide what this provider vouches for. The
+ * refusals come first, so a disabled section's bad switch still refuses the
+ * composition. Core's schema coerces environment-variable spellings first;
+ * a hand-built configuration meets the refusal.
+ *
+ * The federation callback (which writes the split) and the `acr` drop both
+ * read this one function, so they cannot disagree.
  */
 export function federationTrustsUpstreamAmr(config: unknown, name: string): boolean {
 	const federations = (config as { federations?: unknown } | null | undefined)?.federations;
@@ -376,11 +351,9 @@ export function federationTrustsUpstreamAmr(config: unknown, name: string): bool
 	if (!Object.hasOwn(federations, name)) return false;
 	const section = (federations as Record<string, unknown>)[name];
 	if (typeof section !== "object" || section === null) return false;
-	// The nested shape's sub-section — keyed by `type`, or by the name when a
-	// shorthand has none (session's `extractFederationSection`) — holds the
-	// adapter's own settings. The switch there would be ignored, so an
-	// operator who wrote it would believe the IdP trusted, or distrusted, when
-	// neither holds: refused, saying where it belongs.
+	// The nested shape's sub-section (keyed by `type`, or by the name for a
+	// shorthand: session's `extractFederationSection`) holds the adapter's own
+	// settings. A switch there would be silently ignored, so it is refused.
 	const type =
 		typeof (section as { type?: unknown }).type === "string"
 			? (section as { type: string }).type

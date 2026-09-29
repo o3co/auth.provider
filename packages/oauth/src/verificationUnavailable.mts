@@ -18,16 +18,14 @@
  * The one answer the routes here give a token they could not verify because
  * a dependency was down — the keystore, or a revocation store — as core's
  * `isVerificationUnavailable` reports it. (`/oauth/revoke` logs the same line
- * but words its 503 as RFC 7009 §2.2.1's retry, beside its other 503s; the
- * refresh grant answers through the token endpoint's envelope.)
+ * but words its 503 as RFC 7009 §2.2.1's retry; the refresh grant answers
+ * through the token endpoint's envelope.)
  *
- * `503 temporarily_unavailable`, with core's description naming the
+ * `503 temporarily_unavailable` with core's description naming the
  * dependency, no `WWW-Authenticate` challenge, and an error-level
  * `token_verification_unavailable` line carrying the route (`site`), the
- * reason and the projected error — whose cause is what the dependency threw.
- * Never `401 invalid_token`, `active: false` or a silent `200`: each of those
- * is a verdict on the token, and an outage is not one (see
- * `isVerificationUnavailable` in core's `jwt/verify.mts`).
+ * reason and the projected error. Never `401 invalid_token`, `active: false`
+ * or a silent `200`: each is a verdict on the token, and an outage is not.
  */
 
 import {

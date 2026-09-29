@@ -15,38 +15,27 @@
  */
 
 /**
- * The contract suite of the `loginCompletion` slot (#728; the
- * session-admission ADR's D5) and its test double.
+ * The contract suite of the `loginCompletion` slot, and its test double.
+ * See ADR 2026-09-28-session-admission.
  *
- * `loginCompletionContract(input)` answers one case per rule, as
- * `sessionRequirementContract` does. It drives the completion over the
- * fake request of `fake-http.mts` — an express session with `regenerate`,
- * `save` and `sessionID` — and holds it to what the session package's
- * `establishSession` and `answerInterruption` do.
+ * `loginCompletionContract(input)` drives a completion over the fake
+ * express session of `fake-http.mts` and holds it to what the session
+ * package's `establishSession` and `answerInterruption` do:
  *
- * - Each refuses, with a `RangeError`, what core did not build, before the
- *   session is touched: no regeneration, no save, no reporter built, no
- *   ceremony opened, and — with `records` — no session record written.
- * - An establishment builds the caller's reporter once, for the record it
- *   writes (`{ sid, sub }`), and leaves the browser signed in, as core's
- *   admission reads a cookie (`cookieClaim`), for the establishment's
- *   subject, on a regenerated session saved signed in; with `records`, one
- *   record is written when it answers a `sid`. It leaves the response to
- *   its caller.
- * - An interruption is answered with the requirement's `403` — with
- *   `csrfCookieName`, a fresh token set in that cookie (the MFA ADR's D27)
- *   — its ceremony opened on the regenerated session's id, saved and not
- *   signed in.
- * - Every outage — the session store at `create`, the cookie session's
- *   `regenerate` or `save`, the ceremony's `open` — is reported to the
- *   caller's reporter once, never established, and leaves the browser not
- *   signed in; an establishment's — the session store's included — leaves
- *   no record behind, and an
- *   interruption's is answered `503 temporarily_unavailable` with no token.
+ * - What core did not build is refused with a `RangeError` before anything
+ *   is touched: session, reporter, ceremony, record.
+ * - An establishment builds the reporter once, for `{ sid, sub }`, and
+ *   saves a regenerated session that `cookieClaim` reads as signed in for
+ *   its subject; one record per `sid` answered. The response is the
+ *   caller's.
+ * - An interruption answers the requirement's `403` (with a fresh token in
+ *   `csrfCookieName`, when given), its ceremony opened on the regenerated
+ *   session id, saved and not signed in.
+ * - An outage (store `create`, cookie `regenerate` / `save`, ceremony
+ *   `open`) is reported once, leaves no record and the browser not signed
+ *   in; an interruption's is `503 temporarily_unavailable` with no token.
  *
- * `createRecordingLoginCompletion` keeps that contract: it counts the
- * session records it would hold (its `sid`s are made up), records what it
- * was handed, issues the `403`'s token through the CSRF guard it is given,
+ * `createRecordingLoginCompletion` keeps that contract with made-up `sid`s
  * and can stand in for a session store that is down. Published on
  * `@o3co/auth-provider-core/testing`.
  */

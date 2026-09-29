@@ -17,13 +17,10 @@
 import type { LoggableError } from "../logging/loggableError.mjs";
 
 /**
- * A liveness signal for one backing dependency.
- *
- * Probes are registered by whoever *owns* the connection — the builder that
- * opened it — because that is the only place holding a reference to it. An
- * adapter's public interface is a narrow command surface (get / set / del),
- * deliberately without a `ping`, so the composition root cannot construct
- * this from the outside.
+ * A liveness signal for one backing dependency, registered by the builder that
+ * opened the connection: adapters deliberately expose no `ping`, so the
+ * composition root cannot build one from outside. See ADR
+ * 2026-08-26-readiness-probes-registered-by-connection-owners.
  */
 export interface ReadinessProbe {
 	/**
@@ -39,16 +36,16 @@ export interface ReadinessProbe {
 }
 
 /**
- * Passed to adapter builders via `BuilderContext.readiness`. Builders
- * that open a connection SHOULD register a probe for it:
+ * Passed to adapter builders via `BuilderContext.readiness`. Builders that
+ * open a connection SHOULD register a probe for it:
  *
  *     ctx.readiness?.register({ name: "redis", check: () => client.ping() })
  *
- * Mirrors `LifecycleRegistrar`: the boot planner owns the instance and
- * seeds it as the `readinessRegistrar` bootstrap component, so a builder
- * reached through a module that declares `optional: ["readinessRegistrar"]`
- * receives it. Always use optional chaining — a factory constructed outside
- * the boot planner (unit tests) receives `{}` as its context.
+ * Like `LifecycleRegistrar`, the boot planner owns the instance and seeds it
+ * as the `readinessRegistrar` bootstrap component, so a builder reached
+ * through a module declaring `optional: ["readinessRegistrar"]` receives it.
+ * Always use optional chaining: a factory built outside the boot planner
+ * (unit tests) receives `{}` as its context.
  */
 export interface ReadinessRegistrar {
 	register(probe: ReadinessProbe): void;

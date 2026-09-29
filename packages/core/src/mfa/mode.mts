@@ -15,30 +15,26 @@
  */
 
 /**
- * `mfa.mode` as a consumer reads it (the MFA ADR's D19; the session-admission
- * ADR's D7): the boot check that refuses a mode other than `off` while no
- * requirement named `mfa` is registered (`session-requirement-missing`), and
- * the MFA package, whose requirement is the mode's one reader at request
- * time. No consumer of a session reads it: what "logged in" means under a
- * mode is the requirement's to decide, through admission.
+ * `mfa.mode` as its consumers read it: the boot check that refuses a mode other
+ * than `off` while no requirement named `mfa` is registered
+ * (`session-requirement-missing`), and the MFA package, whose requirement is its
+ * one request-time reader. Session consumers never read it; admission decides
+ * what "logged in" means (ADR 2026-09-28-session-admission).
  */
 
 /**
- * `mfa.mode` (D19): `required` — every password login has a second factor and
- * every consumer enforces it; `optional` — users with factors are challenged,
- * nobody is forced, step-up works; `off` — no MFA.
+ * `mfa.mode`. `required`: every password login has a second factor and every
+ * consumer enforces it. `optional`: users with factors are challenged, nobody is
+ * forced, step-up works. `off`: no MFA.
  */
 export type MfaMode = "off" | "optional" | "required";
 
 /**
- * `mfa.mode` as a consumer reads it, off any config-shaped value: the mode, or
- * `undefined` when it is absent — which only absence is. What absence means is
- * the caller's to decide: core's schema and reference default it to `"off"`
- * (D19). A value that is given but is not one of the three — a typo, a casing
- * slip, `""`, `null` — is a `RangeError` naming `mfa.mode` and quoting
- * nothing of the value, never `undefined`: read as absent, a typo would
- * default to `"off"` and switch MFA off. Core's schema refuses such a value
- * at boot; this refuses it in a hand-built configuration too.
+ * Reads `mfa.mode` off any config-shaped value: the mode, or `undefined` only
+ * when absent (core's schema defaults it to `"off"`). Any other given value
+ * (a typo, a casing slip, `""`, `null`) is a `RangeError` that quotes nothing of
+ * the value, never `undefined`: read as absent, a typo would switch MFA off.
+ * This also covers hand-built configurations the schema never sees.
  */
 export function readMfaMode(config: unknown): MfaMode | undefined {
 	const mode = (config as { mfa?: { mode?: unknown } } | undefined)?.mfa?.mode;

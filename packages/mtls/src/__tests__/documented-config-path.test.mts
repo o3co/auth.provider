@@ -15,25 +15,14 @@
  */
 
 /**
- * #496 — the boot refusals this package added have to be reachable from the
- * configuration path `packages/core/README.md` documents.
- *
- * That path was two parses: a composition root built its config with
- * `AppConfigSchema.parse(...)` and handed the result to `createApp`, which
- * composed every module's own `configSchema` over `CoreConfigSchema` and
- * parsed again. `AppConfigSchema` stripped what it did not declare, and until
- * #496 it declared no `oauth.mtls` — so the second parse never saw the
- * operator's block, `enabled` fell to its `false` default, and the module
- * contributed nothing. mTLS reported itself as switched off rather than as
- * misconfigured, and every refusal added that cycle (#431, #469, #470) was
- * unreachable: the configuration they inspect had been thrown away one step
- * earlier.
- *
- * Since #728 the documented path is one parse: the composition root hands
- * `createApp` the configuration it resolved, and boot parses it once, laying
- * every schema's output over what was written. These tests boot `mtlsModule`
- * that way and ask it what it makes of the result — at boot, where its
- * refusals are, and of the configuration boot parsed.
+ * This package's boot refusals must be reachable from the configuration path
+ * `packages/core/README.md` documents: the composition root hands `createApp`
+ * the configuration it resolved, and boot parses it once, laying every
+ * schema's output over what was written. A parse that dropped `oauth.mtls`
+ * would let `enabled` fall to its `false` default: mTLS would report itself
+ * switched off rather than misconfigured, and every refusal would be
+ * unreachable. These tests boot `mtlsModule` that way and ask it what it makes
+ * of the result, at boot, where its refusals are.
  */
 
 import { type AppConfig, BootError, createApp } from "@o3co/auth-provider-core";

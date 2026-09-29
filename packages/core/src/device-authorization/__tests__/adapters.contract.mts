@@ -15,14 +15,12 @@
  */
 
 /**
- * Conformance suite for `DeviceCodeStore` (#298).
- *
- * Every implementation runs this — the in-memory one in core, the Redis one
- * in `@o3co/auth-provider-redis`, and anything an operator writes. The port's
- * atomicity requirements are the whole reason it exists: a Redis adapter that
- * implements `poll` as `GET` then `DEL` passes a naive unit test and issues
- * two access tokens for one approval under concurrency, so the cases that
- * matter most here are the ones that call the same method twice.
+ * Conformance suite for `DeviceCodeStore`, run by the in-memory store in core,
+ * the Redis one in `@o3co/auth-provider-redis`, and anything an operator
+ * writes. The port exists for its atomicity: a Redis adapter that implements
+ * `poll` as `GET` then `DEL` passes a naive unit test and issues two access
+ * tokens for one approval under concurrency, so the cases that matter most
+ * here call the same method twice.
  */
 
 import { describe, expect, it } from "vitest";
@@ -50,10 +48,10 @@ const seed = {
 /**
  * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
  * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
- * NaN is never `<= now`, so it slipped past every past-expiry check; one past
- * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
- * as `1e+21`) and a Date cannot hold, and a script that writes its record
- * before setting the deadline left the record with no TTL at all.
+ * NaN is never `<= now`, so it passes every past-expiry check; one past the
+ * Date range is a number Redis cannot take as a deadline (`1e21` is sent as
+ * `1e+21`) and a Date cannot hold, and a script that writes its record before
+ * setting the deadline would leave the record with no TTL at all.
  */
 const UNSTORABLE_EXPIRIES = [
 	Number.NaN,
@@ -117,10 +115,7 @@ export const runDeviceCodeStoreContract = (
 		});
 
 		it("refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
-			// NaN is never `<= now`: the memory adapter answered `pending` for such
-			// a record until a sweep found it, and the Redis script wrote the pair
-			// before `PEXPIREAT NaN` failed, leaving both keys with no TTL. A
-			// non-finite expiry is a caller fault.
+			// A non-finite expiry is a caller fault (see `UNSTORABLE_EXPIRIES`).
 			await withStore(async (store) => {
 				for (const bad of UNSTORABLE_EXPIRIES) {
 					await expect(store.create({ ...seed, expiresAtMs: bad })).rejects.toThrow(RangeError);

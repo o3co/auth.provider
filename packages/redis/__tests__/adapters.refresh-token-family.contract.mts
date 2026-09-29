@@ -36,10 +36,10 @@ const PAST = (): number => Date.now() - 1;
  * An in-process store judges expiry on this process's clock. A Redis key
  * expires on the server's, which sits to either side of the host's, and a
  * relative `PX` runs from when the command reached the server; a loaded run
- * also reaches its next line late. A fixed sleep after a short expiry therefore
- * either read an entry the store had already dropped, or checked one it had
- * not dropped yet. The default is this process's clock; a Redis runner passes
- * one that reads the server's `TIME`, or waits for the keys to be gone.
+ * also reaches its next line late. So a fixed sleep after a short expiry can
+ * read an entry the store already dropped, or check one it has not dropped
+ * yet. The default is this process's clock; a Redis runner passes one that
+ * reads the server's `TIME`, or waits for the keys to be gone.
  */
 export interface ExpiryClock {
 	/** Epoch milliseconds on the clock the store expires entries by. */
@@ -75,10 +75,10 @@ const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily
 /**
  * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
  * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
- * NaN is never `<= now`, so it slipped past every past-expiry check; one past
- * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
- * as `1e+21`) and a Date cannot hold, and a script that writes its record
- * before setting the deadline left the record with no TTL at all.
+ * NaN is never `<= now`, so it would slip past every past-expiry check; one
+ * past the Date range is a number Redis cannot take as a deadline (`1e21` is
+ * sent as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline would leave the record with no TTL at all.
  */
 const UNSTORABLE_EXPIRIES = [
 	Number.NaN,
@@ -166,7 +166,7 @@ export function runRefreshTokenFamilyStoreContract(
 			expect(after?.activeJti).toBe(fam.activeJti); // unchanged
 		});
 
-		// #274: a decision carries an opaque `reason` back to the caller so a
+		// A decision carries an opaque `reason` back to the caller so a
 		// wrapper can classify an outcome from INSIDE the atomic operation.
 		// Without it, "committed" cannot distinguish an ordinary rotation from
 		// a commit that exists to reject the request (a replay revocation),
@@ -283,8 +283,7 @@ export function runRefreshTokenFamilyStoreContract(
 		});
 
 		it("findFamily returns null for expired family (lazy GC)", async () => {
-			// Dated from, and waited out on, the store's own clock (see
-			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
+			// Dated from, and waited out on, the store's own clock (see `ExpiryClock`).
 			const store = await factory();
 			const expiresAt = await aheadOf(expiry);
 			const fam = FAMILY({ expiresAtMs: expiresAt.getTime() });
@@ -329,10 +328,10 @@ export function runRefreshTokenFamilyStoreContract(
 		});
 
 		it("registerFamily refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
-			// NaN is never `<= now`, so it slipped past the expired-at-issue check:
-			// the memory adapter kept the family for ever, and Redis was sent
-			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
-			// `expired-at-issue` names.
+			// NaN is never `<= now`, so it would pass the expired-at-issue check:
+			// the memory adapter would keep the family for ever, and Redis would be
+			// sent `PX NaN`. A non-finite expiry is a caller fault, not the timing
+			// race `expired-at-issue` names.
 			const store = await factory();
 			for (const bad of UNSTORABLE_EXPIRIES) {
 				await expect(store.registerFamily(FAMILY({ expiresAtMs: bad }))).rejects.toThrow(
@@ -415,8 +414,8 @@ export function runRefreshTokenFamilyStoreContract(
 
 			// All N updaters try to rotate from "jti-0" → "jti-i". Exactly one observes
 			// the initial state and commits; the rest re-read post-commit (activeJti
-			// already "jti-X") and either abort (their updater returns null when the
-			// previousJti precondition fails) or retry-exhaust under contention.
+			// already "jti-X") and either abort (the activeJti precondition fails)
+			// or retry-exhaust under contention.
 			const settled = await Promise.allSettled(
 				Array.from({ length: N }, (_, i) =>
 					store.updateFamily(fam.familyId, (current) => {

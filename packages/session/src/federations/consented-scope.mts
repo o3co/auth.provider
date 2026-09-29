@@ -15,49 +15,22 @@
  */
 
 /**
- * What a completed federation authorization consented to, as one
- * space-delimited string, or `undefined` when nothing did.
+ * What a completed federation authorization consented to, as one canonical
+ * space-delimited string, or `undefined` when nothing did:
  *
- * Two readings, in the order RFC 6749 gives them:
+ * 1. the upstream's answer (`FederationProfile.scope`) when present — RFC
+ *    6749 §5.1 requires it whenever the grant differs from the request;
+ * 2. else what the provider asked for (`FederationProvider.scope`) — §3.3
+ *    lets the answer be omitted only when it equals the request, so silence
+ *    means "as requested", not "no scope" (Apple sends none).
  *
- * 1. What the upstream answered (`FederationProfile.scope`). §5.1 makes that
- *    field REQUIRED whenever the granted scope differs from the requested one,
- *    so when an upstream names a scope, that is what it granted.
- * 2. What the provider asked for (`FederationProvider.scope`). §3.3 makes the
- *    answer OPTIONAL only when it is identical to the request, so silence
- *    means "as requested" — not "no scope". Apple genuinely sends none, and so
- *    may a third-party adapter, and reading that silence as "no scope" would
- *    leave the record with no ceiling at all (#647).
- *
- * The two are separated by PRESENCE, not by usefulness. `scope: ""` and
- * `scope: "   "` are answers — the upstream spoke and granted nothing this
- * route can name — so they claim nothing rather than falling through to the
- * request. `@o3co/auth-provider-federation-oidc`'s delegated exchange keeps an
- * empty scope for the same reason, and an adapter that reports one must not
- * flatten it into silence.
- *
- * An adapter is a third-party extension point, so neither reading is believed
- * before it is checked (D5): a non-string, an empty string and a whitespace-only
- * string all name nothing. That check also protects the store — the Redis
- * adapter seals the record into one ciphertext and a non-string field would
- * only fail on the NEXT read, where it is indistinguishable from corruption
- * and the record is dropped.
- *
- * The result is canonical on both branches: parsed, de-duplicated and re-joined,
- * so the value a later refresh is judged against does not depend on the spacing
- * an upstream or a provider happened to use.
- *
- * The two branches can speak different vocabularies. Google answers with full
- * URLs (`https://www.googleapis.com/auth/userinfo.email`) where its provider
- * lists the short aliases, so a record built from the answer and one built from
- * the request do not compare with each other. That is sound because a record
- * only ever compares with itself: the ceiling and every later answer come from
- * the same upstream.
- *
- * The sibling concept in `@o3co/auth-provider-core`'s federation grants is
- * `consentedScopes` (`federation-grants/eligibility.mts`), which judges an
- * upstream token against the same kind of ceiling for grants that outlive a
- * session. One idea, two subsystems.
+ * Decided by presence, not usefulness: an answered `""` claims nothing
+ * rather than falling back to the request. Adapter input is checked before it
+ * is believed (a non-string names nothing), which also keeps a bad field out
+ * of the sealed Redis record. The two branches may use different
+ * vocabularies (Google answers full URLs for its short aliases); that is
+ * sound because a record only ever compares with itself. Core's
+ * `consentedScopes` applies the same idea to federation grants.
  */
 import { parseScopeTokens } from "@o3co/auth-provider-core";
 
@@ -65,18 +38,15 @@ export function consentedScope(
 	answered: unknown,
 	requested: readonly string[] | undefined,
 ): string | undefined {
-	// Present is not absent, whatever it says. An upstream that answered and
-	// named nothing usable has not been silent, and falling back to the request
-	// there would record every requested scope as consent on a response that
-	// granted none — fail-open, on the write that sets the ceiling for the life
-	// of the connection. Only a field that is not there at all reaches §3.3.
+	// Present is not absent: an answer naming nothing usable must not fall back
+	// to the request, which would record unconsented scopes as the ceiling for
+	// the life of the connection (fail-open).
 	if (answered !== undefined) {
 		const named = parseScopeTokens(answered);
 		return named.length > 0 ? named.join(" ") : undefined;
 	}
 	// Parsed the same way, not merely filtered: an entry may itself be a
-	// space-delimited list, or whitespace, and a rule the answered branch keeps
-	// and this one does not is the same half-stated contract in a smaller place.
+	// space-delimited list, or whitespace.
 	const asked = [...new Set((requested ?? []).flatMap((entry) => parseScopeTokens(entry)))];
 	return asked.length > 0 ? asked.join(" ") : undefined;
 }

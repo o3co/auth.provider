@@ -15,21 +15,18 @@
  */
 
 /**
- * What every device route does when the device-code store cannot be reached:
- * one answer and one kind of log line, shared so the three cannot drift.
+ * What every device route does when the device-code store cannot be
+ * reached: one answer and one kind of log line, shared so the three routes
+ * cannot drift.
  *
- * A store that throws — a connection gone, a timeout, a store that broke its
- * own contract — is an outage. The product answers an outage
- * `503 temporarily_unavailable` (RFC 6749 §5.2's "temporarily unable to
- * handle the request"), never a verdict on the code, which nobody could read,
- * and never a `500`, which says the server is broken when a dependency is
- * down. It is logged at error, because an outage is what an operator pages
- * on, through `loggableError`'s projection: a store error carries the command
- * it answered, and with it a user code, a device code or the approving
- * subject. The device-code store's own refusals are not outages: a
- * `DeviceCodeStoreError` is answered where it is caught.
- *
- * The projection is core's, as every log line in this package is.
+ * A store that throws is an outage, answered `503 temporarily_unavailable`
+ * (RFC 6749 §5.2): never a verdict on a code nobody could read, and never a
+ * `500`, which says the server is broken when a dependency is down. It is
+ * logged at error, for an operator to page on, through core's
+ * `loggableError` projection, because a store error carries the command it
+ * answered and with it a user code, a device code or the approving subject.
+ * A `DeviceCodeStoreError` is the store's own refusal, not an outage, and is
+ * answered where it is caught.
  */
 import { consoleLogger, loggableError } from "@o3co/auth-provider-core";
 

@@ -15,21 +15,16 @@
  */
 
 /**
- * `allowedFederationGrantConnections`, read defensively (#593, D9).
+ * `allowedFederationGrantConnections`, read defensively (the federation-grants
+ * ADR, D9).
  *
- * `ClientRepository` is a port: the bundled repository validates the field
- * against the registration schema, and a deployment's own repository — the
- * whole reason the port exists — validates nothing this package can see. D9
- * says to check the authenticated record before using its new fields, and
- * review named what happens otherwise: a repository that answers a
- * comma-joined string turns the permission check into a substring match, where
- * `"calendar,mail".includes("cal")` is `true` and a client is allowed a
- * connection nobody granted it.
- *
- * So anything that is not an array is read as an empty allowlist, which is
- * the same thing absence means: nothing is allowed, and an array keeps only
- * its strings. The reader is core's `federationGrantAllowlist`, shared with
- * lodging and the consent page.
+ * `ClientRepository` is a port, and a deployment's own repository validates
+ * nothing this package can see. One that answers a comma-joined string would
+ * turn the permission check into a substring match, where
+ * `"calendar,mail".includes("cal")` is `true`. So anything that is not an
+ * array reads as an empty allowlist — what absence means: nothing is allowed
+ * — and an array keeps only its strings. The reader is core's
+ * `federationGrantAllowlist`, shared with lodging and the consent page.
  */
 
 import { federationGrantAllowlist } from "@o3co/auth-provider-core";

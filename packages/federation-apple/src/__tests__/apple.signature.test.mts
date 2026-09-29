@@ -15,16 +15,13 @@
  */
 
 /**
- * #542 — the id_token's signature is verified against Apple's JWKS.
- *
- * openid-client 6 treats an id_token returned by the token endpoint as
- * delivered over TLS and does not verify its signature on the code flow
- * unless `enableNonRepudiationChecks` is on; a `jwks_uri` in the metadata
- * fetches nothing by itself. Apple publishes no userinfo endpoint, so the
- * id_token is the only source of identity here — which makes its signature
- * the only thing standing between the token endpoint's TLS and the account.
- * These cases run the real library against a fake Apple that records every
- * request and signs real RS256 tokens.
+ * The id_token's signature is verified against Apple's JWKS. openid-client 6
+ * treats an id_token from the token endpoint as delivered over TLS and does
+ * not verify its signature on the code flow unless `enableNonRepudiationChecks`
+ * is on (a `jwks_uri` in the metadata fetches nothing by itself). Apple has no
+ * userinfo endpoint, so the id_token is the only source of identity, and its
+ * signature the only thing between the token endpoint's TLS and the account.
+ * Runs the real library against a fake Apple that signs real RS256 tokens.
  */
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";
@@ -69,7 +66,7 @@ describe("Apple id_token signature verification (#542)", () => {
 		const profile = await exchange(provider);
 		expect(profile.sub).toBe(idp.sub);
 		expect(profile.email).toBe("alice@example.test");
-		// Before #542 this was zero: the token was accepted without a key.
+		// The JWKS was fetched: the token was checked against a published key.
 		expect(idp.requestsTo(APPLE.jwksUri)).toHaveLength(1);
 		const token = idp.requestsTo(APPLE.tokenEndpoint);
 		expect(token).toHaveLength(1);

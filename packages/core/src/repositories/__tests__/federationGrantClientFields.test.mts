@@ -15,15 +15,13 @@
  */
 
 // What a client needs on its record to use a federation grant at all
-// (#593, D9, slice 4).
+// (ADR 2026-09-17-federation-grants-offline-delegation).
 //
-// Two fields, and the reason they are two: the connection allowlist is what a
-// worker needs to spend a grant that already exists, and the redirect URIs are
-// what a browser needs to create one. A token/status worker never performs the
-// browser flow, so requiring a redirect URI of it would couple the two.
-//
-// Absence means nothing is allowed, on both. A client registered before this
-// existed must not find itself opted into offline delegation.
+// Two fields: a worker needs the connection allowlist to spend a grant that
+// already exists, a browser needs the redirect URIs to create one. A
+// token/status worker never performs the browser flow, so requiring a
+// redirect URI of it would couple the two. Absence means nothing is allowed
+// on both, so a client that omits them is never opted into offline delegation.
 
 import { describe, expect, it } from "vitest";
 import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";

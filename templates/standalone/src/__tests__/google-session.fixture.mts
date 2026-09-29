@@ -15,21 +15,18 @@
  */
 
 /**
- * A browser session with Google linked, on the standalone as a deployment
- * composes it: `oauthModule`, the session module and the real Google adapter,
- * booted through `createApp` under the shipped configuration.
+ * A browser session with Google linked, on the standalone composed as a
+ * deployment does: `oauthModule`, the session module and the real Google
+ * adapter, booted through `createApp` under the shipped configuration.
  *
- * The routes that act on a session's federation — the two logout routes and
- * `POST /oauth/federation/:name/token` — live in `@o3co/auth-provider-oauth`,
- * which depends on no adapter, so its own tests stand one in. What they hand
- * the adapter, and what they make of what its library raises, can only be
- * seen here.
+ * The two logout routes and `POST /oauth/federation/:name/token` live in
+ * `@o3co/auth-provider-oauth`, which depends on no adapter; only here can a
+ * test see what they hand the real adapter and what they make of what its
+ * library raises.
  *
- * Not `all-modules-composition.fixture.mts`: that one switches every module
- * on and signs with a key it keeps to itself. The tests here present an
- * `id_token_hint` and an access token of their own — a caller's, with the
- * claims the case needs — so the deployment signs with an HS256 secret this
- * file holds, and nothing but Google is federated.
+ * Unlike `all-modules-composition.fixture.mts`, the deployment signs with an
+ * HS256 secret this file holds, so tests can present an `id_token_hint` and
+ * access token of their own; nothing but Google is federated.
  */
 
 import { createHmac } from "node:crypto";

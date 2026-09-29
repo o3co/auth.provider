@@ -15,16 +15,15 @@
  */
 
 /**
- * A stored refresh-failure stamp is still accepted where a report is, for a
- * consumer who turns on `exactOptionalPropertyTypes` (#626).
+ * A stored refresh-failure stamp is accepted where a report is, for a
+ * consumer who turns on `exactOptionalPropertyTypes`.
  *
- * The stamp used to extend the report type. It names its optional fields as
- * required keys holding `T | undefined` now, and under that option `a?: T`
- * refuses an explicit `undefined` — so the report's optional fields have to
- * say `?: T | undefined` for the stamp to be accepted. Without the option the
- * two spellings are the same type, so no ordinary type test can tell them
- * apart; this compiles a probe with the option ON, and controls prove it is
- * on and that the types resolved.
+ * The stamp names its optional fields as required keys holding `T |
+ * undefined`, and under that option `a?: T` refuses an explicit `undefined`,
+ * so the report's optional fields have to say `?: T | undefined`. Without the
+ * option the two spellings are the same type, so no ordinary type test can
+ * tell them apart: this compiles a probe with the option on, and controls
+ * prove it is on and that the types resolved.
  */
 
 import path from "node:path";

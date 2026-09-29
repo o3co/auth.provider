@@ -8,20 +8,10 @@ import type { Module, ModuleSpec } from "../module-spec.mjs";
 import type { ProviderDeps } from "../provider.mjs";
 
 // ---------------------------------------------------------------------------
-// Parallel local helpers — test defineModule's `const` generic inference
-// against a local ComponentMap-shaped fixture. We re-derive a local
-// `defineLocalModule` with the SAME shape as the production `defineModule`
-// (single `const` generic, mapped-type provides).
-//
-// The production `defineModule<const R extends ComponentKey, ...>` cannot
-// be called with arbitrary keys because ComponentKey resolves to `never`
-// in the v0.5.0 baseline (empty ComponentMap). Calling
-// `defineModule({ requires: ["foo"] })` would fail with `"foo" not assignable
-// to never` — exactly the typecheck protection we want for production code.
-//
-// To test the INFERENCE behaviour, we mirror the helper locally with a
-// non-empty fixture. This proves the pattern works; production-typed
-// inference is exercised when real ComponentMap slots land in Phases 5-8.
+// `defineLocalModule` mirrors the production `defineModule` (`const`
+// generics, mapped-type provides) over a local ComponentMap-shaped fixture,
+// so inference is tested with keys the shared ComponentMap does not declare.
+// The production `defineModule` refuses such keys at typecheck, as intended.
 // ---------------------------------------------------------------------------
 
 interface LocalCM {
@@ -48,14 +38,9 @@ interface LocalModuleSpec<R extends LocalKey = never, O extends LocalKey = never
 }
 
 /**
- * The widened "erased" form of LocalModuleSpec — mirrors the production
- * pattern `Module = ModuleSpec<ComponentKey, ComponentKey>` so that
- * `LocalModuleSpec<R, O>` (any subset R, O ⊆ LocalKey) is structurally
- * assignable here without a cast. Without this widening, returning
- * `LocalModuleSpec` (= `LocalModuleSpec<never, never>`) would reject
- * the `const`-inferred narrow type at the function boundary.
- *
- * The same widening was applied to production `Module` in module-spec.mts.
+ * The widened "erased" form, mirroring `Module = ModuleSpec<ComponentKey, ComponentKey>`:
+ * any `LocalModuleSpec<R, O>` is assignable to it without a cast, where
+ * `LocalModuleSpec<never, never>` would reject the `const`-inferred type.
  */
 type LocalModule = LocalModuleSpec<LocalKey, LocalKey>;
 
@@ -114,10 +99,8 @@ test("defineLocalModule with no requires/optional uses empty deps", () => {
 });
 
 test("production defineModule signature compiles (smoke check)", () => {
-	// Pure type-level smoke check — verify the production defineModule
-	// is exported with the expected signature shape: `requires` and
-	// `optional` inferred as literals, and the section's schema as a third
-	// argument that defaults to "no section".
+	// `requires` and `optional` are inferred as literals, and the section's
+	// schema is a third argument that defaults to "no section".
 	type DefineModuleType = typeof defineModule;
 	expectTypeOf<DefineModuleType>().toMatchTypeOf<
 		<
@@ -131,7 +114,7 @@ test("production defineModule signature compiles (smoke check)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The module's own configuration section (#728). `section.schema` types
+// The module's own configuration section. `section.schema` types
 // `deps.section` in every factory of the module. These call the production
 // `defineModule`: `config` is a real slot in this program, declared by
 // `../../../boot/types.mts`, which the typecheck program includes.
@@ -267,7 +250,7 @@ test("relocatedFrom is a list of old paths moved whole, or a map from each old p
 });
 
 // ---------------------------------------------------------------------------
-// `authoritative` (#728): the provided keys no composition may substitute
+// `authoritative`: the provided keys no composition may substitute
 // while the module is loaded. Only a key of the module's own `provides`
 // compiles; `config` and `oauthTokenSettings` are real slots in this program.
 // ---------------------------------------------------------------------------

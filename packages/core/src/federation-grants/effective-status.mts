@@ -31,26 +31,21 @@ import type {
 } from "./types.mjs";
 
 /**
- * Whether a subject's revocation boundary covers an instant (#593, D13): a
- * grant's consent against the grants boundary, and a session's authentication
- * against the sessions boundary (D7).
+ * Whether a subject's revocation boundary covers an instant: a grant's consent
+ * against the grants boundary, or a session's authentication against the
+ * sessions boundary. For a grant the consent is compared, not a token's `iat`
+ * (a token from a surviving grant is always fresh) nor `authorizedAt` (a
+ * callback just after the boundary must not hide a consent given before it).
  *
- * For a grant it is the consent that is compared. Not a token's `iat`: a token
- * minted from a surviving grant is always fresh. And not `authorizedAt`: the
- * consent precedes the callback by up to ten minutes, and a callback that
- * lands just after the boundary must not hide a consent given before it.
+ * Inclusive, with the allowance `jwt/verify.mts` gives the same boundary
+ * (`subjectRevocationSkewMs`), not the five-minute `clockSkewMs`, which would
+ * refuse the re-login a revocation sends the user to. A negative allowance
+ * reads as none; `null` is no boundary in force.
  *
- * Inclusive, with the allowance the token check in `jwt/verify.mts` gives the
- * same boundary (`subjectRevocationSkewMs`, one second) — and not the
- * five-minute `clockSkewMs`, which would refuse the re-login a revocation
- * sends the user to. A negative allowance reads as none. `null` is a subject
- * with no boundary in force.
- *
- * A value that cannot be compared is thrown, and answered neither way. "Not
- * covered" would switch the backstop off — for every grant at once, if the
- * allowance is what is wrong, since `Math.max(0, NaN)` is NaN. "Covered"
- * would revoke durably because of a corrupt value. It is an outage, and the
- * caller answers 503, as `verifyJwt` does for a boundary it cannot read.
+ * @throws RangeError for a value that cannot be compared. Neither answer is
+ * safe: "not covered" switches the backstop off (for every grant, if the
+ * allowance is NaN), and "covered" revokes durably over a corrupt value. The
+ * caller answers 503, as `verifyJwt` does.
  */
 export function coveredByRevocationBoundary(
 	instant: Date,
@@ -85,54 +80,42 @@ export interface EffectiveFederationGrantStatusContext {
 	readonly revocationSkewMs: number;
 	/**
 	 * Whether the sealed credential authenticates under the current key ring.
-	 * Only consulted for a grant that is stored as `active`: every other stored
-	 * state has had its credential deleted (D2), and an `active` grant with no
-	 * credential record at all is `"unreadable"`.
+	 * Only consulted for a grant stored as `active`: every other stored state
+	 * has had its credential deleted, and an `active` grant with no credential
+	 * record is `"unreadable"`.
 	 */
 	readonly credentials: "ok" | "unreadable";
 }
 
 /**
- * What a caller is told about a grant (#593, D1). Computed on every read and
- * never persisted: undoing a configuration change, or restoring a key,
- * restores the grant. Only a revocation and an upstream `invalid_grant` are
- * facts about the grant itself, and only those are stored.
+ * What a caller is told about a grant. Computed on every read and never
+ * persisted, so undoing a configuration change or restoring a key restores the
+ * grant; only a revocation and an upstream `invalid_grant` are stored.
  *
- * The order is from what cannot be undone to what can, so that a client is
- * never sent to a remedy that cannot work:
+ * Ordered from what cannot be undone to what can, so a client is never sent to
+ * a remedy that cannot work:
  *
  * 1. a stored revocation;
- * 2. the backstop, before expiry, so that a revocation which never reached the
- *    record is not reported as a mere expiry — and for a grant that already
- *    needs the user too, since the boundary ends that one as well. Not for a
- *    `pending` grant: it has no consent to date, and D7 already demands a
- *    session that authenticated after the boundary;
+ * 2. the backstop, before expiry so an unrecorded revocation is not reported as
+ *    an expiry (not for `pending`, which has no consent to date);
  * 3. expiry, the terminal bound first (`federationGrantExpiryState`);
- * 3a. a connection that is no longer configured. Putting the entry back
- *    restores the grant, so it comes after what cannot be undone — a
- *    configuration remedy must not be offered for a grant that is over — and
- *    it is not a changed identity, which removing an entry does not establish;
- * 4. a changed upstream identity, which no reauthorization can mend — before
- *    the stored `invalid_grant`, because `/reauthorize` refuses such a grant;
- * 5. what a reauthorization does mend: a stored `invalid_grant`, a changed
- *    connection, a credential that does not open — and an upstream that asked
- *    for the user (#616): a refusal stamped with an interaction code, read for
- *    as long as it stands, since time mends nothing there;
- * 6. a grant that cannot yield a token: a `maxAccessTokenLifetime` no token
- *    can satisfy — known without asking the upstream, and named as the reason
- *    whatever an older marker says, because that is what `/token` answers —
- *    and then an upstream that stopped issuing eligible tokens, for as long as
- *    the marker stands. After what a reauthorization mends, since a
- *    reauthorization clears the marker as well.
+ * 4. a connection no longer configured: restorable, so after what is not, and
+ *    not a changed identity;
+ * 5. a changed upstream identity, which no reauthorization mends (before a
+ *    stored `invalid_grant`, since `/reauthorize` refuses such a grant);
+ * 6. what a reauthorization mends: a stored `invalid_grant`, a changed
+ *    connection, an unreadable credential, an upstream interaction code;
+ * 7. a grant that cannot yield a token: an unsatisfiable
+ *    `maxAccessTokenLifetime` (what `/token` answers, whatever an older marker
+ *    says), then a standing ineligibility marker, which stays until a
+ *    reauthorization's callback activates the grant (lodging the request
+ *    leaves it).
  *
- * This is the order D10's steps are reported in, which is not the order the
- * ADR lists them: it puts the backstop before expiry.
- *
- * A key that is missing from the ring is not a status. It is an outage: the
- * caller passes `"unreadable"` for it and answers 503 where this would say
- * `credential_unreadable` — and only there, so that the outage masks nothing
- * that is reported ahead of it, none of which needs a credential. So is a
- * boundary that cannot be compared: `coveredByRevocationBoundary` throws.
+ * The backstop comes before expiry, unlike the federation-grants ADR's
+ * listing. A key missing from the ring is an outage, not a status: the caller
+ * passes `"unreadable"` and answers 503 where this would say
+ * `credential_unreadable`, which masks nothing ahead of it. An incomparable
+ * boundary throws (`coveredByRevocationBoundary`).
  */
 export function effectiveFederationGrantStatus(
 	grant: FederationGrant,
@@ -165,11 +148,10 @@ export function effectiveFederationGrantStatus(
 	if (context.credentials === "unreadable") {
 		return { status: "reauthorization_required", reason: "credential_unreadable" };
 	}
-	// The upstream asked for the user (#616, D11, D12): a refusal stamped with
-	// one of the four interaction codes, read for as long as it stands. Its
-	// date, count and advice are the timed backoff's and are not consulted —
-	// waiting mends nothing here — and it comes before the maximum and the
-	// marker below, which waiting might.
+	// The upstream asked for the user: a refusal stamped with an interaction
+	// code, read for as long as it stands. Its backoff fields are not consulted
+	// (waiting mends nothing), and it precedes the checks below, which waiting
+	// might mend.
 	const interaction = federationGrantInteractionCode(grant.refreshFailure);
 	if (interaction !== undefined) {
 		return { status: "reauthorization_required", reason: `upstream_${interaction}` };

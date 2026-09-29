@@ -13,35 +13,26 @@
  */
 
 /**
- * Sender-constraint enforcement for **protected resources** — the RFC 9449
- * §7.1 / RFC 8705 §3 counterpart to `tokenBindingMw`.
+ * Sender-constraint enforcement for **protected resources**: the RFC 9449 §7.1
+ * / RFC 8705 §3 counterpart to `tokenBindingMw`, which only binds tokens at
+ * `/oauth/token`. Without it, a `cnf`-bearing access token would be accepted as
+ * an ordinary Bearer JWT at `/oauth/userinfo`, the federation token endpoint,
+ * `/oauth/logout` and bearer self-introspection, so a stolen DPoP- or
+ * mTLS-bound token would replay unbound.
  *
- * `tokenBindingMw` runs at `/oauth/token` and answers "what binding is this
- * client presenting?" so a grant can stamp it into the issued token's `cnf`.
- * It says nothing about later requests. Without the middleware in this file a
- * `cnf`-bearing access token is accepted at `/oauth/userinfo`, the federation
- * token endpoint, `/oauth/logout`, and bearer self-introspection as an
- * ordinary Bearer JWT — so a stolen DPoP- or mTLS-bound token replays
- * unbound, which is the whole point of binding it (issue #264).
+ * For a token carrying a `cnf`:
  *
- * What it enforces, for a token that carries a `cnf`:
- *
- *   1. The wire scheme matches the binding. `cnf.jkt` REQUIRES the `DPoP`
- *      auth scheme (RFC 9449 §7.1 — a DPoP-bound token presented as a
- *      Bearer token must be refused); `cnf["x5t#S256"]` keeps `Bearer`,
- *      because RFC 8705 does not redefine the wire-level token type.
+ *   1. The wire scheme matches the binding: `cnf.jkt` requires `DPoP` (RFC 9449
+ *      §7.1); `cnf["x5t#S256"]` keeps `Bearer` (RFC 8705 does not redefine the
+ *      token type).
  *   2. A mechanism *of the kind that owns that `cnf` variant* validated the
- *      material on this request, and produced the same confirmation value.
+ *      material on this request and produced the same confirmation value.
  *
- * Deliberately NOT layered on `tokenBindingMw`: that middleware resolves
- * competing mechanisms by `DispatchPolicy` and answers with 400 +
- * `errorEnvelope`. Here the token already names its binding, so there is
- * nothing to arbitrate — the answer must come from the mechanism the token
- * points at — and a protected resource owes RFC 6750 §3 a 401 with a
- * `WWW-Authenticate` challenge. The exception is a mechanism that reports an
- * outage rather than a verdict (`TokenBindingRefusal.unavailable`): the
- * request is still refused, as `503` with no challenge, because the
- * credential is not what failed.
+ * Not layered on `tokenBindingMw`, which arbitrates mechanisms by
+ * `DispatchPolicy` and answers 400: here the token names its binding, and a
+ * protected resource owes RFC 6750 §3 a 401 with a `WWW-Authenticate`
+ * challenge. A mechanism outage (`TokenBindingRefusal.unavailable`) is `503`
+ * with no challenge, since the credential is not what failed.
  */
 
 import type { Request, RequestHandler } from "express";
@@ -65,10 +56,9 @@ import {
 
 export interface ProtectedResourceBindingOptions {
 	/**
-	 * The same mechanisms `tokenBindingMw` is composed from. MAY be empty:
-	 * a deployment with no mechanisms still has to refuse `cnf`-bearing
-	 * tokens minted before the mechanism was removed, so an empty list is a
-	 * meaningful configuration rather than a reason to skip the middleware.
+	 * The same mechanisms `tokenBindingMw` is composed from. May be empty: a
+	 * deployment with none must still refuse `cnf`-bearing tokens minted before
+	 * a mechanism was removed.
 	 */
 	readonly mechanisms: readonly TokenBindingMechanism[];
 	readonly logger?: Logger;
@@ -79,9 +69,8 @@ export const protectedResourceBindingMw = ({
 	logger,
 }: ProtectedResourceBindingOptions): RequestHandler => {
 	return async (req, res, next) => {
-		// Anything that is not an access-token scheme belongs to another
-		// authentication surface — `Basic` client auth on the introspection
-		// endpoint is the case that actually occurs — and is not ours to judge.
+		// Other schemes belong to another authentication surface (in practice
+		// `Basic` client auth on the introspection endpoint).
 		const authorization = parseAccessTokenAuthorization(req.headers.authorization);
 		if (authorization === null) {
 			next();
@@ -89,13 +78,11 @@ export const protectedResourceBindingMw = ({
 		}
 		const { scheme, token: accessToken } = authorization;
 
-		// Claims are read WITHOUT verifying the signature; the endpoint
-		// downstream still runs the full `verifyJwt`. That is sound because the
-		// two reads cannot disagree — `decodeJwt` is the same primitive
-		// `jwt/verify.mts` uses, over the same bytes — so a token whose `cnf`
-		// is enforced here is the same token whose signature is checked there.
-		// A token that fails to decode is left to the endpoint to reject, which
-		// keeps the "invalid token" response in one place.
+		// Claims are read WITHOUT verifying the signature; the endpoint still
+		// runs `verifyJwt`. Sound because both reads use `decodeJwt` over the same
+		// bytes, so the token whose `cnf` is enforced here is the one whose
+		// signature is checked there. A token that fails to decode is left to the
+		// endpoint, keeping the "invalid token" response in one place.
 		let claims: Record<string, unknown>;
 		try {
 			claims = decodeJwt(accessToken) as Record<string, unknown>;
@@ -104,43 +91,37 @@ export const protectedResourceBindingMw = ({
 			return;
 		}
 
-		// Classify the token's `cnf` before any mechanism runs: `binding` is
-		// still unresolved here, so the match can only be `unbound`,
-		// `compound`, or `no-proof` — the latter meaning "bound by `member`,
-		// proof still to be collected below".
+		// Classify `cnf` before any mechanism runs: with no binding yet the match
+		// is `unbound`, `compound`, or `no-proof` (bound by `member`, proof to
+		// be collected below).
 		const match = matchConfirmation(claims.cnf, null);
 		if (match.status === "unbound") {
-			// Unbound token (or a junk `cnf` that names no binding). Nothing to
-			// enforce — an unbound token was never sender-constrained, and the
+			// Unbound (or a junk `cnf` naming no binding): nothing to enforce; the
 			// endpoint's own authorization checks still apply.
 			next();
 			return;
 		}
 
 		const reject = (rejection: string, challenge: string, description: string): void => {
-			// `rejection` names the sender-constraint rule that refused the
-			// request (`compound_cnf`, `scheme_mismatch`, `proof_invalid`,
-			// `no_matching_binding`). Not `reason`: the verdict line written
-			// beside a `proof_invalid` uses that for the mechanism's own name for
-			// the refused proof.
+			// `rejection`, not `reason`: the verdict line written beside a
+			// `proof_invalid` uses `reason` for the mechanism's own name for the
+			// refused proof.
 			logger?.warn(
 				{ rejection, scheme, site: "protected_resource_binding" },
 				"sender_constraint_rejected",
 			);
 			res.setHeader("WWW-Authenticate", `${challenge} error="invalid_token"`);
 			// RFC 6750 §3.1 gives one code for every token-level failure. The
-			// granular reason goes to the audit log above and never to the
-			// caller: telling an attacker holding a stolen bound token whether
-			// they got the scheme, the proof, or the key wrong hands them a
-			// tuning oracle.
+			// granular reason goes only to the log: telling the holder of a stolen
+			// bound token whether the scheme, the proof or the key was wrong hands
+			// them a tuning oracle.
 			res.status(401).json(errorEnvelope("invalid_token", description));
 		};
 
 		if (match.status === "compound") {
-			// This AS mints exactly one mechanism's confirmation per token, so a
-			// compound `cnf` means a forged token or an AS bug. Refuse rather
-			// than pick a winner — the same call `grants/refreshToken.mts` and
-			// the introspection handler already make.
+			// This AS mints one mechanism's confirmation per token, so a compound
+			// `cnf` means a forged token or an AS bug. Refuse rather than pick a
+			// winner, as `grants/refreshToken.mts` and introspection do.
 			reject("compound_cnf", "Bearer", "access token carries an ambiguous compound cnf binding");
 			return;
 		}
@@ -149,7 +130,7 @@ export const protectedResourceBindingMw = ({
 		const profile = BINDING_PROFILES[member];
 
 		if (scheme !== profile.scheme) {
-			// The #264 replay: a DPoP-bound token handed over as `Bearer`.
+			// The replay this guards against: a DPoP-bound token sent as `Bearer`.
 			reject(
 				"scheme_mismatch",
 				profile.challenge,
@@ -168,15 +149,10 @@ export const protectedResourceBindingMw = ({
 				const code = oauthErrorCodeOf(err);
 				const unavailable = unavailableOf(err);
 				if (unavailable !== undefined && code !== undefined) {
-					// The mechanism could not reach a verdict (`TokenBindingRefusal`):
-					// refused, as the server's fault. No challenge — `401
-					// invalid_token` would tell the client to replace a token that is
-					// fine, and the refresh it prompts meets the same outage at the
-					// token endpoint. RFC 6750 §3.1's codes describe request and
-					// token faults; a server that cannot answer says 503.
-					// This layer answers the 503, so it owns the outage's one line:
-					// the mechanism's reason and the cause's projection, when it
-					// gave them.
+					// No verdict: refused as the server's fault, with no challenge.
+					// `401 invalid_token` would tell the client to replace a token that
+					// is fine, and the refresh would meet the same outage. This layer
+					// answers the 503, so it writes the outage's one log line.
 					logger?.error(
 						{ mechanism: mechanism.kind, code, ...unavailableLogFields(err) },
 						"protected_resource_binding_unavailable",
@@ -184,9 +160,7 @@ export const protectedResourceBindingMw = ({
 					res.status(503).json(errorEnvelope(code, unavailable));
 					return;
 				}
-				// The same verdict line the token endpoint writes: the code the
-				// refusal carries, its `reason`, and its projection
-				// (`verdictLogFields`).
+				// The same verdict line the token endpoint writes.
 				logger?.warn(
 					{
 						mechanism: mechanism.kind,
@@ -197,9 +171,9 @@ export const protectedResourceBindingMw = ({
 				);
 				const retryInstruction = retryInstructionOf(err);
 				if (retryInstruction !== undefined && code !== undefined) {
-					// A retry instruction, not a verdict (`TokenBindingRefusal`) —
-					// RFC 9449 §9's nonce challenge (#530): the resource asks with the
-					// error the challenge names, and hands over what to retry with.
+					// A retry instruction, not a verdict (RFC 9449 §9's nonce
+					// challenge): answer with the error the challenge names and the
+					// headers to retry with.
 					applyResponseHeaders(res, err);
 					res.setHeader("WWW-Authenticate", `${profile.challenge} error="${code}"`);
 					res.status(401).json(errorEnvelope(code, retryInstruction));
@@ -215,13 +189,10 @@ export const protectedResourceBindingMw = ({
 		}
 
 		if (binding === null) {
-			// Covers all three ways the proof can fail to arrive: the mechanism
-			// is not installed (a deployment that dropped the module while bound
-			// tokens are still live), no material was presented, or the material
-			// proved possession of a different key or certificate. Each is a
-			// stolen-token replay from the resource's point of view. (For why
-			// the thumbprint comparison is a plain `!==`, see
-			// `grants/confirmationMatch.mts`.)
+			// The mechanism is not installed (dropped while bound tokens are still
+			// live), no material was presented, or it proved a different key or
+			// certificate. Each is a stolen-token replay to the resource. (Why the
+			// thumbprint comparison is a plain `!==`: `grants/confirmationMatch.mts`.)
 			reject(
 				"no_matching_binding",
 				profile.challenge,

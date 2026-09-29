@@ -16,14 +16,11 @@
 
 /**
  * `federationGrants.connections.<name>` read into the connections the domain
- * rules take (#593, D4/D6/D15).
- *
- * Everything here is a boot refusal, and the reason it is a boot refusal
- * rather than a per-request failure is the same each time: what these values
- * decide — which upstream account a grant is pinned to, how much residual
- * access it may carry, which environment it belongs to — is decided once, at
- * consent, and lives for as long as the grant does. An operator finds out at
- * boot, or finds out from a user.
+ * rules take (the federation-grants ADR, D4/D6/D15). Everything here is a boot
+ * refusal, not a per-request failure: what these values decide (which upstream
+ * account a grant is pinned to, how much residual access it may carry, which
+ * environment it belongs to) is decided once, at consent, and lives as long as
+ * the grant does.
  */
 
 import { describe, expect, it } from "vitest";
@@ -145,7 +142,7 @@ describe("resolveFederationGrantConnections", () => {
 	});
 
 	it("requires a positive access-token maximum and guesses none", () => {
-		// A guessed one invents a residual-access policy (D15): how long a
+		// A guessed one invents a residual-access policy: how long a
 		// token this provider hands out keeps working after the grant is gone.
 		expect(() => resolve({ g: { ...CONNECTION, maxAccessTokenLifetime: undefined } })).toThrow(
 			/maxAccessTokenLifetime/,
@@ -156,9 +153,9 @@ describe("resolveFederationGrantConnections", () => {
 	});
 
 	it("refuses an access-token maximum that is not a whole number of seconds", () => {
-		// Found by review. `Number(x)` took `true` as one second and `[5]` as
-		// five, and a fraction is not a thing an upstream's `expires_in` can
-		// be compared with.
+		// `Number(x)` takes `true` as one second and `[5]` as five, and a
+		// fraction is not a thing an upstream's `expires_in` can be compared
+		// with.
 		for (const maxAccessTokenLifetime of [0.5, true, [5], "1e3", null, new Date(5)]) {
 			expect(
 				() => resolve({ g: { ...CONNECTION, maxAccessTokenLifetime } }),
@@ -172,9 +169,9 @@ describe("resolveFederationGrantConnections", () => {
 	});
 
 	it("refuses a resource that is not somewhere this provider could ask for a token", () => {
-		// Found by review: `new URL()` parses `javascript:alert(1)` happily,
-		// and userinfo in a resource indicator is a credential in a value that
-		// is echoed to an upstream. `callbackURL` already refused both.
+		// `new URL()` parses `javascript:alert(1)` happily, and userinfo in a
+		// resource indicator is a credential in a value that is echoed to an
+		// upstream. `callbackURL` refuses both too.
 		expect(() => resolve({ g: { ...CONNECTION, resource: "javascript:alert(1)" } })).toThrow(
 			/resource/,
 		);
@@ -194,7 +191,7 @@ describe("resolveFederationGrantConnections", () => {
 	});
 
 	it("refuses an authorization parameter the provider owns", () => {
-		// Slice 2's exclusion, not a list of permitted vendor parameters: what
+		// An exclusion, not a list of permitted vendor parameters: what
 		// matters is that configuration cannot take over the PKCE challenge,
 		// the state, the nonce or the redirect this provider computes.
 		for (const key of ["code_challenge", "state", "nonce", "redirect_uri", "scope", "resource"]) {
@@ -222,7 +219,7 @@ describe("resolveFederationGrantConnections", () => {
 
 	it("takes a callback URL when one is supplied, and refuses an unusable one", () => {
 		// Optional here: a worker spending a grant never performs the browser
-		// flow. Slice 6 makes it mandatory, with the flow it belongs to.
+		// flow. The acquisition settings require it, with the flow it belongs to.
 		expect(() => resolve({ g: CONNECTION })).not.toThrow();
 		expect(() =>
 			resolve({ g: { ...CONNECTION, callbackURL: "https://app.example/cb" } }),

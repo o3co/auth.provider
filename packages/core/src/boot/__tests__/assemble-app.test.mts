@@ -34,14 +34,11 @@ function makeMockRouter() {
 		}),
 		allUseCalls,
 		/**
-		 * Only the mounts that came from a route contribution.
-		 *
-		 * `assembleApp` also mounts infrastructure middleware that no module
-		 * declared — the protected-resource sender-constraint guard (#264) —
-		 * across several paths at once. Route contributions always mount on a
-		 * single string path, so the array shape separates the two cleanly and
-		 * keeps these mount-order tests about the ordering algorithm rather
-		 * than about how many middlewares boot happens to install.
+		 * Only the mounts that came from a route contribution. `assembleApp` also
+		 * mounts infrastructure middleware no module declared (the
+		 * protected-resource sender-constraint guard) across several paths at
+		 * once; route contributions always mount on a single string path, so
+		 * these mount-order tests stay about the ordering algorithm.
 		 */
 		get useCalls(): { mountPath: string; handler: unknown }[] {
 			return allUseCalls.filter(
@@ -481,7 +478,7 @@ describe("assembleApp — 12. AppHandle itself is Object.frozen", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 13. MUST-FIX 2 — factory-produced route validation (duplicate mountPath)
+// 13. Factory-produced route validation (duplicate mountPath)
 // ---------------------------------------------------------------------------
 
 describe("assembleApp — 13. MUST-FIX 2: factory-produced route validation", () => {
@@ -586,7 +583,7 @@ describe("assembleApp — 13. MUST-FIX 2: factory-produced route validation", ()
 });
 
 // ---------------------------------------------------------------------------
-// 14. MUST-FIX 3 — Symbol.asyncDispose NOT called on override/bootstrap values
+// 14. Symbol.asyncDispose NOT called on override/bootstrap values
 // ---------------------------------------------------------------------------
 
 describe("assembleApp — 14. MUST-FIX 3: no asyncDispose on external (override/bootstrap) values", () => {
@@ -642,7 +639,7 @@ describe("assembleApp — 14. MUST-FIX 3: no asyncDispose on external (override/
 
 describe("assembleApp — 17. listen() wraps router in Express app", () => {
 	// ---------------------------------------------------------------------------
-	// 14. D-5 LifecycleRegistrar drain (Step 3 in buildDispose)
+	// 14. LifecycleRegistrar drain (step 3 in buildDispose)
 	// ---------------------------------------------------------------------------
 
 	describe("assembleApp — 14. dispose drains LifecycleRegistrar (D-5)", () => {
@@ -688,11 +685,10 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 	// ---------------------------------------------------------------------------
 
 	it("returns 404 (not crash with 'next is not a function') for unmatched paths", async () => {
-		// Regression: passing a bare Express Router to http.createServer means
-		// fall-through requests cause "TypeError: next is not a function"
-		// (Router is middleware expecting an outer (req, res, next) caller).
-		// listen() must wrap router in a real Express app so the standard
-		// finalhandler returns a 404 response.
+		// A bare Express Router under http.createServer throws "TypeError: next
+		// is not a function" on fall-through (it is middleware expecting an outer
+		// caller), so listen() wraps it in an Express app whose finalhandler
+		// answers 404.
 		const { default: express } = await import("express");
 		const handle = assembleApp(makeFrozenWorld([]), {
 			express: { Router: () => express.Router() },
@@ -719,7 +715,7 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 18. discovery: only the document's own error is converted (#626 F4)
+// 18. discovery: only the document's own error is converted
 // ---------------------------------------------------------------------------
 
 describe("assembleApp — 18. discovery: only the document's own error is converted (#626 F4)", () => {
@@ -757,11 +753,10 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 	};
 
 	it("does not convert a router-factory failure, even one that is a DiscoveryDocumentError (#650)", () => {
-		// The conversion into `reason: "discovery-document-invalid"` is for a
-		// document that did not assemble. The router factory is called after
-		// the document is planned and outside the conversion, so what it throws
-		// arrives as itself — including an error whose TYPE says "document",
-		// which a `try` around the whole planner call would have relabelled.
+		// Only a document that did not assemble becomes
+		// `reason: "discovery-document-invalid"`. The router factory runs after
+		// planning and outside the conversion, so what it throws arrives as
+		// itself, even an error whose TYPE says "document".
 		const routerFailure = new DiscoveryDocumentError("thrown by the router factory");
 
 		const thrown = thrownBy(() =>
@@ -815,10 +810,9 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 			}),
 		],
 	])("does not convert %s, even with a DiscoveryDocumentError (#650)", (_label, world) => {
-		// Host-supplied code outside the document builder. `assembleApp` has
-		// no `try` around the planner any more — only the builder's own error
-		// comes back as a value to convert — so what these throw arrives as
-		// itself whatever its type.
+		// Host-supplied code outside the document builder. Only the builder's
+		// own error comes back as a value to convert, so what these throw
+		// arrives as itself whatever its type.
 		const failure = new DiscoveryDocumentError("thrown by host code, not by the builder");
 
 		const thrown = thrownBy(() =>
@@ -830,11 +824,9 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 	});
 
 	it("does not iterate the collector when no issuer is configured (#650)", () => {
-		// Before #626 F4 the planner returned before touching the collector
-		// when the issuer was missing. Building the collector into an argument
-		// would run it first — host code, on a deployment that serves no
-		// document — so the call site passes a reader, and this pins that it
-		// is not called.
+		// Reading the collector runs host code, which a deployment that serves
+		// no document must not do. The call site passes a reader, and this pins
+		// that it is not called when no issuer is configured.
 		let iterated = false;
 		const world: FrozenWorld = {
 			...makeFrozenWorld([], [], {
@@ -861,10 +853,9 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 	});
 
 	it("re-raises a failure while planning the document that is not the document's own error", () => {
-		// A contribution is host data. One whose getter throws fails inside
-		// document planning, and that is not a document that failed to
-		// validate — so it too arrives as itself rather than as a
-		// `discovery-document-invalid` boot error.
+		// A contribution is host data. A getter that throws during planning is
+		// not a document that failed to validate, so it arrives as itself, not
+		// as a `discovery-document-invalid` boot error.
 		const readFailure = new TypeError("contribution getter failed");
 		const hostile = {
 			providerRoot: true,

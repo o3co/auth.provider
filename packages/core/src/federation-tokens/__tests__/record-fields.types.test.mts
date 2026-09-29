@@ -17,28 +17,26 @@
 /**
  * Every `FederationTokens` field is a required key.
  *
- * A `FederationTokenStore` often copies a record field by field — the bundled
- * in-memory store does. A field it forgets is dropped without a sound, and
- * every field of this record changes what happens when it is gone:
+ * A `FederationTokenStore` often copies a record field by field (the bundled
+ * in-memory store does), and a field it forgets is dropped silently. Each
+ * field matters when it is gone:
  *
- * - `tokenType` (#645): absent is read as a record written before #645 and
- *   answered as Bearer — a sender-constrained token handed on as a bearer one.
- *   Fails OPEN.
+ * - `tokenType`: absent is read as a record that predates the field and
+ *   answered as Bearer, so a sender-constrained token is handed on as a
+ *   bearer one. Fails OPEN.
  * - `refreshToken`: absent is `410 refresh_token_absent`; the connection
  *   cannot be refreshed and the user has to sign in again.
  * - `idToken`: absent loses the `id_token_hint` logout sends the upstream.
- * - `scope` / `grantedScope` (#647): what the response reports, and the
- *   ceiling a refresh is bounded by.
- * - `expiresAt` was already required (`Date | null`), for the same reason.
+ * - `scope` / `grantedScope`: what the response reports, and the ceiling a
+ *   refresh is bounded by.
+ * - `expiresAt` (`Date | null`) is required for the same reason.
  *
- * No marker in the record can catch a store that drops fields: it would drop
- * the marker too. The type can. Every field is a REQUIRED key, its value
- * `undefined` where there is nothing to record, so an object literal that
- * leaves any of them out fails to compile.
- *
- * Asserted with a conditional type rather than `@ts-expect-error`, which any
- * error on its line would satisfy. This file only proves anything under the
- * TypeScript checker; it is on BOTH of core's typecheck lists for that reason.
+ * A marker in the record cannot catch a store that drops fields (it would drop
+ * the marker too); the type can, since an object literal that leaves a
+ * required key out fails to compile. Asserted with a conditional type rather
+ * than `@ts-expect-error`, which any error on its line would satisfy. The file
+ * proves anything only under the TypeScript checker, so it is on both of
+ * core's typecheck lists.
  */
 
 import { describe, expectTypeOf, it } from "vitest";

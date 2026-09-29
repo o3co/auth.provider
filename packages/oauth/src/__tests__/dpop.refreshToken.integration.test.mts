@@ -15,23 +15,20 @@
  */
 
 /**
- * Coverage for the DPoP refresh-token binding matrix — Wave 2 Phase 2 §9.2.
- *
- * The 5-row matrix (Codex Round 1 Important #1) governs how the refresh_token
- * grant correlates the RT's persisted `cnf.jkt` claim with the request-time
- * DPoP proof presented via `ctx.tokenBinding`:
+ * The DPoP refresh-token binding matrix: how the refresh_token grant
+ * correlates the RT's persisted `cnf.jkt` claim with the request-time DPoP
+ * proof presented via `ctx.tokenBinding`:
  *
  *   | RT cnf.jkt | proof JKT       | Outcome
- *   | no         | no              | row 1: issue plain Bearer (legacy preserved)
+ *   | no         | no              | row 1: issue plain Bearer
  *   | no         | yes             | row 2: opt-in upgrade — bind new AT (RT bound only for public)
  *   | yes        | no              | row 3: reject invalid_grant "requires a DPoP proof"
  *   | yes        | yes, differs    | row 4: reject invalid_grant "does not match refresh_token binding"
  *   | yes        | yes, equal      | row 5: rotation preserves binding (AT + RT for public)
  *
- * Pattern: direct grant handler invocation (mirrors refreshToken.test.mts).
- * RTs are minted via SignJWT with arbitrary cnf claims to drive each row.
- * The matrix check runs BEFORE rotation wiring, so tests use mockDeps without
- * refreshTokenFamilyRotation — orthogonal concerns.
+ * Drives the grant handler directly (as refreshToken.test.mts does), with RTs
+ * minted via SignJWT carrying arbitrary cnf claims. The matrix runs BEFORE
+ * rotation, so the deps carry no refreshTokenFamilyRotation.
  */
 
 import { createSecretKey } from "node:crypto";
@@ -84,10 +81,7 @@ const mockDeps: RefreshTokenGrantDeps = {
 	sessionRequirementResolver: resolverForTests([]),
 };
 
-/**
- * `mockDeps` with `oauth.tokenBinding.bindConfidentialClientRefreshTokens`
- * set — the #275 opt-in.
- */
+/** `mockDeps` with the opt-in `oauth.tokenBinding.bindConfidentialClientRefreshTokens` set. */
 const depsWithConfidentialBinding = (enabled: boolean): RefreshTokenGrantDeps => ({
 	...mockDeps,
 	config: {
@@ -175,9 +169,8 @@ const dpopBinding = (jkt: string): TokenBinding => ({
 
 describe("DPoP refresh-token binding matrix — §9.2 (5 rows)", () => {
 	it("row 1: RT plain + no proof → unbound AT, Bearer", async () => {
-		// Pre-DPoP legacy path: the RT was never bound, no proof presented.
-		// The grant MUST preserve the existing Bearer-only behavior — this is
-		// the regression guard for the opt-in default.
+		// An RT never bound, no proof presented: the grant MUST keep issuing
+		// Bearer only — binding is opt-in.
 		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);
 		const ctx = buildCtx({
@@ -199,10 +192,10 @@ describe("DPoP refresh-token binding matrix — §9.2 (5 rows)", () => {
 	});
 
 	it("row 2: RT plain + proof → opt-in upgrade, AT bound, RT bound only for public client", async () => {
-		// Public client opt-in upgrade — proof presented for a previously-unbound
-		// RT. Per §9.1's public-client gate, the new RT MUST also be bound so a
-		// subsequent refresh enforces continuity. Confidential clients in row 2
-		// get AT-bound but RT-plain (next sub-test).
+		// Public client opt-in upgrade — proof presented for an unbound RT. Per
+		// the public-client gate, the new RT MUST also be bound so a subsequent
+		// refresh enforces continuity. Confidential clients in row 2 get
+		// AT-bound but RT-plain (next sub-test).
 		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);
 		const ctx = buildCtx({
@@ -324,13 +317,13 @@ describe("DPoP refresh-token binding matrix — §9.2 (5 rows)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Mechanism-boundary regressions (Codex Important #1 + #2 convergence, PR #185)
+// Mechanism boundaries
 // ---------------------------------------------------------------------------
 
 describe("DPoP refresh-token mechanism boundary", () => {
 	it("non-DPoP mechanism emitting cnf.jkt cannot satisfy a DPoP-bound RT (Codex Important #2)", async () => {
 		// The Confirmation union is mechanism-extensible — a custom mechanism
-		// (e.g. a future FIDO attestation binding) could emit `{ jkt: "..." }`
+		// (e.g. a FIDO attestation binding) could emit `{ jkt: "..." }`
 		// without being DPoP. The matrix's proof extraction MUST gate on
 		// `kind === "dpop"` so a non-DPoP mechanism cannot satisfy a
 		// DPoP-bound RT just by reusing the jkt confirmation shape.
@@ -364,14 +357,10 @@ describe("DPoP refresh-token mechanism boundary", () => {
 	});
 
 	it("mTLS public-client row 2 (RT plain + cert) → opt-in upgrade, new RT bound with x5t#S256 (RFC 8705 §4)", async () => {
-		// Phase 3 inversion. The Phase 2 deferral has been removed: the mTLS
-		// refresh-time matrix (§9.2 mTLS rows) lands together with the §9.1
-		// RT-emission gate, so a public-client mTLS refresh now MUST emit a
-		// bound RT to enforce cross-refresh continuity (parallel to DPoP
-		// row 2 public-variant).
-		//
-		// Confidential clients still get RT-plain (public-client gate
-		// covers both mechanisms per the §9.1 comment).
+		// The refresh-time matrix covers mTLS too, so a public-client mTLS
+		// refresh MUST emit a bound RT to enforce cross-refresh continuity
+		// (parallel to DPoP row 2, public variant). Confidential clients get
+		// RT-plain: the public-client gate covers both mechanisms.
 		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);
 		const ctx = buildCtx({
@@ -404,35 +393,29 @@ describe("DPoP refresh-token mechanism boundary", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #275 — opt-in RT binding for confidential clients
+// Opt-in RT binding for confidential clients
 // ---------------------------------------------------------------------------
 
 /*
- * Both RFCs stop short of requiring this, and neither forbids it.
+ * Neither RFC requires this, and neither forbids it. RFC 9449 §5 ("Refresh
+ * tokens issued to confidential clients ... are not bound to the DPoP proof
+ * public key because they are already sender-constrained with a different
+ * existing mechanism") is descriptive prose with no RFC 2119 keyword; RFC 8705
+ * §7.1 says the same for certificates ("indirectly certificate-bound by way of
+ * the client ID and the associated requirement for (certificate-based)
+ * authentication").
  *
- * RFC 9449 §5: "Refresh tokens issued to confidential clients ... are not
- * bound to the DPoP proof public key because they are already
- * sender-constrained with a different existing mechanism" — descriptive prose,
- * no RFC 2119 keyword, next to three MUSTs for public clients. RFC 8705 §7.1
- * says the same for certificates: confidential-client refresh tokens are
- * "indirectly certificate-bound by way of the client ID and the associated
- * requirement for (certificate-based) authentication".
- *
- * The rationale both give holds here — this grant refuses an unauthenticated
- * caller outright and refuses an RT whose `azp` is not the authenticated
- * client — so a stolen RT is unusable without the client's credential, and
- * binding buys nothing against the threat as usually stated.
- *
- * What it does buy is the case where the two credentials are protected
- * differently: a client secret in an environment variable and a DPoP key in an
- * HSM or TPM. There, leaking the secret alone is not enough. The cost is real
- * and is why this is off by default — a bound RT pins the client to one key or
- * certificate for the RT's whole lifetime, so a key rotation mid-lifetime
+ * This grant refuses an unauthenticated caller and an RT whose `azp` is not
+ * the authenticated client, so a stolen RT is unusable without the client's
+ * credential. Binding helps only where the two credentials are protected
+ * differently (a client secret in an environment variable, a DPoP key in an
+ * HSM or TPM). It is off by default: a bound RT pins the client to one key or
+ * certificate for the RT's whole lifetime, so a mid-lifetime key rotation
  * breaks refresh.
  *
- * The flag is mechanism-neutral because the gate it modifies is
- * (`(bindingIsDpop || bindingIsMtls) && isPublicClient`) and because
- * `oauth.tokenBinding` is where cross-mechanism policy already lives.
+ * The flag is mechanism-neutral because the gate it modifies
+ * (`(bindingIsDpop || bindingIsMtls) && isPublicClient`) is, and
+ * `oauth.tokenBinding` is where cross-mechanism policy lives.
  */
 describe("confidential-client RT binding — opt-in (#275)", () => {
 	it("is off by default: a confidential client's new RT stays plain", async () => {

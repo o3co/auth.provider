@@ -15,20 +15,16 @@
  */
 
 /**
- * Core's audit events carried to the deployment's sink (#593, D18).
+ * Core's audit events carried to the deployment's sink (the federation-grants
+ * ADR, D18). Two properties pinned here:
  *
- * Two properties this file exists for, both of which are easy to lose:
- *
- *  1. **The sink's promise is returned**, not detached. `emitAuditEvent`
- *     swallows it (`sink.record(event).catch(…)`), which means core cannot
- *     bound its wait and a shutdown cannot drain it — the audit of a refresh
- *     that happened after the response is exactly the event that is lost when
- *     the process exits.
- *  2. **Core's omissions are preserved.** For an unknown grant, or one that
- *     was never authorized, core deliberately supplies no connection, no
- *     upstream and no scopes. Filling them in would take a second read — and
- *     for the unknown-grant case, would answer the question the identical 404
- *     exists to refuse.
+ *  1. **The sink's promise is returned**, not detached as `emitAuditEvent`
+ *     does (`sink.record(event).catch(…)`), so core can bound its wait and a
+ *     shutdown can drain it: the audit of a refresh after the response is the
+ *     event a detached promise loses at exit.
+ *  2. **Core's omissions are preserved.** For an unknown or never-authorized
+ *     grant, core supplies no connection, no upstream and no scopes, and the
+ *     bridge does not read them.
  */
 
 import type { AuditEvent, AuditSink, FederationGrantAuditEvent } from "@o3co/auth-provider-core";
@@ -96,9 +92,10 @@ describe("createFederationGrantAuditBridge", () => {
 	});
 
 	it("carries the upstream identity as issuer and subject only, whatever else the event's object holds (#611)", () => {
-		// Verified claims travel beside the subject into check 5 and nowhere
-		// else. The bridge is its own boundary: it does not trust every caller
-		// to have projected them away.
+		// Verified claims travel beside the subject into the identity check (the
+		// federation-grants ADR, D7 check 5) and nowhere else. The bridge is its
+		// own boundary: it does not trust every caller to have projected them
+		// away.
 		const { sink, record } = sinkSpy();
 		void createFederationGrantAuditBridge({ sink, ...context })({
 			...FULL,
@@ -171,12 +168,11 @@ describe("createFederationGrantAuditBridge", () => {
 	});
 
 	it("lets a failing sink be seen, because core reports what it cannot deliver", async () => {
-		// Found by review. Swallowing this made the bridge resolve, so core's
-		// own `audit()` helper never reached its reporting branch and an
-		// operator learned nothing about a sink that was dropping everything.
-		// Core already keeps an audit failure away from the HTTP answer — it
-		// settles this promise and bounds it — so there is nothing for the
-		// bridge to protect by hiding it.
+		// A swallowed rejection would keep core's `audit()` helper from its
+		// reporting branch, and an operator would learn nothing of a sink
+		// dropping everything. Core already keeps an audit failure away from the
+		// HTTP answer (it settles and bounds this promise), so hiding it here
+		// protects nothing.
 		const rejecting = {
 			kind: "test",
 			record: async () => {

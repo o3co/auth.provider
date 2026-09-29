@@ -15,17 +15,14 @@
  */
 
 /**
- * HOTP (RFC 4226) and TOTP (RFC 6238) on `node:crypto`, and the step matching
- * a verification makes (the MFA ADR's F6, D22): HMAC-SHA-1, -256 or -512 over
- * the 8-byte big-endian counter, dynamic truncation, the code `digits` long;
- * the time step counted from the epoch (T0 = 0). A code is looked for at every
- * step from `T - window` to `T + window` — each one computed and compared in
+ * HOTP (RFC 4226) and TOTP (RFC 6238) on `node:crypto`, and a verification's
+ * step matching. See README, "The TOTP factor".
+ *
+ * Every step from `T - window` to `T + window` is computed and compared in
  * constant time, so how far into the window a code matched takes no longer to
- * learn than whether it did — and it counts only when its step is after the
- * factor's `lastUsedStep` (RFC 6238 §5.2): the same code again, and an older
- * one never used once a newer one was accepted, are `replayed`. There is no
- * drift resynchronisation (RFC 6238 §6; D22). Pinned by RFC 6238 Appendix B's
- * vectors and RFC 4226 Appendix D's.
+ * learn than whether it did. A code counts only when its step is after the
+ * factor's `lastUsedStep` (RFC 6238 §5.2). No drift resynchronisation
+ * (RFC 6238 §6).
  */
 
 import { createHmac } from "node:crypto";
@@ -39,7 +36,7 @@ export type TotpAlgorithm = (typeof TOTP_ALGORITHMS)[number];
 
 /**
  * A secret of the algorithm's output length, as RFC 6238's reference seeds
- * are (F6): a shorter one wastes the hash, and a longer one is hashed down to
+ * are: a shorter one wastes the hash, and a longer one is hashed down to
  * this length by HMAC anyway.
  */
 export const TOTP_SECRET_BYTES: Readonly<Record<TotpAlgorithm, number>> = Object.freeze({

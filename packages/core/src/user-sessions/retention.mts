@@ -15,21 +15,17 @@
  */
 
 /**
- * How long a subject's revocation boundary has to last (#593, D13).
+ * How long a subject's revocation boundary has to last. See ADR
+ * 2026-09-17-federation-grants-offline-delegation.
  *
- * There are two boundaries and they are bounded by different things, which is
- * why there are two answers here rather than one number.
- *
- * The **grants** boundary must outlast every grant it could ever cover. What
- * bounds a grant is `FEDERATION_GRANT_LIFETIME_CEILING_MS`, which `activate`
- * enforces at the write — *not* `federationGrants.maxExpiresIn`, which an
- * operator can lower, revoke under, and raise again, resurrecting a grant the
- * revocation was meant to end. So the floor below is a constant derived from a
- * constant, and neither configuration nor a caller can shorten it.
- *
- * The **sessions** boundary must outlast the sessions and tokens a cascade
- * might have missed, and what bounds *those* is configuration — so that one is
- * resolved, not fixed.
+ * The two boundaries are bounded by different things. The grants boundary
+ * must outlast every grant it could cover, which
+ * `FEDERATION_GRANT_LIFETIME_CEILING_MS` bounds (enforced by `activate`),
+ * not `federationGrants.maxExpiresIn`: an operator could lower that, revoke,
+ * and raise it again, resurrecting a grant the revocation meant to end. So
+ * its floor is a constant neither configuration nor a caller can shorten.
+ * The sessions boundary must outlast the sessions and tokens a cascade
+ * might have missed, which configuration bounds, so it is resolved.
  */
 
 import type { SessionCookiePolicy } from "../browser-session/types.mjs";
@@ -48,16 +44,13 @@ import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jw
 import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 
 /**
- * One minute more than the longest grant the code will ever allow.
- *
- * A grant's `expiresAt` is at most `consent.at` plus the ceiling (D3, enforced
- * by `activate`), and a boundary is stamped no earlier than the consent it
- * covers, give or take the comparison's second and the rounding to whole
- * seconds. Both are far inside the minute. So a boundary retained this long
- * outlives every grant it covers, whatever the operator does to the
- * configuration and whether or not the caller passed a grant store.
- *
- * The cost is one small key per revoked subject, for a year.
+ * One minute more than the longest grant the code will ever allow. A grant's
+ * `expiresAt` is at most `consent.at` plus the ceiling (enforced by
+ * `activate`), and a boundary is stamped no earlier than the consent it
+ * covers, give or take a second of comparison and rounding. So a boundary
+ * kept this long outlives every grant it covers, whatever the configuration
+ * and whether or not the caller passed a grant store. The cost is one small
+ * key per revoked subject, for a year.
  */
 export const SUBJECT_REVOCATION_MIN_RETENTION_MS = FEDERATION_GRANT_LIFETIME_CEILING_MS + 60_000;
 
@@ -120,38 +113,28 @@ const slotLifetimeSeconds = (value: unknown, path: string): number => {
 };
 
 /**
- * How long a **sessions-only** boundary must be retained, from the lifetimes
- * this deployment is configured with.
+ * How long a sessions-only boundary must be retained, from this
+ * deployment's lifetimes: the session, the refresh token and the access
+ * token (nothing says an access token is shorter than a refresh token, and
+ * `verifyJwt` consults the watermark for both). Each token counts with the
+ * clock tolerance it is accepted with past `exp` (`DEFAULT_CLOCK_SKEW_MS`),
+ * not its nominal expiry; the revocation comparison's own allowance and a
+ * second of rounding go on top.
  *
- * Three inputs, not two. D13 named the refresh token and the session; the
- * access token belongs here as well, because nothing in the configuration says
- * an access token must be shorter than a refresh token — a deployment is free
- * to invert them, and `verifyJwt` consults the watermark for both.
- *
- * And each is extended by the tolerance with which it is actually accepted,
- * not by its nominal expiry: `verifyJwt` passes `clockTolerance`, so a token is
- * acceptable for `DEFAULT_CLOCK_SKEW_MS` past its `exp`. A boundary sized to
- * the nominal expiry leaves exactly that window with nothing behind it. The
- * revocation comparison's own allowance and a whole second of rounding go on
- * top; neither is the five-minute tolerance, which is a different number for a
- * different comparison.
- *
- * What this cannot know is what was issued *before* an operator lowered these
- * settings. Lowering a lifetime shortens the horizon immediately while the
- * artifacts issued under the old one are still live, so a deployment that
- * lowers one keeps the previous horizon until they have expired. The grants
- * boundary has no such hole, because its floor comes from a ceiling the code
- * enforces rather than from configuration.
+ * It cannot know what was issued before an operator lowered a lifetime: the
+ * horizon shrinks at once while older artifacts are still live, so a
+ * deployment that lowers one keeps the previous horizon until they expire.
+ * The grants boundary has no such hole; its floor comes from a ceiling the
+ * code enforces.
  */
 export function resolveSubjectRevocationHorizonMs(
 	config: unknown,
 	/**
-	 * The lifetimes as the slots carry them, when the caller holds them
-	 * (#728): the oauth module's `oauthTokenSettings` and the session store's
+	 * The lifetimes as the slots carry them, when the caller holds them: the
+	 * oauth module's `oauthTokenSettings` and the session store's
 	 * `sessionCookiePolicy`. A slot handed here is read in place of `config`
-	 * and held to the rule the configuration's key is held to — a RangeError
-	 * naming the slot's member otherwise; a slot not handed is read from
-	 * `config`, as before.
+	 * and held to its configuration key's rule, a RangeError naming the
+	 * slot's member otherwise.
 	 */
 	from: {
 		readonly tokenSettings?: Pick<
@@ -171,14 +154,11 @@ export function resolveSubjectRevocationHorizonMs(
 					tokenSettings.refreshTokenExpiresIn,
 					"oauthTokenSettings.refreshTokenExpiresIn",
 				)) * 1000;
-	// The MAXIMUM, not the default. `oauth.accessToken.expiresIn` is what a
-	// grant mints when the request asks for nothing; token exchange may ask
-	// for more, up to `maxExpiresIn`. Sizing the horizon from the default
-	// leaves exactly those longer tokens outliving the boundary that revoked
-	// them — 60-second defaults beside a one-day maximum would retain the
-	// boundary for six minutes. `resolveAccessTokenLifetime` is the one
-	// correct reader of that pair, alias and all, and it refuses a value that
-	// is not a lifetime rather than letting this compute from one.
+	// The maximum, not the default: token exchange may ask for up to
+	// `maxExpiresIn`, and a horizon sized from the default would let those
+	// longer tokens outlive the boundary that revoked them.
+	// `resolveAccessTokenLifetime` is the one reader of that pair, alias and
+	// all, and refuses a value that is not a lifetime.
 	const accessMs =
 		(tokenSettings === undefined
 			? resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn

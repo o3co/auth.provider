@@ -15,55 +15,45 @@
  */
 
 /**
- * errorText.drift.test.mts — the error text this repository writes in its
- * own words keeps to RFC 6749's `1*NQSCHAR` (Appendix A.7, A.8): printable
- * ASCII without `"` and `\`.
+ * Error text this repository writes in its own words keeps to RFC 6749's
+ * `1*NQSCHAR` (Appendix A.7, A.8): printable ASCII without `"` and `\`.
+ * `errorEnvelope` sanitises what it is handed, so a `"`, an em dash or a
+ * section sign still leaves conforming, but as an unreadable `?`; a writer
+ * that builds its body itself (a literal `{ error, error_description }`, a
+ * redirect's query) is not sanitised unless it asks. This guard refuses those
+ * characters where they are written.
  *
- * `errorEnvelope` sanitises whatever it is handed, so a `"`, an em dash or a
- * section sign written into a description still leaves conforming — as `?`,
- * which no test notices and no reader can read. And a writer that builds its
- * body itself (a literal `{ error, error_description }`, a redirect's query)
- * is not sanitised at all unless it asks. The same few characters have
- * crept in over and over, because they are what prose reaches for; this
- * guard refuses them where they are written.
- *
- * What it reads, in every package's source and the standalone template's
- * (tests excluded; `create-app`'s copy is generated from the template): the
- * static text of the string and template literals written as error text —
- * - the value of an `error_description` or `errorDescription` property, and
- *   of a `description` property beside an `error` whose value is a string
- *   literal (an OAuth code: `{ ok: false, error: "invalid_scope",
- *   description }`);
- * - the value of an `error` property beside any of those (the code);
+ * Scanned: every package's source and the standalone template's (tests
+ * excluded; `create-app`'s copy is generated from the template). Read: the
+ * static text of the string and template literals written as error text:
+ * - an `error_description` or `errorDescription` property, and a
+ *   `description` property beside an `error` whose value is a string literal;
+ * - an `error` property beside any of those (the code);
  * - `errorEnvelope(code, description)`'s arguments;
  * - `searchParams.set` / `.append("error" | "error_description", text)`;
  * - an argument passed, in the same file, to a function that writes that
  *   parameter as one of the above (`jsonError(res, 400, "invalid_request",
  *   "…")`);
- * following a name to a `const` declared in the same file, both arms of
- * `?:`, `??` and `||`, both sides of `+`, and the argument of
- * `sanitizeErrorText(…)` / `auditErrorText(…)`.
+ * following a name to a `const` declared in the same file, both arms of `?:`,
+ * `??` and `||`, both sides of `+`, and the argument of `sanitizeErrorText(…)`
+ * / `auditErrorText(…)`.
  *
- * A code is checked whole when it is written whole — non-empty, `1*NQSCHAR` —
- * and by its characters alone when it is a piece of a template or a
- * concatenation (`${prefix}_denied`), because a piece may be empty. An object
- * literal handed to a logger (`log.`, `logger.`, `….logger.`, `console.` with
- * a level) is a log payload, not a response, and is not read; neither is a
- * `description` beside an `error` that is not a literal
- * (`{ error: err, description }`).
+ * A code written whole must be non-empty `1*NQSCHAR`; a piece of a template or
+ * a concatenation (`${prefix}_denied`) is checked by its characters alone,
+ * because a piece may be empty. Not read: an object literal handed to a logger
+ * (`log.`, `logger.`, `….logger.`, `console.` with a level), and a
+ * `description` beside an `error` that is not a literal.
  *
- * These are heuristics about shape, not a proof: a non-OAuth object that
- * happens to pair `error: "…"` with `description`, or names a key
- * `error_description` outside a log call, is read as error text. Rename the
- * key, or keep its text in the same characters.
+ * These are heuristics about shape: a non-OAuth object that pairs
+ * `error: "…"` with `description`, or names a key `error_description` outside
+ * a log call, is read as error text. Rename the key, or keep its text in the
+ * same characters.
  *
- * What it does not see (left to review, and to `errorEnvelope` at run time):
- * - text returned by another function (`describeRedirectRejection`), or a
- *   `const` declared in another file;
- * - text handed to a helper declared in another file;
- * - what a template literal's `${…}` substitutes: an echo of the client, the
- *   configuration or an adapter is the writer's to sanitise
- *   (`sanitizeErrorText`), and a test of that writer's to pin.
+ * Not seen (left to review, and to `errorEnvelope` at run time): text returned
+ * by another function or held in a `const` declared in another file; text
+ * handed to a helper declared in another file; what a template literal's
+ * `${…}` substitutes, which the writer sanitises (`sanitizeErrorText`) and a
+ * test of that writer pins.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";

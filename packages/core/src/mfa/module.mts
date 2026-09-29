@@ -15,9 +15,9 @@
  */
 
 /**
- * The modules that provide core's in-process MFA stores (the MFA ADR's D7,
- * D8, D10). Both are for development and a single replica, and both are
- * refused by name under `deployment.mode = "multi"`.
+ * The modules that provide core's in-process MFA stores. Both are for
+ * development and a single replica, and are refused by name under
+ * `deployment.mode = "multi"`.
  */
 
 import { consoleLogger } from "../logging/consoleLogger.mjs";
@@ -28,15 +28,13 @@ import { createMemoryMfaFactorStore } from "./memoryFactorStore.mjs";
 import { createMemoryMfaTransactionStore } from "./memoryTransactionStore.mjs";
 
 /**
- * Provides the in-process {@link MfaFactorStore}. Every enrollment is lost at
- * the next restart, after which each subject reads as one with nothing
- * enrolled: without the enrollment witness (D12) that lets whoever holds a
- * password bind their own authenticator, so the module warns once when it is
- * built.
+ * Provides the in-process {@link MfaFactorStore}. A restart loses every
+ * enrollment; without the enrollment witness, whoever holds a password could
+ * then bind their own authenticator, so the module warns once when built.
  */
 export const memoryMfaFactorStoreModule = defineModule({
 	name: "core-mfa-factor-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
@@ -53,18 +51,15 @@ export const memoryMfaFactorStoreModule = defineModule({
 
 /**
  * Provides the in-process {@link MfaTransactionStore}. A restart loses the
- * ceremonies in flight — each user starts again from the password — the
- * subject lock state, which a restart therefore lifts, and the email-proof
- * requirement an operator reset recorded (D25): beside a durable factor
- * store, a password holder can then make the next first binding without the
- * proof. Capped at
- * `mfaTransactionStore.memory.maxEntries` when the config sets it (the
- * adapter's default otherwise); a value that is not a positive whole number
- * refuses the boot, naming the key.
+ * ceremonies in flight, lifts the subject lock state, and drops the email-proof
+ * requirement an operator reset recorded, so beside a durable factor store a
+ * password holder could then bind without the proof. Capped at
+ * `mfaTransactionStore.memory.maxEntries` (adapter default when unset); a value
+ * that is not a positive whole number refuses the boot, naming the key.
  */
 export const memoryMfaTransactionStoreModule = defineModule({
 	name: "core-mfa-transaction-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:

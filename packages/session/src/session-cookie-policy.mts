@@ -16,26 +16,23 @@
 
 /**
  * The session cookie's attributes as core's `SessionCookiePolicy` — the
- * `sessionCookiePolicy` slot the session store's module provides (#728),
- * for a module that sets a cookie of its own beside the session's or sizes
- * what must outlive a session, instead of reading `session.*`.
+ * `sessionCookiePolicy` slot the session store's module provides, for a module
+ * that sets a cookie of its own beside the session's or sizes what must
+ * outlive a session, instead of reading `session.*`.
  *
  * The attributes are the ones express-session is given
  * (`./modules/sessionStoreModule.mts`): `session.name`, `session.secure`,
- * `session.sameSite`, `session.domain` — `null`, or empty, a host-only
- * cookie — and `session.maxAge`, the cookie's `Max-Age` and a session
- * record's lifetime. The signing secret is not among them.
+ * `session.sameSite`, `session.domain` (`null` or empty: a host-only cookie)
+ * and `session.maxAge`, the cookie's `Max-Age` and a session record's
+ * lifetime. The signing secret is not among them.
  *
  * It refuses what would break core's contract (`sessionCookiePolicyContract`),
- * so no section yields a policy a reader cannot trust. First what the session
- * store refuses of the cookie, with the store's message
- * ({@link assertHostPrefixKept}, which the store runs too): a `__Host-` name
- * that is not secure, or that names a domain — the store compares it with
- * `null`, so an empty one is refused as well. Then what the store does not
- * refuse yet: a name that is not an RFC 6265 token, a `__Secure-` name or a
- * `SameSite=None` cookie that is not secure — each a cookie a browser drops —
- * and a lifetime outside 1 to `MAX_DURATION_MS` milliseconds (core's schema
- * refuses the last two at validation, before either is built).
+ * so no section yields a policy a reader cannot trust: first what the store
+ * refuses, with the store's message ({@link assertHostPrefixKept}), then a
+ * cookie a browser drops (a name that is not an RFC 6265 token, a `__Secure-`
+ * name or `SameSite=None` without `secure`) and a lifetime outside 1 to
+ * `MAX_DURATION_MS` milliseconds. Core's schema already refuses the
+ * `SameSite=None` and lifetime cases at validation.
  */
 
 import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";

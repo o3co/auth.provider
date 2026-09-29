@@ -15,16 +15,14 @@
  */
 
 /**
- * The refresh grant on session admission (the session-admission ADR's D8,
- * D9): the verified refresh token's claim (`tokenClaim` — its `sid`, which
- * may be absent, its `sub` and its `amr`) is admitted, the live read by `sid`
- * as before, and the registered requirements asked about the token's own
- * `amr` (the MFA ADR's O3: a token is judged on what it was issued with).
- * The revocation boundary stays `verifyJwt`'s: admission skips it for a
- * token carrier. With no requirement registered nothing changes; with one,
- * `unmet` and `reauthenticate` are `400 invalid_grant`, a `step_up` is
- * `400 invalid_grant` with `step_up: "<requirement>"`, and all are answered
- * before the rotation spends the presented token.
+ * The refresh grant on session admission (ADR 2026-09-28-session-admission):
+ * it admits the verified token's claim (`tokenClaim`: its `sid`, which may be
+ * absent, its `sub` and its `amr`) and the live record read by `sid`, and
+ * asks the registered requirements about the token's own `amr`, since a
+ * token is judged on what it was issued with (the MFA ADR). Admission skips
+ * the revocation boundary for a token carrier; it stays `verifyJwt`'s.
+ * `unmet`, `reauthenticate` and `step_up` (with `step_up: "<requirement>"`)
+ * are `400 invalid_grant`, all answered before the rotation spends the token.
  */
 
 import { createSecretKey } from "node:crypto";
@@ -229,8 +227,8 @@ describe("the refresh grant on admission — no requirement registered: as befor
 	});
 
 	it("the revocation boundary stays verifyJwt's: a token minted after it refreshes even though its session was established before", async () => {
-		// Admission skips the boundary for a token carrier (D2, step 4): the
-		// token's own `iat` is what verifyJwt compares, once per request.
+		// Admission skips the boundary for a token carrier: the token's own
+		// `iat` is what verifyJwt compares, once per request.
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, minutesAgo(1), new Date(Date.now() + 3_600_000));
 		const { handler } = makeGrant({
@@ -251,7 +249,7 @@ describe("the refresh grant on admission — a requirement's verdicts (D9)", () 
 		expect(requirement.inputs).toHaveLength(1);
 		const [input] = requirement.inputs;
 		expect(input?.carrier).toBe("token");
-		// The bundled action, the frozen entry itself (the session-admission ADR's D4).
+		// The bundled action, the frozen entry itself.
 		expect(input?.action).toEqual(ADMISSION_ACTIONS["oauth.refresh"]);
 		expect(input?.action.grade).toBe("use");
 		expect(input?.subject).toBe(SUBJECT);
@@ -318,10 +316,10 @@ describe("the refresh grant on admission — a requirement's verdicts (D9)", () 
 });
 
 describe("the refresh grant on admission — no requirement registered: D2's reading of the record", () => {
-	// The one change with no requirement registered: admission reads the
-	// record the token's `sid` names as D2's steps 2 and 3 read every record,
-	// where the grant only asked whether one existed. The bundled stores do
-	// not answer an expired record, so they see no difference.
+	// With no requirement registered, admission still reads the record the
+	// token's `sid` names as it reads every record, not only whether one
+	// exists. The bundled stores do not answer an expired record, so they see
+	// no difference.
 	const refusedBeforeTheRotation = async (session: UserSession) => {
 		const { handler, rotation } = makeGrant({ userSessionStore: storeWith(session) });
 		expect(await refused(handler, await refreshToken())).toMatchObject({

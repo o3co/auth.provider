@@ -17,64 +17,34 @@ import type { AppConfig, AuditSink, Logger } from "@o3co/auth-provider-core";
 import { pino, stdSerializers } from "pino";
 
 /**
- * The composition root's logger, and the value wired into the `logger`
- * ComponentMap slot that every module reads.
- *
- * pino, emitting newline-delimited JSON on stdout — the shape every log
- * aggregator ingests without a parser, and the reason `Logger` was given
- * pino's two-overload call signature in the first place. A pino instance
- * therefore satisfies `Logger` structurally, with no adapter.
- *
- * Two things this closes:
- *
- * - **The slot was never filled.** Only a value satisfying `Logger` can occupy
- *   it, and the logger this template used before exposes four methods with a
- *   narrower call shape. So every module that declares `optional: ["logger"]`
- *   — oauth, session, dpop, mtls, token-exchange — silently fell back to its
- *   own `consoleLogger` default, and nothing an operator configured here
- *   reached any of them.
- * - **`logging.level` is honoured.** pino drops sub-threshold calls before
- *   formatting, so `trace` / `debug` cost nothing in production rather than
- *   being emitted and filtered downstream.
- *
- * `silent` is pino's own name for "emit nothing", so the config vocabulary
- * maps across unchanged.
+ * The composition root's logger, and the value wired into the `logger` slot
+ * every module reads: pino, newline-delimited JSON on stdout. `Logger` has
+ * pino's two-overload call signature, so a pino instance satisfies it with no
+ * adapter, and `silent` is pino's own name for "emit nothing", so the config
+ * vocabulary maps across unchanged. See the template README, "Logging".
  */
 export function createAppLogger(config: AppConfig): Logger {
 	return pino({
 		name: "provider",
 		level: config.logging.level,
-		// `err` is pino's conventional key for an error, and every structured
-		// event in this stack uses it — `logger.error({ err: loggableError(err) },
-		// "…_error")`. Core's projection is plain data with no `message`, so
-		// this serialiser hands it through as it is, every cause's fields
-		// included. It is here for an Error handed to it as it is, which would
-		// otherwise stringify to `{}`, the stack lost exactly where it is
-		// needed.
+		// `err` is the key every structured event in this stack uses
+		// (`logger.error({ err: loggableError(err) }, "…_error")`). Core's
+		// projection is plain data with no `message`, so this serialiser hands it
+		// through as it is, every cause's fields included. It is here for an
+		// Error handed in as it is, which would otherwise stringify to `{}`.
 		serializers: { err: stdSerializers.err },
 	});
 }
 
 /**
  * The stream the audit trail is written on: `name: "audit"`, newline-delimited
- * JSON on stdout, in the same pino envelope as every other line this template
- * emits. One output style, so an aggregator ingests security events and
- * application logs through one parser and separates them on `name`.
+ * JSON on stdout in the same pino envelope as every other line.
  *
- * **It takes no config, and its level is fixed.** That is the point rather
- * than an oversight. `logging.level` is a diagnostics knob — `warn` is an
- * ordinary production setting and `silent` a legitimate one — and an audit
- * trail is evidence, not diagnostics. Routing audit events through the
- * application logger would mean either of those settings silently deleting
- * the record of who authenticated, what was issued, and what was refused:
- * the same drop #287 is about, reached from the operator's side instead of
- * the scaffold's. Where audit events go is chosen by `audit.sink.type`, and
- * that selector has no "none" (#304).
- *
- * A second pino instance rather than a child of the app logger: a child
- * inherits its parent's level, and depending on a level-override subtlety to
- * keep the audit trail alive is exactly the kind of thing that stops being
- * true in a later refactor without anything failing.
+ * **It takes no config, and its level is fixed**, on purpose: an audit trail
+ * is evidence, not diagnostics, and `logging.level` (where `warn` is an
+ * ordinary production setting and `silent` a legitimate one) must not delete
+ * it. See the template README, "Audit trail". A second pino instance rather
+ * than a child of the app logger, because a child inherits its parent's level.
  */
 export function createAuditLogger(): Logger {
 	return pino({
@@ -85,19 +55,16 @@ export function createAuditLogger(): Logger {
 }
 
 /**
- * `AuditSink` writing each event through `auditLogger` — the `"logger"` sink
+ * `AuditSink` writing each event through `auditLogger`: the `"logger"` sink
  * kind this template registers and ships as its default.
  *
- * The event is nested under `audit` rather than spread at the top level:
- * `level`, `time`, `name` and `msg` belong to the log envelope, and a future
- * audit field colliding with one of them would corrupt the line for every
- * consumer. The event type doubles as the message so operators alert on the
- * name — `token.issued.failure`, `authorize.rejected` — the same way they
- * already alert on `session_store_redis_error`.
- *
- * Errors are core's problem, not this function's: `emitAuditEvent` dispatches
- * without awaiting and swallows rejections, because audit recording must never
- * add latency to (or fail) an auth flow.
+ * The event is nested under `audit`, not spread at the top level: `level`,
+ * `time`, `name` and `msg` belong to the log envelope, and an audit field
+ * colliding with one would corrupt the line for every consumer. The event
+ * type is the message, so operators alert on the name (`token.issued.failure`,
+ * `authorize.rejected`) as on `session_store_redis_error`. Errors are core's:
+ * `emitAuditEvent` dispatches without awaiting and swallows rejections,
+ * because audit recording must never add latency to (or fail) an auth flow.
  */
 export function createLoggerAuditSink(auditLogger: Logger): AuditSink {
 	return {

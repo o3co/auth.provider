@@ -15,17 +15,15 @@
  */
 
 /**
- * The login page's URL rule (#728, #750): what every sender of a browser to
- * the login page does to the page — the one home of the rule `LoginEntry`
- * states, so `/authorize`'s own fallback (oauth, when no module provides the
- * slot) and the session package's `loginEntry` cannot drift apart.
+ * The login page's URL rule: the one home of the rule `LoginEntry` states, so
+ * `/authorize`'s own fallback (oauth, when no module provides the slot) and
+ * the session package's `loginEntry` cannot drift apart.
  *
- * The page's own query is the text before any `#`, after the first `?` — as
- * the redirect writes it, so a fragment is never mistaken for the query and a
- * URL that `URL` cannot parse is read all the same. `redirect_to` joins that
- * query (`&` when the page has one, `?` otherwise) before the fragment, which
- * is kept; the target is encoded whole with `encodeURIComponent`, never as a
- * form, so nothing of it reads as the page's query or fragment.
+ * The page's own query is the text after the first `?` and before any `#`,
+ * so a fragment is never mistaken for the query and a URL that `URL` cannot
+ * parse is still read. `redirect_to` joins that query (`&` or `?`) before the
+ * kept fragment; the target is encoded whole with `encodeURIComponent`, never
+ * as a form, so nothing of it reads as the page's query or fragment.
  */
 
 /** The parameter a login page reads where to come back to from. */

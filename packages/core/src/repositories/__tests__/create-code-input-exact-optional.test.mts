@@ -15,17 +15,16 @@
  */
 
 /**
- * A stored `Code` is still accepted by `createCode`, for a consumer who turns
- * on `exactOptionalPropertyTypes` (#626).
+ * A stored `Code` is accepted by `createCode` for a consumer who turns on
+ * `exactOptionalPropertyTypes`, so a code read from one repository can be
+ * written to another.
  *
- * `createCode` took a parameter every field of which a `Code` has; a code
- * copied from one repository into another compiled. `CreateCodeInput` is now
- * derived from `Code`, whose fields are required keys holding `T | undefined`,
- * and keeps `expiresIn` optional: left out, the repository's default applies.
- * Under that option `a?: T` refuses an explicit `undefined`, so `expiresIn`
- * has to say `?: number | undefined` for a `Code` to be accepted. Without the
- * option the two spellings are the same type; this compiles a probe with the
- * option ON, and controls prove it is on and that the types resolved.
+ * `CreateCodeInput` derives from `Code` (required keys holding
+ * `T | undefined`) and keeps `expiresIn` optional. Under the option `a?: T`
+ * refuses an explicit `undefined`, so `expiresIn` must say
+ * `?: number | undefined`. Without the option the two spellings are the same
+ * type, so the probe compiles with it on; controls prove it is on and that
+ * the types resolved.
  */
 
 import path from "node:path";

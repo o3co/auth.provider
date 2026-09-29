@@ -34,7 +34,7 @@ const sessionStoreConfigSchema = fullSectionsSchema.pick({
 const MODULE_NAME = "session-store";
 
 /**
- * What forks per replica when `session.storage.type = "memory"` (#474). Quoted
+ * What forks per replica when `session.storage.type = "memory"`. Quoted
  * by the replica-safety guard into a refused boot and into the unset-mode
  * warning, so it names the consequence rather than the fix.
  */
@@ -57,16 +57,16 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 		name: MODULE_NAME,
 		configSchema: sessionStoreConfigSchema,
 		requires: ["config"],
-		// `logger` is optional (D-4): the redis client's error handler, and the
+		// `logger` is optional: the redis client's error handler, and the
 		// middleware's report of a store that cannot load or save a session,
 		// fall back to consoleLogger when the composition wires no logger slot.
 		optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
 		...(replicaSafety === undefined ? {} : { replicaSafety }),
-		// The session cookie's attributes (#728), for a module that sets a
-		// cookie of its own beside the session's or sizes what must outlive a
-		// session: this module owns the cookie, and the others require the
-		// slot instead of reading `session.*`. The attributes express-session
-		// is given below; the signing secret is not among them.
+		// The session cookie's attributes, for a module that sets a cookie of
+		// its own beside the session's or sizes what must outlive a session:
+		// this module owns the cookie, and the others require the slot instead
+		// of reading `session.*`. They are the attributes express-session is
+		// given below; the signing secret is not among them.
 		provides: {
 			sessionCookiePolicy: (deps) => sessionCookiePolicyFrom((deps.config as AppConfig).session),
 		},
@@ -82,15 +82,11 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					const factory = createSessionStoreFactory(ctx);
 					registerBuiltinSessionStores(factory);
 					const storageSlice = config.session.storage as { type: string } & Record<string, unknown>;
-					// #474: the static manifest (`sessionStoreModule`) declares no
-					// `replicaSafety` because the storage type is config, and this
-					// is the first point at which it is known for certain. A
-					// composition root that wired the static manifest under
-					// `deployment.mode = "multi"` has told the stage-1 guard
-					// nothing, so the same combination is refused here, with the
-					// same reason, rather than mounting a per-process store. With
-					// `sessionStoreModuleFor(config)` the guard has already refused
-					// before this runs.
+					// The static `sessionStoreModule` declares no `replicaSafety`
+					// (the storage type is config), so it told the stage-1 guard
+					// nothing: refuse the combination here, with the same reason,
+					// rather than mount a per-process store. With
+					// `sessionStoreModuleFor(config)` the guard refused before this.
 					if (storageSlice.type === "memory" && config.deployment?.mode === "multi") {
 						throw new BootError({
 							stage: "applyContributions",
@@ -124,15 +120,8 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 							domain: config.session.domain || undefined,
 						},
 					});
-					// Mount-order contract (D-5): no `before` clause, because
-					// `before: ["...absent..."]` raises a `route-order-target-missing`
-					// BootError when the consumer omits the named module (e.g. an
-					// oauth-only deployment that doesn't include sessionModule).
-					// Instead, the middleware relies on declarationIndex tie-breaking:
-					// the composition root MUST list `sessionStoreModule` ahead of
-					// every session-consuming module in `buildModules(...)`. The
-					// standalone template puts it first; documented in the
-					// v0.5.1 CHANGELOG migration note.
+					// No `before` clause: see the mount-order contract on
+					// `sessionStoreModule` below.
 					return {
 						id: "session-middleware",
 						mountPath: "/",
@@ -145,20 +134,18 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 }
 
 /**
- * The session-store module built for one config (#474).
+ * The session-store module built for one config.
  *
- * `session.storage.type = "memory"` is express-session's own per-process
- * `MemoryStore` — the same shape as every memory store the replica-safety
- * guard refuses under `deployment.mode = "multi"` (#271, #455), but the type is
- * config, so a static manifest cannot carry the declaration. This reads it off
- * the config the composition root already holds and returns the manifest with
- * `replicaSafety` declared when the store is in memory, so the guard refuses
- * `SESSION_STORAGE_TYPE=memory` under `"multi"` by name, warns when the mode is
- * unset, and says nothing under `"single"` — exactly as for the other stores.
- * Every other adapter is a shared store and declares nothing.
+ * `session.storage.type = "memory"` is express-session's per-process
+ * `MemoryStore`, the same shape as every memory store the replica-safety guard
+ * refuses under `deployment.mode = "multi"`, but the type is config, so a
+ * static manifest cannot carry the declaration. This declares `replicaSafety`
+ * when the configured store is in memory, so the guard refuses it by name
+ * under `"multi"`, warns when the mode is unset, and says nothing under
+ * `"single"`. Every other adapter is a shared store and declares nothing.
  *
  * Prefer this over {@link sessionStoreModule} wherever the config is in hand
- * at composition time — the standalone's `buildModules(config)` is.
+ * at composition time, as in the standalone's `buildModules(config)`.
  */
 export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
 	return buildSessionStoreModule(
@@ -167,30 +154,22 @@ export function sessionStoreModuleFor(config: SessionStoreModuleConfig) {
 }
 
 /**
- * D-5 / OR-M2: `sessionStoreModule` moves the express-session middleware
- * construction (previously inlined in `templates/standalone/src/app.mts`) into
- * the boot planner's DI graph so the underlying session-store client receives
- * a `BuilderContext.lifecycle` and can register `client.quit()` for disposal.
+ * The static session-store manifest: the express-session middleware as a
+ * route at `mountPath: "/"`, built in the boot planner's DI graph so the
+ * store's client receives a `BuilderContext.lifecycle` and can register
+ * `client.quit()` for disposal.
  *
- * The module contributes a route at `mountPath: "/"` whose handler is the
- * express-session RequestHandler. **Mount-order contract**: the route
- * intentionally has NO `before`/`after` clause, because referencing absent
- * downstream route ids would raise `route-order-target-missing` BootError on
- * partial manifests (e.g. an oauth-only deployment without sessionModule).
- * Mount order is enforced by **declarationIndex tie-breaking** — the
- * composition root MUST list `sessionStoreModule` ahead of every
- * session-consuming module in `buildModules(config)`.
+ * **Mount-order contract**: the route has no `before` / `after` clause,
+ * because naming an absent route id raises a `route-order-target-missing`
+ * BootError on partial manifests (e.g. an oauth-only deployment without
+ * `sessionModule`). Order comes from declarationIndex tie-breaking: the
+ * composition root MUST list this module ahead of every session-consuming
+ * module in `buildModules(config)` (README, "Browser session store").
  *
- * Standalone composition root: drop the manual `app.use(session(...))` block
- * and prepend `sessionStoreModule` to `buildModules(config)`. The session
- * middleware is mounted inside `handle.router`, ordered first by list
- * position. See CHANGELOG v0.5.1 D-5 BREAKING entry for the migration note.
- *
- * This is the static manifest: it does not know the storage type, so it
- * declares no `replicaSafety` and the stage-1 guard cannot name it. The route
- * factory still refuses `memory` under `deployment.mode = "multi"` (#474), so
- * the combination cannot boot either way — but a composition root that has
- * its config should use {@link sessionStoreModuleFor} and get the refusal at
- * stage 1, listed with the other offenders.
+ * It does not know the storage type, so it declares no `replicaSafety` and the
+ * stage-1 guard cannot name it. The route factory still refuses `memory` under
+ * `deployment.mode = "multi"`, but a composition root that has its config
+ * should use {@link sessionStoreModuleFor} and get the refusal at stage 1,
+ * listed with the other offenders.
  */
 export const sessionStoreModule = buildSessionStoreModule(undefined);

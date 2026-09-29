@@ -26,31 +26,23 @@ import {
 import { assertWellFormedKids } from "./kid.mjs";
 
 /**
- * The one thing a KMS, an HSM or a Vault-style provider has to do (#303):
- * produce a signature over bytes it is handed, using a key it never surrenders.
+ * The one thing a KMS, HSM or Vault-style provider has to do: sign bytes it is
+ * handed with a key it never surrenders. Everything else a `KeyStore` owes
+ * (protected header, base64url, compact JWT, rotation, JWKS) is done by
+ * {@link createRemoteSigningKeyStore}, so integrators do not reimplement it
+ * per vendor.
  *
- * This is the whole seam. Everything else a `KeyStore` owes — building the
- * protected header, base64url encoding, assembling the compact JWT, rotation
- * bookkeeping, publishing JWKS — is the same regardless of where the private
- * key lives, and is done by {@link createRemoteSigningKeyStore} so an
- * integrator does not reimplement it per vendor and get it subtly wrong.
+ * `signature` MUST be in JWS form (RFC 7515 §3.3, RFC 7518 §3.4):
  *
- * ## The signature format, stated because it is the trap
+ * - `RS256`: PKCS#1 v1.5, what every provider returns for RSASSA.
+ * - `EdDSA`: the raw 64-byte Ed25519 signature.
+ * - `ES256`: the raw `R || S` concatenation, 64 bytes, not the DER `SEQUENCE`
+ *   AWS KMS, PKCS#11 and OpenSSL return. DER fails as a signature mismatch at
+ *   the relying party, not at the signer; use {@link derToJoseEcdsaSignature}.
  *
- * `signature` MUST be in **JWS form** (RFC 7515 §3.3, RFC 7518 §3.4):
- *
- * - `RS256` — PKCS#1 v1.5, which is what every provider returns for RSASSA.
- * - `EdDSA` — the raw 64-byte Ed25519 signature.
- * - `ES256` — the **raw `R || S` concatenation, 64 bytes**, *not* the DER
- *   `SEQUENCE` that AWS KMS, PKCS#11 and OpenSSL hand back. This is the one
- *   that bites: DER is accepted by nothing that verifies JWS, and the failure
- *   is a signature mismatch at the relying party rather than an error at the
- *   signer. Use {@link derToJoseEcdsaSignature} on the way out.
- *
- * The store cannot detect the wrong form for you — a DER blob is bytes like
- * any other — so it verifies its own output once at construction
- * (`verifyOnConstruction`, default on). A misconfigured signer then fails at
- * boot rather than issuing tokens nothing can verify.
+ * A DER blob is bytes like any other, so the store verifies its own output
+ * once at construction (`verifyOnConstruction`, default on) and a
+ * misconfigured signer fails at boot.
  */
 export interface RemoteSigner {
 	/**
@@ -92,16 +84,11 @@ const base64url = (input: Uint8Array | string): string =>
 	);
 
 /**
- * Convert a DER-encoded ECDSA signature to the raw `R || S` form JWS requires.
- *
- * AWS KMS, PKCS#11 and OpenSSL all return DER; JWS wants the concatenation.
- * Exported because every integrator building an `ES256` {@link RemoteSigner}
- * needs it, and the alternative is each of them writing this parser from the
- * ASN.1 spec — which is how one of them gets the leading-zero trimming wrong
- * and produces signatures that verify only sometimes.
- *
- * `size` is the field size in bytes (32 for P-256), so each half is
- * left-padded to exactly that width.
+ * Converts a DER-encoded ECDSA signature (what AWS KMS, PKCS#11 and OpenSSL
+ * return) to the raw `R || S` form JWS requires. Exported so integrators
+ * building an `ES256` {@link RemoteSigner} do not hand-write the ASN.1 parse
+ * and get the leading-zero trimming wrong. `size` is the field size in bytes
+ * (32 for P-256); each half is left-padded to it.
  */
 export function derToJoseEcdsaSignature(der: Uint8Array, size = 32): Uint8Array {
 	if (der[0] !== 0x30) {
@@ -180,31 +167,19 @@ export function derToJoseEcdsaSignature(der: Uint8Array, size = 32): Uint8Array 
 }
 
 /**
- * A {@link KeyStore} whose private key never enters this process (#303).
+ * A {@link KeyStore} whose private key never enters this process.
  *
- * ## Why this is vendor-neutral
- *
- * The issue asks for "the port + one reference, e.g. AWS KMS". Shipping an AWS
- * SDK dependency in `core` would put a vendor in the dependency closure of
- * every deployment, including the ones signing with a PKCS#11 token or a
- * Vault transit key — the same reason the delivery port (#302) is specified as
- * "no bundled vendor". So the reference is the shape, not the vendor: an
+ * Vendor-neutral: a vendor SDK in `core` would sit in every deployment's
+ * dependency closure, including those signing with PKCS#11 or Vault, so the
  * integrator supplies `sign(kid, data)` and this does the rest.
  *
- * ## Why `HS256` is not accepted
+ * `HS256` is not accepted: a shared secret has no public half, so every
+ * verifier needs the signer's bytes and "the key never leaves the boundary"
+ * cannot hold. It stays on `createSymmetricKeyStore`, where that is visible.
  *
- * A shared secret has no public half, so "the key never leaves the boundary"
- * cannot be true of it — every verifier needs the same bytes the signer has.
- * Offering it here would let a deployment believe it had moved key material
- * out of reach when it had not. HS256 stays on `createSymmetricKeyStore`,
- * where the trade-off is visible.
- *
- * ## Rotation
- *
- * Identical to `createAsymmetricKeyStore`: `previousKeys` keep verifying (and
- * keep appearing in JWKS) until `expiresAt`, after which `getVerificationKey`
- * throws {@link ExpiredKidError} rather than {@link UnknownKidError}, so the
- * two stay distinguishable to a SIEM.
+ * Rotation matches `createAsymmetricKeyStore`: `previousKeys` verify (and
+ * appear in JWKS) until `expiresAt`, then throw {@link ExpiredKidError}, not
+ * {@link UnknownKidError}, so a SIEM can tell the two apart.
  */
 export async function createRemoteSigningKeyStore(
 	options: RemoteSigningKeyStoreOptions,
@@ -297,10 +272,8 @@ export async function createRemoteSigningKeyStore(
 		try {
 			await jwtVerify(probe, publicKey as never);
 		} catch (cause) {
-			// The form hint is algorithm-specific. `ES256` is the one that
-			// actually bites — providers return DER there and nowhere else — so
-			// pointing an RS256 or EdDSA operator at a DER conversion sends them
-			// to look at the one thing that cannot be their problem.
+			// Providers return DER for ES256 only, so only its hint points at the
+			// DER conversion.
 			const formHint =
 				algorithm === "ES256"
 					? "the signature is not in JWS form (ES256 providers return DER, not the raw " +

@@ -15,45 +15,25 @@
  */
 
 /**
- * The trusted-proxy address vocabulary — one definition, shared by everything
- * in this repository that has to answer "is this hop one of ours?" (#292).
+ * The trusted-proxy address vocabulary, shared by everything that asks "is
+ * this hop one of ours?" so the answers cannot drift:
  *
- * Two consumers exist today and must not drift apart:
+ * - `http.trustProxy` goes straight to Express's `trust proxy`, which decides
+ *   whether `X-Forwarded-For` / `-Proto` may rewrite `req.ip` / `req.protocol`;
+ *   {@link checkTrustedProxyEntry} makes a typo fail at boot.
+ * - `oauth.mtls.trusted-proxies` (`@o3co/auth-provider-mtls`) matches
+ *   `req.socket.remoteAddress` with {@link createTrustedProxyMatcher} to decide
+ *   whether a forwarded client-certificate header is evidence of anything.
  *
- *   - **`http.trustProxy`** (this package's config schema) is handed straight
- *     to Express's `trust proxy` setting, which decides whether
- *     `X-Forwarded-For` may rewrite `req.ip` and `X-Forwarded-Proto` may
- *     rewrite `req.protocol`. Express does the matching itself; what this
- *     module contributes there is {@link checkTrustedProxyEntry}, so a typo
- *     fails at boot rather than silently never matching.
- *   - **`oauth.mtls.trusted-proxies`** (`@o3co/auth-provider-mtls`, #280) uses
- *     {@link createTrustedProxyMatcher} against `req.socket.remoteAddress` to
- *     decide whether a forwarded client-certificate header is evidence of
- *     anything.
+ * Entries are Express's own forms (a named range `loopback` / `linklocal` /
+ * `uniquelocal`, an IP literal, a CIDR range), so neither needs a translation
+ * layer. Dotted-netmask notation (`10.0.0.0/255.0.0.0`), which `proxy-addr`
+ * accepts but `BlockList.addSubnet` cannot express, is refused by name.
  *
- * ### The vocabulary is Express's vocabulary
- *
- * Entries are the forms Express's `trust proxy` already accepts natively:
- *
- *   - a **named range** — `loopback`, `linklocal`, `uniquelocal`;
- *   - an **IP literal** — IPv4 or IPv6, any textual form;
- *   - a **CIDR range** — `10.0.0.0/8`, `fc00::/7`.
- *
- * Keeping the two in lockstep is the point: a value an operator validates
- * against this module is a value Express accepts, so `http.trustProxy` needs
- * no translation layer and the mTLS allowlist needs no second dialect.
- *
- * The one deliberate narrowing is dotted-netmask notation
- * (`10.0.0.0/255.0.0.0`), which `proxy-addr` accepts and `BlockList.addSubnet`
- * cannot express. It is rejected by name, pointing at the prefix-length form,
- * rather than accepted into a matcher that could not honour it.
- *
- * ### What an address allowlist is and is not
- *
- * It is a network-level control, not a cryptographic one: necessary, not
- * sufficient. The edge must still strip inbound copies of the headers it
- * forwards, and the hop between the proxy and this process must not be
- * reachable by anyone able to spoof a source address.
+ * An address allowlist is a network-level control, necessary but not
+ * sufficient: the edge must strip inbound copies of the headers it forwards,
+ * and the proxy-to-process hop must not be reachable by anyone who can spoof a
+ * source address.
  */
 
 import { BlockList, isIP } from "node:net";
@@ -133,12 +113,9 @@ const DECIMAL_PREFIX = /^(0|[1-9][0-9]*)$/;
 
 /**
  * Returns `null` when `value` is a usable trusted-proxy entry, otherwise the
- * reason it is not.
- *
- * Mirrors the `checkCanonicalIssuer` / `describeIssuerRejection` pair in
- * `../issuer/canonical.mjs`: the check is reusable from a Zod `superRefine`
- * (which needs the reason to build a per-index issue) and from a plain
- * `throw` site (which needs the sentence).
+ * reason it is not. Split from {@link describeTrustedProxyEntryRejection} (as
+ * `checkCanonicalIssuer` is) so a Zod `superRefine` can build a per-index issue
+ * and a `throw` site can use the sentence.
  */
 export function checkTrustedProxyEntry(value: unknown): TrustedProxyEntryRejection | null {
 	if (typeof value !== "string") return "not-a-string";
@@ -217,28 +194,18 @@ export interface TrustedProxyMatcherOptions {
 }
 
 /**
- * Build a predicate answering whether an observed peer address is one of the
- * configured trusted proxies.
+ * Builds a predicate answering whether an observed peer address is a
+ * configured trusted proxy.
  *
- * **Feed it the peer address, never `req.ip`.** `req.ip` is derived from
- * `X-Forwarded-For` whenever Express `trust proxy` is on, so authenticating a
- * forwarding hop with it would be authenticating one header with another and
- * would make the allowlist decorative. The only thing on an HTTP request an
- * attacker cannot choose is the address of the peer that opened the TCP
- * connection — `req.socket.remoteAddress`.
+ * Feed it the peer address (`req.socket.remoteAddress`), never `req.ip`: with
+ * `trust proxy` on, `req.ip` comes from `X-Forwarded-For`, and authenticating a
+ * hop with it makes the allowlist decorative. An IPv4 entry also matches the
+ * IPv4-mapped IPv6 form (`::ffff:10.0.0.7`) of a dual-stack listener. An empty
+ * list trusts nothing (fail closed); callers that need a non-empty list enforce
+ * it at boot.
  *
- * An IPv4 entry (literal or range) also matches the IPv4-mapped IPv6 form
- * (`::ffff:10.0.0.7`) Node reports on a dual-stack listener, so operators do
- * not have to know which family the listener bound.
- *
- * An empty list produces a predicate that trusts nothing. That is the correct
- * fail-closed behaviour: callers that require a non-empty allowlist enforce it
- * at boot with an operator-facing message, and this layer must not be the thing
- * that decides an unconfigured deployment is safe.
- *
- * Throws at construction on an unusable entry — see
- * {@link checkTrustedProxyEntry}. A hostname or a typo would otherwise never
- * match and turn a deliberate allowlist into a silent outage.
+ * @throws Error at construction on an unusable entry (see
+ * {@link checkTrustedProxyEntry}), which would otherwise never match.
  */
 export const createTrustedProxyMatcher = (
 	entries: readonly string[],

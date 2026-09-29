@@ -27,14 +27,11 @@ import type {
 } from "./types.mjs";
 
 /**
- * AdapterFactory builders for the 4 user-session stores. Per A6+A7 §2.3:
- * register throws on duplicate, replace is the explicit override path,
- * NO freeze() lifecycle. Per A4 §5.7 + §8.4.
- *
- * The composition-root path is for consumers that select adapters by name
- * from configuration (e.g. SESSION_BACKEND=redis). The bundled module
- * (memorySessionStoresModule / redisSessionStoresModule) is the recommended
- * default — see A4 §8.1.
+ * AdapterFactory builders for the four user-session stores: `register`
+ * throws on a duplicate, `replace` is the explicit override, and there is
+ * no `freeze()`. For compositions that pick an adapter by name from
+ * configuration (e.g. `SESSION_BACKEND=redis`); the bundled modules
+ * (`memorySessionStoresModule`, `redisSessionStoresModule`) are the default.
  */
 export function createUserSessionStoreFactory(): UserSessionStoreFactory {
 	return createAdapterFactory<UserSessionStore>("UserSessionStore");

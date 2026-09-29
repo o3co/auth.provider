@@ -15,17 +15,12 @@
  */
 
 /**
- * #597 — the RFC 9207 `iss` authorization-response parameter reaches the
- * library's issuer check.
- *
- * Google's discovery document advertises
+ * The RFC 9207 `iss` authorization-response parameter reaches the library's
+ * issuer check. Google's discovery document advertises
  * `authorization_response_iss_parameter_supported`, and its OpenID Connect
  * reference says of the authorization response's `iss`: "Per RFC 9207, this
- * parameter is always returned and set to https://accounts.google.com". The
- * provider used to rebuild the callback URL from the code alone, so the
- * comparison never ran, and its hand-built metadata never asked for the
- * parameter. These cases run the real library against a fake Google, as the
- * #542 cases do.
+ * parameter is always returned and set to https://accounts.google.com". These
+ * cases run the real library against a fake Google.
  */
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";

@@ -15,63 +15,36 @@
  */
 
 /**
- * Redis-backed `ConsentStore` and `PendingConsentStore` (#561) — what lets
- * the consent step for clients that are not first-party run under
- * `deployment.mode = "multi"`.
- *
- * The memory module is refused there, correctly: a consent granted on one
- * replica is asked for again on every other, and a request parked under a
- * challenge on one replica is unknown to the replica that receives the
- * answer. These adapters put both where every replica reads them. They are
- * provided together by one module, as the memory ones are: the consent step
- * needs both slots, and `createOAuthRouter` refuses a composition with one
- * and not the other.
- *
- * ### Keys
+ * Redis-backed `ConsentStore` and `PendingConsentStore`: consent records and
+ * parked consent requests every replica reads, so the consent step for
+ * non-first-party clients can run under `deployment.mode = "multi"`. One module
+ * provides both slots; `createOAuthRouter` refuses a composition with one and
+ * not the other.
  *
  *     <keyPrefix>rec:<len>:<sub>|<len>:<clientId>   HASH   a consent record
  *     <keyPrefix>{pending}:ch:<challenge>           HASH   a parked request
  *     <keyPrefix>{pending}:sess:<sessionId>         ZSET   that session's challenges
  *
- * A consent record is one key, and every script over it touches that key
- * alone, so it needs no hash tag and its records spread across a Cluster.
- * The pair is encoded with length prefixes — the form the challenge and
- * replay stores use — because a subject or a client id may contain any
- * separator: `("a|b", "c")` and `("a", "b|c")` must not share a record.
+ * A consent record is one key, so it needs no hash tag. The pair is
+ * length-prefixed because a subject or client id may contain any separator:
+ * `("a|b", "c")` and `("a", "b|c")` must not share a record.
  *
- * A parked request and its session's index are two keys, and `consume`
- * arrives with the challenge alone: it reaches the index through the record,
- * and `set` reaches the session's other requests through the index. Redis
- * Cluster runs a script in one slot, so the constant `{pending}` hash tag
- * puts them all there — at the cost of concentrating every parked request on
- * one slot, the trade `redisDeviceCodeStoreModule` makes with `{devauth}`
- * and for the same reason: a human-paced ceremony, bounded per session and
- * gone in minutes, not per-request traffic. The challenge and the session id
- * each follow a fixed segment of their own, after the tag, so neither can
- * spell the other's key or move the tag.
+ * `consume` reaches the session index through the record, and `set` reaches the
+ * session's other requests through the index, each in one script; Redis Cluster
+ * runs a script in one slot, so the constant `{pending}` tag puts every parked
+ * request on one slot (acceptable for a human-paced ceremony, bounded per
+ * session and gone in minutes). The challenge and the session id each follow a
+ * fixed segment after the tag, so neither can spell the other's key or move it.
  *
- * ### Expiry is the timestamp; the TTL is a safety net
+ * Expiry is each record's own `expiresAt` against the caller's `Date.now()`.
+ * The key TTL only reclaims records nobody reads again and runs
+ * {@link CONSENT_EXPIRY_SLACK_MS} past the expiry, so it never fires first. A
+ * consent recorded until revoked has no TTL, even if an earlier grant had one.
  *
- * Both records carry their own `expiresAt`, and every read compares it with
- * the caller's `Date.now()` — the port's contract is the timestamp, as it is
- * for `DeviceCodeStore`. The key TTL a write sets only reclaims records
- * nobody reads again (an abandoned consent page, a consent that lapsed
- * unasked), and it runs {@link CONSENT_EXPIRY_SLACK_MS} past the logical
- * expiry, so it never fires first. A consent recorded until revoked carries
- * no TTL at all — including when an earlier grant for the pair had one.
- *
- * ### The per-session bound
- *
- * `PENDING_CONSENT_PER_SESSION_LIMIT`, held in the script that parks a
- * request, through the session's index: expired requests leave first, then
- * the first-parked go until there is room — the memory adapter's rule, which
- * the shared contract suite checks for both.
- *
- * ### Corrupt records
- *
- * A stored value that is not the shape the port declares reads as absent, never
- * as a throw or a half-typed record — see "Reading what Redis hands back"
- * below for why absence, not an outage.
+ * `PENDING_CONSENT_PER_SESSION_LIMIT` is held in the parking script: expired
+ * requests leave first, then the oldest, as in the memory adapter. A stored
+ * value that is not the port's shape reads as absent (see "Reading what Redis
+ * hands back" below).
  */
 
 import {
@@ -96,19 +69,11 @@ import type {
 /**
  * How far past a record's `expiresAt` its key's TTL runs: five minutes.
  *
- * The TTL is measured from the write on the Redis server's clock; the expiry
- * is judged on the clock of whichever replica reads next. A reader running
- * behind the writer still holds the record live after the TTL — measured by
- * the writer — has run out, so without slack a skewed replica would find a
- * live consent missing (the user asked again) or an open consent page's
- * request gone. Both fail closed, but both are visible to a user who did
- * nothing wrong.
- *
- * Five minutes is the allowance `verifyJwt` grants for clock skew between
- * hosts by default (`clockSkewMs`), so a fleet whose clocks that verifier
- * tolerates is one this store tolerates too. Nothing is decided by the slack
- * — expiry is still the timestamp — so erring long costs only the memory of
- * an abandoned record for five more minutes; erring short costs a user.
+ * The TTL runs on the Redis server's clock; expiry is judged on the reading
+ * replica's. Without slack, a replica running behind would find a live consent
+ * or an open consent page's request already gone. Five minutes is `verifyJwt`'s
+ * default `clockSkewMs`. The slack decides nothing (expiry is still the
+ * timestamp), so erring long costs only memory.
  */
 export const CONSENT_EXPIRY_SLACK_MS = 5 * 60 * 1000;
 
@@ -126,28 +91,20 @@ const PENDING_CONSENT_HASH_TAG = "{pending}";
 // ---------------------------------------------------------------------------
 // Reading what Redis hands back
 //
-// Nothing this package writes fails these checks. A value edited by hand,
-// restored from a mismatched backup or written by another version can, and a
-// record that is not the shape the port promises must not leave this file:
-// the consent route binds a parked request to the session with
-// `Buffer.from(pending.sessionId)`, which throws on anything but a string, and
-// looks a request up by one challenge before consuming by the challenge the
-// record names.
+// A value edited by hand, restored from a mismatched backup or written by
+// another version must not leave this file unless it is the port's shape: the
+// consent route calls `Buffer.from(pending.sessionId)`, which throws on
+// anything but a string.
 //
-// A corrupt record reads as **absent** — `null` — and never throws. The port
-// reserves a throw for a store that could not answer, which surfaces as
-// `temporarily_unavailable`; a store that answered with garbage did answer,
-// and "there is no consent" / "there is no pending request" is the answer
-// that fails closed: the user is asked again, or told the page has expired.
-// Turning corruption into an outage would instead make one bad key a
-// permanent 503 for that user and client.
+// A corrupt record reads as absent (`null`), never a throw. A throw means the
+// store could not answer (`temporarily_unavailable`); absence fails closed (the
+// user is asked again, or told the page expired), where a throw would make one
+// bad key a permanent 503 for that user and client.
 //
-// The checks live here rather than in the Lua scripts so there is one
-// definition of the shape, applied to whatever `ConsentStoreClient` or
-// `PendingConsentStoreClient` a deployment wires, and so a JSON document is
-// judged by `JSON.parse` rather than by `cjson`, which cannot tell `[]` from
-// `{}`. The returned record is rebuilt field by field: nothing the store held
-// beyond the port's fields reaches the caller.
+// The checks live here rather than in Lua so one definition covers any wired
+// client, and JSON is judged by `JSON.parse`, not `cjson` (which cannot tell
+// `[]` from `{}`). Records are rebuilt field by field, so nothing beyond the
+// port's fields reaches the caller.
 // ---------------------------------------------------------------------------
 
 const isString = (value: unknown): value is string => typeof value === "string";
@@ -258,8 +215,8 @@ export function createRedisConsentStore(opts: RedisConsentStoreOptions): Consent
 
 		async grant(record) {
 			// The script writes the record before it sets the TTL, so a NaN or
-			// infinite expiry left a consent with no TTL that no read could age
-			// out. "Until revoked" is `undefined`, not Infinity.
+			// infinite expiry would leave a consent that nothing ages out.
+			// "Until revoked" is `undefined`, not Infinity.
 			if (record.expiresAt !== undefined && !isStorableExpiry(record.expiresAt)) {
 				throw new RangeError(
 					`ConsentStore.grant: expiresAt must be undefined or a finite instant within the Date range (got ${String(record.expiresAt)})`,
@@ -332,14 +289,10 @@ export function createRedisPendingConsentStore(
 			if (json === null) return null;
 			const record = toPendingRecord(json, challenge);
 			if (record === null) {
-				// Reclaimed as a second, compare-and-delete step rather than inside
-				// the read script: the shape is judged here, once, for any client
-				// (see "Reading what Redis hands back"), and the comparison keeps a
-				// request re-parked in between from being taken with it. The answer
-				// does not depend on the reclaim — the record is corrupt whether or
-				// not it goes — so a failure to reclaim leaves it to its TTL and
-				// still answers `null` rather than turning corruption into an
-				// outage.
+				// Reclaimed by a separate compare-and-delete, since the shape is
+				// judged here, not in the read script (see "Reading what Redis hands
+				// back"); the compare spares a request re-parked in between. A failed
+				// reclaim leaves it to its TTL and still answers `null`.
 				await client.discard(keys, challenge, json).catch(() => false);
 			}
 			return record;
@@ -355,18 +308,13 @@ export function createRedisPendingConsentStore(
 }
 
 /**
- * AdapterFactory builder for the Redis `ConsentStore` (composition pattern
- * §8.4). Register it next to {@link redisPendingConsentStoreBuilder}: the
- * consent step needs both slots, and `createOAuthRouter` refuses a
- * composition with one and not the other.
- *
- *   consentFactory.register("redis", redisConsentStoreBuilder);
- *   consentFactory.create({ type: "redis", client, keyPrefix: "consent:" });
+ * AdapterFactory builder for the Redis `ConsentStore`. Register it next to
+ * {@link redisPendingConsentStoreBuilder}: `createOAuthRouter` refuses a
+ * composition with one consent slot and not the other.
  */
 export const redisConsentStoreBuilder: AdapterBuilder<ConsentStore> = (config, _ctx) => {
 	const c = config as { client?: ConsentStoreClient; keyPrefix?: string };
-	// Same structural guard as `redisDeviceCodeStoreBuilder`: fail at boot
-	// rather than at the first `/authorize` for a third-party client.
+	// Fail at boot rather than at the first `/authorize` for a third-party client.
 	if (!c.client) {
 		throw new Error("redisConsentStoreBuilder: 'client' option is required");
 	}
@@ -393,16 +341,11 @@ export const redisPendingConsentStoreBuilder: AdapterBuilder<PendingConsentStore
 
 /**
  * `defineModule` manifest providing both consent slots off the shared Redis
- * clients — the counterpart of core's `memoryConsentStoreModule`, one switch
- * for one feature.
- *
- * Declares no `replicaSafety`, which is the point: a composition wiring the
- * consent step with this module may declare `deployment.mode = "multi"`. The
- * `consentStoreClient` and `pendingConsentStoreClient` slots it requires come
- * from `makeIoredisClients` (or the standalone's shared clients module).
- *
- * configSchema: top-level key `redisConsentStore` (module-namespaced per
- * master roadmap §3.5 — NO bare `keyPrefix` top-level key).
+ * clients, the counterpart of core's `memoryConsentStoreModule`. Declares no
+ * `replicaSafety`, so a composition using it may declare
+ * `deployment.mode = "multi"`. Its client slots come from `makeIoredisClients`
+ * (or the standalone's shared clients module); config lives under
+ * `redisConsentStore`, never a bare top-level `keyPrefix`.
  */
 export const redisConsentStoreModule = defineModule({
 	name: "redis-consent-store",

@@ -15,15 +15,11 @@
  */
 
 /**
- * Issue #296 — the seam between writing the watermark and it meaning anything.
+ * The protected-resource surfaces pass the `subjectRevocation` store to
+ * `verifyJwt`, so the watermark `revokeAllForSubject` writes takes effect: an
+ * option nothing forwards is a revocation that revokes nothing.
  *
- * `verifyJwt` honours a `subjectRevocation` when one is passed, and
- * `revokeAllForSubject` writes the watermark. Neither fact matters unless the
- * protected-resource surfaces actually pass the store, which is what this
- * pins: an option nothing forwards is a revocation that revokes nothing — the
- * same silent no-op #277 was filed about for the jti denylist.
- *
- * The surfaces are the ones that already consult `accessTokenDenylist`:
+ * The surfaces are the ones that consult `accessTokenDenylist`:
  * `/oauth/introspect` (both the body handler and the bearer-credential path),
  * `/oauth/userinfo`, and the federation-token route.
  */

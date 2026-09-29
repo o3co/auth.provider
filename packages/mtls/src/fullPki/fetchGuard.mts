@@ -15,70 +15,32 @@
  */
 
 /**
- * A deliberately small HTTP client for fetching revocation material, with the
- * limits that make fetching a URL out of a certificate safe to do at all.
+ * A deliberately small HTTP client for fetching revocation material (a CRL by
+ * GET, an OCSP request by POST per RFC 6960 Appendix A.1), with the limits
+ * that make fetching a URL taken from a certificate safe at all.
  *
- * ### Why this file exists
+ * Such a URL is a server-side request forgery sink: the request itself is
+ * the payload (a distribution point of `http://169.254.169.254/...` needs no
+ * parseable answer). Two layered controls bound it:
+ * 1. Only a validated path may cause a fetch: `validate.mts` completes path
+ *    validation before reading any URL, so it always comes from a
+ *    certificate chaining to a configured trust anchor.
+ * 2. A required host allowlist, enforced here: trusting a CA to issue
+ *    certificates is not trusting it to choose destinations inside the
+ *    operator's network (the separation `oauth.mtls.trusted-proxies` draws).
  *
- * Revocation checking means taking a URL from an X.509 extension and asking
- * this process to retrieve it. That is a server-side request forgery sink in
- * the classic shape: the request is made by us, from inside the network the
- * auth server lives in, to a destination named by someone else. A CRL
- * distribution point reading `http://169.254.169.254/latest/meta-data/` does
- * not have to return a parseable CRL to be useful to an attacker — the
- * request itself is the payload.
+ * Since the operator names every destination, and internal CAs usually live
+ * at private addresses, core's `isSpecialUseAddress` (RFC 6890) is not
+ * consulted here; see `core/src/net/special-use.mts`.
  *
- * Two controls bound it, and they are layered:
+ * On top of those: redirects are refused (a second, unvetted destination),
+ * the body is capped while it is read, a wall-clock timeout applies, and no
+ * credentials are sent. The platform `fetch` defaults — follow redirects, no
+ * size limit, no allowlist — all fail open, hence a bespoke client.
  *
- *  1. **Only a validated path may cause a fetch.** The caller
- *     (`validate.mts`) runs path validation to completion *before* reading
- *     any distribution point, so the URL always comes from a certificate that
- *     already chains to a trust anchor this deployment configured. A random
- *     client certificate cannot drive an outbound request.
- *  2. **A host allowlist**, enforced here. Layer 1 makes the URL come from a
- *     CA the operator trusts; this layer means trusting a CA to issue
- *     certificates is not the same as trusting it to choose destinations
- *     inside the operator's network. It is the same separation
- *     `oauth.mtls.trusted-proxies` draws for forwarded certificate headers,
- *     and it is required rather than defaulted for the same reason.
- *
- * The allowlist is also why this guard does not consult core's
- * `isSpecialUseAddress` (RFC 6890), which is the control for a URL a stranger
- * chose. Here the operator names every destination, and must be able to name
- * a private one: an internal CA's distribution point and OCSP responder
- * usually are. The two homes state each other; see `core/src/net/special-use.mts`.
- *
- * On top of those: no redirects (a redirect is a second destination that
- * neither layer vetted — the fetch is made with `redirect: "manual"` and a
- * redirect status it hands back is refused), a byte cap read incrementally so
- * a hostile responder cannot exhaust memory before the check fires, a
- * wall-clock timeout, and no credentials.
- *
- * ### What a refusal says
- *
- * A reason from a closed set (`FetchRejection`) and a `detail` in this
- * module's own words — a status, a size, a transport's error code. When the
- * platform fetch threw, its error rides beside them as `cause`, as it was
- * thrown; the log line that reports the refusal carries core's
- * `loggableError` projection of it. Nothing is read from an error's message,
- * and none of it is copied into `detail`: the message is the platform's
- * reading of what a network path or a responder did.
- *
- * ### GET and POST
- *
- * A CRL is fetched with a GET. An OCSP request is a POST whose body is the
- * DER `OCSPRequest` (RFC 6960 Appendix A.1) — the GET form base64-encodes
- * the request into the path, which is both larger and, once a nonce is in
- * it, uncacheable, so there is no reason to speak it. Every guard above is
- * applied to a POST exactly as to a GET; the only additions are the body,
- * its `Content-Type`, and an optional check that the responder answered with
- * the media type it was asked for (#431).
- *
- * ### Why a bespoke client rather than the platform default
- *
- * `fetch` follows redirects, has no size limit, and has no notion of an
- * allowlist. Every one of those defaults is wrong here, and each is wrong in
- * a direction that fails open.
+ * A refusal is a `FetchRejection` plus a `detail` in this module's own words.
+ * A thrown platform error rides as `cause`; its message is never read or
+ * copied into `detail`.
  */
 
 /** Why a fetch did not produce bytes. Values are stable — audit logs read them. */
@@ -95,17 +57,12 @@ export type FetchRejection =
 	| "network_error";
 
 /**
- * The refusals that say the source did not deliver a usable answer — it
- * could not be reached in time, answered with an HTTP error or a redirect, or
- * answered with something too large or of the wrong type — as against the
- * ones about the URL a certificate names (a scheme, host, credentials or URL
- * this guard will not fetch). The first kind is a fault of the source or of
- * this server's configuration, never a verdict on the certificate, and a
- * client cannot cause it: some clear on retry (`timeout`, `network_error`, a
- * 5xx `http_error`), some need an operator (a 404 or 410 `http_error`,
- * `response_too_large`, `redirect_refused`, `unexpected_content_type`). The
- * second is the certificate's own shape. `crl.mts` and `ocsp.mts` read this
- * to say which an unavailable status is.
+ * Refusals meaning the source did not deliver a usable answer (unreachable,
+ * timed out, an HTTP error, a redirect, too large, the wrong type), as against
+ * those about the URL a certificate names. They are faults of the source or
+ * of this server's configuration, never a verdict on the certificate, and no
+ * client can cause them. `crl.mts` and `ocsp.mts` read this to mark an
+ * unavailability as an outage.
  */
 const SOURCE_FAILURES: ReadonlySet<FetchRejection> = new Set<FetchRejection>([
 	"timeout",
@@ -131,14 +88,11 @@ export type FetchOutcome =
 
 export interface GuardedFetchOptions {
 	/**
-	 * Hosts this deployment will retrieve revocation material from. Each entry
-	 * is `host` or `host:port`, matched case-insensitively against the URL's
-	 * authority. An entry without a port matches any port. An IPv6 literal may
-	 * be written bracketed (`[::1]`, `[::1]:8080`) or, without a port, bare
-	 * (`::1`), expanded or compressed.
-	 *
-	 * Never empty: an empty allowlist would mean "any destination", and the
-	 * module refuses that at boot rather than accepting it here.
+	 * Hosts revocation material may be fetched from: `host` or `host:port`,
+	 * matched case-insensitively; an entry without a port matches any port.
+	 * An IPv6 literal may be bracketed (`[::1]`, `[::1]:8080`) or, without a
+	 * port, bare, expanded or compressed. Never empty: that would mean "any
+	 * destination", and the module refuses it at boot.
 	 */
 	readonly allowedHosts: readonly string[];
 	readonly timeoutMs: number;
@@ -181,16 +135,11 @@ const mediaTypeOf = (contentType: string | null): string | null => {
 };
 
 /**
- * The one form both sides of the allowlist comparison are reduced to:
- * lower-case, and for an IPv6 literal bracket-less in the WHATWG
- * serialisation.
- *
- * `URL.hostname` keeps the brackets on an IPv6 literal (`[::1]`) and always
- * serialises it compressed, while an operator may write the entry bracketed
- * or bare, expanded or compressed. Comparing raw strings meant an IPv6 entry
- * could never match. Routing the entry through `URL` gives it exactly the
- * serialisation the URL side will have; a literal `URL` rejects is kept as
- * written, where it matches nothing rather than something unintended.
+ * The form both sides of the allowlist comparison are reduced to: lower-case,
+ * and an IPv6 literal bracket-less in the WHATWG serialisation.
+ * `URL.hostname` keeps the brackets and always compresses, while an entry may
+ * be written either way, so the entry goes through `URL` too; a literal `URL`
+ * rejects is kept as written, where it matches nothing.
  */
 const canonicalHost = (host: string): string => {
 	const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
@@ -347,12 +296,9 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 		try {
 			const response = await fetchImpl(url, {
 				method: request.method ?? "GET",
-				// A redirect names a second destination that the allowlist never
-				// vetted, and following one is how an allowlisted host becomes an
-				// open proxy into everything it can reach. "manual" hands the
-				// redirect back unfollowed, so it is refused by its status below —
-				// "error" made the platform throw, with nothing but the error's
-				// text to tell the refusal from a network failure.
+				// A redirect names a second destination the allowlist never
+				// vetted; following one makes an allowlisted host an open proxy.
+				// "manual" hands it back unfollowed, refused by its status below.
 				redirect: "manual",
 				signal: controller.signal,
 				credentials: "omit",

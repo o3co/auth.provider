@@ -21,13 +21,11 @@ import type { ReadinessRegistrar } from "../readiness/types.mjs";
 /**
  * Passed to AdapterFactory builders via {@link BuilderContext.lifecycle}.
  * Builders that create disposable sub-resources (Redis clients, interval
- * timers, etc.) SHOULD register a cleanup callback here.
+ * timers) SHOULD register a cleanup here.
  *
- * Cleanups are invoked in LIFO order (reverse of registration) during
- * `AppHandle.dispose()`, with `await` between each (sequential, not parallel).
- * Errors in individual cleanups are logged and do NOT abort the drain. All
- * cleanup errors accumulate into the AggregateError that `AppHandle.dispose()`
- * may throw.
+ * `AppHandle.dispose()` runs cleanups sequentially in LIFO order. A failing
+ * cleanup is logged and does not abort the drain; all failures accumulate
+ * into the AggregateError `dispose()` may throw.
  */
 export interface LifecycleRegistrar {
 	/**
@@ -39,26 +37,18 @@ export interface LifecycleRegistrar {
 
 /**
  * Builder context passed to every adapter builder. All fields are optional
- * and additions remain additive-only (non-breaking). Builders may ignore
- * fields they do not need.
- *
- * Planned future fields:
- *   - logger?: Logger         (startup-time logging — see D-4 Logger interface)
- *   - abortSignal?: AbortSignal (timeout-aware init, e.g. database connections)
- *   - tracer?: Tracer         (OpenTelemetry context propagation)
- *   - metrics?: MetricsRecorder (metrics backend injection)
+ * and additions stay additive (non-breaking); builders ignore fields they do
+ * not need.
  */
 export interface BuilderContext {
 	/**
 	 * Lifecycle registrar provided by the boot planner. Builders that produce
-	 * a resource requiring cleanup (database client, interval timer, etc.)
-	 * SHOULD call:
+	 * a resource requiring cleanup SHOULD call:
 	 *
 	 *     ctx.lifecycle?.register(async () => { await resource.close(); })
 	 *
-	 * Optional: factories constructed outside the boot planner (e.g. unit
-	 * tests) receive `{}` as `ctx`, so `ctx.lifecycle` is `undefined`. Always
-	 * use optional chaining.
+	 * Optional: factories built outside the boot planner (e.g. unit tests)
+	 * receive `{}` as `ctx`, so always use optional chaining.
 	 */
 	lifecycle?: LifecycleRegistrar;
 	/**
@@ -67,13 +57,10 @@ export interface BuilderContext {
 	 *
 	 *     ctx.readiness?.register({ name: "redis", check: () => client.ping() })
 	 *
-	 * Registration belongs here for the same reason cleanup does: the builder
-	 * is the only place holding the connection. The adapter it returns exposes
-	 * a narrow command surface with no `ping`, so a composition root cannot
-	 * build the probe from the outside.
-	 *
-	 * Optional, and subject to the same optional-chaining rule as
-	 * {@link BuilderContext.lifecycle}.
+	 * Only the builder holds the connection; the adapter it returns has no
+	 * `ping`, so a composition root cannot build the probe. Optional, like
+	 * {@link BuilderContext.lifecycle}. See ADR
+	 * 2026-08-26-readiness-probes-registered-by-connection-owners.
 	 */
 	readiness?: ReadinessRegistrar;
 	/**
@@ -83,10 +70,9 @@ export interface BuilderContext {
 	 *
 	 *     client.on("error", (err) => ctx.logger?.error({ err: loggableError(err) }, "…_error"))
 	 *
-	 * Same channel as `lifecycle` and `readiness` on purpose: a builder that
-	 * opens a connection owns its cleanup, its probe, and its error listener,
-	 * and having those three arrive by three different routes is how one of
-	 * them gets forgotten. Falls back to `consoleLogger` when absent.
+	 * Same channel as `lifecycle` and `readiness`, so a builder gets its
+	 * cleanup, probe and error listener in one place. Falls back to
+	 * `consoleLogger` when absent.
 	 */
 	logger?: Logger;
 }
@@ -98,13 +84,12 @@ export interface BuilderContext {
  */
 export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
 	/**
-	 * Drain all registered cleanups in LIFO order. Returns the array of
-	 * errors encountered (empty if all cleanups succeeded). Each failure is
-	 * logged as it occurs, once, at error, object-first:
-	 * `{ phase, cleanupIndex, err: loggableError(err) }` with the event
-	 * `adapter_lifecycle_cleanup_failed`, where `phase` says which drain it
-	 * was — `AppHandle.dispose()` or a boot that failed. The drain never
-	 * throws, not even when the logger does.
+	 * Drain all registered cleanups in LIFO order and return the errors.
+	 * Each failure is logged once, at error, as
+	 * `adapter_lifecycle_cleanup_failed` with
+	 * `{ phase, cleanupIndex, err: loggableError(err) }`; `phase` says whether
+	 * `AppHandle.dispose()` or a failed boot drained. Never throws, not even
+	 * when the logger does.
 	 *
 	 * @internal
 	 */
@@ -171,11 +156,9 @@ export type AdapterBuilder<T> = (
  * register a builder per concrete adapter type, and resolve an instance at startup
  * via {@link AdapterFactory.create}.
  *
- * Per A6+A7 §2.3: `AdapterFactory` is a composition-root concern and intentionally
- * has NO `freeze()` method. Infrastructure builder composition is not protocol-
- * module registration; there is no temporal boundary at which mutation becomes a
- * contract violation. Throw-on-duplicate `register` + explicit `replace` is
- * sufficient defence.
+ * Deliberately has no `freeze()`: a composition-root concern has no point after
+ * which mutation becomes a contract violation. Throw-on-duplicate `register`
+ * plus explicit `replace` is sufficient defence.
  */
 export interface AdapterFactory<T> {
 	/**
@@ -187,22 +170,14 @@ export interface AdapterFactory<T> {
 	register(type: string, builder: AdapterBuilder<T>): void;
 
 	/**
-	 * Overwrite a previously-registered builder. Per A6+A7 §2.2.
+	 * Overwrite a previously registered builder. Throws
+	 * {@link AdapterFactoryError} with `reason: "unknown-replace"` when `type`
+	 * is not registered: the caller is wrong about what is registered.
 	 *
-	 * - If `type` is registered: replace the builder. Returns `void`.
-	 * - If `type` is NOT registered: throws {@link AdapterFactoryError} with
-	 *   `reason: "unknown-replace"`. Replacing a non-existent entry is an
-	 *   error — the caller's mental model is wrong about what is registered.
-	 *
-	 * Security note: `replace()` has zero production callers at v0.5.0 and is
-	 * intended exclusively for test-fixture override of built-in adapters
-	 * (e.g., substituting a memory adapter for a Redis adapter in tests). The
-	 * runtime security boundary is the resolved adapter instance returned by
-	 * {@link AdapterFactory.create}, not this factory's builders map.
-	 * Freezing this factory would protect an object already off the runtime
-	 * path post-boot — the wrong layer — so SF-11 was closed by documentation,
-	 * not by adding `freeze()`: #113 (D-3, 2026-05-05; indexed in
-	 * `docs/design-campaign-index.md`).
+	 * Intended for tests substituting a built-in adapter (e.g. memory for
+	 * Redis). The runtime security boundary is the adapter instance
+	 * {@link AdapterFactory.create} returns, not this builders map, which is
+	 * off the runtime path after boot; freezing it would guard the wrong layer.
 	 */
 	replace(type: string, builder: AdapterBuilder<T>): void;
 

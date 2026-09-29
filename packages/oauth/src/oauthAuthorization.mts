@@ -28,16 +28,12 @@ import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "./grants/jwtBearer.
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
 /**
- * Returns true if `value` is an explicit opt-in to enable a feature.
- *
- * HOCON's `passthrough` sub-trees (e.g. `oauth.grants.*`) do not coerce
- * env-var substitution strings to booleans. A resolved `enabled` value can
- * therefore be the string `"true"` (from `OAUTH_GRANTS_X_ENABLED=true`) or
- * the boolean `true` (from an `application.conf` literal). This helper
- * accepts both forms and rejects everything else — including the string
- * `"false"` (env-disable), the boolean `false`, absent / undefined, and
- * unrelated truthy strings like `"yes"` / `"1"` — so the opt-in remains
- * strict while staying operationally usable via env vars.
+ * Returns true if `value` is an explicit opt-in to enable a feature: the
+ * boolean `true` (an `application.conf` literal) or the string `"true"`
+ * (from `OAUTH_GRANTS_X_ENABLED=true`, since HOCON's `passthrough` sub-trees
+ * such as `oauth.grants.*` do not coerce env-var substitutions). Everything
+ * else is refused, including `"false"` and truthy strings like `"yes"` /
+ * `"1"`.
  */
 function isExplicitlyEnabled(value: unknown): boolean {
 	return value === true || value === "true";
@@ -48,42 +44,42 @@ const REQUIRES = [
 	"clientRepository",
 	"codeRepository",
 	"keyStore",
-	// The session-admission ADR's D1: the synthetic key every consumer of
-	// admission takes. The authorization_code grant reads the code's session
-	// through `admitSession` with it, twice; the refresh grant reads the
-	// token's (D9).
+	// The synthetic key every consumer of admission takes (ADR
+	// 2026-09-28-session-admission). The authorization_code grant reads the
+	// code's session through `admitSession` with it, twice; the refresh grant
+	// reads the token's.
 	"sessionRequirementResolver",
 ] as const;
 const OPTIONAL = [
-	// D10: the audit sink admission emits `session.admission.subject_mismatch`
+	// The audit sink admission emits `session.admission.subject_mismatch`
 	// through, when wired.
 	"auditSink",
 	// Both grant factories (createAuthorizationGrant / createRefreshTokenGrant)
-	// read these to back refresh-token rotation persistence and CP-18 grant
+	// read these to back refresh-token rotation persistence and grant
 	// policy enforcement. Boot planner only injects keys listed here, so
 	// omitting them silently drops both features at the grant boundary.
-	"refreshTokenFamilyRotation", // A3 §5.2 — replaces legacy refreshTokenStore (#101)
-	// PB-1 (v0.5.1): the refresh grant must call `revokeFamily` on
-	// rotation `replayed` outcome (RFC 6819 §5.2.2). Both family slots are
+	"refreshTokenFamilyRotation",
+	// The refresh grant must call `revokeFamily` on a rotation `replayed`
+	// outcome (RFC 6819 §5.2.2). Both family slots are
 	// optional to wire — a composition without the refresh_token grant
 	// needs neither — but not optional to decide: with the grant on, its
 	// factory below refuses to boot unless both are filled
 	// (`requireRefreshTokenFamilies`).
 	"refreshTokenFamilyRevocation",
-	// #376: the #296 subject watermark, consulted at RT redemption as
-	// the backstop for a partial credential-change cascade (#322).
+	// The subject watermark, consulted at RT redemption as the backstop
+	// for a partial credential-change cascade.
 	"subjectRevocation",
-	// #301: read by the jwt-bearer grant. Optional so a deployment that
+	// Read by the jwt-bearer grant. Optional so a deployment that
 	// never enables that grant is not made to wire one; the grant
 	// factory refuses at composition when it is enabled without one.
 	"assertionVerifier",
 	"userRepository",
 	"grantPolicy",
 	"userSessionStore",
-	"sessionRPRegistry", // Amendment 4 (§1.1.4)
-	"sessionFamilyIndex", // Amendment 4 (§1.1.4)
-	"sessionFederationIndex", // Amendment 4 (§1.1.4)
-	"logger", // D-4 — structured logger; security audit logs (PB-1/CC-2/SF-6)
+	"sessionRPRegistry",
+	"sessionFamilyIndex",
+	"sessionFederationIndex",
+	"logger", // structured logger; security audit logs
 ] as const;
 
 /** The two slots the refresh_token grant keeps its token families in. */
@@ -99,12 +95,10 @@ const REFRESH_TOKEN_FAMILY_SLOTS = [
  * The grant rotates each refresh token through its family, refuses a
  * replayed one and revokes the family (RFC 9700 §4.14.2, RFC 6819 §5.2.2.3),
  * and `/oauth/revoke` revokes the family the grant reads. Without rotation a
- * refresh token was served with no family record and redeemed with no
- * rotation and no replay check; without revocation a detected replay was a
- * 503 and a revoked family was never read. Neither is a mode a deployment
- * chooses: one that does not want token families turns the grant off
- * (`oauth.grants.refresh_token.enabled = false`), which is the decision the
- * optional slots otherwise leave unmade.
+ * refresh token would be redeemed with no rotation and no replay check;
+ * without revocation a detected replay would be a 503 and a revoked family
+ * never read. A deployment that does not want token families turns the
+ * grant off (`oauth.grants.refresh_token.enabled = false`).
  */
 function requireRefreshTokenFamilies(deps: OAuthAuthorizationModuleDeps): void {
 	const missing = REFRESH_TOKEN_FAMILY_SLOTS.filter((slot) => deps[slot] === undefined);
@@ -123,7 +117,7 @@ function requireRefreshTokenFamilies(deps: OAuthAuthorizationModuleDeps): void {
 
 /**
  * The deps every contribution of {@link oauthAuthorizationModule} receives:
- * exactly its `requires` / `optional`, typed (#626 P2). Each grant factory
+ * exactly its `requires` / `optional`, typed. Each grant factory
  * declares the subset it reads, so the wiring below is checked, not trusted.
  */
 type Requires = (typeof REQUIRES)[number];
@@ -131,20 +125,10 @@ type Optional = (typeof OPTIONAL)[number];
 export type OAuthAuthorizationModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
- * Declarative manifest for the authorization_code and refresh_token grants.
- *
- * Per A2-γ §3.2.2 + Amendment 4 (§1.1.4): the v0.4.x
- * `oauthAuthorizationModule({ codeRepository, clientRepository })` factory
- * whose `init(ctx)` conditionally called `ctx.grantRegistry.register(...)`
- * is replaced by a `defineModule(...)` factory whose `contributes.grants`
- * entries the boot planner registers automatically.
- *
- * Caller surface: `oauthAuthorizationModule({ codeRepository, clientRepository })`
- * → `oauthAuthorizationModule({ config })`.
- * Both repositories now flow through `requires` from the DI graph.
- *
- * Theme B (one responsibility per module), Theme D (immutability — no init
- * mutation of ctx), Theme E (structural conditional via factory body).
+ * Declarative manifest for the authorization_code and refresh_token grants
+ * (and the jwt-bearer and client_credentials grants). The boot
+ * planner registers its `contributes.grants` entries; the repositories come
+ * through `requires` from the DI graph.
  */
 export const oauthAuthorizationModule = (params: { config: AppConfig }): Module => {
 	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
@@ -175,7 +159,7 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			return createRefreshTokenGrant(deps);
 		};
 	}
-	// #301: RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
+	// RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
 	// inert without an `assertionVerifier` — the module lists it optional so a
 	// deployment that never enables this grant is not made to wire one, and the
 	// factory below refuses to register the grant when it is missing rather
@@ -206,37 +190,30 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			return createJwtBearerGrant({ ...deps, assertionVerifier, userRepository });
 		};
 	}
-	// Wave 1 §3.5: client_credentials follows the same opt-in semantics.
-	// Per-client `AuthenticatedClient.allowedGrantTypes` (§3.4.1 deny-by-absence)
-	// is the authoritative access gate; the server-wide flag exists for
-	// operational symmetry with the other built-ins (kill-switch on CVE,
-	// scope minimization for deployments that never use M2M). Set
-	// `oauth.grants.client_credentials.enabled = true` in application.conf
-	// (or via `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED=true`) to activate M2M.
+	// client_credentials follows the same opt-in. Per-client
+	// `AuthenticatedClient.allowedGrantTypes` (deny-by-absence) is the
+	// authoritative access gate; the server-wide flag is a kill switch, and
+	// keeps M2M off in deployments that never use it.
 	if (isExplicitlyEnabled(grantsCfg.client_credentials?.enabled)) {
 		grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
 	}
 
-	// Intentionally no `configSchema`: this module reads only slices already
-	// declared in `CoreConfigSchema` (`oauth.grants.{authorization_code,refresh_token}.enabled`,
-	// `oauth.accessToken`, `oauth.refreshToken.expiresIn`). Adding a
-	// symmetric configSchema would be theatre — boot's composed parse
-	// (#728) already validates these fields with core's schema. Declare a
-	// configSchema here only if a future change adds a read of a
-	// `config.<full-section>` key that lives in `fullSectionsSchema` (e.g.
-	// `config.session`, `config.endpoints`).
+	// No `configSchema`: this module reads only slices `CoreConfigSchema`
+	// declares (`oauth.grants.{authorization_code,refresh_token}.enabled`,
+	// `oauth.accessToken`, `oauth.refreshToken.expiresIn`), which boot's
+	// composed parse already validates. One is needed only for a read of a
+	// key in `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
 	return defineModule<Requires, Optional>({
 		name: "oauth-authorization",
 		requires: REQUIRES,
 		optional: OPTIONAL,
-		// #406: `subjectRevocation` is optional to wire, not optional to decide.
-		// This module reads the slot on its own — a composition that mounts it
-		// without `oauthModule` (the grants alone, no routes) would otherwise
-		// still boot with the watermark unfilled and undeclared, which is the
-		// hole #406 exists to close, one module over.
+		// `subjectRevocation` is optional to wire, not optional to decide.
+		// This module reads the slot on its own, so a composition that mounts
+		// it without `oauthModule` (the grants alone, no routes) would
+		// otherwise boot with the watermark unfilled and undeclared.
 		absencePolicies: {
 			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
-			// D10: the same rule for the audit sink admission emits through,
+			// The same rule for the audit sink admission emits through,
 			// declared here as `oauthModule` declares it, for the same reason.
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},

@@ -15,17 +15,13 @@
  */
 
 /**
- * How long a subject's revocation boundary has to last (#593, D13).
- *
- * Two answers, because there are two boundaries and they are bounded by
- * different things:
- *
- *  - the **grants** boundary must outlast every grant it could ever cover, and
- *    what bounds those is a constant the code enforces at the write — not a
- *    configuration setting, which an operator can lower, revoke under, and
- *    raise again;
- *  - the **sessions** boundary must outlast the sessions and tokens a cascade
- *    might have missed, and what bounds those IS configuration.
+ * How long a subject's revocation boundary has to last. The **grants**
+ * boundary must outlast every grant it could ever cover, and what bounds those
+ * is a constant the code enforces at the write — not a configuration setting,
+ * which an operator can lower, revoke under, and raise again. The
+ * **sessions** boundary must outlast the sessions and tokens a cascade might
+ * have missed, and what bounds those IS configuration.
+ * See ADR 2026-09-17-federation-grants-offline-delegation.
  */
 
 import { describe, expect, it } from "vitest";
@@ -69,11 +65,11 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	});
 
 	it("sizes the access token from the maximum a request may obtain, not the default", () => {
-		// Found by review. `expiresIn` is what a grant mints when the request
-		// asks for nothing; token exchange may ask for more, up to
-		// `maxExpiresIn`. A horizon computed from the default expires while
-		// those longer tokens are still valid — and a token that outlives the
-		// boundary that revoked it works again.
+		// `expiresIn` is what a grant mints when the request asks for nothing;
+		// token exchange may ask for more, up to `maxExpiresIn`. A horizon
+		// computed from the default expires while those longer tokens are still
+		// valid — and a token that outlives the boundary that revoked it works
+		// again.
 		const horizon = resolveSubjectRevocationHorizonMs({
 			oauth: {
 				refreshToken: { expiresIn: 60 },
@@ -118,7 +114,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 	});
 
 	it("refuses a configuration that does not say how long these things live", () => {
-		// A hand-built configuration bypasses the schema (#448), and a horizon
+		// A hand-built configuration bypasses the schema, and a horizon
 		// computed from a missing lifetime is a boundary that expires early.
 		for (const broken of [
 			{ session: { maxAge: 43_200_000 } },
@@ -192,9 +188,9 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		});
 
 		it("holds a slot's lifetime to the rule the configuration's is held to, naming the slot", () => {
-			// A slot built by hand meets no schema either. Read through `??`, a
-			// zero or a string went straight into the arithmetic and sized the
-			// boundary from nothing — or from NaN, which retains nothing.
+			// A slot built by hand meets no schema either. A zero or a string in
+			// the arithmetic would size the boundary from nothing — or from NaN,
+			// which retains nothing.
 			const cases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(0) }],
 				["sessionCookiePolicy.maxAgeMs", { sessionCookie: sessionCookie(-1) }],

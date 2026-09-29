@@ -15,44 +15,39 @@
  */
 
 /**
- * sessionAdmissionCallers.drift.test.mts — no shipped source outside
- * `packages/core/src/session-admission/` reads a session by other means than
- * admission (the session-admission ADR's D10).
+ * No shipped source outside `packages/core/src/session-admission/` reads a
+ * session by other means than admission (the session-admission ADR's D10).
  *
- * What it finds, by shape and by following the receiver — a literal grep
- * would miss `/authorize`'s aliased store (`const store = opts.userSessionStore`)
- * and the device_code grant's boundary read at the poll
- * (`const revocation = options.subjectRevocation; revocation.revokedBefore(…)`):
+ * What it finds, by shape and by following the receiver, since a literal grep
+ * would miss an aliased store (`const store = opts.userSessionStore`) or
+ * boundary (`const revocation = options.subjectRevocation;
+ * revocation.revokedBefore(…)`):
  *
  * - `get(` on a receiver typed `UserSessionStore`: a property named
  *   `userSessionStore` on anything; a local, destructured name or parameter
- *   followed to its declaration — a type annotation naming `UserSessionStore`,
+ *   followed to its declaration (a type annotation naming `UserSessionStore`,
  *   a binding element keyed `userSessionStore`, or an initializer that
- *   resolves the same way, through `await`, `!`, `as`, `??` and `?:`;
+ *   resolves the same way, through `await`, `!`, `as`, `??` and `?:`);
  * - `revokedBefore(` on a receiver typed `SubjectRevocation`, followed the
  *   same way (`subjectRevocation`, a type naming `SubjectRevocation`);
  * - a call of `selectAcr(`;
  * - a `SessionClaim` literal: an object literal with a `carrier` property
  *   whose value is one of the four carriers;
- * - a call of `recordSecondFactor(` — kept to the two bundled stores' own
- *   files and `packages/mfa` (D3, D10);
- * - a call of `establishWithoutAsking(` — kept to the federation callback
- *   (D5);
- * - a call of `resumePrimary(` or `continuationOf(` — kept to the MFA
- *   package (D5).
+ * - a call of `recordSecondFactor(`, `establishWithoutAsking(`,
+ *   `resumePrimary(` or `continuationOf(`, each kept to the files listed
+ *   below (D3, D5, D10).
  *
  * A guarded function is found under an import alias (`import { selectAcr as
  * pick }`), as a string element access (`store["get"]`), and as a reference
- * that is not a call — `.bind`, `.call`, a method taken off its object, a
- * value passed on.
+ * that is not a call (`.bind`, `.call`, a method taken off its object, a
+ * value passed on).
  *
- * Every site outside the home is pinned to its file and count with a
- * reason, and shrinks as the consumers move (A3–A5); `jwt/verify.mts` and
- * the token-side reads of D9 stay until that record. A site not listed, a
- * second one in a listed file, or an entry whose site went away fails.
+ * Every site outside the home is pinned to its file and count with a reason
+ * ({@link ALLOWED}): the token-side reads of D9, outside admission in this
+ * release, and `jwt/verify.mts`'s permanent boundary read. A site not listed,
+ * a second one in a listed file, or an entry whose site went away fails.
  *
- * What it does not follow is left to review, as the #707 guard lists its
- * own holes: a receiver reached under a name declared in another file; a
+ * Left to review: a receiver reached under a name declared in another file; a
  * namespace import (`core.selectAcr`) or a computed key (`store[key]`); a
  * local alias of a guarded function (`const f = selectAcr` is a site,
  * `f(…)` is not a second one); a store reached through reflection

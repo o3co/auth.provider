@@ -14,6 +14,19 @@
  * limitations under the License.
  */
 
+/**
+ * `private_key_jwt` client authentication (RFC 7523 §2.2 / OIDC Core §9).
+ *
+ * A confidential client signs a short-lived JWT with its own private key; the
+ * provider verifies it under the public keys the client registered (`jwks`)
+ * or publishes (`jwksUri`), and spends each assertion's `jti` exactly once.
+ *
+ * This verifier is the whole of the trust decision — which client the
+ * assertion names, whose keys it must verify under, what the claims must
+ * say, and that the `jti` is fresh. The middleware around it only decides
+ * how to answer, and that no second method rides along on the request.
+ */
+
 import {
 	assertionLifetime,
 	auditErrorText,
@@ -41,21 +54,7 @@ import {
 	jwtVerify,
 } from "jose";
 
-/**
- * `private_key_jwt` client authentication (RFC 7523 §2.2 / OIDC Core §9, #484).
- *
- * A confidential client proves it is who it says by signing a short-lived
- * JWT with its own private key; the provider verifies it under the public
- * keys the client registered (`jwks`) or publishes (`jwksUri`). Nothing
- * shared has to be distributed to the client's replicas or rotated
- * everywhere at once, and every assertion carries a `jti` that is spent
- * exactly once.
- *
- * This verifier is the whole of the trust decision — which client the
- * assertion names, whose keys it must verify under, what the claims must
- * say, and that the `jti` is fresh. The middleware around it only decides
- * how to answer, and that no second method rides along on the request.
- */
+/** The one `client_assertion_type` accepted (RFC 7523 §2.2). */
 export const JWT_BEARER_CLIENT_ASSERTION_TYPE =
 	"urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 
@@ -81,11 +80,10 @@ export const CLIENT_ASSERTION_ALGORITHMS = [
  * How far ahead `exp` may be, and how old `iat`: core's
  * `MAX_ASSERTION_LIFETIME_SECONDS`, the one ceiling for every assertion whose
  * `jti` this server records — an ID-JAG is held to it too. RFC 7523 requires
- * `exp` but bounds nothing; client libraries mint assertions that live a
- * minute or ten, and an hour leaves room for a client whose clock runs ahead
- * while keeping the replay record — which lives until `exp` — small. Both
- * limits allow the verifier's clock tolerance on top, as the ID-JAG ceiling
- * does: `exp − now` is compared through core's `assertionLifetime`.
+ * `exp` but bounds nothing; an hour leaves room for a client whose clock runs ahead while
+ * keeping the replay record, which lives until `exp`, small. Both limits
+ * allow the verifier's clock tolerance on top: `exp − now` is compared
+ * through core's `assertionLifetime`.
  */
 export const MAX_CLIENT_ASSERTION_LIFETIME_SECONDS = MAX_ASSERTION_LIFETIME_SECONDS;
 
@@ -181,15 +179,13 @@ export function createClientAssertionVerifier(
 		`at most ${maxSeconds} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${clockTolerance} s clock tolerance`;
 
 	/**
-	 * Log a refusal and say how to answer it. A caught error handed over as
-	 * `err` reaches the log as `loggableError(err)`, never as itself: a replay
-	 * store's ioredis error carries the refused command's arguments, a client
-	 * lookup's library error its own fields, and jose's claim errors the
-	 * assertion's claims as `payload`. The context is typed, so nothing else
-	 * reaches the log beside the client id and an unsupported assertion type
-	 * — and both of those are the client's input, read before any signature
-	 * is checked, so they are recorded through `auditErrorText` (sanitised,
-	 * capped).
+	 * Log a refusal and say how to answer it. A caught `err` reaches the log
+	 * as `loggableError(err)`, never as itself: a replay store's ioredis error
+	 * carries the refused command's arguments, a client lookup's library error
+	 * its own fields, and jose's claim errors the assertion's claims. The
+	 * context is typed, so nothing else reaches the log beside the client id
+	 * and an unsupported assertion type — both client input read before any
+	 * signature check, so recorded through `auditErrorText`.
 	 */
 	const refuse = (
 		status: 400 | 401 | 500 | 503,
@@ -367,9 +363,7 @@ export function createClientAssertionVerifier(
 			// `exp`, `iat` and `nbf` are NumericDates before anything below
 			// computes a lifetime or an age from them (core's
 			// `isNumericDate`): jose checks only that each is a number, and
-			// JSON's `1e400` parses to Infinity. The checks below happened to
-			// refuse an infinite `exp` or `iat` under reasons that describe a
-			// finite one, and let an infinite `nbf` through.
+			// JSON's `1e400` parses to Infinity.
 			const malformedDate = malformedNumericDateClaim(payload);
 			if (malformedDate !== undefined) {
 				return refuse(

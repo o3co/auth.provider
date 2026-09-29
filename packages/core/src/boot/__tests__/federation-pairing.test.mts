@@ -15,15 +15,13 @@
  */
 
 /**
- * Integration tests for the A5 pairing invariant (validate-manifests step 7.5)
+ * Integration tests for the federation / redirect-policy pairing invariant
  * and the federationRedirectPolicyResolver synthetic projection (step 0).
  *
  * `federationRedirectPolicies` is declared in the session package's
  * ContributesMap augmentation. Core tests cast `contributes` objects to
- * `never` where needed so the pairing logic (runtime) can be exercised
- * without pulling a session dependency into core.
- *
- * Per A5 §8.1, §8.2.
+ * `never` where needed so the runtime pairing logic can be exercised without
+ * pulling a session dependency into core.
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
@@ -35,14 +33,11 @@ const minBoot = {
 	pathResolver: (p: string) => p,
 } as never;
 
-// Activator module: a no-op route + requires federationRedirectPolicyResolver.
-// Forces materialisation of the synthetic projection so the matched-pair test
-// can assert the resolver is populated.
-//
-// `federationRedirectPolicyResolver` is added to ComponentMap via the session
-// package's declaration-merge (concrete type: ReadonlyMap<string,
-// FederationRedirectPolicy>). Core tests cast `requires` to `never` to avoid
-// pulling a session dependency into core.
+// Activator module: a no-op route that requires
+// federationRedirectPolicyResolver, forcing materialisation of the synthetic
+// projection so the matched-pair test can assert the resolver is populated.
+// The session package merges that key into ComponentMap, so `requires` is
+// cast to `never` to keep a session dependency out of core.
 const activatorModule = defineModule({
 	name: "test-federation-activator",
 	requires: ["federationRedirectPolicyResolver"] as never,

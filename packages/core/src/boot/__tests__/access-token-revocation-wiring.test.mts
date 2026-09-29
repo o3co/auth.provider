@@ -15,31 +15,23 @@
  */
 
 /**
- * Boot guard for RFC 7009 access-token revocation (#277, folded onto the
- * declared-absence vocabulary by #375).
+ * Boot guard for RFC 7009 access-token revocation, on the declared-absence
+ * guard.
  *
- * `POST /oauth/revoke` answering 200 is a security promise. The access-token
- * half of that promise is kept by the `accessTokenDenylist` slot: without one
- * the endpoint verified the token, logged a warning, and returned 200 while
- * the JWT stayed valid everywhere until expiry. An operator revoking a token
- * mid-incident had no way to learn that from the response.
+ * `POST /oauth/revoke` answering 200 is a security promise, and the
+ * `accessTokenDenylist` slot keeps its access-token half: without it the JWT
+ * stays valid everywhere until expiry, and an operator revoking a token
+ * mid-incident cannot learn that from the response.
  *
- * #277 turned that into a bespoke stage-1 check ("step 13.9") with its own
- * BootError reason. #375 retires the bespoke check: the modules that read the
- * slot now attach `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY`, and the generic
- * declared-absence guard (#363) enforces it — unfilled slot + config not
- * saying `oauth.revocation.accessToken = "unsupported"` → boot refuses with
- * `component-absence-undeclared`. Omission of the config key means NOT
- * declared, which preserves 13.9's reading: every config written before #277
- * omits the key, and those are exactly the deployments whose revocation
- * endpoint answered 200 with nothing behind it.
+ * Modules that read the slot attach `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY`:
+ * unfilled slot + config not saying `oauth.revocation.accessToken =
+ * "unsupported"` → boot refuses with `component-absence-undeclared`. An
+ * omitted config key means NOT declared.
  *
- * One deliberate semantic move: the trigger is now the POLICY on the reading
- * module's manifest, not core hardcoding the key. A hand-built module that
- * reads the slot without attaching the policy no longer trips the guard —
- * attaching the policy is the statement that denylist-backed revocation is
- * part of the app's surface, and the bundled `oauthModule` /
- * `tokenExchangeModule` both make it.
+ * The trigger is the policy on the reading module's manifest, not a key core
+ * hardcodes: a hand-built module that reads the slot without attaching the
+ * policy does not trip the guard. The bundled `oauthModule` /
+ * `tokenExchangeModule` both attach it.
  */
 import { describe, expect, it } from "vitest";
 import { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY, createApp, defineModule } from "../../index.mjs";
@@ -154,8 +146,8 @@ describe("access-token revocation wiring (#277 via the declared-absence guard)",
 	});
 
 	it("still fails when the operator spells out the default explicitly", async () => {
-		// `"denylist"` stated out loud is not a declaration of absence — it is
-		// the promise that needs the slot. Same reading 13.9 had for it.
+		// `"denylist"` stated out loud is not a declaration of absence: it is
+		// the promise that needs the slot.
 		await expect(
 			createApp({
 				modules: [denylistConsumerModule],

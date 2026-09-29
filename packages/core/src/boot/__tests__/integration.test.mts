@@ -15,17 +15,13 @@
  */
 
 /**
- * boot/__tests__/integration.test.mts — End-to-end integration tests for
- * the A2-β boot planner pipeline (createApp).
- *
- * Covers four end-to-end scenarios, the first three per spec §12 + §8.1:
- *   1. Happy boot — multi-module manifest with grants + routes contributions.
- *   2. Spec §12 worked-example failure diagnostic — oauthAuthorizationModule
- *      missing intMissingSlot (test-only slot); BootError shape matches §12 exactly.
- *   3. Reverse-topological cleanup order on dispose (§8.1).
+ * End-to-end integration tests for the boot planner pipeline (createApp):
+ *   1. Happy boot: a multi-module manifest with grants and routes
+ *      contributions.
+ *   2. Failure diagnostic: oauthAuthorizationModule requires intMissingSlot,
+ *      a test-only slot nothing provides; the BootError shape is pinned.
+ *   3. Reverse-topological cleanup order on dispose.
  *   4. `grantHandlerResolver` lists what the grants registry holds.
- *
- * Per A2-β §12 + §8.1 / Phase 4 Task 10.
  */
 
 import { Router } from "express";
@@ -37,14 +33,9 @@ import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
 
-// AS-M1 (Phase F F9 PR6): typed GrantHandler stub for the grants
-// contributions. Pre-AS-M1 the inline literal `{ grantType: ... }` worked
-// because the contributes-map placeholder was `unknown`; post-narrow it
-// must satisfy `GrantHandler` (the `handle` interface). The result
-// shape mirrors `GrantSuccess` — `status: 200` + a minimal `TokenResponse`
-// with `tag` in `access_token` so pipeline assertions can distinguish
-// stubs. The handler is never invoked; the rest of `TokenResponse` is
-// filled with `as never`.
+// Typed GrantHandler stub for the grants contributions. `tag` goes into
+// `access_token` so pipeline assertions can tell stubs apart; the handler is
+// never invoked, so the rest of `TokenResponse` is `as never`.
 const fakeGrantHandler = (tag = "stub"): GrantHandler => ({
 	handle: async () => ({
 		result: {
@@ -56,31 +47,18 @@ const fakeGrantHandler = (tag = "stub"): GrantHandler => ({
 
 // ---------------------------------------------------------------------------
 // Test-only ComponentMap augmentation
-// Declares every slot used across all three scenarios in this file.
 // ---------------------------------------------------------------------------
 
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		// keyStore / clientRepository / codeRepository / userRepository / auditSink
-		// are canonically declared in their respective core files
-		// (keys/KeyStore.mts, repositories/{Client,Code,User}Repository.mts,
-		// audit/types.mts). This test's stub providers return values typed
-		// `as never` so they match the canonical ComponentMap types at the
-		// call site without redeclaring the slot here — declaration merging
-		// would conflict with the real `KeyStore` / `UserRepository` / etc.
-		// types and fail the typecheck stage. Scenario 1's behavior coverage
-		// (closure / planner shape / dispose order) does not depend on the
-		// stub objects' shape; it depends on identity + planner ordering.
+		// keyStore, the repositories and auditSink are declared in their core
+		// files (keys/KeyStore.mts, repositories/{Client,Code,User}Repository.mts,
+		// audit/types.mts), userSessionStore in user-sessions/types.mts.
+		// Redeclaring them here would conflict with the real types and fail
+		// typecheck, so the stub providers return `as never` instead.
 		//
-		// userSessionStore is canonically declared as UserSessionStore? in
-		// `user-sessions/types.mts` ComponentMap merge — do not redeclare here.
-		// Scenario 2 returns a UserSessionStore-compatible stub at the call site.
-		//
-		// Scenario 2 — a test-only slot declared here so the planner can be asked
-		// to require it; it is intentionally never provided by any module in that
-		// test, which triggers the missing-required-component BootError path.
-		// Using a locally declared (never-provided) slot avoids casting legacy
-		// slot names as `never` to bypass ComponentMap type-level checks.
+		// Scenario 2: declared here and never provided, so requiring it triggers
+		// missing-required-component without casting a slot name to `never`.
 		readonly intMissingSlot: { readonly purpose: "scenario-2-trigger" };
 		//
 		// Scenario 3 — cleanup-order slots (prefixed "int" to avoid clashing
@@ -95,10 +73,10 @@ declare module "@o3co/auth-provider-core" {
 // Shared bootstrap stub
 // ---------------------------------------------------------------------------
 
-// Per ADR 2026-04-30: schema is a pure type contract, defaults live in
-// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
-// fixture supplies a minimal schema-valid baseline (intentionally
-// diverges from reference.conf — see makeValidCoreConfig docstring).
+// Per ADR 2026-04-30-config-schema-strict-defaults-from-hocon, defaults live
+// in HOCON and validateAndComposeConfig parses CoreConfigSchema, so the
+// fixture supplies a minimal schema-valid baseline (it diverges from
+// reference.conf on purpose; see makeValidCoreConfig).
 const minBoot = {
 	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,
@@ -111,11 +89,9 @@ const minBoot = {
 describe("integration — Scenario 1: happy boot of a multi-module manifest", () => {
 	it("produces an AppHandle with components, a real Express Router, and dispose", async () => {
 		// Stub return values typed `as never`: these scenarios cover boot-planner
-		// shape (closure, ordering, error catalogue) — not the typed contracts
-		// of each ComponentMap slot. Phase 9 Task 6/10 narrowed several slot
-		// types (e.g. `userRepository: UserRepository`); satisfying each
-		// real interface from a stub object would expand each scenario by
-		// 50+ lines of vacuous method stubs without adding planner coverage.
+		// shape (closure, ordering, error catalogue), not the typed contracts of
+		// each ComponentMap slot. Satisfying each real interface would add
+		// vacuous method stubs without adding planner coverage.
 		const stubKeyStore = { stub: "keyStore" } as never;
 		const stubClientRepository = { stub: "clientRepository" } as never;
 		const stubCodeRepository = { stub: "codeRepository" } as never;
@@ -166,10 +142,8 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 			},
 		});
 
-		// Module: requires auditSink provided by auditSinkModule; provides nothing.
-		// Activation: auditSink is required, which is satisfied by auditSinkModule,
-		// pulling auditModule into the closure; but auditModule itself has no provides.
-		// To force activation of auditSinkModule, declare auditSink as eager.
+		// Module: provides auditSink, eager so it activates although no module
+		// here requires it.
 		const auditSinkEagerModule = defineModule({
 			name: "audit-sink-eager",
 			requires: ["config"],
@@ -177,18 +151,9 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 				auditSink: (_deps) => stubAuditSink,
 			},
 			lifecycle: {
-				// Note: overriding auditSink with a dedicated eager module is simpler
-				// than having a module that requires it with no provides. Instead,
-				// just use the eager lifecycle on the providing module (auditSinkModule
-				// is superseded here by combining in one module with eager: true).
 				auditSink: { eager: true },
 			},
 		});
-
-		// In this scenario we use auditSinkEagerModule instead of the two-module
-		// split above so auditSink is activated unconditionally.
-		// oauthAuthorizationModule does NOT require auditSink here — the audit
-		// concern is handled separately to keep the scenario realistic.
 
 		const handle = await createApp({
 			modules: [keyStoreModule, repositoriesModule, auditSinkEagerModule, oauthAuthorizationModule],
@@ -206,12 +171,10 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 		expect(handle.components.userRepository).toBe(stubUserRepository);
 		expect(handle.components.auditSink).toBe(stubAuditSink);
 
-		// Bootstrap components are accessible.
-		// config is now the parsed (CoreConfigSchema-validated) result —
-		// not the raw bootstrap reference. See validateAndComposeConfig
-		// substitution per Codex P2-A hardening. The `port: 3000` value
-		// comes from the makeValidCoreConfig fixture; per ADR 2026-04-30
-		// the schema layer no longer carries a default for it.
+		// Bootstrap components are accessible. config is the parsed
+		// (CoreConfigSchema-validated) result, not the raw bootstrap reference
+		// (see validateAndComposeConfig). `port: 3000` comes from the
+		// makeValidCoreConfig fixture: the schema carries no default.
 		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 
@@ -254,17 +217,13 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 });
 
 // ---------------------------------------------------------------------------
-// Scenario 2: Spec §12 worked-example failure diagnostic
+// Scenario 2: missing-required-component failure diagnostic
 // ---------------------------------------------------------------------------
 
 describe("integration — Scenario 2: spec §12 worked-example failure diagnostic", () => {
 	it("throws BootError with missing-required-component for a slot that is never provided", async () => {
-		// Replicate the §12 module list. Module names match the spec exactly so
-		// the path assertions below are stable.
-
-		// Stubs typed `as never` per Scenario 1 above: these tests verify
-		// planner shape (closure / ordering / BootError catalogue), not the
-		// typed contracts of each ComponentMap slot.
+		// The path assertions below depend on these module names. Stubs are
+		// typed `as never`, as in Scenario 1.
 		const keyStoreModule = defineModule({
 			name: "key-store",
 			requires: ["config"],
@@ -282,11 +241,8 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			},
 		});
 
-		// oauthAuthorizationModule requires "intMissingSlot" — a test-only slot
-		// declared in the declare module block above but intentionally never
-		// provided by any module in this test, which triggers the BootError.
-		// No `as never` cast needed: the slot is legitimately declared in
-		// ComponentMap for this test file.
+		// oauthAuthorizationModule requires "intMissingSlot", declared above and
+		// never provided, which triggers the BootError.
 		const oauthAuthorizationModule = defineModule({
 			name: "oauth-authorization",
 			requires: ["keyStore", "clientRepository", "codeRepository", "intMissingSlot"],
@@ -322,8 +278,8 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			contributes: {
 				federations: {
 					// A federation, not a placeholder: the contribution type is the
-					// contract since #626 P1, and `{}` no longer compiles. What this
-					// scenario is about is the missing-slot diagnostic below.
+					// contract, so `{}` does not compile. The scenario is about the
+					// missing-slot diagnostic below.
 					google: (_deps) => ({
 						name: "google",
 						scope: ["openid"],
@@ -338,10 +294,9 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			},
 		});
 
-		// auditModule requires auditSink — also missing, but the planner surfaces
-		// only the FIRST violation in input-array order (oauth-authorization's
-		// intMissingSlot comes first per module iteration, which iterates
-		// oauthAuthorizationModule before auditModule in the input array).
+		// auditModule's auditSink is also missing, but the planner surfaces only
+		// the FIRST violation in input-array order, where oauthAuthorizationModule
+		// comes before auditModule.
 		const auditModule = defineModule({
 			name: "audit",
 			requires: ["auditSink"],
@@ -368,7 +323,7 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 		expect(caught).toBeInstanceOf(BootError);
 		const err = caught as BootError;
 
-		// Top-level discriminants — match §12 exactly.
+		// Top-level discriminants.
 		expect(err.reason).toBe("missing-required-component");
 		expect(err.stage).toBe("validateManifests");
 		expect(err.details.reason).toBe("missing-required-component");

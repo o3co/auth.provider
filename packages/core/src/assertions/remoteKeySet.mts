@@ -15,20 +15,16 @@
  */
 
 /**
- * A remote JSON Web Key Set — the one place this library turns a `jwks_uri`
- * into a verification key resolver.
+ * A remote JSON Web Key Set: the one place this library turns a `jwks_uri`
+ * into a verification key resolver. `private_key_jwt` client assertions and
+ * the trust-registry assertion verifier both build on it, so they share one
+ * memo, one tuning and one `fetch` (e.g. behind an egress proxy).
  *
  * jose's `createRemoteJWKSet` caches the document, refetches on an unknown
  * `kid` (with a cooldown, so a flood of bad kids is not a flood of fetches)
  * and refreshes it after `cacheMaxAge`. That cache lives in the resolver, so a
  * resolver made per request is a fetch per request; the memo here is what
  * makes a rotation cost one refetch.
- *
- * Two consumers had their own copy — `private_key_jwt` client assertions
- * (#484) and the trust-registry assertion verifier (#525) — with the same
- * memo and the same tuning, and only the first took a fetch. A deployment
- * behind an egress proxy could fetch a client's keys and not a trusted
- * issuer's (v0.13.0 audit). Both build on this now.
  */
 
 import { createRemoteJWKSet, customFetch } from "jose";

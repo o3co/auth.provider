@@ -15,14 +15,11 @@
  */
 
 /**
- * End-to-end coverage for the `req.tokenBinding` → `ctx.tokenBinding`
- * propagation path on the `/token` route. The middleware unit tests in
- * `packages/core/src/middleware/__tests__/tokenBinding.test.mts` exercise
- * `tokenBindingMw` against a fake `req`/`res` pair and cannot detect a
- * regression in `routes.mts` ctx construction (e.g. a typo that drops the
- * field). This file mounts the real Express + oauth router stack and
- * asserts that a grant handler observes the value written by the
- * middleware.
+ * The `req.tokenBinding` → `ctx.tokenBinding` path on the `/token` route,
+ * through the real Express + oauth router stack: a grant handler observes the
+ * value the middleware wrote. The middleware unit tests
+ * (`packages/core/src/middleware/__tests__/tokenBinding.test.mts`) use a fake
+ * `req`/`res` pair and cannot see `routes.mts` drop the field.
  */
 
 import {
@@ -152,12 +149,8 @@ const dpopMechanism: TokenBindingMechanism = {
 
 describe("/oauth/token — req.tokenBinding → ctx.tokenBinding bridge", () => {
 	it("copies the middleware-resolved binding into ctx.tokenBinding", async () => {
-		// Confirms the /token route's ctx construction wires
-		// `tokenBinding: req.tokenBinding`. A regression in that one-line
-		// spread would silently drop the binding
-		// and downstream grant handlers would issue Bearer tokens instead of
-		// sender-constrained ones — a security regression that the
-		// middleware-only unit tests cannot detect.
+		// A dropped binding would have grant handlers issue Bearer tokens
+		// instead of sender-constrained ones, silently.
 		const handler = capturingHandler();
 		const app = await buildApp(handler, {
 			mountMw: true,
@@ -175,8 +168,7 @@ describe("/oauth/token — req.tokenBinding → ctx.tokenBinding bridge", () => 
 	});
 
 	it("leaves ctx.tokenBinding undefined when tokenBindingMw is not mounted", async () => {
-		// Pins the zero-behavior-change guarantee for Phase 1b deployments
-		// that have not opted into a binding mechanism yet.
+		// A deployment that has not opted into a binding mechanism sees no change.
 		const handler = capturingHandler();
 		const app = await buildApp(handler, { mountMw: false });
 

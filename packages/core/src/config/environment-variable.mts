@@ -15,17 +15,15 @@
  */
 
 /**
- * The environment variable a configuration path is bound to (#728 B9): the
- * section name and the keys inside it, each in upper snake case, joined with
- * `_` — `device-grant.codeLifetimeSeconds` is `DEVICE_GRANT_CODE_LIFETIME_SECONDS`,
- * a list element's index a key of its own (`mfa.encryptionKeys.0.key` is
- * `MFA_ENCRYPTION_KEYS_0_KEY`). A kebab-case section name's hyphens become
- * `_`; a camelCase key splits before each capital that follows a lower-case
- * letter or a digit, and before the last capital of a run followed by a
- * lower-case letter (`jwksURLPath` is `JWKS_URL_PATH`).
- *
- * The rule decides the name; whether a package's `reference.conf` binds it
- * yet is that package's.
+ * The environment variable a configuration path is bound to: the section
+ * name and its keys in upper snake case, joined with `_`
+ * (`device-grant.codeLifetimeSeconds` is `DEVICE_GRANT_CODE_LIFETIME_SECONDS`;
+ * a list index is a key of its own, `mfa.encryptionKeys.0.key` is
+ * `MFA_ENCRYPTION_KEYS_0_KEY`). Hyphens become `_`; a camelCase key splits
+ * before each capital following a lower-case letter or a digit, and before
+ * the last capital of a run followed by a lower-case letter (`jwksURLPath` is
+ * `JWKS_URL_PATH`). The rule decides the name; whether a package's
+ * `reference.conf` binds it is that package's.
  */
 
 /** One key of a path in upper snake case. */

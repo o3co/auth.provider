@@ -16,16 +16,9 @@
 
 /**
  * Starting the listener: one object-first `server_listening` line once the
- * socket is bound — and none for a port that was never bound.
- *
- * The line used to be a template string, `Server is running on
- * http://localhost:<port>`, which a log pipeline indexes as free text rather
- * than as an event with a port. And the standalone called Express 5's
- * `app.listen`, which hands its callback the server's `error` as well as its
- * `listening`: a callback that ignored its argument announced a server on a
- * port another process held, while the error that should have ended the
- * process was swallowed. `listen` now builds the server and wires its events
- * itself.
+ * socket is bound, and none for a port that was never bound. `listen` wires
+ * the server's events itself rather than trust `app.listen`, whose Express 5
+ * callback is handed the bind `error` as well as `listening`.
  */
 
 import { createServer, type Server } from "node:http";
@@ -74,9 +67,9 @@ describe("listen", () => {
 	});
 
 	it("logs a server error after the bind — server_error, the projection — rather than swallowing it", async () => {
-		// Once the socket is bound, a later `error` (accept EMFILE) went to
-		// Express 5's spent listen callback and was lost — and the one after
-		// it, with no listener left, threw out of the process.
+		// Every `error` after the bind (accept EMFILE) is logged: a spent
+		// once-listener would lose the first, and with no listener left the
+		// second would be thrown out of the process.
 		const { logger, calls } = recordingLogger();
 		const server = await listen(express(), 0, logger);
 		opened.push(server);

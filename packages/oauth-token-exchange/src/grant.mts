@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/**
+ * The RFC 8693 token-exchange grant: client authentication, the subject and
+ * actor token rules (sender constraint, refresh-token family, session,
+ * `may_act`), the scope, audience and resource ceilings, the policy hook, and
+ * issuance.
+ */
+
 import type {
 	GrantContext,
 	GrantDependencies,
@@ -57,11 +64,9 @@ import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 
 /**
- * What the exchange reads (#626 P2): the shared grant slots it uses, the
- * client repository, and the validator resolver core hands back — whose
- * `get` answers with the contract this grant consumes, since #626 P1 moved
- * that contract into core. The module's `ProviderDeps<R, O>` satisfies every
- * slot, with no cast left between them.
+ * What the exchange reads: the shared grant slots it uses, the client repository,
+ * and core's validator resolver. The module's `ProviderDeps<R, O>` satisfies
+ * every slot.
  */
 export interface TokenExchangeDependencies
 	extends Pick<
@@ -75,51 +80,37 @@ export interface TokenExchangeDependencies
 		>,
 		ProviderDeps<"clientRepository"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
-	/** What the oauth module provides of `oauth {}` (#728); the configuration is read when absent. */
+	/** What the oauth module provides of `oauth {}`; the configuration is read when absent. */
 	readonly oauthTokenSettings?: OAuthTokenSettings;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
-	// The lifetimes it mints with, read once, when the grant is built: a
-	// configuration built by hand that the resolver refuses is a composition
-	// fault, refused before any request — read per request, it answered every
-	// exchange with a 500, after client authentication had spent whatever it
-	// spends.
-	// The oauth module's settings when the composition holds them (#728),
-	// read whole and checked first; otherwise the configuration, through
-	// core's one reader of the pair.
+	// The lifetimes are read once, when the grant is built, so a hand-built
+	// configuration the resolver refuses fails the composition instead of every
+	// request after client authentication. The oauth module's settings when present
+	// (checked whole), else the configuration through core's reader.
 	const { defaultExpiresIn, maxExpiresIn } =
 		deps.oauthTokenSettings === undefined
 			? resolveAccessTokenLifetime(deps.config)
 			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).accessTokenLifetime;
 
 	return {
-		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn
-		// grant already declare. Token exchange mints a fresh credential out of
-		// one a client already holds — a standing capability of a registration,
-		// never a per-user ceremony — so a registration that predates this
-		// grant, or simply omits `allowedGrantTypes`, must not acquire it by
-		// omission while `oauth.requireGrantTypeAllowlist` defaults off.
-		// Dispatch enforces this before `handle` runs; the in-handler copy
-		// below covers the standalone wiring this package documents, where no
-		// dispatch rule runs at all.
+		// Deny by absence: token exchange mints a fresh credential from one the client
+		// already holds, a standing capability of a registration, so a registration
+		// without `allowedGrantTypes` must not acquire it while
+		// `oauth.requireGrantTypeAllowlist` defaults off. Dispatch enforces this; the
+		// in-handler check below covers standalone wiring, where no dispatch rule runs.
 		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const body = ctx.body as Record<string, unknown>;
 			const subjectToken = typeof body.subject_token === "string" ? body.subject_token : null;
 			const subjectTokenType =
 				typeof body.subject_token_type === "string" ? body.subject_token_type : null;
-			// D-6 Codex post-review: when this grant runs through `/oauth/token`,
-			// Basic-authenticated callers don't repeat `client_id` in the body —
-			// the authenticated identity is the canonical source. We resolve the
-			// effective client id from the body first (matching standalone-wiring
-			// callers) and fall back to `ctx.authenticatedClient.clientId`.
-			//
-			// Treat "present but not a single string" (e.g. `string[]` produced
-			// by a repeated query parameter) as malformed instead of silently
-			// falling back — otherwise an attacker could include a bogus
-			// `client_id` array to bypass the cross-client equality check below.
+			// Through `/oauth/token`, Basic-authenticated callers omit `client_id` from the
+			// body, so the effective client id is the body's, else the authenticated
+			// client's. A present value that is not one string (a repeated parameter) is
+			// malformed, not ignored: ignoring it would bypass the equality check below.
 			const bodyClientIdRaw = body.client_id;
 			let bodyClientId: string | null;
 			if (bodyClientIdRaw === undefined || bodyClientIdRaw === null) {
@@ -133,34 +124,22 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const clientSecretRaw = body.client_secret;
 			let clientSecret: string | null;
 			if (clientSecretRaw === undefined || clientSecretRaw === null) {
-				// Token Exchange currently supports confidential clients only — the
-				// core ClientRepository contract requires `clientSecret` (see
-				// packages/core/src/repositories/types.mts) and PublicClient is
-				// `Omit<Client, "clientSecret">`, so findById alone cannot
-				// distinguish "no secret configured" from "secret omitted by
-				// caller". Accepting an unauthenticated client_id here would let an
-				// attacker exchange a stolen subject_token under any client's
-				// allowlist. Refuse outright; revisit when a Client.public flag
-				// lands.
+				// Confidential clients only: `ClientRepository` cannot tell "no secret
+				// configured" from "secret omitted", so accepting an unauthenticated `client_id`
+				// would let a stolen subject_token be exchanged under any client's allowlist.
 				clientSecret = null;
 			} else if (typeof clientSecretRaw === "string") {
 				clientSecret = clientSecretRaw;
 			} else {
-				// Present but not a string (e.g., repeated param producing string[]).
-				// Refuse to treat this as "omitted" — that path would bypass the
-				// confidential-client auth check.
+				// Present but not a string (a repeated parameter): treating it as omitted would
+				// bypass the confidential-client check.
 				return invalidRequest("client_secret must be a single string value");
 			}
-			// The lifetime the client asks for, in seconds. RFC 8693 defines no
-			// such parameter and RFC 6749 §3.2 has a server ignore one it does
-			// not know, so this is additive: a client that never sends it — or
-			// sends it without a value (§3.2) — gets the configured default,
-			// exactly as before. It is refused, not
-			// ignored, when present and malformed, for the reason `client_id`
-			// above is — a value the caller sent and this grant silently
-			// reinterpreted would answer a different request than the one made.
-			// Honoured below as `min(requested ?? default, max, subject
-			// remaining)`.
+			// The lifetime the client asks for, in seconds. RFC 8693 defines no such
+			// parameter and RFC 6749 §3.2 has a server ignore unknown ones, so omitting it
+			// (or sending it empty) gets the configured default. A malformed value is refused
+			// rather than reinterpreted. Honoured below as
+			// `min(requested ?? default, max, subject remaining)`.
 			const requestedExpiresIn = parseRequestedExpiresIn(body.expires_in);
 			if (requestedExpiresIn === MALFORMED) {
 				return invalidRequest(
@@ -177,18 +156,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				return invalidRequest("subject_token, subject_token_type, client_id are required");
 			}
 
-			// Client authentication. Token Exchange supports confidential clients
-			// only — public (`"none"`) clients are refused regardless of route.
-			//
-			// D-6 (v0.5.1): when this grant is dispatched from the standard
-			// `/token` route, `clientAuthMw` has already authenticated the client
-			// (via Basic header OR body credentials) and populated
-			// `ctx.authenticatedClient`. We trust that identity over the body —
-			// without this branch, Basic-authenticated callers would fail here
-			// because `body.client_secret` is empty when credentials travel in
-			// the `Authorization` header. For consumers wiring this grant onto a
-			// custom route that bypasses `clientAuthMw`, the `else` branch keeps
-			// the original body-credential gate as the sole authenticity check.
+			// Client authentication; public (`"none"`) clients are refused on every route.
+			// Dispatched from `/oauth/token`, `clientAuthMw` has already authenticated the
+			// client (Basic header or body) and that identity is trusted over the body. On a
+			// custom route without `clientAuthMw`, the body credentials are the only check.
 			let client: PublicClient | null;
 			if (ctx.authenticatedClient) {
 				if (ctx.authenticatedClient.tokenEndpointAuthMethod === "none") {
@@ -200,11 +171,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				// Body-supplied client_id MUST match the authenticated identity —
-				// otherwise an attacker could authenticate as A and request a
-				// token exchange under B's allowlist. Standard Basic-authenticated
-				// callers omit body `client_id` entirely; only verify equality
-				// when the body explicitly supplied one (`bodyClientId !== null`).
+				// A body `client_id` must match the authenticated client, or a caller
+				// authenticated as A could exchange under B's allowlist.
 				if (bodyClientId !== null && bodyClientId !== ctx.authenticatedClient.clientId) {
 					return invalidRequest("client_id does not match authenticated client");
 				}
@@ -225,11 +193,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					};
 				}
 			} else {
-				// Standalone wiring: no `clientAuthMw` ahead of us, so verify
-				// the body-supplied secret directly. Repository failures are
-				// surfaced as a controlled 503 to match the authenticated-client
-				// branch — without this guard, a transient repository outage
-				// would propagate as an unhandled 500.
+				// Standalone wiring: verify the body secret here. A repository failure is a 503,
+				// as in the branch above.
 				if (clientSecret === null) {
 					return {
 						result: {
@@ -279,21 +244,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			// #326, the in-handler half of `requiresExplicitGrantAllowlist`
-			// declared above. Not a redundant second copy of the rule: the
-			// dispatch check reads `ctx.authenticatedClient` and skips when it
-			// is null, and this grant documents a standalone wiring (no
-			// `clientAuthMw`) where it IS null and the client was authenticated
-			// from body credentials a few lines up. Without this the strict
-			// declaration would be decorative on exactly the path that has no
-			// route-level gate at all.
-			//
-			// The rule itself is core's — `isGrantTypeAllowed` with
-			// `requireAllowlist`, the same call dispatch makes — rather than a
-			// hand-rolled comparison, and the wire shape is dispatch's, byte for
-			// byte: both of dispatch's allowlist checks answer `client is not
-			// authorized for grant_type '<type>'`, so a caller cannot tell which
-			// gate refused it (the README's note 15).
+			// The in-handler half of `requiresExplicitGrantAllowlist`: dispatch skips its
+			// check when `ctx.authenticatedClient` is null, which is exactly the standalone
+			// wiring. Core's rule (`isGrantTypeAllowed` with `requireAllowlist`) and
+			// dispatch's exact wording, so a caller cannot tell which gate refused it.
 			if (!isGrantTypeAllowed(client.allowedGrantTypes, GRANT_TYPE, { requireAllowlist: true })) {
 				deps.logger?.warn(
 					{ clientId: client.clientId, grantType: GRANT_TYPE },
@@ -317,12 +271,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				return invalidRequest(`subject_token_type '${subjectTokenType}' is not supported`);
 			}
 
-			// Actor token type lookup — kept here so the validator reference is
-			// available for validation below without a second registry call.
-
-			// Reject actor_token_type without actor_token — prevents policies that
-			// gate on req.actorTokenType for delegation from being bypassed by a
-			// caller who only sets the type header.
+			// Reject actor_token_type without actor_token: a policy gating delegation on
+			// `actorTokenType` must not be satisfied by the type alone.
 			if (actorToken === null && actorTokenType !== null) {
 				return invalidRequest("actor_token is required when actor_token_type is provided");
 			}
@@ -342,11 +292,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			try {
 				subjectValidated = await subjectValidator.validate(subjectToken, { role: "subject" });
 			} catch (err) {
-				// A validator throws only when it cannot reach an answer — a
-				// keystore or a revocation store down (core's
-				// `ExchangeTokenValidator` contract). The server's fault, so a
-				// logged 503, never a verdict on the token — on core's console
-				// logger when none is wired, never silently.
+				// A validator throws only when it cannot reach an answer (a keystore or
+				// revocation store down; core's `ExchangeTokenValidator` contract): a logged 503,
+				// never a verdict on the token.
 				(deps.logger ?? consoleLogger).error(
 					{ role: "subject", err: loggableError(err) },
 					"token_exchange_validation_unavailable",
@@ -361,54 +309,27 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 			if (!subjectValidated) return invalidRequest("subject_token validation failed");
 
-			// RFC 9449 §5 / RFC 8705 §4 sender-constraint matrices — core's
-			// `matchConfirmation` (#324), the same implementation the refresh
-			// grant consumes; this grant keeps only the row → refusal mapping
-			// below. Without the matrices the exchange grant was a de-binding
-			// laundry: a stolen DPoP- or mTLS-bound
-			// `subject_token` was accepted with no proof-of-possession and the
-			// issued token dropped the binding, so an attacker converted a
-			// token that was useless without the key into an ordinary bearer
-			// token for their own client (#265).
+			// Sender constraint (RFC 9449 §5, RFC 8705 §4) through core's
+			// `matchConfirmation`, as the refresh grant does. Without it a stolen DPoP- or
+			// mTLS-bound subject_token could be exchanged for an unbound token.
 			//
-			// DPoP matrix:
-			//   subject cnf.jkt | proof JKT       | Outcome
-			//   no              | no              | issue plain Bearer (legacy)
-			//   no              | yes             | issue DPoP-bound AT (opt-in upgrade)
-			//   yes             | no              | reject invalid_request
-			//   yes             | yes, differs    | reject invalid_request (multi-key attack)
-			//   yes             | yes, equal      | issue DPoP-bound AT (binding preserved)
+			//   subject cnf | presented binding | outcome
+			//   no          | no                | plain Bearer
+			//   no          | yes               | bound to the presented key
+			//   yes         | no                | invalid_request
+			//   yes         | yes, differs      | invalid_request
+			//   yes         | yes, equal        | bound (preserved)
 			//
-			// mTLS matrix: identical over `cnf["x5t#S256"]` and the presented
-			// client certificate.
-			//
-			// Evaluated here — after subject validation, before policy
-			// evaluation, store I/O and the keystore signature — so a rejection
-			// short-circuits ahead of the expensive work, the same ordering
-			// rationale the refresh grant states.
-			//
-			// `invalid_request` rather than `invalid_dpop_proof`: the proof or
-			// certificate is well-formed; it is the subject_token that is
-			// unacceptable, which RFC 8693 §2.2.2 answers `invalid_request` (see
-			// `invalidRequest`). The refresh path answers the same rows
-			// `invalid_grant`, RFC 6749 §5.2's code for a refresh token.
-			//
-			// `actor_token` is held to this same matrix further down (#309). A
-			// request carries exactly one `ctx.tokenBinding` — one DPoP proof,
-			// one client certificate — so a subject and an actor bound to
-			// *different* keys cannot both be satisfied; that shape is refused
-			// rather than waved through, and the multi-proof extension it would
-			// need has no RFC 9449 token-endpoint precedent.
-			// Each cnf member is compared only against a binding whose `kind`
-			// owns it — see `core/grants/confirmationMatch.mts` for the
-			// kind-boundary and thumbprint-timing rationale.
+			// The same over `cnf.jkt` (DPoP) and `cnf["x5t#S256"]` (mTLS). Checked before
+			// policy, store I/O and signing so a refusal is cheap. `invalid_request`, not
+			// `invalid_dpop_proof`: the proof is fine, the subject_token is unacceptable
+			// (RFC 8693 §2.2.2). A request carries one binding, so a subject and an actor
+			// bound to different keys cannot both be satisfied and are refused.
 			const match = matchConfirmation(subjectValidated.claims.cnf, ctx.tokenBinding);
 
 			if (match.status === "compound") {
-				// This AS emits exactly one mechanism's confirmation per token, so
-				// a compound cnf is a forged token or an AS bug. Refuse rather
-				// than pick a winner — the stance the refresh grant and the
-				// introspection handler already take.
+				// This AS stamps one mechanism's confirmation per token, so a compound cnf is
+				// forged or a bug: refused, as the refresh grant and introspection do.
 				return invalidRequest(
 					"subject_token has compound cnf binding which is not supported (Stage 1)",
 				);
@@ -428,18 +349,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				);
 			}
 
-			// The confirmation stamped onto the issued token. When the subject was
-			// bound this is the same value it carried — the matrices above have
-			// already established that the presented material matches — so
-			// "preserve" and "rebind to what was proven" are the same claim, and
-			// taking it from the presented binding keeps the token bound to
-			// material this request actually proved possession of.
-			//
-			// Row 2 of each matrix rides on the same expression: an unbound
-			// subject exchanged with a proof yields a bound token. That cannot
-			// help an attacker — a stolen *unbound* subject token was already a
-			// usable bearer credential — and it takes the issued token out of
-			// bearer replay for everyone else.
+			// The issued token is bound to what this request proved. For a bound subject that
+			// equals its `cnf` (matched above); an unbound subject exchanged with a proof
+			// yields a bound token, which cannot help an attacker already holding a bearer
+			// token.
 			const issuedConfirmation = ownedConfirmation(ctx.tokenBinding);
 
 			// The refresh-token family rule — this grant's, not the validator's;
@@ -471,37 +384,15 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				if (!actorValidated) return invalidRequest("actor_token validation failed");
 			}
 
-			// #309: the actor half of the matrices above, and the residual #265
-			// named. `buildActClaim` folds the actor's identity into the issued
-			// token's `act` claim (RFC 8693 §4.1), so an `actor_token` accepted
-			// with no proof-of-possession let a stolen bound token forge the
-			// delegation chain the issued token records — the same laundering
-			// #265 closed for the subject, one parameter over.
-			//
-			// The rule is the subject's, applied to the actor: match the
-			// presented binding or be refused. It is the strictest rule that is
-			// physically expressible here. `AuthenticatedClient` carries no
-			// certificate thumbprint of its own — for an mTLS-authenticated
-			// client the certificate IS `ctx.tokenBinding` — so there is no
-			// second credential an actor's `cnf` could be checked against, and
-			// a request carries exactly one binding.
-			//
-			// The cost is stated rather than worked around: delegation where the
-			// actor and the subject are bound to **different** keys can no longer
-			// be exchanged. It never could be satisfied — one proof cannot answer
-			// two keys — so what changes is that it now fails closed instead of
-			// silently skipping the actor's binding. Supporting it needs more
-			// than one proof per request, which RFC 9449 has no token-endpoint
-			// precedent for; #309 keeps that as the future path rather than
-			// approximating it with a rule that enforces nothing.
-			//
-			// Placed as early as the check can be: it needs the actor's claims,
-			// so it runs immediately after actor validation and ahead of the
-			// actor's family check, `may_act`, the policy hook and the keystore
-			// signature. It is not ahead of *all* store I/O — validating the
-			// subject and the actor already consulted the revocation stores, and
-			// the subject's family was checked above — because a `cnf` cannot be
-			// read out of a token that has not been verified yet.
+			// The actor is held to the same sender-constraint rule: `buildActClaim` records
+			// the actor in the issued token's `act` claim (RFC 8693 §4.1), so an unproven
+			// bound actor_token would let a thief forge the delegation chain. With one
+			// binding per request (an mTLS client's certificate is `ctx.tokenBinding`
+			// itself), delegation between a differently bound actor and subject fails
+			// closed; supporting it would need several proofs per request, for which RFC 9449
+			// has no token-endpoint precedent. Runs right after actor validation (a `cnf`
+			// cannot be read from an unverified token), ahead of the actor's family check,
+			// `may_act`, the policy and signing.
 			if (actorValidated) {
 				const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
 				if (actorMatch.status === "compound") {
@@ -524,10 +415,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					);
 				}
 
-				// The subject's family rule, applied to the actor: the actor's
-				// identity is folded into the issued token's `act` claim, so a
-				// revoked actor credential must not be recorded as a live
-				// delegation any more than a revoked subject may be exchanged.
+				// The subject's family rule, applied to the actor: a revoked actor credential
+				// must not be recorded in `act` as a live delegation.
 				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorValidated);
 				if (actorFamilyRefusal) return actorFamilyRefusal;
 				// And the session rule: an actor whose session a logout ended is
@@ -566,26 +455,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					return invalidRequest("actor_chain_too_deep: actor chain depth limit exceeded");
 				}
 			} else {
-				// Impersonation — no `actor_token`, so the party acting on the
-				// subject's behalf is the authenticated calling client itself,
-				// and `may_act` (RFC 8693 §4.4) is exactly a statement about who
-				// that party may be.
-				//
-				// Consulting the claim only when an `actor_token` happened to be
-				// supplied made a subject-declared constraint opt-out: a client
-				// that simply omitted the parameter was never held to it, so a
-				// token naming `{"sub":"svc-a"}` as its only permitted actor was
-				// exchangeable by any exchange-enabled client that got hold of
-				// it. The claim says who may act; it does not say "only when
-				// they bring a token to prove it".
-				//
-				// `matchesMayActClient` rather than `matchesMayAct`: the latter
-				// takes a `ValidatedToken` and compares `iss` against that
-				// token's issuer, and there is no actor token here to have one.
-				// Rather than fabricate a `ValidatedToken` that lies about its
-				// claims, the narrower matcher compares `sub` against the client
-				// id and refuses any entry that pins `iss` — see its doc comment
-				// for why an inferred issuer would be the permissive guess.
+				// Impersonation: with no actor_token the party acting for the subject is the
+				// calling client, and `may_act` (RFC 8693 §4.4) constrains exactly that party.
+				// It applies whether or not an actor_token was sent, or omitting the parameter
+				// would opt out of it. `matchesMayActClient` compares `sub` with the client id
+				// and refuses any entry pinning `iss` (see its doc comment).
 				const subjectMayAct = subjectValidated.claims.may_act;
 				if (
 					subjectMayAct !== undefined &&
@@ -603,41 +477,18 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Scope narrowing: requested scope ⊆ subject scope ∩ client.allowedScopes.
+			// Scope: requested ⊆ subject scope ∩ client.allowedScopes. The registration is a
+			// ceiling on every grant, so a client registered for `read` holding a subject
+			// token with `admin` must not receive `admin`. Absent or empty `allowedScopes`
+			// means no scope at all (deny by absence); a scope-less deployment still mints,
+			// without a `scope` claim. Unlike the sibling grants, an omitted `scope`
+			// inherits the subject's scope instead of reading `defaultScopes` (see
+			// `grantedScope` below).
 			//
-			// Two ceilings, not one. The subject token's scope bounds what this
-			// exchange may carry forward; the calling client's registration
-			// bounds what that client may ever hold, on any grant. Only the
-			// first was enforced here, so a client registered for `read` that
-			// got hold of a subject token carrying `admin` exchanged it and
-			// received `admin` — its own registration was not a boundary at all,
-			// while `client_credentials`, jwt-bearer and `/authorize` all treat
-			// `allowedScopes` as exactly that.
-			//
-			// Absent and empty `allowedScopes` mean the same thing here, and
-			// they mean deny: a registration that names no scope may receive
-			// none. That is the #363/#396 shape — reading absence as
-			// "unrestricted" is precisely the over-grant #396 removed from the
-			// scope-omitting path in the sibling grants, and it would leave the
-			// hole above open for every registration that never filled the
-			// field in. A scope-less deployment is unaffected: there is nothing
-			// to over-grant, the exchange still mints a token, it simply carries
-			// no `scope` claim.
-			//
-			// Note the axis: this is the `allowedScopes` CEILING, where the
-			// sibling grants do agree with this one. The omitted-`scope`
-			// DEFAULT is where they part company — they read `defaultScopes`,
-			// this grant inherits the subject token's scope. See the note at
-			// the `grantedScope` assignment below.
-			//
-			// RFC 6749 §3.3, two readings. The subject's scope is a validated
-			// token's record, read so it never widens (`readIssuedScope`): a legacy
-			// `read<TAB>write` entry named no scope and must not supply `write`
-			// to a request or to an inheriting exchange now. The request's
-			// is the client's, read strictly: a value that is not a space-delimited
-			// list of scope-tokens is refused as malformed, and a repeated
-			// parameter (an array) is refused rather than read as omitted, which
-			// would inherit the subject's whole scope.
+			// RFC 6749 §3.3, two readings: the subject's scope never widens
+			// (`readIssuedScope`: a legacy `read<TAB>write` names no scope), and the
+			// request's is strict (malformed is refused; a repeated parameter is refused
+			// rather than read as omitted, which would inherit the subject's whole scope).
 			const subjectScope = readIssuedScope(subjectValidated.scope);
 			const subjectScopeSet = new Set(subjectScope);
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
@@ -670,12 +521,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							},
 						};
 					}
-					// Named explicitly, so refuse rather than silently drop it:
-					// the caller asked for a scope its registration does not
-					// carry, and answering with a narrower token would answer a
-					// different request than the one submitted. Same
-					// `invalid_scope` + offending-value shape as the check above
-					// and as the audience allowlist below.
+					// Named explicitly, so refused rather than dropped: a narrower token would
+					// answer a different request than the one submitted.
 					if (!clientScopeSet.has(s)) {
 						return {
 							result: {
@@ -688,29 +535,19 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// The audience ceilings: what the client is registered for
-			// (`allowedAudiences` plus its own id) and what the subject token
-			// carries (its client id when it names none). The request's audience
-			// is held to both here, before the policy runs, so its answer is the
-			// request's alone — no policy decision can turn it into anything
-			// else. A policy's `grantedAudience` is held to the same two below.
+			// The audience ceilings: the client's registration (`allowedAudiences` plus its
+			// own id) and the subject token's audience (its client id when it names none).
+			// The request is held to both before the policy runs, so its refusal is its own;
+			// a policy's `grantedAudience` is held to the same two below.
 			const clientAudienceSet = new Set([...(client.allowedAudiences ?? []), client.clientId]);
 			const subjectAudienceSet = new Set(
 				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
 			);
-			// The target parameters, read by core's `readTargetParameter`, which
-			// the other grants' reading of `resource` is built on. One that is
-			// neither a string nor an array of strings is refused, never
-			// converted: a converted value could name a target the client never
-			// sent (`String([["billing"]])` is `"billing"`). For `resource` the
-			// code is RFC 8707 §2's: a value the server "fails to parse" is
-			// `invalid_target`. RFC 8693 §2.2.2 has no such sentence for
-			// `audience` — it gives `invalid_target` for a target the server is
-			// unwilling or unable to issue for, and `invalid_request` for a
-			// request that is not valid — so `audience` is answered
-			// `invalid_target` by symmetry: one reader, one answer. One that names
-			// nothing — absent, `null`, `""`, or empty entries only — is omitted
-			// (RFC 6749 §3.2).
+			// Targets are read by core's `readTargetParameter`. A value that is neither a
+			// string nor an array of strings is refused, never converted
+			// (`String([["billing"]])` is `"billing"`): `invalid_target` for `resource` (RFC
+			// 8707 §2) and, by symmetry, `audience`. A target naming nothing is omitted (RFC
+			// 6749 §3.2).
 			const audienceValues = readTargetParameter(body.audience);
 			if (audienceValues === null) {
 				return {
@@ -745,14 +582,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						};
 					}
 				}
-				// An audience the client is registered for but the subject token
-				// does not carry. RFC 8693 §2.2.2: "If the authorization server is
-				// unwilling or unable to issue a token for any target service
-				// indicated by the resource or audience parameters, the
-				// invalid_target error code SHOULD be used".
-				// Each named once: every one is an audience the client is
-				// registered for, so the set is bounded by its registration, but
-				// `audience` is not de-duplicated and a caller may repeat one.
+				// An audience the client is registered for but the subject token does not carry:
+				// `invalid_target` (RFC 8693 §2.2.2). De-duplicated, since `audience` may repeat.
 				const widenedAudiences = [
 					...new Set(requestedAudience.filter((audience) => !subjectAudienceSet.has(audience))),
 				];
@@ -774,20 +605,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					};
 				}
 			}
-			// A requested `resource` must equal the issued audience (RFC 8707,
-			// checked after the policy below), and that audience is the client id
-			// or one the registration and the subject token both carry. A resource
-			// outside that set can never be represented, so it is the request's
-			// own `invalid_target`, answered here before the policy runs — the
-			// same reason the audience is: a policy that turned it into its
-			// granted audience would otherwise meet the policy ceiling first and
-			// convert the caller's 400 into a 500.
-			//
-			// The refusal names what the check after the policy names: every
-			// requested resource the issued audience would not equal. That
-			// audience is taken as the request's own, which is what the later
-			// check uses unless a policy replaces it — so without such a policy
-			// the two list the same resources.
+			// A requested `resource` must equal the issued audience (RFC 8707, checked again
+			// after the policy), which is the client id or an audience both the registration
+			// and the subject token carry. A resource outside that set can never be
+			// represented, so it is the request's own `invalid_target`, answered before a
+			// policy could turn it into a policy-ceiling 500. Absent a policy, this names the
+			// same resources the later check would.
 			if (requestedResource) {
 				const unrepresentable = requestedResource.some(
 					(resource) =>
@@ -823,34 +646,14 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Policy hook — existing GrantPolicyHook contract.
-			// grantedScope/grantedAudience start as the narrowed values from the
-			// request validation phase above; the policy hook may further override them.
-			// An omitted `scope` inherits the SUBJECT TOKEN's scope, clamped to
-			// the client's registration.
-			//
-			// This is deliberately not what the sibling grants do, and an earlier
-			// version of this comment claimed a symmetry with them that does not
-			// exist. `/authorize` (`routes/authorize.mts`), `client_credentials`
-			// (`grants/clientCredentials.mts` `resolveScope`), jwt-bearer and the
-			// device grant all resolve an omitted `scope` from the client's
-			// declared `defaultScopes`, and all refuse with `invalid_scope` when
-			// the client declares none against a non-empty allowlist — #396's
-			// deny-by-absence, which exists because "forgot to send `scope`" used
-			// to mean "grant the entire allowlist". This grant reads
-			// `defaultScopes` nowhere and refuses nothing on that axis.
-			//
-			// Inheritance is the right default HERE because the request already
-			// carries a ceiling. RFC 8693 §2.1 gives an omitted `scope` the same
-			// scope as the subject token, and unlike the sibling grants this one
-			// is handed a token whose scope is an explicit, already-authorized
-			// upper bound — there is no unbounded "maximum grant" to fall into,
-			// so the failure #396 closed cannot arise. Narrowing rather than
-			// refusing for the same reason: the caller named nothing to be
-			// refused, and refusing would make a subject token merely wider than
-			// this client unexchangeable rather than exchangeable for less. The
-			// clamp to `allowedScopes` is what keeps the client's own
-			// registration a boundary.
+			// Policy hook: `grantedScope`/`grantedAudience` start as the request's narrowed
+			// values and the policy may narrow them further. An omitted `scope` inherits the
+			// subject token's scope clamped to `allowedScopes` (RFC 8693 §2.1). The sibling
+			// grants instead use `defaultScopes` and refuse when none are declared, so that
+			// "no scope" cannot mean "the whole allowlist"; here the subject token is already
+			// an authorized upper bound, so inheritance cannot over-grant, and narrowing
+			// rather than refusing keeps a subject token wider than the client exchangeable
+			// for less.
 			let grantedScope: readonly string[] | undefined =
 				requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
 			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
@@ -863,9 +666,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					requestedAudience: requestedAudience ?? undefined,
 					originalScope: subjectScope.length > 0 ? subjectScope : undefined,
 					subjectTokenType,
-					// actorTokenType is populated only when an actor_token was actually
-					// validated — prevents policies that gate on actorTokenType from being
-					// deceived by a request that supplied only the type header.
+					// Only when an actor_token was validated, so a type header alone cannot satisfy
+					// a policy gating on it.
 					actorTokenType:
 						actorValidated !== null && actorTokenType !== null ? actorTokenType : undefined,
 					resource: requestedResource ?? undefined,
@@ -893,13 +695,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					};
 				}
 				if (decision.outcome === "deny") {
-					// RFC 6749 §5.2 makes `error` 1*NQSCHAR. The policy's code goes
-					// out as given when it is one; otherwise the refusal is
-					// `invalid_request` — §2.2.2's code for a request refused by
-					// policy — and the code is logged, sanitised, for the operator
-					// who wrote the policy. `/oauth/token` checks every grant's code
-					// too; this covers a composition that dispatches the handler
-					// from its own route.
+					// RFC 6749 §5.2 makes `error` 1*NQSCHAR: a malformed policy code is logged
+					// (sanitised) and replaced by `invalid_request`, RFC 8693 §2.2.2's code for a
+					// request refused by policy. `/oauth/token` checks too; this covers a
+					// composition dispatching the handler from its own route.
 					let error = decision.error;
 					if (!isWellFormedErrorCode(error)) {
 						deps.logger?.warn(
@@ -921,19 +720,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				// #521: presence, not truthiness, and an array — a JS policy returning
-				// a string would reach `.filter` below and throw out of the handler.
-				//
-				// The policy may narrow, never widen, and its decision is held to
-				// the exchange's ceilings before it replaces the request's value, so
-				// a refusal here is the policy's alone: the deployment's policy
-				// exceeding its authority, which every other grant answers with
-				// core's `policyOutOfBounds` (`500 server_error`, #520) — the caller
-				// did nothing wrong. Its scope ceiling is the subject token's scope
-				// AND the client's `allowedScopes`; a scope the subject carries but
-				// the registration does not would hand this client something its
-				// registration never permitted. An empty `grantedScope` strips every
-				// scope (CP-15).
+				// Presence, not truthiness, and it must be an array (a JS policy returning a
+				// string would throw at `.filter`). The policy may narrow, never widen: its scope
+				// must lie within the subject's scope AND the client's `allowedScopes`, else
+				// core's `policyOutOfBounds` (500: the deployment's policy exceeded its
+				// authority, not the caller). An empty `grantedScope` strips every scope.
 				if (decision.grantedScope !== undefined) {
 					if (!Array.isArray(decision.grantedScope)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
@@ -954,12 +745,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					}
 					grantedScope = decision.grantedScope;
 				}
-				// The audience the same way, and the same as core's
-				// `boundPolicyAudience` holds it for every other grant — within
-				// what the client is registered for — with the subject token's
-				// audience as a second bound, the one the request's audience met
-				// above. An empty `grantedAudience` is no decision, as
-				// `boundPolicyAudience` reads it: the request's audience stands.
+				// The audience likewise, as core's `boundPolicyAudience` does for other grants,
+				// with the subject token's audience as a second bound. An empty
+				// `grantedAudience` is no decision: the request's audience stands.
 				if (decision.grantedAudience !== undefined) {
 					if (!Array.isArray(decision.grantedAudience)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
@@ -1019,68 +807,40 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			});
 			const scopeClaim = grantedScope && grantedScope.length > 0 ? grantedScope.join(" ") : null;
 
-			// The issued lifetime, narrowed in three steps.
-			//
-			// 1. What the client asked for with `expires_in`, or the configured
-			//    `oauth.accessToken.defaultExpiresIn` when it asked for nothing.
-			// 2. Clamped to `oauth.accessToken.maxExpiresIn`. Clamped, not
-			//    refused: the request is for "at most this long", and a shorter
-			//    token answers it — the same reading step 3 gives the subject's
-			//    expiry. An unset max equals the default, so no request extends
-			//    past the default unless the operator opted in. The max is also
-			//    the longest a resource server validating this token offline
-			//    can keep accepting it after its family is revoked.
-			// 3. Capped at the subject token's remaining lifetime, below.
+			// The issued lifetime: the requested `expires_in` or
+			// `oauth.accessToken.defaultExpiresIn`, clamped (not refused) to `maxExpiresIn`,
+			// then capped at the subject token's remaining lifetime below. An unset max
+			// equals the default. The max also bounds how long a resource server validating
+			// offline keeps accepting this token after its family is revoked.
 			let expiresIn = Math.min(requestedExpiresIn ?? defaultExpiresIn, maxExpiresIn);
 
-			// RFC 8693 §2.2.1: the issued token's lifetime SHOULD NOT exceed the
-			// subject token's. A fresh `exp` was stamped from config with no
-			// reference to the subject at all, so every exchange reset the
-			// clock: a chain of exchanges outlived the credential it descends
-			// from indefinitely, and the subject's expiry stopped being an
-			// expiry — the one bound that does not depend on any store staying
-			// wired was the one bound not enforced.
-			//
-			// Evaluated here rather than beside the other subject checks so the
-			// order in which a doubly-invalid request is refused does not move;
-			// the subject validator already rejects an expired self-issued token
-			// before this point, which makes this the fail-closed backstop for
-			// consumer-contributed validators rather than the common path.
-			//
-			// The issuance instant is decided once, here, and both the cap and
-			// the minted `iat` / `exp` are measured from it. Reading the clock
-			// again inside `generateToken` let the two land in different
-			// seconds, and `exp = mint second + (subject exp − cap second)`
-			// then passed the subject's `exp` by the seconds in between.
+			// RFC 8693 §2.2.1: the issued token SHOULD NOT outlive the subject token, or a
+			// chain of exchanges outlives its origin indefinitely. The built-in validator
+			// already rejects an expired subject, so this is the fail-closed backstop for
+			// contributed validators, placed here so the refusal order of a doubly invalid
+			// request is unchanged. The issuance instant is read once for both the cap and
+			// the minted `iat`/`exp`, so they cannot straddle a second and exceed the
+			// subject's `exp`.
 			const issuedAt = Math.floor(Date.now() / 1000);
 			const subjectExpiry = subjectValidated.claims.exp;
 			if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
 				const remaining = Math.floor(subjectExpiry - issuedAt);
-				// `<= 0` is both the already-expired token and the one expiring
-				// inside this second. Capping either mints a token with a zero
-				// or negative lifetime — dead on arrival, and indistinguishable
-				// at the resource server from a bug here — so it is a refusal
-				// the caller can read instead.
+				// `<= 0` includes a token expiring within this second: capping would mint a dead
+				// token, so refuse instead.
 				if (remaining <= 0) return invalidRequest("subject_token has expired");
 				expiresIn = Math.min(expiresIn, remaining);
 			}
-			// A subject token carrying no `exp` leaves the lifetime from steps 1
-			// and 2 standing. That is not absence read permissively: `exp` is a
-			// property of the presented credential, not a policy this
-			// deployment declined to write, and a validator that returns a
-			// token without one is asserting a credential with no expiry for
-			// the cap to descend from. The built-in validator never takes this
-			// path — jose rejects an expired token before the handler sees it.
+			// A subject token without `exp` leaves the lifetime above standing: `exp` is a
+			// property of the presented credential, and a validator returning none asserts a
+			// credential with no expiry. The built-in validator never takes this path.
 
 			const accessToken = await generateToken(
 				formatObject({
 					family_id: reportedFamily(subjectValidated),
-					// The subject's session, as a liveness link only (core's
-					// `grants/sessionClaims.mts`): the logout that ends the subject
-					// token ends this one at introspection and userinfo, and no
-					// capability a `sid` authorises — the session's claims, its
-					// upstream tokens — is reachable with it. The actor's session
-					// is not carried: the issued token speaks for the subject.
+					// The subject's session as a liveness link only (core's
+					// `grants/sessionClaims.mts`): the logout that ends the subject token ends this
+					// one at introspection and userinfo, and nothing a `sid` authorises is reachable
+					// with it. The actor's session is not carried.
 					[LIVENESS_SID_CLAIM]: subjectValidated.sid ? subjectValidated.sid : undefined,
 					act,
 				}),
@@ -1098,11 +858,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				},
 			);
 
-			// RFC 9449 §5: a DPoP-bound access token is advertised as
-			// `token_type: "DPoP"`; mTLS keeps "Bearer" (RFC 8705 §3).
-			// `generateTokenResponse` reads it off the confirmation actually
-			// stamped into the token, so the envelope cannot disagree with the
-			// claim.
+			// RFC 9449 §5: a DPoP-bound token is `token_type: "DPoP"`; mTLS keeps "Bearer"
+			// (RFC 8705 §3). Read off the stamped confirmation, so the two cannot disagree.
 			const tokens = generateTokenResponse({ accessToken });
 			const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
 				...tokens,
@@ -1120,44 +877,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 }
 
 /**
- * `400 invalid_request`, the one code RFC 8693 §2.2.2 gives a token-exchange
- * request that is refused for what it presented: "If the request itself is
- * not valid or if either the `subject_token` or `actor_token` are invalid for
- * any reason, or are unacceptable based on policy, [...] the value of the
- * `error` parameter MUST be the `invalid_request` error code."
+ * `400 invalid_request`: RFC 8693 §2.2.2 makes it the code for a request that is
+ * not valid and for a `subject_token` or `actor_token` that is invalid or
+ * unacceptable for any reason. That covers malformed or repeated parameters,
+ * mismatched `actor_token`/`actor_token_type`, a body `client_id` that is not the
+ * authenticated client, a malformed `expires_in`, an unsupported token type (RFC
+ * 6749 §5.2; `unsupported_token_type` is RFC 7009's, for revocation), and every
+ * refused token: validator `null`, sender constraint, family, session,
+ * `may_act`, actor-chain depth, expiry. `invalid_grant` is not open to this grant.
  *
- * - **The request itself:** a missing or repeated parameter, `actor_token`
- *   without `actor_token_type` or the reverse, a body `client_id` that is not
- *   the authenticated client, a malformed `expires_in`, and a token type this
- *   deployment has no validator for or cannot issue — RFC 6749 §5.2's "an
- *   unsupported parameter value". Not `unsupported_token_type`: RFC 7009
- *   registers that code for the revocation endpoint, and RFC 8693 defines no
- *   token-type error.
- * - **A presented token:** the validator's `null`, a sender-constraint row,
- *   the refresh-token family rule, `may_act`, the actor-chain bound or the
- *   subject's expiry. The §2.2.2 sentence is a MUST and covers every one of
- *   them, so no other code is open to this grant for a refused token —
- *   `invalid_grant` included. (The refresh grant, which §2.2.2 does not
- *   govern, answers the same sender-constraint and family rows with RFC
- *   6749's `invalid_grant` for its refresh token.)
+ * One code covers all of these, so `error_description` tells a client which check
+ * refused it and is part of the wire contract (the README names each). Quote
+ * values with `'`: RFC 6749 §5.2 allows neither `"` nor `\`.
  *
- * One code covers all of these, so the `error_description` is what tells a
- * client which check refused it; each call site's description is part of the
- * wire contract and the README names it. A description quotes a value with
- * `'`: RFC 6749 §5.2 allows neither `"` nor `\` in one, and `/oauth/token`
- * replaces any character outside its set with `?`.
- *
- * The request's other answers keep the codes the RFCs give them —
- * `invalid_target` for an audience or resource (§2.2.2), `invalid_scope`,
- * `invalid_client`, `unauthorized_client` — a policy decision past a ceiling
- * is core's `policyOutOfBounds`, and a store that cannot answer is
- * `503 temporarily_unavailable`, never a verdict on the request.
- *
- * A value of the wrong type is `invalid_request` for a parameter sent once
- * (`scope`, `client_id`, `expires_in`: an array is a repeated parameter, RFC
- * 6749 §3.2), but `invalid_target` for `resource` and `audience`, which may be
- * repeated, so a value that is neither a string nor strings is a target that
- * cannot be read (RFC 8707 §2; `audience` by symmetry).
+ * Other answers keep their RFC codes: `invalid_target` for audience and resource
+ * (including values of the wrong type, since both may repeat), `invalid_scope`,
+ * `invalid_client`, `unauthorized_client`; a policy past a ceiling is core's
+ * `policyOutOfBounds`, and an unavailable store is `503 temporarily_unavailable`.
  */
 function invalidRequest(errorDescription: string): GrantHandlerResult {
 	return { result: { status: 400, error: "invalid_request", errorDescription } };
@@ -1167,27 +903,20 @@ function invalidRequest(errorDescription: string): GrantHandlerResult {
 const MALFORMED = Symbol("malformed");
 
 /**
- * The longest `expires_in` digit string read as a lifetime. Ten digits is over
- * three centuries — far past the one-year ceiling any `maxExpiresIn` can carry,
- * so every value it admits that is too large is clamped rather than refused —
- * and well inside the range `Number` represents exactly.
+ * The longest `expires_in` digit string read as a lifetime: ten digits is over
+ * three centuries, far past any `maxExpiresIn`, so large values are clamped
+ * rather than refused, and within `Number`'s exact range.
  */
 const MAX_REQUESTED_EXPIRES_IN_DIGITS = 10;
 
 const REQUESTED_EXPIRES_IN_SHAPE = new RegExp(`^[0-9]{1,${MAX_REQUESTED_EXPIRES_IN_DIGITS}}$`);
 
 /**
- * Reads the `expires_in` form parameter: `undefined` when absent or sent
- * without a value, the number of seconds when it is one string of ASCII decimal
- * digits denoting a positive integer, and `MALFORMED` otherwise.
- *
- * Deliberately narrower than `Number(value)`, which accepts whitespace, a sign,
- * a decimal point, an exponent, hexadecimal, and reads the empty string as `0`.
- * A repeated parameter arrives as an array and is refused rather than having
- * one of its values picked: the grant cannot tell which one the client meant.
- * Absent, `null` and `""` all mean omitted: RFC 6749 §3.2 has a parameter sent
- * without a value treated as if it were not sent, which is also how this grant
- * reads `scope=""`.
+ * Reads `expires_in`: `undefined` when absent or empty (RFC 6749 §3.2), the
+ * seconds when it is one string of ASCII digits denoting a positive integer, else
+ * `MALFORMED`. Narrower than `Number(value)`, which accepts whitespace, signs,
+ * decimals, exponents and hex and reads `""` as `0`. A repeated parameter (an
+ * array) is refused: the grant cannot tell which value was meant.
  */
 function parseRequestedExpiresIn(value: unknown): number | undefined | typeof MALFORMED {
 	if (value === undefined || value === null || value === "") return undefined;
@@ -1209,48 +938,31 @@ function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
 }
 
 /**
- * The family a validator reports, or `undefined` when it reports none. An
- * empty `familyId` names no family, so it is read as absent — by the family
- * rule and by issuance alike: nothing to check, and no `family_id: ""` for the
- * issued token to inherit that no revocation could ever reach.
+ * The family a validator reports, or `undefined`. An empty `familyId` is absent
+ * for the family rule and issuance alike, so no token inherits a `family_id: ""`
+ * that no revocation could reach.
  */
 function reportedFamily(validated: ValidatedToken): string | undefined {
 	return validated.familyId ? validated.familyId : undefined;
 }
 
 /**
- * The refresh-token family rule for a token presented as `subject_token` or
- * `actor_token`: the refusal to return, or `null` when the token passes.
+ * The refresh-token family rule for a `subject_token` or `actor_token`: the
+ * refusal, or `null` when the token passes. This grant owns it (the built-in
+ * validator does not read `refreshTokenFamilyRevocation`), so a revoked family
+ * gets its own description, `family_revoked`, telling the client to
+ * re-authenticate rather than retry. It keys on the `familyId` a validator
+ * reports, whatever token type the validator is registered for.
  *
- * This grant owns the rule, for both tokens; the built-in validator does not
- * read `refreshTokenFamilyRevocation`. A validator can only answer `null`,
- * which the handler reports as `… validation failed`, whereas a revoked family
- * has a description of its own on `/oauth/token` — the refresh grant already
- * gives `family_revoked` there — and it tells the client that
- * re-authenticating, not retrying, is what helps.
- *
- * The rule keys on the family a validator asserts (`familyId`), not on the
- * token type the validator was registered for: the built-in validator can be
- * registered under any type, and whichever produced the subject, the issued
- * token inherits its `family_id`. Its outcomes, checked once per token:
- *
- * - A family but no `refreshTokenFamilyRevocation` wired: refused
- *   (fail-closed). A subject's family would pass to the issued token with
- *   nothing able to observe its revocation; an actor would be recorded in the
- *   issued token's `act` claim on a credential whose revocation cannot be
- *   checked.
+ * - A family with no `refreshTokenFamilyRevocation` wired: refused (fail
+ *   closed), since its revocation could never be observed.
  * - The store throws: `503 temporarily_unavailable`, logged as
- *   `token_exchange_family_store_unavailable` with `store`, the role and core's
- *   `loggableError` projection of the store's error, so an outage is never
- *   reported as a revoked token.
- * - The family is revoked: `family_revoked`.
+ *   `token_exchange_family_store_unavailable`; an outage is never reported as a
+ *   revoked token.
+ * - Revoked: `family_revoked`.
  *
- * Both refusals are {@link invalidRequest}s: an unverifiable or revoked family
- * makes the token unacceptable, which RFC 8693 §2.2.2 answers
- * `invalid_request`.
- *
- * The actor's descriptions carry the `actor_token ` prefix the handler's other
- * actor answers carry.
+ * Refusals are `invalid_request` (RFC 8693 §2.2.2); the actor's carry the
+ * `actor_token ` prefix.
  */
 async function familyRefusal(
 	deps: Pick<TokenExchangeDependencies, "refreshTokenFamilyRevocation" | "logger">,
@@ -1271,9 +983,8 @@ async function familyRefusal(
 	try {
 		revoked = await revocation.isFamilyRevoked(familyId);
 	} catch (err) {
-		// The projection: a store error carries what it sent — an ioredis
-		// reply error the command, the family's key included. On core's
-		// console logger when none is wired: an outage is never silent.
+		// Log the projection only: an ioredis reply error carries the command, the
+		// family's key included.
 		(deps.logger ?? consoleLogger).error(
 			{ store: "refresh_token_family", role, err: loggableError(err) },
 			"token_exchange_family_store_unavailable",
@@ -1291,14 +1002,10 @@ async function familyRefusal(
 }
 
 /**
- * The requested resources a refusal names, as its log line carries them:
- * `missingResources`, the first ten through core's `auditErrorList` (each
- * sanitised and capped at 200 characters), and `missingResourceCount` when
- * that had to cut. They are the caller's own `resource` values — before the
- * policy runs, anything it wrote; after it, values the client and the subject
- * token both carry, but as many as it chose to send — so neither what they
- * hold nor how many there are may reach the line unbounded. A small,
- * well-formed list reads as it always did.
+ * The requested resources a refusal logs: the first ten through core's
+ * `auditErrorList` (sanitised, 200 characters each), plus `missingResourceCount`
+ * when it had to cut. They are caller-controlled, so neither their content nor
+ * their count may reach the log unbounded.
  */
 const loggedResources = (
 	resources: readonly string[],
@@ -1310,33 +1017,19 @@ const loggedResources = (
 };
 
 /**
- * The session rule for a token presented as `subject_token` or `actor_token`:
- * the refusal to return, or `null` when the token passes.
+ * The session rule for a `subject_token` or `actor_token`: the refusal, or `null`
+ * when the token passes. A token minted from a browser session carries its `sid`
+ * and dies with the session at introspection, userinfo and refresh; this applies
+ * the same rule, keyed on the validator's `ValidatedToken.sid` (never
+ * `claims.sid`, which a foreign issuer's token may carry).
  *
- * A token this provider minted from a browser session carries the session's
- * `sid`, and a logout ends it: `/oauth/introspect`, `/oauth/userinfo` and the
- * refresh grant read the `UserSession` it names, and a token whose session is
- * gone is inactive there. The rule here is theirs, read the same way — keyed
- * on the `sid` a validator reports (`ValidatedToken.sid`, never `claims.sid`,
- * which a foreign issuer's token may carry for a session this store never
- * held):
- *
- * - No `sid`, or no `userSessionStore` wired: nothing to check. Without a
- *   store no surface judges a `sid`, and introspection passes the token too.
- * - The store holds no session under it, or one recorded for another
- *   subject (the session grant's rule): `invalid_request` `session_invalid`
- *   (the refresh grant's words; RFC 8693 §2.2.2 makes every refused token
- *   `invalid_request`), `actor_token session_invalid` for the actor.
- * - The store throws: `503 temporarily_unavailable` "session store
- *   unavailable" (`actor_token session store unavailable`), logged once at
- *   error, on core's console logger when no logger is wired, as
- *   `token_exchange_session_store_unavailable` with the store, the step, the
- *   role and core's `loggableError` projection — an outage is never reported
- *   as an ended session, nor waved through as a live one.
- *
- * The issued token carries the subject's session as `liveness_sid` (see the
- * issuance above), so the same logout reaches it too — and nothing a `sid`
- * authorises does.
+ * - No `sid`, or no `userSessionStore`: nothing to check (introspection passes
+ *   the token too).
+ * - No session under the `sid`, or one for another subject: `session_invalid`
+ *   (`actor_token session_invalid` for the actor), as `invalid_request`.
+ * - The store throws: `503 temporarily_unavailable`, logged once as
+ *   `token_exchange_session_store_unavailable`; an outage is never read as an
+ *   ended or a live session.
  */
 async function sessionRefusal(
 	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,
@@ -1372,22 +1065,14 @@ async function sessionRefusal(
 }
 
 /**
- * The single audience an exchanged token is minted for (spec §8.1 rule 2):
+ * The single audience an exchanged token is minted for:
+ * - an explicit audience (request or policy, already bounded): its first entry;
+ * - omitted, with a single subject audience the client is registered for: that;
+ * - otherwise the client's own id, so omitting `audience` cannot mint for an
+ *   audience outside the client's allowlist.
  *
- * - an explicit audience → its first element. It is either the request
- *   parameter or a policy hook override, each already held to the client's
- *   registration and the subject token's audience;
- * - omitted, and the subject names one audience → that audience, if the
- *   client is registered for it, else the client's own id. This prevents
- *   cross-client audience confusion: a client cannot use a stolen
- *   subject_token to mint a token for an audience outside its own allowlist
- *   just by omitting the audience parameter;
- * - omitted, and the subject names several or none → the client's own id.
- *
- * RFC 7519 §4.1.3 lets `aud` be a string or an array; a one-element array is
- * the same as the bare string. `generateToken` carries one audience, so a
- * multi-element `grantedAudience` contributes only its first entry — a known
- * limitation (spec §8.1.1: multi-audience needs introspection by every party).
+ * `generateToken` carries one audience, so only the first `grantedAudience` entry
+ * is used; several audiences would need introspection by every party.
  */
 function issuedAudience(
 	grantedAudience: readonly string[] | undefined,

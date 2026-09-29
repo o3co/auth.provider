@@ -25,17 +25,11 @@ import {
 const DEFAULT_TIMEOUT_MS = 5000;
 
 /**
- * Coerces a numeric config value that may arrive as a string.
- *
- * HOCON environment substitution yields strings, so `CLIENT_USER_TIMEOUT=1234`
- * reaches the builder as `"1234"`. An *absent* key takes `fallback`; anything
- * present but unreadable becomes `NaN` and is rejected by the constructor,
- * which owns the range rules and names the field in its message.
- *
- * The distinction matters because HOCON substitutes a **blank** environment
- * variable as `""` — a very ordinary shape in a `.env` file or an empty
- * ConfigMap key — and `Number("")` is `0`. This used to fall back to the
- * default, hiding the misconfiguration; it is now a boot failure (#285).
+ * Coerces a numeric config value that may arrive as a string (HOCON
+ * environment substitution yields strings). Only an *absent* key takes
+ * `fallback`. Anything present but unreadable becomes `NaN` for the
+ * constructor to reject, and a **blank** environment variable, which HOCON
+ * substitutes as `""`, becomes `0`: a boot failure too, not a silent default.
  */
 const toNumber = (value: unknown, fallback: number): number => {
 	if (value === undefined || value === null) return fallback;
@@ -60,11 +54,11 @@ export const registerBuiltinAdapters = (factories: {
 		return new HttpUserRepository({
 			authenticateUrl: config.authenticateUrl,
 			authenticateByTokenUrl: config.authenticateByTokenUrl,
-			// #482: optional. Present → the repository can link a federated identity.
+			// Optional. Present → the repository can link a federated identity.
 			...(typeof config.linkFederatedIdentityUrl === "string"
 				? { linkFederatedIdentityUrl: config.linkFederatedIdentityUrl }
 				: {}),
-			// #613: optional. Forwarded whenever SET, not only when well-typed —
+			// Optional. Forwarded whenever SET, not only when well-typed —
 			// the link URL above vanishes when misspelt, and for the lookup a value
 			// that vanishes is a deployment that believes itself covered and is
 			// not. The constructor refuses what is not a URL, or not a list.

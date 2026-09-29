@@ -15,14 +15,11 @@
  */
 
 /**
- * End-to-end coverage for the route → ctx.authenticatedClient propagation
- * path of the `client_credentials` grant.
- *
- * The unit tests in `clientCredentials.test.mts` construct
- * `AuthenticatedClient` directly and therefore cannot detect a regression in
- * `routes.mts` ctx construction (e.g. a typo in the 3-line spread that maps
- * `req.oauthClient.*` into the handler input). This file exercises the full
- * HTTP path via supertest so per-client gating is verified end-to-end.
+ * End-to-end coverage for the route → ctx.authenticatedClient propagation of
+ * the `client_credentials` grant. The unit tests in `clientCredentials.test.mts`
+ * construct `AuthenticatedClient` directly, so they cannot catch a fault in how
+ * `routes.mts` maps `req.oauthClient.*` into the handler input; this file
+ * drives the full HTTP path via supertest.
  */
 
 import { randomUUID } from "node:crypto";
@@ -79,7 +76,7 @@ function clientRepoWith(opts: {
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [],
 		allowedScopes: opts.allowedScopes ?? ["read", "write"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// What an omitted `scope` grants: nothing is granted implicitly.
 		defaultScopes: opts.allowedScopes ?? ["read", "write"],
 		allowedAudiences: opts.allowedAudiences ?? ["https://api.example"],
 		...(opts.allowedGrantTypes !== undefined && { allowedGrantTypes: opts.allowedGrantTypes }),
@@ -116,9 +113,9 @@ async function buildApp(clientRepo: ClientRepository): Promise<express.Express> 
 
 describe("client_credentials — /oauth/token integration (route → ctx propagation)", () => {
 	it("issues 200 + access_token when the client record surfaces allowedGrantTypes: ['client_credentials']", async () => {
-		// Confirms routes.mts copies allowedGrantTypes from req.oauthClient
-		// into ctx.authenticatedClient. A typo in the spread would silently
-		// reject this request with 400 unauthorized_client.
+		// routes.mts copies allowedGrantTypes from req.oauthClient into
+		// ctx.authenticatedClient; without it this request is 400
+		// unauthorized_client.
 		const app = await buildApp(clientRepoWith({ allowedGrantTypes: ["client_credentials"] }));
 		const res = await request(app)
 			.post("/oauth/token")
@@ -166,8 +163,8 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 	});
 
 	it("returns 400 unauthorized_client when the client record omits allowedGrantTypes (deny-by-absence)", async () => {
-		// Confirms the field's absence is propagated as undefined (not coerced
-		// to [] or some allow-all default) so §3.4.1 deny-by-absence holds.
+		// The field's absence is propagated as undefined (not coerced to [] or
+		// an allow-all default), so §3.4.1 deny-by-absence holds.
 		const app = await buildApp(clientRepoWith({ allowedGrantTypes: undefined }));
 		const res = await request(app)
 			.post("/oauth/token")
@@ -180,10 +177,9 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 	});
 
 	it("refuses deny-by-absence in the base allowlist rule's words", async () => {
-		// #326 moved the deny-by-absence check from the handler onto dispatch
-		// (`requiresExplicitGrantAllowlist`). Its answer is the one the base
-		// allowlist check gives, code and description, so the two rules cannot
-		// be told apart on the wire.
+		// Deny-by-absence runs at dispatch (`requiresExplicitGrantAllowlist`)
+		// and answers as the base allowlist check does, code and description, so
+		// the two rules cannot be told apart on the wire.
 		const app = await buildApp(clientRepoWith({ allowedGrantTypes: undefined }));
 		const res = await request(app)
 			.post("/oauth/token")
@@ -199,20 +195,17 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 	});
 
 	it("denies a public client with no allowlist through the allowlist rule (#326 precedence)", async () => {
-		// The one composed-order change #326 makes, pinned so it stays
-		// deliberate: this doubly-ineligible request (public client AND absent
-		// allowlist) used to reach the handler and fail its confidential-client
-		// rule first (`invalid_client`); the dispatch-level deny-by-absence now
-		// runs before any handler code, so the allowlist denial wins
-		// (`unauthorized_client`). Still a 400 denial either way — keeping the
-		// old precedence would mean teaching dispatch cc's confidential-client
-		// rule, which is exactly the folklore the flag exists to delete.
+		// Deliberate precedence: dispatch-level deny-by-absence runs before any
+		// handler code, so this doubly-ineligible request (public client AND
+		// absent allowlist) is denied by the allowlist rule (`unauthorized_client`),
+		// not the handler's confidential-client rule (`invalid_client`). The
+		// other order would mean teaching dispatch that confidential-client rule.
 		const publicClient = {
 			clientId: TEST_CLIENT_ID,
 			tokenEndpointAuthMethod: "none" as const,
 			allowedRedirectUris: [],
 			allowedScopes: ["read"],
-			// #396: the old implicit omitted-scope grant, now declared.
+			// What an omitted `scope` grants: nothing is granted implicitly.
 			defaultScopes: ["read"],
 			allowedAudiences: [],
 		};
@@ -235,7 +228,7 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 			clientRepoWith({
 				allowedGrantTypes: ["client_credentials"],
 				allowedScopes: ["scope:a"],
-				// #396: the old implicit omitted-scope grant, now declared.
+				// What an omitted `scope` grants: nothing is granted implicitly.
 				defaultScopes: ["scope:a"],
 			}),
 		);
@@ -337,8 +330,7 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 
 	it("the replay seen-set alone switches the method on: the same client, without one, is refused 500 server_error", async () => {
 		// The coupling a composition inherits when it installs a seen-set for
-		// another consumer — DPoP records its proofs there since the seen-set
-		// replaced its own replay store. Same client, same keys, same
+		// another consumer, such as DPoP's proofs. Same client, same keys, same
 		// assertion shape; only the seen-set differs. (Discovery follows the
 		// same condition: oauthModule advertises private_key_jwt iff a
 		// replaySeenSet is wired — pinned in discovery-contribution.test.mts.)
@@ -363,9 +355,8 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 
 	it("still authenticates when DPoP proofs have filled their share of a memory seen-set", async () => {
 		// Every consumer shares the seen-set, and DPoP records a proof before
-		// any rate limit or token check: a flood of fresh proofs that filled the
-		// set used to refuse client authentication too, for up to the replay
-		// window after it stopped.
+		// any rate limit or token check: a flood of fresh proofs filling DPoP's
+		// share must not refuse client authentication.
 		const seenSet = createMemoryReplaySeenSet({ maxEntries: 10 });
 		let proofs = 0;
 		for (;;) {

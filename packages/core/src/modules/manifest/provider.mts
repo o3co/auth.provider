@@ -21,23 +21,13 @@ import type { SectionDeps, SectionSchema } from "./module-section.mjs";
  * Typed dependency object derived from a module's `requires` and `optional`
  * key sets, and from its section's schema.
  *
- * - Keys in `R` (required) appear as `readonly` non-optional fields whose
- *   value type is `NonNullable<ComponentMap[K]>`. The `NonNullable` strips
- *   the `| undefined` introduced by ComponentMap's optional declaration
- *   (every slot is declared `slot?: T` via declaration-merging so consumers
- *   can opt into slots additively). The boot planner's missing-required-
- *   component check at materialise-time guarantees the slot is present
- *   whenever it appears in a module's `requires`, so the runtime value is
- *   never undefined inside a `provides` callback.
- * - Keys in `O` (optional) appear as `readonly` optional fields with type
- *   `ComponentMap[K] | undefined`.
- * - `S`, the schema of the module's own configuration section (#728), adds
- *   `readonly section` typed as the schema's output; left at `never` — a
- *   module that declares no section — it adds nothing (`SectionDeps` in
- *   `module-section.mts`). `section` is not a slot: boot parses it at
- *   stage 1 and sets it on the deps object beside the slots.
- *
- * Per A2-α §3.1.
+ * - Keys in `R` are non-optional, typed `NonNullable<ComponentMap[K]>`: every
+ *   slot is declared `slot?: T`, and boot's missing-required-component check
+ *   guarantees a required slot is present.
+ * - Keys in `O` are optional, typed `ComponentMap[K] | undefined`.
+ * - `S`, the module's section schema, adds `readonly section` typed as its
+ *   output, or nothing when `never` (`SectionDeps`). `section` is not a slot:
+ *   boot parses it at stage 1 and sets it beside the slots.
  */
 export type ProviderDeps<
 	R extends ComponentKey = never,
@@ -50,13 +40,8 @@ export type ProviderDeps<
 } & SectionDeps<S>;
 
 /**
- * A provider materialises a single ComponentMap slot from the module's
- * typed deps object. Per A2-α §3.1 / §3.2: a single async-or-sync factory
- * shape; no discriminated provider union; invoked at most once per
- * createApp call (boot planner enforces).
- *
- * The return type is `ComponentMap[K] | Promise<ComponentMap[K]>` — a
- * provider may return synchronously when no async work is needed.
+ * A provider materialises one ComponentMap slot from the module's typed deps,
+ * synchronously or not. Boot invokes it at most once per `createApp` call.
  */
 export type Provider<K extends ComponentKey, Deps> = (
 	deps: Deps,

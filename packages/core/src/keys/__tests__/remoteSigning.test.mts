@@ -15,17 +15,13 @@
  */
 
 /**
- * Issue #303 — a `KeyStore` whose private key never enters this process.
- *
- * The port was already shaped for it (`KeyStore.sign`'s own doc says
- * "remote-sign adapters (KMS/HSM) perform the remote call here"), so what was
- * missing was an implementation and a way for one to prove itself. The shared
- * contract does the second job; these cover what is specific to signing
- * somewhere else.
+ * A `KeyStore` whose private key never enters this process (core README,
+ * "Signing without holding the private key"). The shared contract proves the
+ * port; these cover what is specific to signing somewhere else.
  *
  * The `RemoteSigner` here is Node's `crypto` standing in for a KMS: same
  * shape, same asynchrony, same "hands back bytes and keeps the key". That is
- * enough to catch the failures that actually happen — wrong signature form,
+ * enough to catch the failures that actually happen: wrong signature form,
  * mismatched public half, a signer that throws.
  */
 

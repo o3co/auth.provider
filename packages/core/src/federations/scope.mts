@@ -15,39 +15,25 @@
  */
 
 /*
- * RFC 6749 §3.3's scope grammar: `isScopeToken`, the three readers of a
- * space-delimited value, and `canonicalScope`, the one form a scope is
- * written and compared in. Read a scope — or any other space-delimited
- * protocol value, such as OIDC's `prompt` and `acr_values` — through these
- * rather than splitting it by hand: a split on a single space reads a tab as
- * part of a name. Which reader a site uses depends on who wrote the value:
+ * RFC 6749 §3.3 scope grammar: `isScopeToken`, three readers of a
+ * space-delimited value, and `canonicalScope`, the form a scope is stored and
+ * compared in. Read any space-delimited protocol value (a scope, OIDC's
+ * `prompt` and `acr_values`) through these, never by splitting on a single
+ * space, which reads a tab as part of a name. Pick the reader by who wrote
+ * the value:
  *
- * - a client's request parameter: `readSpaceDelimitedParameter`, strict. A
- *   malformed value is the request's fault and is refused (`invalid_scope`
- *   for a scope, RFC 6749 §4.1.2.1 / §5.2).
- * - the scope a token already carries — this server's own access and refresh
- *   tokens, a token-exchange subject: `readIssuedScope`, which never widens.
- *   A token minted before requests were read strictly can hold an entry such
- *   as `openid<TAB>email` that named no scope; it stays naming none.
- * - anything else — an upstream's answer, an assertion's claim, a client
- *   metadata document, an upstream-token record: `parseScopeTokens`,
- *   tolerant. The value is read for what it names, and one that names
- *   nothing is never read as absent.
- *
- * No state.
+ * - a client's request parameter: `readSpaceDelimitedParameter`, strict;
+ *   a malformed value is refused.
+ * - the scope a token already carries (this server's tokens, a
+ *   token-exchange subject): `readIssuedScope`, which never widens.
+ * - anything else (an upstream's answer, an assertion's claim, client
+ *   metadata, an upstream-token record): `parseScopeTokens`, tolerant.
  */
 
 /**
- * Whether one entry is a scope-token.
- *
- * RFC 6749 §3.3 writes the grammar in hex — `scope-token = 1*( %x21 / %x23-5B
- * / %x5D-7E )` — which reads, in words: one or more printable ASCII
- * characters, excluding the space, the double quote and the backslash. The
- * space is excluded because it is the delimiter between tokens.
- *
- * Spelled out as the predicate rather than as a character-class regex, because
- * `[\x21\x23-\x5B\x5D-\x7E]` is the kind of thing a reader has to decode
- * before they can tell whether it is right.
+ * Whether one entry is an RFC 6749 §3.3 scope-token
+ * (`1*( %x21 / %x23-5B / %x5D-7E )`): one or more printable ASCII characters
+ * other than the space, the double quote and the backslash.
  */
 export function isScopeToken(entry: string): boolean {
 	if (entry.length === 0) return false;
@@ -61,19 +47,11 @@ export function isScopeToken(entry: string): boolean {
 /**
  * The scope-tokens a value names, in order and without repeats, or none.
  *
- * Two steps, deliberately separate: split the text into candidates, then judge
- * each candidate on its own. Splitting on a single space and dropping empties
- * conflates the two and gets both wrong — `"\t"` reads as a scope named tab,
- * and `"openid\temail"` as one scope with a tab inside its name, neither of
- * which the grammar admits.
- *
- * Whitespace other than the space is not a delimiter in the grammar, but no
- * scope-token may contain it either, so splitting on all of it cannot merge
- * two tokens or invent one.
- *
- * Anything that is not a string names nothing: a value reaching here has come
- * from an upstream IdP through a third-party adapter, and is not believed
- * before it is read (D5).
+ * Splits on any whitespace, then judges each candidate on its own, so `"\t"`
+ * names nothing and `"openid\temail"` is never one scope with a tab in it. No
+ * scope-token contains whitespace, so splitting on all of it cannot merge two
+ * tokens or invent one. A non-string names nothing: the value came from an
+ * upstream through a third-party adapter and is not trusted.
  */
 export function parseScopeTokens(value: unknown): readonly string[] {
 	if (typeof value !== "string") return [];
@@ -81,27 +59,16 @@ export function parseScopeTokens(value: unknown): readonly string[] {
 }
 
 /**
- * A space-delimited request parameter, read strictly: its entries in order and
- * without repeats, or `null` when it is malformed.
+ * A space-delimited request parameter, read strictly (RFC 6749 §3.3,
+ * `scope-token *( SP scope-token )`): its entries in order and without
+ * repeats, or `null` when malformed. For a value a client sends, where a
+ * malformed one is refused (`invalid_scope`, §4.1.2.1, §5.2) and a tolerant
+ * read would answer a request the client did not make.
  *
- * The counterpart of {@link parseScopeTokens} for a value a client sends in a
- * request, where RFC 6749 names the answer to a malformed one (`invalid_scope`,
- * §4.1.2.1 and §5.2) and reading it tolerantly would answer a request the
- * client did not make. The grammar is §3.3's — `scope-token *( SP
- * scope-token )`:
- *
- * - the space is the only delimiter. Runs of spaces, and spaces at either
- *   end, are tolerated: they can neither merge two entries nor invent one.
- *   A value of spaces alone names nothing (`[]`), and the caller decides
- *   whether that is an omitted parameter or a refusal.
- * - every entry must be a scope-token ({@link isScopeToken}). A tab, a
- *   newline, a quote, a backslash or anything outside printable ASCII makes
- *   the whole value malformed, rather than being dropped or read as a
- *   delimiter.
- *
- * OpenID Connect's other space-delimited request parameters (`prompt`,
- * `acr_values`, OIDC Core §3.1.2.1) are read with it too: their values are
- * printable ASCII without spaces, which the same entry grammar admits.
+ * Only the space delimits; extra spaces are tolerated, and spaces alone yield
+ * `[]` for the caller to judge. An entry that is not a scope-token (a tab,
+ * newline, quote, backslash, non-printable ASCII) makes the whole value
+ * malformed. Also reads OIDC's `prompt` and `acr_values` (OIDC Core §3.1.2.1).
  */
 export function readSpaceDelimitedParameter(value: string): readonly string[] | null {
 	const entries = value.split(" ").filter((entry) => entry !== "");
@@ -110,21 +77,13 @@ export function readSpaceDelimitedParameter(value: string): readonly string[] | 
 
 /**
  * The scope a token already carries, read so that it can never name more than
- * it did when the token was minted: split on the space alone, keeping only the
- * scope-tokens, in order and without repeats.
+ * it did when minted: split on the space alone, keeping only scope-tokens, in
+ * order and without repeats.
  *
- * The reader for a claim this server wrote — or a validator vouches for — as
- * opposed to an upstream's answer ({@link parseScopeTokens}). The difference
- * is what a tab does. Before requests were read strictly, a grant could mint a
- * scope as the client sent it, so a live token can carry `openid<TAB>email` as
- * one entry. That entry named no scope, released no claim and matched no
- * ceiling. Splitting it on the tab would turn it into `openid` and `email` —
- * a scope the token was never granted — so an entry that is not a scope-token
- * is dropped instead. Dropping can only narrow.
- *
- * Runs of spaces and spaces at either end name the same scopes: they can
- * neither merge two entries nor invent one. Anything that is not a string
- * names nothing.
+ * For a claim this server wrote or a validator vouches for. A live token can
+ * carry an entry such as `openid<TAB>email`, which named no scope when
+ * minted; splitting it on the tab would grant `openid` and `email`, so it is
+ * dropped. Dropping can only narrow. A non-string names nothing.
  */
 export function readIssuedScope(value: unknown): readonly string[] {
 	if (typeof value !== "string") return [];

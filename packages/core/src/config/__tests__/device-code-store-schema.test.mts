@@ -19,21 +19,17 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * #472 — the device-grant pair has to *reach* the modules that read it.
- *
+ * The device-grant pair has to *reach* the modules that read it.
  * `AppConfigSchema` is a strip-mode `z.object`, and the standalone validates
- * its HOCON against it before `buildModules` runs. Two sections were never
- * declared here, so a composition that mounted `deviceGrantModule` with
- * `redisDeviceCodeStoreModule` lost both at parse time, before either module's
- * own `configSchema` saw them: `redisDeviceCodeStore.keyPrefix` (the namespace
- * the redis README documents) and every key under `oauth.deviceAuthorization`
- * — `enabled` above all, so the grant the operator switched on stayed off.
+ * its HOCON against it before `buildModules` runs, so an undeclared section
+ * would be lost before either module's own `configSchema` saw it — here
+ * `redisDeviceCodeStore.keyPrefix` (the namespace the redis README documents)
+ * and every key under `oauth.deviceAuthorization`, `enabled` above all.
  *
- * Presence-only, like `redisFederationTokenStore` (#456) and the other
- * `redis*` sections: the defaults stay in the device-grant package's
- * `reference.conf` and in the modules' `configSchema`s. The enum-shaped keys
- * keep their vocabulary so a typo fails here, by name, rather than as a
- * silently-absent declaration downstream.
+ * Presence-only, like the other `redis*` sections: the defaults stay in the
+ * device-grant package's `reference.conf` and in the modules' `configSchema`s.
+ * The enum-shaped keys keep their vocabulary so a typo fails here, by name,
+ * rather than as a silently-absent declaration downstream.
  */
 describe("redisDeviceCodeStore survives AppConfigSchema (#472)", () => {
 	it("keeps the Redis module's key namespace", () => {

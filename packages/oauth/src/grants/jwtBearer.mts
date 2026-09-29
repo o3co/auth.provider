@@ -44,112 +44,35 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 
 /**
- * RFC 7523 JWT-bearer authorization grant, wired to the Store's
- * `authenticateByToken` seam (#301).
+ * RFC 7523 JWT-bearer authorization grant: a pluggable
+ * {@link AssertionVerifier} turns the presented assertion into a subject
+ * handle, and `UserRepository.authenticateByToken` resolves the user.
  *
- * ## The gap this closes
+ * RFC 7523 rather than token exchange: client authentication is optional here
+ * (§3) — a device holding an assertion is typically a public client, which
+ * token exchange refuses — and the RFC leaves assertion key validation out of
+ * scope, so a pluggable verifier conforms.
  *
- * `UserRepository.authenticateByToken(handle)` — "authenticate by an opaque
- * handle and resolve to a subject" — already existed and is service-pluggable,
- * but the only caller was the federation callback. There was no public entry
- * point for *present a device credential → authenticate → get tokens*, so the
- * device-login and anonymous→registered shapes had nowhere to land.
+ * Verification proves possession; the Store decides identity. This grant
+ * never creates, links or writes anything. The token never outlives the
+ * assertion, and no refresh token is issued.
  *
- * ## Why RFC 7523 and not token exchange
- *
- * The issue's option (A) was a custom token-exchange validator, on the reading
- * that it "works today". It does not for this case: the exchange grant answers
- * `401 invalid_client` for `tokenEndpointAuthMethod === "none"` — *"Token
- * Exchange does not support public clients"* — and a device holding a signed
- * assertion is the archetypal public client. RFC 7523 §3 is the standard
- * written for this shape, and says client authentication is **optional**
- * ("JWT authorization grants may be used with or without client authentication
- * or identification"), which is the property token exchange refuses.
- *
- * RFC 7523 also leaves *how* the assertion is validated — "the key used to
- * apply and verify the digital signature" — explicitly out of scope, which is
- * what makes resolving it through a pluggable {@link AssertionVerifier} a
- * conforming choice rather than a deviation.
- *
- * ## Who may use it
- *
- * An authenticated client needs `allowedGrantTypes` to name this grant: the
- * handler declares `requiresExplicitGrantAllowlist`, so an absent allowlist
- * denies at dispatch (#326) rather than admitting by omission, the rule
- * `client_credentials` and the device grant already follow. A caller with no
- * client identity is outside that check by construction.
- *
- * ## The boundary this does not cross
- *
- * Verification proves **possession**; the Store decides **identity**. This
- * grant never inspects who the handle belongs to, never creates or links
- * anything, and never writes. A device that is not linked to a user is the
- * Store's business: it returns whatever subject it wants for that handle,
- * including a stable anonymous one, and continuity across a later signup is a
- * Store data-modelling choice. `UserRepository` stays `authenticate` /
- * `authenticateByToken` (#305's verify-only boundary).
- *
- * ## What `aud` names
- *
- * The client's configured resource audience — `allowedAudiences[0]`, falling
- * back to the client id — the rule the session and device grants apply
- * (#518). A `grantPolicy` may narrow it, within `allowedAudiences`. Without
- * an authenticated client there is no registration to name a resource or a
- * client, and `aud` is the issuer (#520): RFC 9068 §2.2 requires the claim,
- * and the issuer is the one audience every deployment has — the WebAuthn
- * grant mints the same in the same position. Under
- * `oauth.resourceIndicator.enabled` a `resource` parameter derives the
- * audience within `allowedAudiences ∪ {clientId}` and a request the final
- * `aud` cannot represent is `invalid_target`, as in every sibling grant
- * (RFC 8707 §2, #522). An issuer registered with `allowedAudiences` (#525)
- * bounds all of that — the registration's audiences narrowed to the
- * issuer's, the client id only if the issuer admits it — and, with no
- * client, supplies the audience itself. A client and an issuer that admit
- * no audience in common is `invalid_grant`.
- *
- * ## How long the token lives
- *
- * Never longer than the assertion (auth.proxy#90): `expires_in` is
- * `min(oauth.accessToken.defaultExpiresIn, expiresAt − now)`, from the verifier's
- * `expiresAt` — the assertion's `exp` — rounded down, taken at minting. A
- * short-lived assertion yields a short-lived token, and no refresh token is
- * issued, so a client re-exchanges a fresh assertion. A verifier that reports
- * no `expiresAt` asserts a credential with no expiry, and the configured
- * lifetime stands.
- *
- * ## Failure vocabulary
- *
- * - Missing/blank `assertion` → `invalid_request` (RFC 6749 §5.2: a missing
- *   parameter is not a bad grant).
- * - Verifier returns `null`, the Store does not resolve the handle, or the
- *   resolved user fails `oauth.requireEmailVerified` (#297) → `invalid_grant`,
- *   identically. Distinguishing them would let a caller probe for live device
- *   identifiers, or for which of them are linked to a real account. An
- *   assertion with no whole second of lifetime left at minting — past `exp`
- *   inside a verifier's clock tolerance, or run out while the Store answered —
- *   is the same `invalid_grant`, logged as `jwt_bearer_assertion_expired`.
- * - Verifier or Store **throws** → `503 temporarily_unavailable`. An
- *   attestation service or a Store being unreachable is an outage, not a bad
- *   credential, and answering `invalid_grant` would send an operator to
- *   re-enrol a device that was fine — the distinction #408 drew for revocation.
- * - `grantPolicy`, when wired, runs after all of the above and fails closed
- *   (throw → `503`, deny → its own error) — see `evaluateGrantPolicy`. A
- *   widened scope, a `grantedAudience` outside the client's
- *   `allowedAudiences`, or one returned when no authenticated client
- *   supplies that ceiling, is `500 server_error` (#520): the policy exceeded
- *   its authority, the caller did not. Each logs
- *   `jwt_bearer_policy_audience_refused` for the operator who wired it (#521).
- * - A `resource` the issued `aud` cannot represent → `400 invalid_target`
- *   (RFC 8707 §2), under `oauth.resourceIndicator.enabled` only (#522).
- * - The presenting client and the assertion's issuer admit no audience in
- *   common → `invalid_grant`, logged as `jwt_bearer_issuer_audience_mismatch`
- *   (#525): two registrations the operator wrote disagree.
+ * Failures:
+ * - missing `assertion` → `invalid_request` (RFC 6749 §5.2);
+ * - verifier `null`, unresolved handle, unverified email, or an assertion with
+ *   no whole second left → one identical `invalid_grant`, so a caller cannot
+ *   probe which device identifiers exist or are linked to accounts;
+ * - verifier or Store throws → `503 temporarily_unavailable` (an outage is not
+ *   a bad credential);
+ * - a policy that exceeds its authority (widened scope, audience outside the
+ *   ceiling) → `500 server_error`;
+ * - a `resource` the final `aud` cannot represent → `invalid_target`;
+ * - client and assertion issuer admit no common audience → `invalid_grant`.
  */
 /**
- * What the jwt-bearer grant reads (#626 P2); see `AuthorizationGrantDeps`.
- * The verifier and the repository are required here and `optional` on the
- * module, which checks for both before handing over — an enabled grant with
- * either missing is refused at composition, not at the first request.
+ * What the jwt-bearer grant reads. The verifier and repository are required
+ * here; the module checks both before building the grant, so a missing one is
+ * refused at composition, not at the first request.
  */
 export type JwtBearerGrantDeps = Pick<
 	GrantDependencies,
@@ -159,24 +82,18 @@ export type JwtBearerGrantDeps = Pick<
 
 export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => {
 	const { config, keyStore, assertionVerifier, userRepository } = deps;
-	// #297: deployment config, resolved once at construction like the session
-	// grant does — `resolveOAuthOptions` owns the defensive read.
+	// Resolved once at construction; `resolveOAuthOptions` owns the defensive read.
 	const { requireEmailVerified } = resolveOAuthOptions(config);
-	// The lifetime it mints with, read once, when the grant is built: a
-	// configuration built by hand that the resolver refuses is a composition
-	// fault, refused before any request — read per request, it was refused
-	// only after the verifier had recorded an ID-JAG's `jti`, and after client
-	// authentication had spent whatever it spends.
+	// Read once at construction, so an invalid hand-built configuration is
+	// refused before any request rather than after the verifier has recorded
+	// an ID-JAG's `jti`.
 	const { defaultExpiresIn } = resolveAccessTokenLifetime(config);
 
 	return {
-		// #326: a device credential is a standing capability of a registration,
-		// not a per-user ceremony — like `client_credentials` and the device
-		// grant, a client registered before `allowedGrantTypes` existed must
-		// not acquire this grant by omission. Dispatch enforces the denial
-		// before `handle` runs; an unauthenticated caller (RFC 7523 §3 makes
-		// client authentication optional) has no allowlist to consult and is
-		// unaffected.
+		// A device credential is a standing capability of a registration: an
+		// authenticated client must list this grant in `allowedGrantTypes`
+		// (enforced at dispatch). A caller with no client (RFC 7523 §3) has no
+		// allowlist to consult.
 		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const rawAssertion = ctx.body.assertion;
@@ -195,8 +112,8 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			// caller's string into a handle — the request never supplies one.
 			let verified: Awaited<ReturnType<AssertionVerifier["verify"]>>;
 			try {
-				// #525: the verifier learns who is presenting, so an issuer's terms
-				// can admit some clients and not others.
+				// The verifier learns who is presenting, so an issuer's terms can
+				// admit some clients and not others.
 				verified = await assertionVerifier.verify(rawAssertion, {
 					clientId: ctx.authenticatedClient?.clientId,
 				});
@@ -263,16 +180,9 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				};
 			}
 
-			// #297: this grant resolves a user and mints for them, which makes it
-			// the third point (after `/authorize` and the `session` grant) that
-			// holds the user at issuance and therefore the third the gate has to
-			// cover. Without it a deployment requiring a verified email would
-			// find the browser paths gated and the device path wide open.
-			//
-			// Same answer as an unknown handle, on purpose: a distinct
-			// description would tell a caller that this handle resolves to a
-			// real, merely unverified, account. The log line is for the
-			// operator who turned the gate on and now sees devices refused.
+			// The email gate covers every path that mints for a user. Same answer
+			// as an unknown handle: a distinct one would reveal that the handle
+			// resolves to a real, unverified account.
 			if (requireEmailVerified && !isEmailVerified(user)) {
 				deps.logger?.info({ kind: assertionVerifier.kind }, "jwt_bearer_email_not_verified");
 				return {
@@ -290,17 +200,15 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			const client = ctx.authenticatedClient;
 			const clientId = client?.clientId;
 
-			// RFC 8707 (#522): read under the flag alone, as `client_credentials`
-			// does — the enforcement below does not depend on a policy being
+			// RFC 8707: read under the flag alone, whether or not a policy is
 			// wired. Flag off, the parameter is ignored (RFC 6749 §3.2).
 			const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;
 
-			// #525: the assertion issuer's terms. When its registry entry names
-			// audiences, they bound the issued `aud` whatever chose it, and with
-			// no client they are the source the registration would otherwise be.
+			// The assertion issuer's registered audiences, when it has any, bound
+			// the issued `aud` from every source.
 			const issuerAudiences = verified.audience;
 			const withinIssuer = (a: string): boolean =>
 				issuerAudiences === undefined || issuerAudiences.includes(a);
@@ -312,10 +220,8 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				: undefined;
 			const audienceCeiling = clientAudiences ?? issuerAudiences;
 
-			// CP-18: the policy gate every other minting path applies, after
-			// the identity gates and the scope ceilings so it sees a resolved
-			// subject and an already-narrowed request. Consulted whenever it is
-			// wired, as the refresh grant and `/authorize` do.
+			// The grant policy runs after the identity gates and scope ceilings, so
+			// it sees a resolved subject and an already-narrowed request.
 			let policyGrantedAudience: string | null = null;
 			if (deps.grantPolicy) {
 				const policy = await evaluateGrantPolicy(
@@ -334,24 +240,13 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;
-				// #518: the audience ceiling is the client's `allowedAudiences`,
-				// the same one `client_credentials` and `refresh_token` hold a
-				// policy to — narrowed to what the assertion's issuer admits
-				// (#525). Without an authenticated client the issuer's own list
-				// is the ceiling, and with neither there is none at all: then the
-				// answer is the one `resolveScope` gives a scope with nothing to
-				// bound it, refused, not granted — dropping the audience silently,
-				// what this grant did before, let a policy believe it had narrowed
-				// a token that carries no `aud`. Both refusals are
-				// `boundPolicyAudience`'s (#520).
+				// A policy audience is held to `audienceCeiling`; with no ceiling at
+				// all it is refused rather than dropped, so a policy never believes
+				// it narrowed a token that carries no `aud`.
 				const policyAudience = boundPolicyAudience(policy.decision, audienceCeiling);
 				if (!policyAudience.ok) {
-					// #521: an operator-triggered refusal logs, as
-					// `jwt_bearer_email_not_verified` does, so the operator who
-					// wired the policy can see why devices are being refused.
-					// The description quotes what the policy returned, which may
-					// be the caller's `resource` forwarded to it: sanitised and
-					// capped, as the token route records a grant's description.
+					// Logged for the operator who wired the policy. The description may
+					// quote the caller's `resource`, so it is sanitised and capped.
 					deps.logger?.warn(
 						{
 							kind: assertionVerifier.kind,
@@ -364,31 +259,13 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				policyGrantedAudience = policyAudience.audience;
 			}
 
-			// #518: the audience rule the session and device grants apply — the
-			// client's configured resource audience, falling back to the client
-			// id. Minting the client id unconditionally, as this grant did, gave
-			// one public client `aud: "https://api.example"` from `session` and
-			// `aud: "mobile-app"` from here, so a resource server pinning its own
-			// identifier accepted the first token and rejected the second for the
-			// same user, client and scopes. A policy-narrowed audience, validated
-			// above, wins over the default. Without an authenticated client there
-			// is no registration to name a resource or a client, and `aud` is the
-			// issuer (#520): RFC 9068 §2.2 requires the claim, a verifier that pins
-			// its audience refuses a token without one, and the issuer is what the
-			// WebAuthn grant mints in the same position.
-			//
-			// RFC 8707 §2 (#522): when a `resource` was requested and no policy
-			// narrowed an audience, derive `aud` from the request — bounded by
-			// `allowedAudiences ∪ {clientId}`, the ceiling a policy audience is
-			// held to — instead of minting the default and then rejecting it.
-			// Without a client the bound is empty, nothing derives, and the check
-			// below refuses: naming a resource is not a registration.
-			//
-			// #525: every source is bounded by the assertion issuer's terms when
-			// it has any — the registration's audiences narrowed to those the
-			// issuer admits, the client id only if the issuer admits it — and
-			// with no client the issuer's first audience stands in for the
-			// registration.
+			// Audience, first match wins: a policy-narrowed audience; one derived
+			// from `resource` (RFC 8707 §2) within `allowedAudiences ∪ {clientId}`;
+			// the client's `allowedAudiences[0]`, else its client id — the rule
+			// the session and device grants use, so a client gets one `aud` across
+			// grants; with no client, the issuer's first audience, else this
+			// server's issuer (RFC 9068 §2.2 requires the claim). Without a client
+			// nothing derives from `resource`, and the check below refuses.
 			const audience =
 				policyGrantedAudience ??
 				deriveAudienceFromResources(
@@ -406,11 +283,8 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				issuerAudiences !== undefined &&
 				(audience === null || !issuerAudiences.includes(audience))
 			) {
-				// The client and the issuer — two registrations the operator
-				// wrote — admit no audience in common, so no token can name one
-				// both would stand behind. Logged for the operator, refused as a
-				// grant the assertion cannot back, with a description that says
-				// which two registrations to compare.
+				// The client and issuer registrations admit no common audience; the
+				// description says which two registrations to compare.
 				deps.logger?.warn(
 					{ kind: assertionVerifier.kind, issuer: verified.issuer, clientId },
 					"jwt_bearer_issuer_audience_mismatch",
@@ -425,10 +299,8 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 				};
 			}
 
-			// RFC 8707 §2 (#522): the token's audience MUST be the resource the
-			// caller asked for. Runs after the audience is final so it covers
-			// every derivation — policy, the request, the registration fallback
-			// and the issuer.
+			// RFC 8707 §2: the audience must represent the requested resource.
+			// Checked once the audience is final, covering every source.
 			const unrepresented = unrepresentedResources(requestedResource, audience);
 			if (unrepresented.length > 0) {
 				return {
@@ -447,12 +319,9 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			// `token_type` is read off it by `generateTokenResponse`.
 			const confirmation = ownedConfirmation(ctx.tokenBinding);
 
-			// auth.proxy#90: the token never outlives the assertion — the rule
-			// token exchange holds a subject token to (RFC 8693 §2.2.1). A flat
-			// configured lifetime let a two-minute ID-JAG buy an hour-long
-			// token, so the expiry the issuing authority set stopped bounding
-			// anything once exchanged. Taken here, at minting, rather than at
-			// verification: the Store and the policy run in between.
+			// The token never outlives the assertion (as RFC 8693 §2.2.1 holds a
+			// subject token). Capped at minting, not at verification: the Store
+			// and the policy run in between.
 			let expiresIn = defaultExpiresIn;
 			// One issuance instant for both the cap and the token. Read twice,
 			// a second boundary between the reads would stamp `exp` a second
@@ -470,18 +339,11 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 					typeof expiresAt === "number" && Number.isFinite(expiresAt)
 						? Math.floor(expiresAt - nowSeconds)
 						: Number.NaN;
-				// `<= 0` is the assertion already past `exp` — admitted inside a
-				// verifier's clock tolerance, or run out while the Store answered
-				// — and the one expiring within this second; either would mint a
-				// token dead on arrival. Written `!(> 0)` so the malformed case
-				// (NaN) takes the same branch.
-				//
-				// The uniform description, not token exchange's "has expired":
-				// the bundled verifier already folds expiry into its `null`, so a
-				// distinct answer would fire only for an assertion that got this
-				// far — past the Store and the email gate — and tell its holder
-				// the handle resolves to a real account, the probe every refusal
-				// above is worded to deny. The log line is for the operator.
+				// `<= 0`: already past `exp` (within a verifier's clock tolerance,
+				// or lapsed while the Store answered) or expiring this second — a
+				// token dead on arrival. `!(> 0)` also catches NaN. The uniform
+				// description, not "has expired": a distinct answer this far in
+				// would reveal that the handle resolves to a real account.
 				if (!(remaining > 0)) {
 					deps.logger?.info(
 						{ kind: assertionVerifier.kind, issuer: verified.issuer },
@@ -529,22 +391,13 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 
 /**
  * Intersect what the request asks for, what the assertion authorizes, and what
- * the client is allowed.
+ * the client is allowed. An absent ceiling constrains nothing; a requested
+ * scope outside a present ceiling is `invalid_scope`, not silently dropped.
  *
- * Each is a ceiling, and an absent one constrains nothing rather than granting
- * everything — the distinction #396 drew for `defaultScopes`. A requested scope
- * outside any present ceiling is `invalid_scope` rather than silently dropped,
- * so a caller learns their token is narrower than they asked for.
- *
- * An **omitted** scope is the case #396 is about, and it is answered the way
- * `client_credentials` answers it: an authenticated client's *declared*
- * `defaultScopes` — never its whole allowlist — filtered by that allowlist and
- * by the assertion. A client with an allowlist and no declared default gets
- * `invalid_scope`; one with an empty allowlist keeps the empty grant, since
- * there is nothing to over-grant. Without an authenticated client there is no
- * registration to declare a default, so the assertion's own `scope` claim —
- * the issuing authority's statement — is what an omitted request receives,
- * and nothing at all when it names none.
+ * An omitted scope gets an authenticated client's declared `defaultScopes`
+ * (never its whole allowlist), or `invalid_scope` when it declares none and
+ * has a non-empty allowlist. Without a client it gets the assertion's `scope`
+ * claim, or nothing.
  */
 function resolveScope(
 	ctx: GrantContext,
@@ -582,13 +435,9 @@ function resolveScope(
 
 	if (requested.length === 0) {
 		if (client) {
-			// #396, mirrored from `client_credentials`: an omitted scope draws
-			// on the client's DECLARED default, never on the whole allowlist —
-			// "forgot to send scope" must not be the maximum grant. The
-			// assertion stays a ceiling on that default (`within`), and the
-			// allowlist filter is applied even so: schema-validated
-			// registrations are ⊆ by boot, custom repositories are under no
-			// such obligation.
+			// The DECLARED default, never the whole allowlist: "forgot to send
+			// scope" must not be the maximum grant. The allowlist filter still
+			// applies because custom repositories are not schema-validated.
 			const allowed = client.allowedScopes ?? [];
 			if (client.defaultScopes !== undefined) {
 				return { scopes: client.defaultScopes.filter((s) => allowed.includes(s) && within(s)) };
@@ -600,20 +449,13 @@ function resolveScope(
 				errorDescription: "scope is required: this client declares no defaultScopes",
 			};
 		}
-		// No client: the assertion's issuer is the only authority present, and
-		// its `scope` claim is the declared default. With none, the token gets
-		// nothing — there is no allowlist to draw on and inventing one would be
-		// the over-grant #396 removed.
+		// No client: the assertion's `scope` claim is the only declared default;
+		// with none, the token gets nothing.
 		return { scopes: assertionScope ?? [] };
 	}
 
-	// A request with NO ceiling to bound it is refused, not granted.
-	//
-	// `within` is `ceilings.every(...)`, and `[].every(...)` is `true` — so
-	// without this branch a caller with an assertion that names no scope and no
-	// authenticated client would receive whatever scope they asked for, which
-	// is the over-grant #396 removed elsewhere and which the paragraph above
-	// claims not to do. Vacuous truth, in the one place it is most expensive.
+	// With no ceiling, `within` is vacuously true (`[].every`) and would grant
+	// whatever was asked: refuse instead.
 	if (ceilings.length === 0) {
 		return {
 			status: 400,

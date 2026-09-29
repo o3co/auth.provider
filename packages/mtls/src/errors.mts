@@ -17,15 +17,10 @@
 import { lineSafeText } from "@o3co/auth-provider-core";
 
 /**
- * Granular internal reason code for an mTLS certificate validation failure.
- *
- * The wire-level error code is `"invalid_certificate"` for every reason but
- * `revocation_unavailable`, which is `"temporarily_unavailable"` (see
- * {@link MtlsError}). This reason field is for internal audit emission only —
- * it MUST NOT be forwarded to the client verbatim (the wire
- * `error_description` may contain a safe, user-facing variant).
- *
- * Per Wave 2 Phase 3 spec §5.5 + §3.4.
+ * Granular internal reason code for an mTLS certificate validation failure,
+ * for audit emission only: it MUST NOT be forwarded to the client verbatim
+ * (the wire `error_description` may carry a safe variant). The wire code is
+ * on {@link MtlsError}.
  */
 export type MtlsReasonCode =
 	| "malformed_header"
@@ -37,43 +32,35 @@ export type MtlsReasonCode =
 	| "trusted_cas_unconfigured"
 	| "tls_peer_unavailable"
 	/**
-	 * A forwarded-certificate header arrived on a connection whose peer is not
-	 * in `oauth.mtls.trusted-proxies` (issue #280). Either an attacker is
-	 * asserting a client identity by setting the header directly, or the
-	 * deployment's proxy address is missing from the allowlist — the audit
-	 * record carries the observed peer address so the two are separable.
+	 * A forwarded-certificate header arrived from a peer not in
+	 * `oauth.mtls.trusted-proxies`: either an attacker setting the header
+	 * directly or a proxy missing from the allowlist. The audit record carries
+	 * the observed peer address so the two are separable.
 	 */
 	| "untrusted_proxy"
 	/**
 	 * `full-pki` under `on-unavailable = "reject"` could not determine a
-	 * certificate's revocation status because a CRL distribution point or an
-	 * OCSP responder did not answer usefully — unreachable, timed out, an HTTP
-	 * error, an answer that is not DER, a stale list. The server's outage, not
-	 * a verdict on the certificate: core's dispatcher answers it `503` and logs
-	 * it once, at error.
+	 * revocation status because a CRL distribution point or OCSP responder did
+	 * not answer usefully (unreachable, timed out, HTTP error, not DER, stale).
+	 * The server's outage, not a verdict: core answers it `503` and logs it
+	 * once, at error.
 	 */
 	| "revocation_unavailable";
 
 /**
- * Thrown by the mTLS cert extraction and validation pipeline for any
- * certificate validation failure — core's `TokenBindingRefusal`.
+ * Thrown by the mTLS extraction and validation pipeline for any certificate
+ * validation failure — core's `TokenBindingRefusal`.
  *
- * Wire-level `code` is `"invalid_certificate"` for a verdict on the
- * certificate. For `revocation_unavailable` — the server could not reach a
- * verdict — it is `"temporarily_unavailable"`, with `unavailable` set: core's
- * dispatchers answer that `503` with no challenge, and log it once at error
- * (`token_binding_unavailable`, `protected_resource_binding_unavailable`).
- * The `reason` field carries a granular sub-classification for audit
- * emission; it must never reach the wire verbatim (use a safe error
- * description instead).
+ * `code` is `"invalid_certificate"` for a verdict on the certificate. For
+ * `revocation_unavailable` (no verdict reachable) it is
+ * `"temporarily_unavailable"` with `unavailable` set: core answers that `503`
+ * with no challenge and logs it once at error. `reason` is for audit only and
+ * never reaches the wire verbatim.
  *
- * The message is this package's own fixed text. When a parser refused the
- * material, its error is the standard `cause` — never copied into the
- * message, since a parser's message is its reading of what the client sent.
- * An outage's `cause` is an {@link MtlsRevocationUnavailableError}, one member
- * per revocation source that could not be used.
- *
- * Per Wave 2 Phase 3 spec §5.5 + design principle §3.4.
+ * The message is this package's own fixed text. A parser's error goes in
+ * `cause`, never into the message, since it is the parser's reading of what
+ * the client sent. An outage's `cause` is an
+ * {@link MtlsRevocationUnavailableError}.
  */
 export class MtlsError extends Error {
 	readonly code: "invalid_certificate" | "temporarily_unavailable";
@@ -103,17 +90,14 @@ export class MtlsError extends Error {
 }
 
 /**
- * One revocation source — a CRL distribution point or an OCSP responder — that
- * could not be used, as a member of an {@link MtlsRevocationUnavailableError}:
- * `<source> <url>: <reason> — <detail>; for <subject>`, all this package's own
- * words, with the library's error, when one threw, as its `cause`. One error
- * per source, so a log line's cap on a projected message (core's
- * `loggableError`, 256 characters) cuts no other source's account; the
- * certificate it was asked about comes last, so a long subject is what the
- * cap cuts, never the URL or the reason. The URL, the detail and the subject
- * are the certificate's or the source's own text (a distribution point, a
- * responder's Content-Type): each is on one line and capped (core's
- * `lineSafeText`), in the message and in the fields alike.
+ * One revocation source (CRL distribution point or OCSP responder) that could
+ * not be used, as a member of an {@link MtlsRevocationUnavailableError}:
+ * `<source> <url>: <reason> — <detail>; for <subject>`, with the library's
+ * error, when one threw, as `cause`. One error per source, so core's
+ * `loggableError` cap (256 characters) cuts no other source's account; the
+ * subject comes last so the cap cuts it, never the URL or the reason. URL,
+ * detail and subject are foreign text, so each is on one line and capped
+ * (`lineSafeText`) in the message and the fields alike.
  */
 export class MtlsRevocationSourceError extends Error {
 	readonly source: "crl" | "ocsp";
@@ -148,16 +132,12 @@ export class MtlsRevocationSourceError extends Error {
 }
 
 /**
- * The cause of a `revocation_unavailable` refusal: an AggregateError whose
- * members are the {@link MtlsRevocationSourceError}s — one per source that
- * could not be used, for every certificate on the path, leaf first and each
- * certificate's OCSP responders before its CRL distribution points — and
- * whose own message is short, naming each certificate whose status could not
- * be determined. A certificate the CRL decided under `revocation.mode =
- * "both"` after its responder failed has its responder among the members
- * too: that failure is part of the same outage. The dispatcher's outage line
- * carries its projection: the message, and the first five members with their
- * library errors, the rest counted in `aggregateErrorsOmitted`.
+ * The cause of a `revocation_unavailable` refusal. Its members are the
+ * {@link MtlsRevocationSourceError}s, one per unusable source for every
+ * certificate on the path, leaf first and OCSP before CRL per certificate;
+ * its message names each certificate whose status could not be determined.
+ * Under `revocation.mode = "both"`, a failed responder is a member even when
+ * the CRL then decided that certificate: it is part of the same outage.
  */
 export class MtlsRevocationUnavailableError extends AggregateError {
 	/** The subjects of the certificates whose status could not be determined, leaf first, each on one line. */
@@ -171,10 +151,7 @@ export class MtlsRevocationUnavailableError extends AggregateError {
 }
 
 /**
- * The wire-level OAuth error codes emitted by Phase 3 mTLS failures:
- * `"invalid_certificate"` for a verdict on the certificate, and
- * `"temporarily_unavailable"` for a revocation source that could not answer
- * — exported per spec §5.1 so consumers can name the wire-side surface
- * explicitly when constructing error envelopes without importing the class.
+ * The wire-level OAuth error codes of mTLS failures, so consumers can name
+ * them in error envelopes without importing the class.
  */
 export type MtlsErrorCode = MtlsError["code"];

@@ -15,23 +15,16 @@
  */
 
 /**
- * How a reader holds the `oauthTokenSettings` a composition holds before it
- * reads a member (#728).
+ * Checks the `oauthTokenSettings` a composition holds before a reader reads
+ * a member.
  *
- * A reader reads every member from a slot the composition holds, and the
- * configuration only when it holds none: never member by member, which
- * would mix two sources in one reading — the slot's issuer beside the
- * configuration's lifetime. Read that way, a member a host's slot lacks is
- * `undefined`, and for a switch that is a quiet `false`:
- * `requireEmailVerified` off, `legacyTypAccept` left to a validator's
- * default. So the slot is held first to what its readers read — the rules
- * of its contract (`oauthTokenSettingsContract`) for each member — and a
- * member it lacks or gets wrong refuses, naming it.
- *
- * The oauth module's provider keeps the contract, so for it this never
- * refuses; it is there for a slot a host fills by hand. It checks what is
- * read, not what the contract adds for its providers: a member no reader
- * reads is left alone, and whether the value is frozen is the contract's.
+ * Readers take every member from the slot when there is one, and from the
+ * configuration only when there is none; never member by member, which
+ * would mix two sources in one reading. A member the slot lacks would then
+ * read `undefined`, a quiet `false` for a switch, so each member read is
+ * held to its contract rule (`oauthTokenSettingsContract`) and a missing or
+ * wrong one refuses, naming it. The oauth module's provider always passes;
+ * this is for a slot a host fills by hand.
  */
 
 import {
@@ -85,14 +78,13 @@ const readMember = (read: () => unknown): unknown => {
 
 /**
  * The first token lifetime `settings` names beyond the one core resolves
- * from `config` — the access-token maximum, then the refresh-token lifetime —
- * or `undefined` when neither is. A member that is not a number is not
- * compared, and one whose read throws counts as none. The configured
- * lifetimes size retention: the default refresh-token family modules keep a
- * revoked family, and the subject revocation boundary lasts, only that long,
- * and neither reads the slot, so a longer slot lifetime would mint a token
- * that outlives the record revoking it. A configuration that resolves no
- * lifetime is refused by its resolver, naming the key. Internal to core.
+ * from `config` (access-token max, then refresh-token), or `undefined`. A
+ * non-number member is not compared; one whose read throws counts as none.
+ * The configured lifetimes size retention (revoked refresh-token families,
+ * the subject revocation boundary) and neither reads the slot, so a longer
+ * slot lifetime would mint a token that outlives the record revoking it.
+ * The resolver refuses a configuration that resolves no lifetime, naming
+ * the key. Internal to core.
  */
 export function lifetimeBeyondConfiguration(
 	settings: object,
@@ -163,18 +155,17 @@ const readOnce = (member: string, read: () => unknown): unknown => {
 };
 
 /**
- * The `oauthTokenSettings` a composition holds, as a snapshot its readers
- * read: each member a reader reads, read from `value` exactly once, held to
- * what its readers read — a canonical issuer, the access-token default and
- * max each a lifetime with the default not above the max, the refresh-token
- * lifetime a lifetime, every switch a boolean, and neither lifetime longer
- * than the one core resolves from `config`, whoever provides the slot — and
- * answered frozen at every level. What is validated is what is answered: a
- * getter that answers otherwise on a later read, or a host that changes its
- * object afterwards, changes nothing a reader holds. A member no reader reads
- * is neither refused nor carried. A `RangeError` names the first member that
- * does not hold, with both values for a lifetime, or whose read throws, or
- * names the slot when it holds no settings object at all.
+ * The `oauthTokenSettings` a composition holds, as a snapshot frozen at
+ * every level: each member a reader reads, read from `value` exactly once,
+ * held to its contract rule, and no lifetime longer than the one core
+ * resolves from `config`, whoever provides the slot. What is validated is
+ * what is answered: a getter that changes its answer, or a host that
+ * changes its object later, changes nothing a reader holds. Members no
+ * reader reads are neither checked nor carried.
+ *
+ * @throws RangeError naming the first member that does not hold (both
+ *   values for a lifetime) or whose read throws, or the slot when it holds
+ *   no settings object.
  */
 export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthTokenSettings {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {

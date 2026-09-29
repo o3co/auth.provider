@@ -22,54 +22,36 @@ export const PKCE_METHOD_S256 = "S256";
 export const PKCE_METHOD_PLAIN = "plain";
 
 /**
- * What an absent `code_challenge_method` means.
- *
- * RFC 7636 §4.3 defines the parameter as OPTIONAL and defaulting to `plain`,
- * so absence is a *request for plain* and is resolved as one here. Since
- * `plain` is not in a client's method list unless the operator opted that
- * client in, an omitted method is refused at the request boundary.
- *
- * Reading absence as `S256` instead would be worse, not stricter: a client
- * that computed its challenge the RFC 7636 way (challenge = verifier) would
- * be accepted at `/authorize` and then fail the digest comparison at
- * `/token` — a code doomed at redemption, which is exactly the class of bug
- * #273 exists to remove.
+ * What an absent `code_challenge_method` means: a request for `plain` (RFC
+ * 7636 §4.3: OPTIONAL, defaulting to `plain`), refused unless the client
+ * opted into `plain`. Reading absence as `S256` would accept at `/authorize`
+ * a client whose challenge is its verifier and fail it at `/token`: a code
+ * doomed at redemption.
  */
 export const PKCE_METHOD_ABSENT_DEFAULT = PKCE_METHOD_PLAIN;
 
 const S256_ONLY: readonly string[] = Object.freeze([PKCE_METHOD_S256]);
 
 /**
- * The resolved PKCE policy — the ONE object `/authorize` (through
+ * The resolved PKCE policy: the one object `/authorize` (through
  * `ResolvedOAuthOptions.pkce`) and `/token` (through the authorization grant's
- * own `resolveOAuthOptions` call) both read.
- *
- * Before #273 there were three sources of truth: `pkce.required`,
- * `pkce.supportedMethods` / `pkce.defaultMethod`, and the legacy `requireS256`
- * boolean that only the token endpoint honoured. `/authorize` could therefore
- * mint a `plain` code that `/token` refused, and a confidential client could
- * skip PKCE altogether.
+ * own `resolveOAuthOptions` call) both read, so they cannot disagree.
  */
 export interface ResolvedPkceOptions {
 	/**
-	 * Always `true`, and typed as the literal so no code path can branch on a
-	 * `false` that cannot occur.
-	 *
-	 * OAuth 2.1 §4.1.1 and RFC 9700 §2.1.1 require PKCE of **every**
+	 * Always `true`, typed as the literal so nothing can branch on `false`.
+	 * OAuth 2.1 §4.1.1 and RFC 9700 §2.1.1 require PKCE of every
 	 * authorization-code client, confidential ones included: the client secret
-	 * proves who is redeeming the code, not that the redeemer is the party the
-	 * code was issued to. Without a verifier, an authorization code captured
-	 * from the redirect (browser history, referrer, a compromised or
-	 * open-redirecting hop) is replayable by anyone who can also authenticate
-	 * as the client — which includes the client's own compromised backend and
-	 * every mix-up/injection attack RFC 9700 §4.5 catalogues.
+	 * proves who redeems the code, not that the redeemer is the party it was
+	 * issued to. Without a verifier, a code captured from the redirect is
+	 * replayable by anyone who can also authenticate as the client, including
+	 * through the mix-up and injection attacks of RFC 9700 §4.5.
 	 */
 	readonly required: true;
 	/**
-	 * The methods admitted for a client that carries no explicit opt-in:
-	 * `["S256"]`, always. This is deliberately NOT operator-tunable — see
-	 * `resolvePkceOptions`. Per-client widening goes through
-	 * `pkceMethodsForClient`.
+	 * The methods for a client without an opt-in: `["S256"]`, always, and
+	 * not operator-tunable (see `resolvePkceOptions`). Per-client widening
+	 * goes through `pkceMethodsForClient`.
 	 */
 	readonly supportedMethods: readonly string[];
 }
@@ -89,73 +71,44 @@ export interface PkceClientView {
 }
 
 /**
- * The challenge methods this client may use: the resolved policy's baseline,
- * widened by the client's own opt-in.
+ * The challenge methods this client may use: the policy's baseline, widened
+ * by the client's own opt-in. Both endpoints call this with the same policy
+ * and registration, so a code minted by `/authorize` is redeemable at `/token`
+ * by construction.
  *
- * Both endpoints call this with the SAME resolved `policy` — `/authorize`
- * from `ResolvedOAuthOptions.pkce`, `/token` from its own
- * `resolveOAuthOptions` call over the same config — and with the same client
- * registration. That is what makes a code minted by `/authorize` redeemable
- * at `/token` by construction rather than by two implementations agreeing.
- *
- * `plain` is reachable **only** here, and only for a registration that carries
- * a literal `allowPlainPkce: true`. There is no global default and no
- * server-wide allowlist that can produce it, so admitting `plain` is always a
- * named, per-client, operator decision that is visible in the client record —
- * not a deployment-wide setting that quietly covers every client at once.
- *
- * The strict `=== true` matches the `firstParty` / `requireEmailVerified`
- * convention: a YAML or environment value that never passed a boolean schema
- * (`"true"`, `1`) must not widen a security policy.
+ * `plain` is reachable only here, for a registration with a literal
+ * `allowPlainPkce: true`: always a per-client operator decision visible in
+ * the client record, never a deployment-wide setting. The strict `=== true`
+ * (as for `firstParty` / `requireEmailVerified`) keeps a value that never
+ * passed a boolean schema (`"true"`, `1`) from widening a security policy.
  */
 export const pkceMethodsForClient = (
 	policy: ResolvedPkceOptions,
 	client: PkceClientView | null | undefined,
 ): readonly string[] =>
-	// The opt-in is additive: it appends `plain` to whatever baseline the
-	// policy admits, so the widening stays correct if that baseline ever
-	// changes. Derived from `policy` on both paths rather than returning a
-	// second module constant — that is what makes "/authorize and /token read
-	// one object" true of the widened list as well as the baseline.
+	// Appended to `policy`'s baseline rather than a second constant, so the
+	// widened list also comes from the one object both endpoints read.
 	client?.allowPlainPkce === true
 		? Object.freeze([...policy.supportedMethods, PKCE_METHOD_PLAIN])
 		: policy.supportedMethods;
 
 /**
- * The `pkce` config blocks already reported, keyed by the identity of the
- * block itself.
- *
- * `resolveOAuthOptions` runs more than once per boot — `createOAuthRouter`
- * resolves it for the routers and `createAuthorizationGrant` resolves it
- * again for the token endpoint. That duplication is the whole point (it is
- * what makes both endpoints read one policy), but it meant the "your config
- * is inert" line fired once per *resolution* rather than once per
- * deployment.
- *
- * A module-level boolean would fix the duplicate and break something worse: a
- * process that composes several deployments — every test file in this
- * package, and any embedder building more than one AS — would warn for the
- * first stale config and then stay silent for every other one, so a genuinely
- * misconfigured deployment could go unreported because an unrelated one was
- * resolved first. Keying on the config object means "already reported THIS
- * config", so one boot warns once and a second, differently-misconfigured
- * config still warns.
- *
- * A `WeakSet` rather than a `Set` so a discarded config is collectable and a
- * long-lived process composing many routers does not retain them; entries are
- * only ever objects the caller already holds. It also needs no reset hook:
- * test fixtures are distinct objects, so suites are isolated by construction
- * rather than by remembering to clear shared state.
+ * The `pkce` config blocks already reported, keyed by the block's identity.
+ * `resolveOAuthOptions` runs more than once per boot (for the routers and for
+ * the token endpoint), and the inert-config line should fire once per config.
+ * A module-level flag would silence every config after the first in a process
+ * that composes several deployments (tests, embedders), so a misconfigured
+ * one could go unreported. A `WeakSet` lets a discarded config be collected
+ * and needs no reset between test fixtures.
  */
 const reportedPkceConfigs = new WeakSet<object>();
 
 /**
- * Keys that used to shape PKCE policy and no longer do. Order is the order
- * they are reported in, so the warning reads the same for a given config.
+ * Keys that no longer shape PKCE policy, in the order they are reported, so
+ * the warning reads the same for a given config.
  */
 const INERT_PKCE_KEYS: readonly string[] = Object.freeze([
-	// Legacy boolean (B-7 era). Only `/token` honoured it, and it meant
-	// "narrow supportedMethods to S256" — which is now unconditional.
+	// Meant "S256 only", which is now unconditional.
 	"requireS256",
 	// Superseded by `ResolvedPkceOptions.required`, which cannot be false.
 	"required",
@@ -167,42 +120,27 @@ const INERT_PKCE_KEYS: readonly string[] = Object.freeze([
 
 /**
  * Resolves the PKCE policy from the untyped `oauth.grants.authorization_code.pkce`
- * block — which is to say: ignores it, and says so.
+ * block, which is to say: ignores it, and says so.
  *
- * Every knob that block used to carry could only ever *weaken* the policy
- * (turn PKCE off, or admit `plain` server-wide), so #273 removes them rather
- * than re-validating them. A config that still sets one is not a boot failure:
- * the stale value is inert and the resulting behaviour is strictly stronger
- * than what the operator asked for, so failing closed would take a deployment
- * down over a key that is now harmless. It is warned about instead, once per
- * config, at router composition — the same altitude `resolveOAuthOptions`
- * resolves everything else at, so an operator sees one boot-time line rather
- * than one per request or one per resolution (see `reportedPkceConfigs`).
- *
- * The previous `resolvePkceSupportedMethods` helper (TS-4) is gone with the
- * knob it validated: its whole job was to stop an operator-typed
- * `supportedMethods` array from silently widening the allowlist, and there is
- * no longer an operator-typed allowlist to widen.
+ * Every key that block could carry could only weaken the policy (turn PKCE
+ * off, or admit `plain` server-wide), so none is honoured. A config that sets
+ * one still boots, since the result is strictly stronger than asked, and is
+ * warned about once per config at router composition (see
+ * `reportedPkceConfigs`).
  */
 export const resolvePkceOptions = (
 	pkceConfig: Record<string, unknown> | undefined,
 	logger?: Logger,
 ): ResolvedPkceOptions => {
-	// `logger &&` is load-bearing, not a shortcut. Several call sites resolve
-	// without one — `grants/session.mts` reads its own knob through
-	// `resolveOAuthOptions(config)` — and marking the config there would let a
-	// logger-less resolution consume the single warning before the router's
-	// resolution ever got to emit it, purely on module construction order.
-	// Mark only when something was actually reported.
+	// `logger &&` is load-bearing: a logger-less resolution (e.g.
+	// `grants/session.mts`) must not mark the config and so consume the
+	// router's single warning, depending on construction order.
 	if (logger && pkceConfig && !reportedPkceConfigs.has(pkceConfig)) {
 		const ignoredKeys = INERT_PKCE_KEYS.filter((key) => pkceConfig[key] !== undefined);
 		if (ignoredKeys.length > 0) {
-			// Marked only on the branch that has something to report: a config
-			// with nothing stale in it stays unmarked, so an embedder that
-			// mutates a config between resolutions is still told when it
-			// becomes misconfigured.
+			// Marked only when something is reported, so a config mutated into
+			// misconfiguration later is still reported.
 			reportedPkceConfigs.add(pkceConfig);
-			// Object-first call shape per the F5 D-4 Logger convention.
 			logger.warn(
 				{ ignoredKeys },
 				// The message names the outcome, not the keys, so an operator

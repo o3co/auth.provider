@@ -16,14 +16,13 @@
 
 /*
  * The in-process MFA transaction store holds at most `maxEntries`
- * transactions. A transaction is opened at every password login that needs a
- * second factor and at every step-up or enrollment a session starts, and one
- * the user abandons is never presented again, so only its expiry reclaims it:
- * the sweep bounds the store by time, and the login rate — anyone's, where
- * the Store lets anyone sign up — decides its size. At the cap it reclaims
+ * transactions. One is opened at every password login that needs a second
+ * factor and every step-up or enrollment a session starts, and an abandoned
+ * one is reclaimed only by its expiry, so the login rate (anyone's, where the
+ * Store lets anyone sign up) decides the store's size. At the cap it reclaims
  * what has expired, then refuses a new transaction as a store fault (the MFA
- * routes answer 503), the way the challenge store and the replay seen-set do.
- * It never evicts a live transaction: that would end the ceremony of a user
+ * routes answer 503), as the challenge store and the replay seen-set do. It
+ * never evicts a live transaction: that would end the ceremony of a user
  * already typing a code.
  */
 

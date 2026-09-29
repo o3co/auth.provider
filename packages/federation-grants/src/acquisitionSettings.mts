@@ -15,14 +15,10 @@
  */
 
 /**
- * What a deployment must have configured before it may create grants (#593
- * slice 6, D6–D8), resolved once, at boot.
- *
- * Every refusal here is one a user would otherwise meet at the end of a
- * consent — standing in front of a page that cannot be shown, or coming back
- * from the upstream to a callback that was never going to accept them. Those
- * are the worst places to find out a deployment was not set up to finish what
- * it started, so they are found out here.
+ * What a deployment must have configured before it may create grants,
+ * resolved once, at boot (the federation-grants ADR, D6–D8). Every refusal
+ * here is one a user would otherwise meet at the end of a consent: a page
+ * that cannot be shown, or a callback that was never going to accept them.
  */
 
 import type {
@@ -44,7 +40,7 @@ export interface FederationGrantAcquisitionSettings {
 	readonly consentUrl: string;
 	/**
 	 * Where connect sends a browser that is not signed in, and how it comes
-	 * back: the `loginEntry` slot the session module provides (#728), over
+	 * back: the `loginEntry` slot the session module provides, over
 	 * `endpoints.login.url`.
 	 */
 	readonly login: LoginEntry;
@@ -61,7 +57,7 @@ const refuse = (message: string, options?: ErrorOptions): never => {
 
 /**
  * The provider's browser-facing origin: the issuer's — `issuer` when the
- * caller hands one (the `oauthTokenSettings` slot's, #728), otherwise
+ * caller hands one (the `oauthTokenSettings` slot's), otherwise
  * `oauth.jwt.issuer` as the configuration carries it.
  */
 const issuerOrigin = (config: unknown, given: unknown): string => {
@@ -76,14 +72,13 @@ const issuerOrigin = (config: unknown, given: unknown): string => {
 };
 
 /**
- * The consent page. No default, unlike `endpoints.consent.url`: enabling
- * grants is a recorded statement that a page exists (D8).
- *
- * A path, or an absolute URL on the provider's own origin, and nothing else.
- * The page reads what it must show with the session cookie, and this provider
- * never answers a credentialed cross-origin read (`middleware/cors.mts`) — so a
- * page on another origin could never show the user the client, the expiry, or
- * that the access outlives logout, and consent without those is not D8's.
+ * The consent page: no default, unlike `endpoints.consent.url`, because
+ * enabling grants is a recorded statement that a page exists. A path, or an
+ * absolute URL on the provider's own origin, and nothing else: the page reads
+ * what it must show with the session cookie, and this provider never answers
+ * a credentialed cross-origin read (`middleware/cors.mts`), so a page on
+ * another origin could not show the user the client, the expiry, or that the
+ * access outlives logout (the federation-grants ADR, D8).
  */
 const consentUrl = (config: unknown, origin: string): string => {
 	const written = (config as { federationGrants?: { consent?: { url?: unknown } } })
@@ -136,14 +131,13 @@ const consentUrl = (config: unknown, origin: string): string => {
 /**
  * The login page connect sends a browser that is not signed in to: the
  * `loginEntry` slot, which the session module provides from
- * `endpoints.login.url` (#728). Optional in the manifest, so a deployment that
+ * `endpoints.login.url`. Optional in the manifest, so a deployment that
  * leaves grants off owes nothing; required here, once they are on.
  *
- * Core's schema takes an empty page and only `oauthModule` requires one, so a
- * deployment that enables grants without that module could otherwise boot and
- * then answer every such browser with a 500 — the first page of the flow, and
- * the one a user reaches most often. The session module builds the entry with
- * no page and it fails where the page is read: here, at boot.
+ * Core's schema takes an empty page and only `oauthModule` requires one, so
+ * a deployment without that module could otherwise boot and answer every
+ * such browser with a 500. An entry built with no page fails where its `url`
+ * is read: here, at boot.
  */
 const loginEntry = (entry: LoginEntry | undefined): LoginEntry => {
 	if (entry === undefined) {
@@ -211,7 +205,7 @@ export function resolveFederationGrantAcquisitionSettings(
 	config: unknown,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
 	login: LoginEntry | undefined,
-	/** The issuer of the `oauthTokenSettings` slot, when the composition holds it (#728). */
+	/** The issuer of the `oauthTokenSettings` slot, when the composition holds it. */
 	options: { readonly issuer?: string } = {},
 ): FederationGrantAcquisitionSettings {
 	const origin = issuerOrigin(config, options.issuer);
@@ -229,7 +223,7 @@ export function resolveFederationGrantAcquisitionSettings(
 
 /**
  * The registration an identity arriving through `connection` was issued
- * under, as the Store is asked about it (#611) — at boot, whether it covers
+ * under, as the Store is asked about it — at boot, whether it covers
  * it, and in the callback, who holds an identity from it. Configuration only:
  * the federation's name, its configured issuer and the client it was issued to.
  */
@@ -248,21 +242,17 @@ const IDENTITY_LOOKUP_REMEDY =
 	"to record that this deployment does not refuse an upstream account already linked to another user";
 
 /**
- * D7 check 5 asks whether the upstream identity is already another local
- * user's, which needs a lookup the Store port has only optionally. `"required"`
- * — the default — refuses to boot without it; `"unsupported"` is the recorded
- * decision to skip that one check, and it is recorded in the audit of every
- * acquisition rather than taken silently.
+ * Acquisition asks whether the upstream identity is already another local
+ * user's (the federation-grants ADR, D7 check 5), which needs a lookup the
+ * Store port has only optionally. `"required"` — the default — refuses to
+ * boot without it; `"unsupported"` is the decision to skip that one check,
+ * recorded in the audit of every acquisition rather than taken silently.
  *
- * #611: having the method is not enough. A lookup that can see only the
- * namespace it is handed answers "linked to nobody" for an identity from a
- * registration no login linked under — D19's dedicated registration, whose
- * pairwise `sub` no login ever saw — and `"required"` would be satisfied by a
- * check that cannot see the answer. So the Store says, per connection's
- * registration, whether it covers it, and anything but a literal `true` is
- * refused here rather than met by every user who connects. With no connection
- * configured nothing is required, not even the methods: removing the last one
- * must stay operable on any repository.
+ * Having the method is not enough: a lookup that sees only the namespace it
+ * is handed answers "linked to nobody" for an identity from a registration
+ * no login linked under (a dedicated registration, whose pairwise `sub` no
+ * login ever saw). So the Store says, per connection's registration, whether
+ * it covers it, and anything but a literal `true` is refused here.
  */
 export function requireFederationGrantIdentityLookup(
 	mode: FederationGrantIdentityLookup,
@@ -275,7 +265,7 @@ export function requireFederationGrantIdentityLookup(
 ): void {
 	// Nothing can reach check 5 without a connection, so nothing is required —
 	// not even the methods: removing the last connection must stay operable
-	// for a repository that has no lookup at all (Copilot, #612).
+	// for a repository that has no lookup at all.
 	if (mode === "unsupported" || connections.size === 0) return;
 	if (typeof userRepository?.findSubjectByFederatedIdentity !== "function") {
 		refuse(
@@ -311,7 +301,7 @@ export function requireFederationGrantIdentityLookup(
 		if (covered !== true) {
 			// A probe written as `async` answers a promise: not `true`, so refused
 			// — and if it rejects, nothing else would ever observe that, and the
-			// host would see an unhandled rejection beside the refusal (Copilot).
+			// host would see an unhandled rejection beside the refusal.
 			if (typeof (covered as { then?: unknown } | null)?.then === "function") {
 				(covered as PromiseLike<unknown>).then(undefined, () => undefined);
 			}

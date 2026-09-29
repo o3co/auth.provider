@@ -16,28 +16,24 @@
 
 /**
  * A code repository's copy of a code cannot leave a field out and still
- * compile (#626) — for a copy built as an object literal of the record type;
- * not for one behind a cast or one that names a field with the wrong value.
+ * compile — for a copy built as an object literal of the record type; not for
+ * one behind a cast or one that names a field with the wrong value.
  *
- * `/authorize` decides everything a code carries, and `/token` reads it back
- * without deciding again — evaluate-once-at-authorize is the contract. Both
- * bundled repositories copy the record field by field, and a field a copy
- * forgets is dropped without a sound: `nonce` gone mints an id_token the RP
- * cannot bind to its request, `acr` gone mints one that no longer attests
- * the step-up the user performed, `sid` gone makes `/token` refuse the code
- * where a session store is wired and otherwise leaves the RP nothing to match
- * a logout against, `grantedAudience` gone falls back to the client as the
- * audience. v0.5.1 shipped exactly this bug on the Redis path (IH-2 / TS-1).
+ * `/token` reads back what `/authorize` decided without deciding again, and
+ * the bundled repositories copy the record field by field, so a field a copy
+ * forgets is dropped silently: `nonce` gone mints an id_token the RP cannot
+ * bind to its request, `acr` gone one that no longer attests the step-up the
+ * user performed, `sid` gone makes `/token` refuse the code where a session
+ * store is wired and otherwise leaves the RP nothing to match a logout
+ * against, `grantedAudience` gone falls back to the client as the audience.
+ * So `Code` holds every field as a REQUIRED key, `undefined` where
+ * `/authorize` recorded nothing. `CreateCodeInput` is tied to the same keys,
+ * so a field added to the record must be named there too; only `expiresIn`
+ * may be left out, meaning the repository's own default.
  *
- * So what a repository answers with is every field as a REQUIRED key,
- * holding `undefined` where `/authorize` recorded nothing; a copy that
- * forgets one fails to compile. What `/authorize` writes is tied to the same
- * keys, so a field added to the record is one it has to name too — all but
- * `expiresIn`, whose absence means the repository's own default.
- *
- * Asserted with conditional types rather than `@ts-expect-error`. This file
- * only proves anything under the TypeScript checker, and is on BOTH of core's
- * typecheck lists for that reason.
+ * Asserted with conditional types rather than `@ts-expect-error`. The file
+ * proves anything only under the TypeScript checker, so it is on both of
+ * core's typecheck lists.
  */
 
 import { describe, expectTypeOf, it } from "vitest";

@@ -16,17 +16,9 @@
 
 /**
  * Google issues a refresh token only when the user is shown the consent
- * screen: `access_type=offline` "instructs the Google authorization server to
- * return a refresh token and an access token the first time that your
- * application exchanges an authorization code", and without `prompt` "the
- * user will be prompted only the first time your project requests access".
- * The upstream tokens live per session, so a returning user's new session
- * had no refresh token, and oauth's `POST /oauth/federation/google/token`
- * answered `410 refresh_token_absent` once the access token expired.
- *
- * The real library runs against a fake Google that applies that rule
- * (`refreshTokenOnlyOnConsent`) to authorization requests it is handed as a
- * browser would hand them.
+ * screen, and without `prompt` shows it only the first time an app asks
+ * (README, "Refresh tokens and the consent screen"). The real library runs
+ * against a fake Google that applies that rule (`refreshTokenOnlyOnConsent`).
  */
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";

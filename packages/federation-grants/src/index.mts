@@ -15,22 +15,15 @@
  */
 
 /**
- * Public exports for `@o3co/auth-provider-federation-grants` (#593).
+ * Public exports for `@o3co/auth-provider-federation-grants`.
  *
- * Deliberately NOT exported: the `FederationGrantStore` port, the grant domain
- * types and `retrieveFederationGrantToken` all live in
- * `@o3co/auth-provider-core`. A store adapter depends on core alone and never
- * on this package — which is what lets `@o3co/auth-provider-redis` ship a
- * federation grant store without taking a dependency on the routes that spend
- * one, and what lets a subject-wide revocation revoke grants through the port
- * with these routes not installed at all (an ordinary logout leaves them
- * standing).
- *
- * Also not exported: the HTTP serialization, the body parser, the audit bridge
- * and the connection resolver. They are how these routes are spelled, not
- * a second HTTP convention for the product — and a composition root that
- * needed one of them directly would be building a route this package should
- * have built.
+ * Not exported: the `FederationGrantStore` port, the grant domain types and
+ * `retrieveFederationGrantToken`, which live in `@o3co/auth-provider-core` so
+ * that a store adapter (`@o3co/auth-provider-redis`'s) depends on core alone,
+ * and a subject-wide revocation can revoke grants through the port with these
+ * routes not installed. Nor the HTTP serialization, the body parser, the audit
+ * bridge and the connection resolver: they are how these routes are spelled,
+ * not a second HTTP convention for the product.
  *
  * `createFederationGrantRouter` IS exported, because a root that mounts the
  * handlers itself needs the middleware chain rather than an approximation of

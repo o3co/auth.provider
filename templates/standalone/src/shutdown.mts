@@ -14,66 +14,16 @@
  * limitations under the License.
  */
 
+/*
+ * Graceful shutdown for the scaffolded server, kept in the template so that
+ * "does SIGTERM wait for in-flight requests, and for how long?" is answerable
+ * from the code you deploy. See the template README, "Shutdown guarantees".
+ */
+
 import type { Server } from "node:http";
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 
-/**
- * Graceful shutdown for the scaffolded server (#290).
- *
- * ## Why this is in the template rather than a dependency
- *
- * It used to be `gracefulShutdown` from `@o3co/auth.utils@0.0.4`. The ops
- * review's objection was not that the package is bad — it is that for the
- * component which terminates every user session, "does SIGTERM wait for
- * in-flight requests, and for how long?" has to be answerable from the code an
- * operator deploys, and it was answerable only by reading a pre-1.0 package
- * with no contract pinned here.
- *
- * Reading it answered the question, and the answer was the reason to move it:
- * **there was no deadline**. `server.close()` waits for in-flight requests
- * indefinitely, so a single stuck request meant the process never exited on
- * its own and the orchestrator's SIGKILL took it down mid-flight — the
- * opposite of a graceful shutdown, arriving only under the load that produces
- * a stuck request. The cleanup-failure path also wrote to `console.error`, one
- * bare line in a service whose every other line is NDJSON.
- *
- * Neither is fixed by documenting or pinning the dependency, which is why this
- * is ~40 lines here with tests, rather than a version range and a README
- * paragraph.
- *
- * ## The guarantees, stated
- *
- * 1. **SIGTERM and SIGINT** both start it; the second signal is ignored rather
- *    than starting a second dispose over the first one's stores.
- * 2. **New connections stop immediately** (`server.close`), and idle keep-alive
- *    sockets are released (`closeIdleConnections`) — they hold the server open
- *    with no request behind them, so a quiet server would otherwise wait out
- *    the whole deadline for nothing.
- * 3. **In-flight requests are given `drainTimeoutMs`** (default 10s) to finish.
- * 4. **Past the deadline, remaining connections are cut** (`closeAllConnections`)
- *    and the process exits **non-zero** — an orchestrator that only ever sees
- *    `0` cannot tell a clean drain from one that ran out of time.
- * 5. **`cleanup` runs after draining, before exit**, and its failure is logged
- *    through the app logger — as core's `loggableError` projection, never the
- *    error, which holds every cleanup's own error — and reflected in the exit
- *    code. It never wedges the process: a dispose that throws still exits, and
- *    one that never settles is cut off at `cleanupTimeoutMs`.
- * 6. **A `close` that fails is not reported as a clean drain.** `server.close`
- *    reports through its callback, and treating that as success would tell an
- *    orchestrator the listener came down when it did not.
- *
- * Every stage is one object-first line under a snake_case event name:
- * `shutdown_draining` (info, `drainTimeoutMs`), `shutdown_drain_deadline_exceeded`
- * (error), `shutdown_server_close_failed` (error, `err`), `shutdown_cleanup_timed_out`
- * (error, `cleanupTimeoutMs`), `shutdown_cleanup_failed` (error, `err`) and
- * `shutdown_complete` (info, `reason`, `drain`, `exitCode`).
- *
- * Size `drainTimeoutMs` plus `cleanupTimeoutMs` **below** the orchestrator's
- * own kill grace period (Kubernetes `terminationGracePeriodSeconds` is 30s by
- * default, compose `stop_grace_period` 10s; with federation grants on the sum
- * is 55s, so the grace is 60s or more) — the point is to close on our terms
- * before SIGKILL arrives on someone else's.
- */
+/** Options for {@link installGracefulShutdown}. */
 export interface GracefulShutdownOptions {
 	readonly logger: Logger;
 	/** Reverse-topological component cleanup — normally `handle.dispose()`. */
@@ -111,21 +61,17 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
 
 /**
- * The least cleanup allowance federation grants get (#593 slice 7): 45
- * seconds. The package's background registry drains on dispose — it waits for
- * a rotated upstream credential's write — and the longest tail one refresh
- * can have is the upstream hard timeout, the persist budget and the wait for
- * the grant's lock, back to back. With the shipped budgets (25 s + 3 s + 5 s)
- * and {@link FEDERATION_GRANTS_CLEANUP_MARGIN_MS} that is exactly this floor;
- * a deployment that raises a budget raises the allowance with it, below.
- * The ten-second drain that cleanup would otherwise inherit is shorter than
- * the tail, and a shutdown under it would abandon exactly the write the drain
- * exists to wait for, after the IdP had moved on to the new refresh token.
- *
- * A host policy, not a grant setting: what it bounds is `handle.dispose()`,
- * and the orchestrator's grace period has to cover the drain, this and an exit
- * margin — the compose files ship 60 seconds for the shipped budgets, and an
- * operator who raises a budget raises the grace to match.
+ * The least cleanup allowance federation grants get: 45 seconds. The
+ * package's background registry drains on dispose, waiting for a rotated
+ * upstream credential's write, and one refresh's longest tail is the upstream
+ * hard timeout, the persist budget and the wait for the grant's lock, back to
+ * back. With the shipped budgets (25 s + 3 s + 5 s) and
+ * {@link FEDERATION_GRANTS_CLEANUP_MARGIN_MS} that is exactly this floor; a
+ * raised budget raises the allowance ({@link cleanupAllowanceFor}). The
+ * ten-second drain cleanup would otherwise inherit is shorter than the tail,
+ * and would abandon exactly that write after the IdP had moved on to the new
+ * refresh token. A host policy, not a grant setting: it bounds
+ * `handle.dispose()`.
  */
 export const FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS = 45_000;
 
@@ -136,15 +82,15 @@ export const FEDERATION_GRANTS_CLEANUP_MARGIN_MS = 12_000;
  * The most a timer can be asked for: Node's `setTimeout` takes a 32-bit signed
  * delay, and a larger one fires after ~1 ms instead. A sum of budgets an
  * operator set high enough to reach it would otherwise turn the allowance
- * into no allowance at all (Copilot, #614).
+ * into no allowance at all.
  */
 const MAX_TIMER_MS = 2_147_483_647;
 
 /**
  * The `cleanupTimeoutMs` to hand {@link installGracefulShutdown}, from the
  * config: while the feature is on, the longer of the floor above and the
- * configured refresh tail plus the margin; while it is off, nothing — the
- * drain's own budget, as before. A fragment to spread, so an absent allowance
+ * configured refresh tail plus the margin; while it is off, nothing (the
+ * drain's own budget applies). A fragment to spread, so an absent allowance
  * is absent rather than `undefined`. A config that carries no budgets (one
  * built by hand, without `reference.conf`) gets the floor.
  */
@@ -175,6 +121,14 @@ export function cleanupAllowanceFor(config: {
 	};
 }
 
+/**
+ * Install the graceful shutdown on `server`. The guarantees (a deadline on the
+ * drain, a non-zero exit past it, a bounded `cleanup` that never wedges the
+ * process), the log line of each stage and how to size `drainTimeoutMs` plus
+ * `cleanupTimeoutMs` below the orchestrator's kill grace period are in the
+ * template README, "Shutdown guarantees". Beyond them: a `close` that fails is
+ * not reported as a clean drain, and exits non-zero.
+ */
 export function installGracefulShutdown(server: Server, options: GracefulShutdownOptions): void {
 	const {
 		logger,

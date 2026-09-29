@@ -15,23 +15,19 @@
  */
 
 /**
- * Built-in module providing the in-process `DeviceCodeStore` (#298).
+ * Built-in module providing the in-process `DeviceCodeStore`.
  *
- * Development and single-replica only — see `memory.mts` and the
- * `replicaSafety` declaration below (#455), which is what makes a
- * `deployment.mode = "multi"` composition refuse to boot with this mounted.
- *
- * The store's `dispose` is registered with the boot planner's lifecycle
- * registrar (D-5), so `AppHandle.dispose()` stops a sweep timer rather than
- * leaving it to hold the process open. The slot is optional: a hand-built
- * composition without the registrar still gets a working store.
+ * Development and single-replica only: `replicaSafety` makes a
+ * `deployment.mode = "multi"` composition refuse to boot with it mounted.
+ * `dispose` is registered with the lifecycle registrar so
+ * `AppHandle.dispose()` stops the sweep timer; the registrar is optional.
  */
 import { defineModule } from "../modules/manifest/index.mjs";
 import { createMemoryDeviceCodeStore } from "./memory.mjs";
 
 export const memoryDeviceCodeStoreModule = defineModule({
 	name: "core-device-code-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:

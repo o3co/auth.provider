@@ -16,21 +16,15 @@
 
 /**
  * What a JWT's `exp`, `iat` and `nbf` must be before anything computes an
- * expiry, an age or a window from them: a NumericDate (RFC 7519 §2) — a
- * finite number of seconds that a Date can hold.
+ * expiry, age or window from them: a NumericDate (RFC 7519 §2), a finite
+ * number of seconds a Date can hold.
  *
- * jose checks only that such a claim is a number. JSON has no Infinity, but
- * `1e400` parses to it, so an assertion whose `exp` is `1e400` is never
- * expired, reaches whatever records it until it expires, and meets a store
- * that cannot hold "forever" — the seen-set's `RangeError`, answered `503`,
- * the server's fault for the client's malformed input. A finite value past
- * the Date range (`1e300`) is the same thing one step later: a lifetime no
- * store can write. Both are a malformed claim, and a verifier refuses them as
- * one, before any of that arithmetic runs.
- *
- * A fraction is not malformed: RFC 7519 §2 says a NumericDate may be
- * non-integer, and every consumer here accepts one — the seen-set records a
- * fractional expiry, the Redis adapters round it up.
+ * jose checks only that such a claim is a number. `1e400` parses to Infinity,
+ * so an `exp` of `1e400` never expires and reaches a store that cannot hold
+ * "forever" (the seen-set's `RangeError`, a `503` for the client's malformed
+ * input); `1e300`, past the Date range, fails the same way a step later. A
+ * verifier refuses both as malformed before any arithmetic runs. A fraction
+ * is valid (RFC 7519 §2), and every consumer here accepts one.
  */
 
 /**

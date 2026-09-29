@@ -27,18 +27,15 @@ export interface RunReadinessOptions {
 	/**
 	 * Caller-owned map of checks that have not settled yet, keyed by probe name.
 	 *
-	 * Abandoning a check at the deadline does not cancel it. Against a
-	 * partitioned Redis the driver holds the `PING` in its offline queue until
-	 * reconnect, so without this every scrape adds another pending command —
-	 * unbounded during a long outage, and released as a burst on recovery. With
-	 * it, a probe whose previous check is still running is *joined* rather than
-	 * re-issued: one in-flight command per dependency no matter how often the
-	 * endpoint is scraped. Each caller still applies its own deadline, so a
-	 * joining request does not inherit how long the shared check has already
-	 * been waiting.
+	 * Abandoning a check at the deadline does not cancel it: against a
+	 * partitioned Redis the `PING` waits in the driver's offline queue, so every
+	 * scrape would add one more, released as a burst on recovery. With this map
+	 * a probe whose previous check is still running is joined rather than
+	 * re-issued: one in-flight command per dependency. Each caller still applies
+	 * its own deadline.
 	 *
-	 * Pass the same map across calls (the readiness router holds one for its
-	 * lifetime). Omit it and every call issues its own check.
+	 * Pass the same map across calls (the readiness router holds one); omit it
+	 * and every call issues its own check.
 	 */
 	readonly inFlight?: Map<string, Promise<unknown>>;
 }
@@ -46,7 +43,7 @@ export interface RunReadinessOptions {
 /**
  * The failure's text, for the opt-in response body only (`ProbeResult.error`);
  * the log gets the projection (`ProbeResult.err`), never this. A driver that
- * rejects with a bare string is named by it, as the body always did.
+ * rejects with a bare string is named by it.
  */
 function bodyTextOf(err: unknown): string {
 	if (typeof err === "string") return err;

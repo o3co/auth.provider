@@ -15,36 +15,24 @@
  */
 
 /**
- * Session admission (the session-admission ADR's D1, D2, D4, D5, D10): the
- * one decision point every consumer of an authenticated browser session
- * calls, and the one the login route calls before a session is written.
- * `admitSession` reads the session — the claim, the live record, the
- * subject, the subject-revocation boundary — asks the registered
- * requirements by the action's grade, selects the `acr`, and merges the two
- * verdicts by D2's table. The claim builders (`cookieClaim`, `codeClaimFirstRead`, `codeClaimRevalidation`,
- * `linkClaim`, `tokenClaim`) are the one reading of each carrier;
- * `ADMISSION_ACTIONS` names the bundled actions with their grades.
- * `admitPrimary` asks the requirements that interrupt a login and answers
- * the `Establishment` `establishSession` requires; `resumePrimary` composes
- * what every completed requirement added and asks, in order, every one not
- * already done in this login;
- * `establishWithoutAsking` builds a federated login's establishment from
- * the federation's own facts; an interruption's `open` is wrapped, so its
- * answer is validated against the requirement's declared `hintKeys` before
- * the route sees it.
+ * Session admission: the one decision point every consumer of an
+ * authenticated browser session calls, and the one the login route calls
+ * before a session is written. See ADR 2026-09-28-session-admission.
+ *
+ * `admitSession` judges a session for an action; the claim builders are the
+ * one reading of each carrier. `admitPrimary` and `resumePrimary` ask the
+ * requirements that interrupt a login and answer the `Establishment`
+ * `establishSession` requires; `establishWithoutAsking` builds a federated
+ * login's.
  *
  * Every step fails closed: a store that throws is `unavailable`, logged once
- * at error as `session_admission_unavailable` with the store, the action and
- * `loggableError`'s projection — never the `sid`; a subject mismatch is
- * `session_admission_subject_mismatch` at warn and the audit event
- * `session.admission.subject_mismatch`. A caller's fault — a claim no
- * builder made, a resolver the planner did not build, an action without a
- * grade — is a `RangeError` before anything is read. The three brands are
- * module-private `WeakSet`s: an `as` cast forges nothing.
+ * at error with `loggableError`'s projection, never the `sid`. A caller's
+ * fault is a `RangeError` before anything is read. The brands are
+ * module-private `WeakSet`s, so an `as` cast forges nothing.
  *
- * The one call of `selectAcr` in product code is here, over
- * `requirementSession(session)?.amr` — the vouched `amr` — so a value an
- * untrusted IdP asserted in a pre-upgrade session meets no `acr`.
+ * `selectAcr` is called only here in product code, over the vouched `amr`,
+ * so a value an untrusted IdP asserted in a pre-upgrade session meets no
+ * `acr`.
  */
 
 import { emitAuditEvent } from "../audit/factory.mjs";
@@ -113,7 +101,7 @@ import {
 } from "./requirement.mjs";
 
 // ---------------------------------------------------------------------------
-// The brands (D1, D2)
+// The brands
 // ---------------------------------------------------------------------------
 
 /** The claims the builders below made. */
@@ -129,10 +117,9 @@ export interface SessionRequirementSource {
 
 /**
  * Builds the branded resolver over `source` and records it, so `admitSession`
- * knows it (D1). `wrap` is the planner's: the read gate closed while the
- * `provides` factories run is applied to the object recorded, which is the
- * one a consumer is handed. For the boot planner and `resolverForTests`
- * alone; not on the package barrel.
+ * knows it. `wrap` is the planner's read gate (closed while the `provides`
+ * factories run); it is applied to the object recorded, which is the one a
+ * consumer is handed. For the boot planner and `resolverForTests` alone.
  * @internal
  */
 export function sessionRequirementResolverOver(
@@ -153,14 +140,11 @@ const isKnownResolver = (value: unknown): value is SessionRequirementResolver =>
 	typeof value === "object" && value !== null && knownResolvers.has(value);
 
 /**
- * Refuses a resolver the planner or `resolverForTests` did not build: a
- * home-made object or a copy forges nothing. Also the one construction-time
- * check every consumer factory a composition can build by hand runs on its
- * `requirements` (D1), with its own name as `factory`: a missing resolver
- * (`undefined` or `null`) and a forged one are each a `RangeError` that names
- * the factory, thrown where the composition is assembled, not answered on
- * every request. Admission runs it bare, on every call (`admitSession`,
- * `admitPrimary`, `resumePrimary`).
+ * Refuses a resolver the planner or `resolverForTests` did not build; a
+ * home-made object or a copy forges nothing. Consumer factories run it on
+ * their `requirements` at construction, with their own name as `factory`, so
+ * a missing or forged resolver fails where the composition is assembled
+ * rather than on every request. Admission also runs it on every call.
  */
 export function checkResolver(value: unknown, factory?: string): SessionRequirementResolver {
 	if (isKnownResolver(value)) return value;
@@ -176,7 +160,7 @@ export function checkResolver(value: unknown, factory?: string): SessionRequirem
 }
 
 // ---------------------------------------------------------------------------
-// The claim builders (D2)
+// The claim builders
 // ---------------------------------------------------------------------------
 
 const nonEmptyString = (value: unknown): string | undefined =>
@@ -201,10 +185,9 @@ export interface CookieCarrier {
 }
 
 /**
- * The cookie's claim: `authenticated` is `isAuthenticated === true` — the
- * consumers did not agree on the flag's reading; this is the one — and `sid`
- * and `subject` (`user.id`) are copied when they are non-empty strings, else
- * `undefined`. A request without a session claims nothing.
+ * The cookie's claim: `authenticated` is `isAuthenticated === true`, the one
+ * reading of the flag; `sid` and `subject` (`user.id`) are copied when they
+ * are non-empty strings. A request without a session claims nothing.
  */
 export function cookieClaim(req: CookieCarrier): SessionClaim {
 	if (!isObject(req)) throw new RangeError("cookieClaim: the request must be an object");
@@ -224,9 +207,9 @@ export interface CodeCarrier {
 }
 
 /**
- * A code record's claim on its first read: authenticated — a code is minted
- * by a session — with the code's `sid`, and no subject (`CodeData` carries
- * no `sub`): the one claim that reaches a record without one (D2, step 3).
+ * A code record's claim on its first read: authenticated (a session minted
+ * the code), with the code's `sid` and no subject, since `CodeData` carries
+ * no `sub`; `admitSession`'s subject check has nothing to compare.
  */
 export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
 	if (!isObject(code)) {
@@ -242,8 +225,8 @@ export function codeClaimFirstRead(code: CodeCarrier): SessionClaim {
 
 /**
  * A code record's claim on the `authorization_code` grant's second read:
- * the first read's `subject`, required, so the two reads are compared as
- * today and the comparison cannot be left out by omitting an option.
+ * the first read's `subject`, required, so the two reads are compared and
+ * the comparison cannot be left out by omitting an option.
  */
 export function codeClaimRevalidation(code: CodeCarrier, subject: string): SessionClaim {
 	if (!isObject(code)) {
@@ -262,7 +245,7 @@ export function codeClaimRevalidation(code: CodeCarrier, subject: string): Sessi
 	} as SessionClaim);
 }
 
-/** What a link claim is built from: the link transaction's envelope, which records the session and its subject at the start (D8). */
+/** What a link claim is built from: the link transaction's envelope, which records the session and its subject at the start. */
 export interface LinkCarrier {
 	readonly sid: unknown;
 	readonly subject: unknown;
@@ -283,7 +266,7 @@ export function linkClaim(link: LinkCarrier): SessionClaim {
 	return claim({ authenticated: true, sid, subject, carrier: "link" } as SessionClaim);
 }
 
-/** What a token claim is built from: a verified token's claims (D9). */
+/** What a token claim is built from: a verified token's claims. */
 export interface TokenCarrier {
 	readonly sid?: unknown;
 	readonly sub: unknown;
@@ -291,11 +274,10 @@ export interface TokenCarrier {
 }
 
 /**
- * A verified token's claim (D9): authenticated, its `sid` when it carries
- * one — without one the live read is skipped, as the refresh grant does
- * today — its `sub`, and its `amr` for the requirements (`tokenAmr`, absent
- * when the token carries none or not a well-formed list: a token issued
- * before #481). A token without a `sub` is not one a session issued.
+ * A verified token's claim: authenticated, its `sid` when it carries one
+ * (without one the live read is skipped), its `sub`, and its `amr` for the
+ * requirements (`tokenAmr`, absent unless a well-formed list). A token
+ * without a `sub` is not one a session issued.
  */
 export function tokenClaim(claims: TokenCarrier): SessionClaim {
 	if (!isObject(claims)) throw new RangeError("tokenClaim: the claims must be an object");
@@ -312,7 +294,7 @@ export function tokenClaim(claims: TokenCarrier): SessionClaim {
 }
 
 // ---------------------------------------------------------------------------
-// The actions (D4): `ADMISSION_ACTIONS` is `requirement.mts`'s, beside the
+// The actions: `ADMISSION_ACTIONS` lives in `requirement.mts`, beside the
 // remediation rule that reads it.
 // ---------------------------------------------------------------------------
 
@@ -322,35 +304,33 @@ const GRADES: ReadonlySet<string> = new Set<AdmissionGrade>([
 	"remediation",
 ]);
 
-/** The `action` field of a log line: a bundled action's name, or an issued remediation's, else `custom` (D10). */
+/** The `action` field of a log line: a bundled action's name, or an issued remediation's, else `custom`. */
 const actionLabel = (action: AdmissionAction): string =>
 	Object.hasOwn(ADMISSION_ACTIONS, action.name) || isIssuedAction(action) ? action.name : "custom";
 
-/** The `remediation` names already said to be undeclared, once per process each (D4), up to the cap; past it, once for all. */
+/** The `remediation` names already said to be undeclared, once per process each, up to the cap; past it, once for all. */
 const undeclaredRemediations = new Set<string>();
 const UNDECLARED_REMEDIATION_CAP = 256;
 let undeclaredRemediationsOverflowed = false;
 
-/** The requirements already said to have stepped up without a page, once per process each (D2, step 5). */
+/** The requirements already said to have stepped up without a page, once per process each. */
 const pagelessStepUps = new Set<string>();
 
-/** The requirements already said to have stepped up over no session, once per process each (D2, step 5). */
+/** The requirements already said to have stepped up over no session, once per process each. */
 const sessionlessStepUps = new Set<string>();
 
 // ---------------------------------------------------------------------------
-// admitSession (D2)
+// admitSession
 // ---------------------------------------------------------------------------
 
 const isStringList = (value: unknown): value is readonly string[] =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string" && entry.length > 0);
 
 /**
- * What `checkRequest` answers: every untrusted input read once and copied —
- * the claim's fields, the action (the bundled entry or the issued object
- * itself, else a plain copy of name and grade), the caller's `asks`, and
- * each dependency read once off `deps` — so a getter answering one thing to
- * the check and another to the steps changes nothing, and a requirement
- * cannot reach the caller's objects.
+ * What `checkRequest` answers: every untrusted input (claim, action, `asks`,
+ * each dependency off `deps`) read once and copied, so a getter answering
+ * one thing to the check and another to the steps changes nothing, and a
+ * requirement cannot reach the caller's objects.
  */
 interface CheckedRequest {
 	readonly claim: SessionClaim;
@@ -404,7 +384,7 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRe
 		throw new RangeError("admitSession: the action must be a name with a grade");
 	}
 	// A bundled name is accepted as the bundled entry itself alone: the grade
-	// is not the caller's to restate (D4).
+	// is not the caller's to restate.
 	if (Object.hasOwn(ADMISSION_ACTIONS, name)) {
 		if (asked !== (ADMISSION_ACTIONS as Record<string, AdmissionAction>)[name]) {
 			throw new RangeError(
@@ -447,7 +427,7 @@ function checkRequest(deps: AdmissionDeps, request: AdmissionRequest): CheckedRe
 const isValidDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
 
-/** The view a requirement is handed: a copy of four fields, never the record (D2, step 5). */
+/** The view a requirement is handed: a copy of four fields, never the record. */
 const viewOf = (session: UserSession): SessionView =>
 	Object.freeze({
 		sid: session.sid,
@@ -491,35 +471,26 @@ type RequirementOutcome =
 	| { readonly outcome: "unmet"; readonly requirement: string };
 
 /**
- * `admitSession`: whether the session `request.claim` names may proceed with
- * `request.action` (D2). The steps, each fail-closed, in order:
+ * Whether the session `request.claim` names may proceed with
+ * `request.action`. The steps, in order, each failing closed:
  *
- * 1. the claim — not authenticated → `unauthenticated`; a cookie without a
- *    subject → `not_live` (`no_subject`), logged at warn;
- * 2. the live read — with a store: no `sid` → `not_live` (`no_sid`), except
- *    for a token carrier, whose absent `sid` skips the read (D9); no record,
- *    a record without a `sub` or past its `expiresAt` → `not_live` (`gone`),
- *    a throw → `unavailable`; without a store the session is `null` and the
- *    requirements decide what that means;
- * 3. the subject — a claim's subject that is not the record's → `not_live`
- *    (`subject_mismatch`), logged and audited;
- * 4. the revocation boundary — with `subjectRevocation` and a live record;
- *    skipped for a token carrier, whose boundary `verifyJwt` reads (D9);
- * 5. the requirements — for `use` and `credential_change`, each `admit` in
- *    registration order, the first verdict that is not `met` taken; none for
- *    a declared `remediation`; a token carrier's `authentication` is built
- *    from the token's own `amr`, record or not (D9); a throw →
- *    `unavailable`; a `step_up` answers
- *    the requirement's registered page, and one from a requirement that
- *    registered none — nothing could finish the trip — is `unmet` by its
- *    name, said once per process (`session_admission_step_up_without_page`);
- * 6. `acr_values` — `selectAcr` over the vouched `amr`, with reach the union
- *    of every requirement's when the session is live;
- * 7. the merge of 5 and 6, D2's table.
- *
- * A `step_up` a requirement answers over no session is read as
- * `reauthenticate`: nothing can be stepped up onto no session, and a login
- * can.
+ * 1. claim: not authenticated → `unauthenticated`; a cookie without a
+ *    subject → `not_live` (`no_subject`).
+ * 2. live read, with a store: no `sid` → `not_live` (`no_sid`), except a
+ *    token carrier, which skips the read; no record, no `sub` or expired →
+ *    `not_live` (`gone`). Without a store the session is `null` and the
+ *    requirements decide what that means.
+ * 3. subject: a claim's subject that is not the record's → `not_live`
+ *    (`subject_mismatch`), logged and audited.
+ * 4. revocation boundary, for a live record; skipped for a token carrier,
+ *    whose boundary `verifyJwt` reads.
+ * 5. requirements, for `use` and `credential_change`: each `admit` in
+ *    registration order, the first verdict that is not `met` taken (see
+ *    `stepUpVerdict` for `step_up`). A token carrier is judged on the
+ *    token's own `amr`, record or not.
+ * 6. `acr_values`: `selectAcr` over the vouched `amr`, with reach the union
+ *    of every requirement's when the session is live.
+ * 7. `merge` of 5 and 6.
  */
 export async function admitSession(
 	deps: AdmissionDeps,
@@ -614,12 +585,12 @@ export async function admitSession(
 		}
 	}
 
-	// Step 5: the requirements, by the action's effective grade — normalised
-	// first (D4): only the issued remediation keeps its grade and skips them.
+	// Step 5: the requirements, by the action's effective grade: only the
+	// issued remediation keeps its grade and skips them.
 	const requirements = [...resolver.entries()];
 	const effective = effectiveAction(requirements, checked.action, logger);
 	// A token carrier's authentication is the token's own, whether or not a
-	// record was read (D9): the record is only the view.
+	// record was read: the record is only the view.
 	const authentication =
 		presented.carrier === "token"
 			? requirementSessionFromAmr(presented.tokenAmr)
@@ -667,8 +638,7 @@ export async function admitSession(
 	const selection: AcrSelection | undefined =
 		requested.length === 0
 			? undefined
-			: // The amr a carrier is judged on (D2, step 5): a token's own — the
-				// record is only the live view — else the D9 reading of the record.
+			: // The amr step 5 judged on: a token's own, else the record's.
 				selectAcr(
 					requested,
 					(presented.carrier === "token"
@@ -694,12 +664,11 @@ export async function admitSession(
 
 /**
  * A requirement's `step_up` as admission takes it: over no session (no
- * store, or a token carrier without a record) it is `reauthenticate` by its
- * name, said once per process — nothing can be stepped up onto no session,
- * and a login can — so `step_up` always carries a live session; from a
- * requirement that registered no page it is `unmet` by its name, fail
- * closed, said once per process — nothing could finish the trip; else the
- * registered page.
+ * store, or a token carrier without a record) it is `reauthenticate`, since
+ * nothing can be stepped up onto no session and a login can; from a
+ * requirement that registered no page it is `unmet`, since nothing could
+ * finish the trip. Each is logged once per process per name. So a `step_up`
+ * always carries a live session and a page.
  */
 function stepUpVerdict(
 	name: string,
@@ -734,7 +703,7 @@ function stepUpVerdict(
 }
 
 /**
- * The action as the requirements see it (D4): `use` and `credential_change`
+ * The action as the requirements see it: `use` and `credential_change`
  * as given; `remediation` only for the object core issued to one of these
  * requirements at registration — a literal, a copy, or `ADMISSION_ACTIONS`'
  * own entry carries no brand — else `credential_change`, the strictest
@@ -777,7 +746,7 @@ interface MergeContext {
 	readonly table: AdmissionDeps["acrTable"];
 }
 
-/** D2's merge table: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
+/** The merge table of ADR 2026-09-28-session-admission: `R` the requirements' verdict, `A` the acr selection (`undefined` when nothing was asked). */
 function merge(
 	R: RequirementOutcome,
 	A: AcrSelection | undefined,
@@ -866,7 +835,7 @@ function stepUpThroughOne(
 }
 
 // ---------------------------------------------------------------------------
-// Establishment (D5)
+// Establishment
 // ---------------------------------------------------------------------------
 
 /** The establishments `admitPrimary`, `resumePrimary` and `establishWithoutAsking` built. */
@@ -884,7 +853,7 @@ const knownInterruptions = new WeakSet<object>();
  */
 const knownPrimaries = new WeakSet<object>();
 
-/** What a password login produces (D5): the facts, never a `recorded`. */
+/** What a password login produces: the facts, never a `recorded`. */
 export interface PasswordLoginFacts {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
@@ -896,7 +865,7 @@ export interface PasswordLoginFacts {
 }
 
 /**
- * The one builder a password login has (D5): `recorded` is
+ * The one builder a password login has: `recorded` is
  * `passwordSessionAuthentication()` — `amr` `["pwd"]`, primary `pwd`, no
  * second factor — so a route cannot hand in an `amr` or an `mfaAt`. A
  * frozen copy of the facts, checked (`checkPrimaryAuthentication`), which
@@ -933,25 +902,21 @@ const establish = (primary: PrimaryAuthentication): Establishment => {
 	return built as unknown as Establishment;
 };
 
-/** The keys an interruption's body may carry (D5): closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
+/** The keys an interruption's body may carry: closed, so a `user` snapshot, a `sub` or a `sid` cannot leave through it. */
 const ANSWER_KEYS: ReadonlySet<string> = new Set(["error", "transaction", "expires_in", "hints"]);
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
-/** The hint grammar's caps (D5): an integer's range, a list's length, a transaction's length. */
+/** The hint grammar's caps: an integer's range, a list's length, a transaction's length. */
 const HINT_NUMBER_MAX = 86_400;
 const HINT_LIST_MAX = 16;
 const TRANSACTION_MAX_LENGTH = 128;
 
 /**
- * `value` as the closed body of D5, held to what the requirement named
- * `name` declared: `status` 403; `error` in the RFC 6749 error-text class;
- * `transaction` base64url when present; `expires_in` a positive integer
- * when present; `hints` an object whose every key is one of `hintKeys` — a
- * hint name by core's grammar and not a reserved one (`isHintKey`, held at
- * registration and here) — and every value a boolean, a finite number, or
- * an enum-like token (`isHintToken`, or a list of such); no other key. A
- * snapshot, a URL, an address or a name cannot pass. A frozen copy; a body
- * that fails is the requirement's fault, a `RangeError` the route answers
- * as an `open` failure.
+ * Holds an interruption's answer to the closed body (`ANSWER_KEYS`, `error`
+ * in the RFC 6749 error-text class) and to the `hintKeys` the requirement
+ * named `name` declared, each hint a boolean, a bounded integer or
+ * enum-like tokens, so a snapshot, a URL, an address or a name cannot pass.
+ * Answers a frozen copy; a body that fails is the requirement's fault, a
+ * `RangeError` the route answers as an `open` failure.
  */
 function checkInterruptionAnswer(
 	value: unknown,
@@ -963,10 +928,9 @@ function checkInterruptionAnswer(
 	};
 	if (!isObject(value)) return refuse("that is not an object");
 	if (value.status !== 403) refuse("whose status is not 403");
-	// The body: read once, its own keys copied into an object with no
-	// prototype that is what gets validated and answered — so an own
-	// "__proto__" key is copied and listed like any other, not taken for the
-	// prototype's setter.
+	// The body is read once into a null-prototype object, which is what gets
+	// validated and answered: an own "__proto__" key is then an ordinary key,
+	// not the prototype's setter.
 	const bodyRead = value.body;
 	if (!isObject(bodyRead) || Array.isArray(bodyRead)) return refuse("without a body");
 	const body: Record<string, unknown> = Object.create(null);
@@ -1050,13 +1014,11 @@ const unavailableAtEstablishment = (
 };
 
 /**
- * Asks every requirement with `admitPrimary` not already in `done`, in
- * registration order, about `composed` — a requirement that completed its
- * ceremony is done for this login, whatever it added, and is not asked
- * again: the first interruption wins, carrying `continuation` and an `open`
- * that validates the answer; a throw, or an answer that is neither
- * `establish` nor an interruption, is `unavailable`; when every one asked
- * answered `establish`, the establishment over `composed`.
+ * Asks every requirement with `admitPrimary` not in `done`, in registration
+ * order, about `composed`; one that completed is not asked again in this
+ * login, whatever it added. The first interruption wins, carrying the
+ * continuation and an `open` that validates the answer. A throw, or an
+ * answer that is neither `establish` nor an interruption, is `unavailable`.
  */
 async function askEvery(
 	deps: AdmissionDeps,
@@ -1080,7 +1042,7 @@ async function askEvery(
 		const open = isObject(answer) ? answer.open : undefined;
 		if (typeof open === "function") {
 			// The continuation names who interrupted: `resumePrimary` accepts
-			// that requirement's completion alone (D5).
+			// that requirement's completion alone.
 			const continuation = continuationOf(primary, done, name);
 			const interruption = Object.freeze({
 				outcome: "interrupt" as const,
@@ -1090,7 +1052,7 @@ async function askEvery(
 					if (nonEmptyString(sessionId) === undefined) {
 						throw new RangeError("open: the session id must be a non-empty string");
 					}
-					// The requirement persists what core built (D5).
+					// The requirement persists what core built.
 					return checkInterruptionAnswer(
 						await (open as RequirementInterruption["open"]).call(answer, sessionId, continuation),
 						name,
@@ -1113,12 +1075,10 @@ async function askEvery(
 }
 
 /**
- * `admitPrimary` (D5): what `POST /session/login` calls once the user is
- * verified and nothing is written. The primary must be one a core builder
- * made (`passwordPrimary`; a caller's fault is a `RangeError` before any
- * requirement is asked), then every requirement with `admitPrimary` is
- * asked in order over it; the first interruption wins, with a continuation
- * holding the primary and nothing done yet; only when every one answered
+ * What `POST /session/login` calls once the user is verified and before
+ * anything is written. The primary must be one a core builder made, else a
+ * `RangeError`; then every requirement with `admitPrimary` is asked in
+ * order. The first interruption wins; only when every one answers
  * `establish` is an `Establishment` answered.
  */
 export async function admitPrimary(
@@ -1137,10 +1097,9 @@ export async function admitPrimary(
 
 /**
  * The session's `recorded` composed from the primary the route built and
- * what every completed requirement added, in order (`composeAmr`, the MFA
- * ADR's D14: a requirement's `mfa` comes through `addsMfa`); `mfaAt` what
- * the one completion that may carry one — the requirement named `mfa`,
- * which completes once — verified at.
+ * what every completed requirement added, in order (`composeAmr`: a
+ * requirement's `mfa` comes through `addsMfa`); `mfaAt` is what the one
+ * completion that may carry one, the requirement named `mfa`, verified at.
  */
 function composeRecorded(
 	primary: PrimaryAuthentication,
@@ -1169,18 +1128,13 @@ function composeRecorded(
 }
 
 /**
- * `resumePrimary` (D5): after a requirement's ceremony completes. Refuses,
- * before asking anything, a continuation it cannot read — the serialisable
- * DTO the requirement persisted, every field its type admits, every instant
- * epoch milliseconds (`checkPrimaryContinuation`), rehydrated here — a
- * completion by a name that is not a registered requirement with
- * `admitPrimary` — or one already in `done` — and what the name may not add
- * (`checkPrimaryAdditions`); then appends the completion, composes the
- * session's `recorded` from the primary and every completed requirement's
- * additions, and asks, in order, every requirement with `admitPrimary` not
- * already in `done` over the composed result — a requirement that completed
- * is not asked again in this login, whatever it added; one that has not may
- * interrupt, with the updated continuation.
+ * Continues a login after a requirement's ceremony completes. Refuses,
+ * before asking anything, a continuation `checkPrimaryContinuation` cannot
+ * read, a completion by any requirement but the one that interrupted (or
+ * one not registered with `admitPrimary`, or already done), and additions
+ * that requirement may not make. Then composes `recorded` from the primary
+ * and every completion and asks each requirement not yet done; any may
+ * interrupt again with the updated continuation.
  */
 export async function resumePrimary(
 	deps: AdmissionDeps,
@@ -1194,14 +1148,14 @@ export async function resumePrimary(
 		throw new RangeError("resumePrimary: the completion must name a requirement");
 	}
 	// The continuation waits on one requirement's ceremony: its completion,
-	// no other's (D5).
+	// no other's.
 	if (completed.requirement !== read.interruptedBy) {
 		throw new RangeError(
 			`resumePrimary: the continuation waits on "${read.interruptedBy}", not "${completed.requirement}"`,
 		);
 	}
-	// This release interrupts a password login alone: `recorded` is recomposed
-	// from that kind, never taken from the persisted DTO.
+	// Only a password login is interrupted: `recorded` is recomposed from that
+	// kind, never taken from the persisted DTO.
 	const kind = read.primary.recorded.authentication.primary;
 	if (kind !== PASSWORD_AMR) {
 		throw new RangeError(
@@ -1233,10 +1187,9 @@ export async function resumePrimary(
 		),
 		Object.freeze({ requirement: completed.requirement, adds }),
 	]);
-	// Every addition — the earlier completions' as read back, and this one —
-	// is within its requirement's sealed reach (D5): a ceremony adds what its
-	// requirement said it could, and a record from before a reach shrank is
-	// refused rather than composed.
+	// Every addition, the earlier completions' as read back and this one, is
+	// within its requirement's sealed reach: a record from before a reach
+	// shrank is refused rather than composed.
 	for (const entry of done) {
 		const reach = requirements.get(entry.requirement)?.reach;
 		const outside = entry.adds.amr.filter((value) => !reach?.has(value));
@@ -1249,7 +1202,7 @@ export async function resumePrimary(
 	return askEvery(deps, requirements, composeRecorded(primary, done), primary, done);
 }
 
-/** What a federated login legitimately produces (D5): the federation's own facts, never a `recorded`. */
+/** What a federated login legitimately produces: the federation's own facts, never a `recorded`. */
 export interface FederatedLogin {
 	readonly subject: string;
 	readonly user: Readonly<Record<string, unknown>>;
@@ -1259,7 +1212,7 @@ export interface FederatedLogin {
 	readonly federation: string;
 	/** The upstream IdP's `amr`, as it surfaced it. */
 	readonly upstreamAmr: readonly string[];
-	/** Whether that federation's upstream `amr` counts (`federationTrustsUpstreamAmr`, D13). */
+	/** Whether that federation's upstream `amr` counts (`federationTrustsUpstreamAmr`). */
 	readonly trusted: boolean;
 	readonly authTime: Date;
 	readonly redirectTo: string | undefined;
@@ -1267,13 +1220,11 @@ export interface FederatedLogin {
 }
 
 /**
- * `establishWithoutAsking` (D5): the federation callback's establishment,
- * built from the federation's own facts and no requirement asked — the
- * callback consults admission in a later record. `recorded` is composed
- * here through `federatedSessionAuthentication` (#707), so a caller cannot
- * mark an arbitrary `amr` or an `mfaAt` as a federated primary; the seam
- * accepts only what a federation produces. A drift guard pins its callers
- * to the callback.
+ * The federation callback's establishment, built from the federation's own
+ * facts with no requirement asked. `recorded` is composed here through
+ * `federatedSessionAuthentication`, so a caller cannot mark an arbitrary
+ * `amr` or an `mfaAt` as a federated primary. A drift guard pins its
+ * callers to the callback.
  */
 export function establishWithoutAsking(login: FederatedLogin): Establishment {
 	if (!isObject(login)) throw new RangeError("establishWithoutAsking: the login must be an object");

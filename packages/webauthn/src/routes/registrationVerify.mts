@@ -21,7 +21,7 @@
  * authenticator's attestation response via SimpleWebAuthn, and persists the new
  * credential to the store.
  *
- * Security properties (spec §2.4):
+ * Security properties:
  *   - Requires an authenticated subject on `req.webauthnSubject` (set by upstream
  *     session / bearer middleware). Returns 401 if absent.
  *   - Challenge is consumed atomically via ChallengeCeremony for the user-scoped
@@ -30,10 +30,8 @@
  *     replay rejection is the redemption primitive; no separate seen-challenge tracking.
  *   - userId is always taken from the authenticated session (req.webauthnSubject.userId),
  *     NOT from the request body — prevents victim-targeted enrollment.
- *   - nickname is validated: string, 1–64 characters (inclusive). Absent is valid;
- *     empty string is rejected. Limit: 64 chars (chosen to match common display-name
- *     field constraints; large enough for emoji and Unicode labels).
- *   - Multi-origin support: config.origin[] is passed to verifyWebAuthnAttestation (S7).
+ *   - nickname, when present, is a string of 1–64 characters.
+ *   - Multi-origin support: config.origin[] is passed to verifyWebAuthnAttestation.
  *   - A store that cannot answer — the ceremony's consume or the credential
  *     insert — is 503 temporarily_unavailable, logged once at error level as
  *     `webauthn_ceremony_store_unavailable` (`../internal/storeUnavailable.mts`).
@@ -42,10 +40,7 @@
  *     same response is then 400 challenge_invalid, and a new ceremony's
  *     `excludeCredentials` names the stored credential.
  *
- * NOT barrel-exported from the package index — internal to the webauthn module
- * until Task 31 wires the router.
- *
- * Cross-refs: Plan T28 / spec §2.4 / S7 multi-origin
+ * NOT barrel-exported from the package index; `../module.mts` mounts it.
  */
 
 import {
@@ -65,11 +60,9 @@ import { verifyWebAuthnAttestation } from "../internal/verification.mjs";
 // ---------------------------------------------------------------------------
 
 /**
- * Maximum length for a credential nickname, in Unicode code points (string .length
- * in JS measures UTF-16 code units; for BMP characters this is equivalent).
- *
- * 64 chars: large enough for typical display names and short emoji sequences;
- * small enough to avoid storage abuse. Consistent with common profile-field limits.
+ * Maximum length for a credential nickname, as JS string `.length` (UTF-16 code
+ * units, which for BMP characters are code points): large enough for typical
+ * display names and short emoji sequences, small enough to avoid storage abuse.
  */
 const NICKNAME_MAX_LENGTH = 64;
 
@@ -80,15 +73,10 @@ const NICKNAME_MAX_LENGTH = 64;
 /**
  * Zod schema for the verify request body.
  *
- * `response` uses z.object().passthrough() because RegistrationResponseJSON is a
- * complex WebAuthn type. Shape validation is deferred to SimpleWebAuthn inside
- * verifyWebAuthnAttestation — the endpoint only needs `response` to be an object.
- *
- * `nickname` is optional; if present it must be a non-empty string of at most
- * NICKNAME_MAX_LENGTH characters.
- *
- * Any `userId` field in the body is intentionally not parsed — the endpoint reads
- * userId exclusively from req.webauthnSubject.
+ * `response` need only be an object: SimpleWebAuthn validates the
+ * RegistrationResponseJSON shape inside verifyWebAuthnAttestation. Any `userId`
+ * field in the body is intentionally not parsed — the endpoint reads userId
+ * exclusively from req.webauthnSubject.
  */
 const bodySchema = z.object({
 	response: z.object({}).passthrough(),
@@ -124,7 +112,7 @@ export interface RegistrationVerifyDeps {
  */
 export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): RequestHandler {
 	return async (req: Request, res: Response) => {
-		// §2.4: Require authenticated subject — auth strength is consumer-policy concern.
+		// Require authenticated subject — auth strength is consumer-policy concern.
 		const subject = req.webauthnSubject;
 		if (!subject) {
 			res.status(401).json({ error: "unauthorized" });
@@ -132,13 +120,11 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		}
 
 		// userId is always taken from the authenticated session — request body cannot
-		// override (prevents victim-targeted enrollment per spec §2.4).
+		// override (prevents victim-targeted enrollment).
 		const { userId } = subject;
 
-		// Wave 1 post-merge audit M-2: enforce WebAuthn §5.4.3 user-handle constraints
-		// (1..64 bytes opaque). Mirrors the registrationOptions gate so the verify
-		// endpoint is independently safe — both endpoints share the same
-		// req.webauthnSubject invariant under normal middleware composition.
+		// WebAuthn §5.4.3 user-handle constraints (1..64 bytes opaque). Mirrors the
+		// registrationOptions gate so the verify endpoint is independently safe.
 		const userIdByteLength = new TextEncoder().encode(userId).length;
 		if (userIdByteLength < 1 || userIdByteLength > 64) {
 			// The composition's fault, logged once: the length, never the value —
@@ -165,30 +151,12 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 
 		const { response, nickname } = parsed.data;
 
-		// §2.4: Consume the single-use challenge atomically via ChallengeCeremony.
-		// The challenge value comes from the WebAuthn client response's clientDataJSON.
-		// SimpleWebAuthn encodes the challenge as a base64url string inside clientDataJSON;
-		// the stored challenge (issued in the options endpoint) is also base64url. We
-		// extract it from the response object at runtime — it is present in
-		// RegistrationResponseJSON as response.clientDataJSON (base64url JSON containing
-		// { challenge: base64urlString }). However, the challenge key we stored at issue
-		// time is the raw base64url from SimpleWebAuthn's generateRegistrationOptions
-		// output, which SimpleWebAuthn also uses as expectedChallenge internally.
-		//
-		// Ceremony lookup: the challenge stored in the options endpoint is the
-		// base64url string (`options.challenge`). We need to look up the same value here.
-		// The client returns it inside clientDataJSON — but we don't decode clientDataJSON
-		// here; instead, we look up the *live* challenge by fetching it from the store
-		// via a two-step approach: find → consume. ChallengeCeremony.consume(scope, value)
-		// needs the value.
-		//
-		// The SimpleWebAuthn RegistrationResponseJSON does NOT expose the decoded challenge
-		// as a top-level field — clientDataJSON is still base64url-encoded JSON. We must
-		// decode it to get the challenge string that matches what was stored.
-		//
-		// Decode clientDataJSON (base64url → JSON → challenge string).
-		// RegistrationResponseJSON structure: { id, rawId, response: { clientDataJSON, ... }, ... }
-		// clientDataJSON lives one level deeper under response.response, not at response.clientDataJSON.
+		// Consume the single-use challenge atomically via ChallengeCeremony, which
+		// needs the value. The options endpoint stored SimpleWebAuthn's base64url
+		// `options.challenge`; the client returns it inside clientDataJSON, which is
+		// base64url-encoded JSON under response.response (RegistrationResponseJSON:
+		// { id, rawId, response: { clientDataJSON, ... }, ... }), so decode it
+		// (base64url → JSON → challenge string).
 		const innerResponse = (response as Record<string, unknown>).response;
 		const clientDataJSONBase64 =
 			innerResponse !== null &&
@@ -240,10 +208,9 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			return;
 		}
 
-		// §2.4 §S7: Verify the attestation with multi-origin support.
-		// Pass userVerification from config so SimpleWebAuthn enforces the UV flag
-		// when the deployment sets userVerification = "required".
-		// Cross-refs: Codex Round 2 P1-1 / spec §2.5
+		// Verify the attestation with multi-origin support. Pass userVerification
+		// from config so SimpleWebAuthn enforces the UV flag when the deployment
+		// sets userVerification = "required".
 		const verification = await verifyWebAuthnAttestation({
 			// biome-ignore lint/suspicious/noExplicitAny: RegistrationResponseJSON passthrough — validated by SimpleWebAuthn internally
 			response: response as any,
@@ -258,24 +225,20 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			return;
 		}
 
-		// §2.4 / WebAuthn §5.1.3 / Codex Round 5 P2: atomic insert via registerCredential.
-		// The store contract guarantees N concurrent inserts of the same credentialId
-		// result in exactly one success and N-1 throws — no TOCTOU window between a
-		// find check and a write.
+		// Atomic insert via registerCredential: the store contract guarantees N
+		// concurrent inserts of the same credentialId give exactly one success and
+		// N-1 throws, with no TOCTOU window between a find and a write.
 		//
-		// Defense-in-depth: WebAuthn §5.1.3 specifies credential IDs as globally unique
-		// by attacker-resistant random generation, but the AS must not trust
-		// authenticator-supplied uniqueness. A malicious authenticator returning a
-		// credentialId matching a victim's existing record, a storage edge case, or a
-		// user re-enrolling without deletion all produce the same collision; the store
-		// rejects all of them atomically.
-		//
-		// Same-user re-roll requires explicit deletion of the prior credential first
-		// (no silent re-upsert). Returns 400 (not 409) per OAuth-style endpoint
-		// convention — validation errors use 400 in this codebase. Any other
-		// adapter error (e.g. transient Redis ECONNRESET) is the store's outage:
-		// 503, logged once — never swallowed into a 200, and never a 500 the
-		// terminal handler reports as unexpected.
+		// WebAuthn §5.1.3 credential IDs are globally unique by attacker-resistant
+		// random generation, but the AS must not trust authenticator-supplied
+		// uniqueness: a malicious authenticator returning a victim's credentialId,
+		// a storage edge case, or a re-enrolment without deletion all collide, and
+		// the store rejects each atomically. Same-user re-roll requires deleting
+		// the prior credential first (no silent re-upsert). A collision is 400
+		// (not 409), as validation errors are in this codebase. Any other adapter
+		// error (e.g. transient Redis ECONNRESET) is the store's outage: 503,
+		// logged once — never swallowed into a 200, and never a 500 the terminal
+		// handler reports as unexpected.
 		const { material } = verification;
 		try {
 			await deps.credentialStore.registerCredential({

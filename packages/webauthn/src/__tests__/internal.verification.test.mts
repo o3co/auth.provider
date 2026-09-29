@@ -15,25 +15,21 @@
  */
 
 /**
- * Tests for verifyWebAuthnAttestation + verifyWebAuthnAssertion (spec §2.5).
+ * Tests for verifyWebAuthnAttestation + verifyWebAuthnAssertion, with
+ * @simplewebauthn/server mocked: the library ships no fixtures, and a valid
+ * attestation needs raw CBOR, COSE key encoding, authenticatorData and a real
+ * signature.
  *
- * Fixture strategy: Option D — vi.mock(@simplewebauthn/server).
+ * The helpers are thin wrappers, and all they add runs against mocked
+ * responses and throws:
+ *   1. error strings (algorithm/top-origin/origin/challenge/rp_id/counter)
+ *      mapped to the typed reason union
+ *   2. material reshaped to credentialId / publicKey / signCount / transports /
+ *      backedUp
+ *   3. the sign-count corner case (stored=0 && new=0 → allow)
  *
- * Rationale: SimpleWebAuthn v13.1.1 ships no test fixtures or ceremony-builder
- * helpers. Constructing a valid attestation object requires raw CBOR + COSE key
- * encoding + WebAuthn authenticatorData + a real EC/RSA signature, which is
- * brittle and duplicates SimpleWebAuthn's own test surface.
- *
- * The helpers under test are *thin wrappers* whose value-add is:
- *   1. Typed error-reason mapping (algorithm/top-origin/origin/challenge/rp_id/
- *      counter error strings → typed reason union)
- *   2. Material reshaping (drop SimpleWebAuthn-internal fields; expose only
- *      credentialId / publicKey / signCount / transports / backedUp)
- *   3. §2.4 sign-count corner case (stored=0 && new=0 → allow)
- *
- * All three are fully exercisable via mocked SimpleWebAuthn responses/throws.
- * The real cryptographic path is covered by SimpleWebAuthn's own test suite and
- * by the integration tests (T31) that exercise a real ceremony.
+ * The real cryptographic path is covered by the library's own suite and by the
+ * integration tests that run a real ceremony.
  */
 
 import type { WebAuthnCredential } from "@o3co/auth-provider-core";
@@ -104,7 +100,7 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// verifyWebAuthnAttestation (spec §2.5)
+// verifyWebAuthnAttestation
 // ---------------------------------------------------------------------------
 
 describe("verifyWebAuthnAttestation (spec §2.5)", () => {
@@ -143,9 +139,8 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 	});
 
 	it("names a credential whose algorithm is outside the pin, rather than answering unknown (v0.13.0 audit)", async () => {
-		// `WEBAUTHN_ALGORITHM_IDS` refuses e.g. ML-DSA-44 (-48). The library's
-		// message matched no arm, so the operator saw `{"error":"unknown"}` for a
-		// refusal this package chose on purpose.
+		// `WEBAUTHN_ALGORITHM_IDS` refuses e.g. ML-DSA-44 (-48). The refusal is
+		// this package's choice, so it gets its own reason, not `unknown`.
 		mockVerifyRegistration.mockRejectedValueOnce(
 			new Error('Unexpected public key alg "-48", expected one of "-8,-7,-257"'),
 		);
@@ -248,7 +243,7 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)
+// verifyWebAuthnAssertion (incl. the sign-count rule)
 // ---------------------------------------------------------------------------
 
 describe("verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)", () => {
@@ -386,13 +381,11 @@ describe("verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// S7 multi-origin pass-through + rejection (spec §spec S7)
+// Multi-origin pass-through + rejection
 // ---------------------------------------------------------------------------
 
 describe("S7 multi-origin: expectedOrigins array forwarding", () => {
 	it("verifyWebAuthnAttestation forwards multi-element expectedOrigins to SimpleWebAuthn intact", async () => {
-		// Verify the helper passes the full array — the mock captures args so we
-		// can assert every element arrived.
 		mockVerifyRegistration.mockResolvedValueOnce({
 			verified: true,
 			registrationInfo: {
@@ -494,7 +487,7 @@ describe("S7 multi-origin: expectedOrigins array forwarding", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Codex Round 2 P1-1: userVerification enforcement
+// userVerification enforcement
 // ---------------------------------------------------------------------------
 
 describe("Codex Round 2 P1-1: userVerification enforcement", () => {
@@ -720,9 +713,7 @@ describe("cross-origin authentication is the deployment's decision (#554 audit)"
 	it("passes the configured top origins to the library", async () => {
 		// SimpleWebAuthn 14 refuses a cross-origin (iframe) authentication
 		// whose `topOrigin` the browser reports unless `expectedTopOrigin` is
-		// given. Nothing passed one, and `WebAuthnConfig` had no field for it,
-		// so Chromium iframe passkey authentication that worked on 13.3.3
-		// broke with no way for an operator to allow it.
+		// given. The configured top origins are how an operator allows one.
 		mockVerifyAuthentication.mockResolvedValueOnce({
 			verified: true,
 			authenticationInfo: { newCounter: 1 },
@@ -755,9 +746,9 @@ describe("cross-origin authentication is the deployment's decision (#554 audit)"
 	});
 
 	it("reports a refused cross-origin response as its own reason, not an origin mismatch", async () => {
-		// The library's message carries the word "origin", so it landed in the
-		// `/origin/i` arm and answered `origin_mismatch` — sending the operator
-		// to their `webauthn.origin` allowlist, which cannot fix it.
+		// The library's message carries the word "origin", but `origin_mismatch`
+		// would send the operator to their `webauthn.origin` allowlist, which
+		// cannot fix it.
 		mockVerifyAuthentication.mockRejectedValueOnce(
 			new Error(
 				'Detected cross-origin authentication response from top origin of "https://embedder.example", but a value for `expectedTopOrigin` was not specified when calling `verifyAuthenticationResponse()`',

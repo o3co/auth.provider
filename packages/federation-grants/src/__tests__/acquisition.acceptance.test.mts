@@ -15,17 +15,13 @@
  */
 
 /**
- * A grant created end to end through the composed application (#593 slice 6):
- * a client lodges an intent, the user's browser connects, reads the consent,
- * approves, comes back from the upstream — and the client then spends the
- * grant on `/token`.
- *
- * Booted with `createApp` and the real modules, so what is proven is the
- * composition: that the two route contributions mount where they must (the
- * browser half after the session middleware, which reads the session it
- * sets), that the module hands every piece what it needs, and that a grant
- * created by acquisition is one retrieval accepts. The route-level suites test
- * each rule; this tests that they are the same deployment.
+ * A grant created end to end through the composed application: a client lodges
+ * an intent, the user's browser connects, reads the consent, approves and comes
+ * back from the upstream, and the client then spends the grant on `/token`.
+ * Booted with `createApp` and the real modules, this proves the composition:
+ * the browser half mounts after the session middleware whose session it reads,
+ * the module hands every piece what it needs, and a grant acquisition creates
+ * is one retrieval accepts. The route-level suites test each rule.
  */
 
 import { createServer as createNetServer } from "node:net";
@@ -74,10 +70,9 @@ import {
 
 /**
  * The bundled repository, with a lookup that covers this deployment's one
- * registration — which the bundled one alone does not (#611). Both methods
- * read the instance's own fields, so a caller that takes either off the
- * object loses `this` and fails: the slice 6 bug every arrow-function stub
- * hid (Codex).
+ * registration, which the bundled one alone does not. Both methods read the
+ * instance's own fields, so a caller that takes either off the object loses
+ * `this` and fails, which an arrow-function stub would hide.
  */
 class DirectoryRepository extends InMemoryUserRepository {
 	private readonly covered = "upstream";
@@ -129,7 +124,7 @@ const clientRepository: ClientRepository = {
 		id === CLIENT_ID && secret === SECRET ? (client as never) : null,
 };
 
-/** The oauthTokenSettings the composition holds, when a test puts them there (#728); none by default. */
+/** The oauthTokenSettings the composition holds, when a test puts them there; none by default. */
 let tokenSettings: OAuthTokenSettings | undefined;
 
 /** Whose account the fake upstream's exchange verifies; a test may add claims. */
@@ -291,7 +286,7 @@ const boot = async (
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
 			// The login page, which the session module provides in a real
-			// composition (#728).
+			// composition.
 			loginEntry: acquisitionLoginEntry(),
 			sessionRPRegistry: {},
 			sessionFamilyIndex: {},
@@ -425,10 +420,10 @@ describe("a grant created end to end, and spent", () => {
 	};
 
 	it("asks the Store, through the composed deployment, and refuses an upstream account it places with another user (#611)", async () => {
-		// The composition — not the router's options in a unit test — is what
-		// decides whether check 5 runs: a module that handed the router
-		// "unsupported" would boot, probe coverage, and then skip the check on
-		// every callback.
+		// The composition, not the router's options in a unit test, decides
+		// whether the identity check (the federation-grants ADR, D7 check 5)
+		// runs: a module that handed the router "unsupported" would boot, probe
+		// coverage, and then skip the check on every callback.
 		const repository = directory().own("00u-alice", "bob");
 		const { handle, app } = await boot(undefined, repository);
 		try {
@@ -567,7 +562,7 @@ describe("a grant created end to end, and spent", () => {
 	});
 });
 
-// #613: the identity lookup over HTTP, composed — a deployment on
+// The identity lookup over HTTP, composed: a deployment on
 // `HttpUserRepository` keeps `identityLookup = "required"` with a connection
 // configured, given a Store that answers, and the callback reads the Store's
 // answer as the port's.
@@ -1142,7 +1137,8 @@ describe("#616: a grant the upstream asked the user for, and one starved of scop
 			expect((await status(app, grantId)).body).toMatchObject({ scope: "openid offline_access" });
 
 			// Later, a wider consent on the same registration: the IdP now answers
-			// every refresh with the accumulated set (D19), and this grant is starved.
+			// every refresh with the accumulated set (the federation-grants ADR,
+			// D19), and this grant is starved.
 			Object.assign(upstream, {
 				refreshDelegatedToken: async () => ({
 					accessToken: "wide-token",

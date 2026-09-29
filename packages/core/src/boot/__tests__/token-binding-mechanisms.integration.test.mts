@@ -15,23 +15,11 @@
  */
 
 /**
- * boot/__tests__/token-binding-mechanisms.integration.test.mts
+ * boot/__tests__/token-binding-mechanisms.integration.test.mts — how core
+ * composes the `tokenBindingMechanisms` contributions into one
+ * `tokenBindingMw` and applies the dispatch policy.
  *
- * Integration tests for the `tokenBindingMechanisms` contribution kind.
- *
- * Verifies:
- *   1. Empty collector → no synthesized middleware mounted.
- *   2. One mechanism contributed → single `tokenBindingMw` synthesized,
- *      `req.tokenBinding` populated with the mechanism's output.
- *   3. Two mechanisms contributed → ONE `tokenBindingMw` composed across
- *      both; under `intent-explicit` the explicit-intent mechanism wins
- *      over the ambient one when both succeed on the same request.
- *   4. Two mechanisms + `strict-mutual-exclusion` + both succeed → 400.
- *   5. Factory returns null → filtered; not included in the composition.
- *   6. dispatch-policy absent from config → defaults to `intent-explicit`.
- *
- * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
- * for the cross-mechanism design rationale.
+ * See ADR 2026-05-20-token-binding-first-class-abstraction.
  */
 
 import express, { type Request, type RequestHandler, Router } from "express";

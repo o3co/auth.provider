@@ -16,16 +16,12 @@
 
 /**
  * What a thrown message names of a Store URL: its origin and path, never its
- * query or fragment.
- *
- * A Store endpoint may carry a query string (`?tenant=acme` is a legitimate
- * POST target), and a deployment may put a credential there despite the
- * README's advice. Every failure `HttpUserRepository` throws names the
- * endpoint, and every caller logs what it throws (`loggableError` keeps the
- * message as `detail`), so a query in the message is a query in the log.
- *
- * Run against real `node:http` and `node:net` servers — the failures are the
- * transport's, and the messages are built from what the real `fetch` did.
+ * query or fragment. A Store endpoint may carry a query (`?tenant=acme` is a
+ * legitimate POST target), and a deployment may put a credential there despite
+ * the README's advice. Every failure `HttpUserRepository` throws names the
+ * endpoint, and every caller logs it (`loggableError` keeps the message as
+ * `detail`), so a query in the message is a query in the log. Run against real
+ * `node:http` and `node:net` servers: the messages come from what `fetch` did.
  */
 
 import { createServer, type Server } from "node:http";

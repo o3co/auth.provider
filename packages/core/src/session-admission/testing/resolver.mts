@@ -15,19 +15,13 @@
  */
 
 /**
- * `resolverForTests` (the session-admission ADR's D1): the branded
- * `SessionRequirementResolver` a test builds when it constructs a consumer
- * by hand, registered in the same set the boot planner's resolvers are — so
- * the brand stops accidents, not a deployment that imports the testing
- * entry on purpose. Each requirement is registered as boot registers one
- * (`registeredRequirement`): its shape held to the contract, its page on the
- * issuer's origin when one is given, and what the resolver answers a copy —
- * its reach sealed as boot seals it: read once when the resolver is built,
- * held to the reach rules boot holds it to (`sealRegisteredReach`, an empty
- * reach under any name but `mfa` in this release among them), a read-only
- * snapshot answered afterwards. `allowAnyReach` lifts the reach rules —
- * the snapshot stays — for the tests of admission's own mechanics that
- * need two reaching requirements (the merge table); nothing else uses it.
+ * `resolverForTests`: the branded `SessionRequirementResolver` a test builds
+ * when it constructs a consumer by hand. It is registered in the same set as
+ * the boot planner's, so the brand stops accidents, not a deployment that
+ * imports the testing entry on purpose. Each requirement is registered and
+ * its reach sealed as boot does. `allowAnyReach` lifts the reach rules (the
+ * snapshot stays) for tests of admission's own mechanics that need two
+ * reaching requirements; nothing else uses it.
  */
 
 import { sessionRequirementResolverOver } from "../admit.mjs";

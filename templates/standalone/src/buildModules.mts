@@ -75,12 +75,11 @@ import {
  */
 export interface BuildModulesOverrides {
 	/**
-	 * #473: the name this deployment selected its configuration by —
-	 * `CONFIG_ENV || NODE_ENV`, computed once in `app.mts` and passed here so
-	 * the Redis federation-token store's `allow-plaintext` guard reads the
-	 * environment the config actually came from, not `NODE_ENV` alone. Omitted,
-	 * the guard falls back to `NODE_ENV` (and `deployment.mode`, which it reads
-	 * off the config either way).
+	 * The name this deployment selected its configuration by (`CONFIG_ENV ||
+	 * NODE_ENV`, computed once in `app.mts`), so the Redis federation-token
+	 * store's `allow-plaintext` guard reads the environment the config came
+	 * from, not `NODE_ENV` alone. Omitted, the guard falls back to `NODE_ENV`
+	 * (and `deployment.mode`, which it reads off the config either way).
 	 */
 	readonly environment?: string;
 	/**
@@ -93,27 +92,17 @@ export interface BuildModulesOverrides {
 	readonly repositoriesModule?: Module;
 	readonly storesModule?: Module;
 	/**
-	 * D-2 v2 / Wave 5d: override the RT family store module + (when adapter
-	 * is `"redis"`) the bundled redis-clients + redis-store pair. Default
-	 * production manifest is `[standaloneRedisClientsModule, redisRefreshTokenFamilyStoreModule]`
-	 * (single shared ioredis socket per replica via the F4 PR2 unification).
-	 *
-	 * Smoke tests / unit tests that don't want to open an ioredis connection
-	 * pass `[memoryRefreshTokenFamilyStoreModule]` here. The override REPLACES
-	 * the entire group — when the override is provided, `standaloneRedisClientsModule`
-	 * is dropped from the manifest unless the override list includes it.
+	 * Replaces the refresh-token family store modules (default
+	 * `[redisRefreshTokenFamilyStoreModule]`, on the shared ioredis socket).
+	 * Tests that must not open an ioredis connection pass
+	 * `[memoryRefreshTokenFamilyStoreModule]`.
 	 */
 	readonly refreshTokenFamilyModules?: readonly Module[];
 	/**
-	 * #287: override the module filling the `auditSink` slot. Tests substitute
-	 * a sink they can assert on; the default writes the audit trail to stdout
-	 * and is what a deployment gets.
-	 *
-	 * The override REPLACES the default — it does not add a second provider,
-	 * which would be a boot-time slot collision. There is intentionally no way
-	 * to pass "no audit sink": #304's sink policy is that the trail is always
-	 * wired, and a composition that genuinely wants events discarded says so by
-	 * providing a sink that discards them.
+	 * Replaces the module filling the `auditSink` slot (the default writes the
+	 * trail to stdout); tests substitute a sink they can assert on. It replaces
+	 * rather than adds, since a second provider would be a boot-time slot
+	 * collision. There is no way to pass "no audit sink": pass one that discards.
 	 */
 	readonly auditSinkModule?: Module;
 }
@@ -128,16 +117,15 @@ export interface BuildModulesOverrides {
 const SHIPPED_ACCESS_TOKEN_EXPIRES_IN = 3600;
 
 /**
- * The session requirements this composition expects, derived from the PARSED
- * `mfa.mode` and written into the configuration `createApp` is handed (the
- * session-admission ADR's D7): `[]` under `off`, `["mfa"]` under `optional`
- * or `required` — the MFA package, once it exists, is what `buildModules`
- * installs for those modes and what registers the requirement; until then a
- * mode other than `off` is refused at boot (`session-requirement-missing`).
- * Never from the raw `MFA_MODE`, which would let a variable the schema
- * refused boot with a posture the config does not carry; a mode that is
- * none of the three is a `RangeError` naming the key (`readMfaMode`). HOCON
- * has no conditional, so the list is written here.
+ * The session requirements this composition expects, written into the
+ * configuration `createApp` is handed: `[]` under `off`, `["mfa"]` under
+ * `optional` or `required`. `buildModules` installs no module registering
+ * `mfa`, so a mode other than `off` is refused at boot
+ * (`session-requirement-missing`). Derived from the PARSED `mfa.mode`, never
+ * the raw `MFA_MODE`, which would let a variable the schema refused boot with
+ * a posture the config does not carry; any other mode is a `RangeError`
+ * naming the key (`readMfaMode`). Written here because HOCON has no
+ * conditional. See ADR 2026-09-28-session-admission.
  */
 export function withSessionRequirements(config: AppConfig): AppConfig {
 	const mode = readMfaMode(config) ?? "off";
@@ -145,90 +133,64 @@ export function withSessionRequirements(config: AppConfig): AppConfig {
 }
 
 /**
- * Compose the standalone v0.5.0 module list from `config`. Splitting this
- * out of `app.mts` keeps the composition root testable: a smoke test can
- * verify that disabling a federation removes its module pair from the
- * manifest without spinning up a full HTTP server.
- *
- * Federation gating: `googleFederationModule` requires `googleFederationConfig`,
- * which `googleFederationConfigModule` produces by reading
- * `config.federations.google`. When google is disabled (or the section is
- * absent), the config-bridge module's provider throws — so the entire pair
- * MUST be conditionally included at composition time, not gated inside the
- * provider.
- *
- * #524: the generic OIDC federation follows the same rule, once per enabled
- * `federations.<name>` of type "oidc": `oidcFederationModule(name)` per
- * instance plus the one `oidcFederationConfigModule` that reads every
- * instance's config into the slot they share. A section's `type` decides
- * which implementation owns the name, so the two gates never both select
- * the same section.
+ * Compose the standalone module list from `config`. Kept out of `app.mts` so
+ * a smoke test can check the manifest (that disabling a federation removes
+ * its module pair, say) without an HTTP server. The rules for editing the
+ * list (order, one module per store slot, federation adapters with their
+ * config bridges) are in the template README, "Module Composition Order".
  */
 export function buildModules(config: AppConfig, overrides: BuildModulesOverrides = {}): Module[] {
-	// A section's `type` names the implementation: `federations.google` is the
-	// built-in Google federation only when its type is `google` (the default
-	// for that name). With `type = "oidc"` it is a generic OIDC instance named
-	// "google" (#524), and composing both would contribute the same
-	// federation and redirect-policy keys twice.
+	// A section's `type` names the implementation, so the two gates never both
+	// select one section: `federations.google` is the built-in Google
+	// federation only when its type is `google` (that name's default); with
+	// `type = "oidc"` it is a generic OIDC instance, and composing both would
+	// contribute the same federation and redirect-policy keys twice.
 	const googleEnabled =
 		extractFederationSection(config.federations ?? {}, "google")?.type === "google";
 	const oidcFederations = oidcFederationNames(config.federations ?? {});
 	const logger = overrides.logger ?? consoleLogger;
 
-	// Wave 5d (IH-14 + OR-M1 + OR-4) + OR-9: adapter-driven branching for
-	// the OAuth-endpoint rate limiter, the user-session-store family, AND
-	// the OAuth code repository. The RT family store always uses Redis in
-	// the production manifest (D-2 v2 / OR-1) unless
-	// `overrides.refreshTokenFamilyModules` swaps it out. When ANY consumer
-	// adapter is `"redis"` (or the RT family override includes a
-	// Redis-backed store module), the shared `standaloneRedisClientsModule`
-	// is added once and provides every per-purpose ComponentMap slot from a
-	// single ioredis socket per replica. Memory-only deployments skip it.
+	// Adapter switches. When ANY is `"redis"`, or the refresh-token family
+	// modules keep the Redis store (the default), the shared
+	// `standaloneRedisClientsModule` is added once, one ioredis socket per
+	// replica; memory-only deployments open none.
 	const rateLimiterAdapter = config.rateLimiter?.adapter ?? "memory";
 	const userSessionStoresAdapter = config.userSessionStores?.adapter ?? "memory";
-	// #277: the RFC 7009 access-token denylist. Unlike the switches above there
-	// is no "no denylist" branch — `oauthModule` reads the `accessTokenDenylist`
-	// slot because it mounts `/oauth/revoke`, and core's boot validator refuses
-	// a composition that reads the slot with nothing filling it, since the
-	// endpoint would answer 200 while the token kept working. The switch here is
-	// only over WHICH denylist.
+	// The RFC 7009 access-token denylist has no "none" branch: `oauthModule`
+	// mounts `/oauth/revoke` and reads the `accessTokenDenylist` slot, and core's
+	// boot validator refuses a composition that reads the slot with nothing
+	// filling it, since the endpoint would answer 200 while the token kept
+	// working. The switch is only over WHICH denylist.
 	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
-	// #484: the jti single-use record behind private_key_jwt client auth.
+	// The jti single-use record behind private_key_jwt client auth.
 	const replaySeenSetAdapter = config.replaySeenSet?.adapter ?? "memory";
-	// #527: the consent store behind /authorize for clients that are not
-	// first-party. `"none"` (the default) wires nothing — such clients are
-	// refused, as before — so a first-party-only deployment pays nothing and
-	// a multi-replica one is not handed a memory store it cannot run.
-	// `"redis"` (#561) is the store such a deployment selects.
+	// The consent store behind /authorize for clients that are not first-party.
+	// `"none"` (the default) wires nothing and such clients are refused, so a
+	// first-party-only deployment pays nothing and a multi-replica one is not
+	// handed a memory store it cannot run; that one selects `"redis"`.
 	const consentStoreAdapter = config.consentStore?.adapter ?? "none";
-	// #456: adapter switch for the federation token store. `"memory"` by
-	// default, the template's local-dev shape; `"redis"` mounts
-	// `redisFederationTokenStoreModule` off the shared socket — what the README
-	// promised and what the previous factory-based module never delivered: it
-	// built the Redis store without a client and failed at boot.
+	// The federation token store: `"memory"` by default, the local-dev shape;
+	// `"redis"` mounts `redisFederationTokenStoreModule` off the shared socket.
 	const federationTokenStoreAdapter = config.federationTokenStore?.type ?? "memory";
-	// #593 slice 7: federation grants — a user's standing consent that a client
-	// may obtain upstream tokens with no session behind the call. Off by
-	// default, and off installs nothing: no store, no socket, no boot
-	// requirement a deployment that never asked for grants would have to meet.
-	// On, the routes and the background registry the shutdown drains come as a
-	// pair, each store follows its own switch (grants in Redis with acquisition
-	// in memory is a supported single-replica shape), and the subject-revocation
-	// service is installed so a credential change can reach the grants — its
-	// `federationGrantStore` edge is what makes "revoke everything this subject
-	// holds" include them. Enabling the feature is also a statement that the
-	// deployment has a consent page, a callback per connection and a user
-	// repository that covers each connection's registration; the routes module
-	// refuses at boot what is missing, naming it.
+	// Federation grants: a user's standing consent that a client may obtain
+	// upstream tokens with no session behind the call. Off by default, and off
+	// installs nothing: no store, no socket, no boot requirement. On, the routes
+	// and the background registry the shutdown drains come as a pair; each store
+	// follows its own switch (grants in Redis with acquisition in memory is a
+	// supported single-replica shape); and the subject-revocation service is
+	// installed, whose `federationGrantStore` edge makes "revoke everything this
+	// subject holds" include the grants. Enabling it also states the deployment
+	// has a consent page, a callback per connection and a user repository
+	// covering each connection's registration; the routes module refuses at
+	// boot what is missing, naming it.
 	const federationGrantsEnabled = config.federationGrants?.enabled === true;
 	const federationGrantStoreAdapter = config.federationGrantStore?.adapter ?? "memory";
 	const federationGrantIntentStoreAdapter = config.federationGrantIntentStore?.adapter ?? "memory";
 
-	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the
-	// authoritative switch; the legacy `repositories.code.type = "redis"`
-	// path is honored with a deprecation warn so existing operators
-	// relying on `CLIENT_CODE_TYPE=redis` env-var overrides keep working
-	// until they migrate. See CHANGELOG for the removal version.
+	// `oauth.code.adapter` is authoritative; the deprecated
+	// `repositories.code.type = "redis"` (`CLIENT_CODE_TYPE=redis`) is still
+	// honoured, with a deprecation warning. See CHANGELOG for the removal
+	// version.
 	const oauthCodeAdapter = config.oauth?.code?.adapter;
 	const legacyCodeType = (config.repositories?.code as { type?: string } | undefined)?.type;
 	let codeRepositoryAdapter: "memory" | "redis";
@@ -249,14 +211,12 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		codeRepositoryAdapter = "memory";
 	}
 
-	// The access-token lifetime's deprecated alias: `oauth.accessToken.expiresIn`
+	// The deprecated alias `oauth.accessToken.expiresIn`
 	// (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is still read as the default while
-	// `defaultExpiresIn` is unset — `resolveAccessTokenLifetime` does that, and
-	// this only says so. Core's `reference.conf` keeps the shipped lifetime on
-	// the deprecated key, so "the alias supplied the default" is every
-	// deployment that set nothing; an override of it is the one case with
-	// something to move, the reading `legacyCodeType === "redis"` gives above.
-	// See CHANGELOG for the removal version.
+	// `defaultExpiresIn` is unset; `resolveAccessTokenLifetime` does that, and
+	// this only warns. Core's `reference.conf` ships the lifetime on the
+	// deprecated key, so only an override of it has something to move. See
+	// CHANGELOG for the removal version.
 	const accessToken = config.oauth.accessToken;
 	if (
 		accessToken.defaultExpiresIn === undefined &&
@@ -276,11 +236,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const refreshTokenFamilyModules: readonly Module[] = overrides.refreshTokenFamilyModules ?? [
 		redisRefreshTokenFamilyStoreModule,
 	];
-	// Detect whether the RT-family override (if any) keeps the Redis-backed
-	// store. Default (no override) uses Redis. An override that includes the
-	// Redis store module without also wiring `standaloneRedisClientsModule`
-	// would otherwise boot-fail on the missing `refreshTokenFamilyClient`
-	// component (Copilot review on PR #121).
+	// Whether the family modules keep the Redis-backed store (the default
+	// does). Without the shared clients module added for it, that store fails
+	// boot on the missing `refreshTokenFamilyClient` component.
 	const refreshTokenFamilyUsesRedis = refreshTokenFamilyModules.some(
 		(m) => m.name === "redis-refresh-token-family-store",
 	);
@@ -299,10 +257,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			(federationGrantStoreAdapter === "redis" || federationGrantIntentStoreAdapter === "redis"));
 
 	// The four user-session stores switch on `userSessionStores.adapter`; the
-	// federation-token store is always wired and switches on its own key
-	// below (#456). Pre-Wave-5d the redis branch dropped the
-	// federation-token-store provider entirely (Copilot review on PR #121);
-	// splitting `storesModule` fixed that boot failure.
+	// federation-token store is always wired and switches on its own key below.
 	const sessionStoresModules: Module[] =
 		userSessionStoresAdapter === "redis"
 			? [redisSessionStoresModule]
@@ -313,29 +268,26 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const rateLimiterModules: Module[] =
 		rateLimiterAdapter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
 
-	// OR-9: code-repository module — mutually exclusive memory/redis pair.
-	// Same pattern as sessionStoresModules + rateLimiterModules. The two
-	// modules provide the same `codeRepository` slot; including both would
-	// be a boot-time slot collision.
+	// Mutually exclusive: both modules provide the `codeRepository` slot, and
+	// including both would be a boot-time slot collision.
 	const codeRepositoryModules: Module[] =
 		codeRepositoryAdapter === "redis"
 			? [redisCodeRepositoryModule]
 			: [inMemoryCodeRepositoryModule];
 
-	// #277: mutually-exclusive denylist pair, same shape as the three switches
-	// above. The memory branch is a dev convenience and nothing more: it forks
-	// per replica, so `deployment.mode = "multi"` refuses it by name (see core's
+	// The memory denylist is a dev convenience and nothing more: it forks per
+	// replica, so `deployment.mode = "multi"` refuses it by name (core's
 	// replica-safety guard). The template's own application.conf ships `"redis"`.
 	const accessTokenDenylistModules: Module[] =
 		accessTokenDenylistAdapter === "redis"
 			? [redisAccessTokenDenylistModule]
 			: [memoryAccessTokenDenylistModule];
 
-	// #527: opt-in. Each module provides both slots the consent step needs —
-	// the consent records and the requests parked while the page asks — so the
-	// two cannot be wired apart. The memory one declares itself replica-unsafe
-	// and `deployment.mode = "multi"` refuses it by name; the Redis one (#561)
-	// shares both over the ioredis socket.
+	// Opt-in. Each module provides both slots the consent step needs (the
+	// consent records and the requests parked while the page asks), so the two
+	// cannot be wired apart. The memory one declares itself replica-unsafe and
+	// `deployment.mode = "multi"` refuses it by name; the Redis one shares both
+	// over the ioredis socket.
 	const consentStoreModules: Module[] =
 		consentStoreAdapter === "redis"
 			? [redisConsentStoreModule]
@@ -343,32 +295,26 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 				? [memoryConsentStoreModule]
 				: [];
 
-	// #455 / #456: mutually-exclusive federation-token-store pair, the same
-	// shape as the session stores. One module per adapter, so the memory one
-	// can declare `replicaSafety` on its manifest and the Redis one can
-	// `require` its client slot. The previous single module chose the adapter
-	// at runtime under one name — the replica guard could not tell the two
-	// apart, and the Redis branch had no client to hand the builder.
-	//
-	// #473: the Redis module is built for this composition root so its
-	// plaintext guard knows which environment selected the config; it reads
-	// `deployment.mode` off the config itself.
 	const replaySeenSetModules: Module[] =
 		replaySeenSetAdapter === "redis" ? [redisReplaySeenSetModule] : [memoryReplaySeenSetModule];
 
+	// One federation-token-store module per adapter, so the memory one can
+	// declare `replicaSafety` on its manifest and the Redis one can `require`
+	// its client slot. The Redis module is built for this composition root so
+	// its plaintext guard knows which environment selected the config; it
+	// reads `deployment.mode` off the config itself.
 	const federationTokenStoreModules: Module[] =
 		federationTokenStoreAdapter === "redis"
 			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]
 			: [inMemoryFederationTokenStoreModule];
 
-	// #593 slice 7: one module per store, nothing while the feature is off.
-	// The Redis grant store is built for this composition root so its
-	// plaintext guard knows which environment selected the config (#473), as
-	// the federation-token store's is. Both memory modules declare
-	// `replicaSafety`, so `deployment.mode = "multi"` refuses them by name; a
-	// Redis grant store beside memory user-session stores is refused by the
-	// routes module itself, because the grants would outlive the boundary that
-	// ends them (D13).
+	// One module per store, nothing while the feature is off. The Redis grant
+	// store is built for this composition root so its plaintext guard knows
+	// which environment selected the config, as the federation-token store's
+	// is. Both memory modules declare `replicaSafety`, so `deployment.mode =
+	// "multi"` refuses them by name; the routes module itself refuses a Redis
+	// grant store beside memory user-session stores, because the grants would
+	// outlive the boundary that ends them.
 	const federationGrantStoreModules: Module[] = !federationGrantsEnabled
 		? []
 		: federationGrantStoreAdapter === "redis"
@@ -385,31 +331,21 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			: [memoryFederationGrantIntentStoreModule];
 
 	return [
-		// D-5: sessionStoreModule wires the express-session middleware into the
-		// boot-planner-managed lifecycle. **Mount order is enforced by this
-		// list position (declarationIndex tie-breaking)** — the module
-		// intentionally has no `before`/`after` clause, so it MUST be listed
-		// ahead of every session-consuming module here. Do not reorder.
-		//
-		// #474: built from `config` rather than the static manifest, so that
-		// `session.storage.type = "memory"` declares itself replica-unsafe and
-		// `deployment.mode = "multi"` refuses it by name like the other stores.
+		// MUST stay first: it declares no `before`/`after`, so this position is
+		// what mounts express-session ahead of every session-consuming module.
+		// Built from `config` so that `session.storage.type = "memory"` declares
+		// itself replica-unsafe and `deployment.mode = "multi"` refuses it.
 		sessionStoreModuleFor(config),
-		// #593 slice 7: the grants routes mount under `/oauth` beside
-		// `oauthModule`'s router, which parses the bodies of its own routes
-		// only, so each parses its own requests and their place relative to
-		// `oauthModule` does not matter. The browser half sits after the
-		// session middleware by its own `after`, wherever it is listed.
+		// Under `/oauth` beside `oauthModule`, each parsing its own requests, so
+		// their relative order does not matter; the browser half orders itself
+		// after the session middleware by its own `after`.
 		...(federationGrantsEnabled ? federationGrantsModules : []),
 		oauthModule({ config }),
 		oauthSessionModule({ config }),
 		oauthAuthorizationModule({ config }),
-		// JWKS publishing — always wired (depends only on config + keyStore).
-		// Contributed by core's `jwksModule`, NOT oauthModule: a provider that
-		// signs tokens must publish its verification keys regardless of OIDC
-		// issuer config. Co-installed with oauthModule so the discovery
-		// `jwks_uri` (advertised by oauthModule when an issuer is set) always
-		// resolves to this mounted route.
+		// Always wired: a provider that signs tokens must publish its
+		// verification keys regardless of OIDC issuer config, and `oauthModule`'s
+		// discovery `jwks_uri` (advertised when an issuer is set) must resolve.
 		jwksModule,
 		sessionModule,
 		...(googleEnabled ? [googleFederationModule, googleFederationConfigModule] : []),
@@ -418,48 +354,29 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			: []),
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
-		// #287: the audit sink, always wired. Unlike every switch above there is
-		// no "off" branch — the routes' security events (`token.issued.failure`,
-		// `authorize.rejected`, `rate_limit.unavailable`, …) went nowhere in the
-		// shipped artifact because the slot was empty and `emitAuditEvent`
-		// no-ops when it is. Which sink is a config question
-		// (`audit.sink.type`); whether there is one is not.
+		// The audit sink, always wired: `emitAuditEvent` no-ops on an empty slot,
+		// so the routes' security events (`token.issued.failure`,
+		// `authorize.rejected`, `rate_limit.unavailable`, …) would go nowhere.
+		// Which sink is a config question (`audit.sink.type`); whether there is
+		// one is not.
 		overrides.auditSinkModule ?? auditSinkModule,
-		// Shared ioredis clients — only when at least one consumer adapter
-		// actually needs Redis. Memory-only deployments skip this so they
-		// don't open an unused socket.
 		...(usingRedisAnywhere ? [standaloneRedisClientsModule] : []),
-		// Federation-token store: redis (multi-replica) or memory (dev). Always
-		// wired, independent of the `userSessionStores.adapter` switch — it was
-		// bundled into `storesModule` pre-Wave-5d, and the redis session-stores
-		// branch dropped the provider.
 		...federationTokenStoreModules,
-		// #593 slice 7: the grant store and the intent store, when the feature is on.
 		...federationGrantStoreModules,
 		...federationGrantIntentStoreModules,
-		// User-session-store family: redis (multi-replica) or memory (dev).
 		...sessionStoresModules,
-		// OAuth-endpoint rate limiter: redis (shared counters) or memory.
 		...rateLimiterModules,
-		// OAuth code repository: redis (multi-replica) or memory (single-instance).
 		...codeRepositoryModules,
-		// RFC 7009 access-token denylist: redis (shared revocations) or memory
-		// (single-instance dev). Always wired — see the switch above.
 		...accessTokenDenylistModules,
 		...replaySeenSetModules,
-		// Consent records for clients that are not first-party: redis
-		// (multi-replica, #561), memory (single-instance), or nothing (#527).
 		...consentStoreModules,
-		// RT family store: redis by default (closes OR-1); override path
-		// swaps to `[memoryRefreshTokenFamilyStoreModule]` for unit tests.
 		...refreshTokenFamilyModules,
 		defaultRefreshTokenFamilyRotationModule,
 		defaultRefreshTokenFamilyRevocationModule,
-		// #593 slice 7: the composed "end everything this subject holds" a
-		// credential change calls, reached as `handle.components.subjectRevocationService`.
+		// The composed "end everything this subject holds" a credential change
+		// calls, reached as `handle.components.subjectRevocationService`.
 		// Installed with the feature, which is what makes it reach the grants;
-		// the template never installed it before, so a deployment without
-		// grants is as it was — a Store there calls core's revokeAllForSubject.
+		// without grants a Store calls core's revokeAllForSubject.
 		...(federationGrantsEnabled ? [subjectRevocationServiceModule] : []),
 	];
 }

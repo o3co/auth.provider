@@ -15,15 +15,11 @@
  */
 
 /**
- * The test that tells the two ways of owning the contribution type apart
- * (#626 P1).
- *
- * This package peers on `@o3co/auth-provider-core` and must never acquire
- * `@o3co/auth-provider-session` — there is no session import in this file on
- * purpose. If the concrete `FederationProvider` were reached by a `declare
- * module` augmentation that session ships, this file would see `unknown`,
- * because nothing here loads session's augmentation. It sees the contract
- * because core owns it.
+ * Pins that core, not a `declare module` augmentation shipped by
+ * `@o3co/auth-provider-session`, owns the concrete `FederationProvider`. This
+ * package peers on core and must never acquire session, so this file imports
+ * nothing from session on purpose: an augmentation would leave the type
+ * `unknown` here.
  */
 import type { ComponentMap, FederationProvider } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";

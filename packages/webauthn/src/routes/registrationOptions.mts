@@ -22,23 +22,20 @@
  * session / bearer middleware. Authorization strength is a consumer-policy concern;
  * this endpoint trusts upstream auth.
  *
- * Security properties (spec §2.4):
+ * Security properties:
  *   - userId is taken from the authenticated session, NOT the request body —
  *     prevents victim-targeted enrollment (cross-user challenge injection).
  *   - Challenge is scoped to `webauthn:registration:${userId}` so a challenge
- *     issued for user A cannot be consumed by user B.
- *   - challengeTtlMs controls the window; default 120_000 ms per spec §2.4.1.
+ *     issued for user A cannot be consumed by user B; challengeTtlMs (default
+ *     120 s) bounds its window.
  *   - excludeCredentials is populated from the credential store to prevent
  *     re-registering an already-registered authenticator for this user.
- *   - A store that cannot answer — the credential list or the challenge
- *     write — is 503 temporarily_unavailable, logged once at error level as
+ *   - A store that cannot answer (the credential list or the challenge write)
+ *     is 503 temporarily_unavailable, logged once at error level as
  *     `webauthn_ceremony_store_unavailable` (`../internal/storeUnavailable.mts`).
- *     Nothing was issued that the client could use; it asks again.
+ *     Nothing usable was issued; the client asks again.
  *
- * NOT barrel-exported from the package index — internal to the webauthn module
- * until Task 31 wires the router.
- *
- * Cross-refs: Plan T27 / spec §2.4 / §2.4.1
+ * NOT barrel-exported from the package index; `../module.mts` mounts it.
  */
 
 import type { ChallengeStore, Logger, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
@@ -77,7 +74,7 @@ export interface RegistrationOptionsDeps {
  */
 export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps): RequestHandler {
 	return async (req: Request, res: Response) => {
-		// §2.4: Require authenticated subject — auth strength is consumer-policy concern.
+		// Require authenticated subject — auth strength is consumer-policy concern.
 		const subject = req.webauthnSubject;
 		if (!subject) {
 			res.status(401).json({ error: "unauthorized" });
@@ -85,15 +82,13 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 		}
 
 		// userId is always taken from the authenticated session — request body cannot
-		// override (prevents victim-targeted enrollment per spec §2.4).
+		// override (prevents victim-targeted enrollment).
 		const { userId } = subject;
 
-		// Wave 1 post-merge audit M-2: enforce WebAuthn §5.4.3 user-handle constraints
-		// at the boundary. WebAuthn mandates a 1..64-byte opaque user-handle; longer
-		// values are rejected by authenticators at runtime, and consumer misuse
-		// (e.g. passing `req.user.email` here) syncs PII to the authenticator. The
-		// interface JSDoc already documents this MUST, but the library now enforces
-		// it so misconfigurations fail loudly with a 500 (consumer bug, not a 400).
+		// WebAuthn §5.4.3 mandates a 1..64-byte opaque user handle. Longer values
+		// are rejected by authenticators at runtime, and consumer misuse (e.g.
+		// passing `req.user.email` here) syncs PII to the authenticator, so a
+		// misconfiguration fails loudly with a 500 (consumer bug, not a 400).
 		const userIdByteLength = new TextEncoder().encode(userId).length;
 		if (userIdByteLength < 1 || userIdByteLength > 64) {
 			// The composition's fault, logged once: the length, never the value —

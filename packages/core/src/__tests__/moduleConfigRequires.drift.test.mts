@@ -15,44 +15,37 @@
  */
 
 /**
- * moduleConfigRequires.drift.test.mts — no manifest outside core requires
- * `config` (#728). A module reads its own section (`deps.section`) and what
- * another module owns through a slot whose contract is core's; the whole
- * configuration is core's to parse. The manifests that list `config` today
- * are listed below, and the list may only shrink: a manifest that lists it
- * and is not listed fails, and so does a listed one that no longer does.
+ * No manifest outside core requires `config`. A module reads its own section
+ * (`deps.section`) and what another module owns through a slot whose contract
+ * is core's; the whole configuration is core's to parse. The manifests that
+ * still list `config` are in {@link CONFIG_REQUIRERS}, and the list may only
+ * shrink: a manifest that lists it and is not listed fails, and so does a
+ * listed one that no longer does.
  *
- * What it reads, with TypeScript's parser and binder, in the product code of
- * every workspace but core — a source under `src/` outside `__tests__/` that
- * is not a `*.test.*` or `*.spec.*` file: every `defineModule(…)` call, as
- * the module-name scan anchors on it, and every other object literal with a
- * `name` and a `requires` or an `optional` that is a list (an array literal,
- * or a `const` bound to one). The workspaces are `pnpm-workspace.yaml`'s:
- * `dir/*` and a package's own path; any other pattern refuses the scan
- * rather than letting it walk nothing. A manifest lists `config` when
- * its `requires` or its `optional` does — a factory is handed it either way.
+ * Read with TypeScript's parser and binder, in the product code of every
+ * workspace but core (a source under `src/` outside `__tests__/` that is not
+ * a `*.test.*` or `*.spec.*` file): every `defineModule(…)` call, and every
+ * other object literal with a `name` and a `requires` or an `optional` that
+ * is a list (an array literal, or a `const` bound to one). The workspaces are
+ * `pnpm-workspace.yaml`'s: `dir/*` and a package's own path; any other
+ * pattern refuses the scan rather than letting it walk nothing. A manifest
+ * lists `config` when its `requires` or its `optional` does: a factory is
+ * handed it either way.
  *
  * The manifest is the call's argument, an object literal or a `const` bound
- * to one. A key is read as it is spelled — `requires`, `"requires"`,
- * `["requires"]` — and the last one written wins, as in JavaScript; a
- * shorthand `{ name, requires }` is read through the binding it names. Each
- * list is an array literal of string literals, through `as const` and
- * through a `const` — the one in scope where it is used, not another of that
- * name elsewhere in the file. `name` is a string literal, or a `const` bound
- * to one, likewise.
+ * to one. A key is read as it is spelled (`requires`, `"requires"`,
+ * `["requires"]`), the last one written wins, and a shorthand is read through
+ * the binding it names. A list is an array literal of string literals,
+ * through `as const` and through the `const` in scope where it is used;
+ * `name` is a string literal or a `const` bound to one, likewise. Anything
+ * else is reported and fails: a manifest that is not an object literal; a
+ * list that is a `let`, a parameter, an import, a call or a spread; a list a
+ * spread may supply (`spreadMayWrite`) or a computed key may name; and a
+ * manifest listing `config` whose `name` cannot be read, since the list is
+ * keyed by it.
  *
- * Anything else is reported rather than passed over, and fails: a manifest
- * that is not an object literal; a list that is a `let`, a parameter, an
- * import, a call or a spread; a list a spread may supply (`{ ...base }`
- * with no `requires` or `optional` written after it — a spread of object
- * literals that write neither, `...(x ? {} : { x })`, supplies none) or a
- * computed key may name; and a manifest listing `config` whose `name`
- * cannot be read, since the list is keyed by it.
- *
- * What it cannot see is `config` a module's code captures without listing
- * it: a manifest built by a factory that takes the configuration as a
- * parameter — `oauthModule({ config })` — reads it through the closure, and
- * nothing in the manifest says so. Those factories are left to review.
+ * Not seen, left to review: `config` a manifest built by a factory captures
+ * through the closure (`oauthModule({ config })`) without listing it.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -64,9 +57,9 @@ import { describe, expect, it } from "vitest";
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
 
 /**
- * The manifests outside core that require `config` today, keyed
- * `<workspace> -> <module name>` (#728). The list may only shrink: each entry
- * leaves as its module reads its own section and the slots it needs instead.
+ * The manifests outside core that require `config`, keyed
+ * `<workspace> -> <module name>`. The list may only shrink: each entry leaves
+ * as its module reads its own section and the slots it needs instead.
  */
 const CONFIG_REQUIRERS: readonly string[] = [
 	// Each reads a section of its own that is not yet under its name, and some
@@ -506,8 +499,8 @@ describe("the manifest scan", () => {
 	});
 
 	it("resolves a const in the scope it is used in, not the file's last of that name", () => {
-		// The file-wide table read the last `REQUIRES` for both, so `a`'s
-		// config went unseen; and a parameter that shadows a const is no const.
+		// A file-wide table would read the last `REQUIRES` for both and miss
+		// `a`'s config; and a parameter that shadows a const is no const.
 		const found = manifestsIn(
 			"example.mts",
 			[

@@ -45,19 +45,10 @@ import { createRouter } from "#/routes/Federation.mjs";
 type SessionStore = Map<string, Record<string, unknown>>;
 
 /**
- * Build an express app with a cookie-backed in-memory session shim.
- * Every request reads/writes the session object from the shared store via a
- * `sid` cookie. `req.session.save` calls its callback synchronously.
- */
-/**
- * Build a minimal session-like object backed by `store` under `persistKey`.
- *
- * `persistKey` is the store key used for both reads and writes.  For the initial
- * session it equals the cookie id.  For regenerated sessions it is still the
- * original cookie id — simulating the browser receiving a `Set-Cookie` with the
- * new session id, which in tests cannot actually change the agent's cookie.
- * This keeps `/_inspect` requests (which arrive with the original cookie) able
- * to read the regenerated session's data.
+ * Build a minimal session-like object backed by `store` under `persistKey`,
+ * the key for both reads and writes. A regenerated session keeps the original
+ * cookie id as its key, standing in for a `Set-Cookie` the test agent cannot
+ * act on, so `/_inspect` (sent with the original cookie) reads its data.
  */
 function makeSessionObject(
 	store: SessionStore,
@@ -75,9 +66,8 @@ function makeSessionObject(
 			return this as unknown as import("express-session").Session;
 		},
 		regenerate(cb?: (err: unknown) => void) {
-			// Simulate session ID rotation: clear the store entry (old data gone) and
-			// install a fresh empty session.  We reuse the same `persistKey` so that
-			// subsequent supertest requests with the same cookie still reach the data.
+			// Simulate session ID rotation: a fresh empty session under the same
+			// `persistKey`, so later requests with the same cookie still reach it.
 			store.set(persistKey, {});
 			const newSession = makeSessionObject(store, persistKey, req);
 			(req as unknown as { session: Record<string, unknown> }).session = newSession;
@@ -94,6 +84,11 @@ function makeSessionObject(
 	return session;
 }
 
+/**
+ * Build an express app with a cookie-backed in-memory session shim.
+ * Every request reads/writes the session object from the shared store via a
+ * `sid` cookie. `req.session.save` calls its callback synchronously.
+ */
 function makeSessionApp(store: SessionStore): express.Express {
 	const app = express();
 	app.use((req, res, next) => {
@@ -208,7 +203,7 @@ function makeSessionFederationIndex(
 	} as SessionFederationIndex;
 }
 
-/** #296 — subject-keyed index of live sessions, written on federated login. */
+/** Subject-keyed index of live sessions, written on federated login. */
 function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): SubjectSessionIndex & {
 	addSid: ReturnType<typeof vi.fn>;
 	removeSid: ReturnType<typeof vi.fn>;
@@ -337,7 +332,7 @@ function buildCallbackApp({
 	federationTokenStore?: FederationTokenStore;
 	/** Optional middleware inserted AFTER session shim to intercept req.session.save. */
 	saveInterceptor?: express.RequestHandler;
-	/** #482: extra session fields planted next to `federation` — an authenticated `sid`. */
+	/** Extra session fields planted next to `federation`, such as an authenticated `sid`. */
 	sessionSeed?: Record<string, unknown>;
 	auditSink?: AuditSink;
 	/** A partial `AppConfig`; absent is `{}`, as most tests need none. */
@@ -856,7 +851,7 @@ describe("account linking across federations (#482)", () => {
 			["the spelling oauth4webapi reports", "bearer", "bearer"],
 			// Verbatim, including a value that is not a token type. Erasing one
 			// would leave the record silent, and the disclosure point reads
-			// silence as Bearer — which is the behaviour #645 exists to stop.
+			// silence as Bearer.
 			["a value that is not a token type", "DPoP ", "DPoP "],
 			["an empty string, which is not silence", "", ""],
 			// The field holds a string, so a non-string cannot be kept as it was.
@@ -868,12 +863,11 @@ describe("account linking across federations (#482)", () => {
 			// Recorded, not judged. A login does not need the upstream's access
 			// token, so a type this provider cannot hand on must not cost the user
 			// their sign-in — `POST /oauth/federation/:name/token` is where the
-			// disclosure happens and where the refusal belongs. Dropping it here
-			// is what made #645 unanswerable from the record.
+			// disclosure happens and where the refusal belongs.
 			const typed = makeFakeProvider({
 				// Cast because the port types `tokenType` as a string: a number
 				// reaches here only from an adapter that ignores the contract,
-				// which is one of the cases under test (D5).
+				// which is one of the cases under test.
 				exchangeCode: vi.fn(
 					async () =>
 						({
@@ -947,9 +941,9 @@ describe("account linking across federations (#482)", () => {
 				Record<string, unknown>,
 			];
 			expect(attached.accessToken).toBe("at");
-			// Named, and `undefined`. The key is written either way since the
-			// #645 follow-up made it required on `FederationTokens`: a store that
-			// copies the record field by field is made to carry it by the type.
+			// Named, and `undefined`. The key is required on `FederationTokens`,
+			// so a store that copies the record field by field is made to carry
+			// it by the type.
 			expect("tokenType" in attached).toBe(true);
 			expect(attached.tokenType).toBeUndefined();
 		});
@@ -987,7 +981,7 @@ describe("account linking across federations (#482)", () => {
 				"test",
 				expect.objectContaining({ accessToken: "at" }),
 			);
-			// #647: what the user consented to at link time. `scope` is what the
+			// What the user consented to at link time. `scope` is what the
 			// token holds now and `grantedScope` is the ceiling a later refresh is
 			// bounded by (RFC 6749 §6) — the two start equal and only the first
 			// moves. Without the ceiling a narrowing is permanent, because the
@@ -1663,15 +1657,13 @@ describe("Federation routes", () => {
 	// -----------------------------------------------------------------------
 
 	describe("GET /oauth/federation/:name (start)", () => {
-		// Test 1
 		it("returns 404 for unknown provider name", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown");
 			expect(res.status).toBe(404);
 		});
 
-		// AS-1 RFC 6749 §5.2 envelope: 404 body shape migrates from {message:"NotFound"}
-		// to {error:"not_found", error_description}.
+		// RFC 6749 §5.2 error envelope.
 		it("AS-1: 404 unknown provider returns RFC 6749 envelope (no `message`)", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown");
@@ -1683,7 +1675,6 @@ describe("Federation routes", () => {
 			expect(res.body).not.toHaveProperty("message");
 		});
 
-		// Test 2
 		it("redirects with state + code_challenge + code_challenge_method=S256 in Location", async () => {
 			const provider = makeFakeProvider();
 			const app = buildStatelessApp({ providers: new Map([["test", provider]]) });
@@ -1699,7 +1690,6 @@ describe("Federation routes", () => {
 			expect(url.searchParams.get("code_challenge_method")).toBe("S256");
 		});
 
-		// Test 3 — redirect_to stored in session.federation.redirectTo
 		it("accepts valid redirect_to; buildAuthorizationUrl is invoked (session write path ran)", async () => {
 			const provider = makeFakeProvider();
 			const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
@@ -1715,7 +1705,6 @@ describe("Federation routes", () => {
 			expect(buildSpy).toHaveBeenCalled();
 		});
 
-		// Regression: buildAuthorizationUrl must receive the configured redirectUri, not ""
 		it("buildAuthorizationUrl receives the configured redirectUri for the provider", async () => {
 			const provider = makeFakeProvider();
 			const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
@@ -1734,7 +1723,6 @@ describe("Federation routes", () => {
 	// -----------------------------------------------------------------------
 
 	describe("GET /oauth/federation/:name/callback", () => {
-		// Test 4 — missing session.federation
 		it("returns 400 invalid_session when session.federation is absent", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 
@@ -1744,7 +1732,6 @@ describe("Federation routes", () => {
 			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_session" });
 		});
 
-		// Test 5 — mismatched name in session
 		it("returns 400 invalid_session when session.federation.name does not match route param", async () => {
 			const providers = new Map([
 				["other", makeFakeProvider({ name: "other" })],
@@ -1761,7 +1748,6 @@ describe("Federation routes", () => {
 			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_session" });
 		});
 
-		// Test 6 — wrong CSRF state
 		it("returns 400 invalid_state when state query param does not match session state", async () => {
 			const providers = new Map([["test", makeFakeProvider()]]);
 			const { app } = buildCallbackApp({
@@ -1775,7 +1761,6 @@ describe("Federation routes", () => {
 			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_state" });
 		});
 
-		// Test 7 — exchangeCode throws → 502, session.federation deleted (reuse prevention)
 		it("returns 502 exchange_failed when exchangeCode throws; session.federation is deleted", async () => {
 			const provider = makeFakeProvider({
 				exchangeCode: vi.fn(async () => {
@@ -1798,7 +1783,6 @@ describe("Federation routes", () => {
 			expect(JSON.parse(inspect.text).federation).toBeUndefined();
 		});
 
-		// Test 8 — empty profile.sub → 400 invalid_profile; session.federation deleted
 		it("returns 400 invalid_profile when profile.sub is empty; session.federation deleted", async () => {
 			const provider = makeFakeProvider({
 				exchangeCode: vi.fn(async () => ({
@@ -1824,7 +1808,6 @@ describe("Federation routes", () => {
 			expect(JSON.parse(inspect.text).federation).toBeUndefined();
 		});
 
-		// Test 9 — authenticateByToken returns null → 401 unknown_user
 		it("returns 401 unknown_user when authenticateByToken returns null", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -1843,7 +1826,6 @@ describe("Federation routes", () => {
 			expect(repo.authenticateByToken).toHaveBeenCalledWith("test:external-42");
 		});
 
-		// Test 10 — happy path
 		it("answers a sign-in the redirect policy refuses in RFC 6749's terms", async () => {
 			// The sign-in completes and the policy's resolveCallbackRedirect
 			// refuses: its status, its words held to RFC 6749's characters, and a
@@ -1949,8 +1931,7 @@ describe("Federation routes", () => {
 			expect(attachTokens.idToken).toBe("it");
 			// profile.expiresAt is a Date → attached as-is, no 1h fallback re-invented
 			expect(attachTokens.expiresAt).toBeInstanceOf(Date);
-			// #647 — the login path records the consent too, not only the link path.
-			// This is the common path of the two, and it had no content assertion.
+			// The login path records the consent too, not only the link path.
 			expect(attachTokens.scope).toBe("openid email");
 			expect(attachTokens.grantedScope).toBe("openid email");
 
@@ -1960,8 +1941,7 @@ describe("Federation routes", () => {
 		});
 
 		it("records the upstream's token type on the login path too (#645)", async () => {
-			// The two attach sites are the link path and this one. #647 found the
-			// same gap for `scope` and fixed both; this keeps them together.
+			// The link path is the other attach site; this keeps the two in step.
 			const provider = makeFakeProvider({
 				exchangeCode: vi.fn(async () => ({
 					issuer: "https://idp.example.com",
@@ -1992,10 +1972,9 @@ describe("Federation routes", () => {
 			);
 		});
 
-		// Regression: route must propagate profile.expiresAt === null verbatim
-		// (no legacy "now + 1h" fallback). null signals "no finite expiry; don't
-		// refresh" — a fallback would trigger spurious refresh attempts for
-		// GitHub OAuth Apps classic tokens.
+		// profile.expiresAt === null propagates verbatim, with no "now + 1h"
+		// fallback: null signals "no finite expiry; don't refresh", and a fallback
+		// would trigger spurious refresh attempts for GitHub OAuth Apps classic tokens.
 		it("expiresAt=null on profile propagates to FederationTokenStore.attach as null", async () => {
 			const provider = makeFakeProvider({
 				exchangeCode: vi.fn(async () => ({
@@ -2031,7 +2010,6 @@ describe("Federation routes", () => {
 			expect(attachTokens.expiresAt).toBeNull();
 		});
 
-		// Test 11 — rollback: FederationTokenStore.attach throws → UserSessionStore.delete; no token.delete
 		it("rollback: attach throws → UserSessionStore.delete called; returns 503", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2057,7 +2035,6 @@ describe("Federation routes", () => {
 			expect(uss.delete).toHaveBeenCalledOnce();
 		});
 
-		// Test 12 — rollback: req.session.save throws → token.delete + session.delete (reverse order)
 		it("rollback: session.save throws → FederationTokenStore.delete + UserSessionStore.delete", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2123,7 +2100,6 @@ describe("Federation routes", () => {
 			expect(uss.delete).toHaveBeenCalledOnce();
 		});
 
-		// Test 13 — SupportsClaimMapping: mapClaims is namespaced, local claims win (#279)
 		it("SupportsClaimMapping: local claims win and the mapped snapshot is namespaced", async () => {
 			const mapClaimsMock = vi.fn(() => ({
 				email: "mapped@example.com",
@@ -2160,7 +2136,7 @@ describe("Federation routes", () => {
 			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
 				claims: Record<string, unknown>;
 			};
-			// #279: the local record is authoritative for what it declares …
+			// The local record is authoritative for what it declares …
 			expect(createArg.claims.email).toBe("user@example.com");
 			expect(createArg.claims.name).toBe("Alice");
 			// … and federation fills only what it left absent.
@@ -2175,7 +2151,7 @@ describe("Federation routes", () => {
 			});
 		});
 
-		// #279 — a federated provider must not be able to grant local authorization.
+		// A federated provider must not be able to grant local authorization.
 		it("never lets mapClaims write an authorization-bearing claim", async () => {
 			const mapClaimsMock = vi.fn(() => ({
 				groups: ["admin"],
@@ -2214,7 +2190,7 @@ describe("Federation routes", () => {
 			});
 		});
 
-		// #279 + #297 — an upstream assertion of verification is not local verification.
+		// An upstream assertion of verification is not local verification.
 		it("never lets mapClaims set emailVerified", async () => {
 			const mapClaimsMock = vi.fn(() => ({
 				email: "attacker@idp.example.com",
@@ -2273,7 +2249,6 @@ describe("Federation routes", () => {
 			expect(createArg.claims).toEqual({ groups: ["staff"] });
 		});
 
-		// Regression: exchangeCode must receive the configured redirectUri, not ""
 		it("exchangeCode receives the configured redirectUri for the provider", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2299,7 +2274,7 @@ describe("Federation routes", () => {
 			expect(res.status).toBe(404);
 		});
 
-		// AS-1 RFC 6749 §5.2 envelope: callback 404 body shape migrates same as start.
+		// RFC 6749 §5.2 error envelope, as on the start route.
 		it("AS-1: 404 unknown provider on callback returns RFC 6749 envelope (no `message`)", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown/callback?state=x&code=y");
@@ -2311,7 +2286,7 @@ describe("Federation routes", () => {
 			expect(res.body).not.toHaveProperty("message");
 		});
 
-		// Fix 1 — session fixation: regenerate is called; new session has correct sid/isAuthenticated/user
+		// Session fixation: the session is regenerated after a successful login.
 		it("Fix 1: regenerates session after successful auth; new session has sid/isAuthenticated/user", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2355,7 +2330,6 @@ describe("Federation routes", () => {
 			expect((sessionData.user as Record<string, unknown>).id).toBe("user-1");
 		});
 
-		// Fix 1: if regenerate fails, userSessionStore.delete is called (rollback) and 503 returned
 		it("Fix 1: regenerate failure → UserSessionStore.delete rollback + 503", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2391,7 +2365,7 @@ describe("Federation routes", () => {
 			expect(fts.delete).not.toHaveBeenCalled();
 		});
 
-		// Fix 2 — fail-closed reuse-prevention: save failure returns 503, does NOT call exchangeCode
+		// Reuse prevention fails closed.
 		it("Fix 2: reuse-prevention save failure returns 503 and does NOT call exchangeCode", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2429,7 +2403,6 @@ describe("Federation routes", () => {
 			expect(provider.exchangeCode).not.toHaveBeenCalled();
 		});
 
-		// Fix 3 — authenticateByToken throws → 503 temporarily_unavailable
 		it("Fix 3: authenticateByToken throws → 503 temporarily_unavailable", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2452,7 +2425,7 @@ describe("Federation routes", () => {
 			expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
 		});
 
-		// C-1 Claude: userSessionStore.create throws → 503 temporarily_unavailable (no rollback needed)
+		// No rollback is needed when create itself fails.
 		it("C-1: userSessionStore.create throws → 503 temporarily_unavailable; exchangeCode was called", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2478,7 +2451,7 @@ describe("Federation routes", () => {
 			expect(fts.attach).not.toHaveBeenCalled();
 		});
 
-		// Fix 4 — missing code query param → 400 invalid_request (not 502 exchange_failed)
+		// Refused before the exchange: 400, not 502 exchange_failed.
 		it("Fix 4: missing code query param returns 400 invalid_request", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2501,7 +2474,6 @@ describe("Federation routes", () => {
 			expect(provider.exchangeCode).not.toHaveBeenCalled();
 		});
 
-		// Fix 4: empty string code param → 400 invalid_request
 		it("Fix 4: empty string code query param returns 400 invalid_request", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
@@ -2519,11 +2491,10 @@ describe("Federation routes", () => {
 		});
 
 		// -----------------------------------------------------------------------
-		// A4 sibling-store invariants (§6.1 + §13.5)
+		// Sibling-store invariants
 		// -----------------------------------------------------------------------
 
 		describe("federation login: A4 sibling-store invariants", () => {
-			// A4-1: Both stores populated on success
 			it("create succeeds + addFederation succeeds → both stores called, no federations in create input", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2558,7 +2529,6 @@ describe("Federation routes", () => {
 				expect(addExpiresAt).toBeInstanceOf(Date);
 			});
 
-			// A4-2: addFederation failure rolls back orphan UserSession → 503
 			it("addFederation failure after create → orphan session rolled back, 503 returned", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2594,7 +2564,6 @@ describe("Federation routes", () => {
 				expect(sfi.addFederation).toHaveBeenCalledOnce();
 			});
 
-			// A4-3: regenerate failure rolls back BOTH stores in reverse order (federation index first)
 			it("regenerate failure after addFederation rolls back BOTH stores in reverse order (fed first)", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2654,7 +2623,6 @@ describe("Federation routes", () => {
 				expectNoTokenIn(lines);
 			});
 
-			// A4-4: post-regenerate failure unwinds federation index before session (REVERSE order)
 			it("post-regenerate rollback also unwinds federation index before session (REVERSE order)", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2722,14 +2690,13 @@ describe("Federation routes", () => {
 		});
 
 		// -----------------------------------------------------------------------
-		// PB-4 — Federation OIDC nonce wiring (start + callback)
+		// Federation OIDC nonce wiring (start + callback)
 		// -----------------------------------------------------------------------
 
 		describe("PB-4: federation nonce generation + thread-through", () => {
-			// PB-4 RED-1: start handler generates a nonce, persists it on session.federation,
-			// AND passes it to buildAuthorizationUrl. The session-side assertion catches the
-			// regression class where nonce reaches the provider but never lands in the session
-			// (so the callback can't bind id_token via expectedNonce).
+			// The session-side assertion matters: a nonce that reaches the provider but
+			// not the session leaves the callback unable to bind the id_token via
+			// expectedNonce.
 			it("start handler persists nonce on session.federation and forwards it to buildAuthorizationUrl", async () => {
 				const provider = makeFakeProvider();
 				const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
@@ -2753,7 +2720,6 @@ describe("Federation routes", () => {
 				expect(fed?.nonce).toBe(callArg.nonce);
 			});
 
-			// PB-4 RED-2: callback handler threads session.federation.nonce into provider.exchangeCode.
 			it("callback handler threads session-stored nonce into provider.exchangeCode", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2779,15 +2745,14 @@ describe("Federation routes", () => {
 				expect(callArg.nonce).toBe("stored-nonce-9f3d");
 			});
 
-			// PB-4 RED-3: callback handler still works when planted federation has no nonce
-			// (defence-in-depth — adapters that ignore nonce must remain backward-compat).
+			// Adapters that ignore nonce must keep working.
 			it("callback handler tolerates absent session.federation.nonce (passes undefined)", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
 
 				const { app } = buildCallbackApp({
 					providers,
-					// No nonce field — pre-PB-4 sessions or non-OIDC providers.
+					// No nonce field, as for a non-OIDC provider.
 					federation: { name: "test", state: "s1", codeVerifier: "v1" },
 				});
 				const agent = await plantAndGetAgent(app);
@@ -2804,14 +2769,11 @@ describe("Federation routes", () => {
 		});
 
 		// -----------------------------------------------------------------------
-		// TD-6 — Reuse / replay-prevention assertions
+		// Reuse / replay-prevention assertions
 		// -----------------------------------------------------------------------
 
 		describe("TD-6: session.federation cleanup on success path", () => {
-			// TD-6 RED-1: happy path must clear session.federation as part of reuse prevention.
-			// Pre-fix Test 10 only inspected sid, so a regression that re-introduced the
-			// pre-cleared federation envelope (e.g. by re-saving fed back onto the session)
-			// would silently slip through.
+			// Catches an envelope saved back onto the session after it was cleared.
 			it("happy-path callback clears session.federation as part of reuse prevention", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2830,11 +2792,8 @@ describe("Federation routes", () => {
 				expect(sessionData.federation).toBeUndefined();
 			});
 
-			// TD-6 RED-2: replay prevention — re-using the same state after a successful
-			// callback must fail because the planted federation envelope is gone. The 400
-			// invalid_session response is the same one that protects against pre-completion
-			// CSRF state replay; we just assert it activates after the auth-grant has been
-			// consumed.
+			// The envelope is gone after a successful callback, so the same 400
+			// invalid_session that stops a pre-completion state replay stops this one.
 			it("replay prevention: second callback with same state returns 400 invalid_session", async () => {
 				const provider = makeFakeProvider();
 				const providers = new Map([["test", provider]]);
@@ -2861,15 +2820,11 @@ describe("Federation routes", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #296 — subject-keyed session index
-//
-// The index is what `revokeAllForSubject` enumerates after a credential change.
-// Two failure modes matter and they are not symmetric: a MISSING entry is a
-// live session a password reset will never find, while an ORPHAN entry only
-// costs one redundant cascade (`cascadeLogout` on a dead sid is idempotent).
-// That asymmetry is why the write stays immediately after `create` — the
-// earliest point at which a session exists — and every rollback path that
-// deletes the session compensates by removing the entry.
+// Subject-keyed session index, which `revokeAllForSubject` enumerates after a
+// credential change. A MISSING entry is a live session a password reset will
+// never find; an ORPHAN entry costs one redundant, idempotent `cascadeLogout`.
+// So the write stays immediately after `create`, the earliest point a session
+// exists, and every rollback path that deletes the session removes the entry.
 // ---------------------------------------------------------------------------
 
 describe("federation login: subject session index (#296)", () => {
@@ -2983,7 +2938,8 @@ describe("federation login: subject session index (#296)", () => {
 		const ssi = makeSubjectSessionIndex();
 
 		// Fail the second save — the post-regenerate one — to reach the catch
-		// block that unwinds every store, mirroring the A4-4 interceptor above.
+		// block that unwinds every store, as the post-regenerate rollback test
+		// above does.
 		const saveFailInterceptor: express.RequestHandler = (req, _res, next) => {
 			let saveCalls = 0;
 

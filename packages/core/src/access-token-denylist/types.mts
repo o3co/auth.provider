@@ -16,19 +16,15 @@
 
 /**
  * Tracks revoked access-token jtis. Optional ComponentMap slot; when present,
- * verifyJwt consults `has(jti)` and `/oauth/revoke` AT path calls `add(jti, expiresAtMs)`.
+ * verifyJwt consults `has(jti)` and the `/oauth/revoke` access-token path calls
+ * `add(jti, expiresAtMs)`.
  *
- * Wave 2 forward-compat: signature is `add(jti, expiresAtMs, options?)`. Wave 1
- * implementations omit `options` parameter and remain valid when Wave 2 adds DPoP `cnf` binding.
- *
- * `add` keeps the jti denied until `expiresAtMs` — the revoke route passes the
- * token's `exp` plus `REVOCATION_RETENTION_ALLOWANCE_MS` (the verification
- * clock tolerance, a replica allowance and a rounding second), the time it
- * stops verifying and then some:
- * a fractional value is valid (a JWT NumericDate may be non-integer) and the
- * entry lives at least until it; a value that is not a finite instant within
- * the Date range (`isStorableExpiry`) is a RangeError and records nothing. An `expiresAtMs` already past is not an
- * error — revoking an expired token is legal (RFC 7009 §2.1).
+ * `add` keeps the jti denied at least until `expiresAtMs` (the revoke route
+ * passes the token's `exp` plus `REVOCATION_RETENTION_ALLOWANCE_MS`). A
+ * fractional value is valid (a JWT NumericDate may be non-integer); a value that
+ * is not a finite instant within the Date range (`isStorableExpiry`) is a
+ * RangeError and records nothing. A past `expiresAtMs` is not an error: revoking
+ * an expired token is legal (RFC 7009 §2.1).
  */
 export interface AccessTokenDenylist {
 	readonly kind: string;
@@ -38,21 +34,14 @@ export interface AccessTokenDenylist {
 
 /**
  * The declared-absence policy the bundled modules that read
- * `accessTokenDenylist` attach to it (#375, folding #277's bespoke boot
- * check onto the #363 vocabulary).
+ * `accessTokenDenylist` attach to it.
  *
  * RFC 7009 §2.2 makes `POST /oauth/revoke` answer 200 for a well-formed
- * request, so the 200 is the operator's only signal that anything happened —
- * and with no denylist wired, nothing does: the endpoint verified the token,
- * logged a warning nobody reads mid-incident, and the JWT kept verifying
- * everywhere until expiry. #277 refused boot for that state with a bespoke
- * stage ("13.9"); this policy is the same refusal through the generic
- * declared-absence guard. Omission of `oauth.revocation.accessToken` means
- * NOT declared — every config written before #277 omits the key, and those
- * are exactly the deployments whose revocation endpoint answered 200 with
- * nothing behind it — so only an explicit `"unsupported"` excuses the
- * missing slot, and the endpoint then answers `unsupported_token_type`
- * instead of a hollow 200.
+ * request, so with no denylist wired the operator sees success while the JWT
+ * keeps verifying until expiry. Boot therefore refuses the missing slot unless
+ * `oauth.revocation.accessToken` is explicitly `"unsupported"` (omitting the
+ * key is not a declaration); the endpoint then answers
+ * `unsupported_token_type` instead of a hollow 200.
  *
  * One shared constant, like `AUDIT_SINK_ABSENCE_POLICY`: the boot error's
  * advice must not depend on which module tripped it, and the

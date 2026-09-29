@@ -15,20 +15,14 @@
  */
 
 /**
- * Tests for createWebAuthnGrant — urn:o3co:oauth:grant-type:webauthn handler
- * (spec §2.4 / Wave 1 T30).
+ * Tests for createWebAuthnGrant, the urn:o3co:oauth:grant-type:webauthn handler.
  *
- * Strategy:
- *   - verifyWebAuthnAssertion (T25) is vi.mocked — avoids real CBOR/COSE/
- *     crypto; the thin-wrapper contract is tested in internal.verification.test.mts.
- *   - createMemoryWebAuthnCredentialStore (T22/T23) is real — exercises the
- *     full findByCredentialId + updateSignCount (CAS) path.
- *   - ChallengeCeremony is stubbed in-line (simple mock with controllable outcome)
- *     to keep scenarios independent without wiring the full ceremony stack.
- *   - createSymmetricKeyStore (core) is real — issues real JWTs for payload
- *     assertion tests.
- *
- * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns
+ * - verifyWebAuthnAssertion is mocked; its wrapper contract is tested in
+ *   internal.verification.test.mts.
+ * - The memory credential store is real: findByCredentialId and the CAS
+ *   updateSignCount run for real.
+ * - ChallengeCeremony is stubbed with a controllable outcome.
+ * - createSymmetricKeyStore is real, so payload assertions read real JWTs.
  */
 
 import {
@@ -391,19 +385,19 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 		const { tokens } = result;
 		expect(tokens.access_token).toBeTruthy();
 		// No authenticated client, so no `allowedGrantTypes` to name `refresh_token`
-		// and no `azp` a refresh token could ever be redeemed against (#480). The
+		// and no `azp` a refresh token could ever be redeemed against. The
 		// refresh-token paths themselves live in grant.refreshToken.test.mts.
 		expect(tokens.refresh_token).toBeUndefined();
 
 		const payload = decodeJwtPayload(tokens.access_token) as Record<string, unknown>;
 		expect(payload.sub).toBe(USER_ID);
-		// #481: a passkey login says so on the access token (RFC 8176 `hwk`).
+		// A passkey login says so on the access token (RFC 8176 `hwk`).
 		expect(payload.amr).toEqual(["hwk"]);
 	});
 
-	// Post-merge audit H-1: when client authenticated, the AT carries client_id +
-	// azp so /oauth/revoke can resolve ownership (otherwise revoke silently no-ops
-	// per PR #165 fail-closed ownership check).
+	// With an authenticated client, the AT carries client_id + azp so
+	// /oauth/revoke can resolve ownership; without them the fail-closed
+	// ownership check makes revoke a silent no-op.
 	it("H-1 regression: when ctx.authenticatedClient is set, AT carries client_id + azp claims (revocable)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());
@@ -494,7 +488,7 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 				{
 					clientId: "my-app",
 					tokenEndpointAuthMethod: "none",
-					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE], // P1-2: must include grant type
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE], // must include the grant type
 					allowedAudiences: ["https://rs.example"],
 				},
 			),
@@ -539,11 +533,10 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// RFC 8707 resource indicator (flag gating) — Codex Round 3 P1 semantics
+// RFC 8707 resource indicator (flag gating)
 //
-// Post-fix contract (rt-style):
-//   - grantPolicy IS called unconditionally when wired (regardless of resourceIndicator flag)
-//   - resourceIndicator flag gates ONLY whether body.resource is forwarded to policy
+// A wired grantPolicy is called whatever the resourceIndicator flag says; the
+// flag gates only whether body.resource is forwarded to the policy.
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
@@ -578,10 +571,10 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 			makeCtx({ assertion, resource: "https://rs1.example" }),
 		);
 
-		// Policy MUST be called even when resourceIndicator is off (rt-style gate).
-		// Webauthn has no client.allowedScopes ceiling — policy is the ONLY scope-bounding gate.
+		// Policy MUST be called even when resourceIndicator is off: webauthn has no
+		// client.allowedScopes ceiling, so the policy is the ONLY scope-bounding gate.
 		expect(evaluateSpy).toHaveBeenCalledOnce();
-		// resource MUST be undefined (not forwarded) when flag is off (Stage 1 contract preserved).
+		// resource MUST be undefined (not forwarded) when the flag is off.
 		const [req] = evaluateSpy.mock.calls[0];
 		expect(req.resource).toBeUndefined();
 		expect(result.status).toBe(200);
@@ -622,8 +615,6 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		expect(result.status).toBe(200);
 	});
 
-	// ---- Codex Round 3 P1 new regression tests ----
-
 	it("P1-R1: policy is called when wired even with resourceIndicator.enabled false (Codex Round 3 P1)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());
@@ -653,8 +644,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 	});
 
 	it("logs a grant policy that cannot answer as grant_policy_unavailable, once, at error level", async () => {
-		// Every token grant logs it; this one used to evaluate the policy without
-		// its logger and stay silent.
+		// Every token grant logs it, this one included.
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
@@ -835,9 +825,9 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("refuses a scope that is not RFC 6749 §3.3's space-delimited list, which it would otherwise mint as-is", async () => {
 		// With no allowlist and no policy, nothing downstream would catch
-		// "admin\tread": it went into the token's scope claim verbatim, where a
-		// resource server splitting on the space reads one scope and one
-		// splitting on whitespace reads two. The request is refused instead.
+		// "admin\tread": minted verbatim into the scope claim, a resource server
+		// splitting on the space reads one scope and one splitting on whitespace
+		// reads two. The request is refused instead.
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
@@ -857,7 +847,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 });
 
 // ---------------------------------------------------------------------------
-// grantPolicy — deny, scope ceiling, audience, fail-closed (CP-18)
+// grantPolicy — deny, scope ceiling, audience, fail-closed
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
@@ -976,14 +966,14 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 
 		const handler = createWebAuthnGrant(deps);
 		const assertion = makeAssertionResponse();
-		// Provide an authenticated client with allowedAudiences (and grant type — P1-2)
+		// An authenticated client with allowedAudiences and the grant type
 		const { result } = await handler.handle(
 			makeCtx(
 				{ assertion, resource: "https://rs1" },
 				{
 					clientId: "app",
 					tokenEndpointAuthMethod: "none",
-					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE], // P1-2: must include grant type
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE], // must include the grant type
 					allowedAudiences: ["https://rs1.example"],
 				},
 			),
@@ -1000,8 +990,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		// Policy may only narrow, never originate. With no client there is no
 		// `allowedAudiences` ceiling to narrow within, so the answer is the one
 		// the jwt-bearer grant gives and `resolveScope` gives a scope with
-		// nothing to bound it: refused, not minted. This used to be the one
-		// path where a policy could put ANY audience on a token.
+		// nothing to bound it: refused, not minted.
 		const { store, deps } = makeDepsWith(async () => ({
 			outcome: "allow",
 			grantedAudience: ["https://rs1.example"],
@@ -1022,23 +1011,19 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Codex Round 2 P1-2 → #326: allowedGrantTypes strictness for authenticated
-// clients is declared on the handler contract and enforced at /token dispatch
+// allowedGrantTypes strictness for authenticated clients: declared on the
+// handler contract, enforced at /token dispatch
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — allowedGrantTypes strictness (Codex Round 2 P1-2 / #326)", () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
-		// The allowedGrantTypes gate for authenticated clients (deny-by-absence
-		// included — Codex Round 2 P1-2) moved out of this handler and onto the
-		// shared /token dispatch in @o3co/auth-provider-oauth: the handler
-		// declares strictness, dispatch enforces it together with the base
-		// allowedGrantTypes rule before `handle` runs, and skips it when no
-		// client is authenticated (the passkey IS the auth event). This pin
-		// keeps the declaration from silently disappearing; the dispatch
-		// behavior is pinned in the oauth package's
-		// `allowedGrantTypes.enforcement.test.mts`.
+		// The handler only declares strictness. The shared /token dispatch in
+		// @o3co/auth-provider-oauth enforces it (deny-by-absence included) with
+		// the base allowedGrantTypes rule before `handle` runs, and skips it when
+		// no client is authenticated (the passkey IS the auth event). Dispatch is
+		// pinned in the oauth package's `allowedGrantTypes.enforcement.test.mts`.
 		const store = createMemoryWebAuthnCredentialStore();
 		const handler = createWebAuthnGrant(makeBaseDeps(store));
 
@@ -1084,7 +1069,6 @@ describe("createWebAuthnGrant — allowedGrantTypes strictness (Codex Round 2 P1
 			),
 		);
 
-		// Should succeed
 		expect(result.status).toBe(200);
 	});
 });

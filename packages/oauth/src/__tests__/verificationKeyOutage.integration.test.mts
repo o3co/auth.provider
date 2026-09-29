@@ -15,16 +15,13 @@
  */
 
 /**
- * A keystore that cannot answer is the server's outage, on every route that
- * verifies a token this provider signed.
- *
- * The central verifier reported a failed key lookup as `kid_unknown` — a
- * fabricated header — so every route answered the client's fault: `401
- * invalid_token` at a protected resource (the client drops a good token),
- * `400 invalid_grant` at the refresh grant (RFC 6749 §5.2: the client discards
- * its refresh token, a forced logout for everyone who refreshed during the
- * outage), `active: false` at introspection, and a `200` at revocation that
- * revoked nothing. Each is now `503 temporarily_unavailable`, logged.
+ * A keystore that cannot answer is the server's outage, `503
+ * temporarily_unavailable` and logged, on every route that verifies a token
+ * this provider signed. Answered as the client's fault, it would cost the
+ * client a good token (`401 invalid_token` at a protected resource) or its
+ * refresh token (`400 invalid_grant`, RFC 6749 §5.2: a forced logout for
+ * everyone who refreshed during the outage), and at revocation it would be a
+ * `200` that revoked nothing.
  *
  * Driven through the real router (`createOAuthRouter`) with the real
  * symmetric keystore, whose key lookup is made to fail the way a remote key

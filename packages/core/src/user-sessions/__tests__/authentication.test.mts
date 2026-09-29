@@ -16,14 +16,13 @@
 
 /**
  * How a session was established and what this provider vouches for, read the
- * one way every consumer reads them (the MFA ADR's D9): `sessionAuthentication`
- * and `vouchedAmr`. A session written since step 5 of the build order says so
- * in its `authentication` key, and its `amr` holds only what this provider
- * vouches for. One written before carries no such key and is split as it is
- * read: `fed` makes it federated, and every other value beside `fed` is what
- * an upstream IdP asserted — never vouched for, whether or not that federation
- * is trusted now, since the session does not say which federation it was.
- * And how each login path records itself.
+ * one way every consumer reads them (`sessionAuthentication`, `vouchedAmr`;
+ * ADR 2026-09-25-multi-factor-authentication), and how each login path
+ * records itself. A session with an `authentication` key holds in its `amr`
+ * only what this provider vouches for. A pre-upgrade session is split as it
+ * is read: `fed` makes it federated, and every other value beside `fed` is
+ * what an upstream IdP asserted — never vouched for, whether or not that
+ * federation is trusted now, since the session does not say which it was.
  */
 
 import { describe, expect, it } from "vitest";
@@ -42,7 +41,7 @@ import {
 } from "#/user-sessions/authentication.mjs";
 import type { SessionAuthentication, UserSession } from "#/user-sessions/types.mjs";
 
-/** A session written before the MFA ADR's D9: no `authentication` key's value. */
+/** A pre-upgrade session: no `authentication` value. */
 const session = (amr: readonly string[] | undefined): UserSession => ({
 	sid: "sid-1",
 	sub: "user-1",
@@ -54,7 +53,7 @@ const session = (amr: readonly string[] | undefined): UserSession => ({
 	authentication: undefined,
 });
 
-/** A session written since: it says how it was established. */
+/** A session that says how it was established. */
 const recorded = (
 	amr: readonly string[] | undefined,
 	authentication: SessionAuthentication,
@@ -130,7 +129,7 @@ describe("sessionAuthentication — a session written before the design, split a
 		["mfa alone", ["mfa"]],
 	])("cannot tell the primary of a session with %s: undefined", (_label, amr) => {
 		// Unknown is its own answer: the baseline re-authenticates such a
-		// session rather than guessing which primary it had (D16).
+		// session rather than guessing which primary it had.
 		expect(sessionAuthentication(session(amr))).toBeUndefined();
 	});
 
@@ -157,8 +156,8 @@ describe("vouchedAmr — the amr this provider vouches for (D9, D13)", () => {
 	});
 
 	it("is fed alone for a pre-upgrade federated session: what its upstream IdP asserted is not vouched for", () => {
-		// The split D9 prescribes: a pre-upgrade `["hwk", "fed"]` must never
-		// meet an `acr` that needs `hwk`, nor stamp it on a token.
+		// A pre-upgrade `["hwk", "fed"]` must never meet an `acr` that needs
+		// `hwk`, nor stamp it on a token.
 		expect(vouchedAmr(session(["hwk", "fed"]))).toEqual(["fed"]);
 		expect(vouchedAmr(session(["pwd", "mfa", "fed"]))).toEqual(["fed"]);
 	});

@@ -16,19 +16,13 @@
 
 /**
  * The `DeviceCodeStore` port — server state for the OAuth 2.0 Device
- * Authorization Grant (RFC 8628, #298).
+ * Authorization Grant (RFC 8628).
  *
- * The grant spans two devices and three requests that arrive out of order: a
- * device asks for a code, a human approves it somewhere else, and the device
- * discovers this by polling. Every one of those steps is a race with the
- * others, so the port is written as **atomic operations rather than
- * read-then-write pairs** — `approve`, `deny` and `poll` each collapse their
- * check and their mutation into one call the adapter must perform
- * indivisibly.
- *
- * That shape is not decoration. A `find` + `update` version of `poll` lets two
- * concurrent polls both observe `approved` and both redeem the code, which
- * turns a single user approval into two access tokens.
+ * A device asks for a code, a human approves it elsewhere, and the device
+ * polls; these requests race. So `approve`, `deny` and `poll` are **atomic
+ * operations, not read-then-write pairs**: a `find` + `update` `poll` lets
+ * two concurrent polls both see `approved` and mint two access tokens from
+ * one approval.
  */
 
 import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
@@ -36,17 +30,12 @@ import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
 /**
  * What the authorization server knows about one device authorization.
  *
- * `deviceCode` is absent from this record on purpose: it is the device's
- * bearer credential and the only thing that redeems the grant, so it is a
- * lookup key rather than a field to hand back. Adapters that must persist it
- * do so under their own key space.
+ * `deviceCode` is deliberately absent: it is the device's bearer credential,
+ * a lookup key rather than a field to hand back.
  *
- * Every field is a required key, `undefined` where there is none (#626).
- * Both bundled stores rebuild the record field by field on every read, and a
- * field a copy forgot was dropped with no error — `subject` gone refuses an
- * approval the user gave, `grantedScope` gone mints a token with no scope
- * while the approval's audit event records `requestedScope` instead. Naming
- * the key makes that copy a compile error.
+ * Every field is a required key, `undefined` where there is none: stores
+ * rebuild the record field by field, and a required key turns a forgotten
+ * field (a lost `subject` or `grantedScope`) into a compile error.
  */
 export interface DeviceAuthorization {
 	/** The code the human types. Normalised — see `normaliseUserCode`. */
@@ -63,12 +52,10 @@ export interface DeviceAuthorization {
 	/** Set when `status === "approved"`: what they approved. `undefined` before. */
 	readonly grantedScope: readonly string[] | undefined;
 	/**
-	 * Set when `status === "approved"`: when the approval was given, in epoch
-	 * milliseconds — the `nowMs` the approve call was handed. `undefined`
-	 * before. What a poll holds against the subject's sessions boundary: a
-	 * revocation stamped between the approval and the poll is older than the
-	 * token the poll mints, so only the approval's own instant can show the
-	 * approval came before it.
+	 * Set when `status === "approved"`: the approve call's `nowMs`, in epoch
+	 * milliseconds. `undefined` before. A poll checks this, not its own
+	 * instant, against the subject's sessions boundary, so a revocation
+	 * between approval and poll is honoured.
 	 */
 	readonly approvedAtMs: number | undefined;
 }
@@ -76,16 +63,12 @@ export interface DeviceAuthorization {
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
 
 /**
- * The outcome of one device poll.
+ * The outcome of one device poll: the RFC 8628 §3.5 states, plus `slow_down`
+ * and `not_found` (answered as `invalid_grant`, indistinguishable from a
+ * fabricated code).
  *
- * These are the states RFC 8628 §3.5 names, plus the two the RFC leaves to the
- * server: `slow_down` (the device polled faster than the interval it was
- * given) and `not_found` (which the token endpoint answers as
- * `invalid_grant`, indistinguishable from a fabricated code).
- *
- * `approved` carries the record **and consumes it**. Single-use is the
- * adapter's job because it must be atomic with the read — see the file
- * header.
+ * `approved` carries the record **and consumes it**, atomically with the
+ * read (see the file header).
  */
 export type DevicePollOutcome =
 	| { readonly status: "not_found" }
@@ -101,7 +84,7 @@ export interface CreateDeviceAuthorizationInput {
 	readonly userCode: string;
 	readonly clientId: string;
 	/**
-	 * `undefined` when the device asked for no scope. A required key (#626): a
+	 * `undefined` when the device asked for no scope. A required key: a
 	 * writer that left it out would park a request that grants nothing.
 	 */
 	readonly requestedScope: readonly string[] | undefined;
@@ -121,16 +104,12 @@ export interface ApproveDeviceAuthorizationInput {
 	readonly userCode: string;
 	readonly subject: string;
 	/**
-	 * What the approval grants. **Omit it to grant `requestedScope`**, which
-	 * is the normal case and the safe default.
-	 *
-	 * The scope is settled and filtered against the client's allowlist when
-	 * the device first asks, so by approval time it is already the answer.
-	 * Re-deriving it here would mean a second read of the record between the
-	 * lookup that showed the user a scope and the write that grants one —
-	 * a window in which those two can differ. Passing it explicitly is for
-	 * a deployment that lets the user *narrow* what they approve; it can
-	 * never widen, because adapters intersect with `requestedScope`.
+	 * What the approval grants. **Omit it to grant `requestedScope`**, the
+	 * normal case: that scope was already filtered against the client's
+	 * allowlist when the device asked, and re-deriving it would open a window
+	 * between what the user saw and what is granted. Pass it only to let the
+	 * user *narrow*; adapters intersect with `requestedScope`, so it never
+	 * widens.
 	 */
 	readonly grantedScope?: readonly string[];
 	readonly nowMs: number;
@@ -144,23 +123,16 @@ export interface DeviceCodeStore {
 	 * Register a new pending authorization.
 	 *
 	 * @throws `DeviceCodeStoreError` with `reason: "collision"` when
-	 * `deviceCode` or `userCode` already has a live record, writing nothing. A
-	 * collision is a generator failure, not a routine condition, and silently
-	 * overwriting would detach a device from the code its user is about to
-	 * approve. It MUST be signalled with this reason: the endpoint re-draws for
-	 * it and for nothing else, and answers any other error as a store outage
-	 * (`503`).
+	 * `deviceCode` or `userCode` already has a live record, writing nothing
+	 * (overwriting would detach a device from the code its user is about to
+	 * approve). MUST use this reason: the endpoint re-draws for it only and
+	 * answers any other error as a store outage (`503`).
 	 * @throws `DeviceCodeStoreError` with `reason: "full"` when a bounded
-	 * adapter is at its cap with every resident record live (#445). An
-	 * adapter refuses rather than evicts here: what it holds is a human's
-	 * answer in flight, and the caller can ask again while the user cannot
-	 * re-approve what they never saw fail.
+	 * adapter is at its cap with every record live. Refuse, never evict:
+	 * each record is a human's answer in flight. See `DeviceCodeStoreErrorReason`.
 	 * @throws `RangeError`, recording nothing, when `expiresAtMs` is not a
-	 * finite instant within the Date range (NaN, ±Infinity, past ±8.64e15 ms —
-	 * `isStorableExpiry`): such a record would never expire, or could not be
-	 * given a deadline. A
-	 * fractional `expiresAtMs` is valid, and is the instant the record
-	 * expires at.
+	 * finite instant within the Date range (`isStorableExpiry`). A fractional
+	 * `expiresAtMs` is valid.
 	 */
 	create(input: CreateDeviceAuthorizationInput): Promise<void>;
 
@@ -194,21 +166,14 @@ export interface DeviceCodeStore {
 }
 
 /**
- * Absence policy for the `deviceCodeStore` slot (#363 discipline).
+ * Absence policy for the `deviceCodeStore` slot: an empty slot is a boot
+ * failure naming the config key, not a runtime surprise on the first
+ * `/oauth/device_authorization` request.
  *
- * Optional to wire, not optional to decide: a composition that mounts the
- * device grant without a store has no way to remember that a device is
- * waiting, so the grant cannot work at all. The policy makes that a boot
- * failure with a config key to set rather than a runtime surprise on the
- * first `/oauth/device_authorization` request.
- *
- * The declaration is for a deployment that installs the package and leaves
- * the grant off — the policy is applied whether or not the feature is on. It
- * says why the slot is empty; it does not make an enabled grant work without
- * a store, and `deviceGrantModule` refuses that composition at boot on its
- * own (#626). The hint below is quoted into the stage-1 boot error, so it
- * must not send an operator with the grant enabled to write a line that is
- * itself refused.
+ * Declaring absence is for a deployment that leaves the grant off; an
+ * enabled grant without a store is refused by `deviceGrantModule`. The hint
+ * is quoted into the boot error, so it must not tell an operator with the
+ * grant enabled to write a line that is itself refused.
  */
 export const DEVICE_CODE_STORE_ABSENCE_POLICY: AbsencePolicy = {
 	configKey: ["oauth", "deviceAuthorization", "store"],

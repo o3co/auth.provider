@@ -18,22 +18,16 @@
  * `POST /session/logout` must invalidate the token the `session` grant minted
  * from the same browser session.
  *
- * This lives here rather than in `packages/session` or `packages/oauth`
- * because it is the one assertion neither package can make alone: the logout
- * endpoint is in `@o3co/auth-provider-session`, the introspection and userinfo
- * endpoints are in `@o3co/auth-provider-oauth`, and the two are siblings that
- * may not import each other. The standalone template is the composition root
- * where both are mounted on one app, so it is where the contract between them
- * is testable.
+ * Neither package can assert this alone: the logout endpoint is in
+ * `@o3co/auth-provider-session`, introspection and userinfo are in
+ * `@o3co/auth-provider-oauth`, and the two are siblings that may not import
+ * each other. This template is the composition root that mounts both.
  *
- * What it pins: #506 stamped `sid` on the `session` grant's access token and
- * gave `/oauth/introspect` the session-liveness check `/oauth/userinfo`
- * already ran. Both resolve the `UserSession` record — which `/session/logout`
- * used to leave alive, because it destroyed the cookie and nothing else. So in
- * the BFF / `auth.proxy` injection topology, whose logout IS this endpoint, an
- * access token minted from the session kept introspecting `active: true` and
- * kept answering at `/userinfo` for its full lifetime after the user logged
- * out. Only `/oauth/logout` with an `id_token_hint` was ever closed by #506.
+ * The `session` grant stamps `sid` on its access token, and `/oauth/introspect`
+ * and `/oauth/userinfo` both check that the `UserSession` it names is alive.
+ * In the BFF / `auth.proxy` injection topology, whose logout IS this endpoint,
+ * a logout that destroyed only the cookie would leave the token live at both
+ * for its full lifetime.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -68,7 +62,7 @@ const config: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
 	// The posture on session admission `app.mts` derives from `mfa.mode`
-	// (the session-admission ADR's D7): this composition expects none.
+	// (ADR 2026-09-28-session-admission): this composition expects none.
 	sessionRequirements: { expected: [] },
 	oauth: {
 		jwt: {
@@ -215,11 +209,9 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 		expect(loginRes.status).toBe(200);
 
 		const loginCookies = loginRes.headers["set-cookie"] as unknown as string[];
-		// The session cookie comes from the login response, and so does a FRESH
-		// CSRF cookie — the login handler reissues one on the regenerated
-		// session so the follow-up logout needs no second round trip. The
-		// mechanism is a signed double-submit, so the cookie's value IS the
-		// token the header has to echo; the pre-login token no longer matches.
+		// The mechanism is a signed double-submit, so the reissued cookie's
+		// value IS the token the header has to echo; the pre-login token no
+		// longer matches.
 		const csrfCookiePrefix = `${config.session.name}.csrf=`;
 		const reissued = loginCookies
 			.find((c) => c.startsWith(csrfCookiePrefix))
@@ -271,9 +263,9 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 		expect(logoutRes.status).toBe(200);
 		expect(logoutRes.body).toMatchObject({ message: "Logged out successfully" });
 
-		// After it, the same token no longer authorizes anything. This is the
-		// assertion that failed before the fix: the `UserSession` record the
-		// liveness checks resolve outlived the logout.
+		// After it, the same token no longer authorizes anything: the
+		// `UserSession` record the liveness checks resolve does not outlive
+		// the logout.
 		const afterIntrospect = await request(app)
 			.post("/oauth/introspect")
 			.set("Authorization", BASIC)

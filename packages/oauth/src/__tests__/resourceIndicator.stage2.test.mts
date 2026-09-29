@@ -15,24 +15,15 @@
  */
 
 /**
- * RFC 8707 Stage 2 — library-level resource → audience binding enforcement
- * (#173).
+ * RFC 8707 resource → audience binding enforcement (see ADR
+ * 2026-07-31-rfc8707-resource-audience-binding): with the flag on and
+ * `resource` present, every requested resource must be represented by the
+ * token's `aud`, or the response is `400 invalid_target`. `aud` is
+ * single-valued, so two distinct resources are unsatisfiable by construction.
  *
- * Stage 1 (PR #172) forwarded `body.resource` to the policy hook and stopped
- * there: nothing checked that the token actually got minted for the requested
- * resource. These tests pin the enforcement.
- *
- * The rule, generalised from the token-exchange grant's IH-8 hardening: when
- * the flag is on and `resource` is present, every requested resource must be
- * represented by the token's `aud`, or the response is `400 invalid_target`.
- * `aud` is single-valued, so two distinct resources are unsatisfiable by
- * construction.
- *
- * Enforcement is gated on the flag ALONE, not on a policy hook being wired.
- * A deployment that turns the flag on without a policy still derives an
- * audience (`client.allowedAudiences[0] ?? issuer`), and issuing that token in
- * response to a mismatched `resource` request is exactly the RFC 8707 §2
- * violation Stage 2 exists to close.
+ * Enforcement is gated on the flag ALONE: with no policy wired an audience is
+ * still derived (`client.allowedAudiences[0] ?? issuer`), and issuing it for
+ * a mismatched `resource` would violate RFC 8707 §2.
  */
 
 import { createSecretKey } from "node:crypto";
@@ -70,7 +61,7 @@ const CC_CLIENT: AuthenticatedClient = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedGrantTypes: ["client_credentials"],
 	allowedScopes: ["read:res"],
-	// #396: the old implicit omitted-scope grant, now declared.
+	// An omitted scope is granted these, never the allowlist.
 	defaultScopes: ["read:res"],
 	allowedAudiences: [API, OTHER],
 };
@@ -151,7 +142,7 @@ const makeRefreshCtx = (
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedGrantTypes: ["refresh_token"],
 		allowedScopes: ["read", "write"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// An omitted scope is granted these, never the allowlist.
 		defaultScopes: ["read", "write"],
 		allowedAudiences: [API, OTHER],
 	},
@@ -187,7 +178,7 @@ function makeAuthzDeps(
 			consumeByCode: vi.fn().mockResolvedValue({
 				client_id: CLIENT_ID,
 				redirect_uri: RP_URI,
-				// #273: a redeemable code always carries an S256 challenge.
+				// A redeemable code always carries an S256 challenge.
 				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 				code_challenge_method: "S256",
 				...(grantedAudience !== undefined && { grantedAudience }),
@@ -215,7 +206,7 @@ const makeAuthzCtx = (body: Record<string, unknown> = {}): GrantContext => ({
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedGrantTypes: ["authorization_code"],
 		allowedScopes: ["read:res"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// An omitted scope is granted these, never the allowlist.
 		defaultScopes: ["read:res"],
 		allowedAudiences: [API, OTHER],
 	},
@@ -227,9 +218,9 @@ const makeAuthzCtx = (body: Record<string, unknown> = {}): GrantContext => ({
 
 describe("Stage 2 — client_credentials", () => {
 	it("derives the audience from an allowed resource when no policy narrows one", async () => {
-		// Acceptance criterion 1, third bullet: without this the audience would
-		// fall back to allowedAudiences[0] = API and a request for OTHER would
-		// reject, making RFC 8707 unusable unless a policy hook is wired.
+		// Without derivation the audience would fall back to
+		// allowedAudiences[0] = API and a request for OTHER would reject,
+		// making RFC 8707 unusable unless a policy hook is wired.
 		const grant = createClientCredentialsGrant(makeCCDeps());
 		const out = await grant.handle(makeCCCtx({ resource: OTHER }));
 
@@ -276,8 +267,8 @@ describe("Stage 2 — client_credentials", () => {
 	});
 
 	it("rejects when the policy allows but narrows to a different audience", async () => {
-		// The Stage 1 gap: policy says yes, audience ends up as something the
-		// client did not ask for, and the token used to ship anyway.
+		// Policy says yes, but the audience ends up as something the client
+		// did not ask for: no token ships.
 		const grant = createClientCredentialsGrant(
 			makeCCDeps({
 				grantPolicy: makePolicy(async () => ({ outcome: "allow", grantedAudience: [API] })),
@@ -386,9 +377,7 @@ describe("Stage 2 — authorization_code (enforce-only, no policy at the token e
 
 	it("does NOT invoke the policy hook at the token endpoint (C-2 / D-1 preserved)", async () => {
 		// The enforcement is a pure comparison against the value persisted at
-		// /authorize. Re-running policy here would reintroduce the surface D-1
-		// removed, so the invariant is asserted alongside the new behaviour
-		// rather than left to the Stage 1 test to defend.
+		// /authorize, where the policy was evaluated once.
 		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
 		const deps = makeAuthzDeps([API]);
 		const grant = createAuthorizationGrant({ ...deps, grantPolicy: makePolicy(evaluate) });

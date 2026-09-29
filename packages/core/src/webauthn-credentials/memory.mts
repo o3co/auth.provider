@@ -17,18 +17,11 @@ import { WebAuthnCredentialStorageError } from "./errors.mjs";
 import type { WebAuthnCredential, WebAuthnCredentialStore } from "./types.mjs";
 
 /**
- * In-process Map-backed WebAuthnCredentialStore.
- *
- * Atomicity argument (single-process, single-event-loop):
- *   - `registerCredential`: the Map.has check and Map.set are SYNCHRONOUS —
- *     no `await` between them. Node's microtask queue cannot interleave
- *     non-async work, so concurrent callers do not race.
- *   - `updateSignCount` is an atomic compare-and-set (CAS) under the same
- *     guarantee.
- *   - Production deployments requiring multi-process or distributed
- *     deployments should use a real backing store (e.g. a Redis adapter).
- *
- * `remove` is idempotent: deleting a non-existent credentialId is a no-op.
+ * In-process Map-backed WebAuthnCredentialStore. Atomic on one event loop:
+ * `registerCredential`'s check and set, and `updateSignCount`'s
+ * compare-and-set, have no `await` between them, so concurrent callers do
+ * not race. Multi-process deployments need a real backing store (e.g.
+ * Redis). `remove` of an unknown credentialId is a no-op.
  */
 export function createMemoryWebAuthnCredentialStore(): WebAuthnCredentialStore {
 	const byCredentialId = new Map<string, WebAuthnCredential>();

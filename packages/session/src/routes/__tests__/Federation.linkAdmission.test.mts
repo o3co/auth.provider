@@ -15,21 +15,16 @@
  */
 
 /**
- * The federation link flow on session admission (the session-admission ADR's
- * D4 and D8, build order A5).
- *
- * The `?link=1` start reads the browser's session through `admitSession` as
- * `session.link` — graded `credential_change`, so a requirement decides the
- * recent-MFA rule here, where a step-up has a page to return to — and records
- * the subject beside the `sid` in the transaction. The callback reads the
- * session the start bound through `admitSession` as `session.link_callback`,
- * with `linkClaim` over that transaction: a `form_post` callback arrives on a
- * fresh cookie session and has no other binding.
- *
- * Each outcome's answer is pinned here, the three changes D8 names for the
- * start among them — (3) a cookie without `user.id`, (4) the revocation
- * boundary when `subjectRevocation` is wired, (5) a record past its
- * `expiresAt` — and so is what the requirements are asked.
+ * The federation link flow on session admission (ADR
+ * 2026-09-28-session-admission, D4 and D8). The `?link=1` start reads the
+ * browser's session through `admitSession` as `session.link`, graded
+ * `credential_change` so a requirement decides the recent-MFA rule where a
+ * step-up has a page to return to, and records the subject beside the `sid`
+ * in the transaction. The callback reads the session the start bound as
+ * `session.link_callback`, with `linkClaim` over that transaction: a
+ * `form_post` callback arrives on a fresh cookie session and has no other
+ * binding. Pinned: each outcome's answer, D8's changes (3), (4) and (5) for
+ * the start among them, and what the requirements are asked.
  */
 
 import {

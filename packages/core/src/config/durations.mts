@@ -15,20 +15,16 @@
  */
 
 /**
- * Sanity ceiling for a duration expressed in whole seconds: one year.
- *
- * Not a policy — a deployment wanting a 400-day refresh token is a different
- * conversation — but a typo guard. The pairing with `.positive()` is what
- * actually matters (see `readinessTimeoutMs` for the same reasoning): HOCON
- * substitutes an exported-but-empty environment variable as `""`, and
- * `z.coerce.number()` turns `""` into `0`. A zero token lifetime mints tokens
- * that are already expired.
+ * Sanity ceiling for a duration in whole seconds: one year. A typo guard, not
+ * a policy. The pairing with `.positive()` matters more: HOCON substitutes an
+ * exported-but-empty environment variable as `""`, `z.coerce.number()` turns
+ * that into `0`, and a zero token lifetime mints tokens already expired.
  *
  * Exported so a package's own config schema holds its durations to the same
- * ceiling as core's: a rate-limit window, a federation grant's tombstone
- * retention or listing allowance. Past the Date range, such a value is a
- * deadline no store can keep (`isStorableLifetime`), and the store's refusal
- * at construction is the second line behind this one.
+ * ceiling (a rate-limit window, a federation grant's tombstone retention or
+ * listing allowance). Past the Date range such a value is a deadline no store
+ * can keep (`isStorableLifetime`); the store's refusal at construction is the
+ * second line behind this one.
  */
 export const MAX_DURATION_SECONDS = 31_536_000;
 

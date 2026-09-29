@@ -15,36 +15,26 @@
  */
 
 /**
- * Refresh-token issuance for the webauthn grant (#480).
- *
- * The grant used to hand back an access token alone, so a passkey-only user on
- * a native app was bounced to the platform authenticator at every access-token
- * expiry. It now opens a refresh-token family exactly the way the
+ * Refresh-token issuance for the webauthn grant, so a passkey-only user on a
+ * native app is not sent to the platform authenticator at every access-token
+ * expiry. It opens a refresh-token family exactly the way the
  * authorization-code grant does, but only for a client whose
- * `allowedGrantTypes` names `refresh_token` — the deny-by-absence discipline of
- * #268 / #311 / #326.
+ * `allowedGrantTypes` names `refresh_token` (deny by absence).
  *
- * What is asserted here:
- *   - the allowlist gate, in all four of its shapes (named / omitted /
- *     undeclared / no authenticated client);
- *   - that the issued token satisfies every gate `refresh_token`'s own handler
- *     applies at redemption — `typ = rt+jwt`, pinned `iss`, `azp` equal to the
- *     issuing client, a `family_id` claim — checked through core's `verifyJwt`,
- *     the same verifier that handler calls;
- *   - that the family the grant registers rotates once and then reports a
- *     replay, driven through core's real store + rotation wrapper rather than a
- *     spy, so the RFC 6819 §5.2.2.3 semantics are the shared ones;
- *   - that the family is registered under the refresh token's reserved `jti`
- *     and expiry before anything is signed (#449), so no refresh token is
- *     served unless its family was registered, and a family store that cannot
- *     answer is a 503 that costs no signature;
- *   - the DPoP `cnf.jkt` binding, on the same public-client /
- *     `bindConfidentialClientRefreshTokens` gate `authorization.mts` and
- *     `refreshToken.mts` apply.
+ * Pinned here: the allowlist gate in its four shapes; that the issued token
+ * passes every gate `refresh_token`'s own handler applies at redemption,
+ * through the same `verifyJwt`; that the family rotates once and then reports
+ * a replay, through core's real store and rotation wrapper (RFC 6819
+ * §5.2.2.3); that the family is registered under the refresh token's reserved
+ * `jti` and expiry before anything is signed, so no refresh token is served
+ * unless its family was registered, and a family store that cannot answer is
+ * a 503 that costs no signature; and the DPoP `cnf.jkt` binding, on the same
+ * public-client / `bindConfidentialClientRefreshTokens` gate
+ * `authorization.mts` and `refreshToken.mts` apply.
  *
- * `verifyWebAuthnAssertion` is mocked for the same reason grant.test.mts mocks
- * it: the assertion-verification contract is covered by
- * internal.verification.test.mts and real CBOR/COSE fixtures add nothing here.
+ * `verifyWebAuthnAssertion` is mocked, as in grant.test.mts: its contract is
+ * covered by internal.verification.test.mts, and real CBOR/COSE fixtures add
+ * nothing here.
  */
 
 import {
@@ -247,10 +237,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — the lifetimes it mints with", () => {
-	// A configuration built by hand never met the schema. Read when a request
-	// is answered, a bad lifetime was refused only after the ceremony had
-	// consumed the challenge: a 500, and a passkey assertion that can never be
-	// presented again. Read when the grant is built, it never reaches one.
+	// A configuration built by hand never met the schema. The lifetimes are
+	// read when the grant is built: read per request, a bad one would be
+	// refused only after the ceremony had consumed the challenge — a 500, and
+	// a passkey assertion that can never be presented again.
 	const broken: Array<[string, Record<string, unknown>]> = [
 		["oauth.refreshToken.expiresIn = 1.5", { refreshToken: { expiresIn: 1.5 } }],
 		["oauth.refreshToken.expiresIn = NaN", { refreshToken: { expiresIn: Number.NaN } }],
@@ -293,7 +283,7 @@ describe("createWebAuthnGrant — the lifetimes it mints with", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The allowlist gate (#268 / #311 / #326 deny-by-absence)
+// The allowlist gate (deny by absence)
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — refresh_token allowlist gate (#480)", () => {
@@ -319,7 +309,7 @@ describe("createWebAuthnGrant — refresh_token allowlist gate (#480)", () => {
 		);
 
 		expect(tokens.refresh_token).toBeUndefined();
-		// Exactly today's response: an access token, nothing more.
+		// An access token, nothing more.
 		expect(tokens.access_token).toBeTruthy();
 	});
 
@@ -507,7 +497,7 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 	});
 
 	it("answers 503 temporarily_unavailable when the family store cannot register", async () => {
-		// Fail-closed, matching authorization.mts CP-16: a refresh token whose
+		// Fail-closed, as authorization.mts is: a refresh token whose
 		// family was never registered has no replay detection behind it, so it
 		// must not be served.
 		const rotation: RefreshTokenFamilyRotation = {
@@ -527,11 +517,10 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 	});
 
 	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
-		// This used to reach the guard above at request time: no configured TTL
-		// meant `generateToken` emitted no `exp`, and the family had no expiry
-		// to register under, so the grant answered 503 — after the ceremony had
-		// consumed the challenge. The lifetime is now read when the grant is
-		// built, and a missing one refuses the composition instead.
+		// With no configured TTL `generateToken` emits no `exp` and the family
+		// has no expiry to register under. Read when the grant is built, a
+		// missing lifetime refuses the composition before any ceremony consumes
+		// a challenge.
 		const noTtlConfig = {
 			oauth: {
 				jwt: { issuer: ISSUER },
@@ -662,11 +651,10 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 // Module wiring
 //
 // The grant can only register a family if the composition root's rotation
-// component reaches it. `webauthnModule` hands the grant its deps whole, so a
-// declared slot cannot be dropped on the way; this pins the end result, since
-// a slot that did go missing would leave replay detection silently absent in
-// every real deployment while every grant-level test above still passed — the
-// wiring class of the C1 `grantPolicy` bypass (PR #172).
+// component reaches it. `webauthnModule` hands the grant its deps whole; this
+// pins the end result, since a slot lost on the way would leave replay
+// detection silently absent in every real deployment while every grant-level
+// test above still passed.
 // ---------------------------------------------------------------------------
 
 describe("webauthnModule — refresh-token family wiring (#480)", () => {
@@ -683,7 +671,7 @@ describe("webauthnModule — refresh-token family wiring (#480)", () => {
 		if (!grantFactory) throw new Error("webauthnModule contributes no webauthn grant");
 
 		// Awaited, as the boot planner does: a contribution factory may answer
-		// with a promise (#626 P1 — the declared type says so now).
+		// with a promise.
 		const handler = await grantFactory({
 			config: makeConfig(),
 			keyStore,

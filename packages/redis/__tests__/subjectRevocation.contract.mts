@@ -26,15 +26,12 @@ export type SubjectRevocationFactoryForContract = () => Promise<SubjectRevocatio
 const LONG = () => new Date(Date.now() + 600_000);
 
 /**
- * How a test reaches an entry's expiry on the store's own terms.
- *
- * An in-process store judges expiry on this process's clock. A Redis key
- * expires on the server's, which sits to either side of the host's, and a
- * relative `PX` runs from when the command reached the server; a loaded run
- * also reaches its next line late. A fixed sleep after a short expiry therefore
- * either read an entry the store had already dropped, or checked one it had
- * not dropped yet. The default is this process's clock; a Redis runner passes
- * one that reads the server's `TIME`, or waits for the keys to be gone.
+ * How a test reaches an entry's expiry on the store's own terms. A Redis key
+ * expires on the server's clock, which may sit either side of the host's, and
+ * a relative `PX` runs from when the command reached the server, so a fixed
+ * sleep can find an entry already dropped or one not yet dropped. The default
+ * is this process's clock; a Redis runner passes one that reads the server's
+ * `TIME`, or waits for the keys to be gone.
  */
 export interface ExpiryClock {
 	/** Epoch milliseconds on the clock the store expires entries by. */
@@ -61,24 +58,19 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
 	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
 
 /**
- * Behaviour every {@link SubjectRevocation} adapter owes its callers (#321).
+ * Behaviour every {@link SubjectRevocation} adapter owes its callers.
  *
- * The load-bearing property is **monotonicity**. Two credential changes in
- * quick succession, the second computed on a replica whose clock is behind,
- * must not move the line backwards and resurrect every token the first one
- * killed. That is a `max` on write, not a last-writer-wins `SET` — which is
- * why the distributed adapter needs an atomic read-compare-write rather than
- * the plain `SET key value PX ttl` the shape looks like it should be.
- *
- * The same guard applies to the entry's own expiry: shortening an in-force
- * watermark would retire the line while tokens it must refuse are still
+ * The load-bearing property is **monotonicity**: of two credential changes,
+ * the second computed on a replica whose clock is behind must not move the
+ * line backwards and resurrect the tokens the first one killed. That is a
+ * `max` on write, so a distributed adapter needs an atomic read-compare-write,
+ * not a plain `SET key value PX ttl`. The entry's expiry is never shortened
+ * either, or the line would retire while tokens it must refuse are still
  * presentable.
  *
- * Expiry-over-time cases are left to each adapter's own suite — a distributed
- * adapter's clock is the server's, which fake timers cannot move — but the
- * post-expiry *semantics* (a truncated expiry would have lapsed) are pinned
- * here, with an expiry a second out, waited out on the store's own clock
- * (`ExpiryClock`).
+ * Expiry over time is left to each adapter's suite (fake timers cannot move a
+ * server's clock); the post-expiry semantics are pinned here with an expiry a
+ * second out, waited out on the store's own clock ({@link ExpiryClock}).
  */
 export function runSubjectRevocationContract(
 	factory: SubjectRevocationFactoryForContract,
@@ -138,15 +130,12 @@ export function runSubjectRevocationContract(
 
 /**
  * What an adapter owes once it claims {@link SupportsSessionsOnlyRevocation}
- * (#593, D13).
- *
- * The capability exists because a password change and "revoke everything" are
- * different events. What makes it safe is that the narrower one can only ever
- * do less: `revokeSessionsBefore` may move the sessions line forward and must
- * leave the grants line exactly where it was, including absent. An adapter
- * that derived one from the other — or that took a single maximum across both
- * — would either revoke the grants a caller asked to keep, or rescue grants an
- * earlier revocation had ended. Both are silent.
+ * (ADR 2026-09-17-federation-grants-offline-delegation, "Two boundaries, one
+ * default"): `revokeSessionsBefore` may move the sessions line forward and
+ * must leave the grants line exactly where it was, including absent. Deriving
+ * one line from the other, or taking one maximum across both, would silently
+ * revoke grants a caller asked to keep, or rescue grants an earlier
+ * revocation had ended.
  */
 export function runSessionsOnlyRevocationContract(
 	factory: SubjectRevocationFactoryForContract,

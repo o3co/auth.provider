@@ -17,13 +17,12 @@
 import type { FederationGrantExpiredReason } from "./types.mjs";
 
 /**
- * The longest a federation grant can live: one year (#593, D3).
+ * The longest a federation grant can live: one year.
  *
- * The config schema caps `federationGrants.maxExpiresIn` at the same value,
- * but a hand-built config bypasses a schema (#448), and D13's revocation
- * boundary is retained for exactly this long. So the ceiling is a constant of
- * the domain, and both the lifetime an intent gets and the write that
- * activates a grant check it.
+ * The schema caps `federationGrants.maxExpiresIn` at the same value, but a
+ * hand-built config bypasses the schema, and the revocation boundary is
+ * retained for exactly this long. So it is a domain constant, checked both
+ * when an intent's lifetime is resolved and when a grant is activated.
  */
 export const FEDERATION_GRANT_LIFETIME_CEILING_MS = 31_536_000_000;
 
@@ -34,14 +33,11 @@ function assertPositiveFinite(name: string, value: number): void {
 }
 
 /**
- * The lifetime a grant gets when its intent is lodged.
- *
- * A request above the maximum is clamped, not rejected, as the access-token
- * lifetime of a token exchange is: the caller learns the value that applied
- * from the response. The default is clamped too, and everything is clamped to
- * the ceiling — here, and not only at `activate`, so that a lifetime the write
- * would refuse is never offered to a user who then consents upstream for
- * nothing.
+ * The lifetime a grant gets when its intent is lodged. Requests and the
+ * default are clamped (not rejected) to the maximum and the ceiling; the
+ * response tells the caller what applied. Clamped here, not only at
+ * `activate`, so a user is never asked to consent to a lifetime the write
+ * would refuse.
  */
 export function resolveFederationGrantLifetimeMs(limits: {
 	readonly requestedMs?: number;
@@ -60,7 +56,7 @@ export function resolveFederationGrantLifetimeMs(limits: {
 
 /**
  * A grant's expiry counts from the consent, not from the callback that
- * follows it by up to ten minutes. D13's proof that no grant outlives its
+ * follows it by up to ten minutes. The guarantee that no grant outlives its
  * revocation boundary rests on `expiresAt − consent.at` being within the
  * ceiling, so both are measured from the same instant.
  */
@@ -69,7 +65,7 @@ export function federationGrantExpiresAt(consentAt: Date, lifetimeMs: number): D
 }
 
 /**
- * The guard `activate` applies to the fields it is about to write (D2). A date
+ * The guard `activate` applies to the fields it is about to write. A date
  * that is not a date fails it: `NaN > 0` is false.
  */
 export function withinFederationGrantLifetimeCeiling(consentAt: Date, expiresAt: Date): boolean {
@@ -97,15 +93,12 @@ export function federationGrantEffectiveExpiry(grant: ExpiryFields, maxMs: numbe
 
 /**
  * Whether a grant has expired, and which bound ended it. The consented
- * lifetime is terminal: new consent means a new grant. The operator's maximum
- * is not — a grant that reads as expired only because the maximum was lowered
- * yields tokens again if it is raised, always within what the user consented
- * to. When both have passed, the terminal reason is the one reported.
+ * lifetime is terminal; the operator's maximum is not (raising it revives
+ * the grant, within the consent). When both have passed, the terminal
+ * reason is reported.
  *
- * Each test is written as "is it still before the bound?" and negated. Every
- * comparison with NaN is false, so the other way round — "has the bound
- * passed?" — would answer no for a corrupt date or a maximum that is not a
- * number, and the grant would read as live for ever.
+ * Each test is "still before the bound?" negated, so a NaN date or maximum
+ * reads as expired rather than live for ever.
  */
 export function federationGrantExpiryState(
 	grant: ExpiryFields,

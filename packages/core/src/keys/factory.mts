@@ -22,15 +22,11 @@ import { assertSecretEntropy } from "./secretEntropy.mjs";
 export type KeyStoreFactory = AdapterFactory<KeyStore>;
 
 /**
- * The algorithm this library defaults to, and the one `reference.conf` ships
- * (#282). Asymmetric by default so a relying party can verify from the
- * published JWKS without ever holding a key that can also MINT tokens.
- *
- * EdDSA (Ed25519) rather than RS256: it is fully supported by every layer here
- * (`createAsymmetricKeyStore`, the JWKS route's `exportJWK`, and jose's
- * `importPKCS8`/`importSPKI`), its keys and signatures are the smallest of the
- * supported set, and it has no parameter — key size, padding mode — that an
- * operator can get quietly wrong.
+ * The algorithm this library defaults to, and the one `reference.conf` ships.
+ * Asymmetric so a relying party can verify from the published JWKS without
+ * holding a key that can also MINT tokens. EdDSA (Ed25519) over RS256: every
+ * layer here supports it, its keys and signatures are the smallest, and it
+ * has no parameter (key size, padding) an operator can get quietly wrong.
  */
 export const DEFAULT_SIGNING_ALGORITHM = "EdDSA";
 
@@ -48,14 +44,10 @@ const ASYMMETRIC_KEY_HELP =
 	"  openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem";
 
 /**
- * Build the boot failure for an asymmetric algorithm with no key material.
- *
- * This is the message an operator meets on their first deploy after #282, so
- * it names the exact keys and the exact command rather than stating that
- * something is missing. When a `secret` IS present the operator almost
- * certainly carried an HS256 config forward, so the message closes that loop
- * too — the alternative is a correct-but-baffling "privateKey is required"
- * against a config that visibly has a key in it.
+ * The boot failure for an asymmetric algorithm with no key material. It names
+ * the exact keys and command, and when a `secret` is present (an HS256 config
+ * carried forward) explains that too, rather than a baffling "privateKey is
+ * required" against a config that visibly has a key.
  */
 function describeMissingAsymmetricMaterial(
 	algorithm: string,
@@ -141,10 +133,9 @@ function narrowPreviousKeysArray(value: unknown): PreviousKeyEntry[] {
 }
 
 /**
- * Narrows config.previousSecrets from unknown to a typed array of
- * SymmetricPreviousSecret. Mirrors narrowPreviousKeysArray (asymmetric)
- * but builds Date objects from ISO strings and validates the shared-secret
- * shape (kid + secret + expiresAt). HS256-only — IH-9 rotation support.
+ * Narrows config.previousSecrets to SymmetricPreviousSecret[] (HS256
+ * rotation). Mirrors narrowPreviousKeysArray, but builds Date objects from ISO
+ * strings and validates kid + secret + expiresAt.
  */
 function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
 	if (value === undefined || value === null) {
@@ -164,7 +155,7 @@ function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
 		if (typeof raw.secret !== "string" || raw.secret.length === 0) {
 			throw new Error(`previousSecrets[${index}].secret must be a non-empty string`);
 		}
-		// #282: a retired secret is still a live verification key for the whole
+		// A retired secret is still a live verification key for the whole
 		// overlap window, so it carries exactly the forgery risk the current
 		// secret does and clears exactly the same floor.
 		assertSecretEntropy(raw.secret, {
@@ -183,32 +174,22 @@ function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
 }
 
 /**
- * Registers the `local` builder — the in-config path.
+ * Registers the `local` builder, the in-config path.
  *
- * There is deliberately no `remote` builder here (#303). A
- * `createRemoteSigningKeyStore` needs a `RemoteSigner`, which is a function
- * calling out to AWS KMS, a PKCS#11 token or a Vault transit key, and there is
- * no HOCON spelling for a function. A deployment that signs remotely builds
- * the store in its composition root and supplies it as the `keyStore`
- * component, the same way it supplies any other adapter that needs code rather
- * than configuration.
- *
- * Inventing a `remote` config type here would mean either bundling a vendor
- * SDK into `core` — which every deployment would then carry, including the
- * ones signing with a different vendor — or a plugin-lookup layer whose only
- * job is to turn a string back into the callback the composition root already
- * had.
+ * There is deliberately no `remote` builder: `createRemoteSigningKeyStore`
+ * needs a `RemoteSigner`, a function calling AWS KMS, a PKCS#11 token or a
+ * Vault transit key, and HOCON has no spelling for a function. A deployment
+ * that signs remotely builds the store in its composition root and supplies
+ * it as the `keyStore` component. A `remote` config type would mean bundling
+ * a vendor SDK into core, or a plugin lookup that turns a string back into
+ * the callback the composition root already had.
  */
 export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 	factory.register("local", async (config) => {
 		const rawAlgorithm = config.algorithm;
-		// #282: NO fallback. The pre-fix code defaulted an absent `algorithm`
-		// to HS256, which meant a composition root that configured nothing at
-		// all silently got symmetric signing — the exact "quietly weaker than
-		// the operator believes" shape this issue is about. `reference.conf`
-		// always supplies the value, so reaching this branch means a
-		// programmatic caller left it out, and guessing on their behalf is how
-		// the original bug shipped.
+		// No fallback: an absent `algorithm` must not silently become HS256,
+		// quietly weaker than the operator believes. `reference.conf` always
+		// supplies it, so only a programmatic caller reaches this.
 		if (typeof rawAlgorithm !== "string" || rawAlgorithm.length === 0) {
 			throw new Error(
 				"oauth.jwt.signingKey.local.algorithm is not configured (env OAUTH_JWT_ALGORITHM). " +
@@ -219,11 +200,9 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 		const algorithm = rawAlgorithm;
 
 		if (algorithm === "HS256") {
-			// IH-9 defense-in-depth: the Zod schema's strict HS256 branch
-			// already rejects asymmetric-shaped `previousKeys`, but
-			// `factory.create()` accepts `Record<string, unknown>` and bypasses
-			// the schema — programmatic callers (tests, custom composition
-			// roots) could otherwise reproduce the original silent-ignore bug.
+			// Defense in depth: the schema's HS256 branch rejects `previousKeys`,
+			// but `factory.create()` bypasses the schema, and a programmatic
+			// caller's `previousKeys` would otherwise be silently ignored.
 			if (config.previousKeys !== undefined) {
 				throw new Error(
 					"previousKeys is not valid for HS256 — use previousSecrets (kid + secret + expiresAt). " +
@@ -238,10 +217,8 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 						"32 bytes of random material — `openssl rand -hex 32`.",
 				);
 			}
-			// #282: the only pre-fix check was `length === 0`, so a
-			// one-character secret built a working HS256 keystore. An HS256
-			// secret is not merely a decryption key: anyone who guesses it can
-			// MINT tokens for any subject.
+			// Anyone who guesses an HS256 secret can MINT tokens for any subject,
+			// so it must clear the entropy floor, not merely be non-empty.
 			assertSecretEntropy(secret, {
 				configKey: "oauth.jwt.signingKey.local.secret",
 				envVar: "OAUTH_JWT_SECRET",
@@ -253,11 +230,9 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 		}
 
 		if (algorithm === "RS256" || algorithm === "ES256" || algorithm === "EdDSA") {
-			// #282, mirror of the HS256 `previousKeys` guard above: the
-			// asymmetric schema branch is `.passthrough()`, so a
-			// `previousSecrets` block left over from an HS256 config survives
-			// validation and used to be silently dropped here — the same
-			// silent-rotation-loss bug IH-9 closed in the other direction.
+			// Mirror of the HS256 guard: the asymmetric schema branch is
+			// `.passthrough()`, so a `previousSecrets` block left over from an
+			// HS256 config would otherwise be silently dropped, losing rotation.
 			if (config.previousSecrets !== undefined) {
 				throw new Error(
 					`previousSecrets is not valid for ${algorithm} — use previousKeys ` +

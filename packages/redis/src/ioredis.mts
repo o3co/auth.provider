@@ -2,6 +2,13 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+/*
+ * ioredis bindings for the client ports in `./clients.mjs`: `makeIoredisClients` for the
+ * single-connection set, separate factories for the federation grant, federation grant intent
+ * and MFA stores, and the Lua scripts their atomic operations run. Published as the
+ * `@o3co/auth-provider-redis/ioredis` subpath, so the main entry never pulls ioredis types into
+ * a consumer's dependency closure.
+ */
 import { createHash } from "node:crypto";
 import { consoleLogger, type EventLogger, loggableError } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
@@ -40,28 +47,15 @@ import type {
 } from "./clients.mjs";
 
 /**
- * Rate-limit counter increment, atomic with its expiry (#269).
+ * Rate-limit counter increment, atomic with its expiry: `INCR` then a separate `EXPIRE` can
+ * leave the key with no TTL, and a counter that never resets 429s its client forever.
  *
- * `INCR` then a separate `EXPIRE` is not safe: a process death or an error
- * between the two leaves the key with no TTL, and a counter that never resets
- * 429s its client forever.
+ * The expiry is set whenever the key has none (`TTL` < 0), not only on the first hit, so a key
+ * left without a TTL is repaired. An existing expiry is left alone, so steady traffic cannot
+ * hold the window open.
  *
- * The expiry is (re)established whenever the key has none — `TTL` returns -1
- * for a key with no expiry — rather than only on the first hit. That is what
- * repairs a key already stranded without a TTL by the previous
- * implementation; a "first hit" guard never fires for one, because its count
- * never comes back to 1. An existing expiry is left alone, so a steady stream
- * of requests cannot hold the window open by refreshing it.
- *
- * `TTL` rather than `EXPIRE ... NX`: the NX flag is Redis 7.0+, and this
- * package is used against whatever Redis the consumer runs.
- *
- * Returns `{count, pttl}` — the post-increment count and the key's remaining
- * window in milliseconds (#458). The PTTL is read inside the script, after
- * the increment, so the pair describes one counter state; a separate PTTL
- * round-trip could observe a key the window had already expired out from
- * under. The limiter turns it into `resetAt`, which is what the guard needs
- * to put a `Retry-After` on the 429 — behind Redis it had none.
+ * Returns `{count, pttl}`, both read in the script so they describe one counter state. The
+ * limiter turns `pttl` into `resetAt`, the 429's `Retry-After`.
  */
 const LUA_INCREMENT_WITH_TTL = `
 local count = redis.call('INCR', KEYS[1])
@@ -72,13 +66,10 @@ return {count, redis.call('PTTL', KEYS[1])}
 `.trim();
 
 /**
- * Lua compare-and-replace script for a session record — the step-up
- * capability's write (the MFA ADR's D9). `KEYS[1]` = the session key;
- * `ARGV[1]` = the value the caller read; `ARGV[2]` = the value it computed
- * from it. Replaces only while the key still holds exactly what was read, and
- * keeps the key's TTL (`KEEPTTL`, Redis 6.0+): a second factor never changes
- * how long a session lives. Returns 1 when it replaced, 0 otherwise — another
- * write moved the session, or it is gone.
+ * Compare-and-replace for a session record, the MFA step-up write. `KEYS[1]` = the session
+ * key; `ARGV[1]` = the value the caller read, `ARGV[2]` = its replacement. Replaces only while
+ * the key still holds what was read, keeping its TTL (`KEEPTTL`): a second factor never changes
+ * how long a session lives. Returns 1 when it replaced, 0 otherwise.
  */
 const LUA_REPLACE_IF_UNCHANGED = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -102,63 +93,30 @@ end
 `.trim();
 
 /**
- * Precomputed SHA-1 digest of `LUA_COMPARE_AND_DELETE`. Redis indexes its
- * server-side script cache by SHA-1 of the bytewise script source, so this
- * digest is deterministic and matches what `SCRIPT LOAD` would return. We
- * compute it once at module load and skip the extra round-trip that a
- * `SCRIPT LOAD` would cost on every cold-cache `EVAL` fallback.
+ * SHA-1 of `LUA_COMPARE_AND_DELETE`. Redis keys its script cache by the SHA-1 of the source, so
+ * the digest matches what `SCRIPT LOAD` would return, without that round trip.
  */
 const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1").update(LUA_COMPARE_AND_DELETE).digest("hex");
 
 /**
- * Lua monotonic watermark write — the `SubjectRevocation` store's only mutation.
+ * The subject revocation record's only write: both boundaries (sessions, grants) in one key,
+ * one atomic step. `KEYS[1]` = the record; `ARGV` = mode (`all` | `sessions`), `before` and the
+ * proposed expiry (epoch ms), the grant retention (ms). Returns the value written; a stored value
+ * it cannot read is refused with an error.
  *
- * `KEYS[1]` = the watermark key; `ARGV[1]` = the proposed `before` in epoch ms;
- * `ARGV[2]` = the proposed expiry in epoch ms. Returns the watermark in force
- * after the write.
+ * Boundaries and expiry only move forward: a boundary moved back resurrects tokens an earlier
+ * revocation killed, and a shorter expiry retires the record while tokens it must refuse are
+ * still presentable. `PEXPIRETIME` gives the stored absolute expiry (-1: none, the key stays
+ * persistent; -2: absent, the proposed one applies). A grants boundary keeps the record at least
+ * until that boundary plus the retention.
  *
- * Both fields take the **larger** of proposed and stored. Moving the watermark
- * backwards would resurrect every token the earlier reset killed, and
- * shortening the expiry would retire the line while tokens it must refuse are
- * still presentable — so a plain `SET key value PX ttl` is the wrong primitive,
- * and a client-side read-compare-write loses the same race one round-trip
- * later.
- *
- * `PEXPIRETIME` (Redis 7.0+, and v0.5.1 pins the floor to 7.2 LTS) answers the
- * absolute expiry directly, so the comparison needs no clock reading of its
- * own. It answers `-1` for a key with no TTL and `-2` for one that does not
- * exist; both fall through to the proposed expiry, which is what makes an
- * expired watermark start fresh rather than being resurrected by the guard.
- */
-/**
- * Both revocation boundaries, one key, one atomic write (#593, D13).
- *
- * The value is deliberately **not** JSON. `cjson.encode` writes numbers at
- * fourteen significant digits by default and an epoch millisecond is thirteen
- * — too close to a silent truncation for a value that decides whether a token
- * is refused — and the common case here is a single number, which a delimited
- * form keeps as a single number.
- *
- * That encoding is the other half of the rollback argument:
- *
- *   `<n>`          both boundaries are `n`. What `revokeBefore` always writes,
- *                  so what every caller written before #593, and the whole
- *                  `"revoke"` path, writes.
- *   `v1:<s>:<g>`   they differ.
- *   `v1:<s>:-`     the sessions boundary alone; no revocation has covered this
- *                  subject's grants.
- *
- * A previous release reads the first form and only the first form. So a
- * deployment that never makes a sessions-only stamp never writes anything an
- * older reader would refuse and can roll back freely; one that does has the
- * richer form only for the subjects it was used on, where an older reader
- * fails closed — the safe direction, and the smallest set available.
- *
- * What is unsafe in BOTH directions, and has to be said out loud: a
- * mixed-version writer. An old writer stamping over a `v1:` record reads it
- * with `tonumber`, gets nil, and writes its own scalar — moving the grants
- * boundary forward (safe) and the sessions boundary possibly backward (not).
- * Drain old writers before allowing sessions-only stamps.
+ * The value is not JSON (`cjson` writes 14 significant digits, too close to an epoch ms's 13):
+ *   `<n>`         both boundaries are `n`
+ *   `v1:<s>:<g>`  they differ
+ *   `v1:<s>:-`    sessions only; no revocation has covered the subject's grants
+ * Older releases read only `<n>`: rollback is safe until sessions-only stamps are used, and once
+ * `v1:` records exist an old writer can move the sessions boundary backward, so drain old
+ * writers first. See packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md.
  */
 const LUA_SET_REVOCATION_BOUNDARIES = `
 local mode = ARGV[1]
@@ -243,24 +201,13 @@ const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
 let watermarkScriptCached = false;
 
 /**
- * Lua sweep-then-list for the subject session index — the read path of
- * `SubjectSessionIndex`.
+ * Sweep-then-list for the subject session index. `KEYS[1]` = the subject's sorted set; returns
+ * the members still live.
  *
- * `KEYS[1]` = the subject's sorted set. Returns the members still live.
- *
- * The boundary is `TIME`, the **server's** clock, not the calling replica's
- * `Date.now()`. Scores are written by whichever replica handled the login and
- * read by whichever replica handles the next request; comparing two host
- * clocks would drop live sessions early or keep expired ones listed by exactly
- * the skew between them. The store is the one clock every replica shares,
- * which is the reason this index moved off in-process state at all.
- *
- * Sweeping and reading in one script also makes them one value and one moment
- * — as two commands they could disagree about the boundary member.
- *
- * `TIME` makes the script non-deterministic, which is fine: Redis has
- * replicated scripts by their effects since 5.0 and does so unconditionally in
- * 7.x, so replicas receive the resulting `ZREMRANGEBYSCORE`, not a re-run.
+ * The boundary is the server's `TIME`, not the calling replica's clock: scores are written and
+ * read by different replicas, and comparing two host clocks would misjudge sessions by the skew
+ * between them. One script makes the sweep and the read agree on the boundary. A
+ * non-deterministic `TIME` is fine: Redis 7 replicates scripts by their effects.
  */
 const LUA_PRUNE_AND_LIST = `
 local t = redis.call("TIME")
@@ -276,40 +223,25 @@ const LUA_PRUNE_AND_LIST_SHA = createHash("sha1").update(LUA_PRUNE_AND_LIST).dig
 let pruneAndListScriptCached = false;
 
 /**
- * Whether `err` is Redis's `NOSCRIPT` — the cold-cache reply to `EVALSHA`
- * after a `SCRIPT FLUSH` or a cluster failover, and the signal to fall back to
- * `EVAL` (which implicitly reloads the script) rather than to fail the call.
- *
- * Shared by both EVALSHA call sites since #321 added the second one; a second
- * inline copy of the `instanceof` + `includes` pair is how the two would come
- * to disagree about what counts as a cache miss.
- *
- * It reads the message because nothing else says it: ioredis's `ReplyError`
- * carries Redis's reply text and no code, and ioredis's own `Script` detects
- * a cache miss by the same read. The text decides this boolean and nothing
- * else — it is never logged or thrown; a miss falls back to `EVAL`, and any
- * other error is rethrown as it is.
+ * Whether `err` is Redis's `NOSCRIPT`, the cold-cache reply to `EVALSHA` after a `SCRIPT FLUSH`
+ * or a failover: the signal to fall back to `EVAL` (which reloads the script), not to fail. It
+ * reads the message because ioredis's `ReplyError` carries no code (ioredis's own `Script` does
+ * the same); the text decides this boolean only and is never logged or thrown.
  */
 function isNoScriptError(err: unknown): boolean {
 	return err instanceof Error && err.message.includes("NOSCRIPT");
 }
 
-// --- Device authorization scripts (#433) -----------------------------------
+// --- Device authorization scripts --------------------------------------------
 //
-// Five scripts, one per `DeviceCodeStoreClient` operation, because the port
-// they back is written as atomic operations and a round trip cannot honour
-// that. `KEYS` carries what the caller knows up front; the other key of the
-// pair is derived inside the script — from the record's `userCode`, or from
-// the index's device code — and reached through the shared `{devauth}` hash
-// tag, which is what puts it in the slot the script was routed to. Redis 7
-// lets a script touch an undeclared key in its own slot and refuses one in
-// another, so the tag is load-bearing rather than cosmetic.
+// One script per `DeviceCodeStoreClient` operation, because the port's operations are atomic.
+// `KEYS` carries the key the caller knows; the other key of the pair is derived inside the
+// script and shares the `{devauth}` hash tag, so it is in the slot the script was routed to
+// (Redis refuses a script's access to an undeclared key in another slot).
 //
-// Replies are small arrays headed by a kind string (`{'approved', flat}`)
-// rather than integers, so a reply cannot be misread as another kind by an
-// off-by-one. Numbers travel as strings both ways: Lua's `tostring` of an
-// integral double is the integer, and epoch milliseconds are well inside the
-// fourteen significant digits `%.14g` keeps.
+// Replies are arrays headed by a kind string (`{'approved', flat}`), not integers, so one kind
+// cannot be misread as another. Numbers travel as strings: epoch ms fit in the 14 significant
+// digits Lua's `tostring` keeps.
 
 /** Lua prelude: `HGETALL`'s flat `[field, value, …]` reply as a table. */
 const LUA_DEVICE_CODE_RECORD_OF = `
@@ -321,17 +253,10 @@ end
 `.trim();
 
 /**
- * `create` — both keys insert-only, both with the authorization's expiry.
- *
- * `KEYS[1]` = record key, `KEYS[2]` = user-code index key; `ARGV[1]` = the
- * device code (the index's value), `ARGV[2]` = expiry in epoch ms,
- * `ARGV[3…]` = the record's field/value pairs. Returns 1, or 0 — writing
- * nothing — when either key already exists.
- *
- * `PEXPIREAT` with the absolute deadline rather than `PX` with a lifetime
- * computed twice: the two keys must retire together. A deadline already in
- * the past reclaims the pair on the spot, as `PEXPIREAT` does for any key;
- * the port never issues one.
+ * `create`: both keys insert-only, both with the authorization's expiry. `KEYS[1]` = record,
+ * `KEYS[2]` = user-code index; `ARGV[1]` = device code, `ARGV[2]` = expiry (epoch ms),
+ * `ARGV[3…]` = the record's field/value pairs. Returns 1, or 0 (writing nothing) when either key
+ * exists. One absolute `PEXPIREAT` deadline, so the two keys retire together.
  */
 const LUA_DEVICE_CODE_CREATE = `
 if redis.call('EXISTS', KEYS[1], KEYS[2]) > 0 then
@@ -345,16 +270,10 @@ return 1
 `.trim();
 
 /**
- * `findPending` — the record behind a user code, if it can still be approved.
- *
- * `KEYS[1]` = user-code index key; `ARGV[1]` = record key prefix, `ARGV[2]` =
- * now in epoch ms. Returns the record's `HGETALL` reply, or nil for absent,
- * expired, or already decided.
- *
- * Reads reclaim: an expired record is deleted by whoever finds it, as the
- * memory adapter does, rather than left for the TTL. An index whose record is
- * gone — the pair shares a deadline, but Redis retires keys one at a time —
- * is dropped on sight.
+ * `findPending`: the record behind a user code, if it can still be approved. `KEYS[1]` =
+ * user-code index; `ARGV[1]` = record key prefix, `ARGV[2]` = now (epoch ms). Returns the
+ * `HGETALL` reply, or nil for absent, expired or decided. Whoever finds an expired record, or an
+ * index whose record is gone (Redis retires the pair's keys one at a time), deletes it.
  */
 const LUA_DEVICE_CODE_FIND_PENDING = `
 ${LUA_DEVICE_CODE_RECORD_OF}
@@ -376,28 +295,17 @@ return flat
 `.trim();
 
 /**
- * `decide` — `pending` → `approved` | `denied`, refusing a second decision.
+ * `decide`: `pending` → `approved` | `denied`, refusing a second decision. `KEYS[1]` =
+ * user-code index; `ARGV[1]` = record key prefix, `ARGV[2]` = now (epoch ms; an approval's
+ * `approvedAtMs`), `ARGV[3]` = `approved` | `denied`, `ARGV[4]` = subject, `ARGV[5]` =
+ * `requested` | `narrow`, `ARGV[6]` = the caller's grantedScope as a JSON array (`narrow` only).
+ * Returns `{'ok', record}`, `{'already_decided', status}`, `{'expired'}` or `{'not_found'}`.
  *
- * `KEYS[1]` = user-code index key; `ARGV[1]` = record key prefix, `ARGV[2]` =
- * now in epoch ms, `ARGV[3]` = `approved` | `denied`, `ARGV[4]` = subject,
- * `ARGV[5]` = `requested` | `narrow`, `ARGV[6]` = the caller's grantedScope
- * as a JSON array (read only under `narrow`). An approval records `ARGV[2]`
- * as `approvedAtMs`, in the same write. Returns `{'ok', record}`,
- * `{'already_decided', status}`, `{'expired'}` or `{'not_found'}`.
- *
- * The check and the write are one script because the record is reached
- * through the index: `GET`, `HGETALL`, `HSET` from the client would let a
- * denial and an approval interleave, and whichever lands second overwrites
- * the first — the user who denied a phishing prompt talked into "just trying
- * again".
- *
- * The scope intersection happens here for the same reason. `requestedScope`
- * never changes after `create`, so it could be read separately — but that is
- * a second read between the lookup that showed the user a scope and the write
- * that grants one, which the port's docblock rules out. `narrow` filters the
- * caller's list against it in the caller's order; `requested` grants it
- * whole. An empty result is written as `[]` literally, because
- * `cjson.encode({})` is `{}` — an object, not an array.
+ * Check and write are one step, so a denial and an approval cannot interleave with the second
+ * overwriting the first. The scope intersection is inside it too, so no read sits between
+ * showing the user a scope and granting one: `narrow` filters the caller's list by
+ * `requestedScope` in the caller's order, `requested` grants it whole. An empty result is
+ * written as `[]` literally, because `cjson.encode({})` is `{}`.
  */
 const LUA_DEVICE_CODE_DECIDE = `
 ${LUA_DEVICE_CODE_RECORD_OF}
@@ -437,31 +345,16 @@ return {'ok', redis.call('HGETALL', codeKey)}
 `.trim();
 
 /**
- * `poll` — the interval gate, the status read, and the consumption of an
- * approval, in one script. This is the one the port's whole shape exists
- * for: as `HGETALL` then `DEL` from the client, two concurrent polls both
- * observe `approved`, and one human approval becomes two access tokens.
+ * `poll`: the interval gate, the status read and the consumption of an approval in one step;
+ * as `HGETALL` then `DEL`, two concurrent polls would turn one approval into two access tokens.
+ * `KEYS[1]` = record; `ARGV[1]` = now (epoch ms), `ARGV[2]` = user-code index key prefix,
+ * `ARGV[3]` = the `slow_down` increment (s). Returns `{'not_found'}`, `{'expired'}`,
+ * `{'slow_down', interval}`, `{'denied'}`, `{'pending'}` or `{'approved', record}`.
  *
- * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms, `ARGV[2]` = user-code
- * index key prefix, `ARGV[3]` = the `slow_down` increment in seconds.
- * Returns `{'not_found'}`, `{'expired'}`, `{'slow_down', interval}`,
- * `{'denied'}`, `{'pending'}` or `{'approved', record}`.
- *
- * `expired` is answered from `expiresAtMs` against the caller's `now`, not
- * from the key's TTL. The two are set from one value, but the port's contract
- * is the timestamp, and a record inside its TTL whose deadline has passed on
- * the caller's clock still answers `expired` — and is reclaimed here.
- *
- * The interval gate runs before the status read, as the memory adapter's
- * does: an over-eager poller is told to slow down whether or not its user
- * has answered. RFC 8628 §3.5 says the interval "MUST be increased by 5
- * seconds for this and all subsequent requests", and the increase is written
- * back so it is the interval the *next* gate measures against — a server
- * that says `slow_down` while still measuring against the original interval
- * tells a compliant client to slow down forever.
- *
- * `denied` and `approved` both delete the pair on the way out: the answer is
- * the record's last act, and a second poll must see `not_found`.
+ * Expiry is judged by `expiresAtMs` against the caller's `now`, not by the key's TTL. The gate
+ * runs before the status read, and the increased interval is written back: RFC 8628 §3.5
+ * applies it to "this and all subsequent requests", so the next gate measures against it.
+ * `denied` and `approved` delete the pair, so a second poll sees `not_found`.
  */
 const LUA_DEVICE_CODE_POLL = `
 ${LUA_DEVICE_CODE_RECORD_OF}
@@ -504,34 +397,23 @@ if not userCode then return 0 end
 return redis.call('DEL', KEYS[1], ARGV[1] .. userCode)
 `.trim();
 
-// --- Consent scripts (#561) -------------------------------------------------
+// --- Consent scripts ---------------------------------------------------------
 //
-// Five scripts — one per operation that must be indivisible, the pending
-// store's read and consume sharing one — for the reason the device scripts
-// above give. Expiry is judged by the record's own `expiresAt`
-// against the caller's clock, passed in `ARGV`, and never by a key's TTL:
-// the TTL a write sets is a safety net for records nobody reads again, the
-// same split `LUA_DEVICE_CODE_POLL` makes between the TTL and `expiresAtMs`.
-// A record inside its TTL whose timestamp has passed on the caller's clock is
-// gone, and is reclaimed by whoever finds it.
+// One script per operation that must be indivisible (the pending store's read and consume
+// share one). Expiry is judged by the record's `expiresAt` against the caller's clock (`ARGV`),
+// never by the key's TTL, which is only a safety net for records nobody reads again; whoever
+// finds a record past its `expiresAt` reclaims it.
 //
-// Expiries are set with a relative `PEXPIRE` rather than `PEXPIREAT` the
-// caller's deadline. An absolute deadline is read on the server's clock, so
-// the skew between the writing replica and Redis would move the safety net
-// by exactly that much — before the logical expiry when Redis runs ahead. A
-// lifetime measured from the write is independent of that skew; the adapter
-// adds slack for the one it cannot remove, between the writer and a later
-// reader (see `CONSENT_EXPIRY_SLACK_MS`).
+// The safety net is a relative `PEXPIRE`, not `PEXPIREAT` at the caller's deadline: an absolute
+// deadline is read on the server's clock and would shift by the writer-to-Redis skew, firing
+// early when Redis runs ahead. The adapter adds slack for the writer-to-reader skew
+// (`CONSENT_EXPIRY_SLACK_MS`).
 
 /**
- * `ConsentStoreClient.find` — the record, unless it has expired.
- *
- * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms. Returns
- * `{scopes, grantedAt, expiresAt|nil}`, or nil for absent or expired.
- *
- * The reclaim is in the script because a `DEL` sent after the read could
- * remove a grant another browser wrote in between. An `expiresAt` that does
- * not parse reads as expired: the fail-closed direction for a consent.
+ * `ConsentStoreClient.find`: the record unless expired. `KEYS[1]` = record; `ARGV[1]` = now
+ * (epoch ms). Returns `{scopes, grantedAt, expiresAt|nil}`, or nil for absent or expired. The
+ * reclaim is in the script so it cannot delete a grant written after the read. An unparsable
+ * `expiresAt` reads as expired (fail closed).
  */
 const LUA_CONSENT_FIND = `
 local r = redis.call('HMGET', KEYS[1], 'scopes', 'grantedAt', 'expiresAt')
@@ -547,29 +429,16 @@ return r
 `.trim();
 
 /**
- * `ConsentStoreClient.grant` — the union with what is recorded, as one write.
+ * `ConsentStoreClient.grant`: the union with what is recorded, as one write. `KEYS[1]` =
+ * record; `ARGV[1]` = now (epoch ms), `ARGV[2]` = grantedAt, `ARGV[3]` = the granted scopes as
+ * a JSON array, `ARGV[4]` = expiresAt, empty for until revoked, `ARGV[5]` = TTL (ms, with an
+ * expiry only).
  *
- * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms, `ARGV[2]` = grantedAt,
- * `ARGV[3]` = the granted scopes as a JSON array, `ARGV[4]` = expiresAt or
- * empty for until revoked, `ARGV[5]` = the TTL in ms (read only with an
- * expiry).
- *
- * The recorded scopes join the union only while the recorded consent is live
- * on the caller's clock: a lapsed consent is not something the user still
- * agrees to. They keep their order and the new ones follow, as the memory
- * adapter's `Set` does. A recorded consent that is not well-formed — `scopes`
- * not a JSON array of strings, `grantedAt` not a number — contributes nothing
- * rather than failing the grant or lending it the strings it does hold: the
- * adapter's `find` reports such a record absent, so the user was asked again,
- * and their answer is the whole record. An empty union is written as `[]`
- * literally, because `cjson.encode({})` is `{}`.
- *
- * Without an expiry the record is until revoked, so the stale `expiresAt`
- * field goes and so does the key's TTL — `PERSIST`, explicitly: an earlier
- * expiring grant's TTL left in place would delete this consent when it fired,
- * on no request at all. With one whose TTL is not positive the new record is
- * dead on arrival, and the key is removed, as the memory adapter's record
- * would read.
+ * Recorded scopes join (in order, new ones after) only while the recorded consent is live on
+ * the caller's clock. A malformed record (`scopes` not a JSON array of strings, `grantedAt` not
+ * a number) contributes nothing: `find` reports it absent, so the user was asked again. An
+ * empty union is written as `[]` (`cjson.encode({})` is `{}`). Without an expiry the key is
+ * `PERSIST`ed, or an earlier grant's TTL would delete it; a TTL that is not positive removes it.
  */
 const LUA_CONSENT_GRANT = `
 local now = tonumber(ARGV[1])
@@ -623,32 +492,17 @@ return 1
 `.trim();
 
 /**
- * `PendingConsentStoreClient.set` — park a request and hold its session to
- * the bound, in one script.
+ * `PendingConsentStoreClient.set`: park a request and hold its session to the bound, in one
+ * step. `KEYS[1]` = record, `KEYS[2]` = the session's index; `ARGV[1]` = now (epoch ms),
+ * `ARGV[2]` = challenge, `ARGV[3]` = sessionId, `ARGV[4]` = expiresAt, `ARGV[5]` = record TTL
+ * (ms), `ARGV[6]` = the serialised request, `ARGV[7]` = per-session bound, `ARGV[8]` = record
+ * key prefix, `ARGV[9]` = session index key prefix.
  *
- * `KEYS[1]` = record key, `KEYS[2]` = the session's index; `ARGV[1]` = now in
- * epoch ms, `ARGV[2]` = challenge, `ARGV[3]` = sessionId, `ARGV[4]` =
- * expiresAt, `ARGV[5]` = the record's TTL in ms, `ARGV[6]` = the serialised
- * request, `ARGV[7]` = the per-session bound, `ARGV[8]` = record key prefix,
- * `ARGV[9]` = session index key prefix.
- *
- * In the memory adapter's order: a request already parked under the
- * challenge leaves its own session's index (possibly another session's,
- * reached through the record); this session's expired requests — and index
- * entries whose record is already gone — leave before the bound is judged, so
- * a dead request never costs a live one its place; then the first-parked go
- * until there is room.
- *
- * The index is a sorted set scored by the order requests were parked in —
- * one past the highest score it holds — not by `createdAt`. That is the
- * memory adapter's insertion order exactly, and it is a total order no
- * replica's clock takes part in: `createdAt` is written by whichever replica
- * served the request, and two within a millisecond would tie and fall back to
- * comparing challenges, which are random.
- *
- * The index is kept alive at least as long as its longest-lived request —
- * its TTL is only ever raised — so it cannot vanish under a record it still
- * has to bound.
+ * In the memory adapter's order: a request already parked under the challenge leaves its own
+ * session's index; this session's expired or orphaned entries leave before the bound is judged,
+ * so a dead request never costs a live one its place; then the first-parked go until there is
+ * room. The index is scored by parking order (one past its highest score), not `createdAt`: a
+ * total order no replica's clock takes part in. Its TTL only rises, so it outlives its records.
  */
 const LUA_PENDING_CONSENT_SET = `
 local now = tonumber(ARGV[1])
@@ -688,19 +542,11 @@ return 1
 `.trim();
 
 /**
- * `PendingConsentStoreClient.get` and `.consume` — the read, and the read
- * that spends.
- *
- * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms, `ARGV[2]` = challenge,
- * `ARGV[3]` = session index key prefix, `ARGV[4]` = `spend` | `peek`.
- * Returns the serialised request, or nil for absent or expired.
- *
- * `spend` is the port's one step: the record, its removal and its index
- * entry's removal in one script, so of two answers in flight exactly one is
- * handed the request. `GETDEL` alone would be atomic for the record but
- * leave the index entry to a second command — a consumed request still
- * counting toward the bound until it did. `peek` never spends a live request;
- * an expired one is reclaimed by either.
+ * `PendingConsentStoreClient.get` and `.consume`. `KEYS[1]` = record; `ARGV[1]` = now (epoch
+ * ms), `ARGV[2]` = challenge, `ARGV[3]` = session index key prefix, `ARGV[4]` = `spend` |
+ * `peek`. Returns the serialised request, or nil for absent or expired. `spend` removes the
+ * record and its index entry in the same step, so of two answers in flight exactly one gets the
+ * request. `peek` never spends a live request; either reclaims an expired one.
  */
 const LUA_PENDING_CONSENT_TAKE = `
 local r = redis.call('HMGET', KEYS[1], 'record', 'sessionId', 'expiresAt')
@@ -715,20 +561,12 @@ return false
 `.trim();
 
 /**
- * `PendingConsentStoreClient.discard` — reclaim a request the adapter read and
- * found corrupt, only if it is still the value that was read.
- *
- * `KEYS[1]` = record key; `ARGV[1]` = the serialised request as read,
- * `ARGV[2]` = challenge, `ARGV[3]` = session index key prefix. Returns 1 when
- * the record and its index entry were removed, 0 when the stored value is no
- * longer that one (or is gone).
- *
- * A compare-and-delete rather than a plain delete because it runs after the
- * read, as a second command: a valid request re-parked under the challenge in
- * between must not be taken with the corrupt one it replaced. The index is
- * reached through the record's own `sessionId` field, which the park script
- * writes beside the serialisation — the JSON's copy is exactly what may be
- * corrupt.
+ * `PendingConsentStoreClient.discard`: reclaim a request the adapter found corrupt, only while
+ * it is still the value read. `KEYS[1]` = record; `ARGV[1]` = the serialised request as read,
+ * `ARGV[2]` = challenge, `ARGV[3]` = session index key prefix. Returns 1 when removed, 0 when
+ * the value changed or is gone. Compare-and-delete, so a valid request re-parked meanwhile is
+ * not taken. The index is found through the record's `sessionId` field, not the possibly
+ * corrupt JSON.
  */
 const LUA_PENDING_CONSENT_DISCARD = `
 local r = redis.call('HMGET', KEYS[1], 'record', 'sessionId')
@@ -739,14 +577,8 @@ return 1
 `.trim();
 
 /**
- * A script, its digest, and its cache-residency flag — the EVALSHA-first call
- * path the three scripts above take by hand, packaged once for the five
- * device-authorization scripts (#433) so a sixth inline copy of the NOSCRIPT
- * dance cannot come to disagree with the others about what a cache miss is.
- *
- * The flag is module-scoped for the reason `scriptCached` gives: the script
- * is a constant, so every client in the process shares one view of whether
- * the server holds it.
+ * A script, its digest, and whether the server is expected to hold it, for
+ * {@link runScript}'s EVALSHA-first path. Module-scoped, as `scriptCached` explains.
  */
 interface CachedScript {
 	readonly source: string;
@@ -773,30 +605,22 @@ const PENDING_CONSENT_SET = defineScript(LUA_PENDING_CONSENT_SET);
 const PENDING_CONSENT_TAKE = defineScript(LUA_PENDING_CONSENT_TAKE);
 const PENDING_CONSENT_DISCARD = defineScript(LUA_PENDING_CONSENT_DISCARD);
 
-// --- Federation grant scripts (#593) ---------------------------------------
+// --- Federation grant scripts ------------------------------------------------
 //
-// One script per write, and every guard inside it. What the layout makes
-// possible, and what it does not: a grant's HASH, its credential and its lock
-// share a hash tag, so one script may touch all three; the subject's index is
-// its own key, in its own slot, and no script touches it together with a
-// record. That is the price of letting a deployment's grants spread across a
-// Cluster rather than pile onto the one node a shared tag would name — and it
-// is why the index is reserved before the record is written, at the horizon
-// the record will have, and pruned by that horizon alone (D16).
+// One script per write, with every guard inside it. A grant's HASH, credential and lock share
+// a hash tag, so one script may touch all three. The subject's index is its own key in its own
+// slot, so grants spread across a Cluster, and no script touches it with a record: it is
+// reserved before the record is written, at the horizon the record will have, and pruned by
+// horizon alone. See the Redis layout in
+// packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md.
 //
-// Every script validates before it mutates. Lua's isolation is not a
-// transaction: an error halfway through leaves what it already wrote.
+// Every script validates before it mutates: an error midway leaves what was already written.
 
 /**
- * Shared prelude. Concatenated into each script's source, so each still has
- * its own SHA-1 and its own cache entry.
- *
- * `horizon` is the instant the record stops answering, and it is the one
- * arithmetic every guard and every key deadline agrees on: a `pending` grant
- * lapses with its intent and keeps no retention; anything ever authorized runs
- * from the stored expiry plus the retention it was created with; one revoked
- * before it was ever authorized has no expiry, so it runs from the revocation.
- * A revocation moves no horizon.
+ * Shared prelude, concatenated into each script (each keeps its own SHA-1). `fg_horizon` is
+ * the instant a record stops answering, the one arithmetic every guard and key deadline agrees
+ * on: a `pending` grant lapses with its intent; an authorized one at its stored expiry plus its
+ * retention; one revoked before it was authorized at the revocation plus the retention.
  */
 const LUA_FG_PRELUDE = `
 local function fg_num(v)
@@ -848,20 +672,11 @@ end
 `;
 
 /**
- * Creates a `pending` grant. `KEYS[1]` = the record, `KEYS[2]` = its
- * credential; `ARGV` = the caller's clock, the base fields, the intent's
- * handle and expiry, the retention.
- *
- * The existence check is on the key, not on the horizon: an ID is taken for
- * as long as a record is there under it, and a caller whose clock is ahead
- * must not lodge over a record everyone else can still see.
- *
- * A credential already at `KEYS[2]` goes with it. It could never authenticate
- * under the new authorization — the record it was sealed for is gone — but a
- * secret at rest that nothing can use is still a secret at rest, and a
- * mismatched restore or a reused ID can leave one. The record's fields are
- * read for the reply *before* the deadline is applied, so that a reply is
- * never built from a key the same script expired.
+ * Creates a `pending` grant. `KEYS[1]` = record, `KEYS[2]` = credential; `ARGV` = the caller's
+ * clock, the base fields, the intent's handle and expiry, the retention. The existence check is
+ * on the key, not the horizon: a caller whose clock runs ahead must not lodge over a record
+ * others still see. A leftover credential at `KEYS[2]` is deleted: unusable, but still a secret
+ * at rest. The reply's fields are read before the deadline is applied, never from an expired key.
  */
 const LUA_FG_CREATE = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -885,17 +700,10 @@ return {1, fields}
 `;
 
 /**
- * The record and its credential, in one step. `KEYS[1]` = the record,
- * `KEYS[2]` = its credential.
- *
- * One step because the two are read together or not at all: between a
- * `HGETALL` and a `GET` an activation can replace both, and the caller would
- * evaluate one authorization against the other's credential. A reply of two
- * elements says there is no credential; three says there is one, which an
- * empty string also is.
- *
- * No visibility guard: what the caller may see is judged where the record is
- * decoded, against the authenticated text rather than the arithmetic field.
+ * The record and its credential in one step, so an activation cannot replace both between two
+ * reads. `KEYS[1]` = record, `KEYS[2]` = credential. A two-element reply means no credential,
+ * three means one (possibly empty). No visibility guard: the caller judges visibility where it
+ * decodes the record, against the authenticated text.
  */
 const LUA_FG_SNAPSHOT = `
 if redis.call('EXISTS', KEYS[1]) == 0 then return {0} end
@@ -906,14 +714,11 @@ return {1, fields, credential}
 `;
 
 /**
- * Names a reauthorization's intent as current. `KEYS[1]` = the record;
- * `ARGV` = the caller's clock, the handle, the intent's expiry.
- *
- * Refuses a `pending` grant — a first-time intent makes a new grant and never
- * takes over another one's — and a grant past its stored expiry, so that a
- * new consent cannot resurrect a lifetime that has ended. Moves no deadline
- * and bumps no version: a refresh in flight must not lose its write to a
- * renewal the user may never finish.
+ * Names a reauthorization's intent as current. `KEYS[1]` = record; `ARGV` = the caller's clock,
+ * the handle, the intent's expiry. Refuses a `pending` grant (a first intent makes a new grant)
+ * and one past its stored expiry (a new consent cannot resurrect an ended lifetime). Moves no
+ * deadline and bumps no version, so a refresh in flight does not lose its write to a renewal the
+ * user may never finish.
  */
 const LUA_FG_NAME_INTENT = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -968,15 +773,10 @@ return 1
 `;
 
 /**
- * Reserves a grant in its subject's index. `KEYS[1]` = the index; `ARGV` =
- * the member, its horizon, the allowance.
- *
- * The score moves forward only, and `ZADD GT` would do it in one command —
- * it is written out here so that the comparison and the index's own deadline
- * are one step, and so that the reply says what the horizon became. The
- * deadline is the last horizon the index holds plus the allowance, so the
- * index outlives every record it points at even when its node's clock differs
- * from theirs.
+ * Reserves a grant in its subject's index. `KEYS[1]` = index; `ARGV` = member, its horizon, the
+ * allowance. The score only moves forward (written out rather than `ZADD GT` so the index's
+ * deadline is set in the same step). That deadline is the last horizon plus the allowance, so
+ * the index outlives every record it points at even when its node's clock differs from theirs.
  */
 const LUA_FG_RESERVE = `
 local horizon = tonumber(ARGV[2])
@@ -994,14 +794,10 @@ return 1
 `;
 
 /**
- * Drops members whose horizon is past by the allowance. `KEYS[1]` = the
- * index; `ARGV` = the adapter's clock, the allowance.
- *
- * By horizon and never by whether the record is there: the two are different
- * keys, so a member reserved for a record still being written would be
- * dropped by that rule and nothing would put it back. The allowance is what
- * keeps the prune later than any answer a replica whose clock differs could
- * still give from the record itself.
+ * Drops members whose horizon is past by the allowance. `KEYS[1]` = index; `ARGV` = the
+ * adapter's clock, the allowance. Never by the record's absence: a member reserved for a record
+ * still being written would be lost for good. The allowance keeps the prune later than any
+ * answer a replica with a different clock could still give from the record.
  */
 const LUA_FG_PRUNE = `
 local clock = tonumber(ARGV[1])
@@ -1011,25 +807,16 @@ return redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. string.format('%.0
 `;
 
 /**
- * Takes a grant from its current intent to `active`. `KEYS[1]` = the record,
- * `KEYS[2]` = its credential; `ARGV` = the caller's clock, the handle, the
- * authorization text, its expiry, the three guard fields, the sealed
- * credential.
+ * Takes a grant from its current intent to `active`. `KEYS[1]` = record, `KEYS[2]` =
+ * credential; `ARGV` = the caller's clock, the handle, the authorization text, its expiry, the
+ * identity revision, upstream issuer and subject, the sealed credential.
  *
- * The current intent is compared here and not by version, because naming and
- * retiring an intent bump none: a caller that read a pointer and activated on
- * it would otherwise activate a renewal the user had already superseded, or
- * one a subject-wide revocation had retired. That is the mistake this script
- * exists to make impossible.
- *
- * The stored expiry is checked unless the grant is `pending` — a new consent
- * must not resurrect a lifetime that has ended — and the identity revision
- * and upstream account must be the ones recorded, so that a renewal never
- * re-points a grant at another account (D4, D7).
- *
- * The authorization is replaced as a whole, so the marker and the stamp of a
- * failed refresh go with the one they were about. A use recorded before it
- * stays: it says nothing about what the grant allows.
+ * The current intent is compared here, not the version (naming and retiring an intent bump
+ * none), so a renewal already superseded or retired by a subject-wide revocation can never be
+ * activated. Unless `pending`, the stored expiry must not have passed, and the identity revision
+ * and upstream account must match the recorded ones: a renewal never re-points a grant at
+ * another account. The authorization is replaced whole, taking its marker and failure stamp with
+ * it; a recorded use stays.
  */
 const LUA_FG_ACTIVATE = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -1073,17 +860,11 @@ return {1, fields}
 `;
 
 /**
- * Replaces the credential of an `active` grant. `KEYS[1]` = the record,
- * `KEYS[2]` = its credential; `ARGV` = the caller's clock, the expected
- * version, the sealed credential, whether a marker was given, the marker.
- *
- * The marker is replaced as a whole, including being removed: a refresh that
- * found the token eligible says so by handing over none. The stamp of a
- * failed refresh is forgotten, because this refresh succeeded. Neither
- * horizon moves — the credential's deadline is set to the same expiry it
- * already had, so a rotation does not extend what the user consented to.
- * A credential the server's clock has already reclaimed is not replaced:
- * there is nothing to rotate, and the write is refused in this same step.
+ * Replaces an `active` grant's credential. `KEYS[1]` = record, `KEYS[2]` = credential; `ARGV` =
+ * the caller's clock, the expected version, the sealed credential, whether a marker was given,
+ * the marker. The marker is replaced whole (none given: removed) and the failure stamp cleared.
+ * No horizon moves: the credential keeps its expiry, so a rotation does not extend the consent.
+ * A credential Redis has already reclaimed is not replaced; there is nothing to rotate.
  */
 const LUA_FG_REPLACE = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -1117,15 +898,10 @@ return {1, fields}
 `;
 
 /**
- * Asks for the user again. `KEYS[1]` = the record, `KEYS[2]` = its
- * credential; `ARGV` = the caller's clock, the expected version.
- *
- * The one transition with no expiry guard: an upstream that says the
- * credential is dead is believed whenever it says it, and a record whose
- * expiry passed while the answer was in flight must still lose its
- * credential. The marker stays — it describes the tokens this authorization
- * yields, which is exactly what the user is being asked about — and the
- * horizon does not move, because what was consented to has not changed.
+ * Asks for the user again. `KEYS[1]` = record, `KEYS[2]` = credential; `ARGV` = the caller's
+ * clock, the expected version. No expiry guard: an upstream saying the credential is dead is
+ * believed whenever it says so, and the credential goes. The marker stays (it describes what the
+ * user is asked about) and the horizon does not move.
  */
 const LUA_FG_REQUIRE_REAUTH = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -1146,18 +922,11 @@ return {1, redis.call('HGETALL', KEYS[1])}
 `;
 
 /**
- * Ends the grant. `KEYS[1]` = the record, `KEYS[2]` = its credential; `ARGV`
- * = the instant, who revoked it.
- *
- * No version guard: a revocation does not lose to a refresh in flight, and
- * whichever runs second is still correct — a revocation after a refresh takes
- * the credential the refresh wrote, and a refresh after a revocation is
- * refused by the status.
- *
- * What the grant was authorized for stays, so the status route can say what
- * ended. A revocation moves no horizon — an authorized grant is retained from
- * its expiry whenever it was revoked — except for one that was never
- * authorized, which has no expiry to be retained from and runs from here.
+ * Ends the grant. `KEYS[1]` = record, `KEYS[2]` = credential; `ARGV` = the instant, who revoked.
+ * No version guard: in either order with a refresh the outcome is right (the revocation takes
+ * the new credential, or the status refuses the refresh). What was authorized stays, so the
+ * status route can say what ended. No horizon moves, except for a grant never authorized, which
+ * has no expiry and is retained from the revocation.
  */
 const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
 -- The horizon as the read side computes it (#627): from the expiry in the
@@ -1236,21 +1005,13 @@ return {1, fields}
 `;
 
 /**
- * Stamps a failed refresh. `KEYS[1]` = the record; `ARGV` = the caller's
- * clock, the expected version, when the failure happened, its kind, the row,
- * and the two optional fields with a flag each.
- *
- * The version is compared although none is written: a failure that outlived
- * its own refresh must not install a backoff over a credential written since
- * (D12). The row is measured from the stamp it replaces and against the
- * failure's own instant, not the caller's clock — a stamp that took a second
- * to arrive is still one failure after the last. An equal instant counts
- * onward; an earlier one is refused, so a stamp that arrives out of order
- * never replaces a newer one.
- *
- * Only the stamp's fields are touched, so a use or a pointer written
- * meanwhile survives — which is the reason this is a script and not a
- * read, a count and a write.
+ * Stamps a failed refresh. `KEYS[1]` = record; `ARGV` = the caller's clock, the expected
+ * version, the failure's instant, its kind, the row window, and two optional fields with a flag
+ * each. The version is compared although none is written: a failure that outlived its refresh
+ * must not install a backoff over a credential written since. The row is measured from the
+ * stamp it replaces by the failure's own instant, not the caller's clock; an earlier instant is
+ * refused, so an out-of-order stamp never replaces a newer one. Only the stamp's fields are
+ * touched, so a use or intent written meanwhile survives.
  */
 const LUA_FG_NOTE_FAILURE = `${LUA_FG_PRELUDE}
 local now = tonumber(ARGV[1])
@@ -1349,41 +1110,22 @@ const deviceCodeRecordOf = (flat: unknown): DeviceCodeRecordFields =>
 	hashFields(flat) as unknown as DeviceCodeRecordFields;
 
 /**
- * Module-level flag tracking whether the script is currently expected to be
- * resident in the Redis server's script cache. `true` means the next call
- * may use `EVALSHA`; `false` (e.g. after a `NOSCRIPT` error from
- * `SCRIPT FLUSH` or cluster failover) means the next call must use `EVAL`,
- * which implicitly re-loads the script and lets us flip back to `true`.
- *
- * Module scope (not per-`makeIoredisClients` call) because the script is
- * constant: multiple ioredis clients in the same process share the same
- * cache state on the same Redis server.
+ * Whether `LUA_COMPARE_AND_DELETE` is expected in the server's script cache: `true` lets the
+ * next call use `EVALSHA`; a `NOSCRIPT` (after `SCRIPT FLUSH` or a failover) clears it, and the
+ * `EVAL` fallback reloads the script and sets it again. Module-scoped, like every such flag here,
+ * because the script is constant: clients in one process share the server's cache state.
  */
 let scriptCached = false;
 
 /**
- * Surface per-command failures from a `MULTI`/`EXEC` reply.
+ * Surfaces per-command failures from a `MULTI`/`EXEC` reply. ioredis resolves `exec()` with one
+ * `[error, result]` per queued command and does not reject when one failed, so a refused
+ * `PEXPIRE … NX/GT` would leave a key with no TTL while the caller is told the write worked.
  *
- * ioredis resolves `exec()` with one `[error, result]` tuple per queued
- * command and **does not reject** when one of them failed — `EXEC` itself
- * succeeded, after all. Every pipeline in this file used to discard that reply,
- * so a `PEXPIRE … NX/GT` refused by an older or misconfigured Redis left the
- * key with no TTL at all while the caller was told the write went through. That
- * is the same shape as the bug #269 paid for with the rate limiter: an expiry
- * that silently never got set, on a key nothing revisits.
- *
- * `null` is not a failure and is passed through unchanged: it is the
- * WATCH-abort signal, which `refresh-token-family`'s CAS loop reads as
- * "conflict, retry". Turning that into a throw would break refresh-token
- * rotation under contention.
- *
- * The first failure wins. The thrown error names the operation in fixed
- * words and carries the reply's error as `cause`, never its text: the reply
- * is Redis's about the command it refused and can quote the command's
- * arguments, and the message goes wherever the store's caller puts it. The
- * driver's own words ("WRONGTYPE …", "OOM …") still reach the operator —
- * through `loggableError`, which projects the cause and cuts the quoted
- * arguments.
+ * `null`, the WATCH abort, passes through: the refresh-token family's CAS loop retries on it.
+ * The first failure throws, naming the operation in fixed words with the reply's error as
+ * `cause`, never in the message: Redis's reply can quote the command's arguments.
+ * `loggableError` projects the cause for the operator without them.
  */
 function assertPipelineSucceeded(reply: unknown[] | null, operation: string): unknown[] | null {
 	if (reply === null) return null;
@@ -1398,55 +1140,27 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
 	return reply;
 }
 
-/**
- * Wrap a single ioredis connection into the 18 typed client wrappers
- * needed by `@o3co/auth-provider-redis` adapters. Production consumers
- * use this factory in their composition root and spread the result into
- * `bootstrapComponents`.
- *
- * Every returned client issues its commands against the one connection passed
- * in — this factory opens nothing of its own (the sole exception is
- * `refreshTokenFamilyClient.duplicate()`, which is per rotation, not per
- * purpose). Connection-level ioredis options are therefore shared by all
- * eighteen purposes, so a composition root that needs different failure timing
- * for one of them — `enableOfflineQueue: false` on the rate limiter, say —
- * has to build that purpose off a second connection deliberately (#286).
- *
- * Lives on the `@o3co/auth-provider-redis/ioredis` subpath so that consumers
- * importing the main entry (`@o3co/auth-provider-redis`) do NOT pull
- * `ioredis` types into their TypeScript dependency closure. The main entry
- * stays vendor-agnostic; only callers of `makeIoredisClients` need ioredis
- * installed. A wrapper for another client library would take the same
- * `@o3co/auth-provider-redis/<vendor>` subpath convention.
- *
- * Per Copilot review on PR #102.
- *
- *     const io = new Redis(...);
- *     const clients = makeIoredisClients(io);
- *     await createApp({
- *         modules: [...],
- *         bootstrapComponents: { config, pathResolver, ...clients },
- *     });
- *
- * Mixed-backend deployments (e.g. memcached for ChallengeStore + redis
- * for FederationTokenStore) wire each slot individually instead of
- * spreading.
- *
- * Per Phase 10 addendum §3.
- *
- * @param options.logger — where errors from connections this wrapper opens
- *   itself (see `refreshTokenFamilyClient.duplicate()`) are reported. Defaults
- *   to `consoleLogger`. Typed as `EventLogger` rather than `Logger` because
- *   composition roots pass their host logger here, and a logger without
- *   `trace` / `fatal` / `child` cannot satisfy `Logger`. The connection passed
- *   in as `io` stays the caller's responsibility — they own its lifetime and
- *   its listeners; see the README for the listener it needs.
- */
+/** Options for {@link makeIoredisClients}. */
 export interface IoredisClientsOptions {
-	/** See {@link makeIoredisClients}. */
+	/**
+	 * Where errors from connections the wrapper opens itself (the refresh-token family's
+	 * `duplicate()`) are reported; defaults to `consoleLogger`. An `EventLogger` rather than a
+	 * `Logger`, so a composition root can pass its host logger. The `io` connection, its
+	 * lifetime and its listeners stay the caller's; see the README for the listener it needs.
+	 */
 	readonly logger?: EventLogger;
 }
 
+/**
+ * Wraps one ioredis connection into the typed clients the `@o3co/auth-provider-redis` adapters
+ * need; a composition root spreads the result into `bootstrapComponents`, or wires slots one by
+ * one for a mixed-backend deployment.
+ *
+ * Every client uses `io`; the only connection opened here is the per-rotation
+ * `refreshTokenFamilyClient.duplicate()`. Connection options are therefore shared by every
+ * purpose, and one that needs different failure timing (`enableOfflineQueue: false` for the
+ * rate limiter, say) needs a connection of its own.
+ */
 export function makeIoredisClients(
 	io: Redis,
 	options: IoredisClientsOptions = {},
@@ -1478,8 +1192,8 @@ export function makeIoredisClients(
 		del: (k) => io.del(k),
 	};
 
-	// #277: revoked access-token jtis. Plain PX SET (no NX) — re-revoking a jti
-	// is idempotent and last-write-wins on the expiry.
+	// Revoked access-token jtis. Plain PX SET (no NX): re-revoking a jti is idempotent, and the
+	// last write sets the expiry.
 	const accessTokenDenylistClient: AccessTokenDenylistClient = {
 		set: (k, v, _mode, ttlMs) => io.set(k, v, "PX", ttlMs) as Promise<"OK">,
 		exists: (k) => io.exists(k),
@@ -1501,15 +1215,11 @@ export function makeIoredisClients(
 		multi: () => buildRefreshMulti(underlying.multi()),
 		duplicate: () => {
 			const dup = underlying.duplicate();
-			// ioredis `duplicate()` copies options but NOT event listeners, so a
-			// fresh duplicate starts with zero `error` listeners — and an
-			// EventEmitter `error` with none throws, taking the process down.
-			// One of these is opened per refresh rotation, so a socket blip on
-			// any short-lived duplicate crashed the provider. The parent
-			// connection is the caller's to instrument; this one is ours,
-			// because it never leaves this wrapper. It logs the projection:
-			// ioredis puts the command a reply answered on the error, and
-			// for a refused handshake that is `AUTH` with the password.
+			// `duplicate()` copies options but not listeners, and an `error` event with no
+			// listener throws and takes the process down. This connection never leaves the
+			// wrapper, so the listener is ours. It logs the projection: ioredis attaches the
+			// failed command to the error, and for a refused handshake that is `AUTH` with the
+			// password.
 			dup.on("error", (err: unknown) => {
 				logger.error({ err: loggableError(err) }, "redis_duplicate_connection_error");
 			});
@@ -1517,18 +1227,11 @@ export function makeIoredisClients(
 			const disposable: DisposableRefreshTokenFamilyClient = {
 				...inner,
 				[Symbol.asyncDispose]: async () => {
-					// Disposal must never be the thing that fails. This runs on an
-					// `await using` binding around a refresh rotation: if `quit()`
-					// rejects after the rotation already committed, the grant reports
-					// failure for committed work, the client retries with the old
-					// refresh token, replay detection fires, and the whole family is
-					// revoked — the user is forced to re-login. And if the body
-					// already threw, a rejecting disposal wraps it in a
-					// SuppressedError that hides the original.
-					//
-					// `disconnect()` tears the socket down synchronously and does not
-					// reject, so it is the correct fallback for a connection that is
-					// already gone.
+					// Disposal must never fail. After a committed rotation, a rejection would
+					// report failure, the client would retry with the old refresh token, and
+					// replay detection would revoke the family; if the body threw, a rejecting
+					// disposal would bury its error in a SuppressedError. `disconnect()` is
+					// synchronous and never rejects.
 					try {
 						await dup.quit();
 					} catch {
@@ -1571,14 +1274,9 @@ export function makeIoredisClients(
 			(await runScript(io, REPLACE_IF_UNCHANGED, [k], [expected, next])) === 1,
 	};
 
-	// `pExpireGT` is implemented as `PEXPIREAT NX` followed by `PEXPIREAT GT`
-	// (D-10). Redis 7.0+ treats a non-volatile key as having infinite TTL for
-	// the GT/LT/NX flags, so a bare `PEXPIREAT … GT` against a freshly-created
-	// key (no existing TTL) would silently no-op and leave the key persistent.
-	// The NX clause sets the TTL on first write; the GT clause raises it on
-	// subsequent same-sid writes only when the new ts is strictly greater
-	// (preventing the CR-3 truncation race when a stale `expiresAt` value
-	// arrives concurrently). Same effect in 2 commands within one pipeline.
+	// `pExpireGT` is `PEXPIREAT NX` then `PEXPIREAT GT`: Redis treats a key with no TTL as
+	// infinite for GT/LT/NX, so a bare GT on a fresh key would no-op and leave it persistent. NX
+	// sets the first TTL; GT only raises it, so a stale `expiresAt` arriving late cannot shorten it.
 	const buildRPRegistryMulti = (p: ReturnType<Redis["multi"]>): SessionRPRegistryMultiClient => {
 		const m: SessionRPRegistryMultiClient = {
 			hSet: (k, f, v) => {
@@ -1603,7 +1301,7 @@ export function makeIoredisClients(
 		unlink: (k) => io.unlink(k),
 		hSet: (k, f, v) => io.hset(k, f, v) as Promise<number>,
 		// `hscanStream` emits a flat `[field, value, field, value, …]` array per
-		// cursor; re-pair it so callers never see the flattening (#291).
+		// cursor; re-pair it so callers never see the flattening.
 		hScanIterator: (key, opts) =>
 			(async function* () {
 				const stream = io.hscanStream(key, { count: opts?.COUNT });
@@ -1616,10 +1314,8 @@ export function makeIoredisClients(
 			})(),
 		multi: () => buildRPRegistryMulti(io.multi()),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
-		// Returns 1 when either NX (first-write) or GT (raise) sets the TTL,
-		// 0 otherwise. Without the early return on NX success the caller would
-		// observe a "failure" (0 from the GT clause that no-ops once NX has
-		// already set TTL == ms), which misreports first-write success.
+		// 1 when either NX (first write) or GT (raise) set the TTL. Returns early on NX: the GT
+		// that follows a successful NX answers 0 and would misreport the first write.
 		pExpireGT: async (k, ms) => {
 			const nx = await io.pexpireat(k, ms, "NX");
 			if (nx === 1) return nx;
@@ -1668,7 +1364,7 @@ export function makeIoredisClients(
 		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
 	};
 
-	// --- subject-keyed clients (#321) ---------------------------------------
+	// --- subject-keyed clients -----------------------------------------------
 
 	const buildSubjectIndexMulti = (p: ReturnType<Redis["multi"]>) => {
 		const m: SubjectSessionIndexMultiClient = {
@@ -1713,10 +1409,7 @@ export function makeIoredisClients(
 	const subjectRevocationClient: SubjectRevocationClient = {
 		get: (k) => io.get(k),
 		async setRevocationBoundaries(key, mode, beforeMs, expiresAtMs, grantRetentionMs) {
-			// EVALSHA-first with a NOSCRIPT fallback to EVAL, matching
-			// `compareAndDelete` above — see `scriptCached` for why the flag is
-			// module-scoped and how a `SCRIPT FLUSH` or cluster failover is
-			// recovered from.
+			// EVALSHA-first with a NOSCRIPT fallback to EVAL; see `scriptCached`.
 			const args = [
 				key,
 				mode,
@@ -1748,17 +1441,12 @@ export function makeIoredisClients(
 				: io.set(k, v, "PX", ttl)) as FederationTokenStoreClient["set"],
 		del: (k) => io.del(k),
 		unlink: (...keys) => io.unlink(...keys),
-		// #291: SADD and its expiry in one MULTI/EXEC, so the pair cannot come
-		// apart and strand the index key with no TTL. `PEXPIRE … NX` +
-		// `PEXPIRE … GT` is the D-10 pair: NX bootstraps the TTL (a bare GT
-		// no-ops on a key Redis considers infinite-TTL), GT then raises it
-		// without ever truncating a further deadline. Both flags are Redis 7.0+;
-		// this package pins 7.2 LTS. MULTI rather than Lua because every command
-		// touches the same single key, which keeps it valid on Cluster too.
+		// SADD and its expiry in one MULTI/EXEC, so the index key cannot be left without a TTL;
+		// NX then GT as in `pExpireGT` above. MULTI rather than Lua: every command touches one
+		// key, which stays valid on Cluster.
 		sAddWithTtl: async (key, member, ttlMs) => {
-			// EXEC succeeding does not mean the queued commands did — inspect the
-			// reply, or a refused PEXPIRE silently voids the atomic-TTL guarantee
-			// this method's contract makes.
+			// EXEC succeeding does not mean the queued commands did: a refused PEXPIRE would void
+			// the atomic-TTL guarantee.
 			const reply = await io
 				.multi()
 				.sadd(key, member)
@@ -1782,10 +1470,7 @@ export function makeIoredisClients(
 					for (const key of batch as string[]) yield key;
 				}
 			})(),
-		// D-9: atomic compare-and-delete via Lua. EVALSHA on the hot path with a
-		// precomputed module-level SHA-1; on `NOSCRIPT` (cold cache after
-		// SCRIPT FLUSH or cluster failover) falls back to EVAL, which Redis
-		// implicitly loads into its server-side cache so the next EVALSHA hits.
+		// Atomic compare-and-delete (advisory-lock release), EVALSHA-first; see `scriptCached`.
 		async compareAndDelete(key, expectedValue) {
 			if (scriptCached) {
 				try {
@@ -1798,9 +1483,7 @@ export function makeIoredisClients(
 				}
 			}
 			const r = (await io.eval(LUA_COMPARE_AND_DELETE, 1, key, expectedValue)) as number;
-			// EVAL implicitly loads the script into Redis's server-side cache;
-			// future EVALSHA hits with the precomputed SHA. No extra SCRIPT LOAD
-			// round-trip required.
+			// EVAL loads the script into the server's cache, so the next EVALSHA hits.
 			scriptCached = true;
 			return r === 1;
 		},
@@ -1817,16 +1500,12 @@ export function makeIoredisClients(
 		return { count, pttl };
 	};
 	const rateLimiterClient: RateLimiterClient = {
-		// One script for both: the count-only method is the original contract,
-		// kept for callers that hold this client directly (#458).
+		// One script for both; the count-only method serves callers that hold this client directly.
 		incrementWithTtl: async (k, ttlSeconds) => (await incrementWithTtlAndPttl(k, ttlSeconds)).count,
 		incrementWithTtlAndPttl,
 	};
 
-	// OR-9: code-repository client. Codes are short-TTL (60-600s) high-volume
-	// records; the four-method surface (`set`/`get`/`getDel`/`del`) maps
-	// directly to ioredis primitives. Shares the same socket as the other
-	// per-purpose clients.
+	// Authorization codes: short-lived, high-volume records mapped directly onto ioredis commands.
 	const codeRepositoryClient: CodeRepositoryClient = {
 		set: (k, v, _mode, ttlMs) => io.set(k, v, "PX", ttlMs) as Promise<"OK">,
 		get: (k) => io.get(k),
@@ -1834,10 +1513,7 @@ export function makeIoredisClients(
 		del: (k) => io.del(k),
 	};
 
-	// #433: the device-code store's five operations, each one Lua script (see
-	// the `LUA_DEVICE_CODE_*` docblocks for what each guarantees). The record
-	// key and the index key share the `{devauth}` hash tag, so the key a script
-	// derives from the other is in the slot it was routed to.
+	// Each device-code operation is one Lua script; see the `LUA_DEVICE_CODE_*` docblocks.
 	const deviceCodeStoreClient: DeviceCodeStoreClient = {
 		async create(keys, input) {
 			const fields = Object.entries(input.fields).flatMap(([field, value]) =>
@@ -1849,9 +1525,8 @@ export function makeIoredisClients(
 				[keys.codeKeyPrefix + input.deviceCode, keys.userKeyPrefix + input.userCode],
 				[input.deviceCode, String(input.expiresAtMs), ...fields],
 			);
-			// 1 written, 0 a key already there — and nothing else. Any other
-			// reply is not the collision signal: read as one, it had the endpoint
-			// re-draw five times against a store it could not understand.
+			// 1 written, 0 a key already there. Any other reply is an error, not a collision the
+			// endpoint would re-draw codes against.
 			if (reply === 1) return true;
 			if (reply === 0) return false;
 			throw new Error(
@@ -1928,11 +1603,9 @@ export function makeIoredisClients(
 		},
 	};
 
-	// #561: the consent store and the parked-request store, each operation that
-	// must be indivisible one Lua script (see the `LUA_CONSENT_*` and
-	// `LUA_PENDING_CONSENT_*` docblocks). A consent record is one key; a parked
-	// request and its session's index share the `{pending}` hash tag, so the
-	// keys a script derives from the other are in the slot it was routed to.
+	// Each indivisible consent operation is one Lua script (see the `LUA_CONSENT_*` and
+	// `LUA_PENDING_CONSENT_*` docblocks). A parked request and its session's index share the
+	// `{pending}` hash tag, so a key a script derives is in the slot it was routed to.
 	const consentStoreClient: ConsentStoreClient = {
 		async find(key, nowMs) {
 			const reply = (await runScript(io, CONSENT_FIND, [key], [String(nowMs)])) as
@@ -2037,7 +1710,7 @@ export function makeIoredisClients(
 }
 
 /**
- * The commands a federation grant store needs from its connection (#593).
+ * The commands a federation grant store needs from its connection.
  *
  * Narrower than `Redis` on purpose: everything a write does happens inside a
  * script, and a listing's reads are routed one key at a time, so a Cluster
@@ -2067,8 +1740,8 @@ const fgFields = (flat: unknown): FederationGrantHashFields =>
 
 /**
  * A write's reply: `[1, fields]` when it happened, `[0]` when it was refused.
- * Absence and a failed precondition are the same answer on purpose — the
- * record may change again before the caller looks, so the port re-reads (D2).
+ * Absence and a failed precondition are the same answer on purpose: the
+ * record may change again before the caller looks, so the port re-reads.
  */
 const fgWritten = (reply: unknown): FederationGrantHashFields | null => {
 	if (!Array.isArray(reply) || reply[0] !== 1) return null;
@@ -2076,15 +1749,13 @@ const fgWritten = (reply: unknown): FederationGrantHashFields | null => {
 };
 
 /**
- * The federation grant store's connection (#593, D16), separate from
- * {@link makeIoredisClients} so that a Cluster deployment can have one.
+ * The federation grant store's connection, separate from {@link makeIoredisClients} so that a
+ * Cluster deployment can have one.
  */
 export function makeIoredisFederationGrantStoreClient(
-	// `Redis` beside the narrow interface: ioredis declares `zrange` as a
-	// stack of overloads that TypeScript will not assign to the three-argument
-	// signature above, so a strict caller handing over its `Redis` — the
-	// standalone template is one — could not compile against the interface
-	// alone. A Cluster client still satisfies the interface (#593 slice 7).
+	// `Redis` beside the narrow interface: ioredis's overloaded `zrange` is not assignable to the
+	// interface's signature, so a strict caller could not pass its `Redis`. A Cluster client
+	// still satisfies the interface.
 	io: FederationGrantRedisCommands | Redis,
 ): FederationGrantStoreClient {
 	const connection = io as unknown as Redis;
@@ -2252,22 +1923,16 @@ export function makeIoredisFederationGrantStoreClient(
 	};
 }
 
-// --- federation grant intents (#593, D16, slice 6) ------------------------
+// --- federation grant intents -----------------------------------------------
 //
-// Five of the seven operations are scripts — the ones that read, decide and
-// write across keys, which Redis can only make one step with a script or with
-// WATCH/MULTI on a connection of their own (#449 is why this package prefers
-// the script). The two reads are plain commands.
+// The five operations that read, decide and write across keys are scripts (the alternative,
+// WATCH/MULTI, needs a connection of its own); the two reads are plain commands. Each script
+// is routed by KEYS[1] and derives the other keys from ARGV[1], the `<prefix>{intents}:`
+// namespace, so all share one hash tag and the operation stays one atomic step on a Cluster
+// node. No script reaches a grant's keys (`<prefix>{<id>}:…`).
 //
-// Every script is routed by the one key it is given (KEYS[1]) and derives the
-// others from ARGV[1], the `<prefix>{intents}:` namespace. They share that
-// constant hash tag, so every key a script derives is in the slot it was
-// routed to: a Cluster node treats them as local, and the operation stays one
-// atomic step. No script reaches a grant's keys (`<prefix>{<id>}:…`).
-//
-// A caller's `now` decides what it is told. What is RECLAIMED is Redis's:
-// the key TTLs, and the server time the admission script reads to prune the
-// bound. No script deletes a record because a caller's clock says it lapsed.
+// A caller's `now` decides what it is told; only Redis reclaims (key TTLs, and the server time
+// the admission script prunes the bound by). No script deletes a record on a caller's clock.
 
 /**
  * Admission. KEYS[1] = the intent. ARGV: prefix, handle, record, expiresAtMs,
@@ -2350,15 +2015,13 @@ return ARGV[4]
 `;
 
 /**
- * KEYS[1] = the consent. ARGV: prefix, nowMs, binding, decision, state,
- * transaction, transactionExpiresAtMs, connection.
+ * KEYS[1] = the consent. ARGV: prefix, nowMs, binding, decision, state, transaction,
+ * transactionExpiresAtMs, connection.
  *
- * The whole answer in one step: the challenge goes, the intent is marked spent,
- * and an approval writes the transaction — or nothing happens. The consent's
- * own deadline is checked as well as the intent's although the two are the
- * same date: they are two keys, and Redis may reclaim them at two instants, so
- * checking both is what makes the answer the same whichever went first. A
- * state already held by a transaction refuses the approval and spends nothing.
+ * The whole answer in one step: the challenge goes, the intent is marked spent, and an approval
+ * writes the transaction, or nothing happens. Both the consent's and the intent's deadline are
+ * checked (one date, but two keys Redis may reclaim at different instants). A state already
+ * held by a transaction refuses the approval and spends nothing.
  */
 const LUA_FGI_ANSWER = `
 local now = tonumber(ARGV[2])
@@ -2473,9 +2136,8 @@ const fgiText = (reply: unknown): string | null => (typeof reply === "string" ? 
 const ADMISSION_REFUSALS = new Set(["limit", "collision", "closed", "expired"]);
 
 /**
- * The federation grant intent store's connection (#593, D16, slice 6). It may
- * be the grant store's own connection: nothing here needs a second one, and
- * the keys live under a different hash tag either way.
+ * The federation grant intent store's connection. It may be the grant store's own: nothing
+ * here needs a second one, and the keys live under a different hash tag either way.
  */
 export function makeIoredisFederationGrantIntentStoreClient(
 	io: FederationGrantIntentRedisCommands,
@@ -2592,21 +2254,18 @@ export function makeIoredisFederationGrantIntentStoreClient(
 	};
 }
 
-// --- MFA stores (the MFA ADR's D7, D8, D12) ---------------------------------
+// --- MFA stores ----------------------------------------------------------------
+// See packages/core/docs/adr/2026-09-25-multi-factor-authentication.md.
 
 /**
- * `MfaFactorStoreClient.update` — the version compare-and-set.
+ * `MfaFactorStoreClient.update`: the version compare-and-set. `KEYS[1]` = the subject's hash;
+ * `ARGV[1]` = the factor's field, `ARGV[2]` = expected version, `ARGV[3]` = next version,
+ * `ARGV[4]` = the new mutable part. Returns the value as written, or nil.
  *
- * `KEYS[1]` = the subject's hash; `ARGV[1]` = the factor's field, `ARGV[2]` =
- * the expected version, `ARGV[3]` = the next version, `ARGV[4]` = the new
- * mutable part. Returns the value as written, or nil.
- *
- * The value is `<version>\n<fixed>\n<mutable>` (see `MfaFactorStoreClient`).
- * The version is compared as text and the fixed part is carried over byte
- * for byte: nothing here decodes the JSON, because `cjson` would write an
- * empty array back as `{}` (the MFA ADR's D7). All three lines are matched,
- * to the end of the value: one with a fourth line, even an empty one, is not
- * a record this adapter wrote, and is answered nil rather than cut to three.
+ * The value is `<version>\n<fixed>\n<mutable>` (see `MfaFactorStoreClient`). The version is
+ * compared as text and the fixed part copied byte for byte, never decoded: `cjson` would write
+ * an empty array back as `{}`. A value with a fourth line, even an empty one, is not one this
+ * adapter wrote and answers nil.
  */
 const LUA_MFA_FACTOR_UPDATE = `
 local current = redis.call('HGET', KEYS[1], ARGV[1])
@@ -2633,7 +2292,10 @@ const REFUSED_QUESTION =
 const isRefusal = (err: unknown): boolean =>
 	err instanceof Error && err.name === "ReplyError" && REFUSED_QUESTION.test(err.message);
 
-/** `CONFIG GET <name>`'s value: the reply is `[name, value]`, or empty for a name the server does not know. */
+/**
+ * `CONFIG GET <name>`'s value: the reply is `[name, value]`, or empty for a name the server
+ * does not know.
+ */
 const configValue = (reply: unknown, name: string): string | undefined =>
 	Array.isArray(reply) && reply[0] === name && typeof reply[1] === "string" ? reply[1] : undefined;
 
@@ -2644,12 +2306,11 @@ const infoValue = (section: unknown, name: string): string | undefined =>
 		: undefined;
 
 /**
- * What `io`'s server says about keeping what it is written (the MFA ADR's
- * D12). The policy from `INFO memory` — `CONFIG GET maxmemory-policy` only
- * where INFO does not say, so a managed server that blocks `CONFIG` still
- * reports it; AOF from `INFO persistence`; `CONFIG GET save` only when AOF is
- * off, to tell RDB snapshots from none. A refused question leaves its part
- * unread; any other failure is the caller's.
+ * What `io`'s server says about keeping what it is written. The policy from `INFO memory`
+ * (`CONFIG GET maxmemory-policy` only where INFO does not say, so a managed server that blocks
+ * `CONFIG` still reports it); AOF from `INFO persistence`; `CONFIG GET save` only when AOF is
+ * off, to tell RDB snapshots from none. A refused question leaves its part unread; any other
+ * failure is the caller's.
  */
 async function redisDurability(io: Redis): Promise<RedisDurability> {
 	let refusal: unknown;
@@ -2676,10 +2337,9 @@ async function redisDurability(io: Redis): Promise<RedisDurability> {
 }
 
 /**
- * The `MfaFactorStore`'s client over one ioredis connection (the MFA ADR's
- * D7). Also part of {@link makeIoredisClients}; built on its own so a
- * deployment can keep enrolled factors on a dedicated database or instance,
- * as D12's durability requirements prefer.
+ * The `MfaFactorStore`'s client over one ioredis connection. Also part of
+ * {@link makeIoredisClients}; exported alone so a deployment can keep enrolled factors on a
+ * dedicated database or instance, as the MFA ADR's durability requirements prefer.
  */
 export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient {
 	return {
@@ -2708,9 +2368,8 @@ export function makeIoredisMfaFactorStoreClient(io: Redis): MfaFactorStoreClient
 	};
 }
 
-// A transaction is one hash (the MFA ADR's D8). Its deadline is set once, by
-// `create`, and nothing moves it: an update, an attempt, a taken challenge
-// each write fields and leave the key's expiry where it was.
+// A transaction is one hash. Its deadline is set once, by `create`, and nothing moves it: an
+// update, an attempt, a taken challenge each write fields and leave the key's expiry alone.
 
 /**
  * `MfaTransactionStoreClient.create` — insert-only.
@@ -2729,16 +2388,11 @@ return 1
 `.trim();
 
 /**
- * `MfaTransactionStoreClient.update` — the version compare-and-set.
- *
- * `KEYS[1]` = the transaction; `ARGV[1]` = the expected version, `ARGV[2]` =
- * the incarnation, `ARGV[3]` = how many fields to write (n), then n field,
- * value pairs, then the fields to remove. Returns every field as written, or
- * nil. `HINCRBY` moves the version: Redis's integer arithmetic stays exact
- * where a Lua number's text (14 significant digits) would not. It never
- * leaves the safe integers: the store refuses an update at
- * `Number.MAX_SAFE_INTEGER` before this runs (core's
- * `checkMfaVersionAdvances`).
+ * `MfaTransactionStoreClient.update`: the version compare-and-set. `KEYS[1]` = the
+ * transaction; `ARGV[1]` = expected version, `ARGV[2]` = incarnation, `ARGV[3]` = n, then n
+ * field/value pairs, then the fields to remove. Returns every field as written, or nil.
+ * `HINCRBY` moves the version, exact where Lua's 14-digit number text would not be; core's
+ * `checkMfaVersionAdvances` refuses an update at `Number.MAX_SAFE_INTEGER` before this runs.
  */
 const LUA_MFA_TX_UPDATE = `
 local held = redis.call('HMGET', KEYS[1], 'version', 'incarnation')
@@ -2753,20 +2407,12 @@ return redis.call('HGETALL', KEYS[1])
 `.trim();
 
 /**
- * Shared by the two operations that decide on a live transaction inside a
- * script — `reserveAttempt` and `takeChallenge` — whose caller's clock has
- * to reach the script: whether the transaction at `key` is gone at `now`,
- * as a read (`transactionOf`) judges it — at or past its `expiresAtMs`, or
- * holding none that is a finite number. The deadline is read from the hash
- * field `create` writes it to, as text: `tonumber` reads the text `String`
- * wrote as the same double, so both sides judge one instant alike, to the
- * fraction of a millisecond. The `record` is never decoded here: `cjson`
- * refuses a lone-surrogate escape and nesting past a thousand levels, both
- * of which `JSON.parse` reads, and a transaction every read answers live
- * would be refused for its whole life. Nothing here deletes: the key stays
- * until its deadline on the server's clock, so a caller whose clock runs
- * ahead is told the transaction is gone and costs no other caller the
- * transaction — as `fg_visible` treats a federation grant.
+ * `mfa_tx_gone(key, now)`, for the scripts that decide on a live transaction with the caller's
+ * clock (`reserveAttempt`, `takeChallenge`): gone at or past `expiresAtMs`, or when that field
+ * is not a finite number, as `transactionOf` judges it (`tonumber` reads `String`'s text as the
+ * same double). `record` is never decoded: `cjson` refuses lone surrogates and deep nesting that
+ * `JSON.parse` reads. Nothing is deleted, so a caller whose clock runs ahead costs no other
+ * caller the transaction (as `fg_visible` treats a federation grant).
  */
 const LUA_MFA_TX_PRELUDE = `
 local function mfa_tx_gone(key, now)
@@ -2816,7 +2462,10 @@ redis.call('HDEL', KEYS[1], 'challenge')
 return challenge
 `.trim();
 
-/** `MfaTransactionStoreClient.consume`. `KEYS[1]` = the transaction; `ARGV[1]` = the expected version. */
+/**
+ * `MfaTransactionStoreClient.consume`. `KEYS[1]` = the transaction; `ARGV[1]` = the expected
+ * version.
+ */
 const LUA_MFA_TX_CONSUME = `
 if redis.call('HGET', KEYS[1], 'version') ~= ARGV[1] then return false end
 local fields = redis.call('HGETALL', KEYS[1])
@@ -2824,21 +2473,17 @@ redis.call('DEL', KEYS[1])
 return fields
 `.trim();
 
-// D21's subject state: `KEYS[1]` the lock hash, `KEYS[2]` the week's sorted
-// set (see `MfaSubjectKeys`), under one hash tag. The rules are the port's,
-// read exactly as core's in-process store applies them
-// (`core/src/mfa/memoryTransactionStore.mts`): the same replay of the run for
-// the backoff, the same count of the week, the same trust ends, in the same
-// floating-point operations on the same numbers — every instant is carried as
-// the caller's own text, or as `%.17g`, which reads back as the same double.
+// Subject lockout state: `KEYS[1]` the lock hash, `KEYS[2]` the week's sorted set (see
+// `MfaSubjectKeys`), under one hash tag. The rules are core's in-process store's
+// (`core/src/mfa/memoryTransactionStore.mts`), applied in the same floating-point operations
+// on the same numbers: every instant travels as the caller's text or as `%.17g`, which reads
+// back as the same double.
 //
-// Each answer is judged on the caller's `now`. What a script forgets is judged
-// no later than the server's clock, less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS):
-// a caller far ahead erases nothing. What Redis reclaims is judged by Redis:
-// while a run is counted the keys have no TTL (a run ends only at a success,
-// an exempt success or a clear); once none is, they expire a day after the
-// last failure or trust stops counting. A stored value a script cannot read
-// is refused with an error — an outage, never a state that holds nothing.
+// Answers are judged on the caller's `now`; what a script forgets is judged no later than the
+// server's clock less a day (MFA_CLOCK_SKEW_ALLOWANCE_MS), so a caller far ahead erases nothing.
+// While a run is counted the keys have no TTL; otherwise they expire a day after the last
+// failure or trust stops counting. A stored value a script cannot read is an error (an
+// outage), never read as an empty state.
 
 const LUA_MFA_SUBJECT_PRELUDE = `
 local WEEK = 604800000
@@ -3159,9 +2804,9 @@ const MFA_SUBJECT_EXEMPT = defineScript(LUA_MFA_SUBJECT_EXEMPT);
 const HOLDS: ReadonlySet<unknown> = new Set(["backoff", "weekly", "hard"]);
 
 /**
- * The `MfaTransactionStore`'s client over one ioredis connection (the MFA
- * ADR's D8, D21, D25). Also part of {@link makeIoredisClients}; built on its
- * own so a deployment can give it a dedicated database or instance.
+ * The `MfaTransactionStore`'s client over one ioredis connection. Also part of
+ * {@link makeIoredisClients}; exported alone so a deployment can give it a dedicated database
+ * or instance.
  */
 export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionStoreClient {
 	return {

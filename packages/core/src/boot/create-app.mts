@@ -15,18 +15,11 @@
  */
 
 /**
- * boot/create-app.mts — The orchestrator for the A2-β boot planner pipeline.
- *
- * Wires stages 1-6 (`validateManifests → planBoot → materializeComponents →
- * applyContributions → freezeWorld → assembleApp`) into a single async
- * `createApp` function. The orchestrator owns no per-call state: it receives
- * inputs, calls each stage function in order, and forwards the output.
- *
- * Built-in defaults for the fourteen built-in contribution kinds are seeded by
- * `mergeWithBuiltins`; consumer-supplied kinds (via `contributionKinds`)
- * overlay on top.
- *
- * Per A2-β §6.2 / §6.4 / §9.
+ * boot/create-app.mts: the boot planner's orchestrator. Wires stages 1-6
+ * (`validateManifests → planBoot → materializeComponents →
+ * applyContributions → freezeWorld → assembleApp`) into one async `createApp`
+ * that holds no per-call state. `mergeWithBuiltins` seeds the built-in
+ * contribution kinds; consumer-supplied kinds overlay them.
  */
 
 import type { RequestHandler, Router } from "express";
@@ -67,11 +60,11 @@ import type {
 import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.mjs";
 
 // ---------------------------------------------------------------------------
-// Public API — createApp (Per A2-β §6.2 / §6.4)
+// Public API — createApp
 // ---------------------------------------------------------------------------
 
 /**
- * Orchestrator for the A2-β boot planner pipeline.
+ * Orchestrator for the boot planner.
  *
  * Stages:
  *   1. validateManifests — normalise + validate all manifests.
@@ -81,20 +74,14 @@ import { refuseGuardedHostKinds, validateManifests } from "./validate-manifests.
  *   5. freezeWorld — Object.freeze component map + call freeze() on registries.
  *   6. assembleApp — mount routes, build AppHandle.
  *
- * Built-in contribution kinds (grants, tokenExchangeValidators, federations,
- * federationRedirectPolicies, mfaFactors, sessionRequirements,
- * rateLimitBudgets, federationTypes, auditHooks, routes, grantPolicyHooks,
- * grantMiddleware, tokenBindingMechanisms, discoveryMetadata) are seeded by
- * `mergeWithBuiltins`; consumer-supplied kinds overlay on top — except
- * `sessionRequirements` and `mfaFactors` (`session-requirement-kind-guarded`)
- * and `rateLimitBudgets` and `federationTypes` (`contribution-kind-guarded`),
- * which `createApp` refuses to see replaced before the merge
- * (`refuseGuardedHostKinds`).
+ * `mergeWithBuiltins` seeds the built-in contribution kinds and consumer kinds
+ * overlay them, except `sessionRequirements` and `mfaFactors`
+ * (`session-requirement-kind-guarded`) and `rateLimitBudgets` and
+ * `federationTypes` (`contribution-kind-guarded`), which `createApp` refuses
+ * to see replaced before the merge (`refuseGuardedHostKinds`).
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
- *
- * Per A2-β §6.2 / §6.4.
  */
 export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	options: CreateAppOptions<B>,
@@ -106,17 +93,16 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	const bootstrapComponents = snapshotHostMap(options.bootstrapComponents);
 	const overrideComponents = snapshotHostMap(options.overrideComponents);
 
-	// The session-admission ADR's D3: a host collector for `sessionRequirements`
-	// or `mfaFactors` is refused before anything is merged or validated.
+	// A host collector for a guarded kind is refused before anything is merged
+	// or validated.
 	refuseGuardedHostKinds(contributionKinds);
 
-	// Merge consumer kinds on top of built-in defaults. Per A2-β §6.2.
+	// Merge consumer kinds on top of built-in defaults.
 	const merged = mergeWithBuiltins(contributionKinds);
 
-	// Stage 1: validateManifests. Per A2-β §5.1.
-	// validated.bootstrapComponents carries the parsed config (Zod defaults /
-	// transforms applied). All downstream stages must use it instead of the
-	// raw bootstrapComponents. Per A2-β §5.1 step 13.
+	// Stage 1: validateManifests. validated.bootstrapComponents carries the
+	// parsed config (Zod defaults / transforms applied); every later stage must
+	// use it instead of the raw bootstrapComponents.
 	const validated = validateManifests({
 		modules,
 		bootstrapComponents,
@@ -125,12 +111,11 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	});
 	const validatedBootstrap = validated.bootstrapComponents;
 
-	// D-5: Pre-seed the lifecycle registrar as a bootstrap component so modules
-	// that declare `optional: ["lifecycleRegistrar"]` receive it via deps and
-	// can forward it into `createAdapterFactory(kind, { lifecycle: ... })`.
-	// Owned by the boot planner (not consumer-overridable — guarded in
-	// validateManifests via `bootstrap-component-collision` if a consumer
-	// supplies it via overrideComponents).
+	// Pre-seed the lifecycle registrar as a bootstrap component so modules
+	// that declare `optional: ["lifecycleRegistrar"]` can forward it into
+	// `createAdapterFactory(kind, { lifecycle: ... })`. Owned by the boot
+	// planner: validateManifests refuses a consumer override
+	// (`bootstrap-component-collision`).
 	const lifecycleReg = createLifecycleRegistrar();
 	// Same pre-seeding for readiness: a builder that opens a connection is the
 	// only place that can probe it, so it needs the registrar at build time.
@@ -142,10 +127,10 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	} as typeof validatedBootstrap;
 
 	try {
-		// Stage 2: planBoot. Per A2-β §5.2.
+		// Stage 2: planBoot.
 		const plan = planBoot(validated, bootstrapWithLifecycle, overrideComponents);
 
-		// Stage 3: materializeComponents. Per A2-β §5.3.
+		// Stage 3: materializeComponents.
 		const material = await materializeComponents(
 			plan,
 			bootstrapWithLifecycle,
@@ -153,17 +138,14 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 			merged,
 		);
 
-		// Stage 4: applyContributions. Per A2-β §5.4.
+		// Stage 4: applyContributions.
 		const registry = await applyContributions(material, merged);
 
-		// Stage 5: freezeWorld. Per A2-β §5.5.
+		// Stage 5: freezeWorld.
 		const frozen = freezeWorld(registry);
 
-		// Pre-import express before calling the synchronous assembleApp.
-		// assembleApp is synchronous but needs express.Router; pre-importing here
-		// (in the async orchestrator) avoids making assembleApp async.
-		// Per task §6.3 pattern: orchestrator does `await import("express")` and
-		// passes the result to assembleApp via options.express.
+		// assembleApp is synchronous but needs express.Router, so the async
+		// orchestrator imports express and passes it via options.express.
 		let expressMod: { Router: () => Router } | undefined;
 		try {
 			expressMod = (await import("express")) as { Router: () => Router };
@@ -173,16 +155,14 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 			expressMod = undefined;
 		}
 
-		// Stage 6: assembleApp. Per A2-β §5.6 / §6.3.
+		// Stage 6: assembleApp.
 		return assembleApp(frozen, { express: expressMod, lifecycleReg, readinessReg });
 	} catch (err) {
-		// D-5 partial-boot failure: any builder may have already registered a
-		// cleanup callback before a later stage threw. Best-effort drain so
-		// adapter sub-resources do not leak when boot fails. No AppHandle
-		// exists, but a composition root that has a logger handed it in, as a
-		// bootstrap component or an override (never both: stage 1 refuses the
-		// pair) — `dispose()` logs through either — so a failed cleanup is
-		// logged there, and through `consoleLogger` only when there is none.
+		// Partial-boot failure: a builder may already have registered a
+		// cleanup, so drain best-effort to avoid leaking adapter sub-resources.
+		// There is no AppHandle; a failed cleanup is logged through the logger
+		// the composition handed in (bootstrap component or override, never
+		// both), else through `consoleLogger`.
 		await lifecycleReg._drain(
 			overrideComponents?.logger ?? validatedBootstrap.logger ?? consoleLogger,
 			"boot_failure",
@@ -199,7 +179,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  * A plain copy of a host map's own enumerable keys and their values, each
  * read once. Every key is defined, not assigned, so an own `__proto__` stays a
  * key (stage 1 refuses it, naming the map) rather than becoming the copy's
- * prototype — and its value is not read, so an accessor there never runs. Anything that is not an object is handed on as it is, for stage
+ * prototype. Anything that is not an object is handed on as it is, for stage
  * 1 to judge.
  */
 function snapshotHostMap<T>(map: T): T {
@@ -220,37 +200,28 @@ function snapshotHostMap<T>(map: T): T {
 }
 
 // ---------------------------------------------------------------------------
-// Internal: mergeWithBuiltins (Per A2-β §6.2)
+// Internal: mergeWithBuiltins
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the fourteen built-in contribution kinds and overlay any consumer-supplied
- * collectors on top.
- *
- * Built-in defaults:
+ * Seed the built-in contribution kinds and overlay any consumer-supplied
+ * collectors on top:
  * - grants: a `NameKeyedCollector` over one `GrantRegistry`, which holds the
- *   handlers and answers every call — `register` / `replace` (throwing
- *   `GrantRegistryError`), `freeze`, `get` and `entries`.
- * - tokenExchangeValidators, federations, federationRedirectPolicies,
- *   mfaFactors, sessionRequirements, rateLimitBudgets, federationTypes: a
- *   Map-backed `NameKeyedCollector`, which is the only registry of its kind.
- *   Token-exchange validators are contributed by modules
- *   (`oauth-token-exchange` contributes the self-issued access-token one) and
- *   read back through the `tokenExchangeValidatorResolver` synthetic key.
+ *   handlers and answers every call (`register` / `replace` throw
+ *   `GrantRegistryError`).
+ * - the other name-keyed kinds: a Map-backed `NameKeyedCollector`, the only
+ *   registry of its kind.
  * - auditHooks, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
  *   discoveryMetadata: identity-dedup `ListCollector`.
  * - routes: declaration-indexed `RouteCollector`.
  *
- * @internal
+ * @internal Exported for its test; `createApp` is its one caller.
  */
-/** @internal Exported for its test; `createApp` is its one caller. */
 export function mergeWithBuiltins(
 	consumer: ContributionKindMap | undefined,
 ): ContributionCollectorMap {
-	// AS-M1 (PR6): explicit type arguments are required for the four kinds
-	// whose contributes-map placeholders were narrowed from `unknown` to
-	// concrete same-package types in v0.5.1. The factories themselves are
-	// type-parametric so the slot-side concrete type flows through.
+	// Explicit type arguments carry each slot's concrete contributes-map type
+	// into its collector.
 	const builtin: ContributionCollectorMap = {
 		grants: makeGrantCollector(),
 		tokenExchangeValidators: makeMapNameKeyedCollector<ExchangeTokenValidator>(),
@@ -306,25 +277,9 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 }
 
 /**
- * Build a plain `Map`-backed `NameKeyedCollector<T>`. Generic-parametric
- * since AS-M1 (PR6): callers pass the concrete contributes-map slot type
- * (e.g. `<MfaFactor>`, `<FederationProvider>`) so the produced collector
- * matches the narrowed `ContributionCollectorMap` slot.
- *
- * Used for `tokenExchangeValidators`, `federations`,
- * `federationRedirectPolicies`, `mfaFactors`, `sessionRequirements`,
- * `rateLimitBudgets` and `federationTypes`. The Map is the only registry
- * of each of those kinds, and keeps the whole `NameKeyedCollector` contract:
- * `register` throws on a duplicate and `replace` on an unknown name, both
- * throw after `freeze()`, and `entries()` lists in registration order.
- *
- * @internal
- */
-/**
- * The `sessionRequirements` collector refuses `replace` outright (the
- * session-admission ADR's D3): a requirement is switched off by not
- * installing it, and nothing may swap one from behind the consumers, by any
- * path the collector offers.
+ * The `sessionRequirements` collector refuses `replace` outright: a
+ * requirement is switched off by not installing it, and nothing may swap one
+ * from behind the consumers, by any path the collector offers.
  * @internal
  */
 function withoutReplace<T>(collector: NameKeyedCollector<T>): NameKeyedCollector<T> {
@@ -338,6 +293,15 @@ function withoutReplace<T>(collector: NameKeyedCollector<T>): NameKeyedCollector
 	};
 }
 
+/**
+ * Build a plain `Map`-backed `NameKeyedCollector<T>`, typed by the caller's
+ * contributes-map slot type (e.g. `<MfaFactor>`). The Map is the only
+ * registry of its kind and keeps the whole `NameKeyedCollector` contract:
+ * `register` throws on a duplicate and `replace` on an unknown name, both
+ * throw after `freeze()`, and `entries()` lists in registration order.
+ *
+ * @internal
+ */
 function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
 	const m = new Map<string, T>();
 	let frozen = false;
@@ -379,15 +343,9 @@ function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
 }
 
 /**
- * Build a `ListCollector<T>` with same-instance deduplication.
- * Generic-parametric since AS-M1 (PR6): callers pass the concrete
- * contributes-map slot type (e.g. `<AuditHook>`, `<GrantPolicyHookContribution>`)
- * so the produced collector matches the narrowed `ContributionCollectorMap`
- * slot.
- *
- * Used for `auditHooks`, `grantPolicyHooks`, `grantMiddleware`,
- * `tokenBindingMechanisms` and `discoveryMetadata`. The `Set`-based identity
- * check silently skips re-registration of the same reference per A2-α §4.5.
+ * Build a `ListCollector<T>` with same-instance deduplication, typed by the
+ * caller's contributes-map slot type (e.g. `<AuditHook>`). Appending the same
+ * reference again is silently skipped.
  *
  * @internal
  */
@@ -403,7 +361,7 @@ function makeIdentityDedupListCollector<T>(): ListCollector<T> {
 				throw new Error("ListCollector: frozen; cannot append");
 			}
 			if (seen.has(value)) {
-				return; // Silently skip — same-instance dedup per A2-α §4.5.
+				return; // Silently skip: same-instance dedup.
 			}
 			seen.add(value);
 			arr.push(value);
@@ -419,10 +377,8 @@ function makeIdentityDedupListCollector<T>(): ListCollector<T> {
 
 /**
  * Build a `RouteCollector` that accumulates `CollectedRouteContribution`
- * records in declaration order.
- *
- * `freeze()` is mandatory on `RouteCollector` per A2-β §6.2; after freeze,
- * `append` throws.
+ * records in declaration order. `freeze()` is mandatory on `RouteCollector`;
+ * after it, `append` throws.
  *
  * @internal
  */

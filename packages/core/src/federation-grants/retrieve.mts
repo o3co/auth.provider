@@ -60,7 +60,7 @@ export interface FederationGrantRefresher {
 	}): Promise<DelegatedTokens>;
 }
 
-/** Token-free, always: no event carries an access token, a refresh token, or any other secret (D18). */
+/** Token-free, always: no event carries an access token, a refresh token, or any other secret. */
 export interface FederationGrantAuditEvent {
 	readonly type:
 		| "federation.grant.token.success"
@@ -71,32 +71,29 @@ export interface FederationGrantAuditEvent {
 		| "federation.grant.reauthorization_required"
 		| "federation.grant.revoked"
 		/**
-		 * A withdrawal that did not happen (D18). Its own type rather than a
-		 * `.token.denied` with a different outcome: a dashboard counting
-		 * denied disclosures would otherwise count refused withdrawals with
-		 * them, and the two mean opposite things — one is a credential not
-		 * handed out, the other is a credential still live that somebody tried
-		 * to end.
+		 * A withdrawal that did not happen. Its own type, not a `.token.denied`:
+		 * a refused withdrawal leaves a credential live, the opposite of a
+		 * refused disclosure, and dashboards must not count them together.
 		 */
 		| "federation.grant.revoke.denied"
-		/** Slice 6: a client lodged an intent — a first grant, or a renewal (D6). */
+		/** A client lodged an intent — a first grant, or a renewal. */
 		| "federation.grant.requested"
 		/**
-		 * Slice 6: a lodging that did not happen. Its own type, for the reason
+		 * A lodging that did not happen. Its own type, for the reason
 		 * `.revoke.denied` is: a refused request to CREATE access is not a
 		 * refused disclosure of access that exists.
 		 */
 		| "federation.grant.request.denied"
 		/**
-		 * Slice 6: a connect flow that ended without a grant — the user
-		 * declined, the session was not the right one, the flow went stale.
-		 * Only facts established by then are carried: an early failure may
-		 * have no grant id to name (D18 amended).
+		 * A connect flow that ended without a grant — the user declined, the
+		 * session was not the right one, the flow went stale. Only facts
+		 * established by then are carried: an early failure may have no grant
+		 * id to name.
 		 */
 		| "federation.grant.authorization_failed"
-		/** Slice 6: a connect flow created a grant (D7 check 8 won). */
+		/** A connect flow created a grant. */
 		| "federation.grant.authorized"
-		/** Slice 6: a renewal replaced a grant's authorization in place. */
+		/** A renewal replaced a grant's authorization in place. */
 		| "federation.grant.reauthorized";
 	readonly correlationId: string;
 	readonly grantId: string;
@@ -117,7 +114,7 @@ export interface FederationGrantRetrievalLimits {
 	/** `federationGrants.maxExpiresIn`, as it is configured now. */
 	readonly maxExpiresInMs: number;
 	/**
-	 * How far replicas' clocks may differ. It is the backstop's allowance (D13),
+	 * How far replicas' clocks may differ. It is the backstop's allowance,
 	 * and how far ahead of `now` a stored token may be dated and still be
 	 * believed.
 	 */
@@ -132,12 +129,12 @@ export interface FederationGrantRetrievalLimits {
 	readonly ineligibleRetryAfterMs: number;
 	/**
 	 * How long the upstream is not asked again after it failed twice in a row
-	 * (30 s), and the least a rate limit is honoured for (D12). The first
+	 * (30 s), and the least a rate limit is honoured for. The first
 	 * failure of a row is retried promptly. `ineligibleRetryAfterMs` is the
 	 * ceiling, and what a refusal with a code this provider knows waits.
 	 */
 	readonly refreshFailureBackoffMs: number;
-	/** The SOFT deadline: how long a caller waits for the upstream (D12). */
+	/** The SOFT deadline: how long a caller waits for the upstream. */
 	readonly upstreamTimeoutMs: number;
 	/** The HARD deadline: where the upstream request is aborted. */
 	readonly upstreamHardTimeoutMs: number;
@@ -167,7 +164,7 @@ export interface RetrieveFederationGrantTokenDeps {
 	connection(name: string): FederationGrantConnection | undefined;
 	refresher(connection: FederationGrantConnection): FederationGrantRefresher | undefined;
 	/**
-	 * The subject's grants boundary (D13). A failure fails closed: 503. Neither
+	 * The subject's grants boundary. A failure fails closed: 503. Neither
 	 * this read nor the store's `open` is bounded by the retrieval: a reader
 	 * that can hang carries its own timeout. What the retrieval bounds is the
 	 * wait for the refresh lock, and everything that holds it.
@@ -182,7 +179,7 @@ export interface RetrieveFederationGrantTokenDeps {
 	 * That is the tail of every refresh — letting go of the lock, then telling
 	 * the audit sink — and, when the caller stopped waiting at the soft
 	 * deadline, the refresh itself, which goes on holding the lock until its
-	 * result is persisted (D12); and the record of a use and the audit of an
+	 * result is persisted; and the record of a use and the audit of an
 	 * answer, neither of which an answer waits for. The promise never rejects.
 	 */
 	background(work: Promise<void>): void;
@@ -193,16 +190,12 @@ export interface RetrieveFederationGrantTokenDeps {
 	 */
 	audit?(event: FederationGrantAuditEvent): void | Promise<void>;
 	/**
-	 * Told the cause wherever one is turned into a typed answer, or dropped:
-	 * a 503 says that something failed, and an operator needs to know what. The
-	 * error may be an upstream's, and may carry what the upstream echoed: it is
-	 * for a logger that projects it (`loggableError`), and never for a
-	 * response. A 503 turned from one carries the same object as its
-	 * `failure`, so a caller can log that one as the outage and every other as
-	 * a failure the answer did not carry. A write retried within the persist
-	 * budget is told once per distinct kind of failure (name and code), with
-	 * the last error of that kind and `attempts`; a write, a mark or an
-	 * upstream call that did not answer in time is told too, as not answered.
+	 * Told the cause whenever a failure becomes a typed answer or is dropped,
+	 * so an operator can see what a 503 hides. The error may echo upstream
+	 * content: it is for a projecting logger (`loggableError`), never for a
+	 * response. A 503 carries the same object as its `failure`. Retried
+	 * writes are told once per distinct kind (name and code) with the last
+	 * error and `attempts`; a call that did not answer in time is told too.
 	 */
 	report?(failure: FederationGrantRetrievalFailure): void;
 }
@@ -211,12 +204,12 @@ export interface RetrieveFederationGrantTokenRequest {
 	readonly grantId: string;
 	/** The authenticated client. */
 	readonly clientId: string;
-	/** `sub`, required on every grant-addressed route (D9). */
+	/** `sub`, required on every grant-addressed route. */
 	readonly subject: string;
 	/** The client's `allowedFederationGrantConnections`. */
 	readonly allowedConnections: readonly string[];
 	readonly correlationId: string;
-	// Assertions the provider checks (D10). None of them widens anything.
+	// Assertions the provider checks. None of them widens anything.
 	readonly connection?: string;
 	readonly scope?: readonly string[];
 	readonly resource?: string;
@@ -227,26 +220,22 @@ export interface RetrieveFederationGrantTokenRequest {
 const MAX_TIMER_MS = 2_147_483_647;
 
 /**
- * Refuses limits the retrieval cannot keep its promises under. For whoever
- * composes it to call at boot: a schema guarantees these, and a hand-built
- * config bypasses a schema (#448).
+ * Refuses limits the retrieval cannot keep its promises under. Call at boot:
+ * a hand-built config bypasses the schema.
  *
- * - Every limit is a finite number, and none is negative; the ones a timer or
- *   a lock is given are positive, and fit a timer. NaN compares as fine
- *   everywhere: under a NaN refresh buffer no token is refreshed before it
- *   has died, and a NaN retry interval switches the marker's limit off.
- * - `refreshFailureBackoffMs <= ineligibleRetryAfterMs`: the marker's interval
- *   is the ceiling on how long a failing upstream is not asked (D12).
- * - `upstreamTimeoutMs <= upstreamHardTimeoutMs`: the soft deadline only
- *   answers the caller, and the hard one is where the request is aborted.
- * - `upstreamHardTimeoutMs + persistRetryBudgetMs + margin <= refreshLockTtlMs`
- *   (D12). The lock has no renewal, and one that expires mid-refresh lets two
+ * - Every limit is finite and non-negative; those given to a timer or a lock
+ *   are positive and fit a timer. (NaN would silently disable early refresh
+ *   and the marker's limit.)
+ * - `refreshFailureBackoffMs <= ineligibleRetryAfterMs`: the marker's
+ *   interval is the ceiling on how long a failing upstream is not asked.
+ * - `upstreamTimeoutMs <= upstreamHardTimeoutMs`: the soft deadline answers
+ *   the caller; the hard one aborts the request.
+ * - `upstreamHardTimeoutMs + persistRetryBudgetMs + margin <= refreshLockTtlMs`:
+ *   the lock has no renewal, and one that expires mid-refresh lets two
  *   replicas present the same refresh token.
  *
- * This compares configured durations and nothing else. What makes them mean
- * something is in the retrieval: every deadline counts from the moment the
- * lock was acquired, and the upstream is not asked at all once the look under
- * the lock has used up the time a caller waits.
+ * Only configured durations are compared; every deadline counts from lock
+ * acquisition (see `refresh`).
  */
 export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetrievalLimits): void {
 	const timed = [
@@ -444,25 +433,21 @@ function handOver(
 
 /**
  * What a look is told about the call it is made for. Every look judges the
- * grant the same way; they differ in what becomes of a stored token that would
- * be refreshed.
+ * grant the same way; they differ in what becomes of a stored token that
+ * would be refreshed.
  *
- * - The first look, and the same look again once the lock is held, when
- *   another replica may have refreshed already: it sends the call to the
- *   refresh.
- * - `attempted` — the last look, after the call went for a refresh, whatever
- *   came of that: it wrote, it lost, the upstream failed, the lock was not to
- *   be had, the lease was spent. A stored token that is good and carries what
- *   was asked is answered with the life it has (D10): a refresh is an attempt
- *   to improve on it, never a condition for it, and `refresh` runs once per
- *   call. What would have been a refresh is answered by `refresh` as what the
- *   attempt came to, and the look's own verdicts, an expiry or a revocation
- *   that landed meanwhile, come before that.
- * - `fetched` — with `attempted`, the access token the call wrote. When that
- *   is what is stored it is the call's own: never refreshed again, and one
- *   that lacks the asserted scope answers `invalid_scope`, since the upstream
- *   was asked and that is what it gave. Something else stored by then — a
- *   reauthorization does not take the refresh lock — is somebody else's.
+ * - Default (the first look, and again under the lock): sends the call to
+ *   the refresh.
+ * - `attempted` — the last look, after a refresh was tried, whatever came of
+ *   it. A good stored token carrying what was asked is answered with the
+ *   life it has: a refresh improves on it, never conditions it, and runs at
+ *   most once per call. The look's own verdicts (an expiry or revocation
+ *   meanwhile) come first; what would have been a refresh answers with what
+ *   the attempt came to.
+ * - `fetched` — with `attempted`, the token this call wrote. While it is
+ *   stored it is never refreshed again, and lacking the asserted scope it
+ *   answers `invalid_scope`. Anything else stored by then is somebody else's
+ *   (a reauthorization does not take the refresh lock).
  */
 interface Look {
 	readonly attempted?: true;
@@ -492,7 +477,7 @@ type Evaluation =
 			/**
 			 * The stored access token, when it is one that could still be disclosed:
 			 * eligible under the current maximum, alive, and dated believably. A
-			 * refresh that brings nothing usable keeps it (D5).
+			 * refresh that brings nothing usable keeps it.
 			 */
 			readonly keep?: StoredAccessToken;
 			/** The access token that is stored, whether or not it could be disclosed. */
@@ -527,7 +512,7 @@ const UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
 /**
  * What `count` the store will give a failure at `at`: one more than a stamp no
  * older than `rowMs`, else one — and `undefined` for one dated before the
- * stamp on the record, which the store refuses (D2): a caller must not be
+ * stamp on the record, which the store refuses: a caller must not be
  * told a wait the record will not carry.
  */
 const rowCount = (
@@ -575,7 +560,7 @@ async function evaluate(
 	const now = deps.now();
 
 	// One answer for an unknown ID, another client's grant and another
-	// subject's, so that a known ID tells a stranger nothing (D9).
+	// subject's, so that a known ID tells a stranger nothing.
 	if (
 		opened === null ||
 		opened.grant.clientId !== request.clientId ||
@@ -618,10 +603,10 @@ async function evaluate(
 	}
 
 	if (status.status === "revoked") {
-		// The backstop: a subject-wide revocation that never reached this record
-		// (D13). Made durable on the first touch. A write that FAILS is a
-		// revocation outage, and D13 has those surface; one that changes nothing
-		// means somebody else got there, and the answer stands.
+		// The backstop: a subject-wide revocation that never reached this record.
+		// Made durable on the first touch. A write that FAILS is a revocation
+		// outage and surfaces as one; one that changes nothing means somebody
+		// else got there, and the answer stands.
 		const revoked = await settle(() => deps.store.revoke(grant.id, "backstop", now));
 		if (!revoked.ok) {
 			return {
@@ -655,8 +640,8 @@ async function evaluate(
 		return { kind: "deny", denial: { code: "connection_identity_changed" }, grant };
 	}
 	if (status.status === "reauthorization_required") {
-		// A key that is missing from the ring is an outage, and not a status (D1,
-		// D16): the credential may be perfectly good. It is answered here, where
+		// A key that is missing from the ring is an outage, and not a status:
+		// the credential may be perfectly good. It is answered here, where
 		// the credential is first needed, and not earlier — everything reported
 		// ahead of it is decided without one, and an outage must mask none of it.
 		if (
@@ -702,7 +687,7 @@ async function evaluate(
 		void unhandled;
 		return { kind: "deny", denial: unavailable("storage"), grant };
 	}
-	// The stamp of a failed refresh (D12): while it stands the upstream is not
+	// The stamp of a failed refresh: while it stands the upstream is not
 	// asked either. The marker's denial comes first: an ineligible answer is the
 	// more specific fault.
 	const failure = federationGrantRefreshFailureStands(grant.refreshFailure, {
@@ -730,7 +715,7 @@ async function evaluate(
 	}
 
 	// What the request asserts is checked here, so that a request that can
-	// never succeed does not cost an upstream call (D10).
+	// never succeed does not cost an upstream call.
 	if (request.connection !== undefined && request.connection !== grant.connection) {
 		return {
 			kind: "deny",
@@ -772,7 +757,7 @@ async function evaluate(
 	let keep: StoredAccessToken | undefined;
 	if (token !== undefined) {
 		// The same predicate guards every disclosure, cached or fresh, against
-		// the CURRENT maximum (D5).
+		// the CURRENT maximum.
 		const eligible = judgeUpstreamAccessToken({
 			issuedLifetime: token.issuedLifetime,
 			scopes: token.scopes,
@@ -795,19 +780,15 @@ async function evaluate(
 		const remainingMs = tokenEndsAt - now.getTime();
 		if (eligible && believed && remainingMs > 0) {
 			keep = token;
-			// Against the scopes THIS token carries, not what the grant once got (D10).
+			// Against the scopes THIS token carries, not what the grant once got.
 			const carries = request.scope === undefined || scopesWithin(request.scope, token.scopes);
-			// A token is never refreshed before it is half spent. Until then a
-			// refresh has little more life to give, and an upstream that has just
-			// left a scope out is not going to change its mind — while every refresh
-			// rotates the refresh token at an IdP that rotates. Without this bound a
-			// client asking an hour of tokens issued for an hour, or a scope the
-			// upstream never puts in one, or anything at all of tokens issued with
-			// less life than the buffer, would get a rotation on every request: the
-			// harm D5's marker exists to prevent, on a path the marker does not
-			// cover, since such a token is eligible. With it, a client can cause
-			// two rotations in a token's lifetime and no more, while the upstream
-			// answers. What an upstream that FAILS costs is not bounded here (D12).
+			// Never refreshed before it is half spent: an earlier refresh gains
+			// little and rotates the refresh token at a rotating IdP. Without this
+			// bound a client could force a rotation on every request (a `min_ttl`
+			// near the lifetime, a scope the upstream never grants, a lifetime
+			// below the buffer), a path the ineligibility marker does not cover.
+			// With it, at most two rotations per token lifetime while the
+			// upstream answers. A FAILING upstream is bounded by the stamp.
 			const halfSpent = age >= lifetimeMs / 2;
 			const ranDown = remainingMs <= deps.limits.refreshBufferMs;
 			const wantsMore = !carries || remainingMs <= minTtlSeconds * 1000;
@@ -822,7 +803,7 @@ async function evaluate(
 					kind: "token",
 					grant,
 					token,
-					// A cache hint for a cooperating worker, never enforcement (D15).
+					// A cache hint for a cooperating worker, never enforcement.
 					expiresIn: Math.floor(
 						Math.max(0, Math.min(tokenEndsAt, grantEndsAt.getTime()) - now.getTime()) / 1000,
 					),
@@ -961,15 +942,12 @@ type RefreshOutcome =
 	) & {
 		readonly audits: readonly PendingAudit[];
 		/**
-		 * Something of this call's is still IN FLIGHT: an upstream request that
-		 * was aborted may be rotating the refresh token all the same, and a write
-		 * that was still going at the end of its budget may yet land. The lock is
-		 * then left to run out instead of being let go of. A failure that arrived
-		 * is not that: nothing is in flight any more. Whoever acquired it next would present the
-		 * stored refresh token — the old one — beside an operation that is about to
-		 * replace it, and an IdP that detects reuse answers that by revoking the
-		 * family, the new token included. The price is that others wait out what is
-		 * left of the lock, while the store or the upstream is failing anyway.
+		 * Something of this call's is still IN FLIGHT (an aborted upstream
+		 * request may still rotate the refresh token; a write past its budget may
+		 * still land), so the lock is left to run out rather than released: the
+		 * next holder would present the old refresh token, and a reuse-detecting
+		 * IdP revokes the whole family. A failure that arrived leaves nothing in
+		 * flight.
 		 */
 		readonly keepLock?: true;
 	};
@@ -994,7 +972,7 @@ interface ReadResponse {
  * Reads a refresh response without trusting its shape, and without throwing:
  * the refresh token is taken first and whatever else is wrong with the
  * response, it is kept. Discarding the response would discard the only valid
- * credential (D5).
+ * credential.
  */
 function readResponse(
 	response: unknown,
@@ -1100,7 +1078,7 @@ async function refreshUnderLock(
 		refresher.refreshDelegatedToken({
 			refreshToken: held.refreshToken,
 			// The grant's scopes: RFC 6749 §6 lets a refresh ask for no more, and an
-			// IdP that honours it never starves a narrow grant (D5).
+			// IdP that honours it never starves a narrow grant.
 			scopes: [...grant.scopes],
 			...(grant.resource !== undefined ? { resource: grant.resource } : {}),
 			signal: controller.signal,
@@ -1135,18 +1113,13 @@ async function refreshUnderLock(
 		} catch {
 			classified = { reason: "unknown", structured: false };
 		}
-		// An outage, read before anything the body said: the upstream could not
-		// be reached, did not answer in time, or answered 5xx — on the error, its
-		// Error causes or the Response it was raised over
-		// (`isFederationUpstreamOutage`, the connect callback's own test), or
-		// whatever else the classifier reads structurally as one: a 5xx status
-		// or a connection code on a thrown value that is not an Error, which a
-		// hand-written adapter may throw. Neither reads the IdP's parsed body,
-		// which openid-client carries as the error's cause. A 5xx is never a verdict on the
-		// credential, whatever OAuth code its body carries: a 503 naming an
-		// interaction code must not stamp the user's absence (below). A 429 is
-		// no outage, and stays the rate limit below. The classifier's
-		// message-only `network` is a guess, and is not an outage here.
+		// An outage, read before anything the body said: unreachable, timed out
+		// or 5xx, on the error, its causes or its Response
+		// (`isFederationUpstreamOutage`), or a structural 5xx status or
+		// connection code the classifier finds on a non-Error. Neither reads
+		// the IdP's parsed body. A 5xx is never a verdict on the credential,
+		// whatever OAuth code its body names. A 429 is not an outage, and the
+		// classifier's message-only `network` is a guess, not an outage.
 		const outage =
 			isFederationUpstreamOutage(settled.error) ||
 			(classified.reason === "network" && classified.structured);
@@ -1188,16 +1161,12 @@ async function refreshUnderLock(
 				audits: [["federation.grant.reauthorization_required", "upstream_invalid_grant"]],
 			};
 		}
-		// The upstream asked for the user (#616, D11): one of the four interaction
-		// codes, read off the error's own field — the classifier puts nothing a
-		// message said there — and ahead of a 429 it came with, since a 429 that
-		// names the user is the user. Not beside an outage (above): a 5xx is never
-		// a verdict, whatever its body names (review of #690). Nothing said the refresh
-		// token is bad, so the credentials are kept; nothing is mended by waiting,
-		// so no wait is told. What is answered comes from the record: the stamp
-		// the record carries at the last look, or whatever replaced it — never
-		// the code in hand, which a renewal or a revocation may have overtaken
-		// while the stamp was being written.
+		// The upstream asked for the user: an interaction code read off the
+		// error's own field, ahead of a 429 it came with. Never beside an
+		// outage: a 5xx is no verdict. The refresh token is not known bad, so
+		// the credentials are kept; waiting mends nothing, so no wait is told.
+		// The answer comes from the record at the last look, never the code in
+		// hand, which a renewal or revocation may have overtaken.
 		if (!outage && isFederationGrantInteractionCode(classified.upstreamCode)) {
 			const reason = `upstream_${classified.upstreamCode}` as const;
 			const noted = await stamp(
@@ -1228,7 +1197,7 @@ async function refreshUnderLock(
 					};
 				case "elapsed":
 					// The write may still land. The lease is kept so that it does not
-					// land under the next holder's refresh (D12).
+					// land under the next holder's refresh.
 					return {
 						kind: "denied",
 						denial: unavailable("storage", noted.failure),
@@ -1238,7 +1207,7 @@ async function refreshUnderLock(
 			}
 		}
 		// None of the rest changes the credentials. The failure is stamped on the
-		// record (D12), so that the next request does not ask a failing upstream
+		// record, so that the next request does not ask a failing upstream
 		// again at once — a refusal, and an outage from the second time on.
 		let denial: FederationGrantDenial;
 		let failure: FederationGrantRefreshFailureInput;
@@ -1409,7 +1378,7 @@ async function refreshUnderLock(
 					expectedVersion: grant.version,
 					credentials,
 					ineligible,
-					// Sampled at the write: a refresh that straddles the expiry must fail (D2).
+					// Sampled at the write: a refresh that straddles the expiry must fail.
 					now: deps.now(),
 				}),
 			),
@@ -1432,7 +1401,7 @@ async function refreshUnderLock(
 		if (result.ok) {
 			// An attempt that threw before this one answered is told all the same.
 			reportWrite();
-			// A writer whose precondition fails does not use what it fetched (D2).
+			// A writer whose precondition fails does not use what it fetched.
 			// That includes this call's own earlier attempt having landed with its
 			// acknowledgement lost: the last look then finds its token stored. The
 			// upstream was asked, and may have rotated: that leaves a trail.
@@ -1464,7 +1433,7 @@ async function refreshUnderLock(
 	// No attempt that threw means none was made in time: nothing answered.
 	const writeFailure = reportWrite() ?? failed("write", NOT_ANSWERED);
 	// The new credentials are dropped. The stored refresh credential is not
-	// assumed to be still good: the next refresh decides (D12). The failure is
+	// assumed to be still good: the next refresh decides. The failure is
 	// stamped all the same, best effort, with what is left of the persist
 	// budget — the store is what failed, and one more write to it may fail too
 	// — and not a millisecond past it: the lock is sized for the budget, and a
@@ -1479,14 +1448,12 @@ async function refreshUnderLock(
 }
 
 /**
- * Stamps a failed refresh on the record (D12): one attempt, bounded, under the
- * lock, so that every waiter finds it. For the timed backoff it never changes
- * the answer — the last look answers a stored token that serves with or
- * without it — and a store that will not take it is told to the logger. What
- * it came to is returned for the one stamp that IS the answer, the user's
- * absence (#616): `written`, `refused` on the guard, `failed` on a throw, or
- * `elapsed` past the budget, when the write may still land — the last two
- * with the failure they were reported as.
+ * Stamps a failed refresh on the record: one bounded attempt under the lock,
+ * so every waiter finds it. For the timed backoff it never changes the
+ * answer, and a store that refuses it is only reported. For the user's
+ * absence the stamp IS the answer, so the outcome is returned: `written`,
+ * `refused` (guard), `failed` (throw) or `elapsed` (may still land), the
+ * last two with the failure they were reported as.
  */
 async function stamp(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1565,7 +1532,7 @@ async function lastLook(
 		stored,
 		// `refreshed` says that what is answered is what this call fetched. It is
 		// not when the write brought no access token and kept the one the grant
-		// had (D5), nor when something else was stored before this look.
+		// had, nor when something else was stored before this look.
 		fetched !== undefined && stored.kind === "token" && stored.token.value === fetched,
 		replaced ? unavailable("concurrent_update") : fallback,
 	);
@@ -1622,7 +1589,7 @@ async function refresh(
 		// The lease has one clock. It starts when the store TOOK the lock — when it
 		// was asked for, plus what the store waited — which is before the store
 		// answered. Every deadline counts from there: what this call spends under
-		// the lock before it asks the upstream is spent of the same lease (D12), and
+		// the lock before it asks the upstream is spent of the same lease, and
 		// so is however long the acknowledgement took. A store that cannot say how
 		// long it waited, or says it waited longer than the whole round trip, is not
 		// one to run a refresh on: the lock is let go of, and the caller is told the
@@ -1691,7 +1658,7 @@ async function refresh(
 	// ONE worker owns the upstream call and the guarded write. Its tail — the
 	// release, and then what it has to tell the audit sink, in that order —
 	// is handed over at once: it may outlive the answer, and when the caller
-	// stops waiting at the soft deadline the whole of it does (D12).
+	// stops waiting at the soft deadline the whole of it does.
 	const work = refreshUnderLock(
 		deps,
 		request,
@@ -1742,15 +1709,15 @@ async function refresh(
 }
 
 /**
- * An upstream access token for a federation grant (#593, D10–D12): every
- * retrieval re-evaluates the grant, a call refreshes at most once, and a
- * writer that loses never returns the token it fetched. The package maps the
- * typed result to HTTP and does nothing else.
+ * An upstream access token for a federation grant: every retrieval
+ * re-evaluates the grant, a call refreshes at most once, and a writer that
+ * loses never returns the token it fetched. The routes package only maps the
+ * typed result to HTTP. See ADR 2026-09-17-federation-grants-offline-delegation,
+ * D10–D12.
  *
- * It answers with a typed result for everything its dependencies may do at
- * run time — reject, throw, answer late or answer nonsense. It rejects only
- * for a bug in how it was composed: a `connection`, `refresher` or `now` that
- * throws. Even then no lock is left behind.
+ * Any run-time misbehaviour of a dependency becomes a typed result. It
+ * rejects only for a composition bug (a throwing `connection`, `refresher` or
+ * `now`), and even then leaves no lock behind.
  */
 export async function retrieveFederationGrantToken(
 	deps: RetrieveFederationGrantTokenDeps,

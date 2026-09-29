@@ -15,29 +15,18 @@
  */
 
 /**
- * Pure utility for extracting and normalizing a single federation's config slice.
+ * Extract and normalize one federation's config slice, so every per-federation
+ * module shares the same shape rules (README, "Configuring federations"):
  *
- * Per A2-γ §3.5 — migrated from the v0.4.x `sessionModule.init()` body so that
- * per-federation `defineModule` consumers can share the same flat / nested shape
- * normalization without re-implementing it. The shape rules are:
+ * - Flat (default): `{ enabled, type?, ...credentials }`; `type` defaults to
+ *   `<name>`.
+ * - Nested: `{ enabled, type, [type]: { ...credentials } }`; other top-level
+ *   fields pass through onto the merged result.
+ * - Mixed (a top-level credential field beside a nested sub-section) is
+ *   ambiguous and throws.
  *
- *   FLAT shape (default):
- *     federations.<name> = { enabled, type?, ...credentials }
- *     The credentials are at the top level. `type` defaults to `<name>` when
- *     omitted (shorthand: key serves as type identifier).
- *
- *   NESTED shape (explicit, for multi-tenant or custom-typed federations):
- *     federations.<name> = { enabled, type, [type]: { ...credentials } }
- *     The sub-section keyed by `type` carries the credentials; top-level
- *     non-control fields are passthrough (preserved on the merged result).
- *
- *   MIXED shape (rejected):
- *     federations.<name> = { enabled, type, clientId: "x", [type]: {...} }
- *     Top-level credential fields AND a nested sub-section is ambiguous —
- *     throws so consumers must pick one shape per entry.
- *
- * Returns `undefined` when the section is missing or `enabled` is not `true`.
- * Returns the normalized credential object otherwise (with `type` always set).
+ * Returns `undefined` when the section is missing or `enabled` is not `true`,
+ * otherwise the normalized credential object with `type` always set.
  */
 export function extractFederationSection(
 	federations: Record<string, unknown>,

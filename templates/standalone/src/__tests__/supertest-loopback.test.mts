@@ -15,16 +15,15 @@
  */
 
 /**
- * #556 — the server `request(app)` starts listens on the address supertest
- * dials, in this project's own test run.
- *
- * Unpatched, supertest starts its server with `app.listen(0)` — the
- * dual-stack wildcard `[::]:P` — and sends the request to `127.0.0.1:P`. On
- * macOS the kernel can hand out a `P` another process already holds as
- * `127.0.0.1:P`; the request then reaches that process, and if it never
- * answers the test hangs until its timeout. `vitest.supertest-loopback.mts`
- * (wired in through `setupFiles` in `vitest.config.mts`) binds the server to
- * `127.0.0.1` instead. These tests fail if that wiring is lost.
+ * The server `request(app)` starts listens on the address supertest dials,
+ * in this project's own test run. Unpatched, supertest starts its server with
+ * `app.listen(0)` — the dual-stack wildcard `[::]:P` — and sends the request
+ * to `127.0.0.1:P`. On macOS the kernel can hand out a `P` another process
+ * already holds as `127.0.0.1:P`; the request then reaches that process, and
+ * if it never answers the test hangs until its timeout.
+ * `vitest.supertest-loopback.mts` (a `setupFiles` entry in
+ * `vitest.config.mts`) binds `127.0.0.1` instead; these tests fail if that
+ * wiring is lost.
  */
 
 import http from "node:http";
@@ -154,9 +153,8 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 
 	it("closes an agent's one server after the last request sent over it, not the first (#703)", async () => {
 		// The request built first is the one whose call bound the server. Closing
-		// the server when that one finishes — what supertest 7.2 did, and this
-		// guard with it — resets the connection of a request still on its way:
-		// ECONNRESET on Node 26.
+		// the server when that one finishes, as supertest 7.2 does, resets the
+		// connection of a request still on its way: ECONNRESET on Node 26.
 		const held = holdingApp();
 		const server = http.createServer(held.app);
 		const closes = recordCloses(server, held);

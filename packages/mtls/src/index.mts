@@ -17,27 +17,12 @@
 /**
  * Public exports for `@o3co/auth-provider-mtls`.
  *
- * Intentionally NOT exported (internal helpers):
- *   - `parseEnvoyXfccHeader`, `parsePlainPemHeader` — dialect parsers
- *     are composed via the `cert-header-dialect` config key, not imported
- *     directly.
- *   - `validateCertChain` — internal PKI helper; consumers configure
- *     `mode = "pki"` and `trusted-cas` rather than calling it.
- *   - `createTrustedProxyMatcher` — no longer lives here at all. #292 moved the
- *     trusted-proxy vocabulary into `@o3co/auth-provider-core`, where
- *     `http.trustProxy` validates against the same definition; this package
- *     consumes it. Consumers configure `trusted-proxies` rather than building a
- *     matcher, and anything that does need one imports core's so a second,
- *     subtly different notion of "trusted proxy" cannot appear.
- *   - `pemToDer`, `derToPem` — internal codec; surface minimization.
- *   - the `fullPki/` internals (`createFullPkiValidator`, the CRL resolver,
- *     the guarded fetch) — `mode = "full-pki"` is reached through config, not
- *     by assembling the validator by hand. Only the algorithm vocabulary is
- *     exported, because an operator writing
- *     `oauth.mtls.full-pki.signature-algorithms` needs to know what the legal
- *     values are, and a list in prose drifts from the one the schema enforces.
- *
- * Per Wave 2 Phase 3 spec §5.1.
+ * The header parsers, `validateCertChain`, the PEM codec and the `fullPki/`
+ * internals are not exported: consumers reach them through config
+ * (`cert-header-dialect`, `mode`, `trusted-cas`). The trusted-proxy matcher is
+ * core's, shared with `http.trustProxy`. Only the `full-pki` algorithm
+ * vocabulary is exported, so the legal `signature-algorithms` values are the
+ * list the schema enforces rather than prose that drifts.
  */
 
 export type { ClientCertificate } from "./certificate.mjs";

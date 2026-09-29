@@ -16,14 +16,11 @@
 
 /**
  * The OAuth router parses the bodies of the routes it owns, and only those.
- *
- * It is mounted at `/oauth`, a prefix other packages mount routes under too —
- * the device grant, federation grants, WebAuthn, a deployment's own. A body
- * parser that ran for every request beneath the prefix consumed those
- * routes' request streams whenever the OAuth router happened to be mounted
- * ahead of them: what another route received depended on the order the
- * composition listed its modules in, and `body-parser` does not parse a body
- * twice, so that route's own parser, limit and media types never ran.
+ * Other packages mount routes under `/oauth` too (device grant, federation
+ * grants, WebAuthn, a deployment's own). A parser for every request beneath
+ * the prefix would consume their request streams whenever the OAuth router is
+ * mounted first, and `body-parser` does not parse a body twice, so their own
+ * parser, limit and media types would never run.
  */
 
 import type {
@@ -239,8 +236,8 @@ describe("the OAuth router's body parsing", () => {
 		"parses a route's path exactly, not a longer one beneath it (%s)",
 		async (_label, surfaces) => {
 			// `router.use(path)` matches every path beneath `path`, so a later
-			// module's `/oauth/token/custom` or `/oauth/consent/custom` had its
-			// body read by parsers meant for `/oauth/token` and `/oauth/consent`.
+			// module's `/oauth/token/custom` or `/oauth/consent/custom` would have
+			// its body read by parsers meant for `/oauth/token` and `/oauth/consent`.
 			const router = await routerWith(surfaces);
 			const mounted = [...new Set(routePaths(router))];
 			const sibling = (path: string) => `/oauth${path.replace(":name", "example")}/custom`;

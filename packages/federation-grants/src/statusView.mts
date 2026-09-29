@@ -15,19 +15,15 @@
  */
 
 /**
- * What a grant looks like from outside (#593, D9).
+ * What a grant looks like from outside. See ADR
+ * 2026-09-17-federation-grants-offline-delegation, D9.
  *
- * An allowlist, written out field by field, rather than a record with a few
- * things deleted. What a grant holds includes the consent session it was made
- * in, the intent handle that made it, the fingerprints its identity is pinned
- * to, its version and the stamp of its last failed refresh — none of which is
- * a caller's business, and all of which a spread would disclose the day
- * somebody adds a field to the record.
- *
- * A field a record does not have is **omitted**, not reported empty: a pending
- * grant has no upstream account and no expiry because it has not been
- * consented to yet, and `"expires_at": null` would invite a client to compare
- * it with something.
+ * An allowlist, field by field, not a record with fields deleted: the rest of
+ * the record (consent session, intent handle, identity fingerprints, version,
+ * last failed refresh stamp) is no caller's business, and a spread would
+ * disclose any field added later. A field a record does not have is
+ * **omitted**, not reported empty: `"expires_at": null` would invite a client
+ * to compare it with something.
  */
 
 import {
@@ -47,13 +43,10 @@ export function federationGrantStatusView(
 	/**
 	 * Whether the client may still use this grant's connection.
 	 *
-	 * A grant that has ENDED is described whether or not the client may still
-	 * use its connection — that answer is what lets a client stop asking. What
-	 * it is not is a reason to keep handing back the upstream account, the
-	 * consented scope set and the dates to a client an operator has just taken
-	 * off the allowlist. Review asked the question the design had not: removing
-	 * a client from the allowlist is an operator's lever, and a lever that
-	 * changes the status code but not the payload is half a lever.
+	 * A grant that has ENDED is described either way: that answer lets a client
+	 * stop asking. But a client an operator has taken off the allowlist is not
+	 * handed the upstream account, the consented scope set or the dates, so
+	 * removing it changes the payload and not only the status code.
 	 */
 	permitted: boolean,
 ): Readonly<Record<string, unknown>> {
@@ -78,7 +71,7 @@ export function federationGrantStatusView(
 					scope: grant.scopes.join(" "),
 					...(grant.resource === undefined ? {} : { resource: grant.resource }),
 					authorized_at: instant(grant.authorizedAt),
-					// Effective, not stored (D3): computed from `maxExpiresIn` as it
+					// Effective, not stored: computed from `maxExpiresIn` as it
 					// is configured NOW, so lowering the maximum moves this earlier
 					// for grants that already exist — possibly into the past — and
 					// raising it brings it back, never beyond the stored expiry.

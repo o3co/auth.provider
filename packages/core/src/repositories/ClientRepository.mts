@@ -23,22 +23,17 @@ export type PublicClient = Omit<Client, "clientSecret">;
  *
  * The contract every route relies on:
  *
- * - A client that does not exist is `null`, and so is a secret that does not
- *   match — never a throw. Those are the client's fault and are answered
- *   `invalid_client`.
+ * - An unknown client or a non-matching secret is `null`, never a throw:
+ *   the client's fault, answered `invalid_client`.
  * - Throw only when the store cannot answer. Client authentication (the
- *   oauth package's `createClientAuthMiddleware`, at `/oauth/token`,
- *   `/oauth/introspect`, `/oauth/revoke` and every route that mounts it) and
- *   `/authorize` answer a throw as `503 temporarily_unavailable` ("client
- *   repository unavailable") and log it at error level as
- *   `client_repository_unavailable`. A repository that throws for an unknown
- *   client or a bad secret turns the client's mistake into the server's
- *   outage.
- * - The `clientId` is the client's input. Those routes screen it first
- *   (`isWellFormedClientId`: no control character, at most
- *   `MAX_CLIENT_ID_LENGTH` characters) and refuse a malformed one without
- *   asking the repository, but any other character may still be in it: bind
- *   it as a query parameter, never interpolate it.
+ *   oauth package's `createClientAuthMiddleware`) and `/authorize` answer a
+ *   throw as `503 temporarily_unavailable` and log it at error level as
+ *   `client_repository_unavailable`, so throwing for a client's mistake
+ *   turns it into the server's outage.
+ * - The `clientId` is client input. Those routes refuse a malformed one
+ *   (`isWellFormedClientId`) before asking the repository, but any other
+ *   character may still be in it: bind it as a query parameter, never
+ *   interpolate it.
  */
 export interface ClientRepository {
 	/**
@@ -46,17 +41,12 @@ export interface ClientRepository {
 	 * fields (everything except `clientSecret`) or `null` when the client does
 	 * not exist. Used by `clientAuthMw` for the public-client (`tokenEndpoint-
 	 * AuthMethod === "none"`) path and by `/authorize` for redirect-URI /
-	 * scope validation that does not require credential authentication.
+	 * scope validation.
 	 *
-	 * Naming convention (AS-10, since v0.5.1): repositories use
-	 * `findBy<Field>` for primary-key and alternate-key lookups returning
-	 * a public projection without authentication. Single-object stores
-	 * (e.g. `UserSessionStore`) use `get(<id>)` instead. Operation-specific
-	 * names like `consumeByCode` denote atomic single-use semantics; they
-	 * are NOT subject to the `findBy` convention. The convention is
-	 * currently enforced by code review on PRs that add or rename
-	 * repository methods; a lint rule and contributor-guide section may
-	 * follow once the convention has settled across all repositories.
+	 * Naming convention: `findBy<Field>` for key lookups returning a public
+	 * projection without authentication; single-object stores (e.g.
+	 * `UserSessionStore`) use `get(<id>)`; operation names like
+	 * `consumeByCode` mark atomic single-use and are outside the convention.
 	 */
 	findById(clientId: string): Promise<PublicClient | null>;
 	/**
@@ -71,15 +61,11 @@ export interface ClientRepository {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot declaration (per A2-α §6.1)
+// ComponentMap slot declaration
 //
-// `clientRepository` is a core component produced by a composition-root-local
-// module (e.g. `repositoriesModule` in A2-γ §3.8 standalone template). Modules
-// that validate OAuth clients declare `requires: ["clientRepository"]` and
-// receive the instance through the typed DI graph.
-//
-// Per A2-γ §3.2.3 / §3.2.2 / §3.2.1: oauthSessionModule, oauthAuthorization-
-// Module, and oauthModule all require clientRepository in their manifests.
+// `clientRepository` is produced by a composition-root-local module (e.g. the
+// standalone template's `repositoriesModule`). Modules that validate OAuth
+// clients declare `requires: ["clientRepository"]`.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

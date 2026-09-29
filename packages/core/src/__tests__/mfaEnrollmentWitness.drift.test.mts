@@ -17,17 +17,15 @@
 /**
  * The MFA enrollment witness has one reading (the MFA ADR's D12):
  * `readMfaEnrollmentWitness`, which answers a value that is neither a boolean
- * nor absent as `malformed` — `503`, never a first binding. A second reading
- * written as `user.mfaEnrolled === true` would read a Store's `1` or `"true"`
- * as "not enrolled", which is the downgrade D12 exists to prevent, and it
- * would look harmless in a diff.
+ * nor absent as `malformed` (`503`, never a first binding). A second reading
+ * such as `user.mfaEnrolled === true` would read a Store's `1` or `"true"` as
+ * "not enrolled", the downgrade D12 exists to prevent.
  *
  * So no product file in any package, nor in the standalone template, reads
- * `mfaEnrolled` but the reader itself: a property access (`user.mfaEnrolled`, `user?.mfaEnrolled`), an
- * element access by the literal name, or a destructuring binding. Read with
- * TypeScript's parser, so a comment or a string that names the field is not a
- * read, and the declaration on `User` is not one either. Tests are left out:
- * they assert on the raw value on purpose.
+ * `mfaEnrolled` but the reader itself: a property access, an element access by
+ * the literal name, or a destructuring binding. Read with TypeScript's parser,
+ * so a comment, a string or the declaration on `User` is not a read. Tests are
+ * left out: they assert on the raw value on purpose.
  */
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";

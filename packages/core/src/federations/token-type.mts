@@ -15,21 +15,18 @@
  */
 
 /*
- * RFC 6749's `token_type`: `BEARER_TOKEN_TYPE`, `canonicalTokenType` (whether
- * a value is a `token-type` at all, per §A.13 — a `type-name` or a URI
- * reference, checked against RFC 3986's grammar including its structure) and
- * `isBearerTokenType` (§5.1's case-insensitive comparison). What an upstream
- * token may be handed on as, asked by both routes that hand one on. No state.
+ * RFC 6749 `token_type`: whether a value is a token type at all (§A.13,
+ * checked against RFC 3986's grammar) and whether it is Bearer (§5.1). Both
+ * routes that hand an upstream token on ask these.
  */
 
 import { isIPv6 } from "node:net";
 
 /**
  * The one type an upstream access token may be handed on as, spelled as RFC
- * 6750 §2.1 spells the scheme. RFC 6749 §5.1 makes the comparison
- * case-insensitive ("Value is case insensitive", said there and in §4.2.2;
- * §7.1 is what defines the types themselves), so this is the spelling to
- * WRITE, never the one to test against — {@link isBearerTokenType} is that.
+ * 6750 §2.1 spells the scheme. RFC 6749 §5.1 compares case-insensitively, so
+ * this is the spelling to write, never to test against; use
+ * {@link isBearerTokenType}.
  */
 export const BEARER_TOKEN_TYPE = "Bearer";
 
@@ -74,27 +71,20 @@ const RELATIVE_REF = new RegExp(
 const IP_FUTURE = new RegExp(`^[vV][0-9A-Fa-f]+\\.[${UNRESERVED}${SUB_DELIMS}:]+$`);
 
 /**
- * Whether a value is a `token-type` in the sense of RFC 6749 §A.13:
+ * Whether a value is a `token-type` (RFC 6749 §A.13):
  *
  *     token-type = type-name / URI-reference
  *     type-name  = 1*name-char
  *     name-char  = "-" / "." / "_" / DIGIT / ALPHA
  *
- * Every `name-char` is an RFC 3986 unreserved character, so every non-empty
- * `type-name` is itself a valid relative reference and the union reduces to
- * one question: is this a URI reference? That is answered by RFC 3986's own
- * grammar — structure included, not only the character set. A lexical check
- * let `https://[` through, an IP-literal that never closes, and read it as a
- * type the upstream meant (#649 review).
+ * Every non-empty `type-name` is a valid RFC 3986 relative reference, so this
+ * reduces to "is it a URI reference?", answered by RFC 3986's grammar with
+ * its structure: a lexical check would pass `https://[`, an IP-literal that
+ * never closes. Brackets appear only around an IP-literal, so bracketed text
+ * must be an IPv6 address or an IPvFuture.
  *
- * `[` and `]` appear nowhere in RFC 3986 except around an IP-literal, so once
- * the structure matched, any bracketed text IS the IP-literal, and it has to
- * be an IPv6 address or an IPvFuture.
- *
- * The one deliberate departure: `""` is a URI reference (`path-empty` with no
- * query or fragment) and is refused here. §5.1 makes `token_type` REQUIRED,
- * and a value that names nothing does not meet that — it is an adapter
- * answering something broken, not an upstream naming a type.
+ * `""` is a URI reference but is refused: §5.1 makes `token_type` REQUIRED,
+ * and an empty one is a broken adapter answer, not a type.
  */
 function isTokenType(value: string): boolean {
 	if (value.length === 0) return false;
@@ -104,18 +94,14 @@ function isTokenType(value: string): boolean {
 }
 
 /**
- * The stored form of an upstream `token_type`: the name the upstream gave, or
- * `undefined` when what it gave is not a token type at all (RFC 6749 §A.13,
- * {@link isTokenType}).
+ * The stored form of an upstream `token_type`: the upstream's spelling,
+ * neither trimmed nor re-cased, or `undefined` when it is not a token type at
+ * all ({@link isTokenType}).
  *
- * This is what separates an adapter answering something BROKEN from an
- * upstream answering a real type this provider may not hand on — the two
- * refusals `POST /oauth/federation/:name/token` gives on a refresh. It has to
- * be the grammar and not a looser bound, or garbage such as `"Bearer^"` is
- * read as a type name and answered as if the upstream had meant it.
- *
- * Nothing is trimmed or re-cased. The spelling is the upstream's, and
- * {@link isBearerTokenType} is what reads it.
+ * This separates a broken adapter answer from a real type this provider may
+ * not hand on, the two refusals `POST /oauth/federation/:name/token` gives on
+ * a refresh. It must be the grammar, not a looser bound, or garbage such as
+ * `"Bearer^"` is answered as a type the upstream meant.
  */
 export function canonicalTokenType(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
@@ -126,24 +112,15 @@ export function canonicalTokenType(value: unknown): string | undefined {
  * Whether a named token type is `Bearer`, however the upstream spelled it
  * (RFC 6749 §5.1; oauth4webapi lower-cases what it was sent).
  *
- * This is the question a route asks before handing an upstream's access token
- * to somebody else, and the answer is no for every other name in IANA's Access
- * Token Types registry. `PoP` (RFC 9200) and `DPoP` (RFC 9449) are
- * sender-constrained: presenting one takes a proof of possession of a key, and
- * the recipient of a token delegated by value does not hold that key — the
- * provider cannot present it on their behalf either, so there is no reading
- * under which such a token is usable once it has been handed on. `N_A` (RFC
- * 8693 §2.2.1) is not sender-constrained but is not an access token type at
- * all: it is Token Exchange's marker for "no type applies", and there is
- * nothing to present. Answering any of them as `Bearer` would be worse than
- * refusing: it drops a constraint the upstream imposed, or invents one that
- * was never issued, and hands out a credential that only looks usable.
+ * A route asks this before handing an upstream access token on; every other
+ * IANA Access Token Type is refused. `PoP` (RFC 9200) and `DPoP` (RFC 9449)
+ * are sender-constrained: the recipient does not hold the key, and the
+ * provider cannot present it for them. `N_A` (RFC 8693 §2.2.1) is not an
+ * access token type at all. Reading any of them as `Bearer` would drop a
+ * constraint or hand out a credential that only looks usable.
  *
- * A type nobody named is not judged here. RFC 6749 §5.1 makes `token_type`
- * REQUIRED, so an answer that omits it comes from an adapter written before
- * the field rather than from an upstream meaning "not bearer" — but that
- * reading belongs to the caller that knows which of the two it is holding, and
- * is stated where it is made rather than hidden in this predicate.
+ * An absent type is not judged here: only the caller knows whether it holds
+ * an adapter's omission or an upstream's answer.
  */
 export function isBearerTokenType(named: unknown): named is string {
 	return typeof named === "string" && named.toLowerCase() === "bearer";

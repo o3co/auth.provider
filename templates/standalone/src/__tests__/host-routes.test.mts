@@ -15,17 +15,10 @@
  */
 
 /**
- * The host's own routes — liveness, readiness, the metrics scrape — mounted
- * as the process mounts them (`mountRoutes`), and what an error one of them
- * lets through is answered with.
- *
- * The composed router answers its own errors with core's terminal handler.
- * The host's routes sat in front of a handler of the template's own, which
- * answered in other words ("Internal server error"), took any 4xx `status`
- * for the client's mistake and answered it as one, handed an error on to
- * Express once the headers were out (whose final handler prints the stack),
- * and logged the path as it arrived. Core's handler is now the one after
- * them too, so a deployment answers every route's error the same way.
+ * The host's own routes (liveness, readiness, the metrics scrape), mounted as
+ * the process mounts them (`mountRoutes`), and what an error one of them lets
+ * through is answered with: core's terminal handler, the same one behind the
+ * composed router, so every route's error is answered the same way.
  */
 
 import type { Logger, ReadinessProbe } from "@o3co/auth-provider-core";

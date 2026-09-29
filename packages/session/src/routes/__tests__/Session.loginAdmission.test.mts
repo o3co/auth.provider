@@ -15,24 +15,15 @@
  */
 
 /**
- * `POST /session/login` asks before anything is written (the
- * session-admission ADR's D5, build order A6).
- *
- * Once the Store's `authenticate` succeeds, the route builds the primary with
- * core's `passwordPrimary` and calls `admitPrimary`; each outcome's answer is
- * pinned here: `establish` → the session established as it always was;
- * `unavailable` → `503`, logged once by admission, nothing written;
- * `interrupt` → the express session regenerated and left unauthenticated, the
- * requirement's ceremony opened with the regenerated session's id, the session
- * saved, and the requirement's validated `403` answered with a fresh CSRF
- * token — and each point that can fail after the regeneration (the
- * regeneration itself, `open`, the save) answered `503` with the cookie
- * session dropped, no `UserSession`, and the session never established.
+ * `POST /session/login` asks before anything is written (ADR
+ * 2026-09-28-session-admission, D5): once the Store's `authenticate`
+ * succeeds, the route builds the primary with core's `passwordPrimary` and
+ * calls `admitPrimary`. Each outcome's answer is pinned here.
  *
  * The express session is express-session's own over its `MemoryStore`, so the
  * regeneration mints a real session id, the save is a real store write, and a
- * dropped session sets no cookie. That no requirement changes the login — the
- * route with none registered — is `Session.test.mts`'s, unchanged.
+ * dropped session sets no cookie. The route with no requirement registered is
+ * pinned by `Session.test.mts`.
  */
 
 import {
@@ -424,8 +415,6 @@ describe("POST /session/login — a user core cannot copy into the primary", () 
 	it("is refused before any requirement is asked and before anything is written: the route's error, answered 500", async () => {
 		// `passwordPrimary` holds a structured-clone copy of the user, so a
 		// value that cannot be copied — a function — is a RangeError there.
-		// Before admission the express session's JSON store dropped it and
-		// the login succeeded.
 		const { requirement, asked } = fixture(() => "establish");
 		const { app, userSessionStore, trace } = setup({
 			requirements: [requirement],

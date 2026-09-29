@@ -15,16 +15,13 @@
  */
 
 /**
- * #728: every configuration leaf core's schema declares reads the string an
+ * Every configuration leaf core's schema declares reads the string an
  * environment variable arrives as. HOCON substitutes `${?VAR}` as a string,
- * always — in a shipped file or in an operator's own. The HOCON library's Zod
- * bridge used to coerce a bare `z.boolean()` / `z.number()` leaf on the way
- * into the standalone template's pre-parse; boot's one composed parse is
- * plain Zod, so such a leaf would refuse `"false"` where it used to read
- * `false`: a deployment that booted before, refused now.
+ * always, and boot's one composed parse is plain Zod: a bare `z.boolean()` /
+ * `z.number()` leaf would refuse `"false"`.
  *
- * It walks core's transitional base — core's sections and every section it
- * mirrors — through objects, records and lists. The modules' own schemas are
+ * The walk covers core's transitional base (core's sections and every section
+ * it mirrors) through objects, records and lists. The modules' own schemas are
  * held to the same rule where they are all loaded (`tools/composition`,
  * `unreadableModuleLeaves` from the testing entry).
  */

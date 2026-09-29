@@ -23,16 +23,12 @@ const DEFAULT_WAIT_MS = 4_000;
 const POLL_INTERVAL_MS = 50;
 
 /**
- * Creates a single-process advisory lock usable by the in-memory
- * FederationTokenStore adapter. Not shared across processes — use
- * the redis lock (Task 3) for multi-process deployments.
+ * Single-process advisory lock for the in-memory FederationTokenStore. Not
+ * shared across processes; multi-process deployments need the redis lock.
  *
- * Stale entries (TTL-expired but never re-acquired) remain in the internal
- * Map until the next acquire of the same (sid, federationName) pair. For the
- * F-6 use case — one lock per active refresh cycle, TTL ≤ 5s — this is a
- * negligible bounded cost; deployments with very high distinct-session churn
- * and rare re-locks on the same federation can rely on process recycling
- * for final cleanup.
+ * A TTL-expired entry stays in the Map until the same (sid, federationName)
+ * is acquired again or released, so the Map grows with the number of distinct
+ * pairs a process has locked. Nothing sweeps it; it is a development adapter.
  */
 export function createInProcessLock(): Pick<SupportsLock, "acquireLock"> {
 	const holders = new Map<string, { expiresAt: number; token: symbol }>();

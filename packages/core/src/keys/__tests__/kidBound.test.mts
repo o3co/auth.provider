@@ -16,16 +16,12 @@
 
 /**
  * A keystore refuses, when it is built, a `kid` that `verifyJwt` would refuse.
- *
- * `verifyJwt` refuses a `kid` header that is not a well-formed key id — not a
- * string, empty, longer than `MAX_KID_LENGTH`, or carrying a control
- * character — as `kid_unknown`, before any keystore is asked. A keystore
- * configured with such a kid built and signed without complaint, and then
- * every token it signed was refused: a total outage, reported as the
- * client's fault. So the rule is checked where the kid is chosen — the
- * current kid, every previous kid, on the local stores and the remote-signing
- * one, and in `oauth.jwt.signingKey` — and a kid that passes is one the
- * verifier asks for.
+ * `verifyJwt` refuses a `kid` that is not a well-formed key id (not a string,
+ * empty, longer than `MAX_KID_LENGTH`, or carrying a control character) as
+ * `kid_unknown`, so a keystore built with one would sign only tokens that are
+ * refused: a total outage, reported as the client's fault. So the rule is
+ * checked where the kid is chosen: the current and every previous kid, on the
+ * local and remote-signing stores, and in `oauth.jwt.signingKey`.
  */
 
 import { generateKeyPairSync, sign as nodeSign } from "node:crypto";

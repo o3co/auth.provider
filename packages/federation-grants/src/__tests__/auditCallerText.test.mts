@@ -15,16 +15,13 @@
  */
 
 /**
- * What the audit trail keeps of a caller's own text (#593, D18).
- *
- * Two fields of these events are the caller's before anything has checked
- * them: `details.grantId`, the path parameter — audited by the denial hook
- * before client authentication, and by core for a grant nobody holds — and
- * `subject`, the `sub` the body asserts. The deployment's sink is read by
- * systems that split on a line break (the standalone writes every event into
- * its log), so both reach it sanitised and capped, as the log lines of this
- * package already carry them. Run against the real router, stores and core
- * retrieval, with the real sink seam.
+ * What the audit trail keeps of a caller's own text (the federation-grants
+ * ADR, D18). Two fields are the caller's before anything has checked them:
+ * `details.grantId`, the path parameter (audited by the denial hook before
+ * client authentication, and by core for a grant nobody holds), and `subject`,
+ * the `sub` the body asserts. Sinks are read by systems that split on a line
+ * break, so both reach the sink sanitised and capped, as this package's log
+ * lines carry them. Runs the real router, stores, core retrieval and sink seam.
  */
 
 import type { AuditEvent } from "@o3co/auth-provider-core";

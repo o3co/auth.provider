@@ -41,21 +41,17 @@ export type GrantPolicyOutcome =
 	| { readonly ok: false; readonly result: GrantError };
 
 /**
- * A decision the policy was not entitled to make — a scope or an audience
- * outside the ceiling the grant handed it (#520).
+ * A decision the policy was not entitled to make: a scope or an audience
+ * outside the ceiling the grant handed it.
  *
- * `500 server_error`, not a 4xx. The request was well formed and the caller
- * did nothing wrong; the deployment's own policy code did, and an error that
- * says otherwise sends the wrong person looking. RFC 6749 §5.2 defines no
- * server-side code for the token endpoint, and the peers that met the same
- * gap answer the same way — node-oidc-provider, Keycloak and Spring
- * Authorization Server all return `server_error` there. A 5xx is also what an
- * operator's alerting watches: a broken policy filed among client mistakes is
- * a broken policy nobody notices.
+ * `500 server_error`, not a 4xx: the caller did nothing wrong, the
+ * deployment's policy code did, and a 5xx is what an operator's alerting
+ * watches. RFC 6749 §5.2 defines no server-side code for the token endpoint;
+ * node-oidc-provider, Keycloak and Spring Authorization Server also answer
+ * `server_error` here.
  *
- * `deny` is not this — a policy that refuses is doing its job, and its answer
- * goes out as its own `400`. A policy that throws is `503
- * temporarily_unavailable`: an outage, not a fault.
+ * Not `deny` (a policy doing its job, answered `400`), nor a policy that
+ * throws (`503 temporarily_unavailable`, an outage).
  */
 export function policyOutOfBounds(errorDescription: string): GrantError {
 	return { status: 500, error: "server_error", errorDescription };
@@ -99,34 +95,25 @@ export interface EvaluateGrantPolicyOptions {
 }
 
 /**
- * Evaluate `grantPolicy` for a token grant, fail-closed (CP-18), and apply
- * its scope decision to the grant's already-narrowed effective scope.
+ * Evaluate `grantPolicy` for a token grant, fail-closed, and apply its scope
+ * decision to the grant's already-narrowed effective scope. The rules every
+ * minting path applies:
  *
- * One home for the three rules every minting path applies, so the next grant
- * consults the policy by calling this rather than by knowing the folklore:
- *
- * - **A policy that throws is `503 temporarily_unavailable`**, never allow.
- *   Policy is a security boundary; failing open would grant the pre-policy
- *   ceiling, which is exactly what the policy exists to prevent. The throw is
- *   logged at error level as `grant_policy_unavailable`
- *   ({@link logGrantPolicyUnavailable}) through `options.logger` — a required
- *   key, so a caller has to say which logger, or `undefined` on purpose.
+ * - **A policy that throws is `503 temporarily_unavailable`**, never allow:
+ *   failing open would grant the pre-policy ceiling the policy exists to
+ *   narrow. Logged as `grant_policy_unavailable`
+ *   ({@link logGrantPolicyUnavailable}).
  * - **`deny` is `400` with the policy's own error** and description.
- * - **`grantedScope` may only narrow.** It is re-validated against
- *   `effectiveScopes` — the request as already narrowed to every ceiling the
- *   grant knows — and not against a broader allowlist: a policy returning a
- *   scope the caller did not ask for is scope expansion even when the client
- *   would have been allowed it, and is answered by {@link policyOutOfBounds}.
- *   An empty array is honoured as "strip all" (CP-15). Absent, the effective
- *   scopes stand.
+ * - **`grantedScope` may only narrow.** It is checked against the ceiling
+ *   (by default `effectiveScopes`, the request already narrowed to every
+ *   ceiling the grant knows), not a broader allowlist: a scope the caller did
+ *   not ask for is expansion even when the client would have been allowed
+ *   it ({@link policyOutOfBounds}). An empty array strips all; absent, the
+ *   effective scopes stand.
  *
- * `grantedAudience` is left on `decision` for the caller to hand to
- * {@link boundPolicyAudience} together with the ceiling its grant applies.
- *
- * `options.scopeCeiling` is for a grant whose ceiling is wider than its default:
- * `refresh_token`, where a silent policy leaves the scope the refresh asked
- * for and a `grantedScope` may reach anything in the original grant (RFC 6749
- * §6). Omitted, the ceiling is `effectiveScopes` itself.
+ * `grantedAudience` stays on `decision` for the caller to pass to
+ * {@link boundPolicyAudience}. `options.scopeCeiling` is for `refresh_token`,
+ * whose `grantedScope` may reach anything in the original grant (RFC 6749 §6).
  */
 export async function evaluateGrantPolicy(
 	grantPolicy: GrantPolicyHook,
@@ -172,9 +159,8 @@ export async function evaluateGrantPolicy(
 		return { ok: true, scopes: effectiveScopes, decision };
 	}
 	if (!Array.isArray(decision.grantedScope)) {
-		// #521: a JS policy returning a string passes a truthiness check, and
-		// `.filter` would then throw a TypeError that dispatch does not catch —
-		// fail-closed, but ungraceful. Refuse it as what it is.
+		// A JS policy's string passes a truthiness check, and `.filter` would then
+		// throw a TypeError dispatch does not catch. Refuse it as what it is.
 		return { ok: false, result: policyOutOfBounds("policy returned a non-array grantedScope") };
 	}
 	const ceilingSet = new Set(scopeCeiling.scopes);
@@ -195,27 +181,23 @@ export type PolicyAudienceOutcome =
 	| { readonly ok: false; readonly result: GrantError };
 
 /**
- * Apply the policy's audience decision within `ceiling` — the audiences the
- * grant may mint for, or `undefined` when nothing supplies one.
- *
- * Policy may narrow, never originate (#520):
+ * Apply the policy's audience decision within `ceiling`: the audiences the
+ * grant may mint for, or `undefined` when nothing supplies one. Policy may
+ * narrow, never originate:
  *
  * - No `grantedAudience`, or an empty one, is no decision: `audience` is
  *   `null` and the grant's own default applies.
- * - With no ceiling — no authenticated client, so no `allowedAudiences` — an
- *   audience from the policy has nothing to narrow within and is refused.
- *   This is the answer every scope ceiling gives a scope with nothing to
- *   bound it, and closes the one path a policy could once use to put ANY
- *   audience on a token.
+ * - With no ceiling (no authenticated client, so no `allowedAudiences`), a
+ *   policy audience has nothing to narrow within and is refused, as a scope
+ *   with no ceiling would be. Otherwise a policy could put ANY audience on a
+ *   token.
  * - An entry outside the ceiling is refused: a buggy or compromised policy
- *   must not mint a token that a resource server the client was never
- *   registered for would accept.
- * - Otherwise the first entry is the audience. `generateToken` carries one
- *   `aud`; multi-audience tokens are out of scope for every grant that calls
- *   this.
+ *   must not mint a token for a resource server the client was never
+ *   registered for.
+ * - Otherwise the first entry is the audience; `generateToken` carries one
+ *   `aud`.
  *
- * Both refusals are {@link policyOutOfBounds}: the policy exceeded its
- * authority, the caller did not.
+ * Both refusals are {@link policyOutOfBounds}.
  */
 export function boundPolicyAudience(
 	decision: GrantPolicyAllow,
@@ -224,7 +206,7 @@ export function boundPolicyAudience(
 	const granted = decision.grantedAudience;
 	if (granted === undefined) return { ok: true, audience: null };
 	if (!Array.isArray(granted)) {
-		// #521: the same guard as the scope half — a string would reach `.filter`.
+		// The same guard as the scope half: a string would reach `.filter`.
 		return { ok: false, result: policyOutOfBounds("policy returned a non-array grantedAudience") };
 	}
 	if (granted.length === 0) return { ok: true, audience: null };

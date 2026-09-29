@@ -15,22 +15,12 @@
  */
 
 /**
- * loopback.test.mts — the single loopback-hostname vocabulary (#364).
- *
- * Three consumers share this predicate and must not drift apart:
- *   - `checkSecureEndpoint` (`@o3co/auth-provider-foundation`, #285): `http://`
- *     Store URLs are accepted for loopback hosts only.
- *   - `checkRedirectShape` (`@o3co/auth-provider-session`, #278): `http://`
- *     redirect targets are accepted for loopback hosts only.
- *   - the operator-facing carve-out prose both of them print, which promises
- *     "localhost, 127.0.0.0/8, [::1]" — this suite is that promise, executable.
- *
- * Before #364 the predicate existed as two sibling copies whose doc comments
- * were identical and whose behavior was not (`"::1"` unbracketed was accepted
- * by one and not the other) — the copies drifted one commit after the decision
- * not to unify them was written down. The unified predicate accepts the union:
- * both are loopback, and treating either form as non-loopback was never a
- * decision anyone made.
+ * loopback.test.mts — the single loopback-hostname vocabulary, shared by
+ * `checkSecureEndpoint` (`@o3co/auth-provider-foundation`: `http://` Store
+ * URLs) and `checkRedirectShape` (`@o3co/auth-provider-session`: `http://`
+ * redirect targets), which accept `http://` for loopback hosts only, and by
+ * the operator-facing carve-out prose both print, which promises "localhost,
+ * 127.0.0.0/8, [::1]" — this suite is that promise, executable.
  */
 
 import { describe, expect, it } from "vitest";
@@ -43,8 +33,7 @@ describe("isLoopbackHostname", () => {
 		// IPv6 loopback as URL.hostname reports it (always bracketed)...
 		"[::1]",
 		// ...and as a raw hostname outside a URL (what a config value or a
-		// socket API hands over). Both denote the same address; accepting only
-		// one form is how the pre-#364 copies drifted.
+		// socket API hands over). Both denote the same address.
 		"::1",
 		// The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1 —
 		// 127.0.0.53 is systemd-resolved, and containers report others.

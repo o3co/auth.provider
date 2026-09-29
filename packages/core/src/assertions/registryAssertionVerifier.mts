@@ -50,15 +50,15 @@ export interface RegistryAssertionVerifierOptions {
 	readonly audience: string | readonly string[];
 	/**
 	 * This authorization server's issuer identifier (RFC 8414) — the one and
-	 * only `aud` an ID-JAG may name (#526). Required by any entry whose
-	 * `profile` is `"id-jag"`; the token endpoint URL is not an alias there.
+	 * only `aud` an ID-JAG may name. Required by any entry whose `profile` is
+	 * `"id-jag"`; the token endpoint URL is not an alias there.
 	 */
 	readonly issuerIdentifier?: string;
 	/**
-	 * Where ID-JAG `jti` values are recorded so each assertion is accepted once
-	 * (#526). Keyed per issuer, expiring with the assertion. Required by any
-	 * `"id-jag"` entry; an outage of the store throws, so the grant answers
-	 * `503` rather than accepting a replay.
+	 * Where ID-JAG `jti` values are recorded so each assertion is accepted once,
+	 * keyed per issuer and expiring with the assertion. Required by any
+	 * `"id-jag"` entry; a store outage throws, so the grant answers `503` rather
+	 * than accepting a replay.
 	 */
 	readonly replaySeenSet?: ReplaySeenSet;
 	/** Adapter kind, for logs and boot diagnostics. Default `"jwt-registry"`. */
@@ -66,38 +66,23 @@ export interface RegistryAssertionVerifierOptions {
 	/** The fetch a `jwks_uri` entry's key set uses. An egress proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
 	/**
-	 * Where a refusal says why. The grant answers every refusal the same
-	 * `invalid_grant`, so without this an operator cannot tell an IdP minting
-	 * over-long ID-JAGs from a bad signature. Logged at warn as
-	 * `jwt_bearer_assertion_refused` with the entry's `issuer` and a `reason`:
-	 * `lifetime` (an ID-JAG past `MAX_ASSERTION_LIFETIME_SECONDS` and the
-	 * entry's clock tolerance; with `lifetimeSeconds` and
-	 * `maxLifetimeSeconds`) or `numeric_date` (with the `claim`) — and,
-	 * without an `issuer`, as `malformed_issuer` for an `iss` that cannot name
-	 * one (refused before the registry is asked; the value is the client's and
-	 * is not logged). Other refusals are not logged here. Absent, nothing is
-	 * logged.
+	 * Where a refusal says why: the grant answers every refusal with the same
+	 * `invalid_grant`. Logged at warn as `jwt_bearer_assertion_refused` with the
+	 * entry's `issuer` and a `reason`: `lifetime` (with `lifetimeSeconds` and
+	 * `maxLifetimeSeconds`) or `numeric_date` (with the `claim`); without an
+	 * `issuer`, `malformed_issuer` for an `iss` that cannot name one (the
+	 * client's value is not logged). Other refusals are not logged.
 	 */
 	readonly logger?: Logger;
 	/**
-	 * How an entry's claims are read — code, so it lives here rather than on
-	 * the entry a store holds. Called per verification with the entry found;
-	 * `undefined`, or an absent reader, keeps the default: a non-empty `sub`
-	 * (or `<iss>#<sub>` / `<iss>#<tenant>#<sub>` for an ID-JAG) and a
-	 * space-delimited `scope`.
+	 * How an entry's claims are read (code, so it is not stored on the entry).
+	 * Called per verification, ID-JAG entries included; `undefined` or an absent
+	 * reader keeps the default: a non-empty `sub` (`<iss>#<sub>` /
+	 * `<iss>#<tenant>#<sub>` for an ID-JAG) and a space-delimited `scope`.
 	 *
-	 * It runs for every entry, ID-JAG ones included. With several issuers
-	 * whose `sub` values may collide, namespace the handle for the entries that
-	 * need it and return `undefined` for the rest, and refuse a missing or empty
-	 * `sub` rather than namespacing it — the Store receives the handle alone:
-	 *
-	 * ```ts
-	 * readersFor: (entry) =>
-	 *   entry.profile === "id-jag"
-	 *     ? undefined // keeps <iss>#<tenant>#<sub>
-	 *     : { readSubjectHandle: (c) =>
-	 *         typeof c.sub === "string" && c.sub.length > 0 ? `${entry.issuer}#${c.sub}` : null },
-	 * ```
+	 * When issuers' `sub` values may collide, namespace the handle for the
+	 * entries that need it, and refuse a missing or empty `sub` rather than
+	 * namespacing it: the Store receives the handle alone.
 	 */
 	readonly readersFor?: (entry: AssertionIssuerEntry) => AssertionClaimReaders | undefined;
 }
@@ -150,12 +135,10 @@ const readResources = (claims: JWTPayload): readonly string[] | undefined => {
 };
 
 /**
- * jose error codes that mean "this assertion does not verify". Everything else
- * — a JWKS endpoint that timed out, answered non-200, or published a set that
- * does not parse; a network failure — means the verifier could not reach a
- * conclusion, and is thrown so the grant answers `503` rather than telling a
- * device its credential is bad when the truth is that the issuer's endpoint
- * is down (the #408 distinction).
+ * jose error codes that mean "this assertion does not verify". Anything else
+ * (a JWKS endpoint that timed out, answered non-200 or published an unparsable
+ * set; a network failure) means no conclusion was reached, and is thrown so the
+ * grant answers `503` instead of calling a good credential bad.
  */
 const REFUSAL_CODES: ReadonlySet<string> = new Set([
 	"ERR_JWS_SIGNATURE_VERIFICATION_FAILED",
@@ -173,70 +156,36 @@ const isRefusal = (err: unknown): boolean =>
 	err instanceof errors.JOSEError && REFUSAL_CODES.has(err.code);
 
 /**
- * The {@link AssertionVerifier} over a trust registry (#525): "we trust these
- * N issuers, each with their own keys and terms", where
- * `createJwtAssertionVerifier` was "this one key, this one issuer".
+ * The {@link AssertionVerifier} over a trust registry: several issuers, each
+ * with its own keys and terms (clients, subjects, scopes, audiences).
  *
- * ## Order of checks, and why
- *
- * 1. Decode the claims without verifying, read `iss`, and look it up. An
- *    issuer nobody registered is refused **before any signature work**: no
- *    key is fetched, no signature is checked. This is what keeps an
- *    unregistered issuer from costing a JWKS fetch per probe, and what makes
- *    "signed by A, claiming to be B" fail on B's keys rather than A's.
- * 2. The entry must not have expired, and the presenting client must be one
- *    the entry admits (`allowedClients`; an unauthenticated presenter passes
- *    only when the entry names no list).
- * 3. Signature, `iss`, `aud`, `exp` (mandatory, RFC 7523 §3 item 4), `nbf` /
- *    `iat` when present, against the entry's keys and algorithms — and each of
- *    the three a NumericDate (core's `jwt/numericDate.mts`): jose checks only
- *    that it is a number, so `exp: 1e400` (Infinity) would otherwise verify as
- *    an assertion that never expires and reach the ID-JAG replay record,
- *    whose store refuses an infinite lifetime with a `RangeError` the grant
- *    answers `503`. A malformed date is the assertion's fault: `null`.
- * 4. `sub` must be one the entry admits (`allowedSubjects`), and the handle
- *    reader must find a handle.
- * 5. The result carries the entry's ceilings: the scope claim intersected
- *    with `allowedScopes`, and `allowedAudiences` as the audience ceiling —
- *    and the assertion's own, `exp` as `expiresAt`, which caps the issued
- *    token's lifetime (auth.proxy#90).
- *
- * ## The ID-JAG profile (#526)
+ * The unverified `iss` is looked up first, so an unregistered issuer is refused
+ * before any key fetch or signature check (a probe costs no JWKS fetch), and an
+ * assertion claiming issuer B is verified against B's keys only. `exp` is
+ * mandatory (RFC 7523 §3 item 4), and `exp` / `nbf` / `iat` must be
+ * NumericDates: jose only checks for a number, so `exp: 1e400` would never
+ * expire. The result carries the entry's scope and audience ceilings and `exp`
+ * as `expiresAt`, which caps the issued token.
  *
  * An entry with `profile: "id-jag"` accepts the Identity Assertion JWT
- * Authorization Grant (draft-ietf-oauth-identity-assertion-authz-grant) —
- * what an enterprise IdP mints for a client so a resource's authorization
- * server can issue it a token. On top of the checks above, in step 3 and
- * after it:
+ * Authorization Grant (draft-ietf-oauth-identity-assertion-authz-grant) and
+ * also requires:
+ * - header `typ` `oauth-id-jag+jwt` (§3, RFC 8725 §3.11);
+ * - `aud` exactly `issuerIdentifier` (never the token endpoint URL), as a
+ *   string or a one-element array;
+ * - `client_id` naming the client authenticated at the token endpoint;
+ * - `jti`, `iat` and `sub`, with each `jti` accepted once per issuer until
+ *   `exp` (`replaySeenSet`). A `jti` over `MAX_JTI_LENGTH`, or a lifetime or
+ *   `iat` age over `MAX_ASSERTION_LIFETIME_SECONDS` plus clock tolerance, is
+ *   refused before it is recorded, so the replay record stays bounded;
+ * - `scope` and `resource` as claims, intersected with `allowedScopes` and
+ *   `allowedAudiences` (a resource the entry does not admit is refused);
+ * - the handle `<iss>#<sub>` (or `<iss>#<tenant>#<sub>`): `sub` is unique only
+ *   within its issuer, and linking it to a local principal is the Store's job.
  *
- * - the JWT header `typ` MUST be `oauth-id-jag+jwt` (§3, RFC 8725 §3.11);
- * - `aud` MUST be this server's issuer identifier — `issuerIdentifier`,
- *   never the token endpoint URL — as one string or a one-element array;
- * - `client_id` MUST name the client that authenticated at the token
- *   endpoint; an unauthenticated presenter is refused — client
- *   authentication is required for this grant;
- * - `jti`, `iat` and `sub` are required, and each `jti` is accepted **once**
- *   for the assertion's lifetime, recorded in `replaySeenSet` per issuer; a
- *   `jti` longer than `MAX_JTI_LENGTH` (256) is refused before it is recorded,
- *   and so is an assertion with a lifetime of more than
- *   `MAX_ASSERTION_LIFETIME_SECONDS` past now (plus the entry's clock
- *   tolerance, as every other time check here allows), or an `iat` more than
- *   that old (`lifetime.mts`, the ceiling `private_key_jwt` holds a client
- *   assertion to) — logged as such (`logger`);
- * - `scope` and `resource` travel as claims, not request parameters: the
- *   scope ceiling is the claim intersected with `allowedScopes`, and the
- *   audience ceiling is the `resource` claim intersected with
- *   `allowedAudiences` (a resource the entry does not admit is refused). The
- *   grant then bounds both by the client's registration.
- * - the handle is `<iss>#<sub>` (or `<iss>#<tenant>#<sub>`): `sub` is unique
- *   only within its issuer, and resolving it to a local principal stays
- *   with the Store — an unlinked one is refused there.
- *
- * Every refusal is the same `null`. Distinguishing them would let a caller
- * probe for which issuers are registered or which subjects are admitted —
- * the reason goes to the server's log only (`logger`).
- * Replay within `exp` is detected for ID-JAG only; a plain RFC 7523 issuer
- * should mint short-lived assertions.
+ * Every refusal is the same `null`, so a caller cannot probe which issuers or
+ * subjects are registered; the reason goes to `logger` only. Replay within
+ * `exp` is detected for ID-JAG only.
  */
 export function createRegistryAssertionVerifier(
 	options: RegistryAssertionVerifierOptions,
@@ -364,16 +313,13 @@ export function createRegistryAssertionVerifier(
 					audience: idJag ? (issuerIdentifier as string) : audiences,
 					clockTolerance,
 					algorithms: [...entry.algorithms],
-					// RFC 7523 §3 item 4: `exp` is mandatory. jose validates it only
-					// when present, so without naming it an assertion that omits it
-					// never expires. `iat` and `nbf` stay optional (MAYs) and are
-					// validated when present — except under ID-JAG, where iat,
-					// jti, sub and client_id are all required claims (§3).
+					// RFC 7523 §3 item 4: `exp` is mandatory, and jose checks it only
+					// when present. `iat` and `nbf` stay optional, except that ID-JAG
+					// §3 requires iat, jti, sub and client_id.
 					requiredClaims: idJag ? ["exp", "iat", "jti", "sub", "client_id"] : ["exp"],
-					// An ID-JAG's `iat` is also bounded (v0.13.0 audit): its `jti` is
-					// remembered until `exp`, so an old assertion with a distant `exp`
-					// is a stale grant and a long-lived replay record at once. The
-					// same hour the `private_key_jwt` verifier allows.
+					// An ID-JAG's `iat` is bounded too: an old assertion with a
+					// distant `exp` is a stale grant and a long-lived replay record.
+					// The same hour the `private_key_jwt` verifier allows.
 					...(idJag ? { maxTokenAge: MAX_ASSERTION_LIFETIME_SECONDS } : {}),
 					...(idJag ? { typ: ID_JAG_TYP } : {}),
 				}));
@@ -398,12 +344,9 @@ export function createRegistryAssertionVerifier(
 				// kept until `exp`, so the issuer's claim does not decide its size.
 				const jti = claims.jti;
 				if (!isRecordableJti(jti)) return null;
-				// At most an hour past now (`lifetime.mts`), refused before the
-				// jti is recorded: the record lives until `exp`, so an unbounded
-				// `exp` would be a replay record with no bound either. The clock
-				// tolerance is allowed here as in every other time check — an
-				// IdP whose clock runs ahead mints an hour-long ID-JAG a little
-				// past an hour from this server's now.
+				// At most an hour past now (`lifetime.mts`), plus the clock
+				// tolerance as in every other time check. Refused before the jti
+				// is recorded: the record lives until `exp`.
 				const { exceeded, lifetimeSeconds, maxLifetimeSeconds } = assertionLifetime(
 					claims.exp as number,
 					Math.floor(Date.now() / 1000),
@@ -466,10 +409,8 @@ export function createRegistryAssertionVerifier(
 				issuer: entry.issuer,
 				...(scope === undefined ? {} : { scope }),
 				...(audienceCeiling === undefined ? {} : { audience: audienceCeiling }),
-				// Required by jose and a NumericDate (checked above) for both
-				// profiles. As the claim says — one inside the clock tolerance is
-				// already past, and the grant, not this verifier, refuses it
-				// (auth.proxy#90).
+				// NumericDate-checked above. Kept as claimed: one already past
+				// within the clock tolerance is refused by the grant, not here.
 				expiresAt: claims.exp as number,
 			};
 		},

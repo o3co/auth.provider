@@ -15,13 +15,12 @@
  */
 
 /**
- * What every consumer of session admission in this package shares (the
- * session-admission ADR's D1, D8): the token endpoint's shape of a `step_up`
- * refusal — `invalid_grant` with `step_up: "<requirement>"`, RFC 6749's
- * vocabulary with one member beside it (the MFA ADR's D16 row), which the
- * `session`, `authorization_code` and `refresh_token` grants all answer and
- * `/oauth/token` copies onto the wire. The refusal a factory built by hand
- * answers for a missing or forged requirements resolver is core's
+ * The token endpoint's `step_up` refusal, shared by every consumer of session
+ * admission in this package (see ADR 2026-09-28-session-admission):
+ * `invalid_grant` with one member beside RFC 6749's, `step_up:
+ * "<requirement>"`. The `session`, `authorization_code` and `refresh_token`
+ * grants answer it and `/oauth/token` copies it onto the wire. A hand-built
+ * factory's missing or forged requirements resolver is refused by core's
  * `checkResolver(value, factory)`, which every consumer factory runs at
  * construction.
  */
@@ -38,7 +37,7 @@ export interface StepUpRefusal extends GrantError {
 }
 
 /**
- * A `step_up` admission as a grant answers it (D8): the session is live and
+ * A `step_up` admission as a grant answers it: the session is live and
  * a requirement can be met by a trip a token endpoint cannot send anyone on,
  * so the client re-authenticates the user interactively — `invalid_grant`,
  * with the requirement named in `step_up`.

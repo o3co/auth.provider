@@ -33,17 +33,12 @@ export interface ConsentStoreContractFactory {
 }
 
 /**
- * The behaviour every {@link ConsentStore} adapter shares (#527). The memory
- * adapter runs this in-tree; a Redis adapter runs the same suite against a
- * real Redis, so the two cannot disagree about what a record means.
- */
-/**
  * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
  * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
- * NaN is never `<= now`, so it slipped past every past-expiry check; one past
- * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
- * as `1e+21`) and a Date cannot hold, and a script that writes its record
- * before setting the deadline left the record with no TTL at all.
+ * NaN is never `<= now`, so it passes every past-expiry check; one past the
+ * Date range is a number Redis cannot take as a deadline (`1e21` is sent as
+ * `1e+21`) and a Date cannot hold, and a script that writes its record before
+ * setting the deadline would leave the record with no TTL at all.
  */
 const UNSTORABLE_EXPIRIES = [
 	Number.NaN,
@@ -54,6 +49,11 @@ const UNSTORABLE_EXPIRIES = [
 	-1e21,
 ];
 
+/**
+ * The behaviour every {@link ConsentStore} adapter shares. The memory adapter
+ * runs this in-tree; a Redis adapter runs the same suite against a real Redis,
+ * so the two cannot disagree about what a record means.
+ */
 export function runConsentStoreContract(name: string, factory: ConsentStoreContractFactory): void {
 	describe(`ConsentStore contract — ${name}`, () => {
 		let store: ConsentStore;
@@ -87,19 +87,17 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			};
 			await store.grant(record);
 			// Strictly: a record with no expiry names `expiresAt` as `undefined`
-			// rather than leaving it out (#626).
+			// rather than leaving it out.
 			expect(await store.find("u-1", "app")).toStrictEqual(record);
 			expect(await store.find("u-1", "other-app")).toBeNull();
 			expect(await store.find("u-2", "app")).toBeNull();
 		});
 
 		it("records a later grant as the union with what is already recorded, never a replacement", async () => {
-			// The port's contract (#527 review): two browsers consenting to
-			// different scopes at once must not lose the grant the user already
-			// answered for. The case this suite used to run — `[read]` then
-			// `[read, write]` — is a superset, which a replacing adapter passes
-			// too; so a later grant here is disjoint from the first, and
-			// replacing it is visible.
+			// The port's contract: two browsers consenting to different scopes at
+			// once must not lose the grant the user already answered for. The later
+			// grant is disjoint from the first, since a replacing adapter passes a
+			// superset too.
 			await store.grant({
 				sub: "u-1",
 				clientId: "app",
@@ -155,10 +153,8 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 		});
 
 		it("refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
-			// NaN is never `<= now`: the memory store kept such a consent for
-			// ever, and Redis was asked for a TTL of NaN after the record was
-			// written. "Until revoked" is `undefined`; an infinite expiry is not
-			// another spelling of it.
+			// "Until revoked" is `undefined`; an infinite expiry is not another
+			// spelling of it.
 			for (const expiresAt of UNSTORABLE_EXPIRIES) {
 				await expect(
 					store.grant({

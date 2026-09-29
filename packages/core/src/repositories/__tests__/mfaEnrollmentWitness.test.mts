@@ -15,17 +15,15 @@
  */
 
 /**
- * The MFA enrollment witness (the MFA ADR's D12): a fact outside the factor
- * store that the subject enrolled, so that losing the factor store — a Redis
- * restarted without persistence, an eviction, a Store restored from an old
- * backup — is not read as "this user never enrolled", which would let
- * whoever holds the password bind their own authenticator.
- *
- * The Store answers it on `authenticate` as `User.mfaEnrolled`, and may be
- * told it through an optional `UserRepository` capability,
- * `markMfaEnrolled`, which a guard detects by method presence. A repository
- * without the capability, and a Store that answers no field, leave the
- * witness absent.
+ * The MFA enrollment witness (ADR 2026-09-25-multi-factor-authentication): a
+ * fact outside the factor store that the subject enrolled, so that losing the
+ * factor store — a Redis restarted without persistence, an eviction, a Store
+ * restored from an old backup — is not read as "this user never enrolled",
+ * which would let whoever holds the password bind their own authenticator.
+ * The Store answers it on `authenticate` as `User.mfaEnrolled` and may be told
+ * it through the optional `markMfaEnrolled` capability, detected by method
+ * presence. A repository without the capability, and a Store that answers no
+ * field, leave the witness absent.
  */
 
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -101,9 +99,10 @@ describe("the MFA enrollment witness (D12)", () => {
 /*
  * One reading of the witness, three answers. A Store that answers `1` or
  * `"true"` passes a shape check that only asks for an object, and read as
- * `=== true` it would silently be no witness — the downgrade D12 exists to
- * prevent. So a value that is neither a boolean nor absent is malformed: the
- * coordinator answers it 503, logged once, and never opens a first binding.
+ * `=== true` it would silently be no witness — the downgrade the witness
+ * exists to prevent. So a value that is neither a boolean nor absent is
+ * malformed: the coordinator answers it 503, logged once, and never opens a
+ * first binding.
  */
 describe("readMfaEnrollmentWitness (D12)", () => {
 	it("answers enrolled for true, and not_enrolled for false or absent", () => {

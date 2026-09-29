@@ -15,19 +15,13 @@
  */
 
 /**
- * The token route's domain body (#593, D10).
- *
- * Every field here is an *assertion*: something the caller claims about the
- * grant it is asking against, which core then checks. None of them widens
- * anything — a scope the grant does not carry is a refusal, not a request —
- * so the parser's whole job is to hand core exactly what the caller wrote, or
- * to refuse before core is asked at all.
- *
- * What it deliberately does NOT do is judge. `min_ttl` is handed over as a
- * number whatever its size: whether it is negative, or larger than the
- * connection permits, is core's decision and comes back as
- * `invalid_request/min_ttl_out_of_range` — one answer for one question, rather
- * than two layers each with their own idea of the bound.
+ * The token route's domain body (the federation-grants ADR, D10). Every field
+ * is an *assertion* the caller makes about the grant, which core then checks;
+ * none widens anything (a scope the grant does not carry is a refusal, not a
+ * request). The parser hands core exactly what the caller wrote, or refuses
+ * before core is asked. It does NOT judge: `min_ttl` is handed over as a
+ * number whatever its size, and whether it is negative or above the
+ * connection's ceiling is core's `invalid_request/min_ttl_out_of_range`.
  */
 
 import { describe, expect, it } from "vitest";

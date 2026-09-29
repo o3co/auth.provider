@@ -118,7 +118,7 @@ register/replace pattern A1 §5.6 and A3 §5.6 instantiate.
 
 ### Named artifacts
 
-- **Phase 10 addendum §3 — the "backing client interface" pattern** [verified]: narrow, vendor-agnostic Redis-command client interfaces (`ChallengeStoreClient`, `RateLimiterClient`, …) consumed by adapters so the redis package's main entry never pulls ioredis types; `makeIoredisClients` at the `/ioredis` subpath constructs them. Home: `packages/redis/src/clients.mts` + `ioredis.mts`. The "v0.5.0 pre-tag interface review S3" decision relocated the interfaces out of core.
+- **Phase 10 addendum §3 — the "backing client interface" pattern** [verified]: narrow, vendor-agnostic Redis-command client interfaces (`ChallengeStoreClient`, `RateLimiterClient`, …) consumed by adapters so the redis package's main entry never pulls ioredis types; `makeIoredisClients` at the `/ioredis` subpath constructs them. Home: `packages/redis/src/clients.mts` + `ioredis.mts`.
 - **"the §9.2 matrix"** [verified]: NOT an A-spec section — Wave 2 token-binding spec §9.2. The five-row refresh-time enforcement matrix correlating a bound refresh token's persisted `cnf` claim with the request-time DPoP proof / mTLS certificate in the `refresh_token` grant. Home: `packages/oauth` refresh grant via core's `confirmationMatch.mts`; integration tests in `packages/dpop` / `packages/mtls`. Anchor: v0.8.0 CHANGELOG; ADR `2026-05-20-token-binding-first-class-abstraction.md`.
 - **const-Module pattern (A5 §10.2)** [verified]: a package exports a pre-built `defineModule` **const value** (not a factory); its config arrives through a typed ComponentMap slot listed in `requires`; it contributes the paired `federations.<name>` + `federationRedirectPolicies.<name>`. §10.1/§10.2 are the Google/GitHub instances; webauthn and session cite it as the recommended custom-module shape.
 
@@ -135,7 +135,6 @@ were tagged by series; prefix expansions are the campaign's own shorthand,
 
 - **D-1** — Code/CodeData identity binding: identity + grantedScope persist on the authorization-code record; policy evaluated once at `/authorize`; session-side binding removed [verified]
 - **D-2 v2** — standalone ioredis unification: one externally-owned client via `standaloneRedisClientsModule` (supersedes the uncited v1 design; pairs with Wave 5d) [verified]
-- **D-3** — close SF-11 by documentation rather than `Object.freeze()` on AdapterFactory ("wrong-layer framing") [reconstructed — the resolution document was never committed and is lost]
 - **D-4** — structured `Logger` interface + ComponentMap `logger` slot (six levels, consoleLogger fallback) [verified]
 - **D-5** — `BuilderContext.lifecycle`: boot-planner-owned LifecycleRegistrar drives `dispose()`; **D-5 v2** — redis adapters expose no dispose; the consumer owns the client lifecycle [verified / reconstructed]
 - **D-6** — client-authentication redesign (with PB-2): `clientAuthMw` resolves the client via `findById`; no body-spoofable identity; `azp` = authenticated client; RT bound to authorized party [verified]
@@ -157,7 +156,7 @@ OR-1 standalone wires the Redis RT-family store (in-memory broke multi-replica r
 
 ### SF-* — security findings
 
-SF-1 central JWT `typ` enforcement / `legacyTypAccept` (default flipped by Phase G S2) · SF-3 corrupt PKCE code records no longer pass (S256 and plain) · SF-4 advisory-lock check-then-delete race (=OR-13) · SF-5 token-exchange policy scope ⊆ request set · SF-6 RTs lacking jti/family_id no longer skip rotation (replay-detection bypass) · SF-8 `/introspect` returns `token_type: "Bearer"` and accepts access tokens only · SF-10 bounded in-memory rate-limiter bucket map · SF-12 federation refresh post-lock re-read guard (no `?? ""` fallback) · SF-13 federation refresh error mapping for openid-client v6 structured errors — [verified]; SF-11 AdapterFactory returned-object mutability handled by documentation (per D-3) — [reconstructed]
+SF-1 central JWT `typ` enforcement / `legacyTypAccept` (default flipped by Phase G S2) · SF-3 corrupt PKCE code records no longer pass (S256 and plain) · SF-4 advisory-lock check-then-delete race (=OR-13) · SF-5 token-exchange policy scope ⊆ request set · SF-6 RTs lacking jti/family_id no longer skip rotation (replay-detection bypass) · SF-8 `/introspect` returns `token_type: "Bearer"` and accepts access tokens only · SF-10 bounded in-memory rate-limiter bucket map · SF-12 federation refresh post-lock re-read guard (no `?? ""` fallback) · SF-13 federation refresh error mapping for openid-client v6 structured errors — [verified]
 
 ### MIN-* — minor findings
 
@@ -173,7 +172,7 @@ AS-1/AS-2 unified RFC 6749 §5.2 error envelope (+429 body migration) · AS-3 `r
 
 ### CR-* / CC-* / TS-* / SC-* / TD-* — sibling series
 
-- **CR (concurrency/race)**: CR-1 lock-release race (=OR-13) · CR-2 binding identity persisted onto the code record · CR-3 Redis pipeline TTL truncation under concurrent writes (→ D-10) · CR-4 second-store re-check before `addFamilyId` · CR-5 unknown option shape throws — all [verified]
+- **CR (concurrency/race)**: CR-1 lock-release race (=OR-13) · CR-2 binding identity persisted onto the code record · CR-3 Redis pipeline TTL truncation under concurrent writes (→ D-10) · CR-4 second-store re-check before `addFamilyId` — all [verified]
 - **CC (config correctness)**: CC-2 `unknownFamilyPolicy` key · CC-3 production misconfiguration hard-fails (warn-only in dev; residual closed by OR-12) · CC-4 compiled test artifacts must not ship (CI guard) · CC-5 readonly public DTOs — all [verified]
 - **TS (type safety, Wave 5g)**: TS-1 code-record payload persistence (=IH-2) · TS-2 runtime validation replaces the `as User` cast in HttpUserRepository · TS-3 corrupt Redis envelope validation replaces `JSON.parse as` · TS-4 `resolvePkceSupportedMethods` per-element narrowing · TS-6 refresh-family builder structural client guard — all [verified]
 - **SC (supply chain)**: SC-4 pnpm version pinned in both package.json · SC-5 dependency pin alignment · SC-6 dependency major bump for Express 5 · SC-7 `pnpm audit --prod` CI gate — all [verified]
@@ -203,7 +202,6 @@ campaign**:
 | S1 | Claude multi-agent review | missing required dep at apply-time must throw [verified] |
 | S2 (a) | Phase G security | flip `legacyTypAccept` default true→false [verified] |
 | S2 (b) | Claude multi-agent review | inconsistent diagnostic in validate-manifests [verified] |
-| S3 | v0.5.0 pre-tag interface review | backing-client interfaces live in `@o3co/auth-provider-redis`, not core (→ Phase 10 addendum §3) [verified] |
 | S7–S12 | webauthn Wave 1 spec / dogfood | see chapter 4 [verified] |
 
 "Codex Delta" tags mark findings from a Codex review pass (e.g. Delta 3:

@@ -17,23 +17,13 @@
 import type { SubjectSessionIndex } from "../types.mjs";
 
 /**
- * In-memory {@link SubjectSessionIndex} (#296).
- *
- * Deliberately **not** built on `createMemorySidSortedSet`, despite the shape
- * looking identical. That primitive keeps one expiry per *key*, which is
- * correct for the sid-keyed indexes — every member there belongs to the one
- * session and shares its expiry, and its own comment says so: "same-sid writes
- * always carry the SAME expiresAt".
- *
- * A subject-keyed index breaks that assumption. One subject's sessions expire
- * at different times, so a single bucket expiry would either keep an expired
- * session listed (when a later session extends the bucket) or drop a live one
- * early (when an earlier-expiring session shortens it). Neither is acceptable
- * for the index a credential change enumerates. Expiry is therefore tracked
- * per member.
- *
- * GC is lazy — expired members are dropped when the subject is read — with no
- * background sweep, matching the other in-memory stores here.
+ * In-memory {@link SubjectSessionIndex}. Not built on
+ * `createMemorySidSortedSet`, which keeps one expiry per key: right for the
+ * sid-keyed indexes, whose members share their session's expiry, but one
+ * subject's sessions expire at different times, and a single expiry would
+ * keep an expired session listed or drop a live one early from the index a
+ * credential change enumerates. Expiry is tracked per member; expired
+ * members are dropped when the subject is read, with no background sweep.
  */
 export function createInMemorySubjectSessionIndex(): SubjectSessionIndex {
 	/** subject → (sid → expiry ms). Insertion order is preserved by Map. */

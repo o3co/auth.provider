@@ -18,46 +18,25 @@ import type { AdapterBuilder, SubjectSessionIndex } from "@o3co/auth-provider-co
 import type { SubjectSessionIndexClient } from "./clients.mjs";
 
 /**
- * Redis {@link SubjectSessionIndex} (#321) — the missing half of #296.
+ * Redis {@link SubjectSessionIndex}: a subject's live sessions, which
+ * `revokeAllForSubject` enumerates to cascade over (a password reset, for one)
+ * on deployments using `redisSessionStoresModule`.
  *
- * `revokeAllForSubject` needs to enumerate a subject's live sessions to cascade
- * over them. #296 shipped only an in-process index, so a deployment on
- * `redisSessionStoresModule` got `unavailable: ["subjectSessionIndex", …]` and
- * a password reset revoked nothing — on exactly the deployments that need it.
+ * One sorted set per subject, each member scored by its session's expiry in
+ * epoch ms, so listing and GC are one command each on the server's clock. Not
+ * the sid-keyed sorted-set client: that keeps one expiry per key, and a
+ * subject's sessions do not share one.
  *
- * ## One sorted set per subject, scored by expiry
+ * The key also carries a TTL, the latest member expiry and only ever raised
+ * (`pExpireGT`), so a subject who never logs in again leaves the keyspace and a
+ * shorter session added later cannot expire the whole set early. It is set in
+ * the same `multi` as the write, so a write cannot land without its expiry.
  *
- * Score is the member's expiry in epoch milliseconds, so "live sessions" is
- * `ZRANGEBYSCORE key now +inf` and the GC sweep is
- * `ZREMRANGEBYSCORE key -inf now` — one command each, evaluated against the
- * **server's** clock, which is the only clock every replica agrees on.
- *
- * This is why the adapter does not reuse the sid-keyed sorted-set client. That
- * one keeps a single expiry per key, correct where every member belongs to one
- * session and shares its expiry; a subject's sessions do not, so a key-level
- * TTL would either keep an expired session listed or drop a live one early.
- *
- * ## The key still carries a TTL
- *
- * Per-member scores decide what is *listed*; the key-level TTL is what stops a
- * subject who never logs in again from living in the keyspace forever. It is
- * set to the latest member expiry and only ever raised (`pExpireGT`), so a
- * short-lived session added after a long-lived one cannot pull the whole
- * subject's set in with it. Paired with the write in one pipeline, because a
- * mutation whose expiry silently failed is the shape #269 paid for.
- *
- * ## Read prunes, on the store's clock
- *
- * There is no background sweep, so `listSids` is the only chance to reclaim.
- * It sweeps and reads in one server-side operation whose boundary is the
- * **store's** clock — see `pruneExpiredAndList`. Using the calling replica's
- * `Date.now()` would compare a score written by whichever replica handled the
- * login against whichever replica handles the read: two host clocks, and the
- * skew between them drops live sessions early or keeps expired ones listed.
- * One operation also makes the sweep and the read agree about the boundary
- * member, which two commands could not. An emptied sorted set is removed by
- * Redis itself, which keeps the keyspace from holding an entry for everyone
- * who ever logged in.
+ * There is no background sweep: `listSids` prunes and reads in one server-side
+ * operation (`pruneExpiredAndList`) on the store's clock. The calling replica's
+ * clock would compare against a score another host wrote, and one operation
+ * keeps the sweep and the read agreed on the boundary member. Redis deletes an
+ * emptied sorted set itself.
  */
 export interface RedisSubjectSessionIndexOptions {
 	readonly client: SubjectSessionIndexClient;
@@ -81,15 +60,10 @@ export function createRedisSubjectSessionIndex(
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("SubjectSessionIndex.addSid: expiresAt must be a valid date");
 			}
-			// An already-expired session is not worth indexing; it would only be
-			// swept on the next read. Mirrors the in-process adapter.
-			//
-			// This one comparison is deliberately local: `expiresAt` was computed
-			// on this host, so checking it against this host's clock is
-			// self-consistent, and it is an optimisation rather than the
-			// correctness gate — the server-clock sweep in `listSids` is. Reading
-			// the store's clock here would buy a round-trip to make a
-			// short-circuit slightly more accurate.
+			// An already-expired session is not worth indexing, as in the
+			// in-process adapter. The local clock is fine here: `expiresAt` was
+			// computed on this host, and this is only a short-circuit; the
+			// server-clock sweep in `listSids` is the correctness gate.
 			if (expiresAtMs <= Date.now()) return;
 			const k = key(subject);
 			await deps.client
@@ -116,15 +90,10 @@ export function createRedisSubjectSessionIndex(
 }
 
 /**
- * AdapterFactory builder for the Redis-backed `SubjectSessionIndex` (#321).
- *
- * Use when per-adapter `AdapterFactory` granularity is needed; for the common
- * case the bundled `redisSessionStoresModule` is sufficient. Default
- * `keyPrefix` matches the bundle's production layout (`ss:sub:`) so swapping
- * between bundle and individual builder does not change the keyspace.
- *
- * Missing `client` throws at boot rather than crashing at the first Redis op,
- * matching every other builder in this package.
+ * AdapterFactory builder for the Redis-backed `SubjectSessionIndex`, for
+ * per-adapter granularity; `redisSessionStoresModule` covers the common case.
+ * The default `keyPrefix` (`ss:sub:`) matches that bundle's, so switching
+ * between them keeps the keyspace. A missing `client` throws at boot.
  */
 export const redisSubjectSessionIndexBuilder: AdapterBuilder<SubjectSessionIndex> = (
 	config,

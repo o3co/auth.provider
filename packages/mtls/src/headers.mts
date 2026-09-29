@@ -15,47 +15,25 @@
  */
 
 /**
- * Header dialect parsers for extracting client certificate PEM from reverse-
- * proxy forwarded-cert headers.
- *
- * Two dialects ship in Phase 3 Stage 1 per spec §1.3:
- *   - `"envoy"`: Envoy XFCC (x-forwarded-client-cert) header format.
- *   - `"plain-pem"`: Raw PEM value, possibly URL-encoded.
- *
- * Both parsers are internal — NOT re-exported from index.mts. Consumers
- * select a dialect via the `certHeaderDialect` config key; `createMtlsMechanism`
- * dispatches to the correct parser at extraction time.
- *
- * Per Wave 2 Phase 3 spec §5.4 (CertHeaderDialect) + §6.2 (step 2 — dialect parse).
+ * Parsers that extract the client certificate PEM from a reverse proxy's
+ * forwarded-cert header, in two dialects: `"envoy"` (Envoy XFCC) and
+ * `"plain-pem"` (a PEM value, possibly URL-encoded). Internal, not
+ * re-exported from index.mts: `createMtlsMechanism` picks one by
+ * `certHeaderDialect`.
  */
 
 /**
- * The set of supported certificate header dialect identifiers.
- *
- * Exported from index.mts per spec §5.1 so operators can reference the type
- * when building typed config objects. The union is closed at Stage 1 — a
- * future nginx dialect adds a new arm via a semver-minor bump, not a
- * catch-all `string`.
- *
- * Per Wave 2 Phase 3 spec §5.4.
+ * The supported certificate header dialects. A closed union: a new dialect
+ * is a new arm, not a catch-all `string`.
  */
 export type CertHeaderDialect = "envoy" | "plain-pem";
 
 /**
- * Maximum permitted raw header value size in UTF-8 bytes. Defense-in-depth
- * against DoS via oversize XFCC headers from a misbehaving or malicious
- * upstream (Codex review Round 1 Important #1, PR for Sub-PR 3a).
- *
- * Measured against `Buffer.byteLength(value, "utf8")` rather than `value.length`
- * (UTF-16 code units), so non-ASCII payloads cannot bypass the cap by
- * representing more bytes per character than the JS string length suggests.
- *
- * Realistic XFCC values are well under 10KB for a single cert + chain (≈3KB
- * per typical RSA-2048 cert). 16KB caps the upper realistic envelope plus
- * headroom for URL-percent-encoding bloat (≤3× expansion).
- *
- * A value exceeding this cap → `Error("header value exceeds size cap")`, which
- * the extractor wraps as `MtlsError("malformed_header", …)`.
+ * Maximum raw header value size in UTF-8 bytes, against DoS via an oversize
+ * header from a misbehaving or malicious upstream. Measured in UTF-8 bytes,
+ * not `value.length`, so multi-byte characters cannot slip past it.
+ * Realistic XFCC values are well under 10KB for a cert and its chain (about
+ * 3KB per RSA-2048 cert); 16KB adds headroom for percent-encoding.
  */
 const MAX_RAW_HEADER_BYTES = 16 * 1024;
 
@@ -74,22 +52,12 @@ interface ParsedCertHeader {
 	readonly chainPem?: string;
 }
 
-/**
- * Detect whether a string contains URL-percent-encoded characters.
- *
- * Used internally to decide whether to URL-decode before further processing.
- * A string that contains neither `%20` nor `%0A` (and no `%` at all) is
- * treated as literal.
- */
+/** Whether a string contains a `%XX` escape; without one it is taken literally. */
 const isUrlEncoded = (value: string): boolean => /%[0-9A-Fa-f]{2}/.test(value);
 
 /**
- * URL-decode a percent-encoded value, normalizing `decodeURIComponent`'s
- * native `URIError` into a plain `Error` so the dialect parsers never leak
- * a `URIError` to the call site. The extractor (Sub-PR 3b) wraps all
- * primitive errors as `MtlsError("malformed_header", …)` — without this
- * wrapper, a `URIError` would surface as the wrong reason code (Codex
- * review Round 1 Important #3).
+ * `decodeURIComponent`, with its `URIError` normalized to a plain `Error` so
+ * the dialect parsers throw one kind of error for malformed input.
  */
 const safeDecodeURIComponent = (value: string, field: string): string => {
 	try {
@@ -100,16 +68,10 @@ const safeDecodeURIComponent = (value: string, field: string): string => {
 };
 
 /**
- * Strip enclosing double-quotes from an XFCC field value per Envoy's
- * documented format. Envoy 1.18+ emits quoted values for fields whose
- * payload contains structural characters (`Cert="…"`, `Chain="…"`).
- * Backslash-escapes within quotes are handled per RFC 7230 quoted-string
- * grammar (the common cases are `\"` and `\\`).
- *
- * Non-quoted values are returned verbatim. Mismatched leading-only or
- * trailing-only quote raises a parse error to surface the malformed
- * dialect to operators rather than silently passing through (Codex review
- * Round 1 Important #2 / Claude Minor #2 convergence).
+ * Strip enclosing double-quotes from an XFCC field value: Envoy 1.18+ quotes
+ * values containing structural characters (`Cert="…"`). Escapes are undone
+ * per the RFC 7230 quoted-string grammar (`\"`, `\\`). Unquoted values pass
+ * through; a quote at only one end is a parse error, not passed through.
  */
 const unquoteXfccField = (raw: string, fieldName: string): string => {
 	if (raw.length === 0) return raw;
@@ -131,20 +93,12 @@ const unquoteXfccField = (raw: string, fieldName: string): string => {
  *   element = field *(";" field)
  *   field = token "=" value
  *
- * Phase 3 Stage 1 processes only the FIRST element (the client-facing hop).
- * Required field: `Cert=<url-encoded-pem>`. Optional field: `Chain=<url-encoded-pem>`.
- * `By=` and `Hash=` are parsed-past but not used — they are informational.
- *
- * Parse failure → throws a plain `Error`. The call site (extractor.mts step 2)
- * wraps it into `MtlsError("malformed_header", "envoy header parse failure")`, this
- * error as its `cause`.
- *
- * Per Wave 2 Phase 3 spec §6.2.
+ * Only the first element (the client-facing hop) is read. `Cert=` is
+ * required, `Chain=` optional (both URL-encoded PEM); other fields are
+ * ignored. Throws a plain `Error` on malformed input.
  */
 export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
-	// Defense-in-depth size cap before any string ops (Codex Round 1 Important #1).
-	// Measure UTF-8 bytes, not JS string length (UTF-16 code units), so multi-byte
-	// characters cannot bypass the cap (Copilot review Round 2 Important #1).
+	// Size cap before any string work.
 	const rawByteLen = Buffer.byteLength(value, "utf8");
 	if (rawByteLen > MAX_RAW_HEADER_BYTES) {
 		throw new Error(
@@ -181,9 +135,7 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 		throw new Error('XFCC header is missing required "Cert=" field');
 	}
 
-	// Cert= and Chain= values are URL-percent-encoded per the XFCC spec.
-	// Envoy 1.18+ may also wrap structural-character values in quoted-strings —
-	// unquoteXfccField handles `Cert="..."` and the standard `\"`/`\\` escapes.
+	// Cert= and Chain= are URL-encoded, and may be quoted (unquoteXfccField).
 	const certPem = safeDecodeURIComponent(unquoteXfccField(rawCert, "Cert"), "Cert");
 	const certByteLen = Buffer.byteLength(certPem, "utf8");
 	if (certByteLen > MAX_DECODED_PAYLOAD_BYTES) {
@@ -210,26 +162,12 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 };
 
 /**
- * Parse a plain-PEM certificate header.
- *
- * The header value is either a literal PEM block or a URL-percent-encoded
- * PEM block. URL-encoded values are decoded automatically.
- *
- * **Multi-PEM concatenation is rejected** (spec OQ1 §14.1 strict decision):
- * a header value containing multiple `-----BEGIN CERTIFICATE-----` blocks is
- * malformed_header. Operators who need to convey a chain MUST use the `envoy`
- * dialect with its `Chain=` field instead.
- *
- * Parse failure → throws a plain `Error`. The call site wraps it into
- * `MtlsError("malformed_header", …)`.
- *
- * Per Wave 2 Phase 3 spec §6.2 + OQ1 §14.1.
+ * Parse a plain-PEM certificate header: one PEM block, literal or
+ * URL-encoded. More than one block is rejected; a chain needs the `envoy`
+ * dialect's `Chain=`. Throws a plain `Error` on malformed input.
  */
 export const parsePlainPemHeader = (value: string): ParsedCertHeader => {
-	// Defense-in-depth size cap BEFORE any string-shaping work (trim/decode),
-	// so a malicious oversize header is rejected without doing the expensive
-	// work first (Copilot review Round 2 Minor #2 — parity with parseEnvoyXfccHeader).
-	// Measure UTF-8 bytes, not JS string length (Copilot Round 2 Important #1).
+	// Size cap before any trim or decode.
 	const rawByteLen = Buffer.byteLength(value, "utf8");
 	if (rawByteLen > MAX_RAW_HEADER_BYTES) {
 		throw new Error(
@@ -241,11 +179,7 @@ export const parsePlainPemHeader = (value: string): ParsedCertHeader => {
 		throw new Error("plain-pem header value is empty");
 	}
 
-	// URL-decode if the value contains percent-encoded sequences.
-	// This handles the common case of an HTTP header that was URL-encoded
-	// by the reverse proxy (e.g. nginx `$ssl_client_escaped_cert`).
-	// safeDecodeURIComponent normalizes URIError → plain Error so the
-	// extractor wraps it consistently (Codex Round 1 Important #3).
+	// A proxy may URL-encode the value (e.g. nginx `$ssl_client_escaped_cert`).
 	const decoded = isUrlEncoded(value) ? safeDecodeURIComponent(value, "plain-pem value") : value;
 	const decodedByteLen = Buffer.byteLength(decoded, "utf8");
 	if (decodedByteLen > MAX_DECODED_PAYLOAD_BYTES) {
@@ -254,10 +188,8 @@ export const parsePlainPemHeader = (value: string): ParsedCertHeader => {
 		);
 	}
 
-	// OQ1 strict: reject multi-PEM concatenations. A legitimate single cert
-	// has exactly one BEGIN marker; two or more indicates a chain was passed
-	// where only a leaf cert is expected. Reject rather than silently use the
-	// first cert (downgrade-prevention, per spec §3.3).
+	// Two or more BEGIN markers mean a chain where only a leaf is expected:
+	// rejected rather than silently using the first cert (downgrade prevention).
 	const beginCount = (decoded.match(/-----BEGIN CERTIFICATE-----/g) ?? []).length;
 	if (beginCount === 0) {
 		throw new Error("plain-pem header does not contain a PEM certificate block");

@@ -15,14 +15,10 @@
  */
 
 /**
- * router-etag.test.mts — the #293 item 4 caching contract of the JWKS route.
- *
- * The response body is computed once per key SET and revalidated with a
- * strong ETag; the cache is keyed on (kid, publicKey identity) pairs because
- * the KeyStore contract has no rotation event to hook. These tests pin the
- * three behaviors that matter: a stable set serves a stable ETag and answers
- * `304` to `If-None-Match`, a changed set changes the ETag (and the body),
- * and the error paths stay uncached and untagged.
+ * The caching contract of the JWKS route. The response body is computed once
+ * per key SET and revalidated with a strong ETag; the cache is keyed on
+ * (kid, publicKey identity) pairs because the KeyStore contract has no
+ * rotation event to hook.
  */
 import express from "express";
 import { generateKeyPair } from "jose";

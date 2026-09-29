@@ -17,13 +17,13 @@
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 
 // ---------------------------------------------------------------------------
-// Value types (Theme D: structurally immutable)
+// Value types (structurally immutable)
 // ---------------------------------------------------------------------------
 
 /**
  * OIDC-standard user claims durably attached to a session. Populated at
- * login. Used as the authoritative source for /userinfo and id_token;
- * independent of the browser session. Per A4 §5.1.
+ * login; the authoritative source for /userinfo and id_token, independent of
+ * the browser session.
  */
 export interface UserSessionClaims {
 	readonly email?: string;
@@ -36,7 +36,7 @@ export interface UserSessionClaims {
 
 /**
  * A Relying Party that has completed a token exchange via this session.
- * Source data for OIDC Back-Channel / Front-Channel Logout fanout. Per A4 §5.2.
+ * Source data for OIDC Back-Channel / Front-Channel Logout fanout.
  */
 export interface RegisteredRP {
 	readonly clientId: string;
@@ -48,20 +48,14 @@ export interface RegisteredRP {
 }
 
 /**
- * Authenticated user session aggregate. Post-create immutable at v0.5.0
- * (claims update deferred post-publish), except for what a second factor
- * verified in it adds — `amr` and `authentication`, through the optional
- * step-up capability ({@link SupportsSecondFactorUpdate}, the MFA ADR's D9).
- * Per A4 §5.1.
+ * Authenticated user session aggregate. Immutable after create, except for
+ * what a verified second factor adds (`amr`, `authentication`) through the
+ * optional step-up capability ({@link SupportsSecondFactorUpdate}).
  *
- * Expiry encoding: `expiresAt: Date` (not `expiresAtMs: number`) is intentional
- * for A4 aggregates. Per A3 §5.1: low-level storage primitives (A3:
- * ChallengeStore, RefreshTokenFamilyStore, ReplaySeenSet) use epoch-ms
- * `number` to eliminate Date mutation surface. A4 higher-level aggregates use
- * `Date` for ergonomics at the application layer. Callers bridging A3 and A4
- * convert explicitly at the boundary (`new Date(epochMs)` to lift, or
- * `someDate.getTime()` to lower) so the two encodings never alias the same
- * field. This is a deliberate two-tier design, not an inconsistency.
+ * Time fields are `Date`, while low-level storage primitives (ChallengeStore,
+ * RefreshTokenFamilyStore, ReplaySeenSet) use epoch-ms numbers. Convert
+ * explicitly at the boundary (`new Date(ms)`, `date.getTime()`) so the two
+ * encodings never alias one field.
  */
 export interface UserSession {
 	readonly sid: string;
@@ -71,44 +65,38 @@ export interface UserSession {
 	readonly expiresAt: Date;
 	readonly claims: UserSessionClaims;
 	/**
-	 * #481: how the user authenticated — RFC 8176 values (`pwd`, `hwk`,
-	 * `mfa`, `otp`, …) plus the deployment-defined `fed` for a federated
-	 * login. Surfaced as the id_token `amr` claim and consulted by
-	 * `/authorize` for `acr_values`. `undefined` when the login path recorded
-	 * nothing (a session written before #481).
+	 * How the user authenticated: RFC 8176 values (`pwd`, `hwk`, `mfa`, `otp`,
+	 * …) plus the deployment-defined `fed` for a federated login. Surfaced as
+	 * the id_token `amr` claim and consulted by `/authorize` for `acr_values`.
+	 * `undefined` when the login path recorded nothing.
 	 *
-	 * A required key (#626): both stores copy the session field by field, and
-	 * a copy that forgot `amr` would hide the step-up the user performed
-	 * without an error — `/authorize` answering a request whose `acr_values`
-	 * needs it `unmet_authentication_requirements`, and the id_token carrying
-	 * no `amr`. On the input, it makes a login path say what it knows.
+	 * Holds only what this provider vouches for (the primary, a trusted
+	 * upstream IdP's values, each verified second factor) in a session that
+	 * says so in `authentication`; an older session is read through
+	 * `vouchedAmr` (`./authentication.mts`), which splits it.
 	 *
-	 * Since the MFA ADR's D9 it holds only what this provider vouches for —
-	 * the primary, a trusted upstream IdP's values, each verified second
-	 * factor — in a session that says so in `authentication`. A session
-	 * written before that key existed is read through `vouchedAmr`
-	 * (`./authentication.mts`), which splits it.
+	 * A required key: stores copy the session field by field, and a copy that
+	 * dropped `amr` would silently hide a step-up (`/authorize` answering
+	 * `unmet_authentication_requirements`, the id_token without `amr`).
 	 */
 	readonly amr: readonly string[] | undefined;
 	/**
-	 * The MFA ADR's D9: how the session was established — `undefined` for a
-	 * session written before this key existed, which `sessionAuthentication`
-	 * reads from its `amr`. A required key, as `amr` is (#626): a store's copy
-	 * that forgot it would read every session as a pre-upgrade one, splitting
-	 * a trusted federation's values out and forgetting a verified second
-	 * factor. Read it through `sessionAuthentication`, never directly.
+	 * How the session was established; `undefined` for a session written before
+	 * the key existed. Read it through `sessionAuthentication`, never directly.
+	 * A required key like `amr`: a copy that dropped it would read every session
+	 * as a pre-upgrade one, losing a trusted federation's values and a verified
+	 * second factor.
 	 */
 	readonly authentication: SessionAuthentication | undefined;
 }
 
 /**
- * How a session was established (the MFA ADR's D9): the primary
- * authentication, which federation, what an untrusted upstream IdP asserted,
- * and when a second factor was last verified in the session. The record's
- * `authentication` key, read through `sessionAuthentication`
- * (`./authentication.mts`), which answers the same shape for a session
- * written before the key existed. Every field is a required key, holding
- * `undefined` where there is nothing to say, so a copy names each one.
+ * How a session was established: the primary authentication, which
+ * federation, what an untrusted upstream IdP asserted, and when a second
+ * factor was last verified. Read through `sessionAuthentication`
+ * (`./authentication.mts`), which answers the same shape for older sessions.
+ * Every field is a required key, holding `undefined` where there is nothing
+ * to say, so a copy names each one.
  */
 export interface SessionAuthentication {
 	/** How the session was established: `"pwd"` (`POST /session/login`), `"fed"` (a federation callback). */
@@ -121,19 +109,15 @@ export interface SessionAuthentication {
 	 * `provider.name`.
 	 */
 	readonly federation: string | undefined;
-	/** What an untrusted upstream IdP asserted (D13): kept for the record, never stamped, never read for `acr`. */
+	/** What an untrusted upstream IdP asserted: kept for the record, never stamped, never read for `acr`. */
 	readonly upstreamAmr: readonly string[] | undefined;
-	/** When a second factor was last verified — or bound (D24) — in this session. */
+	/** When a second factor was last verified, or bound, in this session. */
 	readonly mfaAt: Date | undefined;
 }
 
 /**
- * Parameters for creating a new session. `federations` field DELETED vs
- * v0.4.x — federations are added separately via
- * `SessionFederationIndex.addFederation` after session create. Per A4 §5.1.
- *
- * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
- * for rationale.
+ * Parameters for creating a new session. Federations are added afterwards via
+ * `SessionFederationIndex.addFederation`.
  */
 export interface CreateUserSessionInput {
 	readonly sid: string;
@@ -142,47 +126,34 @@ export interface CreateUserSessionInput {
 	readonly expiresAt: Date;
 	readonly claims: UserSessionClaims;
 	/**
-	 * #481: how the user authenticated — RFC 8176 values (`pwd`, `hwk`,
-	 * `mfa`, `otp`, …) plus the deployment-defined `fed` for a federated
-	 * login. Surfaced as the id_token `amr` claim and consulted by
-	 * `/authorize` for `acr_values`. `undefined` when the login path knows
-	 * nothing of how the user authenticated.
-	 *
-	 * A required key (#626): both stores copy the session field by field, and
-	 * a copy that forgot `amr` would hide the step-up the user performed
-	 * without an error — `/authorize` answering a request whose `acr_values`
-	 * needs it `unmet_authentication_requirements`, and the id_token carrying
-	 * no `amr`. On the input, it makes a login path say what it knows.
+	 * How the user authenticated (see {@link UserSession.amr}); `undefined` when
+	 * the login path knows nothing of it. A required key, so a login path says
+	 * what it knows.
 	 */
 	readonly amr: readonly string[] | undefined;
 	/**
-	 * The MFA ADR's D9: how the session was established. A login path writes
-	 * it (`passwordSessionAuthentication`, `federatedSessionAuthentication` in
-	 * `./authentication.mts` compose it with the `amr` beside it); `undefined`
-	 * writes a session read as one from before the key existed. A required
-	 * key: a login path says what it knows, and a copy cannot drop it.
-	 * `mfaAt`, when present, must be a valid date at or after the epoch — a
-	 * `RangeError` otherwise, and nothing is recorded.
+	 * How the session was established, composed with `amr` by
+	 * `passwordSessionAuthentication` / `federatedSessionAuthentication`
+	 * (`./authentication.mts`); `undefined` writes a session read as a
+	 * pre-upgrade one. A required key. `mfaAt`, when present, must be a valid
+	 * date at or after the epoch: a `RangeError` otherwise, nothing recorded.
 	 */
 	readonly authentication: SessionAuthentication | undefined;
 }
 
 // ---------------------------------------------------------------------------
-// Storage interfaces (Theme B: 4-way split)
+// Storage interfaces
 // ---------------------------------------------------------------------------
 
 /**
- * Sid-keyed store for the authenticated user session. Post-create immutable
- * at v0.5.0 (claims update deferred post-publish); a store may add the
- * step-up capability ({@link SupportsSecondFactorUpdate}), which writes a
- * verified second factor into a live session and nothing else. Per A4 §5.1.
+ * Sid-keyed store for the authenticated user session. Immutable after create;
+ * a store may add the step-up capability ({@link SupportsSecondFactorUpdate}),
+ * which writes a verified second factor into a live session and nothing else.
  *
- * Cascade semantics: `delete(sid)` is the global session-invalidation
- * primitive. Sibling reverse-index stores hold orphan entries naturally
- * cleaned up via TTL synced to `session.expiresAt` at write time; the
- * orchestrator (route handler) calls `UserSessionStore.delete` LAST so any
- * failure in upstream sibling cleanup leaves the session valid for retry.
- * See A4 §6 cascade orchestration.
+ * `delete(sid)` is the global session-invalidation primitive. Sibling indexes
+ * hold entries with a TTL synced to `session.expiresAt`; the orchestrator
+ * calls `UserSessionStore.delete` LAST, so a failed sibling cleanup leaves the
+ * session valid for retry.
  */
 export interface UserSessionStore {
 	readonly kind: string;
@@ -198,10 +169,8 @@ export interface UserSessionStore {
 }
 
 /**
- * A second factor verified in a session (the MFA ADR's D9, D14): the `amr`
- * the verification adds — the factor's values, and `mfa` when the factor adds
- * it (`composeAmr` of nothing held gives exactly that) — and when it was
- * verified.
+ * A second factor verified in a session: the `amr` it adds (the factor's
+ * values, and `mfa` when the factor adds it) and when it was verified.
  */
 export interface SecondFactorEvent {
 	readonly amr: readonly string[];
@@ -209,46 +178,36 @@ export interface SecondFactorEvent {
 }
 
 /**
- * The step-up capability (the MFA ADR's D9): a store that can record a second
- * factor verified in a live session, which a step-up needs. Detected by
- * method presence ({@link supportsSecondFactorUpdate}), like
- * {@link SupportsSessionsOnlyRevocation}: a custom store written without it
- * keeps working, and a step-up asks for a re-authentication instead. Both
- * bundled stores have it.
+ * The step-up capability: a store that can record a second factor verified
+ * in a live session. Detected by method presence
+ * ({@link supportsSecondFactorUpdate}); a custom store without it keeps
+ * working, and a step-up asks for re-authentication instead. Both bundled
+ * stores have it.
  */
 export interface SupportsSecondFactorUpdate {
 	/**
 	 * Record that a second factor was verified in the live session `sid`, and
-	 * answer the session as it is now stored.
+	 * answer the session as now stored.
 	 *
 	 * `amr` becomes what the session vouches for followed by `event.amr`, in
-	 * insertion order, each value once — no vouched value is lost. `mfaAt`
-	 * becomes the later of the stored one and the event's, each no later than
-	 * the recording store's clock: monotonic on that clock, so one a replica
-	 * whose clock ran ahead recorded comes back to it. Nothing else changes —
-	 * `authTime` (a step-up never moves it, D18) and the session's lifetime
-	 * included. A session written
-	 * before `authentication` existed is split first
-	 * (`sessionAfterSecondFactor`), so a value an untrusted upstream IdP
-	 * asserted never becomes a vouched one.
+	 * insertion order, each value once. `mfaAt` becomes the later of the stored
+	 * one and the event's, each clamped to the store's clock (so a value from a
+	 * replica whose clock ran ahead comes back to it). Nothing else changes,
+	 * `authTime` and the session's lifetime included. A session written before
+	 * `authentication` existed is split first (`sessionAfterSecondFactor`), so
+	 * an untrusted upstream IdP's value never becomes a vouched one.
 	 *
-	 * `null`, and nothing written, when the session is gone — or predates
-	 * `authentication` and its primary cannot be told, which no second factor
-	 * fixes: such a session logs in again. Under `mfa.mode = "required"` the
-	 * requirement rule re-authenticates it (D16) before a step-up is asked;
-	 * under `optional` it does not, and the MFA ADR's step-5 amendment obliges
-	 * `/authorize` (build-order step 13), when it would ask a step-up of such
-	 * a session, to send it to the login page instead.
+	 * `null`, nothing written, when the session is gone, or predates
+	 * `authentication` and its primary cannot be told: such a session logs in
+	 * again (`/authorize` sends it to the login page rather than asking a
+	 * step-up).
 	 *
-	 * An event with no values, an empty value, a primary's marker (`pwd`,
-	 * `fed`), only `mfa`, or a time that is not a valid date at or after the
-	 * epoch or is further ahead of the store's clock than the clock skew
-	 * tolerated between hosts (`DEFAULT_CLOCK_SKEW_MS`), is a `RangeError`
-	 * before anything is read, and nothing is written: the caller's fault,
-	 * never an outage (`checkSecondFactorEvent`). A time accepted is recorded
-	 * no later than the store's clock, and a stored `mfaAt` ahead of it is
-	 * brought back to it before the later of the two is taken. A store that cannot answer rejects with an
-	 * error of its own, as every store method does: its outage.
+	 * A `RangeError` before anything is read, nothing written, for an event
+	 * with no values, an empty value, a primary's marker (`pwd`, `fed`), only
+	 * `mfa`, or a time that is not a valid date at or after the epoch or is
+	 * further ahead of the store's clock than `DEFAULT_CLOCK_SKEW_MS`
+	 * (`checkSecondFactorEvent`). A store outage rejects with the store's own
+	 * error.
 	 */
 	recordSecondFactor(sid: string, event: SecondFactorEvent): Promise<UserSession | null>;
 }
@@ -265,76 +224,51 @@ export function supportsSecondFactorUpdate(
 }
 
 /**
- * Sid-keyed registry of Relying Parties (RPs) that have completed a token
- * exchange via this session. Source data for OIDC Back-Channel /
- * Front-Channel Logout fanout. Per A4 §5.2.
+ * Sid-keyed registry of Relying Parties that completed a token exchange via
+ * this session: source data for OIDC Back-Channel / Front-Channel Logout.
+ * Upsert per clientId; removed only with the whole session (`removeBySid`).
  *
- * Mutability: append/upsert (per-clientId dedup); cleanup via removeBySid.
- * Per-RP removal is intentionally not exposed — RPs are removed only when
- * the entire session terminates.
- *
- * TTL contract: every `registerRP` MUST be called with the session's
- * `expiresAt`; the adapter writes the storage entry with TTL synced to
- * `expiresAt`. An Invalid Date — as `expiresAt` or as the RP's
- * `registeredAt` — is a `RangeError`, and nothing is recorded.
+ * Every `registerRP` MUST pass the session's `expiresAt`, which the adapter
+ * uses as the entry's TTL. An Invalid Date (as `expiresAt` or the RP's
+ * `registeredAt`) is a `RangeError`, and nothing is recorded.
  */
 export interface SessionRPRegistry {
 	readonly kind: string;
-	/**
-	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
-	 * for rationale.
-	 */
 	registerRP(sid: string, rp: RegisteredRP, expiresAt: Date): Promise<void>;
 	listRPs(sid: string): Promise<ReadonlyArray<RegisteredRP>>;
 	removeBySid(sid: string): Promise<void>;
 }
 
 /**
- * Sid-keyed index of refresh-token family ids. Source data for cascade
- * revocation in the logout flow (consumes A3's RefreshTokenFamilyRevocation).
- * Per A4 §5.3.
+ * Sid-keyed index of refresh-token family ids: source data for cascade
+ * revocation on logout. Append-only (idempotent on duplicates); removed only
+ * with the whole session (`removeBySid`).
  *
- * Mutability: append-only (idempotent on duplicate familyId); cleanup via
- * removeBySid. Per-family removal is not exposed.
- *
- * TTL contract: every `addFamilyId` MUST be called with the session's
- * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
+ * Every `addFamilyId` MUST pass the session's `expiresAt`. An Invalid Date is
+ * a `RangeError`, and nothing is recorded.
  */
 export interface SessionFamilyIndex {
 	readonly kind: string;
-	/**
-	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
-	 * for rationale.
-	 */
 	addFamilyId(sid: string, familyId: string, expiresAt: Date): Promise<void>;
 	listFamilyIds(sid: string): Promise<ReadonlyArray<string>>;
 	removeBySid(sid: string): Promise<void>;
 }
 
 /**
- * Sid-keyed index of upstream federation provider names that have
- * authenticated this session. Per A4 §5.4.
+ * Sid-keyed index of upstream federation names that authenticated this
+ * session: source data for cascade federation logout and for federation
+ * token route gating.
  *
- * Source data for: (a) cascade federation logout; (b) federation token
- * route gating (`isFederationLinked(sid, name)` semantics).
+ * `listFederations(sid)` MUST return names in insertion order (oldest
+ * first): `routes/logout.mts` picks the first for the post-logout redirect.
+ * Append-only (idempotent on duplicates), with per-federation removal on
+ * federation logout and full cleanup via `removeBySid`.
  *
- * Ordering contract (load-bearing): `listFederations(sid)` MUST return
- * federation names in INSERTION order (oldest first). `routes/logout.mts`
- * consumes the first element to choose the IdP for post-logout redirect.
- *
- * Mutability: append-only (idempotent on duplicate name) + per-federation
- * removal (`removeFederation(sid, name)`) for federation logout completion +
- * full cleanup via `removeBySid`.
- *
- * TTL contract: every `addFederation` MUST be called with the session's
- * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
+ * Every `addFederation` MUST pass the session's `expiresAt`. An Invalid Date
+ * is a `RangeError`, and nothing is recorded.
  */
 export interface SessionFederationIndex {
 	readonly kind: string;
-	/**
-	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
-	 * for rationale.
-	 */
 	addFederation(sid: string, federationName: string, expiresAt: Date): Promise<void>;
 	listFederations(sid: string): Promise<ReadonlyArray<string>>;
 	removeFederation(sid: string, federationName: string): Promise<void>;
@@ -342,33 +276,19 @@ export interface SessionFederationIndex {
 }
 
 /**
- * Subject-keyed index of the session ids belonging to one principal (#296).
+ * Subject-keyed index of a principal's session ids: answers "what sessions
+ * does this subject have?", which a credential change asks in order to end
+ * every session without knowing a sid. `revokeAllForSubject` enumerates it.
  *
- * Every other index here is keyed by `sid` — they answer "what does this
- * session own?". This one answers the inverse, "what sessions does this
- * subject have?", which is the question a credential change asks: the Store
- * has just written a new password and every session established with the old
- * one has to go, without the caller knowing a single sid.
+ * Append-only per (subject, sid), idempotent. `removeSid` removes one
+ * session, leaving the subject's others.
  *
- * `UserSessionStore` cannot answer it — it is `create` / `get(sid)` /
- * `delete(sid)` — so without this index `revokeAllForSubject` has nothing to
- * enumerate.
- *
- * Mutability: append-only per (subject, sid), idempotent on duplicates.
- * Per-member removal (`removeSid`) is exposed because a single session ending
- * must not erase the subject's other sessions — unlike the sid-keyed indexes,
- * where the whole key dies with the session.
- *
- * TTL contract: every `addSid` MUST be called with the session's `expiresAt`,
- * so an abandoned session ages out of the index rather than accumulating
- * against a long-lived user. An Invalid Date is a `RangeError`, and nothing is recorded.
+ * Every `addSid` MUST pass the session's `expiresAt`, so an abandoned session
+ * ages out rather than accumulating against a long-lived user. An Invalid
+ * Date is a `RangeError`, and nothing is recorded.
  */
 export interface SubjectSessionIndex {
 	readonly kind: string;
-	/**
-	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
-	 * for rationale.
-	 */
 	addSid(subject: string, sid: string, expiresAt: Date): Promise<void>;
 	listSids(subject: string): Promise<ReadonlyArray<string>>;
 	/** Remove one session from the subject's set, leaving the others. */
@@ -378,62 +298,16 @@ export interface SubjectSessionIndex {
 }
 
 /**
- * Per-subject not-before watermark for issued access tokens (#296).
+ * The declared-absence policy for both subject-level revocation slots
+ * ({@link SubjectRevocation}, {@link SubjectSessionIndex}): leaving them
+ * unfilled must be a stated decision at boot, since without them `verifyJwt`
+ * skips the watermark check, the refresh-redemption gate is inert and
+ * `revokeAllForSubject` reports `unavailable`.
  *
- * A credential change has to invalidate outstanding access tokens, and
- * `AccessTokenDenylist` cannot express that: it is `add(jti)` / `has(jti)`,
- * and the jtis a subject currently holds are not enumerable anywhere. A
- * watermark inverts the problem — instead of naming every token, it names the
- * moment before which none of them count.
- *
- * The comparison is against the token's `iat`, and it is deliberately
- * inclusive (`iat <= watermark` is revoked). `iat` is second-truncated
- * (`generateToken` floors `Date.now() / 1000`) and a multi-replica deployment
- * has independent clocks, so a token minted a few hundred milliseconds before
- * the reset routinely lands in the same second as the watermark. Killing a
- * token minted just *after* the reset costs the client one retry; letting one
- * from just *before* survive is the vulnerability this exists to close.
- *
- * TTL contract: `revokeBefore` MUST be called with an `expiresAt` at least as
- * far out as the longest-lived credential the watermark has to refuse.
- * Family revocation is the primary kill for refresh tokens and the watermark
- * is the backstop for the case family revocation did not complete, so a
- * watermark that lapses first takes the backstop with it.
- *
- * **Amended in slice 5** — this used to say "the longest-lived refresh token,
- * **not** the access token", and that was wrong in two ways. A deployment is
- * free to configure an access token that outlives its refresh token, and
- * token exchange may mint one up to `oauth.accessToken.maxExpiresIn` rather
- * than the default. `resolveSubjectRevocationHorizonMs` is the reader that
- * gets this right: the session, the refresh token, and the access-token
- * **maximum**, each extended by the tolerance it is actually accepted with.
- *
- * Adapters raise the stored expiry to the grants retention floor whenever a
- * write advances the grants boundary, so a caller that under-sizes this
- * cannot leave a grant outliving the boundary that revoked it. Nothing raises
- * it for a sessions-only stamp, which is why the horizon above exists.
- */
-/**
- * The declared-absence policy for **both** subject-level revocation slots
- * (#406) — the one silent no-op #363 did not close.
- *
- * #363 gave `auditSink` and `accessTokenDenylist` policies so an unfilled
- * optional slot has to be a stated decision at boot, and its own doc cites "a
- * subject-revocation watermark nothing consulted (#322)" as motivation.
- * {@link SubjectRevocation} and {@link SubjectSessionIndex} did not get one,
- * and the consequence reached every shape this repository ships: a scaffolded
- * deployment got `subjectRevocation: undefined`, so `verifyJwt` skipped the
- * watermark check, the #376 refresh-redemption gate was inert, and
- * `revokeAllForSubject` reported `unavailable` — with no boot-time signal in
- * either direction.
- *
- * **One policy for two keys, on purpose.** They are two components but one
- * capability: subject-level revocation needs the index to enumerate what to
- * cascade and the watermark to refuse what the cascade missed. A deployment
- * that has neither has one thing to say, not two, and #321's adapters fill
- * them together for the same reason. The declared-absence guard compares
- * policies per key, so sharing one constant across both is exactly what keeps
- * the boot error's advice from depending on which module tripped it.
+ * One policy for both keys: they are one capability (the index enumerates
+ * what to cascade, the watermark refuses what the cascade missed), and the
+ * guard compares policies per key, so a shared constant keeps the boot
+ * error's advice independent of which module tripped it.
  */
 export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
 	configKey: ["oauth", "revocation", "subject"],
@@ -448,16 +322,34 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
 		"unaffected either way.",
 } as const;
 
+/**
+ * Per-subject not-before watermark for issued access tokens: a credential
+ * change must invalidate outstanding tokens whose jtis are not enumerable, so
+ * the watermark names the moment before which none count.
+ *
+ * Compared inclusively against `iat` (`iat <= watermark` is revoked): `iat`
+ * is second-truncated and replica clocks differ, so a token minted just
+ * before the reset often shares the watermark's second. Killing one minted
+ * just after costs a retry; letting one from just before survive is the
+ * vulnerability this closes.
+ *
+ * `revokeBefore`'s `expiresAt` MUST reach at least as far as the
+ * longest-lived credential the watermark must refuse, since it is the
+ * backstop when family revocation did not complete. That includes an access
+ * token outliving its refresh token and token exchange's
+ * `oauth.accessToken.maxExpiresIn`; `resolveSubjectRevocationHorizonMs`
+ * computes it. Adapters raise the stored expiry to the grants retention
+ * floor whenever a write advances the grants boundary; nothing does so for a
+ * sessions-only stamp.
+ */
 export interface SubjectRevocation {
 	readonly kind: string;
 	/**
 	 * End everything for this subject: sessions, this provider's own tokens,
-	 * and — since #593 — the subject's federation grants.
-	 *
-	 * It advances **both** boundaries of D13, which is what makes a Store that
-	 * upgrades without touching this call site behave exactly as one watermark
-	 * always did. Keeping grants is the narrower, newer operation, and it takes
-	 * the deliberate call on {@link SupportsSessionsOnlyRevocation}.
+	 * and the subject's federation grants. Advances both boundaries, so a Store
+	 * that never calls the sessions-only variant behaves as one watermark did.
+	 * Keeping grants takes the deliberate call on
+	 * {@link SupportsSessionsOnlyRevocation}.
 	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
 	/** The sessions watermark, or `null` when this subject has none in force. */
@@ -465,26 +357,19 @@ export interface SubjectRevocation {
 }
 
 /**
- * The second boundary (#593, D13): sessions and grants, separately.
+ * The second boundary: sessions and grants, separately. A password change
+ * need not end every delegation (each agent and paused job would need a new
+ * login, grant, consent and upstream authorization); an explicit revocation
+ * does. See the federation-grants ADR.
  *
- * A password change and "revoke everything" are different events. Ending every
- * delegation on every password change puts the price in the wrong place — each
- * agent and each paused job then needs a new login, a new grant, a new consent
- * and a new upstream authorization — and the industry does not do it either:
- * in Entra's own table a confidential client's token survives a password
- * change, and only an explicit revocation ends every class.
+ * Both boundaries are fields of one record, advanced by one atomic,
+ * monotonic write. With two writes, a session that should be dead could
+ * consent between them, and that consent would escape the grants backstop
+ * for good.
  *
- * The two boundaries are two fields of **one record**, advanced by one atomic,
- * monotonic write. Two writes would open a window between them: with the
- * grants boundary written and the sessions boundary still to come, a session
- * that should already be dead could consent, and that consent would be dated
- * after the grants boundary and escape the backstop for good.
- *
- * A capability, detected by method presence like the others, so an adapter
- * written before #593 keeps working in a deployment that has no grants. With
- * federation grants enabled it is required, and boot refuses an adapter
- * without it — method presence can only change which watermark is read; it
- * cannot enforce the retention the backstop depends on.
+ * Detected by method presence, so older adapters keep working where there
+ * are no grants. With federation grants enabled boot requires it: method
+ * presence cannot enforce the retention the backstop depends on.
  */
 export interface SupportsSessionsOnlyRevocation {
 	/**
@@ -513,7 +398,7 @@ export function supportsSessionsOnlyRevocation(
 }
 
 // ---------------------------------------------------------------------------
-// AdapterFactory aliases (Theme C: composition-root, throw-on-duplicate)
+// AdapterFactory aliases
 // ---------------------------------------------------------------------------
 
 export type UserSessionStoreFactory = AdapterFactory<UserSessionStore>;
@@ -524,7 +409,7 @@ export type SubjectSessionIndexFactory = AdapterFactory<SubjectSessionIndex>;
 export type SubjectRevocationFactory = AdapterFactory<SubjectRevocation>;
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge (4 slots, all optional)
+// ComponentMap declaration-merge (all slots optional)
 // ---------------------------------------------------------------------------
 
 declare module "@o3co/auth-provider-core" {
@@ -537,11 +422,3 @@ declare module "@o3co/auth-provider-core" {
 		readonly subjectRevocation?: SubjectRevocation;
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Backing client interfaces (Phase 10 addendum §3)
-// ---------------------------------------------------------------------------
-
-// UserSessionStoreClient / SessionRPRegistryClient (+Multi) /
-// SessionSidSortedSetClient (+Multi) backing-client interfaces relocated to
-// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3).

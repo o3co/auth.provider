@@ -15,14 +15,11 @@
  */
 
 /**
- * Tests for generateRegistrationOptionsForUser + generateAuthenticationOptionsForUser (spec §2.4).
+ * Tests for generateRegistrationOptionsForUser + generateAuthenticationOptionsForUser.
  *
- * No mocks — uses real @simplewebauthn/server invocation. These helpers are pure
- * functions returning deterministic JSON shapes; the real library call exercises
- * the mapping layer (rpId, challenge encoding, excludeCredentials, attestationType,
- * userVerification, discoverable-credential flow).
- *
- * Cross-refs: Plan T26 / spec §2.4
+ * No mocks: the helpers are pure, so the real @simplewebauthn/server call
+ * exercises the mapping layer (rpId, challenge encoding, excludeCredentials,
+ * attestationType, userVerification, discoverable-credential flow).
  */
 
 import type { WebAuthnCredential } from "@o3co/auth-provider-core";

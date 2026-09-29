@@ -15,41 +15,18 @@
  */
 
 /**
- * Generating and normalising the two codes RFC 8628 defines (#298).
+ * Generating and normalising the two codes RFC 8628 defines.
  *
- * They have opposite jobs and therefore opposite designs:
+ * - **`device_code`** is a bearer credential nobody types: 256 bits,
+ *   base64url, per §5.2's "very high entropy code".
+ * - **`user_code`** is typed by a human: 8 characters of base 20 (~34.5
+ *   bits), which §5.1 accepts only together with rate-limiting to about 5
+ *   attempts. The code and the limit are one mitigation; never ship the
+ *   code without the limit.
  *
- * - **`device_code`** is never shown to anyone. It is a bearer credential the
- *   device redeems, so RFC 8628 §5.2 asks for "a very high entropy code" and
- *   nothing about it needs to be typeable. 256 bits, base64url.
- *
- * - **`user_code`** is read off one screen and typed into another. Entropy
- *   fights usability directly here, and §5.1 resolves the fight with
- *   rate-limiting rather than length: "an 8-character base 20 user code (with
- *   roughly 34.5 bits of entropy)" is sufficient *when* "the rate-limiting
- *   interval and validity period would need to only allow 5 attempts". Those
- *   are two halves of one mitigation; shipping the code without the limit
- *   would be shipping 34.5 bits against an unlimited attacker.
- *
- * ### The character set
- *
- * `BCDFGHJKLMNPQRSTVWXZ` — the consonants, from RFC 8628 §6.1. Two properties
- * matter, and neither is arbitrary:
- *
- * - **No vowels**, so no arrangement of the 20 characters can spell a word.
- *   A code that reads as an obscenity in some language gets screenshotted
- *   rather than typed.
- * - **No characters that are confusable in a typical font.** The set omits
- *   every digit, so `0`/`O`, `1`/`I`/`l`, `5`/`S`, `8`/`B` and `2`/`Z` cannot
- *   arise. §6.1: "It is RECOMMENDED to avoid character sets that contain two
- *   or more characters that can easily be confused".
- *
- * The hyphen in `BCDF-GHJK` is presentation only. Normalisation drops it and
- * whitespace, and folds case — so `bcdf ghjk`, `BCDFGHJK` and `bcdf-ghjk` are
- * all the same code. Any *other* character outside the set is **rejected, not
- * stripped**: a user who mistypes a `0` for an `O` is told the code is wrong
- * rather than having a character silently removed and being matched against a
- * different code.
+ * The alphabet is RFC 8628 §6.1's consonants: no vowels (no code spells a
+ * word) and no digits (no `0`/`O`, `1`/`I` style confusion). The hyphen is
+ * presentation only; see `normaliseUserCode` for what input is accepted.
  */
 
 import { randomBytes, randomInt } from "node:crypto";
@@ -88,15 +65,12 @@ export const formatUserCode = (normalised: string): string => {
 };
 
 /**
- * Reduce anything a human typed to the canonical form used for storage and
+ * Reduce what a human typed to the canonical form used for storage and
  * comparison, or `null` when it cannot be one of our codes.
  *
- * Lower case is folded up and formatting characters are dropped, because a
- * user copying `bcdf-ghjk` off a television has entered the right code.
- * Characters *outside* the alphabet are **rejected rather than stripped**: a
- * `0` typed for an `O` is a mistake, and silently removing it would turn an
- * 8-character mistake into a 7-character lookup that fails for a reason the
- * user cannot see — or worse, matches a different code.
+ * Case is folded and whitespace and hyphens dropped. Any other character
+ * outside the alphabet is **rejected, not stripped**: stripping a mistyped
+ * `0` could match a different code.
  */
 export const normaliseUserCode = (input: string): string | null => {
 	const compact = input.replace(/[\s-]/g, "").toUpperCase();

@@ -22,7 +22,7 @@ import type { SenderConstraint } from "../grants/senderConstraint.mjs";
  * - `"client_secret_post"`: form-encoded body parameters (§2.3.1)
  * - `"private_key_jwt"`: a JWT the client signs with its own private key
  *   (RFC 7523 §2.2 / OIDC Core §9), verified under the keys registered as
- *   `jwks` or published at `jwksUri`. No shared secret anywhere (#484).
+ *   `jwks` or published at `jwksUri`. No shared secret anywhere.
  * - `"none"`: public client (no secret; PKCE/S256 mandatory per RFC 9700 §2.1.1)
  */
 export type TokenEndpointAuthMethod =
@@ -34,9 +34,8 @@ export type TokenEndpointAuthMethod =
 export interface Client {
 	readonly clientId: string;
 	/**
-	 * Token-endpoint authentication method. REQUIRED — the schema rejects
-	 * client entries that omit it; deployments upgrading from v0.5.0 must add
-	 * the field explicitly per the v0.5.1 migration guide.
+	 * Token-endpoint authentication method. Required: the schema rejects client
+	 * entries that omit it.
 	 *
 	 * Public clients (`"none"`) MUST present PKCE/S256 at `/authorize`;
 	 * confidential clients (`"client_secret_basic"` / `"client_secret_post"`)
@@ -51,75 +50,61 @@ export interface Client {
 	readonly clientSecret?: string;
 	/**
 	 * The client's public signing keys for `private_key_jwt`, inline (RFC 7591
-	 * `jwks`, #484). Exactly one of `jwks` / `jwksUri` when the method is
-	 * `"private_key_jwt"`; neither for any other method. Public material —
-	 * it rides along on `PublicClient`.
+	 * `jwks`). Exactly one of `jwks` / `jwksUri` when the method is
+	 * `"private_key_jwt"`; neither for any other method. Public material: it
+	 * rides along on `PublicClient`.
 	 */
 	readonly jwks?: { readonly keys: ReadonlyArray<Readonly<Record<string, unknown>>> };
 	/**
-	 * Where the client publishes those keys (RFC 7591 `jwks_uri`, #484):
-	 * `https`, or `http` on a loopback host. Fetched and cached at
-	 * verification time, so rotating a key is a publish, not a re-registration.
+	 * Where the client publishes those keys (RFC 7591 `jwks_uri`): `https`, or
+	 * `http` on a loopback host. Fetched and cached at verification time, so
+	 * rotating a key is a publish, not a re-registration.
 	 */
 	readonly jwksUri?: string;
 	readonly allowedRedirectUris: readonly string[];
 	readonly allowedScopes: readonly string[];
 	/**
-	 * What an omitted `scope` parameter grants (#396). Absent means the client
-	 * has not declared a default: a scope-omitting request is then refused with
-	 * `invalid_scope` whenever `allowedScopes` is non-empty — the old behavior
-	 * granted the ENTIRE allowlist, making "forgot to send scope" the maximum
-	 * grant (deny-by-absence, the #326/#363 shape). A client whose
-	 * `allowedScopes` is empty is unaffected: there is nothing to over-grant,
-	 * and scope-less deployments keep working.
+	 * What an omitted `scope` parameter grants. Absent: a scope-omitting request
+	 * is refused with `invalid_scope` whenever `allowedScopes` is non-empty
+	 * (deny-by-absence), so forgetting `scope` never yields the maximum grant. A
+	 * client whose `allowedScopes` is empty is unaffected.
 	 */
 	readonly defaultScopes?: readonly string[];
 	/**
 	 * Audience URIs this client may receive tokens for.
 	 *
 	 * Consumers:
-	 * - Token Exchange (RFC 8693) `audience` parameter selection — when this
-	 *   list is empty or undefined, only the client's own `clientId` is
-	 *   accepted as an audience target.
-	 * - Every issuing grant's default `aud` — the first entry, with a
-	 *   `grantPolicy` narrowing within the list. What an absent list falls
-	 *   back to is the client id for a user-bound token (`authorization_code`,
-	 *   `session`, device, WebAuthn, jwt-bearer) and the issuer for a
-	 *   client-only one (`client_credentials`); the two families are spelled
-	 *   out on `AuthenticatedClient.allowedAudiences` in `../grants/types.mts`
-	 *   (#520).
-	 * - Introspection's audience pin — an authenticated caller may ask about
+	 * - Token Exchange (RFC 8693) `audience` selection: when this list is empty
+	 *   or absent, only the client's own `clientId` is accepted.
+	 * - Every issuing grant's default `aud`: the first entry, with a
+	 *   `grantPolicy` narrowing within the list. An absent list falls back to
+	 *   the client id for a user-bound token and to the issuer for a client-only
+	 *   one (`client_credentials`); see `AuthenticatedClient.allowedAudiences`
+	 *   in `../grants/types.mts`.
+	 * - Introspection's audience pin: an authenticated caller may ask about
 	 *   tokens whose `aud` is in `allowedAudiences ∪ {clientId}`.
 	 */
 	readonly allowedAudiences?: readonly string[];
 	/**
 	 * Grant types this client is explicitly permitted to use.
 	 *
-	 * Enforced **centrally** by `isGrantTypeAllowed` — once at `/oauth/token`
-	 * grant dispatch, before the concrete handler runs, and at `/authorize`
-	 * against `authorization_code` — so every current and future grant
-	 * inherits the check rather than opting in (#268). The central rule:
+	 * Enforced centrally by `isGrantTypeAllowed`, at `/oauth/token` grant
+	 * dispatch before the handler runs and at `/authorize` against
+	 * `authorization_code`, so every grant inherits the check:
 	 *
-	 * - `undefined` (absent) → **no restriction**. Absence means the
-	 *   registration declared no policy, not that it declared an empty one;
-	 *   denying here would revoke every grant from every registration written
-	 *   before this field existed.
-	 * - `[]` (empty) → every grant is denied. An empty allowlist names no
-	 *   grant type, so none can match it.
-	 * - non-empty array → a grant is allowed iff its `grant_type` string
-	 *   appears in the list, compared exactly.
+	 * - absent: no restriction. The registration declared no policy; denying
+	 *   would revoke every grant from registrations that predate the field.
+	 * - `[]`: every grant is denied.
+	 * - non-empty: a grant is allowed iff its `grant_type` is listed, compared
+	 *   exactly.
 	 *
-	 * A grant handler that declares `requiresExplicitGrantAllowlist` on its
-	 * `GrantHandler` contract composes a **stricter** rule on top: dispatch
-	 * denies by absence for that grant, so machine-to-machine access is
-	 * never acquired by omission (#326). `client_credentials`
-	 * (`grants/clientCredentials.mts`) and the WebAuthn grant
-	 * (`@o3co/auth-provider-webauthn`) declare it. Both rules are enforced
-	 * at dispatch — either can reject, and only the absent case
-	 * distinguishes them; no handler carries its own copy of the check.
+	 * A grant that declares `requiresExplicitGrantAllowlist` (`client_credentials`,
+	 * the WebAuthn grant) is denied by absence instead, so machine-to-machine
+	 * access is never acquired by omission. Both rules run at dispatch; no
+	 * handler carries its own copy of the check.
 	 */
 	readonly allowedGrantTypes?: readonly string[];
-	// NEW (TODO-F-5): Logout metadata.
+	// Logout metadata.
 	readonly postLogoutRedirectUris?: readonly string[];
 	readonly backchannelLogoutUri?: string;
 	// default: true (includes sid in logout_token) — intentional deviation from OIDC Back-Channel
@@ -129,139 +114,106 @@ export interface Client {
 	// default: true (includes sid in frontchannel logout iframe URL) — intentional deviation from OIDC
 	// Front-Channel Logout 1.0 spec default of false, to default to the safer behavior. See ClientEntrySchema.
 	readonly frontchannelLogoutSessionRequired?: boolean;
-	// NEW (TODO-F-6): Federation-token access opt-in.
 	/**
 	 * When true, this client MAY call POST /oauth/federation/:name/token to
-	 * retrieve the user's upstream federation access_token. Deny-by-default
-	 * (deny-by-absence); must be explicitly opted in per client.
-	 *
-	 * Why default false: federation access_tokens grant access to the user's
-	 * external resources (Google Calendar, GitHub API, etc.) — high blast
-	 * radius. Opt-in prevents accidentally granting this power to a generic
-	 * OAuth client registration that only needs auth.
+	 * retrieve the user's upstream federation access_token. Deny by absence:
+	 * such a token reaches the user's external resources (Google Calendar,
+	 * GitHub API, ...), so a client registered only for auth must not get this
+	 * by accident.
 	 */
 	readonly allowedAzpForFederationToken?: boolean;
 	/**
-	 * The federation grant connections (#593, D9) this client may spend a
-	 * grant on. Absent or empty means none: a registration made before
-	 * offline delegation existed must not find itself opted into it.
-	 *
-	 * Deny-by-absence rather than a wildcard, and exact names rather than a
-	 * pattern, for the reason {@link allowedAzpForFederationToken} is opt-in:
-	 * a grant hands a client the user's access at an upstream, and the blast
-	 * radius of a mistake is every user who ever connected.
+	 * The federation grant connections this client may spend a grant on. Absent
+	 * or empty means none, so no existing registration is opted in silently.
+	 * Deny-by-absence and exact names, not a wildcard or pattern, for the reason
+	 * {@link allowedAzpForFederationToken} is opt-in: a grant hands a client the
+	 * user's access at an upstream, and the blast radius of a mistake is every
+	 * user who ever connected.
 	 */
 	readonly allowedFederationGrantConnections?: readonly string[];
 	/**
-	 * Where the connect flow may return to for this client (#593, D7). Absent
-	 * or empty means nowhere, and {@link allowedRedirectUris} is never
-	 * inherited: the two flows end in different places, and a worker that only
-	 * spends grants never performs the browser flow at all.
-	 *
-	 * Held to the same rules as any other redirect URI.
+	 * Where the connect flow may return to for this client. Absent or empty
+	 * means nowhere, and {@link allowedRedirectUris} is never inherited: the two
+	 * flows end in different places, and a worker that only spends grants never
+	 * performs the browser flow. Held to the same rules as any redirect URI.
 	 */
 	readonly federationGrantRedirectUris?: readonly string[];
 	/**
-	 * Sender-constraint requirement for this client. See Wave 2 Token-
-	 * binding Cluster spec §4.8. Surfaces through `PublicClient` (via
-	 * `Omit`) and `AuthenticatedClient` (via the `/token` route's
-	 * projection).
+	 * Sender-constraint requirement for this client. Surfaces through
+	 * `PublicClient` (via `Omit`) and `AuthenticatedClient` (via the `/token`
+	 * route's projection).
 	 */
 	readonly senderConstrained?: SenderConstraint;
 	/**
-	 * Whether this client is first-party — i.e. operated by the same
-	 * organisation as this authorization server, and trusted to receive the
-	 * user's identity without the user being asked (#267).
+	 * Whether this client is first-party: operated by the same organisation as
+	 * this authorization server, and trusted to receive the user's identity
+	 * without the user being asked.
 	 *
-	 * `GET /authorize` mints an authorization code as soon as the session is
-	 * authenticated, with no consent step. That is defensible in a pure
-	 * first-party OP and only there: a forced top-level navigation from an
-	 * attacker's page makes a logged-in victim's browser mint a code, bound to
-	 * the victim's session, delivered to the named client's registered
-	 * `redirect_uri`. Registering one semi-trusted client turns the endpoint
-	 * into an account-linking vector.
+	 * `GET /authorize` mints a code as soon as the session is authenticated,
+	 * with no consent step. That is defensible only for a first-party client: a
+	 * forced top-level navigation from an attacker's page makes a logged-in
+	 * victim's browser mint a code delivered to the client's registered
+	 * `redirect_uri`, so registering one semi-trusted client would turn the
+	 * endpoint into an account-linking vector.
 	 *
-	 * So the assumption is now enforced rather than assumed: `/authorize`
-	 * refuses any client that is not `true` here — one with no `firstParty`
-	 * field and one carrying an explicit `false` alike. There is no opt-out:
-	 * the one-time `oauth.authorize.allowUnmarkedClients` migration flag that
-	 * admitted unmarked registrations (#317) was removed in #330, and a config
-	 * still setting it fails at boot with migration instructions.
-	 *
-	 * This does **not** make `/authorize` safe against forced navigation for a
-	 * client that *is* first-party — that is the accepted model, and the
-	 * user-interaction step which changes it is consent (#284). What the flag
-	 * closes is the escalation: a client that should never have been trusted
-	 * with a silent code cannot be registered into that position by accident.
+	 * `/authorize` therefore refuses any client that is not `true` here (absent
+	 * or `false` alike), with no opt-out. This does not protect a first-party
+	 * client against forced navigation (the accepted model; consent is what
+	 * changes it); it stops an untrusted client from being registered into that
+	 * position by accident.
 	 */
 	readonly firstParty?: boolean;
 	/**
 	 * Human-readable name of the client (RFC 7591 `client_name`), shown on the
-	 * consent page a client that is not first-party is routed through (#527).
+	 * consent page a client that is not first-party is routed through.
 	 */
 	readonly clientName?: string;
 	/**
 	 * URL of the client's home page (RFC 7591 `client_uri`), shown on the
-	 * consent page beside the name (#527).
+	 * consent page beside the name.
 	 */
 	readonly clientUri?: string;
 	/**
-	 * Whether this client may use the RFC 7636 `plain` PKCE challenge method
-	 * (#273).
+	 * Whether this client may use the RFC 7636 `plain` PKCE challenge method.
 	 *
 	 * PKCE is mandatory for every authorization-code client and `S256` is the
-	 * only method the authorization server accepts — there is no server-wide
-	 * setting that admits `plain`, because a deployment-wide one would quietly
-	 * cover every client at once. This flag is the ONLY way to reach it, and it
-	 * is deliberately per client: admitting `plain` is a named exception for a
-	 * named registration, visible in the client record itself.
+	 * only method otherwise accepted. There is deliberately no server-wide
+	 * switch: admitting `plain` is a named exception for a named registration,
+	 * visible in the client record.
 	 *
 	 * `plain` stores the verifier as the challenge, so anything that can read
 	 * the authorization request (browser history, a proxy log, a referrer)
-	 * learns the verifier too and PKCE stops proving anything. Set this only
-	 * for a legacy client that genuinely cannot compute SHA-256, and treat it
-	 * as a migration deadline rather than a configuration.
+	 * learns the verifier and PKCE proves nothing. Set this only for a legacy
+	 * client that cannot compute SHA-256, as a migration deadline.
 	 *
-	 * Absent and `false` are the same: S256 only. Like `firstParty`, the check
-	 * is a strict `=== true`, so an uncoerced `"true"` from YAML or an
-	 * environment variable does not widen the policy.
-	 *
-	 * Surfaces through `PublicClient` (via `Omit`) and `AuthenticatedClient`
-	 * (via the `/token` route's projection) so `/authorize` and `/token` read
-	 * the same value.
+	 * Absent and `false` both mean S256 only. Like `firstParty`, the check is a
+	 * strict `=== true`, so an uncoerced `"true"` from YAML or an environment
+	 * variable does not widen the policy. Surfaces through `PublicClient` and
+	 * `AuthenticatedClient` so `/authorize` and `/token` read the same value.
 	 */
 	readonly allowPlainPkce?: boolean;
 }
 
 /**
- * A user as returned by a {@link UserRepository}, published by **the Store** —
+ * A user as returned by a {@link UserRepository}, published by **the Store**:
  * auth.provider's term for the consumer's upstream user service, the system of
- * record for identity, credentials, and email-verification state. auth.provider
- * reads Store-published state, and causes a write there only through the two
+ * record for identity, credentials and email-verification state. auth.provider
+ * reads Store-published state and causes a write there only through the two
  * optional relays its own flows need (`UserRepository.linkFederatedIdentity`
  * and `markMfaEnrolled`); `HttpUserRepository` in
- * `@o3co/auth-provider-foundation` is the shipped client. This doc is the
- * term's definition site (see docs/design-vocabulary.md in the repository —
- * the docs/ tree is not shipped in the npm package).
+ * `@o3co/auth-provider-foundation` is the shipped client. This is the term's
+ * definition site (see docs/design-vocabulary.md in the repository).
  *
- * The claim-bearing fields below are the ones `extractUserClaims` reads when
- * seeding a session's claims envelope, and they mirror `UserSessionClaims`
- * exactly. They are declared rather than left to the index signature because a
- * Store is reached across an untyped boundary — `HttpUserRepository` parses
- * JSON — and until #297 the only thing telling an implementer that
- * `emailVerified` was a *boolean* was the runtime `typeof` check that silently
- * dropped it when it wasn't.
- *
- * `email_verified` in an issued token is Store-owned state that auth.provider
- * only reflects. Issuing the verification token, delivering it, and flipping
- * the state belong to the Store; this library reads the result and binds it
- * into the artifact (responsibility #4).
+ * The claim-bearing fields mirror `UserSessionClaims` and are what
+ * `extractUserClaims` reads when seeding a session's claims envelope. They are
+ * declared rather than left to the index signature because a Store is reached
+ * across an untyped boundary (`HttpUserRepository` parses JSON).
+ * `email_verified` in a token only reflects Store-owned state: issuing,
+ * delivering and applying the verification belong to the Store.
  *
  * `mfaEnrolled` is not a claim: it is the MFA enrollment witness, read by the
- * MFA package (its `mfa` requirement and routes) and never stamped on a token.
- *
- * The index signature stays: a Store may carry custom claims beyond these, and
- * a consumer may map them through a custom claim filter.
+ * MFA package and never stamped on a token. The index signature carries
+ * custom claims, which a consumer may map through a custom claim filter.
  */
 export interface User {
 	readonly id: string;
@@ -285,16 +237,13 @@ export interface User {
 	/** Surfaced as the non-standard `groups` claim under the `groups` scope. */
 	readonly groups?: readonly string[];
 	/**
-	 * The MFA enrollment witness (the MFA ADR's D12): whether this user has
-	 * enrolled a second factor, as the Store answers it on `authenticate`. It
-	 * lives outside the factor store so that losing that store does not read
-	 * as "never enrolled" — which would let whoever holds the password bind
-	 * their own authenticator. Read it through `readMfaEnrollmentWitness`
-	 * only: `true` is a witness; `false` and absence say the subject has not
-	 * enrolled; any other value is malformed, which the MFA package answers
-	 * `503` and never reads as "not enrolled". The provider tells the Store
-	 * through `UserRepository.markMfaEnrolled` where the repository has it; a
-	 * Store that answers no field leaves the witness absent.
+	 * The MFA enrollment witness: whether this user has enrolled a second
+	 * factor, as the Store answers it on `authenticate`. It lives outside the
+	 * factor store so that losing that store does not read as "never enrolled",
+	 * which would let whoever holds the password bind their own authenticator.
+	 * Read it only through `readMfaEnrollmentWitness`; the provider writes it
+	 * through `UserRepository.markMfaEnrolled` where the repository has it. See
+	 * the MFA ADR (2026-09-25-multi-factor-authentication), D12.
 	 */
 	readonly mfaEnrolled?: boolean;
 	readonly [key: string]: unknown;
@@ -303,33 +252,24 @@ export interface User {
 /**
  * Data persisted in the code record at /authorize time.
  *
- * `consumeByCode` (atomic single-use) is the sole authenticity gate; `client_id`
- * and `redirect_uri` embedded in the record replace the session-based identity
- * gates removed in v0.5.1 (see CHANGELOG for the historical context — the
- * design rationale is the D-1 code-repository rewrite shipped in that release).
+ * `consumeByCode` (atomic single-use) is the sole authenticity gate; the
+ * record's `client_id` and `redirect_uri` bind the code to its client.
  *
- * Breaking change for custom CodeRepository implementations: `client_id` and
- * `redirect_uri` are now required, on the record and on `CreateCodeInput`, so
- * a call to `createCode` that omits either fails typecheck.
- *
- * #626: every other field is a required key as well, holding `undefined`
- * where `/authorize` recorded nothing. `/token` reads the record back without
- * deciding anything again, and a repository copies it field by field; a copy
- * that forgot `nonce`, `acr` or `sid` minted an id_token without it, with no
- * error anywhere — the Redis path did exactly that before v0.5.1 (IH-2 /
- * TS-1). Naming the key makes that copy a compile error — it surfaces at the
- * object literal the copy builds, whichever step of it left the field out.
+ * Every field is a required key, holding `undefined` where `/authorize`
+ * recorded nothing. `/token` reads the record back without deciding anything
+ * again, and a repository copies it field by field; a required key makes a
+ * copy that forgets `nonce`, `acr` or `sid` a compile error at the object
+ * literal, instead of an id_token silently missing the claim.
  */
 export interface CodeData {
-	readonly client_id: string; // required — replaces the session.code_client_id gate
-	readonly redirect_uri: string; // required — closes IH-4 vacuous-pass (RFC 6749 §4.1.3)
+	readonly client_id: string;
+	readonly redirect_uri: string; // must match at /token (RFC 6749 §4.1.3)
 	readonly code_challenge: string | undefined;
 	readonly code_challenge_method: string | undefined;
-	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
-	// These fields are persisted at /authorize and read at /token.
+	// OIDC authorize → token round-trip state.
 	readonly nonce: string | undefined;
 	readonly sid: string | undefined;
-	/** #481: the acr `/authorize` satisfied for this request; the id_token's `acr`. */
+	/** The acr `/authorize` satisfied for this request; the id_token's `acr`. */
 	readonly acr: string | undefined;
 }
 

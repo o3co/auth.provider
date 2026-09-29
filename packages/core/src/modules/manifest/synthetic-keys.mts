@@ -24,24 +24,16 @@ import type {
 } from "./contributes-map.mjs";
 
 /**
- * Read-only projection of the boot planner's `grants` collector, exposed
- * to route factories that dispatch by `grant_type` at request time. Per
- * A2-α §6.5 + Amendment 3.
- *
- * The boot planner instantiates this resolver before the `provides`
- * factories run (it fills in `applyContributions`, Phase 4 / A2-β §5.4) and
- * freezes the underlying registry; the resolver exposes only `get` and
- * `entries`, no write surface.
+ * Read-only projection of the boot planner's `grants` collector, for route
+ * factories that dispatch by `grant_type` at request time. The planner builds
+ * it before the `provides` factories run and freezes the registry behind it.
  */
 export interface GrantHandlerResolver {
 	readonly get: (grantType: string) => GrantHandler | undefined;
 	readonly entries: () => IterableIterator<readonly [string, GrantHandler]>;
 }
 
-/**
- * Read-only projection of the boot planner's `tokenExchangeValidators`
- * collector. Per A2-α §6.5.
- */
+/** Read-only projection of the boot planner's `tokenExchangeValidators` collector. */
 export interface TokenExchangeValidatorResolver {
 	readonly get: (tokenType: string) => ExchangeTokenValidator | undefined;
 	readonly entries: () => IterableIterator<readonly [string, ExchangeTokenValidator]>;
@@ -49,9 +41,9 @@ export interface TokenExchangeValidatorResolver {
 
 /**
  * Read-only projection of the boot planner's `mfaFactors` collector: every
- * contributed second factor by kind (the MFA ADR's D3, D7). A kind whose
- * factory answered `null` — switched off by its configuration — is absent
- * from both `get` and `entries`.
+ * contributed second factor by kind (ADR 2026-09-25-multi-factor-authentication).
+ * A kind whose factory answered `null` (switched off by its configuration) is
+ * absent from both `get` and `entries`.
  */
 export interface MfaFactorResolver {
 	readonly get: (kind: string) => MfaFactor | undefined;
@@ -59,50 +51,30 @@ export interface MfaFactorResolver {
 }
 
 /**
- * Read-only projection of the boot planner's `rateLimitBudgets` collector
- * (#728): every contributed budget by the prefix it limits. A prefix whose
- * factory answered `null` — switched off by its module's settings — is
- * absent from both `get` and `entries`. A limiter reads it at request time;
- * what an operator configures on the limiter itself for a prefix is the
- * limiter's to weigh against it.
+ * Read-only projection of the boot planner's `rateLimitBudgets` collector:
+ * every contributed budget by the prefix it limits. A prefix whose factory
+ * answered `null` (switched off by its module's settings) is absent from both
+ * `get` and `entries`. A limiter reads it at request time and weighs it
+ * against what an operator configured on the limiter for that prefix.
  */
 export interface RateLimitBudgetResolver {
 	readonly get: (prefix: string) => RateLimitSpec | undefined;
 	readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
 }
 
-/**
- * Re-export of `FederationProvider` for consumers that name the slot's value
- * type. It is the adapter port itself since #626 P1 — it was a placeholder
- * while the contract lived in `packages/session`.
- */
+/** Re-export for consumers that name the `federationProviders` slot's value type. */
 export type { FederationProvider };
 
 /**
- * The set of synthetic ComponentMap keys at v0.5.0. The boot planner
- * (Phase 4 / A2-β §5.1 step 3) consults this set to reject:
- * - any module's `provides[K]` where `K ∈ SYNTHETIC_COMPONENT_KEYS`
- * - any `bootstrapComponents[K]`
- * - any `overrideComponents[K]`
+ * ComponentMap keys whose values the boot planner builds itself. Boot rejects
+ * any of them in a module's `provides`, in `bootstrapComponents` and in
+ * `overrideComponents` (`synthetic-key-collision`). Each `…Resolver` projects
+ * the contribution kind of the same stem; `federationRedirectPolicies` is
+ * typed in `@o3co/auth-provider-session`.
  *
- * A5 (Phase 7) added `federationRedirectPolicyResolver` — the synthetic
- * projection for `federationRedirectPolicies` contributions (typed in
- * `@o3co/auth-provider-session/src/federations/contributes.mts`).
- * `mfaFactorResolver` is the projection for `mfaFactors` (the MFA ADR's D3);
- * `sessionRequirementResolver` for `sessionRequirements` (the
- * session-admission ADR's D3), whose contract is in
- * `session-admission/requirement.mts` and whose value the boot planner brands;
- * `rateLimitBudgetResolver` for `rateLimitBudgets` (#728).
- *
- * Per A2-α §6.5 NORMATIVE constraints. The PRIMARY immutability guard
- * is the TypeScript declared type `ReadonlySet<string>` — `.add()`,
- * `.delete()`, and `.clear()` are prevented at compile time. The
- * runtime `Object.freeze` call additionally marks the Set object as
- * frozen (no new own properties, no prototype change), but it does
- * NOT prevent the built-in Set methods from mutating the internal
- * `[[SetData]]` slot — that is a JavaScript engine constraint specific
- * to built-in collection types. A consumer casting `(s as Set<string>)`
- * to mutate is explicitly bypassing the public type contract.
+ * Immutability rests on the `ReadonlySet<string>` type. `Object.freeze` does
+ * not stop the built-in Set methods from mutating `[[SetData]]`, so a cast to
+ * `Set<string>` bypasses the contract.
  */
 export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 	new Set([
@@ -113,58 +85,37 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"mfaFactorResolver",
 		"sessionRequirementResolver",
 		"rateLimitBudgetResolver",
-		// D-5: lifecycleRegistrar is boot-planner-owned (pre-seeded into the
-		// bootstrap map by createApp). Consumer-supplied values via
-		// bootstrapComponents/overrideComponents would create two registrars
-		// that silently diverge — the planner drains its own instance while
-		// builders register cleanups on the consumer's. Reserve the key.
+		// Boot-planner-owned (createApp pre-seeds it). A consumer-supplied
+		// registrar would diverge silently: the planner drains its own while
+		// builders register cleanups on the consumer's.
 		"lifecycleRegistrar",
-		// Same reservation for the readiness registrar: two registrars would
-		// diverge silently, the planner reading its own (empty) instance while
-		// builders register probes on the consumer's — `/readyz` would then
-		// answer ready with nothing actually probed.
+		// Same for readiness: the planner would read its own empty registrar
+		// while builders register probes on the consumer's, and `/readyz` would
+		// answer ready with nothing probed.
 		"readinessRegistrar",
 	]),
 );
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge for synthetic resolver slots.
+// ComponentMap declaration-merge for the synthetic resolver slots, so a module
+// can declare `requires: ["grantHandlerResolver"]` etc. through the typed
+// `defineModule` surface.
 //
-// The boot planner injects these projections into the working component map
-// before stage 3 runs the `provides` factories (`prepareSyntheticProjections`
-// in `boot/apply-contributions.mts`), so a provider may require one and hold
-// it; it reads the projection lazily, at request time, because the
-// contributions behind it register only in stage 4 — a read while the
-// provides factories run throws, and the boot is refused. Without
-// declaration-merging them onto ComponentMap, downstream modules cannot
-// declare `requires: ["grantHandlerResolver"]` etc. through the typed
-// `defineModule` surface — `ComponentKey = keyof ComponentMap` would not
-// include these keys and authoring would require a private augmentation.
+// The planner injects these projections before stage 3 runs the `provides`
+// factories (`prepareSyntheticProjections` in `boot/apply-contributions.mts`).
+// A provider may hold one but must read it lazily, at request time: the
+// contributions behind it register in stage 4, and a read while the provides
+// factories run throws and refuses the boot.
 //
-// Slot-name reservation (A1 §5.5): unnamespaced names
-// (grantHandlerResolver, tokenExchangeValidatorResolver, federationProviders)
-// are reserved for o3co. Consumers MUST namespace their own keys.
+// Unnamespaced slot names are reserved for o3co; consumers MUST namespace
+// their own keys.
 //
-// `federationProviders` is shaped as `ReadonlyMap<string, FederationProvider>`
-// — same shape as the runtime view returned by `makeFederationProviders` in
-// `apply-contributions.mts`.
-//
-// TRADE-OFF (NORMATIVE): merging these slots onto ComponentMap means the
-// type system NO LONGER rejects a module that writes
-// `provides: { grantHandlerResolver: () => ... }` or a host that supplies
-// `bootstrapComponents.grantHandlerResolver` / `overrideComponents.
-// grantHandlerResolver`. Those collisions are caught at RUNTIME by
-// `validate-manifests.mts` step 3a (provides), 3b (bootstrap), and 3c
-// (overrideComponents) — `BootError({ reason: "synthetic-key-collision" })`.
-//
-// The trade-off is deliberate: typed `requires` is the higher-value goal
-// for downstream module authors (it is the read path for the resolvers).
-// The write paths (provides / bootstrap / overrideComponents) are guarded
-// structurally by `SYNTHETIC_COMPONENT_KEYS` membership checks at boot
-// time, which is the same enforcement the planner relies on for non-typed
-// languages and dynamically loaded modules. The runtime check is
-// authoritative; the type system narrows the typical failure mode (typo
-// in `requires`) but does not gate the deliberate-collision case.
+// TRADE-OFF (NORMATIVE): once merged, the type system no longer rejects a
+// module or host that writes one of these slots (`provides`,
+// `bootstrapComponents`, `overrideComponents`). `validate-manifests.mts`
+// rejects that at runtime (`synthetic-key-collision`); that check is
+// authoritative and also covers untyped and dynamically loaded modules. Typed
+// `requires`, the read path, is worth more to module authors.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
@@ -172,9 +123,9 @@ declare module "@o3co/auth-provider-core" {
 		readonly tokenExchangeValidatorResolver?: TokenExchangeValidatorResolver;
 		readonly federationProviders?: ReadonlyMap<string, FederationProvider>;
 		readonly mfaFactorResolver?: MfaFactorResolver;
-		/** The registered session requirements, in registration order (the session-admission ADR's D3): branded, the planner's alone. */
+		/** The registered session requirements in registration order, branded by the planner (ADR 2026-09-28-session-admission). */
 		readonly sessionRequirementResolver?: SessionRequirementResolver;
-		/** Every module's rate-limit budget by prefix (#728), read by a limiter at request time. */
+		/** Every module's rate-limit budget by prefix, read by a limiter at request time. */
 		readonly rateLimitBudgetResolver?: RateLimitBudgetResolver;
 	}
 }

@@ -15,17 +15,11 @@
  */
 
 /**
- * End-to-end coverage for the canonical confidential-client shape: the
- * authorization code is exchanged over a back channel, so the `/token` request
- * carries no end-user cookie.
- *
- * The unit tests for the grant all inject `session: { user: { id: "u1" } }`
- * into the grant context, which only models the same-browser / BFF topology.
- * That masked a defect where the access token's `sub` was read from the
- * token-request session instead of the UserSession the code is bound to: with
- * no cookie the claim was simply absent, and every consumer of `sub`
- * downstream broke. This file exercises the grant and the userinfo route
- * together so the two stay consistent.
+ * End-to-end coverage for a confidential client that exchanges the code over a
+ * back channel, so the `/token` request carries no end-user cookie. Pins that
+ * the access token's `sub` comes from the UserSession the code is bound to,
+ * not from the token-request session (the grant unit tests inject
+ * `session.user`, which only models the same-browser / BFF topology).
  */
 
 import {
@@ -107,7 +101,7 @@ async function exchangeCodeWithoutCookie() {
 				client_id: CLIENT_ID,
 				redirect_uri: RP_URI,
 				sid: SID,
-				// #273: a redeemable code always carries an S256 challenge.
+				// A redeemable code always carries an S256 challenge.
 				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 				code_challenge_method: "S256",
 				grantedScope: ["openid", "email"],

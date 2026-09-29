@@ -15,33 +15,24 @@
  */
 
 /**
- * Atomic replay-detection primitive. Records (scope, key) pairs and answers
- * "has this been seen before?" without amplifying storage on attacker probes
- * (the read path is `contains`, which never writes).
+ * Atomic replay-detection primitive: records (scope, key) pairs and answers
+ * "seen before?".
  *
- * Per A1 §5.2 (lines 146-177). Concurrency contract:
- *   - markSeen(scope, key, expiresAtMs): N parallel for same key → exactly 1
- *     returns true ("fresh, this call wrote"), N-1 return false ("replay").
- *   - contains(scope, key): read-only; atomicity vs concurrent markSeen NOT
- *     required (the wrapper layer queries contains only when find returned
- *     null, so the read-vs-write race window is benign).
+ * Concurrency: N parallel `markSeen` calls for one key give exactly one
+ * `true` (fresh, this call wrote) and N-1 `false` (replay). `contains` need
+ * not be atomic against `markSeen`; callers query it only after `find`
+ * returned null, where that race is benign.
  *
- * markSeen MUST throw ChallengeStorageError({ reason: "expired-at-issue" })
- * for expiresAtMs <= now(), and RangeError for an expiresAtMs that is not a
- * finite instant within the Date range (NaN, ±Infinity, past ±8.64e15 ms —
- * `isStorableExpiry`) — a caller fault rather than a timing
- * race, so it is not the error consumers swallow. Either way nothing is
- * recorded. A fractional expiresAtMs is valid, and the record lives at least
- * until it. contains MUST NOT throw domain errors.
+ * `markSeen` MUST throw `ChallengeStorageError({ reason: "expired-at-issue" })`
+ * for `expiresAtMs <= now()`, and `RangeError` for an `expiresAtMs` that is
+ * not a finite instant within the Date range (`isStorableExpiry`): a caller
+ * fault, not a timing race, so consumers do not swallow it. Either way
+ * nothing is recorded. A fractional `expiresAtMs` is valid; the record lives
+ * at least until it.
  *
- * `contains` is the security-friendly disambiguation primitive — attacker
- * probing via ChallengeCeremony.consume hits `contains` (read-only, zero
- * storage amplification) rather than `markSeen` (which would amplify
- * storage proportional to probe rate).
- *
- * The no-throws contract on `contains` is enforced by the shared adapter
- * contract test suite (`__tests__/adapters.contract.mts`, established in
- * Task 4 and re-imported by the Redis adapter test in Task 12).
+ * `contains` never writes and MUST NOT throw domain errors, so attacker
+ * probes through `ChallengeCeremony.consume` cost no storage. The adapter
+ * contract suite (`__tests__/adapters.contract.mts`) enforces this.
  */
 export interface ReplaySeenSet {
 	readonly kind: string;
@@ -64,17 +55,10 @@ export interface ReplaySeenSet {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge (A1 §5.5)
+// ComponentMap declaration-merge
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly replaySeenSet?: ReplaySeenSet;
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Backing client interface (Phase 10 addendum §3)
-// ---------------------------------------------------------------------------
-
-// ReplaySeenSetClient backing-client interface relocated to
-// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3).

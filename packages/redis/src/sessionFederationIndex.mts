@@ -24,18 +24,14 @@ export interface RedisSessionFederationIndexOptions {
 }
 
 /**
- * Redis-backed SessionFederationIndex. Wraps `createRedisSidSortedSet` (ZSET
- * with insertion-time score, ZADD NX). Per A4 §5.4 + §7.2.
+ * Redis-backed SessionFederationIndex over `createRedisSidSortedSet` (a ZSET
+ * scored in insertion order, `ZADD NX`).
  *
- * Ordering contract (load-bearing): `listFederations(sid)` returns federation
- * names in INSERTION order (oldest first). `routes/logout.mts` uses the first
- * element for IdP post-logout redirect. ZADD NX preserves original
- * insertion-time score so re-add of an existing member does NOT promote its
- * position.
- *
- * `removeFederation(sid, name)` delegates to `RedisSidSortedSet.remove` for
- * per-element removal (required for federation logout completion, distinct from
- * full-session `removeBySid`).
+ * `listFederations(sid)` MUST return names in insertion order, oldest first:
+ * `routes/logout.mts` uses the first for the IdP post-logout redirect.
+ * `ZADD NX` keeps a re-added member's original score, so it does not move.
+ * `removeFederation` removes one element, which federation logout completion
+ * needs, as distinct from the whole-session `removeBySid`.
  */
 export function createRedisSessionFederationIndex(
 	opts: RedisSessionFederationIndexOptions,
@@ -59,16 +55,11 @@ export function createRedisSessionFederationIndex(
 }
 
 /**
- * AdapterFactory builder for the Redis-backed `SessionFederationIndex` (AS-9).
- *
- * Use when per-adapter `AdapterFactory` granularity is needed; for the common
- * case the bundled `redisSessionStoresModule` is sufficient. Default
- * `keyPrefix` matches the bundle's production layout (`ss:fed:`) so swapping
- * between bundle and individual builder does not change the keyspace.
- *
- * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
- * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op.
+ * AdapterFactory builder for the Redis-backed `SessionFederationIndex`, for
+ * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
+ * common case. The default `keyPrefix` is the bundle's (`ss:fed:`), so
+ * switching between the two keeps the keyspace. A missing `client` throws at
+ * boot, as in `redisChallengeStoreBuilder`, rather than at the first command.
  */
 export const redisSessionFederationIndexBuilder: AdapterBuilder<SessionFederationIndex> = (
 	config,

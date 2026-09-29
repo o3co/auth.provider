@@ -16,67 +16,31 @@
 import type { X509Certificate } from "node:crypto";
 
 /**
- * Narrow PKI mode chain validation per Wave 2 Phase 3 spec §7.2.
+ * Narrow PKI mode (`mode = "pki"`) chain validation — deliberately NOT full
+ * RFC 5280 path validation. It checks the leaf's validity and client profile
+ * (`checkClientLeafProfile`), then walks the chain hop by hop with cycle
+ * detection, requiring of every intermediate and of the anchor: validity,
+ * `basicConstraints.CA === true` (RFC 5280 §4.2.1.9), and both `checkIssued`
+ * and a signature check (`isSignedBy`).
  *
- * **This is NOT full RFC 5280 path validation.** The narrow mode checks:
+ * Enough for the common single-private-CA M2M shape (RFC 8705 §2.1). Name
+ * constraints, policies, path length, `keyUsage` and revocation are not
+ * checked — a revoked certificate binds tokens until its `notAfter` — so
+ * deployments that need them use `mode = "full-pki"` (README "PKI Mode
+ * Scope"). Otherwise, mitigate with short certificate lifetimes and a
+ * minimal `trusted-cas` (RFC 8705 §7.4).
  *
- *   1. Leaf cert validity window (`notBefore <= now <= notAfter`).
- *   2. Leaf certificate profile: `basicConstraints.CA === false` and, when the
- *      extension is present, an `extendedKeyUsage` including `clientAuth`
- *      (RFC 5280 §4.2.1.9 + §4.2.1.12). Added by issue #280.
- *   3. Chain walk hop-by-hop, with fingerprint cycle detection.
- *   4. Per-intermediate validity window.
- *   5. Per-intermediate `basicConstraints.CA === true` (RFC 5280 §4.2.1.9).
- *   6. Per-hop **pair check**: `checkIssued` (DN / AKID / SKID match) AND
- *      `isSignedBy` (cryptographic signature). Applied at both intermediate
- *      hops and the terminal trust anchor — see `isSignedBy`'s JSDoc for why
- *      both are required.
- *   7. Trust-anchor validity window, and `basicConstraints.CA === true` on the
- *      anchor itself (issue #280).
- *
- * The narrow mode is sufficient for the common single-private-CA M2M
- * deployment shape (RFC 8705 §2.1). Operators needing full path validation
- * (name constraints, policy mappings, CRL/OCSP, path length) MUST defer
- * deployment until `mode = "full-pki"` arm ships — README §"PKI Mode Scope"
- * documents the scope-out, and `mtlsModule` boot-time check rejects
- * misconfigurations that would silently fail.
- *
- * ### Revocation is NOT checked — deliberately, and tracked
- *
- * Nothing here consults a CRL (RFC 5280 §6.3) or an OCSP responder
- * (RFC 6960). A client certificate that has been revoked continues to bind
- * tokens until its `notAfter` passes. This is a **known, accepted gap** in the
- * narrow mode, not an oversight: revocation needs a fetch path, a cache, and
- * an operator-visible soft-fail / hard-fail policy, none of which belong in a
- * synchronous pure function. It is tracked with the rest of the outstanding
- * RFC 5280 checks in **o3co/auth.provider#341**.
- *
- * Until it ships, the mitigation is short certificate lifetimes and rotation,
- * plus the RFC 8705 §7.4 advice to keep `trusted-cas` as small as possible.
- *
- * **Why explicit boolean return, not throw**: the call site (extractor.mts
- * step 5) wraps the failure into `MtlsError("chain_validation_failed", ...)`.
- * Threading `{ ok, step }` lets the extractor populate the audit `detail`
- * field with the specific failing check name without parsing an exception
- * message. Mirrors `parseProof` from `@o3co/auth-provider-dpop`.
- *
- * Per spec §7.2 + §7.3 (checks NOT performed) + §7.4 (RFC 8705 §7.4 alignment).
+ * Returns `{ ok, step }` rather than throwing, so the extractor can put the
+ * failing check's name in the audit `detail` without parsing a message.
  */
 export type ValidationResult =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly step: string };
 
 /**
- * Probe `basicConstraints` for `CA: TRUE`. Node's `X509Certificate.ca`
- * (boolean) is the canonical accessor — see
- * <https://nodejs.org/api/crypto.html#x509certificateca>.
- *
- * **Why not `keyUsage` check too**: RFC 5280 §4.2.1.3 says a cert MUST have
- * `keyCertSign` to sign certs IF keyUsage is present at all. Most CAs do
- * include `keyCertSign`. The spec §7.2 narrow check list intentionally
- * skips the keyUsage assertion to match what `X509Certificate` exposes
- * directly — adding keyUsage parsing would require ASN.1 walking which
- * the spec defers to the future `full-pki` arm.
+ * Probe `basicConstraints` for `CA: TRUE` via Node's `X509Certificate.ca`.
+ * `keyUsage` (`keyCertSign`, RFC 5280 §4.2.1.3) is not checked: it needs
+ * ASN.1 parsing `X509Certificate` does not expose.
  */
 const issuerIsCA = (issuer: X509Certificate): boolean => issuer.ca === true;
 
@@ -93,30 +57,16 @@ const EKU_CLIENT_AUTH = "1.3.6.1.5.5.7.3.2";
 const EKU_ANY = "2.5.29.37.0";
 
 /**
- * Check the leaf against the client-certificate profile (issue #280).
+ * Check the leaf against the client-certificate profile:
+ * - not `CA:TRUE`: a token bound to a CA certificate is bound to an identity
+ *   that can mint others, turning a leaked CA key into a binding bypass;
+ * - `extendedKeyUsage`, when present, includes `clientAuth` (or
+ *   `anyExtendedKeyUsage`), so a web-PKI server certificate cannot pose as a
+ *   client credential. Absence is accepted: RFC 5280 §4.2.1.12 makes the
+ *   extension a restriction, not a grant.
  *
- * Two properties, both readable from what `X509Certificate` exposes directly:
- *
- *   - **`basicConstraints`.** A `CA:TRUE` certificate is not a client
- *     credential. Binding a token to one binds it to an identity that can also
- *     mint other identities, so a single leaked CA key becomes a token-binding
- *     bypass rather than "just" a CA compromise.
- *   - **`extendedKeyUsage`.** When present, it MUST include `clientAuth` (or
- *     `anyExtendedKeyUsage`). This is what stops a server certificate — which
- *     a web PKI hands out on request for any domain you control — from being
- *     presented as a client credential.
- *
- * **Absence of `extendedKeyUsage` is accepted.** RFC 5280 §4.2.1.12 makes the
- * extension a restriction, not a grant: "If the extension is present, then the
- * certificate MUST only be used for one of the purposes indicated." A leaf
- * without it is unconstrained. Reading absence as "no permitted purposes"
- * would reject every deployment whose private CA does not stamp an EKU, and
- * would not be the RFC's reading.
- *
- * **Naming trap:** Node's `X509Certificate.keyUsage` returns the **extended**
- * key usage OIDs, not the `keyUsage` bit string. The RFC 5280 §4.2.1.3
- * `keyCertSign` check on issuers is therefore NOT implementable from this
- * accessor and is tracked in #341 with the rest of the path-validation gap.
+ * Naming trap: Node's `X509Certificate.keyUsage` returns the *extended* key
+ * usage OIDs, not the `keyUsage` bit string.
  */
 export const checkClientLeafProfile = (leaf: X509Certificate): ValidationResult => {
 	if (leaf.ca === true) {
@@ -139,25 +89,11 @@ export const checkClientLeafProfile = (leaf: X509Certificate): ValidationResult 
 };
 
 /**
- * Cryptographically verify that `subject` was signed by `issuer`'s private key.
- *
- * `X509Certificate.verify(publicKey)` performs the signature check; it does NOT
- * also check DN or extensions (those are checkIssued's job). The pair must be
- * gated TOGETHER: checkIssued for the DN/AKID/SKID match, then `verify` for the
- * cryptographic proof.
- *
- * **Why this is load-bearing**: `X509_check_issued` (OpenSSL primitive backing
- * Node's `checkIssued`) does NOT verify signatures — its docs are explicit. The
- * incidental AKID/SKID checks reject many naive forges, but they are not a
- * security guarantee: an attacker who omits the AKID extension entirely (legal
- * per RFC 5280) or carefully crafts a matching AKID can bypass `checkIssued`
- * without ever proving cryptographic relation to the issuer. The explicit
- * `verify(publicKey)` closes the gap and matches the spec §7.2 "current signed
- * directly by …" contract that the README "PKI Mode Scope" advertises.
- *
- * Returns `false` on any verification failure (mismatched signature, algorithm
- * mismatch, etc.) — the caller maps this to a chain-validation failure with the
- * specific failing hop named in `step`.
+ * Cryptographically verify that `subject` was signed by `issuer`'s key.
+ * Always paired with `checkIssued`, which (as OpenSSL's `X509_check_issued`)
+ * matches DN / AKID / SKID but never verifies a signature: a forged
+ * certificate that omits AKID (legal under RFC 5280) or crafts a matching
+ * one would pass it alone. Returns `false` on any verification failure.
  */
 const isSignedBy = (subject: X509Certificate, issuer: X509Certificate): boolean => {
 	try {
@@ -182,21 +118,15 @@ export const validateCertChain = (
 	if (now < new Date(leaf.validFrom)) return { ok: false, step: "leaf cert not yet valid" };
 	if (now > new Date(leaf.validTo)) return { ok: false, step: "leaf cert expired" };
 
-	// Step 2 (#280): leaf certificate profile. Runs BEFORE the chain walk so a
-	// server certificate presented as a client credential reports that, rather
-	// than reporting "no path to trust anchor" and sending the operator to look
-	// at their CA configuration instead of the certificate they issued.
+	// Step 2: leaf certificate profile, before the chain walk, so a server
+	// certificate presented as a client credential is reported as such rather
+	// than as "no path to trust anchor".
 	const profile = checkClientLeafProfile(leaf);
 	if (!profile.ok) return profile;
 
-	// Step 3: chain walk. Track fingerprints to detect cycles — a malicious
-	// chain could otherwise loop forever or exhaust stack.
-	//
-	// Per-hop cost is up to 4 .find() scans over the (trustedCas) and
-	// (intermediates) arrays — verified-pair lookup + DN-only fallback for
-	// the audit-signal distinction. Realistic deployments have <5 hops and
-	// <20 anchors so the O(N²) shape is trivially fine; merging the two
-	// scans would obscure the audit-reason branching and is not worth it.
+	// Step 3: chain walk, tracking fingerprints so a malicious cyclic chain
+	// cannot loop. Up to four `.find()` scans per hop is fine at realistic
+	// sizes (<5 hops, <20 anchors) and keeps the audit reasons distinct.
 	let current = leaf;
 	const seen = new Set<string>();
 	// Walk depth is bounded by `intermediates.length + 1` (one terminal hop to
@@ -219,10 +149,9 @@ export const validateCertChain = (
 			if (now > new Date(anchor.validTo)) {
 				return { ok: false, step: "trust anchor expired" };
 			}
-			// #280: the anchor list is operator-supplied, so a paste error can put
-			// an end-entity certificate in it. Terminating on something that is
-			// not allowed to issue certificates would accept a chain no other
-			// verifier would.
+			// The anchor list is operator-supplied, so a paste error can put an
+			// end-entity certificate in it; terminating on a non-CA would accept
+			// a chain no other verifier would.
 			if (!issuerIsCA(anchor)) {
 				return {
 					ok: false,

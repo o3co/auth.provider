@@ -17,17 +17,14 @@
 import { isError, isFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
- * SF-13 — what an upstream federation refresh failed with.
+ * What an upstream federation refresh failed with.
  *
- * - `invalid_grant`: the IdP rejected the refresh token (revoked, expired,
- *   mismatched). Only ever the IdP's structured answer — an `error` of
- *   `invalid_grant` or `invalid_token` on what the library raised — and never
+ * - `invalid_grant`: the IdP rejected the refresh token. Only ever read off
+ *   its structured `error` (`invalid_grant` or `invalid_token`), and never
  *   under a 429 or during an outage: a caller may end the credential on it.
- * - `rate_limited`: the IdP answered 429, whatever code it named, or named
- *   `too_many_requests` — under a 5xx too: asked to slow down, a caller does,
- *   and the upstream has judged nothing about the credential.
- * - `network`: the IdP could not be reached, did not answer in time, or
- *   answered 5xx — whatever else its body said.
+ * - `rate_limited`: a 429 whatever code it named, or a `too_many_requests`
+ *   code even under a 5xx. It judges nothing about the credential.
+ * - `network`: unreachable, timed out, or 5xx, whatever the body said.
  * - `unknown`: anything else.
  */
 export type FederationRefreshErrorReason = "invalid_grant" | "rate_limited" | "network" | "unknown";
@@ -35,12 +32,9 @@ export type FederationRefreshErrorReason = "invalid_grant" | "rate_limited" | "n
 export interface FederationRefreshErrorClassification {
 	readonly reason: FederationRefreshErrorReason;
 	/**
-	 * Whether `reason` was read off the error's structured properties, and not
-	 * matched in its message. The message fallback is a guess, so it answers
-	 * only `network` or `unknown`: an `invalid_grant` is always structured,
-	 * because acting on one ends a credential — the session's upstream tokens,
-	 * or a federation grant's, whose user goes through consent again (#593,
-	 * D12).
+	 * Whether `reason` came from the error's structured properties rather than
+	 * its message. The message fallback is a guess and answers only `network`
+	 * or `unknown`: an `invalid_grant` ends a credential, so it is never guessed.
 	 */
 	readonly structured: boolean;
 	/**
@@ -52,20 +46,7 @@ export interface FederationRefreshErrorClassification {
 	readonly retryAfterSeconds?: number;
 }
 
-/**
- * Node/undici fetch failures bubble up as `TypeError("fetch failed")` with the
- * underlying network error code on `.cause.code` (one level deep).
- * openid-client v6 rethrows these as-is. Walk the cause chain so
- * `ECONNREFUSED` / `ENOTFOUND` / `ETIMEDOUT` reach the `network` classification
- * regardless of whether the code lands on the top-level error or its `cause`.
- *
- * The code is read on the thrown value itself, whatever it is — a hand-written
- * adapter may throw a plain object — and on a cause only when that cause is an
- * Error: openid-client's `ResponseBodyError` carries the IdP's parsed JSON body
- * as its cause, and a `code` the IdP wrote there says nothing about this
- * server's transport. `isFederationUpstreamOutage` follows causes by the same
- * rule.
- */
+/** Transport failure codes Node sets on an error's `code`. */
 const NETWORK_CODES: ReadonlySet<string> = new Set([
 	"ECONNREFUSED",
 	"ENOTFOUND",
@@ -73,6 +54,15 @@ const NETWORK_CODES: ReadonlySet<string> = new Set([
 	"EAI_AGAIN",
 ]);
 
+/**
+ * Finds a `NETWORK_CODES` code on the thrown value or its cause chain: undici
+ * throws `TypeError("fetch failed")` with the code on `.cause`, and
+ * openid-client v6 rethrows it as-is. The thrown value is read whatever it is,
+ * since an adapter may throw a plain object; a cause only when it is an Error,
+ * because openid-client's `ResponseBodyError` carries the IdP's parsed body as
+ * its cause and a `code` there says nothing about this server's transport.
+ * `isFederationUpstreamOutage` follows causes by the same rule.
+ */
 function extractNetworkCode(error: unknown): string | undefined {
 	let cur: unknown = error;
 	for (let depth = 0; depth < 4 && cur !== null && typeof cur === "object"; depth++) {
@@ -85,11 +75,10 @@ function extractNetworkCode(error: unknown): string | undefined {
 }
 
 /**
- * The error codes this provider repeats. An allow-list, and not a pattern: any
- * pattern that fits `invalid_client` fits an opaque token as well, and an
- * upstream that echoes what it was sent must not get a refresh token repeated
- * through this field. Anything else an upstream sends is left out, and a
- * caller reports it as unknown.
+ * The upstream error codes this provider repeats. An allow-list, not a
+ * pattern: any pattern that fits `invalid_client` also fits an opaque token,
+ * and an upstream that echoes its input must not get a refresh token repeated
+ * through this field. Other codes are left out and reported as unknown.
  */
 export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
 	// RFC 6749 §5.2 — the token endpoint.
@@ -136,48 +125,35 @@ function retryAfterSeconds(error: object): number | undefined {
 
 function structuredReason(error: object): FederationRefreshErrorReason | undefined {
 	const e = error as { error?: unknown; status?: unknown };
-	// An outage is read before the codes that reject the refresh token: the
-	// upstream could not be reached, did not answer in time, or answered 5xx — on the error, its
-	// Error causes or the Response it was raised over (`isFederationUpstreamOutage`),
-	// or a 5xx status on a thrown value that is not an Error, which a hand-written
-	// adapter may throw. A 5xx is never a verdict on the refresh token, whatever
-	// its body says: an IdP that is down and answers `invalid_grant` must not
-	// cost the user their upstream tokens. A 429 is no outage.
+	// An outage (unreachable, timed out or 5xx, on the error, its Error causes or
+	// its Response, or a 5xx `status` on a non-Error an adapter threw) is read
+	// before the codes that reject the refresh token. A 5xx is never a verdict
+	// on it: an IdP that is down and answers `invalid_grant` must not cost the
+	// user their upstream tokens. A 429 is no outage.
 	const outage =
 		isFederationUpstreamOutage(error) ||
 		(typeof e.status === "number" && e.status >= 500 && e.status < 600);
-	// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4,
-	// read before any code that would end the credential: a 429 is the upstream
-	// asking for less, not a verdict on the refresh token, whatever its body
-	// names. RFC 6585 defines `too_many_requests` as an HTTP status name — some
-	// IdPs (Google, Microsoft) echo it back as the error code in `.error`.
+	// A 429 (RFC 6585 §4) asks for less and is no verdict on the refresh token,
+	// whatever its body names, so it is read before any code that ends the
+	// credential. Some IdPs (Google, Microsoft) echo `too_many_requests` as `.error`.
 	if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
-	// openid-client v6 surfaces token-endpoint errors with `.error` populated
-	// from the IdP response body (RFC 6749 §5.2 error codes). `invalid_grant` is
-	// the canonical "refresh token rejected"; `invalid_token` is RFC 6750 §3.1 —
-	// both require re-auth.
+	// `.error` is the IdP's RFC 6749 §5.2 code. `invalid_grant` and
+	// `invalid_token` (RFC 6750 §3.1) both require re-auth.
 	if (!outage && (e.error === "invalid_grant" || e.error === "invalid_token")) {
 		return "invalid_grant";
 	}
 	if (outage) return "network";
-	// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT may be on
-	// the top-level error (legacy adapters) or wrapped as `.cause` of a TypeError
-	// thrown by undici/fetch (openid-client v6's transport) — here also when the
-	// thrown value itself is not an Error, which the outage test does not read.
-	// Never in a cause that is not an Error: that is a peer's parsed body.
+	// Also catches a network code on a thrown non-Error, which the outage test
+	// does not read.
 	if (extractNetworkCode(error) !== undefined) return "network";
 	return undefined;
 }
 
 /**
- * Whether a code may be repeated to a caller (#593, D11, D18).
- *
- * The allow-list above is applied where a classification is *made*, and a
- * stamped code is read back where one is *remembered* (D12) — a stamp a
- * fixture seeded, a version wrote before this list, or someone edited in the
- * keyspace would otherwise reach a caller unchecked. So the same question is
- * asked again wherever a reason is built from stored data, which is what keeps
- * D11's promise true rather than merely intended.
+ * Whether a code may be repeated to a caller. The classifier applies the
+ * allow-list when it classifies; ask again wherever a reason is built from a
+ * stored code, which a fixture, an older version or a keyspace edit may have
+ * written. See ADR 2026-09-17-federation-grants-offline-delegation.
  */
 export function isKnownFederationRefreshErrorCode(code: unknown): code is string {
 	return typeof code === "string" && KNOWN_ERROR_CODES.has(code);
@@ -186,14 +162,11 @@ export function isKnownFederationRefreshErrorCode(code: unknown): code is string
 /**
  * Classifies what an upstream refresh rejected with. Structured properties
  * (`.error`, `.status`, `.code`, and the outage shapes
- * `isFederationUpstreamOutage` knows) are read first; the message fallback is
- * defense-in-depth for legacy or non-openid-client errors, reads an outage
- * only, and `structured` says which of the two answered.
+ * `isFederationUpstreamOutage` knows) are read first; the message fallback
+ * reads an outage only, and `structured` says which of the two answered.
  *
  * `reason` is safe to act on alone: `invalid_grant` is the IdP's structured
- * verdict on the refresh token, and never read during an outage or off a
- * message. The session-bound token route acts on it so; the federation grant
- * retrieval (#593, D12) is the second caller.
+ * verdict on the refresh token, never read during an outage or off a message.
  */
 export function classifyFederationRefreshError(
 	error: unknown,
@@ -208,13 +181,11 @@ export function classifyFederationRefreshError(
 		const reason = structuredReason(error);
 		if (reason !== undefined) return { reason, structured: true, ...extras };
 	}
-	// Defense-in-depth string fallback for non-openid-client errors (legacy
-	// stubs, mocks, custom adapters). It reads an outage and nothing else: a
-	// message is whatever the library, a proxy or the upstream wrote, so an
-	// `invalid_grant` in it is not the IdP's verdict and ends no credential.
-	// An adapter that throws a plain `Error("invalid_grant: ...")` is read as
-	// `unknown`; to have a rejection acted on it sets `.error`, as
-	// openid-client's `ResponseBodyError` does.
+	// Message fallback for errors not from openid-client. It reads an outage
+	// and nothing else: a message is whatever the library, a proxy or the
+	// upstream wrote, so an `invalid_grant` in it ends no credential. An
+	// adapter that wants a rejection acted on sets `.error`, as openid-client's
+	// `ResponseBodyError` does.
 	const msg = error instanceof Error ? error.message : String(error);
 	if (msg.includes("temporarily_unavailable") || /5\d\d/.test(msg)) {
 		return { reason: "network", structured: false, ...extras };

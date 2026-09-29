@@ -15,7 +15,7 @@
  */
 
 /**
- * #593 slice 7 — the standalone composes federation grants from its config.
+ * The standalone composes federation grants from its config.
  *
  * What is under test is the WIRING: which modules the switches select, that
  * the shared Redis client module provides the two slots the Redis stores
@@ -260,10 +260,10 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		);
 		expect(installed).not.toContain("redis-federation-grant-store");
 		expect(installed).not.toContain("redis-federation-grant-intent-store");
-		// Listed ahead of oauthModule, as the template writes them — the
+		// Listed ahead of oauthModule, as the template writes them: the
 		// template's choice, since each module parses its own bodies and the
-		// order no longer changes that; the browser half sits after the
-		// session middleware by its own `after`.
+		// order does not change that; the browser half sits after the session
+		// middleware by its own `after`.
 		expect(installed.indexOf("federation-grants")).toBeLessThan(installed.indexOf("oauth"));
 
 		handleRef = await boot(config, true);
@@ -272,8 +272,8 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		// not express's 404.
 		expect((await request(app).post("/oauth/federation-grants/g/status")).status).toBe(401);
 		expect(handleRef.components.subjectRevocationService).toBeDefined();
-		// The connect flow's login trip is the session module's loginEntry
-		// (#728), built from the configured login page: the URL connect sends
+		// The connect flow's login trip is the session module's loginEntry,
+		// built from the configured login page: the URL connect sends
 		// a browser that is not signed in to.
 		const page = config.endpoints.login.url;
 		const back = "https://auth.example/session/federation-grants/connect?request=h";
@@ -354,9 +354,8 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 			// its horizon, and it is eager, so the store's provider runs at boot
 			// with it — and with it the refusals of a cookie the store would
 			// otherwise mount: one a browser drops, or a name `cookie` throws on
-			// for every response. Fail-fast, where the deployment failed at run
-			// time before. Without the service nothing reads the slot, and the
-			// same cookie boots as it did.
+			// for every response. Without the service nothing reads the slot,
+			// and the same cookie boots.
 			handleRef = await boot(resolveConfig({ ...BASE_ENV, ...cookie }), true);
 			await handleRef.dispose();
 			handleRef = undefined;
@@ -434,10 +433,10 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 
 describe("the browser consent route parses its own body, with sessionModule listed ahead of it", () => {
 	// `sessionModule`'s routers are mounted at `/session`, the prefix the
-	// federation grants browser half mounts under too. Their parsers ran for
-	// every request beneath `/session`, so with `sessionModule` listed first
-	// the consent route's body arrived parsed — past its 16 KiB bound, its
-	// throttle-then-parse order and its JSON refusals.
+	// federation grants browser half mounts under too. If their parsers ran
+	// for every request beneath `/session`, then with `sessionModule` listed
+	// first the consent route's body would arrive parsed, past its 16 KiB
+	// bound, its throttle-then-parse order and its JSON refusals.
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {

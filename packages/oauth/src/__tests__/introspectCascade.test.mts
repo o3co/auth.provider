@@ -62,7 +62,7 @@ const mockClientRepository: ClientRepository = {
 };
 
 const mockCodeRepository: CodeRepository = {
-	// D-1: Code requires client_id + redirect_uri.
+	// A code record requires client_id + redirect_uri.
 	createCode: async () =>
 		codeRecord({
 			code: "test-code",
@@ -279,7 +279,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 	});
 
 	it("rejects empty-string family_id and does NOT consult store", async () => {
-		// family_id: "" should be treated as missing (M1 guard)
+		// family_id: "" is treated as missing
 		const token = await makeAccessToken({ family_id: "" });
 
 		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
@@ -299,14 +299,11 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SF-8: /introspect token_type + access-only enforcement (RFC 7662 §2.2)
+// /introspect token_type + access-only enforcement (RFC 7662 §2.2)
 //
-// Pre-SF-8, /introspect echoed the JOSE `typ` header value (e.g. "at+jwt") in
-// `token_type` — wrong namespace per RFC 7662 (which references the OAuth
-// Token Type registry, not JOSE). It also accepted RT / id_token JWTs as
-// `active: true` since the verifier was signature-only. SF-8 hardcodes
-// `token_type: "Bearer"` for active access tokens and relies on SF-1's typ
-// pin to filter non-access tokens to `{ active: false }`.
+// `token_type` is `"Bearer"` for an active access token, never the JOSE `typ`
+// (e.g. "at+jwt"): RFC 7662 references the OAuth Token Type registry. The
+// verifier's `typ` pin answers RT and id_token JWTs `{ active: false }`.
 // ---------------------------------------------------------------------------
 
 describe("/introspect — SF-8: token_type + access-only enforcement", () => {
@@ -327,10 +324,9 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 	}
 
 	it("RED-1: returns active=true with token_type=Bearer + jti for a valid access token (NOT 'at+jwt')", async () => {
-		// RFC 6750 §6.1.1 — `Bearer` is the OAuth Token Type. The pre-SF-8
-		// response leaked the JOSE `typ` ("at+jwt"), wrong namespace per
-		// RFC 7662 §2.2. RFC 7662 §2.2 also lists `jti` as a registered
-		// response field (Codex calibration m3) — confirm presence.
+		// RFC 6750 §6.1.1 — `Bearer` is the OAuth Token Type; the JOSE `typ`
+		// ("at+jwt") is the wrong namespace per RFC 7662 §2.2, which also lists
+		// `jti` as a registered response field.
 		const token = await makeAccessToken({ client_id: "client1", jti: "jti-sf8-red1" });
 		const app = await buildApp();
 		const res = await introspect(app, token);
@@ -368,13 +364,11 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 	});
 
 	it("RED-4: response carries client_id (RFC 7662 §2.2 RECOMMENDED) — sourced from client_id when present, falls back to azp for v0.5.1 compat", async () => {
-		// Codex calibration m2: current issuance emits `azp` (RFC 9068 §2.2),
-		// not `client_id`. RFC 7662 §2.2 lists `client_id` as RECOMMENDED in
-		// the response. SF-8 returns `client_id: payload.client_id ?? azp`
-		// so resource servers see the authorized-party identifier under the
-		// standard field name regardless of which side of the v0.5/v0.6
-		// upgrade window the issuance is on. v0.6+ flips issuance to emit
-		// `client_id` directly; this fallback becomes a no-op then.
+		// A token may carry `azp` (RFC 9068 §2.2) rather than `client_id`, and
+		// RFC 7662 §2.2 lists `client_id` as RECOMMENDED in the response, so
+		// introspection answers `client_id: payload.client_id ?? azp`: resource
+		// servers see the authorized-party identifier under the standard field
+		// name either way.
 		const token = await makeAccessToken({ azp: "client1" });
 		const app = await buildApp();
 		const res = await introspect(app, token);
@@ -420,12 +414,11 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 });
 
 // ---------------------------------------------------------------------------
-// oauthModule — refreshTokenFamilyRevocation composition (C1) via createTestApp
+// oauthModule — refreshTokenFamilyRevocation composition via createTestApp
 //
-// Migrated to createTestApp pattern: oauthModule is booted via the Phase 4
-// planner; refreshTokenFamilyRevocation flows through the DI graph. The
-// family-revoke cascade must still fire because createOAuthRouter receives the
-// store from typed deps (A3 §5.3 — RefreshTokenFamilyRevocation interface).
+// oauthModule is booted via the boot planner; refreshTokenFamilyRevocation
+// flows through the DI graph into createOAuthRouter's typed deps, and the
+// family-revoke cascade must fire.
 // ---------------------------------------------------------------------------
 
 describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via createTestApp", () => {
@@ -438,7 +431,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		};
 
-		// refreshTokenFamilyRevocation flows through the DI graph as the A3 §5.3 slot;
+		// refreshTokenFamilyRevocation flows through the DI graph as a typed slot;
 		// oauthModule reads it from typed deps and forwards to createOAuthRouter.
 		const refreshTokenFamilyRevocationModule = defineModule({
 			name: "test:refresh-token-family-revocation",
@@ -470,7 +463,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
-				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// oauthModule mounts /oauth/revoke, so the boot validator requires a
 				// denylist behind it. Memory is right here — one process, one test.
 				memoryAccessTokenDenylistModule,
 				// Issuer is configured, so the discovery presence contract requires
@@ -494,7 +487,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 
 		const res = await introspect(app, token);
 
-		// If C1 is fixed, the store was consulted and the family is revoked → inactive.
+		// The store was consulted and the family is revoked → inactive.
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(false);
 		expect(refreshTokenFamilyRevocation.isFamilyRevoked).toHaveBeenCalledWith(familyId);
@@ -504,53 +497,36 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 });
 
 /*
- * #318 — introspection describes the TOKEN, and stays that way.
- *
- * #297 asked for `email_verified` in the id_token, `/userinfo` and
- * introspection. The first two ship; the third was split out because it is a
- * design decision, not a gap. The decision is **no**, and this pins it as an
- * invariant rather than leaving it as prose someone has to find.
+ * Introspection describes the TOKEN: a token whose subject has user claims in
+ * the Store (e.g. `email_verified`) still introspects to token metadata alone.
  *
  * RFC 7662 §2.2 defines the response as meta-information about the token, and
- * §5 is explicit about the cost of going further: *"Omitting privacy-sensitive
- * information from an introspection response is the simplest way of minimizing
- * privacy issues"*, alongside a `MUST` to prevent disclosure of user
- * identifiers to unintended parties. §2.2 carries the same instinct for scopes
- * — an AS "MAY limit which scopes from a given token are returned for each
- * protected resource to prevent a protected resource from learning more about
- * the larger network than necessary."
+ * §5: "Omitting privacy-sensitive information from an introspection response
+ * is the simplest way of minimizing privacy issues", alongside a `MUST` to
+ * prevent disclosure of user identifiers to unintended parties.
  *
- * Both ways to answer differently have a real cost, and neither buys anything
- * `/userinfo` does not already give a resource server holding the token:
- * minting user claims into every access token spreads PII into a credential
- * that transits more places than an id_token and goes stale the moment the
- * Store flips it (access tokens are not re-derived); reading the session store
- * from the introspect handler turns a session-store outage into an
- * introspection outage, on a hot path resource servers call per request.
- *
- * So the guard is the deliverable: a token whose subject has user claims in
- * the Store still introspects to token metadata alone. A future change that
- * makes introspection a second `/userinfo` fails here and has to argue with
- * this comment first.
+ * Neither way to answer differently buys anything `/userinfo` does not already
+ * give a resource server holding the token: minting user claims into every
+ * access token spreads PII into a credential that transits more places than an
+ * id_token and goes stale when the Store changes it (access tokens are not
+ * re-derived); reading the session store from the introspect handler turns a
+ * session-store outage into an introspection outage, on a hot path resource
+ * servers call per request.
  */
 describe("/introspect carries token metadata only (#318)", () => {
 	/**
-	 * Exactly what this AS answers with — an RFC 7662 §2.2 **subset plus two
-	 * extensions**, not the §2.2 set:
+	 * Exactly what this AS answers with, as a closed list — an RFC 7662 §2.2
+	 * **subset plus two extensions**, not the §2.2 set:
 	 *
 	 * - `username` and `nbf` are §2.2 members deliberately omitted (this AS
 	 *   issues `at+jwt` without `nbf` and does not persist a human-readable
 	 *   username — see `IntrospectResponse`).
-	 * - `azp` is not a §2.2 member; it mirrors RFC 9068's authorized-party
-	 *   claim.
-	 * - `cnf` is the confirmation mirror the token-binding work added.
+	 * - `azp` is not a §2.2 member; it mirrors RFC 9068's authorized-party claim.
+	 * - `cnf` is the token-binding confirmation mirror.
 	 *
-	 * §2.2 permits both directions — every member is optional, and
+	 * §2.2 permits both directions: every member is optional, and
 	 * "implementations MAY extend this structure with their own
-	 * service-specific response names". Naming the set precisely matters here
-	 * because the point of the guard is that it is a closed list: calling it
-	 * "the RFC set" would invite adding a §2.2 member (`username`) that this AS
-	 * has decided not to answer.
+	 * service-specific response names".
 	 */
 	const ALLOWED = new Set([
 		"active",

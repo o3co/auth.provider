@@ -15,13 +15,11 @@
  */
 
 /**
- * Issue #407 — scaffold hardening from the v0.10.0 release-cut audit.
- *
- * These pin the parts of the scaffold that are checkable from inside the
+ * Pins the parts of the scaffold that are checkable from inside the
  * repository. The scaffold is the artifact an operator actually deploys, and
- * every one of these was invisible until someone read the file: the container
+ * a mistake in it stays invisible until someone reads the file: the container
  * install losing an allowlist, the dev compose dialling a Redis that is not
- * there, and one `git add .` committing the signing key.
+ * there, one `git add .` committing the signing key.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -38,17 +36,11 @@ const read = (rel: string): string => readFileSync(`${standaloneDir}${rel}`, "ut
 
 /**
  * The `environment:` entries of a compose file's `app` service, as the
- * environment the container would actually see.
- *
- * A hand-rolled reader rather than a YAML dependency: these two files are
- * fixed-shape artifacts in this repository, the block is flat `KEY: value`
- * scalars, and adding a parser to the template's dependency tree to read its
- * own scaffold would be a strange thing to ship to operators.
- *
- * Compose's `${VAR:?err}` required-variable form resolves from the operator's
- * shell or `.env`, so there is no literal value to record — the key is mapped
- * to `null`, which is the point of that form and what the assertions below
- * check for.
+ * environment the container would actually see. Hand-rolled rather than a
+ * YAML dependency: both files are fixed-shape, the block is flat `KEY: value`
+ * scalars, and the template should not ship a parser to read its own
+ * scaffold. Compose's `${VAR:?err}` required-variable form resolves from the
+ * operator's shell or `.env`, so its key is mapped to `null`.
  */
 function composeAppEnvironment(rel: string): Map<string, string | null> {
 	const lines = read(rel).split("\n");
@@ -81,13 +73,10 @@ function resolveWith(env: Record<string, string>, configEnv = "production"): App
 /**
  * A compose file's `environment:` block, plus the secrets no compose file
  * carries (they come from `.env` or a compose secret) — the environment the
- * process would boot under.
- *
- * The key material follows what the file itself says: the production compose
- * points the EdDSA key paths at its mounted secrets, so leave the default
- * algorithm alone; the dev compose supplies no key at all, so give it the
- * HS256 shape, whose `.strict()` union member is exactly why the two cannot
- * share one map.
+ * process would boot under. The production compose points the EdDSA key
+ * paths at its mounted secrets, so the default algorithm stays; the dev
+ * compose supplies no key, so it gets the HS256 shape, whose `.strict()`
+ * union member is why the two cannot share one map.
  */
 function bootableEnv(rel: string): Record<string, string> {
 	const env: Record<string, string> = {
@@ -108,10 +97,9 @@ describe("#407 — the Dockerfile installs with everything pnpm needs", () => {
 	it("copies pnpm-workspace.yaml into the deps stage", () => {
 		// `create-auth-provider` generates it to carry the bcrypt
 		// `onlyBuiltDependencies` allowlist, because pnpm >= 10.29 reads that
-		// setting ONLY from this file — in single-package projects too (#360).
-		// A deps stage that copies `package.json` and the lockfile but not this
-		// runs allowlist-less, which re-creates #360 the day an alpine prebuild
-		// is missing and bcrypt has to compile.
+		// setting ONLY from this file — in single-package projects too. A deps
+		// stage without it runs allowlist-less, which leaves bcrypt unbuilt the
+		// day an alpine prebuild is missing and it has to compile.
 		const dockerfile = read("/Dockerfile");
 		const depsStage = dockerfile.slice(
 			dockerfile.indexOf("FROM node-base AS deps"),
@@ -119,8 +107,7 @@ describe("#407 — the Dockerfile installs with everything pnpm needs", () => {
 		);
 		// Matched as a COPY instruction, not as a substring of the stage: the
 		// comment above that COPY names the file too, so a substring check
-		// would keep passing if the instruction regressed and the comment
-		// stayed — which is the failure this test exists to catch.
+		// would keep passing without the instruction.
 		const copyLines = depsStage
 			.split("\n")
 			.filter((line) => /^COPY\b/.test(line.trim()) && !line.trim().startsWith("#"));
@@ -180,13 +167,11 @@ describe("#407 — the production compose matches the topology it documents", ()
 });
 
 /**
- * Issue #705 — the per-deployment files are per-deployment everywhere.
- *
- * `.gitignore` keeps the secrets and the per-machine configuration out of
- * git, the client registry among them. The build context did not: the
+ * What `.gitignore` keeps out of git (secrets and per-machine configuration,
+ * the client registry among them) stays out of the build context too: the
  * `Dockerfile` copies `config/`, so a `config/clients.yaml` in the working
- * copy — client secrets included — was baked into the runtime image, and one
- * built from a clean checkout had no registry and no way to be given one.
+ * copy, client secrets included, would be baked into the runtime image.
+ * Production is given the registry from outside the image instead.
  */
 describe("#705 — what .gitignore keeps out of git stays out of the image, and production is given it", () => {
 	/**
@@ -301,12 +286,10 @@ function composeSecretFiles(rel: string): Map<string, string> {
 }
 
 describe("the compose files put a store and its lifetime-sibling on the same backend", () => {
-	// The production compose set `SESSION_STORAGE_TYPE: redis` and left
-	// `USER_SESSION_STORES_ADAPTER` at its `memory` default. express-session
-	// then survives a restart and the `UserSession` it points at does not, so
-	// every browser comes back `isAuthenticated` with nothing behind it and
-	// /authorize loops until the cookie is deleted by hand.
-	//
+	// With express-session on Redis and the user-session stores on memory,
+	// express-session survives a restart and the `UserSession` it points at
+	// does not: every browser comes back `isAuthenticated` with nothing behind
+	// it and /authorize loops until the cookie is deleted by hand.
 	// `DEPLOYMENT_MODE: single` is silent about this on purpose — the replica
 	// guard answers "can these stores be shared", not "do these two stores have
 	// the same lifetime" — so nothing but this assertion stands behind it.
@@ -358,27 +341,21 @@ describe("the production compose refuses to guess HTTP_TRUST_PROXY", () => {
 
 describe("#407 — the two READMEs agree on security advice", () => {
 	it("does not recommend HTTP_TRUST_PROXY=true in the Japanese README", () => {
-		// #292 made `trust proxy` a CIDR/hop policy precisely because `true`
-		// means "believe the leftmost forwarded entry from whoever opened the
-		// connection". The English README warns against it; the Japanese one
-		// still recommended it, so the two disagreed on which is safe.
+		// `trust proxy` is a CIDR/hop policy because `true` means "believe the
+		// leftmost forwarded entry from whoever opened the connection". The
+		// English README warns against it, and the Japanese one must agree.
 		expect(read("/README.ja.md")).not.toMatch(/HTTP_TRUST_PROXY=true/);
 	});
 });
 
 /**
- * Issue #512 — the suite that ships with a scaffolded project has to be green
- * in that project, not only in this workspace.
- *
- * A scaffold installs `@o3co/auth-provider-*` from npm, where the packages sit
- * under `node_modules` and vitest externalizes them: Node loads them natively
- * and their own `import "ioredis"` / `import "redis"` never meet the
- * `vi.mock` registry. In this workspace the same packages are symlinks to
- * source outside `node_modules`, vitest inlines them, and the mocks apply —
- * which is how replica-safety.test.mts stayed green here while dialling
- * `redis.test` for real in every scaffold. The second half is `make test`:
- * it runs this suite inside the `test` image, where a file the Dockerfile
- * never copied simply does not exist.
+ * The suite that ships with a scaffolded project has to be green in that
+ * project, not only in this workspace. A scaffold installs
+ * `@o3co/auth-provider-*` from npm, under `node_modules`, where vitest
+ * externalizes them and their own `import "ioredis"` / `import "redis"` never
+ * meet the `vi.mock` registry unless inlined; here they are symlinks vitest
+ * inlines anyway. And `make test` runs this suite inside the `test` image,
+ * where a file the Dockerfile never copied does not exist.
  */
 describe("#512 — the shipped suite is green outside this repository", () => {
 	it("runs the published packages through vitest, so module mocks reach them", async () => {

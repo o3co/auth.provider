@@ -17,39 +17,27 @@
 import { isLoopbackHostname } from "./loopback.mjs";
 
 /**
- * The registered-redirect-URI shape vocabulary (#395, from #293 item 1).
+ * The registered-redirect-URI shape vocabulary. It stops misconfiguration at
+ * boot, where the operator is looking; the security boundary is elsewhere
+ * (registration is operator-only, matching is string equality bar the RFC 8252
+ * §7.3 loopback port, see {@link matchesRegisteredRedirectUri}, and PKCE is
+ * mandatory).
  *
- * A registration carrying `javascript:alert(1)`, a fragment, or userinfo used
- * to boot cleanly and become a valid redirect target — while the logout
- * metadata fields in the same schema were already URL-validated. The wall this
- * checker stands on is elsewhere (registration is operator-only, matching is
- * string equality bar the RFC 8252 §7.3 loopback port — see
- * {@link matchesRegisteredRedirectUri} — and PKCE is mandatory); what it stops
- * is the misconfig foot-gun, at boot, where the operator is looking.
- *
- * The rules, and why each is shaped the way it is:
- *
- * - **Parse-then-check, never raw string comparison** — the one clause the
- *   #395 falsification pass promoted to a requirement. WHATWG `new URL()`
+ * - **Parse, then check; never compare raw strings.** WHATWG `new URL()`
  *   strips ASCII tab/newline and lowercases the scheme, so `java\tscript:`
- *   REACHES the deny check as `javascript:`; a raw prefix match would have
- *   missed it. Anything the parser refuses, this refuses.
- * - **No fragment** (RFC 6749 §3.1.2 MUST NOT) and **no userinfo** — both are
- *   redirect-response corruption vectors with no legitimate registration use.
- * - **`https:` allowed; `http:` for loopback hosts only** — the same carve-out
- *   `checkSecureEndpoint` and `checkRedirectShape` consume, via the shared
- *   {@link isLoopbackHostname} home (#364).
- * - **Custom schemes by grammar, not enumeration**: allowed only when the
- *   scheme contains a `.` — RFC 8252 §7.1's reverse-domain shape
- *   (`com.example.app:/callback`). Every executable/pseudo scheme
- *   (`javascript:`, `data:`, `blob:`, `file:`, `intent:`, …) is dotless and
- *   falls out structurally, with nothing to keep enumerated. A deny check on
- *   the scheme's FIRST dot-separated label backs it up, so a future
- *   `javascript.something:` spelling cannot ride the grammar in.
- * - **No legacy escape hatch, deliberately**: a dotless custom scheme
- *   (`myapp:`) is refused with no config bypass. That is a documented
- *   capability decision (#395), not an oversight — RFC 8252 §7.1 says SHOULD
- *   reverse-domain, and a quiet flag would be two spellings for one decision.
+ *   reaches the deny check as `javascript:`, which a raw prefix match would
+ *   miss. Anything the parser refuses, this refuses.
+ * - **No fragment** (RFC 6749 §3.1.2 MUST NOT) and **no userinfo**: both
+ *   corrupt the redirect response and have no legitimate registration use.
+ * - **`https:`; `http:` for loopback hosts only**, via {@link isLoopbackHostname}.
+ * - **Custom schemes by grammar, not enumeration**: only a scheme containing a
+ *   `.` (RFC 8252 §7.1 reverse-domain, `com.example.app:/callback`). Every
+ *   executable/pseudo scheme is dotless and falls out structurally; a deny
+ *   check on the scheme's first dot-separated label stops a dotted spelling
+ *   such as `javascript.something:`.
+ * - **No escape hatch, deliberately**: a dotless custom scheme (`myapp:`) is
+ *   refused with no config bypass. RFC 8252 §7.1 says SHOULD reverse-domain,
+ *   and a flag would be two spellings for one decision.
  */
 
 /** Why a registered redirect URI was refused. */
@@ -92,13 +80,10 @@ export function checkRedirectUri(raw: string): RedirectUriRejection | null {
 	} catch {
 		return { reason: "unparsable" };
 	}
-	// AFTER the parse, so a tab-smuggled `java\tscript:` still reports as the
-	// executable scheme it parses into rather than as a character problem — but
-	// refused regardless: WHATWG strips ASCII tab/newline/CR, while nothing
-	// downstream ever does — {@link matchesRegisteredRedirectUri} relaxes the
-	// loopback port and nothing else. A registration these characters survive
-	// into can never match a real request; it is a dead entry that is
-	// miserable to diagnose.
+	// Checked after the parse, so a tab-smuggled `java\tscript:` reports as the
+	// executable scheme it parses into. Refused either way: WHATWG strips ASCII
+	// tab/newline/CR but redirect_uri matching never does, so such a
+	// registration could never match a request.
 	const scheme = url.protocol.slice(0, -1); // parsed: lowercased, tab/newline-stripped
 	if (/[\t\n\r]/.test(raw)) {
 		const firstLabel = scheme.split(".")[0] ?? scheme;
@@ -155,44 +140,32 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
 
 /**
  * Whether `url` is the shape RFC 8252 §7.3's port relaxation is written for:
- * an `http:` listener on a loopback IP literal.
- *
- * `localhost` is deliberately excluded. It is a loopback *name*, resolved
- * through the host's name resolution, and §8.3 discourages it for exactly
- * that reason — so it keeps the plain `http:` carve-out
- * {@link isLoopbackHostname} grants every consumer, and gets no second one
- * here. The predicate itself is not restated: this composes on the one home
- * (#364) rather than opening a second dialect of "loopback".
+ * an `http:` listener on a loopback IP literal. `localhost` is excluded: it
+ * goes through name resolution, which §8.3 discourages for that reason, so it
+ * keeps only the plain `http:` carve-out of {@link isLoopbackHostname}.
  */
 const isLoopbackHttpListener = (url: URL): boolean =>
 	url.protocol === "http:" &&
-	// Userinfo has no place in a redirect target (`checkRedirectUri` refuses it
-	// on the registration side), and excluding it here keeps the authority
-	// below a plain `host[:port]` — one less shape for the surgery to get
-	// wrong.
+	// No userinfo (`checkRedirectUri` refuses it on registration), so the
+	// authority is a plain `host[:port]` for `withoutAuthorityPort`.
 	url.username === "" &&
 	url.password === "" &&
 	url.hostname !== "localhost" &&
 	isLoopbackHostname(url.hostname);
 
 /**
- * `raw` with the authority's `:port` removed, byte for byte — or `null` when
+ * `raw` with the authority's `:port` removed, byte for byte, or `null` when
  * the authority cannot be located with certainty.
  *
- * This works on the ORIGINAL string, never on a parsed `URL`'s serialization,
- * and that is the whole point. Comparing normalized `href`s would have
- * ignored not just the port but dot-segment resolution (`/a/../cb` ≡ `/cb`),
- * `\` as a path separator, scheme case and an elided empty path — widening
- * the allowlist by exactly the URIs a native app controls. Only the port may
- * differ, so only the port is removed.
+ * It works on the ORIGINAL string, never a parsed `URL`'s serialization:
+ * normalized `href`s would also ignore dot-segments (`/a/../cb` ≡ `/cb`), `\`
+ * as a path separator, scheme case and an elided empty path, widening the
+ * allowlist by URIs a native app controls. Only the port may differ.
  *
  * Callers must have established via {@link isLoopbackHttpListener} that the
- * value parses to an `http:` loopback IP literal with no userinfo; the
- * authority is then `host[:port]`, with the port after `]` for the bracketed
- * IPv6 form and after the sole `:` otherwise. Anything that does not present
- * that shape in its raw spelling — `http:/127.0.0.1/cb`, which the parser
- * accepts but which has no literal `://` — returns `null` and gets no
- * carve-out, which is the safe direction.
+ * value is an `http:` loopback IP literal with no userinfo. A raw spelling
+ * without a literal `://` (`http:/127.0.0.1/cb`, which the parser accepts)
+ * returns `null` and gets no carve-out, the safe direction.
  */
 function withoutAuthorityPort(raw: string): string | null {
 	const schemeEnd = raw.indexOf("://");
@@ -227,42 +200,30 @@ function withoutAuthorityPort(raw: string): string | null {
 }
 
 /**
- * Whether a presented `redirect_uri` matches one registered entry — the
- * runtime comparison `/authorize` runs against `client.allowedRedirectUris`
- * (#483).
+ * Whether a presented `redirect_uri` matches one registered entry, the
+ * comparison `/authorize` runs against `client.allowedRedirectUris`.
  *
  * **Exact string equality, with one carve-out.** When BOTH sides are `http:`
  * on a loopback IP literal (`127.0.0.0/8`, `[::1]`), the port is dropped from
- * both before comparing and everything else — scheme, host, path, query — is
- * still compared exactly. Every other pair, `localhost` and `https:`
- * included, is the string comparison it has always been.
+ * both and everything else is still compared exactly. Every other pair,
+ * `localhost` and `https:` included, is a plain string comparison.
  *
- * Why: a native app receiving the authorization response on a loopback
- * interface binds an **ephemeral port** the OS assigns at run time (RFC 8252
- * §7.3), so the registration cannot name it — `http://127.0.0.1/cb` has to
- * admit `http://127.0.0.1:49152/cb`. The relaxation is safe precisely because
- * the host is a literal: traffic to it never leaves the machine, and the port
- * is the only part the client could not know in advance. A loopback *name*
- * would move that guarantee into name resolution, which is why `localhost` is
- * out (§8.3).
+ * Why: a native app receiving the response on a loopback interface binds an
+ * ephemeral port the OS assigns at run time (RFC 8252 §7.3), so the
+ * registration cannot name it. The relaxation is safe because the host is a
+ * literal whose traffic never leaves the machine; a loopback *name* would move
+ * that guarantee into name resolution, which is why `localhost` is out (§8.3).
  *
- * What this does NOT relax: the token endpoint's RFC 6749 §4.1.3 binding.
- * `/authorize` records the URI it actually redirected to, and redemption
- * compares the presented `redirect_uri` to that record with `!==` — a
- * different question ("is this the URI this code was issued for") that stays
- * exact, port included.
+ * Not relaxed: the token endpoint's RFC 6749 §4.1.3 binding. Redemption
+ * compares the presented `redirect_uri` with `!==` to the URI `/authorize`
+ * actually redirected to, port included.
  *
- * The parse decides only WHETHER the carve-out applies. The equality itself
- * runs on the two original strings with the port removed, so nothing else is
- * normalized away — comparing WHATWG-serialized `href`s would silently have
- * accepted `/a/../cb` for `/cb`, `\` for `/`, `HTTP:` for `http:` and an
- * empty path for `/`, which is the allowlist widening this exists to avoid.
- * An unparsable value on either side falls back to the string comparison
- * rather than throwing.
+ * The parse decides only whether the carve-out applies; equality runs on the
+ * original strings (see {@link withoutAuthorityPort}). An unparsable value on
+ * either side falls back to the string comparison rather than throwing.
  */
 export function matchesRegisteredRedirectUri(registered: string, presented: string): boolean {
-	// The pre-#483 behaviour, unchanged, and the answer for every pair the
-	// carve-out does not cover.
+	// Exact equality: the only match outside the carve-out.
 	if (registered === presented) return true;
 
 	let registeredUrl: URL;

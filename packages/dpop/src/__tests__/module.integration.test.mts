@@ -15,32 +15,15 @@
  */
 
 /**
- * module.integration.test.mts
- *
- * Integration test for `dpopModule` composition via `createApp`.
- *
- * Sub-PR 2b scope (narrower than the full spec §12.2):
- *   - Verify `dpopModule` wires correctly with `createApp`.
- *   - When `oauth.dpop.enabled = false` (default), no DPoP middleware is
- *     mounted — requests succeed without a DPoP header.
- *   - When `oauth.dpop.enabled = true`, a valid DPoP proof populates
- *     `req.tokenBinding` with the correct `kind` and `confirmation.jkt`.
- *   - An invalid proof returns HTTP 400 with `error: "invalid_dpop_proof"`.
- *   - Every accepted proof is recorded in core's `replaySeenSet` slot, so a
- *     proof accepted by one replica is refused by every replica that shares
- *     the set; an enabled mechanism with no seen-set is refused at boot.
- *   - The memory seen-set answers `deployment.mode` through core's
- *     replica-safety guard: `"multi"` refuses boot, unset warns, `"single"`
- *     is silent. DPoP adds no check of its own.
- *
- * Sub-PR 2c deferred:
- *   - `token_type: "DPoP"` in the response body.
- *   - `cnf.jkt` claim in the issued access token.
- *
- * Test pattern: copied from packages/core/src/boot/__tests__/
- *   grant-middleware.integration.test.mts (Phase 1d retro integration).
- *
- * Per Wave 2 Phase 2 spec §12.2 (narrowed) + Phase 2 plan T2.6.3.
+ * `dpopModule` composed through `createApp`:
+ *   - with `oauth.dpop.enabled = false` (default), no DPoP middleware is
+ *     mounted;
+ *   - enabled, a valid proof populates `req.tokenBinding` (`kind`,
+ *     `confirmation.jkt`) and an invalid one is `400 invalid_dpop_proof`;
+ *   - every accepted proof is recorded in core's `replaySeenSet` slot, and an
+ *     enabled mechanism with no seen-set is refused at boot;
+ *   - the memory seen-set answers `deployment.mode` through core's
+ *     replica-safety guard, with no check of DPoP's own.
  */
 
 import {
@@ -91,11 +74,10 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**
- * The deployment's canonical issuer, as `makeValidCoreConfig` sets it. Since
- * #292 the expected `htu` is built from THIS, not from the request — so the
- * proof names it even though supertest speaks plain http to an ephemeral port
- * and the requests below send a `Host` header saying something else entirely.
- * That divergence is the point: it is what the old reconstruction trusted.
+ * The deployment's canonical issuer, as `makeValidCoreConfig` sets it. The
+ * expected `htu` is built from this, not from the request, so the proof names
+ * it even though supertest speaks plain http to an ephemeral port and the
+ * requests below send a `Host` header saying something else entirely.
  */
 const ISSUER_ORIGIN = "https://auth.test";
 
@@ -121,11 +103,7 @@ const mintProof = async (jti: string = crypto.randomUUID(), origin: string = ISS
 	return { proof, jkt, jti };
 };
 
-/**
- * Build a route contribution that records the token binding on the request
- * and responds 200 with the binding JSON for assertion. Mirrors the Phase 1d
- * retro test pattern.
- */
+/** A route handler that records the request's token binding for assertion and responds 200. */
 const makeTokenBindingObserver =
 	(received: { tokenBinding?: unknown }): RequestHandler =>
 	(req, res) => {
@@ -228,9 +206,7 @@ describe("dpopModule — integration via createApp", () => {
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("DPoP", proof)
-			// A Host header that is NOT the issuer. Before #292 this decided
-			// what the proof had to match; now it is ignored, and the request
-			// succeeds anyway.
+			// A Host header that is NOT the issuer: the expected htu ignores it.
 			.set("Host", "attacker.example")
 			.send({});
 
@@ -336,9 +312,7 @@ describe("dpopModule — integration via createApp", () => {
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("DPoP", proof)
-			// A Host header that is NOT the issuer. Before #292 this decided
-			// what the proof had to match; now it is ignored, and the request
-			// succeeds anyway.
+			// A Host header that is NOT the issuer: the expected htu ignores it.
 			.set("Host", "attacker.example")
 			.send({});
 		const after = Date.now();
@@ -361,7 +335,7 @@ describe("dpopModule — integration via createApp", () => {
 	it("when enabled: refuses a proof whose jti is longer than 256 characters, before it reaches the seen-set", async () => {
 		// The token endpoint checks the proof before it authenticates the client,
 		// and every accepted jti is a seen-set key for replay-store-ttl-seconds:
-		// unbounded, an anonymous caller chose how large each record was.
+		// unbounded, an anonymous caller would choose how large each record is.
 		const recorded: string[] = [];
 		const backing = createMemoryReplaySeenSet();
 		const spy: ReplaySeenSet = {
@@ -410,9 +384,9 @@ describe("dpopModule — integration via createApp", () => {
 	});
 
 	it("when enabled: refuses to boot with no replaySeenSet, in every deployment.mode", async () => {
-		// There is no per-process fallback any more: a mechanism that cannot
-		// record a proof cannot refuse its replay, so boot says what to wire
-		// rather than choosing a store on the composition's behalf.
+		// There is no per-process fallback: a mechanism that cannot record a
+		// proof cannot refuse its replay, so boot says what to wire rather than
+		// choosing a store on the composition's behalf.
 		for (const mode of [undefined, "single", "multi"] as const) {
 			const { replaySeenSet: _omitted, ...withoutSeenSet } = makeBoot(true) as BootstrapMap & {
 				replaySeenSet?: unknown;
@@ -441,11 +415,10 @@ describe("dpopModule — integration via createApp", () => {
 	});
 
 	it("refuses the retired oauth.dpop.replay-store key rather than ignoring it", async () => {
-		// The key chose between a per-process fallback and a mandatory
-		// dpopReplayStore slot; neither exists now. Ignored silently, a
-		// deployment that had wired a shared DPoP store beside a memory
-		// seen-set would move its DPoP records into memory with no new signal,
-		// so the stale line fails boot and names what replaced it.
+		// A deployment that sets this key may have wired a shared DPoP store
+		// beside a memory seen-set. Ignored silently, its DPoP records would
+		// move into memory with no signal, so the stale key fails boot and
+		// names what replaced it.
 		const boot = makeBoot(true) as unknown as {
 			config: { oauth: { dpop: Record<string, unknown> } };
 		};
@@ -569,14 +542,11 @@ describe("dpopModule — integration via createApp", () => {
 	it("refuses to build a mechanism when no canonical issuer is configured (#292)", () => {
 		// The origin every proof's `htu` is checked against is the deployment's
 		// own. Without one the AS would have to rebuild it from the request's
-		// forwarded headers — the reconstruction #292 removed — so refuse to
-		// construct rather than run with a binding the caller controls both
-		// sides of.
-		//
-		// Exercised through the contributed factory rather than `createApp`,
+		// forwarded headers, a binding the caller controls both sides of, so it
+		// refuses to construct. Exercised through the contributed factory
 		// because `createApp` parses `CoreConfigSchema` first and would reject
-		// the config before the module is reached. This guard is what protects
-		// a composition root that builds the mechanism itself.
+		// the config before the module is reached; this guard protects a
+		// composition root that builds the mechanism itself.
 		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
 		const oauth = (boot.config as { oauth: Record<string, unknown> }).oauth;
 		delete oauth.jwt;
@@ -585,8 +555,7 @@ describe("dpopModule — integration via createApp", () => {
 	});
 
 	it("refuses to build a mechanism when the issuer is a bare host rather than a URL (#292)", () => {
-		// The shape a `Host` header would have supplied. Deriving an origin
-		// from it is exactly what this change stopped doing.
+		// The shape a `Host` header supplies; an origin is never derived from one.
 		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
 		(boot.config as { oauth: { jwt: unknown } }).oauth.jwt = { issuer: "as.example:3000" };
 
@@ -618,11 +587,10 @@ describe("dpopModule — server-provided nonce from config (#530)", () => {
 	});
 
 	it("measures the secret on its decoded length, as every other operator secret is (v0.13.0 audit)", () => {
-		// `openssl rand -hex 16` is 32 characters and 16 bytes of randomness.
-		// The nonce issuer counted characters, so it passed a key with half the
-		// strength the floor exists to guarantee; `session.secret` and the HS256
-		// key have been measured on the decoded value since #282. The refusal
-		// names the key and the env var, as theirs do.
+		// `openssl rand -hex 16` is 32 characters and 16 bytes of randomness:
+		// counting characters would pass a key with half the strength the floor
+		// exists to guarantee. Measured decoded, as `session.secret` and the
+		// HS256 key are; the refusal names the key and the env var, as theirs do.
 		const hex16 = "0123456789abcdef0123456789abcdef";
 		expect(() => buildMechanism(withNonce(hex16).config)).toThrow(
 			/oauth\.dpop\.nonce\.secret must carry at least 32 bytes[\s\S]*OAUTH_DPOP_NONCE_SECRET/,
@@ -695,13 +663,11 @@ describe("dpopModule — server-provided nonce from config (#530)", () => {
 // ---------------------------------------------------------------------------
 // Replica safety of the replay records
 //
-// A per-process seen-set forks per replica: a proof captured once could be
-// presented once to every replica, each of which had never seen its `jti`.
-// DPoP records its proofs in core's `replaySeenSet` slot, so the answer is
-// the one core's replica-safety guard already gives for the memory seen-set
-// module — `"multi"` refuses boot, unset warns, `"single"` is silent — with
-// no check of DPoP's own. A shared seen-set is what makes a replay to another
-// replica fail.
+// A per-process seen-set forks per replica, so a captured proof could be
+// presented once to each. DPoP records proofs in core's `replaySeenSet` slot
+// and adds no check of its own: core's replica-safety guard answers for the
+// memory module (`"multi"` refuses boot, unset warns, `"single"` is silent),
+// and a shared seen-set is what makes a replay to another replica fail.
 // ---------------------------------------------------------------------------
 
 const spyLogger = (): Logger & {
@@ -772,7 +738,7 @@ const replyErrorFor = (args: readonly string[]): Error =>
 
 /** The event core's replica-safety guard logs when the mode is unset. */
 const REPLICA_UNSAFE_EVENT = "replica_unsafe_adapters";
-/** The event DPoP logged for its own per-process fallback, which is gone. */
+/** The per-process fallback's event, which DPoP must not log. */
 const RETIRED_NOT_SHARED_EVENT = "dpop_replay_store_not_shared";
 
 interface ReplicaBootOptions {
@@ -939,13 +905,13 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 
 	it("answers 503 temporarily_unavailable at the token endpoint when the seen-set cannot be read, and logs it", async () => {
 		// The client did nothing wrong: its proof may be perfectly good, and it
-		// will be accepted once the store answers again. `400 invalid_dpop_proof`
-		// said the proof was invalid (RFC 9449 §5), which a client can read as
-		// final. The token endpoint answers store outages elsewhere in this
-		// repository with 503 temporarily_unavailable too (private_key_jwt's
-		// replay record, the refresh-token family, the revocation stores).
+		// will be accepted once the store answers again, while
+		// `400 invalid_dpop_proof` says the proof is invalid (RFC 9449 §5),
+		// which a client can read as final. The token endpoint answers other
+		// store outages (private_key_jwt's replay record, the refresh-token
+		// family, the revocation stores) with 503 temporarily_unavailable too.
 		// What it logs is the store error's projection: ioredis puts the write
-		// it refused — the record's key and value — on the error.
+		// it refused (the record's key and value) on the error.
 		const { logger, lines } = serialiseEverythingLogger();
 		const down: ReplaySeenSet = {
 			kind: "down",

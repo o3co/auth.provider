@@ -19,36 +19,27 @@
  * template can turn on, switched on together from the shipped HOCON, and
  * mounted the way `app.mts` mounts it.
  *
- * What is real: the configuration (`config/*.conf` over the `reference.conf`
- * of every package the composition loads, core's last, resolved with the
- * environment a deployment would export) read in `app.mts`'s two phases
- * (#728) — `readSwitches` for `buildModules`, `resolveForBoot` for
- * `createApp`, which parses it once — `buildModules`, core's `createApp`,
- * every module and store it selects, the key store, the audit sink, `helmet`
- * and the terminal error handler.
+ * Real: the configuration (`config/*.conf` over every loaded package's
+ * `reference.conf`, core's last, under the environment a deployment would
+ * export) read in `app.mts`'s two phases (`readSwitches`, then
+ * `resolveForBoot` for `createApp`), `buildModules`, core's `createApp`, every
+ * module and store it selects, the key store, the audit sink, `helmet` and the
+ * terminal error handler.
  *
- * What is substituted, and why:
+ * Substituted (the first two are overrides `buildModules` offers):
+ * - client and user repositories: in memory, not YAML off disk;
+ * - the refresh-token family store under `deployment.mode = "single"`: memory,
+ *   not the shipped Redis, so the single-replica boot opens no sockets;
+ * - upstream identity providers: core's fake OpenID Provider, through the
+ *   `fetch` option the Google and OIDC adapters take; the config bridges'
+ *   values are read as shipped (`googleFederationConfigModule`, the OIDC
+ *   package's reader), with only `fetch` added;
+ * - configuration with no environment form (grant connections, a key ring, a
+ *   landing URL): one more HOCON layer above the shipped ones.
  *
- * - The client and user repositories — `repositoriesModule` reads YAML files
- *   off disk; the in-memory repositories carry the registrations the flows
- *   need. `buildModules` offers this override for the purpose.
- * - The refresh-token family store under `deployment.mode = "single"` — the
- *   shipped composition always puts it on Redis; the memory store keeps the
- *   single-replica boot free of sockets. `buildModules` offers this override.
- * - The upstream identity providers — core's fake OpenID Provider behind a
- *   `fetch`, handed to the Google and OIDC adapters through the `fetch` option
- *   each adapter takes for exactly this. The config bridges' values are read
- *   through the template's own bridge (`googleFederationConfigModule`) and the
- *   OIDC package's reader, and only `fetch` is added.
- * - Configuration with no environment form (a map of grant connections, a key
- *   ring, a landing URL): one more HOCON layer above the shipped ones, as an
- *   operator would write it in their own file.
- *
- * `tools/composition` in the monorepo imports this file and boots the same
+ * `tools/composition` in the monorepo imports this file to boot the same
  * composition with the workspace's other modules added (`ComposeOptions`'s
- * `extraModules`, `extraOverrides`, `extraClients` and `extraUsers`) — their
- * packages' `reference.conf` files layered because the modules declare them
- * — so the two suites share one fixture rather than two copies that drift.
+ * `extra*` options), so the two suites share one fixture.
  */
 
 import { createHash, generateKeyPairSync, randomBytes } from "node:crypto";
@@ -207,7 +198,7 @@ export function ownFiles(): string[] {
 }
 
 /**
- * Phase one, as `app.mts` reads it (#728): the switches `buildModules` chooses
+ * Phase one, as `app.mts` reads it: the switches `buildModules` chooses
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
  * `reference.conf`, with the posture on session admission derived from the
@@ -353,20 +344,19 @@ export async function sharedUpstreams(): Promise<Upstreams> {
 }
 
 /**
- * Snapshots each fake's settings — every property that is not a function —
- * and returns what puts them back: primitives reassigned, objects restored in
+ * Snapshots each fake's settings (every property that is not a function) and
+ * returns what puts them back: primitives reassigned, objects restored in
  * place (a fake may hold its own reference to one), recorded requests
  * cleared. A fake's signing key is checked, not restored: a rotated key is
  * refused.
  *
- * What a fake keeps in its closure is not restored either: core's fake IdP
- * remembers whether consent was granted (`consentGranted`), how many codes it
- * issued (`codesIssued`) and every authorization it recorded. Codes and
- * authorizations are keyed per login, so a later boot's login is unaffected;
- * consent is not, and it decides Google's refresh token only under
- * `refreshTokenOnlyOnConsent`. That knob is therefore forbidden on a shared
- * fake — the next reset refuses to run if a test set it; a test that needs it
- * makes a fake of its own with `createFakeIdp`.
+ * A fake's closure is not restored: core's fake IdP remembers whether consent
+ * was granted (`consentGranted`), how many codes it issued (`codesIssued`) and
+ * every authorization it recorded.
+ * Codes and authorizations are keyed per login; consent is not, and it decides
+ * Google's refresh token only under `refreshTokenOnlyOnConsent`. That knob is
+ * therefore forbidden on a shared fake (the next reset refuses to run if a test
+ * set it); a test that needs it makes its own fake with `createFakeIdp`.
  */
 export function resettable(...fakes: readonly object[]): () => void {
 	const snapshots = fakes.map((fake) => ({
@@ -977,7 +967,7 @@ export const TOO_LARGE = { error: "invalid_request", error_description: "body_to
 // ---------------------------------------------------------------------------
 
 /**
- * The parts of the #685 outage rule, each checked on its own so a case pins
+ * The parts of the outage rule, each checked on its own so a case pins
  * only what is broken and asserts the rest:
  *
  * - `answer` — the status and error code (a redirect's location and code);

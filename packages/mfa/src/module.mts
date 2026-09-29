@@ -15,50 +15,27 @@
  */
 
 /**
- * `mfaModule` and `mfaModules` (the MFA ADR's D1, D11, D20 and step 3's
- * obligations; the session-admission ADR's D3, D6, D7): what a composition
- * installs to turn MFA on — installed is on.
+ * `mfaModule` and `mfaModules`: what a composition installs to turn MFA on
+ * (installed is on).
  *
- * - **Manifest.** Requires `config`, core's three MFA ports
- *   (`mfaFactorResolver`, `mfaFactorStore`, `mfaTransactionStore`) — the
- *   name `mfa` is accepted only from a module bound to them — the
- *   `userSessionStore` (a composition without one is refused at the
- *   requires-closure, naming the slot) and `sessionRequirementResolver`;
- *   reads `auditSink`, its absence declared (`audit.sink.type = "none"`), and
- *   `logger`. Stateless: nothing forks per replica.
- * - **The requirement.** Contributes `sessionRequirements.mfa`
- *   (`requirement.mts`). Its factory reads, in order: `mfa.mode` through
- *   core's `readMfaMode` — `off`, or unset, is refused ("remove the MFA
- *   module, or set `mfa.mode`", D20); the package's settings
- *   (`readMfaSettings`, with the module's `environment`), so a ring, a
- *   transaction life or a lock it cannot use refuses the boot, naming the
- *   key; `endpoints.mfa.url`, the page a step-up starts on. It builds, once
- *   per boot, the key ring's sealing on the composition's logger — what
- *   keeps `mfa_factor_sealed_with_retired_key` to once per key id — and the
- *   requirement, and keeps both, with the object it returned — the one core
- *   issues `mfa.step_up` to (build-order step 11) — for the routes of the
- *   same boot (`mfaBootState`). When the ring carries the development sample
- *   key, which the settings accepted, it says so once, at warn; so it does
- *   when the user-session store cannot record a step-up
- *   (`mfa_step_up_unsupported`, core's `supportsSecondFactorUpdate`, D20),
- *   and the requirement then sends a session to log in where it would step
- *   it up.
- * - **The routes' mount.** Contributes the route `mfa-routes` at
- *   `/session/mfa`, after the session middleware. Its factory runs after
- *   every name-keyed contribution has registered, so it is where the
- *   installed factors are held to what the requirement needs of them, each
- *   refusal a `cause` with a `reason`: an enabled factor whose kind core's
- *   hint grammar refuses — a first binding's `hints.enrollable` names it —
- *   (`mfa-factor-kind-unhintable`, naming the kind); more enabled counting
- *   factors than core's hint list carries, 16 (`mfa-too-many-factors`); and
- *   `mfa.mode = "required"` with no counting factor enabled
- *   (`mfa-no-counting-factor`, D20): nobody could meet the requirement. The
- *   routes themselves — the transaction, the challenge, the verification —
- *   are build-order step 8's third part; until then it answers nothing and
- *   every request passes through.
+ * Requires `config`, core's three MFA ports (the name `mfa` is accepted only from
+ * a module bound to them), `userSessionStore` and `sessionRequirementResolver`;
+ * reads `auditSink` (absence declared) and `logger`. Nothing forks per replica.
  *
- * `mfaModules` is what a composition lists: the TOTP factor's module and
- * this one.
+ * Contributes `sessionRequirements.mfa`. Its factory refuses the boot when
+ * `mfa.mode` is `off` or unset, when the package's settings are unusable (naming
+ * the key), or when `endpoints.mfa.url` is unset. It builds the key ring's sealing
+ * once per boot (so `mfa_factor_sealed_with_retired_key` is logged once per key
+ * id) and keeps it, with the requirement core issues `mfa.step_up` to, for the
+ * same boot's routes (`mfaBootState`). It warns once when the development sample
+ * key is in use, and once when the user-session store cannot record a step-up
+ * (`mfa_step_up_unsupported`); the requirement then sends the session to log in
+ * instead.
+ *
+ * Contributes the `mfa-routes` mount at `/session/mfa`, after the session
+ * middleware. Its factory runs after every factor has registered, so it checks
+ * the installed factors (`checkInstalledFactors`). The routes themselves are not
+ * implemented yet: the mount passes every request through.
  */
 
 import {
@@ -84,10 +61,10 @@ import { createLoginTransactions } from "./transactions.mjs";
 /** The id of the MFA routes' contribution: what another route orders itself against. */
 export const MFA_ROUTES_ID = "mfa-routes";
 
-/** Where the MFA routes are mounted (the MFA ADR's §2). */
+/** Where the MFA routes are mounted. */
 const MFA_ROUTES_MOUNT_PATH = "/session/mfa";
 
-/** What a composition root tells the MFA module that its configuration cannot (#473). */
+/** What a composition root tells the MFA module that its configuration cannot. */
 export interface MfaModuleOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
@@ -109,14 +86,10 @@ export interface MfaBootState {
 }
 
 /**
- * Each boot's state, by that boot's `mfaFactorResolver`: a projection core
- * builds once per boot and hands every factory of it, the requirement's and
- * the routes' alike. This relies on core handing that one object — the same
- * identity — to both factories of a boot (`prepareSyntheticProjections` in
- * core's `boot/apply-contributions.mts` injects it once into the working
- * map both passes build their deps from), and a new one to every boot;
- * `module.test.mts` pins both ("keeps, per boot, …", "keeps each boot's
- * own …").
+ * Each boot's state, keyed by that boot's `mfaFactorResolver`. Relies on core
+ * handing the same projection object to both factories of a boot and a new one
+ * to every boot (`prepareSyntheticProjections` in core's
+ * `boot/apply-contributions.mts`); `module.test.mts` pins both.
  */
 const bootStates = new WeakMap<object, MfaBootState>();
 
@@ -135,18 +108,16 @@ export function mfaBootState(factors: MfaFactorResolver): MfaBootState {
 }
 
 /**
- * `mfa.mode = "required"` with no counting factor enabled (the MFA ADR's
- * D20): the `cause` of the boot's refusal, with its reason.
+ * `mfa.mode = "required"` with no counting factor enabled: the `cause` of the
+ * boot's refusal, with its reason.
  */
 export class MfaNoCountingFactorError extends RangeError {
 	readonly reason = "mfa-no-counting-factor";
 
 	/**
-	 * `enabledKinds`: the factors enabled, none of which counts — kinds core's
-	 * hint grammar has already admitted, so the message quotes nothing else.
-	 * The MFA module cannot tell which factor modules are installed (a
-	 * switched-off factor is absent from the resolver), so the TOTP factor's
-	 * key is named second, and only for a composition that installs it.
+	 * `enabledKinds`: the enabled factors, none counting, already admitted by core's
+	 * hint grammar. The module cannot tell which factor modules are installed, so the
+	 * message names the TOTP key only conditionally.
 	 */
 	constructor(enabledKinds: readonly string[]) {
 		const enabled =
@@ -217,7 +188,7 @@ function checkInstalledFactors(factors: MfaFactorResolver, mode: MfaRequirementM
 	}
 }
 
-/** The page a step-up starts on: `endpoints.mfa.url` (D19), which core's reference.conf defaults. */
+/** The page a step-up starts on: `endpoints.mfa.url`, which core's reference.conf defaults. */
 function stepUpPageOf(config: unknown): StepUpPage {
 	const url = (config as { endpoints?: { mfa?: { url?: unknown } } } | undefined)?.endpoints?.mfa
 		?.url;
@@ -229,17 +200,14 @@ function stepUpPageOf(config: unknown): StepUpPage {
 	return { url, params: {} };
 }
 
-/** A route that answers nothing: every request passes through, until the MFA routes land. */
+/** A route that answers nothing: every request passes through. */
 const passThrough = (_req: unknown, _res: unknown, next: () => void): void => next();
 
 /**
- * The `mfa` section as the module declares it (#728): the package's
- * `config/reference.conf`, which holds its defaults, and the path it sits at.
- * Its schema checks nothing yet: the requirement's factory reads the section
- * itself (`readMfaSettings`) and refuses what it cannot use as that
- * factory's failure, which a check here would turn into a refusal at an
- * earlier stage. The schema takes over when the section moves under the
- * module's name.
+ * The `mfa` section: the package's `config/reference.conf` (its defaults) and its
+ * path. The schema checks nothing: the requirement's factory reads the section
+ * (`readMfaSettings`), and what it refuses must stay that factory's failure
+ * rather than become an earlier-stage refusal.
  */
 const MFA_SECTION_SCHEMA = z.unknown();
 
@@ -293,9 +261,8 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 							"mfa_development_sample_key_in_use",
 						);
 					}
-					// D20: a session store that cannot record a step-up is said once;
-					// the requirement then sends a session to log in where it would
-					// step it up.
+					// A session store that cannot record a step-up is warned about once; the
+					// requirement then sends a session to log in where it would step it up.
 					const stepUpRecordable = supportsSecondFactorUpdate(deps.userSessionStore);
 					if (!stepUpRecordable) {
 						logger.warn(

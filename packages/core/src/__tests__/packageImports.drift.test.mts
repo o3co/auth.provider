@@ -15,52 +15,42 @@
  */
 
 /**
- * packageImports.drift.test.mts — a package imports only core (#728, its
- * decided B4 and B13; AGENTS.md, "Extension surface: four axes"). In code a
- * package imports `@o3co/auth-provider-core` and no other workspace package;
- * at run time one package depends on another only through a slot whose
- * contract lives in core.
+ * A package imports only core (AGENTS.md, "Extension surface: four axes"). In
+ * code a package imports `@o3co/auth-provider-core` and no other workspace
+ * package; at run time one package depends on another only through a slot
+ * whose contract lives in core.
  *
- * What it reads, with TypeScript's parser, in every source under the `src/`
- * of every workspace but the compositions — declaration files included:
- * `import` and `export … from`, value and type-only
- * alike; `import("…")` in a type position and as a call; `require(…)`,
- * `require.resolve(…)` and `import.meta.resolve(…)`; `import … =
- * require(…)`; and `declare module "…"`, which augments a package it must
- * be able to see. A specifier names a workspace package when it is that
- * package's name or one of its subpaths.
+ * Read with TypeScript's parser, in every source under the `src/` of every
+ * workspace but the compositions, declaration files included: `import` and
+ * `export … from`, value and type-only alike; `import("…")` in a type position
+ * and as a call; `require(…)`, `require.resolve(…)` and
+ * `import.meta.resolve(…)`; `import … = require(…)`; and `declare module
+ * "…"`, which augments a package it must be able to see. A specifier names a
+ * workspace package when it is that package's name or one of its subpaths.
  *
- * The rules, each a case below:
- *
- * - **Product code** — a source outside `__tests__/` and not a `*.test.*` or
- *   `*.spec.*` file, which ships — imports no workspace package but core,
- *   beyond the edges that predate the rule (`TOLERATED_EDGES`). The list is
- *   keyed by the importing workspace and the package imported, with every
- *   name imported through the edge, and may only shrink: an edge or a name
- *   not on it fails, and so does an entry whose import is gone. A specifier
- *   the parser cannot read (`import(x)`, `require(x)`) fails too: it could
- *   be anything.
- * - **Tests** compose what they test, as a composition does, and never
- *   ship: a test may import another workspace package, but only one its
- *   package declares (`devDependencies`, or a runtime dependency), so the
- *   install that runs it has it.
- * - **Everything** names a workspace package — its own included — through
- *   its published entry: the package's name or a subpath its `exports`
- *   lists. And no relative
- *   specifier leaves its workspace: another package's source is reached
- *   through its entry or not at all.
- * - **package.json** agrees: a package's runtime dependencies on workspace
+ * - Product code (outside `__tests__/`, not a `*.test.*` or `*.spec.*` file)
+ *   imports no workspace package but core, beyond {@link TOLERATED_EDGES}: an
+ *   edge or a name not on it fails, and so does an entry whose import is
+ *   gone. A specifier the parser cannot read (`import(x)`, `require(x)`)
+ *   fails too: it could be anything.
+ * - Tests compose what they test and never ship: a test may import another
+ *   workspace package, but only one its package declares (`devDependencies`,
+ *   or a runtime dependency), so the install that runs it has it.
+ * - Everything names a workspace package, its own included, through its
+ *   published entry: the package's name or a subpath its `exports` lists. No
+ *   relative specifier leaves its workspace.
+ * - package.json agrees: a package's runtime dependencies on workspace
  *   packages (`dependencies`, `peerDependencies`, `optionalDependencies`)
  *   other than core are exactly the packages its tolerated edges import.
- * - **The compositions** (`COMPOSITIONS`) assemble every package — that is
- *   their job — and are not read; each entry must still name a workspace, so
- *   the exemption cannot outlive the directory.
+ * - The compositions ({@link COMPOSITIONS}) assemble every package and are
+ *   not read; each entry must still name a workspace, so the exemption cannot
+ *   outlive the directory.
  *
- * What it does not follow is left to review: a specifier assembled at run
- * time outside product code; a require function bound under another name
- * (`const req = createRequire(…)`, which core uses for `express` alone), whose
- * calls are not read; a package reached through a symlink or an absolute
- * path; and a file in a workspace outside its `src/`.
+ * Left to review: a specifier assembled at run time outside product code; a
+ * require function bound under another name (`const req = createRequire(…)`,
+ * which core uses for `express` alone), whose calls are not read; a package
+ * reached through a symlink or an absolute path; and a file in a workspace
+ * outside its `src/`.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -84,7 +74,7 @@ const COMPOSITIONS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The imports between packages that predate the rule (#728), keyed
+ * The imports between packages that predate the rule, keyed
  * `<importing workspace> -> <package imported>`, each with every name
  * imported through it — `type X` for a type-only import. The list may only
  * shrink: nothing may be added to it, and an entry, or a name, whose import

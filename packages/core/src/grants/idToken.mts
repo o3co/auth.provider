@@ -23,40 +23,27 @@ export interface GenerateIdTokenOptions {
 	readonly issuer: string;
 	readonly expiresIn?: number; // default 3600 seconds
 	/**
-	 * #481: RFC 8176 authentication methods the session recorded. Omitted when
-	 * empty. `?: … | undefined` (#626): a session and a code record name the
-	 * key and may hold `undefined`, which a caller compiling with
-	 * `exactOptionalPropertyTypes` must be able to pass on as it is.
+	 * RFC 8176 authentication methods the session recorded; omitted when
+	 * empty. `| undefined` because a session or code record may hold
+	 * `undefined`, which a caller compiling with `exactOptionalPropertyTypes`
+	 * must be able to pass on as it is.
 	 */
 	readonly amr?: readonly string[] | undefined;
-	/** #481: the Authentication Context Class Reference `/authorize` satisfied. See `amr` on `undefined`. */
+	/** The Authentication Context Class Reference `/authorize` satisfied. See `amr` on `undefined`. */
 	readonly acr?: string | undefined;
 }
 
 /**
- * Generates a signed id_token JWT (OIDC 1.0 Core §2).
+ * Generates a signed id_token JWT (OIDC Core §2): iss, sub, aud, azp (when
+ * given), exp, iat, jti, auth_time, sid (for back-channel logout), nonce
+ * (when the authorize request sent one), well-formed amr / acr, and the user
+ * claims the scopes authorize ({@link filterClaimsByScope}).
  *
- * Claim composition:
- *   - iss = issuer
- *   - sub (required)
- *   - aud (required)
- *   - azp (optional, added when provided)
- *   - exp / iat (seconds since epoch)
- *   - auth_time (seconds since epoch, from `authTime`)
- *   - sid (session identifier for back-channel logout)
- *   - nonce (when provided by the authorize request)
- *   - scope-filtered user claims via {@link filterClaimsByScope}
- *
- * Header: `typ: "JWT"` (#394). Load-bearing, not a hint: logout's SF-1 check
- * pins `id_token_hint` to the id_token `typ`, and every at+jwt-pinned surface
- * (userinfo, introspection, the central verifier) relies on the value being
- * **disjoint from RFC 9068's `at+jwt`** to refuse an id_token presented as an
- * access token — a property `JWT` satisfies just as the pre-#394 `id+jwt`
- * did, without failing strict external RPs that validate `typ`.
- *
- * #394 accepted the pre-flip `id+jwt` alongside it for a migration window;
- * #402 closed that window, and `id+jwt` is now refused as an ordinary `typ`
- * mismatch.
+ * Header `typ: "JWT"` is load-bearing: logout pins `id_token_hint` to it, and
+ * every at+jwt-pinned surface (userinfo, introspection, the central verifier)
+ * relies on it being **disjoint from RFC 9068's `at+jwt`** to refuse an
+ * id_token presented as an access token. `JWT` also passes strict external
+ * RPs that validate `typ`.
  */
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
 	const now = Math.floor(Date.now() / 1000);

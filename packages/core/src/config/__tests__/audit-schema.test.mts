@@ -15,16 +15,12 @@
  */
 
 /**
- * #287 — `audit.sink` has to be a DECLARED top-level section, not merely a
- * key an operator writes in HOCON.
- *
- * `AppConfigSchema` is a plain `z.object`, so it strips what it does not
- * declare. An undeclared section therefore does not fail loudly: the key
- * vanishes between `parseFile` and the composition root, the sink selector
- * reads `undefined`, and the deployment falls back to whatever the default
- * is while the operator's configuration sits in the file looking effective.
- * `federationTokenStore` is the standing example of that failure mode in
- * this repository.
+ * `audit.sink` has to be a DECLARED top-level section, not merely a key an
+ * operator writes in HOCON. `AppConfigSchema` is a plain `z.object` and strips
+ * what it does not declare, so an undeclared section does not fail loudly: the
+ * key vanishes between `parseFile` and the composition root, the sink selector
+ * reads `undefined`, and the deployment falls back to whatever the default is
+ * while the operator's configuration sits in the file looking effective.
  *
  * Shape only — the literal default lives in `reference.conf` per
  * ADR 2026-04-30.

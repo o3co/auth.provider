@@ -20,19 +20,14 @@ import { createRefreshTokenFamilyRevocation } from "./revocation.mjs";
 import { createRefreshTokenFamilyRotation } from "./rotation.mjs";
 
 /**
- * Memory-backed RefreshTokenFamilyStore module. Test + dev only — no
- * persistence across restarts. Ships in @o3co/auth-provider-core.
- *
- * A restart forgets every family, revoked ones included: an access token of
- * a family revoked before the restart passes the family check afterwards
- * until it expires. Inherent to a store in process memory, and one more
- * reason it is declared replica-unsafe.
- *
- * Per A3 §8.1.
+ * Memory-backed RefreshTokenFamilyStore module, for tests and development:
+ * nothing persists across restarts. A restart forgets every family, revoked
+ * ones included, so an access token of a family revoked before it passes the
+ * family check until it expires; one reason it is declared replica-unsafe.
  */
 export const memoryRefreshTokenFamilyStoreModule = defineModule({
 	name: "core-refresh-token-family-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
@@ -44,14 +39,11 @@ export const memoryRefreshTokenFamilyStoreModule = defineModule({
 });
 
 /**
- * Default RefreshTokenFamilyRotation wrapper module. Composes the storage
- * primitive into the 4-outcome rotation ceremony. Replaceable via DI:
- * consumers wanting custom rotation policy (audit-emitting, grace-period,
- * etc.) provide a module with `provides: { refreshTokenFamilyRotation: ... }`
- * INSTEAD of this one — boot planner enforces uniqueness via
- * BootError({ reason: "duplicate-provides" }).
- *
- * Per A3 §8.1.
+ * Default RefreshTokenFamilyRotation wrapper module: composes the storage
+ * primitive into the 4-outcome rotation ceremony. For a custom rotation
+ * policy (audit-emitting, grace-period, …), provide
+ * `refreshTokenFamilyRotation` from a module used INSTEAD of this one; boot
+ * refuses two (`duplicate-provides`).
  */
 export const defaultRefreshTokenFamilyRotationModule = defineModule({
 	name: "core-default-refresh-token-family-rotation",
@@ -71,8 +63,6 @@ export const defaultRefreshTokenFamilyRotationModule = defineModule({
  * Default RefreshTokenFamilyRevocation wrapper module. Composes the
  * storage primitive into the idempotent revoke + read-only check, keeping a
  * revoked record for the configured access-token maximum (`retention.mts`).
- *
- * Per A3 §8.1.
  */
 export const defaultRefreshTokenFamilyRevocationModule = defineModule({
 	name: "core-default-refresh-token-family-revocation",

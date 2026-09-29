@@ -15,31 +15,15 @@
  */
 
 /**
- * `POST /oauth/device/verification` against cross-site requests.
- *
- * The endpoint authorises on the end-user session cookie alone, which is
- * exactly the credential a browser attaches to a request another site made.
- * RFC 8628 §5.4's remote-phishing attack needs nothing more: any public
- * `client_id` obtains a `user_code`, lures a logged-in user to a page that
- * auto-submits `action=approve&user_code=...`, and polls `/oauth/token` for
- * the victim's access token. `verification_uri_complete = false` exists to
- * keep the user typing the code; a forged POST types it for them.
- *
- * Two layers, exercised here through the router the module mounts:
- *
- *   1. JSON only. A form-encoded POST is a "simple" request the browser
- *      sends without a preflight; `application/json` is not. The handler
- *      refuses any other media type itself, so the rule does not depend on
- *      what else is mounted under `/oauth` — composition.test.mts boots it
- *      beside `oauthModule` in both orders.
- *   2. The same CSRF guard `/session/login` runs (#272), as the `csrfGuard`
- *      slot the session module provides (#728): a foreign `Origin` /
- *      `Referer` is refused outright, same-origin or `session.csrf.trustedOrigins`
- *      is accepted, and a request with no origin signal at all must carry the
- *      session's signed double-submit token. One policy, not a second one.
- *      The tests fill the slot with the session package's guard, built as
- *      the session module builds it, so what the route answers and logs is
- *      what it answered and logged when it built the guard itself.
+ * `POST /oauth/device/verification` against cross-site requests (RFC 8628
+ * §5.4's remote phishing): the endpoint authorises on the session cookie
+ * alone, which a browser attaches to a request another site made. Two layers,
+ * exercised through the router the module mounts: JSON only (a form POST is a
+ * "simple" request sent without a preflight), and the CSRF guard
+ * `/session/login` runs, from the `csrfGuard` slot the session module
+ * provides. The tests fill the slot with the session package's guard, built
+ * as the session module builds it. See the package README, "JSON only, behind
+ * the session CSRF guard".
  */
 
 import type { AppConfig, ClientRepository, Logger } from "@o3co/auth-provider-core";
@@ -104,7 +88,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 					"verification-uri-complete": false,
 					"code-lifetime-seconds": 600,
 					"polling-interval-seconds": 5,
-					// Present because the module refuses to mount without it (#448);
+					// Present because the module refuses to mount without it;
 					// the limiter below declares the prefix explicitly, so the seed
 					// never runs here and the numbers need not agree.
 					rateLimit: { limit: 50, windowSeconds: 300 },
@@ -256,8 +240,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 	});
 
 	it("refuses a request with no origin signal and no token (the session guard's rule)", async () => {
-		// The header-less client is the case the pre-#272 guard waved through.
-		// Same policy here: no `Origin`, no `Referer`, no token — refused.
+		// No `Origin`, no `Referer`, no token: refused.
 		const { deps, store } = makeDeps();
 		await seedPending(store);
 		const app = mountVerification(deps);

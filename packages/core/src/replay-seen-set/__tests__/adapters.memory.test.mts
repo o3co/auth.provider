@@ -22,16 +22,11 @@ afterEach(() => {
 });
 
 /*
- * The in-memory seen-set grew without bound.
- *
- * `markSeen` never pruned, and a record was dropped only when that exact
- * (scope, key) was asked about again after it expired. Every consumer records
- * a value that is never presented again once it has been honoured — a client
- * assertion's `jti`, an ID-JAG's `jti`, a DPoP proof's `jti` — so nothing was
- * ever reclaimed: one permanent Map entry per accepted assertion or proof on a
- * long-running single-process deployment. DPoP records one per request at
- * every protected resource. The access-token denylist had the same leak and
- * the same fix (#293 item 6).
+ * Every consumer records a value that is never presented again once it has
+ * been honoured — a client assertion's `jti`, an ID-JAG's `jti`, a DPoP
+ * proof's `jti`, one per request at every protected resource. A record
+ * dropped only when its (scope, key) is asked about again after it expired
+ * would never be reclaimed, so `markSeen` sweeps expired records.
  */
 describe("createMemoryReplaySeenSet — bounded growth", () => {
 	/** Record `count` keys under `scope` that expire `ttlMs` from now. */
@@ -272,15 +267,13 @@ describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => 
 });
 
 /*
- * Nothing bounded the set but time. DPoP records a proof before the token
- * endpoint's rate limit runs and before a protected resource has verified
- * the access token, so anyone can have it write one 300-second record per
- * request: the set grew with the request rate, until the process ran out of
- * memory. A cap on the records it holds bounds it; at the cap it refuses a
- * new record as a store fault — the set cannot record it, so the value is
- * not accepted — the way a Redis seen-set refuses a write at `maxmemory`
- * under `noeviction`. It never evicts a live record, which would let the
- * value it held be replayed.
+ * DPoP records a proof before the token endpoint's rate limit runs and before
+ * a protected resource has verified the access token, so anyone can have it
+ * write one 300-second record per request. A cap on the records the set holds
+ * bounds it; at the cap it refuses a new record as a store fault — the set
+ * cannot record it, so the value is not accepted — the way a Redis seen-set
+ * refuses a write at `maxmemory` under `noeviction`. It never evicts a live
+ * record, which would let the value it held be replayed.
  */
 describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 	const later = (): number => Date.now() + 600_000;
@@ -322,7 +315,7 @@ describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 
 	it("keeps the last tenth for the other consumers: a DPoP proof is refused once the set holds 90% of its cap", async () => {
 		// DPoP records a proof before any rate limit or token check, and every
-		// consumer shares the set: a DPoP flood that filled it refused client
+		// consumer shares the set: a DPoP flood that filled it would refuse client
 		// authentication too, for up to the replay window after it stopped.
 		const set = createMemoryReplaySeenSet({ maxEntries: 10 });
 		for (let i = 0; i < 9; i += 1) {

@@ -15,15 +15,11 @@
  */
 
 /**
- * Issue #272 — the session routes' CSRF defence was a single `Origin` check
- * that called `next()` whenever the header was absent, so any caller able to
- * omit `Origin` walked straight past it. There was no anti-CSRF token to fall
- * back on, and the trust list was `cors.allowedOrigins` — a CORS policy doing
- * duty as a CSRF policy.
- *
- * These tests pin the replacement: a signed double-submit token, a strict
- * same-origin `Origin` / `Referer` check with its own trust list, and the
- * acceptance rule that composes them.
+ * The session routes' CSRF defence: a signed double-submit token, a strict
+ * same-origin `Origin` / `Referer` check with its own trust list (not
+ * `cors.allowedOrigins`: a CORS policy is not a CSRF policy), and the
+ * acceptance rule that composes them. A missing `Origin` and `Referer` is
+ * never an implicit pass.
  */
 
 import { fullSectionsSchema, type Logger } from "@o3co/auth-provider-core";
@@ -378,8 +374,8 @@ describe("csrf — origin / referer check", () => {
 	});
 
 	it("classifies a missing Origin and Referer as absent rather than allowed", () => {
-		// The #272 bug in one assertion: absence is a verdict the caller must
-		// decide about, never an implicit pass.
+		// Absence is a verdict the caller must decide about, never an implicit
+		// pass.
 		expect(checkRequestOrigin(fakeRequest({}), [])).toBe("absent");
 	});
 
@@ -454,8 +450,8 @@ describe("csrf — guard acceptance rule", () => {
 
 	it("accepts a same-origin browser request that carries no token", async () => {
 		const { app } = buildApp();
-		// #556: bound to the loopback address the request dials — a hostless
-		// listen can share its port with another process's 127.0.0.1 socket.
+		// Bound to the loopback address the request dials: a hostless listen
+		// can share its port with another process's 127.0.0.1 socket.
 		const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
 			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
 		});
@@ -476,9 +472,7 @@ describe("csrf — guard acceptance rule", () => {
 
 	it("rejects a foreign Origin even when a valid token is presented", async () => {
 		// Deliberately stricter than "either arm passes": a foreign `Origin` is
-		// positive evidence that a browser made this request from another site,
-		// and the pre-#272 code already rejected it. A security fix must not
-		// hand that back.
+		// positive evidence that a browser made this request from another site.
 		const { app, csrf } = buildApp();
 		const token = csrf.mint();
 

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-/** Shared types for the RFC 8628 device authorization grant (#298). */
+/** Shared types for the RFC 8628 device authorization grant. */
 
 import type { AuditSink, DeviceCodeStore, RateLimiter } from "@o3co/auth-provider-core";
 
@@ -43,13 +43,9 @@ export interface DeviceAuthorizationSettings {
 	readonly verificationUri: string;
 	/**
 	 * Whether to also return `verification_uri_complete`, which embeds the
-	 * user code so a QR code can carry it.
-	 *
-	 * Off by default. RFC 8628 §5.4: with it "it is particularly important to
-	 * confirm that the device is in the user's possession, as the user no
-	 * longer has to type in the code" — the typing *is* the proof of
-	 * proximity, and removing it without replacing that confirmation is what
-	 * turns a phishing link into a working attack.
+	 * user code so a QR code can carry it. Off by default: typing the code is
+	 * the proof of proximity (RFC 8628 §5.4). See README,
+	 * "`verification_uri_complete` is off by default".
 	 */
 	readonly verificationUriComplete: boolean;
 	readonly codeLifetimeSeconds: number;
@@ -62,20 +58,19 @@ export interface DeviceGrantDependencies {
 	readonly rateLimiter?: RateLimiter;
 	/**
 	 * Where `device.approved` / `device.denied` / `device.rate_limited` /
-	 * `device.decision_outcome_unknown` go.
-	 * Optional to wire; the module attaches `AUDIT_SINK_ABSENCE_POLICY`, so a
-	 * composition with no sink has to say `audit.sink.type = "none"` (#363).
+	 * `device.decision_outcome_unknown` go. Optional to wire; the module
+	 * attaches `AUDIT_SINK_ABSENCE_POLICY`, so a composition with no sink has
+	 * to say `audit.sink.type = "none"`.
 	 */
 	readonly auditSink?: AuditSink;
 	readonly logger?: {
 		warn(obj: Record<string, unknown>, msg: string): void;
 		info?(obj: Record<string, unknown>, msg: string): void;
 		/**
-		 * Where a limiter-backend outage is reported (#457):
-		 * `rate_limiter_failed_open` / `rate_limiter_failed_closed`, the lines
-		 * `createRateLimitGuard` writes. Optional so a warn-only logger keeps
-		 * compiling; without it the line goes to core's console logger rather
-		 * than nowhere.
+		 * Where a limiter-backend outage is reported
+		 * (`rate_limiter_failed_open` / `rate_limiter_failed_closed`, written by
+		 * `createRateLimitGuard`). Optional so a warn-only logger keeps
+		 * compiling; without it the line goes to core's console logger.
 		 */
 		error?(obj: Record<string, unknown>, msg: string): void;
 	};

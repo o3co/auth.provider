@@ -15,48 +15,19 @@
  */
 
 /**
- * middleware/cors.mts — the consumer of `cors.allowedOrigins` (#500).
+ * CORS for `cors.allowedOrigins`, on the endpoints a browser legitimately
+ * calls cross-origin ({@link browserFacingCorsRoutes}).
  *
- * The key was declared in `application.schema.mts` and shipped in every
- * `reference.conf`, and nothing read it. A cross-origin preflight to
- * `/oauth/token` got no `Access-Control-Allow-Origin`, so a browser SPA served
- * from any origin but the provider's could not use this provider at all — and
- * an operator who set the key had no way to discover that, because a silent
- * no-op config key produces no error, no warning and no log line. That is the
- * failure the #363 declared-absence discipline exists to refuse, reached
- * through a config key rather than a DI slot.
- *
- * ### What this grants, and what it deliberately does not
- *
- * **An exact-match allowlist, and nothing else.** The `Origin` header is
- * compared to the configured entries by string equality and the matched entry
- * is echoed back. An arbitrary origin is never reflected, and `*` is never
- * emitted — not even for the unauthenticated documents, where it would be
- * harmless, because one code path that can emit `*` is one code path away from
- * emitting it on a response that carries a token.
- *
- * **An empty list means CORS is off**, which stays the default. Nothing is
- * mounted, no response gains a `Vary`, and the deployment behaves exactly as
- * it did before this middleware existed.
- *
- * **No `Access-Control-Allow-Credentials`, ever.** A cross-origin SPA here is
- * a public client using PKCE: it holds no cookie of ours and needs none. The
- * cookie it would gain access to is the one backing the `session` grant, which
- * exchanges an authenticated browser session for tokens — allowing credentials
- * would hand every allowlisted origin the ability to mint tokens for whoever
- * is signed in, which is a different and much larger grant than "may read the
- * token endpoint's response to a request it authenticated itself". The two
- * arrive together in CORS, so this list buys only the second.
- *
- * **`Vary: Origin` on every response from a CORS-enabled route**, whether an
- * `Origin` arrived or not. A shared cache that keyed only on the URL would
- * otherwise serve one origin's response — headers included — to another.
- *
- * ### Which routes
- *
- * The ones a browser legitimately calls cross-origin, and only those. See
- * {@link browserFacingCorsRoutes} for the table and the case-by-case reasons,
- * including why `/oauth/introspect` and `/oauth/authorize` are not on it.
+ * - Exact-match allowlist: the matched entry is echoed. An arbitrary origin is
+ *   never reflected and `*` is never emitted, even on public documents, so no
+ *   code path exists that could emit it on a response carrying a token.
+ * - An empty list means CORS is off (the default): nothing is mounted.
+ * - Never `Access-Control-Allow-Credentials`. A cross-origin SPA is a public
+ *   PKCE client and needs no cookie of ours; allowing credentials would let
+ *   every allowlisted origin use the cookie-backed `session` grant to mint
+ *   tokens for whoever is signed in.
+ * - `Vary: Origin` on every response from a CORS-enabled route, so a shared
+ *   cache keyed on the URL cannot serve one origin's response to another.
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
@@ -74,31 +45,20 @@ export interface CorsRoute {
 }
 
 /**
- * The request headers a preflight is answered with.
- *
- * `content-type` because the token endpoint takes
- * `application/x-www-form-urlencoded` (which is CORS-safelisted only for a
- * narrow set of values, so it still has to be named), `authorization` because
- * userinfo and revocation take a bearer token, and `dpop` because a
- * sender-constrained public client carries a proof on every one of these
- * calls. Nothing else: an allowlist of request headers is cheap to widen later
- * and impossible to narrow once a client depends on it.
+ * Request headers a preflight allows: `content-type` (the token endpoint's
+ * form body still has to be named; the safelist covers only narrow values),
+ * `authorization` (bearer tokens at userinfo and revocation) and `dpop`
+ * (sender-constrained public clients). Nothing else: an allowlist of request
+ * headers is cheap to widen and impossible to narrow once clients depend on it.
  */
 const ALLOWED_REQUEST_HEADERS = "content-type, authorization, dpop";
 
 /**
- * Response headers a matched origin may read, beyond the CORS-safelisted set
- * (`Cache-Control`, `Content-Language`, `Content-Length`, `Content-Type`,
- * `Expires`, `Last-Modified`, `Pragma`).
- *
- * All three are answers the caller cannot act on otherwise: without
- * `Retry-After` a throttled SPA sees an opaque `429` and has nothing to back
- * off by, without `WWW-Authenticate` a `401` from userinfo does not say
- * which scheme or realm it wanted, and without `DPoP-Nonce` a cross-origin
- * DPoP client cannot read the nonce a `use_dpop_nonce` refusal hands it to
- * retry with (RFC 9449 §8, #530) — the retry the refusal asks for would
- * never happen. None reveals anything to an origin that is already
- * permitted to read the whole body.
+ * Response headers a matched origin may read beyond the CORS-safelisted set.
+ * Each is needed to act on an answer: `Retry-After` to back off a `429`,
+ * `WWW-Authenticate` for a `401`'s scheme and realm, `DPoP-Nonce` to retry a
+ * `use_dpop_nonce` refusal (RFC 9449 §8). None reveals anything to an origin
+ * already allowed to read the body.
  */
 const EXPOSED_RESPONSE_HEADERS = "WWW-Authenticate, Retry-After, DPoP-Nonce";
 
@@ -113,50 +73,34 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
 /**
  * The endpoints CORS is enabled on, for a given config.
  *
- * **On the list**, because a browser has a legitimate reason to call each one
- * from a page served by another origin:
+ * On the list, as a browser has reason to call each from another origin:
+ *   - `POST /oauth/token`: the PKCE code exchange and refresh.
+ *   - `GET|POST /oauth/userinfo`: OIDC Core §5.3 defines both methods.
+ *   - `POST /oauth/revoke`: RFC 7009 §2.1 lets a public client revoke its own
+ *     tokens (SPA sign-out).
+ *   - the discovery documents ({@link discoveryPathsFor}) and JWKS
+ *     ({@link resolveJwksPath}): public metadata, with paths from the same
+ *     sources as the route registration and `jwks_uri`, so none can drift.
  *
- *   - `POST /oauth/token` — the PKCE code exchange and refresh. Without this
- *     one nothing else matters; it is the call an SPA cannot avoid.
- *   - `GET|POST /oauth/userinfo` — OIDC Core §5.3 defines both methods.
- *   - `POST /oauth/revoke` — RFC 7009 §2.1 lets a public client revoke its own
- *     tokens, which is exactly what an SPA does on sign-out.
- *   - `GET /.well-known/openid-configuration`, its RFC 8414 twin
- *     `/.well-known/oauth-authorization-server` (#528) and the JWKS document
- *     — public, unauthenticated, cacheable metadata that a browser-based
- *     client library fetches to discover the endpoints above. The discovery
- *     paths come from {@link discoveryPathsFor} and the JWKS path from
- *     {@link resolveJwksPath}: the same single sources the route registration
- *     and the advertised `jwks_uri` use, so none of them can drift.
+ * Off the list:
+ *   - `POST /oauth/introspect`: server-to-server; RFC 7662 §2.1 requires
+ *     client authentication, and public clients are refused there.
+ *   - `GET /oauth/authorize`: a top-level navigation, which CORS does not
+ *     govern.
+ *   - `/session/*`: cookie-backed, governed by the CSRF policy
+ *     (`session.csrf.trustedOrigins`).
  *
- * **Deliberately off the list:**
- *
- *   - `POST /oauth/introspect` is server-to-server. RFC 7662 §2.1 requires the
- *     caller to authenticate, and this provider already refuses public
- *     clients there, so a browser could never use it — enabling CORS on it
- *     would only advertise a surface no legitimate browser client has.
- *   - `GET /oauth/authorize` is a top-level navigation, not a `fetch`. CORS
- *     has no bearing on where a browser is allowed to navigate, so a header
- *     there would grant nothing and imply something false about the endpoint.
- *   - `/session/*` is cookie-backed by construction and covered by the CSRF
- *     policy at `session.csrf.trustedOrigins`, which answers the different
- *     question ("may this origin make me change state") that #272 split apart
- *     from this one.
- *
- * NOTE: the `/oauth/*` paths are coupled to the bundled `oauthModule`'s
- * mountPath, the same coupling the `/oauth/token` middleware mounts in
- * `boot/assemble-app.mts` already carry. A downstream that re-mounts the OAuth
- * router elsewhere must build its own table.
+ * The `/oauth/*` paths assume the bundled `oauthModule`'s mountPath; a
+ * downstream that re-mounts the OAuth router must build its own table.
  */
 export function browserFacingCorsRoutes(
 	config: {
 		oauth?: { jwt?: { jwksPath?: unknown; issuer?: unknown } };
 	},
 	/**
-	 * The issuer the discovery paths are derived from, when the caller holds
-	 * it apart from the configuration — core's `assembleApp` hands the
-	 * `oauthTokenSettings` slot's (#728), so the table and the discovery route
-	 * name one issuer. `oauth.jwt.issuer` otherwise.
+	 * The issuer the discovery paths derive from, when the caller holds it apart
+	 * from the config (`assembleApp` passes the `oauthTokenSettings` slot's, so
+	 * table and discovery route name one issuer). `oauth.jwt.issuer` otherwise.
 	 */
 	options: { readonly issuer?: string } = {},
 ): readonly CorsRoute[] {
@@ -194,18 +138,12 @@ export interface CorsMiddlewareOptions {
 }
 
 /**
- * Build the CORS middleware, or `null` when there is nothing to do — an empty
- * (or entirely invalid) allowlist means CORS is off and no middleware should
- * be mounted at all, so that a deployment which has not opted in cannot even
- * gain a `Vary` header it did not have before.
+ * Build the CORS middleware, or `null` when the allowlist is empty (or
+ * entirely invalid): CORS is off and nothing is mounted, not even `Vary`.
  *
- * The re-check of `allowedOrigins` mirrors what `resolveJwksPath` does for
- * `oauth.jwt.jwksPath`: the config schema already refuses a malformed entry at
- * boot, and this repeats the check because a hand-built `AppConfig` — which
- * this codebase supports and `resolveOAuthOptions` documents — never passed
- * that schema. A dropped entry is warned about by name rather than ignored,
- * because a silently-narrowed allowlist is the same class of failure as the
- * silently-absent one this middleware exists to fix.
+ * `allowedOrigins` is re-checked because a hand-built `AppConfig` never passed
+ * the config schema. A dropped entry is warned about by name: a silently
+ * narrowed allowlist is as hard to diagnose as a silently absent one.
  */
 export function corsMw(options: CorsMiddlewareOptions): RequestHandler | null {
 	const logger = options.logger;
@@ -246,13 +184,10 @@ export function corsMw(options: CorsMiddlewareOptions): RequestHandler | null {
 			req.method === "OPTIONS" && req.headers["access-control-request-method"] !== undefined;
 
 		if (typeof origin !== "string" || !origins.has(origin)) {
-			// An unlisted (or absent) origin gets no CORS headers at all. A
-			// preflight still ends here rather than falling through: the routes
-			// above answer POST or GET, so the OPTIONS would 404, and a 404 tells
-			// the operator reading their logs that the path is wrong when the
-			// actual answer is that the origin is not on the list. The browser
-			// refuses the request either way — the absent header is what decides
-			// it, not the status.
+			// An unlisted or absent origin gets no CORS headers. A preflight still
+			// ends here: falling through would 404 and point the operator at the
+			// path rather than the allowlist. The absent header is what makes the
+			// browser refuse.
 			if (isPreflight) {
 				res.status(204).end();
 				return;

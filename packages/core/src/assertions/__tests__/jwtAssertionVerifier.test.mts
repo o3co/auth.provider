@@ -15,14 +15,10 @@
  */
 
 /**
- * Issue #301 — possession proof, which is the part the issue is emphatic about:
- * "A bare DeviceID is **not** authentication."
- *
- * Almost every case here is a refusal, because that is where this component's
- * value is. Accepting a valid assertion is one line of jose; the reason this
- * ships rather than leaving each deployment to hand-roll it is that the
- * refusals are easy to leave out, and leaving one out turns a login into a
- * string comparison.
+ * Possession proof: a bare device id is not authentication. Almost every case
+ * here is a refusal. Accepting a valid assertion is one line of jose; the
+ * refusals are what is easy to leave out, and leaving one out turns a login
+ * into a string comparison.
  */
 
 import { generateKeyPairSync } from "node:crypto";
@@ -167,7 +163,6 @@ describe("createJwtAssertionVerifier — what it refuses (#301)", () => {
 		expect(await verifier().verify(await mint({ sub: "" }))).toBeNull();
 	});
 
-	// The failure the issue names by name.
 	it("refuses a bare identifier that is not a token at all", async () => {
 		expect(await verifier().verify("device-1234")).toBeNull();
 		expect(await verifier().verify("")).toBeNull();
@@ -197,8 +192,7 @@ describe("createJwtAssertionVerifier — construction (#301)", () => {
 
 	it("refuses to build without an algorithm list", () => {
 		// Omitting it lets jose accept anything the key can verify, which is
-		// wider than configuring one key means — and the docstring promised
-		// otherwise before this was required.
+		// wider than configuring one key means.
 		expect(() => verifier({ algorithms: [] })).toThrow(/at least one algorithm/);
 	});
 
@@ -207,9 +201,8 @@ describe("createJwtAssertionVerifier — construction (#301)", () => {
 	});
 
 	it("is a one-entry registry since #525: reports the issuer, takes the context, terms unchanged", async () => {
-		// The static-key configuration every existing deployment has keeps
-		// working; what it verifies now also says which issuer it was, and it
-		// accepts the presenting client without caring who that is.
+		// The static-key configuration keeps working: its result also names the
+		// issuer, and it accepts any presenting client.
 		const exp = Math.floor(Date.now() / 1000) + 300;
 		const result = await verifier().verify(await mint({ sub: "device:abc" }, { expSec: exp }), {
 			clientId: "any-client",

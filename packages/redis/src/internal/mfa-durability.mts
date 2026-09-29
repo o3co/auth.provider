@@ -15,37 +15,30 @@
  */
 
 /**
- * The boot check both MFA store modules run (the MFA ADR's D12, and its
- * step-3 amendment for the transaction store's email-proof key family).
- *
- * "Only zero records open a first binding" (F3) is only as strong as the
- * store that holds the records: an eviction, or a restart without
+ * The boot check both MFA store modules run. "Only zero records open a first
+ * binding" is only as strong as the store: an eviction, or a restart without
  * persistence, empties a subject's list, and whoever holds the password can
  * then bind their own authenticator. The email-proof requirement an operator
  * reset records is lost the same way. So, before the store is provided:
  *
- * - an `allkeys-*` `maxmemory-policy`, which may evict any key, refuses the
- *   boot. `noeviction` and the `volatile-*` policies pass: the factors and
- *   the requirement carry no TTL, so a `volatile-*` policy never picks them;
- * - for the transaction store, a `volatile-*` policy is one warning: its
- *   subject lock and weekly window carry a TTL once no run is counted, and an
- *   evicted one lifts a D21 hold early. `noeviction` is what the MFA key
- *   families are meant to run on;
- * - RDB snapshots without AOF are one warning: a crash loses the last
- *   snapshot interval of what was written;
- * - no persistence at all is one warning: a restart loses everything;
- * - the policy is judged by an allow-list: `noeviction` passes, the four
- *   `volatile-*` policies are each store's to judge, the three `allkeys-*`
- *   refuse; anything else — empty, unknown, a future server's — is a policy
- *   the check cannot judge, named in the warning below;
- * - what could not be read — a question the server refused, as many managed
- *   services refuse `CONFIG`, or answered without the value — is named in one
+ * - the policy is judged by an allow-list. `noeviction` passes. The three
+ *   `allkeys-*`, which may evict any key, refuse the boot, whatever else could
+ *   not be read. The four `volatile-*` pass: they never pick the factors or
+ *   the requirement, which carry no TTL. The transaction store still warns on
+ *   them, because its subject lock and weekly window carry a TTL once no run
+ *   is counted and an evicted one lifts a lockout hold early. Any other policy
+ *   (empty, unknown, a future server's) cannot be judged and is named in the
+ *   warning below;
+ * - RDB snapshots without AOF are one warning, no persistence at all another;
+ * - what could not be read (a question the server refused, as many managed
+ *   services refuse `CONFIG`, or answered without the value) is named in one
  *   warning that the check could not run, and the boot goes on. The policy is
  *   read from `INFO memory` first, so a server that blocks `CONFIG` is still
- *   held to the refusal, and each part is judged on its own: a known
- *   `allkeys-*` policy refuses whatever else could not be read;
+ *   held to the refusal;
  * - a server that cannot answer at all fails the boot, as any store outage at
- *   boot does: it is not a refusal.
+ *   boot does.
+ *
+ * See the MFA ADR (2026-09-25-multi-factor-authentication), D12.
  */
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";

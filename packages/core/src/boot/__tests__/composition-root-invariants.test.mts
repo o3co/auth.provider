@@ -15,22 +15,9 @@
  */
 
 /**
- * Integration tests for the composition-root invariants restored in Phase 9
- * boot-validator restoration (review fix #7).
- *
- * Restored:
- *   - Step 13.5: CP-20 grantPolicy / jwt.issuer invariant.
- *
- * Dropped during Phase 9 (does not apply to v0.5.0):
- *   - v0.4.x A4 four-store invariant. v0.5.0's package-level segregation
- *     splits the four user-session slots between sessionModule (consumes 2)
- *     and oauthModule (consumes 2); a blanket "all-or-none" check mis-fires
- *     on legitimate test fixtures and partial-subsystem composition roots.
- *     Step 4 (checkRequiresClosure) already enforces per-module wiring.
- *
- * Other v0.4.x guards (MFA partial-wiring, TODO-F-1 federation+stores) are
- * tracked as a follow-up in CHANGELOG; they require new BootErrorReason
- * literals and are out of scope for the publish-gate fix-up commit.
+ * Integration tests for the composition-root grantPolicy / `oauth.jwt.issuer`
+ * invariant: boot fails on a missing or empty issuer, however grantPolicy is
+ * wired.
  */
 
 import { describe, expect, it } from "vitest";
@@ -47,7 +34,7 @@ const noopGrantPolicy: GrantPolicyHook = {
 };
 
 // ---------------------------------------------------------------------------
-// Step 13.5 — CP-20 grantPolicy / jwt.issuer invariant
+// grantPolicy / jwt.issuer invariant
 // ---------------------------------------------------------------------------
 
 describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
@@ -74,11 +61,11 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 		},
 	});
 
-	// #266 made `oauth.jwt.issuer` required at the schema boundary, so config
-	// validation (step 1) now rejects a missing or malformed issuer before the
-	// CP-20 scan (step 13.5) can run. CP-20 remains as a backstop for a config
-	// object that reaches the DI graph without passing the schema; what these
-	// tests pin is that boot fails, not which of the two gates catches it.
+	// `oauth.jwt.issuer` is required at the schema boundary, so config
+	// validation rejects a missing or malformed issuer before the grantPolicy
+	// scan runs. The scan stays as a backstop for a config object that reaches
+	// the DI graph without passing the schema; these tests pin that boot
+	// fails, not which of the two gates catches it.
 	it("rejects grantPolicy module when config.oauth.jwt.issuer is missing", async () => {
 		await expect(
 			createApp({
@@ -120,8 +107,8 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 	});
 
 	it("requires an issuer even when no module provides grantPolicy", async () => {
-		// Before #266 the issuer was optional unless grantPolicy was wired. It is
-		// now the identity every minted token is bound to, so it is unconditional.
+		// The issuer is the identity every minted token is bound to, so it is
+		// required whether or not grantPolicy is wired.
 		await expect(
 			createApp({
 				modules: [],
@@ -135,12 +122,10 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 		);
 	});
 
-	// CP-20 must also fire when grantPolicy is wired via bootstrapComponents
-	// or overrideComponents — those are the other two supported paths into
-	// the typed DI graph (per A2-α §6.1 + A2-β §5.1 step 8). A module-only
-	// scan would let an empty-issuer misconfig slip through whenever the
-	// host pre-seeds grantPolicy directly. Multi-reviewer convergence in
-	// Round 2: Claude (Important) + Codex (P2).
+	// The check must also fire when grantPolicy is wired via
+	// bootstrapComponents or overrideComponents, the other two paths into the
+	// typed DI graph: a module-only scan would let an empty issuer through
+	// whenever the host pre-seeds grantPolicy directly.
 	it("rejects bootstrapComponents.grantPolicy when issuer is missing", async () => {
 		await expect(
 			createApp({

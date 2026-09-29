@@ -16,26 +16,20 @@
 
 /**
  * Every module this template can turn on, booted together on one replica
- * through the real composition — the shipped HOCON, `buildModules`, core's
- * `createApp`, mounted as `app.mts` mounts it — and held to the contracts that
- * exist only when the modules meet: one discovery document that tells the
- * truth about every grant and endpoint, every module's route answering in the
- * same app, each module's body rules surviving its neighbours in either mount
- * order, and a store outage answered 503 and logged once.
- *
- * Each package's own suite boots that package alone or against stand-ins, and
- * the defects this file exists for were invisible there: a discovery document
- * made invalid by a neighbour's contribution, a disabled grant still
- * advertised, one module's prefix parser setting another's body limit, a
- * content-type rule that held in one mount order only. See
- * `all-modules-composition.fixture.mts` for what is real and what is
- * substituted, and `all-modules-composition.multi.test.mts` for the same
+ * through the real composition (the shipped HOCON, `buildModules`, core's
+ * `createApp`, mounted as `app.mts` mounts it), and held to the contracts that
+ * exist only when the modules meet, which no package's own suite can see: one
+ * discovery document that tells the truth about every grant and endpoint,
+ * every module's route answering in the same app, each module's body rules
+ * surviving its neighbours in either mount order, and a store outage answered
+ * 503 and logged once. The fixture file says what is real and what is
+ * substituted; `all-modules-composition.multi.test.mts` boots the same
  * composition on Redis under `deployment.mode = "multi"`.
  *
  * `knownDefect` marks a contract the composition breaks today; its comment
  * names the defect. In the monorepo it is `it.fails`: the fix that mends the
  * defect turns the case red, and turns it into a plain `it`. An outage case
- * pins only the part of the #685 rule that is broken, and asserts the rest
+ * pins only the part of the outage rule that is broken, and asserts the rest
  * (`describeOutages` in the fixture).
  */
 
@@ -249,7 +243,7 @@ describe("every module the template can turn on boots together", () => {
 		// `app.mts` fills the `logger` slot so that `LOG_LEVEL` and the JSON
 		// envelope reach every module; boot hands a module only the slots its
 		// manifest names, so a route or grant module without `logger` writes
-		// its outage lines to nobody (the session grant did, answering 503).
+		// its outage lines to nobody.
 		const { modules } = await boot();
 		const answering = modules.filter(
 			(m) => contributionNames(m, "routes").length + contributionNames(m, "grants").length > 0,
@@ -1008,7 +1002,7 @@ const OUTAGES: readonly OutageCase[] = [
 			outage.down = true;
 			return (await login(app)).res;
 		},
-		// Intended (#296): the login is not denied for a best-effort index write,
+		// Intended: the login is not denied for a best-effort index write,
 		// and the missed write is logged at error because a token minted from
 		// this session keeps introspecting active after a credential change —
 		// the runbook pages on it.

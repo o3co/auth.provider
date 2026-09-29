@@ -15,34 +15,28 @@
  */
 
 /**
- * Server-issued challenge metadata returned by ChallengeStore.find().
- * Epoch ms instead of Date eliminates the mutation surface that
- * `Object.freeze` cannot defend against on a Date instance.
- * Per A1 §5.1 (lines 89-95) — A1 is the challenge-store/replay-seen-set
- * design document (uncommitted, v0.5.0 campaign); its surviving content is
- * indexed in docs/design-campaign-index.md.
+ * Server-issued challenge metadata returned by ChallengeStore.find(). Epoch
+ * ms rather than a Date, whose mutation `Object.freeze` cannot prevent.
  */
 export interface Challenge {
 	readonly expiresAtMs: number;
 }
 
 /**
- * Atomic primitives for server-issued challenge tracking. Identifies a single-
- * winner across N concurrent calls; ceremony classification (replayed vs
- * unknown) is layered above by ChallengeCeremony, NOT by this primitive.
+ * Atomic primitives for server-issued challenge tracking: a single winner
+ * across N concurrent calls. Ceremony classification (replayed vs unknown)
+ * is ChallengeCeremony's, not this primitive's.
  *
- * Per A1 §5.1 (lines 89-138). Concurrency contract:
+ * Concurrency contract:
  *   - issue(scope, value): N parallel → exactly 1 success, N-1 throws "duplicate"
  *   - consume(scope, value): N parallel on live entry → exactly 1 returns true,
  *     N-1 return false
  *   - find: read-only, no atomicity required
  *
  * Adapters MUST throw ChallengeStorageError per the throw matrix in
- * `./errors.mts`. find / consume MUST NOT throw on nonexistent / expired
- * entries (return null / false respectively).
- * This contract is enforced by the shared adapter contract test suite
- * (`__tests__/adapters.contract.mts`, established in Tasks 3 + 4 and re-imported
- * by the Redis adapter tests in Tasks 11 + 12).
+ * `single-use/errors.mts`; find / consume MUST NOT throw on a missing or
+ * expired entry (they return null / false). The shared adapter contract
+ * suite (`__tests__/adapters.contract.mts`) enforces this.
  */
 export interface ChallengeStore {
 	readonly kind: string;
@@ -63,14 +57,13 @@ export interface ChallengeStore {
 	issue(scope: string, value: string, expiresAtMs: number): Promise<void>;
 
 	/**
-	 * Non-mutating lookup. Returns null for absent / expired entries.
-	 * Reading does not mutate state; safe to call repeatedly.
+	 * Non-mutating lookup; null for an absent or expired entry. Safe to call
+	 * repeatedly.
 	 *
-	 * Note: Redis-backed adapters reconstruct expiresAtMs from PTTL and may
-	 * drift by <10ms vs the originally-issued epoch ms. The drift is benign —
-	 * the wrapper layer (`ChallengeCeremony`, Task 5) only uses expiresAtMs
-	 * to set the subsequent `markSeen` TTL; the security window remains
-	 * TTL-bounded. Per A1 §5.1 (lines 117-122).
+	 * Redis-backed adapters rebuild expiresAtMs from PTTL and may drift by
+	 * under 10 ms from the issued value. Benign: `ChallengeCeremony` uses it
+	 * only for the following `markSeen` TTL, and the security window stays
+	 * TTL-bounded.
 	 */
 	find(scope: string, value: string): Promise<Challenge | null>;
 
@@ -82,20 +75,17 @@ export interface ChallengeStore {
 }
 
 /**
- * Discriminated outcome of one ChallengeCeremony.consume call. The wrapper's
- * complete return contract is one of these three values; system errors
- * (Redis network, etc.) propagate as native errors and are NOT classified
- * here.
+ * Outcome of one ChallengeCeremony.consume call: the wrapper's complete
+ * return contract. System errors (Redis network, …) propagate as native
+ * errors and are not classified here.
  *
- * Per A1 §5.3 (lines 185-218).
- *
- *   "consumed": Atomically deleted by THIS call; recorded in ReplaySeenSet
- *     for future replay detection. Caller MAY proceed with the protected op.
- *   "replayed": Previously consumed (race-loss branch OR an earlier call
- *     recorded in ReplaySeenSet). Caller MUST reject AND treat as a replay-
- *     attack audit signal.
- *   "unknown": No record matches (scope, value). Caller MUST reject. This is
- *     the expected outcome for attacker probing of random values.
+ *   "consumed": deleted by this call and recorded in ReplaySeenSet. The
+ *     caller MAY proceed with the protected operation.
+ *   "replayed": consumed before (race loss, or an earlier call recorded in
+ *     ReplaySeenSet). The caller MUST reject and treat it as a replay-attack
+ *     audit signal.
+ *   "unknown": no record matches (scope, value). The caller MUST reject; the
+ *     expected outcome for an attacker probing random values.
  */
 export type ChallengeCeremonyOutcome =
 	| { readonly outcome: "consumed" }
@@ -106,8 +96,6 @@ export type ChallengeCeremonyOutcome =
  * Composes ChallengeStore + ReplaySeenSet primitives into the 3-outcome
  * server-issued challenge ceremony. The default implementation is in
  * `./ceremony.mts`; consumers can replace it by providing their own module.
- *
- * Per A1 §5.3.
  */
 export interface ChallengeCeremony {
 	/**
@@ -119,20 +107,14 @@ export interface ChallengeCeremony {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge (A1 §5.5)
+// ComponentMap declaration-merge
 // ---------------------------------------------------------------------------
 //
-// Slots:
-//   - challengeStore?: ChallengeStore
-//   - challengeCeremony?: ChallengeCeremony
-//
-// Per A1 §5.5: optional slots — modules MAY omit the entire challenge-related
-// stack. The `declare module` block uses the PACKAGE NAME
-// ("@o3co/auth-provider-core"), NOT a relative path — only the package name
-// pulls in consumer augmentations to the same `ComponentMap` interface.
-//
-// Unnamespaced names are reserved for first-party slots. Consumer keys MUST
-// namespace (e.g., "acme.cacheChallengeStore") to avoid collisions.
+// Optional slots: a composition may omit the whole challenge stack. The
+// `declare module` block names the package ("@o3co/auth-provider-core"), not
+// a relative path: only the package name merges with consumer augmentations
+// of the same `ComponentMap`. Unnamespaced names are reserved for first-party
+// slots; consumer keys MUST namespace (e.g. "acme.cacheChallengeStore").
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStore?: ChallengeStore;
@@ -141,9 +123,9 @@ declare module "@o3co/auth-provider-core" {
 }
 
 // ---------------------------------------------------------------------------
-// Backing client interface (Phase 10 addendum §3)
+// Backing client interface
 // ---------------------------------------------------------------------------
 
-// ChallengeStoreClient backing-client interface relocated to
-// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3) — the
-// shape is intrinsically Redis-flavoured and lives with its consumers.
+// The ChallengeStoreClient backing-client interface lives in
+// @o3co/auth-provider-redis: its shape is Redis-flavoured and belongs with
+// its consumers.

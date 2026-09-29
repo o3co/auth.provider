@@ -15,22 +15,20 @@
  */
 
 /**
- * #593 acceptance criterion 8, at the two HTTP logout endpoints (D14).
- *
- * A federation grant outlives the session it was agreed through. The proof of
- * that used to be a direct call to `cascadeLogout()` — which is the cascade
- * `/oauth/logout` runs, and not what `/session/logout` runs: that endpoint has
- * its own record hygiene (`invalidateSessionRecords`) and reaches the grant
- * store on no path, by construction. A proof of the helper is not a proof of
- * the endpoints. So this drives both, on the standalone, as a deployment
- * composes them: a grant seeded beside a live browser session, the session's
- * records gone afterwards, the grant and its credential exactly as they were,
- * and `/token` still disclosing.
+ * A federation grant outlives the session it was agreed through, at both HTTP
+ * logout endpoints (ADR 2026-09-17-federation-grants-offline-delegation).
+ * `/oauth/logout` runs `cascadeLogout()`; `/session/logout` has its own record
+ * hygiene (`invalidateSessionRecords`) and reaches the grant store on no path,
+ * by construction. A proof of the helper is not a proof of the endpoints, so
+ * this drives both, on the standalone, as a deployment composes them: a grant
+ * seeded beside a live browser session, the session's records gone afterwards,
+ * the grant and its credential exactly as they were, and `/token` still
+ * disclosing.
  *
  * The seeded grant's access token is fresh, so the disclosure is the cached
- * one and no upstream is asked — the OIDC federation the connection names is
- * configured with `discovery = false` and hand-typed endpoints so that the
- * deployment boots without a network.
+ * one and no upstream is asked; the OIDC federation the connection names has
+ * `discovery = false` and hand-typed endpoints so the deployment boots without
+ * a network.
  */
 
 import { createHmac } from "node:crypto";
@@ -106,13 +104,13 @@ const ENV: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	// The connect flow is not driven here, and the bundled repository has no
 	// identity lookup; "unsupported" is the declaration a deployment without one
-	// makes (#613), and what lets a connection be configured at all.
+	// makes, and what lets a connection be configured at all.
 	FEDERATION_GRANTS_IDENTITY_LOOKUP: "unsupported",
 };
 
 /**
  * The shipped configuration under the environment above, with the two lists
- * that have no environment form (comment 9 on #593) written over it: the
+ * that have no environment form written over it: the
  * upstream federation the connection names, and the connection.
  */
 function resolveConfig(): AppConfig {
@@ -388,13 +386,13 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 			await boot();
 		const { cookies, csrfToken, headerName } = await login(app, config);
 		const sid = await sidOf(app, cookies);
-		// A session-bound upstream token beside the grant: the record #276's
-		// guarantee is about, keyed by this session.
+		// A session-bound upstream token beside the grant, keyed by this
+		// session: a record logout must end.
 		await federationTokenStore.attach(sid, "upstream", {
 			accessToken: "session-bound-upstream-token",
 			expiresAt: null,
-			// Every field is a required key since the #645 follow-up; this
-			// record carries only the access token.
+			// Every field is a required key; this record carries only the
+			// access token.
 			refreshToken: undefined,
 			idToken: undefined,
 			tokenType: undefined,
@@ -410,7 +408,7 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 			.set(headerName, csrfToken);
 		expect([200, 204]).toContain(logout.status);
 
-		// The session-bound records are gone (#276 holds) ...
+		// The session-bound records are gone ...
 		expect(await userSessionStore.get(sid)).toBeNull();
 		expect(await federationTokenStore.get(sid, "upstream")).toBeNull();
 		// ... and the grant is not among them.
@@ -425,8 +423,8 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 		await federationTokenStore.attach(sid, "upstream", {
 			accessToken: "session-bound-upstream-token",
 			expiresAt: null,
-			// Every field is a required key since the #645 follow-up; this
-			// record carries only the access token.
+			// Every field is a required key; this record carries only the
+			// access token.
 			refreshToken: undefined,
 			idToken: undefined,
 			tokenType: undefined,

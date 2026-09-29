@@ -15,7 +15,7 @@
  */
 
 /**
- * What an end-user has agreed a client may obtain on their behalf (#527).
+ * What an end-user has agreed a client may obtain on their behalf.
  *
  * One record per (`sub`, `clientId`). A later grant adds to it — the union,
  * never a replacement (see `ConsentStore.grant`) — so the record is always the
@@ -31,50 +31,45 @@ export interface ConsentRecord {
 	readonly grantedAt: number;
 	/**
 	 * Epoch milliseconds; `undefined` means until revoked. `consentCovers`
-	 * honours it. Nothing in this library sets one — `POST /oauth/consent`
-	 * records consent until revoked — so it is for a deployment that writes
+	 * honours it. Nothing in this library sets one (`POST /oauth/consent`
+	 * records consent until revoked); it is for a deployment that writes
 	 * records itself, or an adapter that ages them out on its own policy.
 	 *
-	 * A required key, `undefined` included (#626): "until revoked" is the one
-	 * value that widens what the record grants. A copy that dropped the field
-	 * would keep a consent meant to lapse until it is revoked: on the way in
-	 * (the bundled Redis store would write no expiry and no TTL), or on the
-	 * way out, in a store that judges expiry by the record it returns. The
-	 * bundled Redis store judges the stored expiry in its script, so its
-	 * read-back copy alone could not do this. Spelling the key out makes those
-	 * copies a compile error, and makes a writer say "until revoked" rather
-	 * than arrive at it by leaving the field out.
+	 * A required key, `undefined` included: "until revoked" is the one value
+	 * that widens what the record grants, so a copy that dropped the field
+	 * would keep a consent meant to lapse, on the way in (the bundled Redis
+	 * store would write no expiry and no TTL) or on the way out (in a store
+	 * that judges expiry by the record it returns). Spelling the key out makes
+	 * such copies a compile error, and makes a writer say "until revoked"
+	 * rather than arrive at it by leaving the field out.
 	 */
 	readonly expiresAt: number | undefined;
 }
 
 /**
- * Where consent records live (#527). Read by `/authorize` for a client that
- * is not first-party — a first-party client never consults it — and written
- * by the consent endpoint when the user accepts.
+ * Where consent records live. Read by `/authorize` for a client that is not
+ * first-party (a first-party client never consults it), and written by the
+ * consent endpoint when the user accepts.
  *
- * Optional to wire: a deployment that serves first-party clients only has no
- * consent to record. Without it, `/authorize` refuses a client that is not
- * first-party, exactly as it did before the slot existed.
+ * Optional: a deployment serving first-party clients only has no consent to
+ * record. Without it, `/authorize` refuses a client that is not first-party.
  *
- * Throwing means the store could not answer — a backend being down — and is
- * surfaced as `temporarily_unavailable`, never as a granted or a refused
- * consent: minting a code is an authorization decision, and an outage is not
- * a reason to make it either way.
+ * Throwing means the store could not answer (a backend down) and surfaces as
+ * `temporarily_unavailable`, never as a granted or a refused consent: minting
+ * a code is an authorization decision, and an outage is no reason to make it
+ * either way.
  */
 export interface ConsentStore {
 	readonly kind: string;
 	find(sub: string, clientId: string): Promise<ConsentRecord | null>;
 	/**
-	 * Records consent for the (`sub`, `clientId`) pair, as the **union** of
-	 * `record.scopes` and any scopes already recorded for that pair — never
-	 * as a replacement. Two browsers consenting to different scopes at the
-	 * same time would otherwise lose one of the grants, and the one lost is
-	 * the one the user already answered for. `grantedAt` and `expiresAt` are
-	 * the new record's.
-	 *
-	 * An adapter over a store with a compare-and-set or a set type should use
-	 * it; the union is the contract, not the read-modify-write.
+	 * Records consent for the (`sub`, `clientId`) pair as the **union** of
+	 * `record.scopes` and any scopes already recorded for it, never a
+	 * replacement: two browsers consenting to different scopes at once would
+	 * otherwise lose a grant the user already answered for. `grantedAt` and
+	 * `expiresAt` are the new record's. An adapter over a store with a
+	 * compare-and-set or a set type should use it; the union is the contract,
+	 * not the read-modify-write.
 	 *
 	 * An `expiresAt` that is not a finite instant within the Date range
 	 * (`isStorableExpiry`) is a `RangeError`, and nothing is recorded: "until
@@ -101,11 +96,11 @@ export function consentCovers(
 }
 
 // ---------------------------------------------------------------------------
-// The parked request (#552)
+// The parked request
 // ---------------------------------------------------------------------------
 
 /**
- * An `/authorize` request parked while the user is asked for consent (#552).
+ * An `/authorize` request parked while the user is asked for consent.
  *
  * Addressed by its `challenge` — 32 random bytes, handed to the deployment's
  * consent page through the redirect URL and nowhere else — and bound to the
@@ -129,8 +124,8 @@ export interface PendingConsentRecord {
 	/** The validated `redirect_uri`, where a denial goes. */
 	readonly redirectUri: string;
 	/**
-	 * The request's `state`, `undefined` when it carried none. A required key
-	 * (#626): a store that dropped it would send a denial back without `state`,
+	 * The request's `state`, `undefined` when it carried none. A required key:
+	 * a store that dropped it would send a denial back without `state`,
 	 * which RFC 6749 §4.1.2.1 requires there, and the client's CSRF check would
 	 * refuse the user's own "no".
 	 */
@@ -142,41 +137,34 @@ export interface PendingConsentRecord {
 }
 
 /**
- * How many requests one session may have parked at once (#527 audit).
- *
- * Records are keyed by challenge and reclaimed only on expiry, so without a
- * bound one authenticated session could park an unbounded number inside the
- * ten-minute window. A browser has no use for more than a handful of consent
- * pages open at once; past the bound the oldest of that session's requests —
- * the one parked first — goes, and every other session is untouched. A
- * request of the session that has already expired leaves the count before
- * the bound is judged, so it never costs a live one its place.
- *
- * Part of the port rather than of one adapter (#561): an adapter over a
- * shared store holds the same bound, and the contract suite checks it.
+ * How many requests one session may have parked at once. Records are keyed
+ * by challenge and reclaimed only on expiry, so without a bound one
+ * authenticated session could park any number inside the ten-minute window.
+ * Past the bound that session's oldest request goes, and no other session is
+ * touched; the session's already-expired requests leave the count first, so
+ * they never cost a live one its place. Part of the port, not of one
+ * adapter: an adapter over a shared store holds the same bound, and the
+ * contract suite checks it.
  */
 export const PENDING_CONSENT_PER_SESSION_LIMIT = 16;
 
 /**
- * Where a parked request waits for its answer (#552).
+ * Where a parked request waits for its answer. A record of its own, not a
+ * field on the session: express-session hands every request a snapshot and
+ * writes it back on save, so two answers in flight for one challenge would
+ * both read it, both pass and both apply (an accept and a deny, the accept's
+ * grant standing although the user denied). A record that `consume` returns
+ * and removes in one step makes the second answer find nothing; the
+ * federation callback keeps its ephemeral state the same way.
  *
- * A record of its own, not a field on the session. express-session hands
- * every request a snapshot and writes it back on save, so two answers in
- * flight for one challenge both read the challenge, both pass, and both
- * apply — an accept and a deny, in either order, with the accept's grant
- * standing although the user denied. A record that `consume` returns and
- * removes in one step is what makes the second answer find nothing. The
- * federation callback keeps its ephemeral state the same way (#494).
- *
- * `consume` is the port's reason to exist and the one operation an adapter
- * has to get right: read and remove atomically — `GETDEL` on Redis, never a
- * `GET` followed by a `DEL`. `get` is the page's read of what is being
- * asked, and must not spend the record.
+ * `consume` is the one operation an adapter has to get right: read and
+ * remove atomically (`GETDEL` on Redis, never `GET` then `DEL`). `get` is
+ * the page's read of what is being asked, and must not spend the record.
  *
  * Wired together with `consentStore`: the bundled memory module provides
- * both, and the consent step is mounted only when both are present. A
- * store that cannot answer throws, and is surfaced as
- * `temporarily_unavailable`, never as an answer either way.
+ * both, and the consent step is mounted only when both are present. A store
+ * that cannot answer throws, surfaced as `temporarily_unavailable`, never as
+ * an answer either way.
  */
 export interface PendingConsentStore {
 	readonly kind: string;
@@ -194,7 +182,7 @@ export interface PendingConsentStore {
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slots (#527, #552)
+// ComponentMap slots
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

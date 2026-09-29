@@ -17,14 +17,13 @@
 /**
  * A registered client id that no request can reach is refused at boot.
  *
- * Every route screens a `client_id` with `isWellFormedClientId` before it
- * asks the repository, and refuses one that fails as an unknown client. A
- * client registered under such an id — longer than `MAX_CLIENT_ID_LENGTH`,
- * empty, or carrying a control character — was accepted by the bundled
- * repository and then could never authenticate or authorize: a registration
- * that silently does nothing. So the bundled repository, and the YAML file
- * it is loaded from, refuse it when built, naming the entry's position — not
- * the id, which may carry control characters a terminal would act on.
+ * Every route refuses a `client_id` that fails `isWellFormedClientId` as an
+ * unknown client, before asking the repository, so a client registered under
+ * such an id — longer than `MAX_CLIENT_ID_LENGTH`, empty, or carrying a
+ * control character — could never authenticate or authorize. The bundled
+ * repository and the YAML file it is loaded from refuse it when built, naming
+ * the entry's position — not the id, which may carry control characters a
+ * terminal would act on.
  */
 
 import fs from "node:fs";
