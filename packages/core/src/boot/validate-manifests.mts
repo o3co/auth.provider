@@ -1998,9 +1998,14 @@ function sectionRelocationsOf(m: Module): readonly SectionRelocation[] {
  *   its type — rendering it could throw (a bigint, a cyclic object) before
  *   the refusal exists — and the value itself is in `details.at`.
  * - `section.relocatedFrom` is a list of such paths, or a map from such paths
- *   to `""` or such a path inside the section; and no old path is, or holds,
- *   a loaded module's section — its own or another's — which a
- *   configuration that sets that section would then be refused for.
+ *   to `""` or such a path inside the section; no old path is, or holds, a
+ *   loaded module's section — its own or another's — which a configuration
+ *   that sets that section would then be refused for; and no two loaded
+ *   modules claim overlapping old paths — the same one, or one under the
+ *   other's — since a key set there would have two new paths. (One module may
+ *   cover its own old path with a more specific one: a subtree, and a key
+ *   renamed in it.) The later module in `modules` is the one refused, and
+ *   `problem` names both.
  *   `details.relocatedFrom` names the entry, or the value when it is neither
  *   form, and `details.problem` what is wrong with it.
  *
@@ -2034,6 +2039,17 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 	const sections = rawModules
 		.filter((m) => m.section !== undefined)
 		.map((m) => ({ module: m.name, path: sectionSegmentsOf(m) }));
+	/** Whether one path is the other or lies under it, in either direction. */
+	const overlaps = (a: readonly string[], b: readonly string[]): boolean => {
+		const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+		return shorter.every((key, i) => longer[i] === key);
+	};
+	/** The old paths the modules before this one claimed. */
+	const claimed: {
+		readonly module: string;
+		readonly from: string;
+		readonly path: readonly string[];
+	}[] = [];
 	for (const m of rawModules) {
 		const relocatedFrom: unknown = m.section?.relocatedFrom;
 		if (relocatedFrom === undefined) continue;
@@ -2073,6 +2089,17 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 						: `it holds the section of module "${held.module}", so every configuration that sets that section would be refused`,
 				);
 			}
+			const other = claimed.find(({ module, path }) => module !== m.name && overlaps(path, old));
+			if (other !== undefined) {
+				throw refusal(
+					m,
+					from,
+					`module "${other.module}" moved its section from "${other.from}" and module "${m.name}" from "${from}", which overlap: a key set there would have two new paths`,
+				);
+			}
+		}
+		for (const [from] of entries) {
+			claimed.push({ module: m.name, from: from as string, path: (from as string).split(".") });
 		}
 	}
 }

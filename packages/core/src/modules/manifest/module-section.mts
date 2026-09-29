@@ -137,8 +137,11 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * module, boot refuses before parsing it (`config-path-relocated`), naming
 	 * each such key, where it goes now and the environment variable that binds
 	 * that (#728 B9's naming). An old path may not be, or hold, a loaded
-	 * module's section — its own or another's; that is refused at stage 1
-	 * (`module-section-path-invalid`).
+	 * module's section — its own or another's — and no two loaded modules may
+	 * claim overlapping old paths (the same one, or one under the other's), a
+	 * key set there then having two new paths; both are refused at stage 1
+	 * (`module-section-path-invalid`). One module may cover its own old path
+	 * with a more specific one.
 	 *
 	 * What an old path must no longer hold by default, so that only an
 	 * operator's own setting is refused: its defaults move with it. A
