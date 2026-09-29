@@ -284,6 +284,21 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
+	it("refuses an oauthTokenSettings without an issuer, naming the member, rather than serving on the configuration's (#728)", async () => {
+		// A slot the composition holds is read whole: a member it lacks is not
+		// taken from the configuration beside it.
+		const { issuer: _dropped, ...withoutIssuer } = createTestOAuthTokenSettings();
+		const booting = createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+				oauthTokenSettings: withoutIssuer as never,
+			},
+		});
+		await expect(booting).rejects.toThrow(/oauthTokenSettings\.issuer/);
+	});
+
 	it("an issuer path is a literal, not a route pattern: metacharacters boot and serve (#528 review)", async () => {
 		// Express 5 parses a route string with path-to-regexp, where `+`, `*`,
 		// `(`, `)`, `:` and `{}` are syntax. An issuer is a URL, and those

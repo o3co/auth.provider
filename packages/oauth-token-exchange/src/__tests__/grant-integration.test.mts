@@ -1583,6 +1583,19 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 		).toBeNull();
 	});
 
+	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read beside the configuration's", async () => {
+		// Read member by member, the configuration's `true` would stand in for
+		// the member the slot lacks, and accept an untyped token on a slot
+		// nobody meant to say so.
+		const { legacyTypAccept: _dropped, ...withoutSwitch } = settings();
+		expect(() =>
+			validatorFor({
+				config: configWith({ legacyTypAccept: true }),
+				oauthTokenSettings: withoutSwitch,
+			}),
+		).toThrow(/oauthTokenSettings\.legacyTypAccept/);
+	});
+
 	it("mints the slot's default lifetime, not the configuration's", async () => {
 		const factory = tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE];
 		if (factory === undefined) throw new Error("the module contributes no token_exchange grant");
