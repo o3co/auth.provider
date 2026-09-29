@@ -16,14 +16,12 @@
 
 /**
  * What `full-pki` says when pkijs's path-validation engine refuses a chain,
- * against the real engine.
- *
- * The refusal's `detail` is this package's own words for what the engine
- * found, chosen by the engine's result code — never the engine's message.
- * When the engine caught an Error on the way (a plain `Error` from its path
- * builder, its own `ChainValidationError`), that error is the refusal's
- * `cause`. Whether a path reached no trust anchor is read from the code and
- * from the issuer lookup coming back empty, never from the message.
+ * against the real engine. The refusal's `detail` is this package's own words,
+ * chosen by the engine's result code, never the engine's message. An Error the
+ * engine caught on the way (its path builder's plain `Error`, its own
+ * `ChainValidationError`) is the refusal's `cause`. Whether a path reached no
+ * trust anchor is read from the code and from the issuer lookup coming back
+ * empty, never from the message.
  */
 
 import type { X509Certificate } from "node:crypto";

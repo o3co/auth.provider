@@ -25,8 +25,8 @@ import { validateCertChain } from "#/pki.mjs";
  *   root → intermediate → leaf                  (well-formed)
  *   root → bad-intermediate (CA=false) → leaf-bad-chain  (RFC 5280 §4.2.1.9 violation)
  *
- * Per spec §7.2 narrow PKI mode: trust anchor match (checkIssued), validity
- * window per hop, basicConstraints CA=true on intermediates, cycle detection.
+ * Narrow PKI mode checks: trust anchor match (checkIssued), validity window
+ * per hop, basicConstraints CA=true on intermediates, cycle detection.
  */
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const loadCert = (name: string) =>
@@ -42,11 +42,10 @@ const attackerLeaf = loadCert("attacker-leaf.pem");
 const NOW = new Date("2026-06-01T00:00:00Z");
 
 /**
- * A second, independent single-hop chain used only for the leaf-certificate
- * profile checks (#280): one anchor and four leaves differing solely in
- * `basicConstraints` / `extendedKeyUsage`. Kept separate from the chain above
- * so those fixtures — and the AKID-serial nuance the forged-cert test depends
- * on — stay exactly as they were. Minted with a 10-year window, so these tests
+ * A second, independent single-hop chain for the leaf-certificate profile
+ * checks: one anchor and four leaves differing only in `basicConstraints` /
+ * `extendedKeyUsage`. Separate from the chain above, whose AKID-serial nuance
+ * the forged-cert test depends on. Minted with a 10-year window, so these tests
  * read the real clock rather than `NOW` (which predates their `notBefore`).
  */
 const extRoot = loadCert("ext-root.pem");
@@ -79,49 +78,38 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 	});
 
 	it("rejects when trustedCas is empty", () => {
-		// Boot-time fail-loud catches the empty case (§11.2), but defense-in-depth
-		// at the chain walk too — never silently accept an unknown anchor.
+		// Boot refuses the empty case; the chain walk does too, as defense in
+		// depth: never silently accept an unknown anchor.
 		const result = validateCertChain(leaf, [intermediate], [], NOW);
 		expect(result.ok).toBe(false);
 	});
 
 	it("rejects chain when intermediate is non-CA (Node.checkIssued enforces RFC 5280 §4.2.1.9)", () => {
 		// `bad-intermediate.pem` is signed by `root` but carries `CA:FALSE`.
-		// Node's `X509Certificate.checkIssued()` returns `false` for non-CA
-		// would-be-issuers — it does the basicConstraints check internally
-		// (OpenSSL's `X509_check_issued` rejects with `X509_V_ERR_INVALID_CA`).
-		// So the chain walk falls through to "no path to trust anchor" rather
-		// than reaching the explicit `issuerIsCA` defense-in-depth check.
-		// Either way the chain is rejected — the regression contract is "this
-		// chain MUST NOT validate", not the specific reason string.
+		// Node's `checkIssued()` already returns false for a non-CA issuer
+		// (OpenSSL's `X509_check_issued`: `X509_V_ERR_INVALID_CA`), so the walk
+		// ends at "no path to trust anchor" before the explicit `issuerIsCA`
+		// check. The contract is "this chain MUST NOT validate", not the reason.
 		const result = validateCertChain(leafBadChain, [badIntermediate], [root], NOW);
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
-			// Document the observable rejection reason — pins Node's behavior.
-			// If a future Node version loosens checkIssued, the assertion would
-			// need to switch to "CA=false" instead, which the explicit
-			// `issuerIsCA` check in pki.mts already covers as defense-in-depth.
+			// Node's reason today; `issuerIsCA`'s "CA=false" should a future Node
+			// loosen checkIssued.
 			expect(result.step).toMatch(/no path to trust anchor|CA=false/);
 		}
 	});
 
 	it("rejects a forged leaf with matching issuer DN but a different signing key (e2e fixture-based, weak coverage)", () => {
-		// Adversarial: attackerLeaf was signed by attacker-root.pem, but its
-		// issuer DN matches the LEGITIMATE root's subject DN (`CN=Test Root CA`).
+		// attackerLeaf was signed by attacker-root.pem, but its issuer DN matches
+		// the LEGITIMATE root's subject DN (`CN=Test Root CA`).
 		//
-		// **Coverage caveat (verified empirically 2026-05-19):** OpenSSL's
-		// X509_check_issued backing Node's `checkIssued` compares the subject's
-		// AKID.authorityCertSerialNumber against the candidate issuer's serial
-		// number. openssl x509 auto-injects an AKID populated with the SIGNING
-		// CA's serial (attacker-root's, not the legit root's), so this fixture's
-		// `attackerLeaf.checkIssued(legitRoot)` returns false WITHOUT touching
-		// the new isSignedBy step. The chain falls through to "no path to trust
-		// anchor".
-		//
-		// This is a documentary / end-to-end regression test — it proves the
-		// forge is rejected, but does NOT pin the isSignedBy branch (the test
-		// would still pass if isSignedBy were removed). The strict contract
-		// pins are the two spy-based tests below.
+		// Coverage caveat: Node's `checkIssued` (OpenSSL's X509_check_issued)
+		// compares the subject's AKID.authorityCertSerialNumber against the
+		// candidate's serial, and openssl x509 filled this AKID with
+		// attacker-root's serial. So checkIssued returns false before the
+		// isSignedBy step and the walk ends at "no path to trust anchor". This
+		// proves the forge is rejected end to end but does NOT pin isSignedBy;
+		// the two spy-based tests below do.
 		const result = validateCertChain(attackerLeaf, [], [root], NOW);
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
@@ -130,16 +118,11 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 	});
 
 	it("rejects with 'trust anchor matched by DN but signature verification failed' when checkIssued passes but verify fails", () => {
-		// Strict pin for the new audit branch (Copilot Round 2 Critical fix).
-		// Forces the exact code path: checkIssued returns true (DN/AKID/SKID
-		// matched by adversary), but signature verification returns false (the
-		// real attack vector — adversary cannot mint a valid signature without
-		// the trust anchor's private key).
-		//
-		// Without this test, the isSignedBy step in pki.mts could be silently
-		// removed and the e2e fixture test above would still pass (because
-		// Node's checkIssued rejects on AKID serial mismatch before isSignedBy
-		// is reached).
+		// Strict pin for the anchor's audit branch: checkIssued returns true
+		// (DN/AKID/SKID matched by the adversary) but the signature does not
+		// verify, the real attack, since only the anchor's private key can mint
+		// a valid one. Without this, the isSignedBy step in pki.mts could be
+		// removed and the fixture test above would still pass.
 		const subject = loadCert("attacker-leaf.pem");
 		const anchor = loadCert("root.pem");
 		vi.spyOn(subject, "checkIssued").mockReturnValue(true);
@@ -171,11 +154,9 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 	});
 
 	it("guards against future Node `checkIssued` loosening — explicit CA bit check is defense-in-depth", () => {
-		// Document the contract that `bad-intermediate.pem` has `ca === false`,
-		// so if a refactor or future Node release ever changed `checkIssued` to
-		// allow non-CA issuers through (or someone bypassed checkIssued for
-		// alternate path discovery), our explicit `issuerIsCA` check would
-		// reject. This is a structural-property assertion, not a chain test.
+		// A structural assertion, not a chain test: `bad-intermediate.pem` has
+		// `ca === false`, so the explicit `issuerIsCA` check rejects it should
+		// `checkIssued` ever let a non-CA issuer through or be bypassed.
 		expect(badIntermediate.ca).toBe(false);
 		expect(intermediate.ca).toBe(true);
 		expect(root.ca).toBe(true);
@@ -204,11 +185,10 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 
 	it("requires the terminal trust anchor to be a CA", () => {
 		// The anchor list is operator-supplied, so a paste error can put an
-		// end-entity certificate in it. Before #280 the walk terminated happily
-		// on any anchor that DN-matched and verified, which would accept a chain
-		// terminating at something that is not allowed to issue certificates.
-		// Forced with spies because a real non-CA anchor cannot have signed
-		// anything in the first place.
+		// end-entity certificate in it; DN-matching and verifying is not enough
+		// for a chain to terminate at something not allowed to issue
+		// certificates. Forced with spies because a real non-CA anchor cannot
+		// have signed anything in the first place.
 		const subject = loadCert("attacker-leaf.pem");
 		const nonCaAnchor = loadCert("leaf.pem"); // ca === false
 		vi.spyOn(subject, "checkIssued").mockReturnValue(true);
@@ -234,7 +214,7 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #280 — leaf certificate profile checks
+// Leaf certificate profile checks
 // ---------------------------------------------------------------------------
 
 /**

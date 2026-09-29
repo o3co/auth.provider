@@ -18,14 +18,9 @@ import { describe, expect, it } from "vitest";
 import { computeCertThumbprint } from "#/thumbprint.mjs";
 
 /**
- * Fixed test certificate (P-256, CN=test, self-signed, valid 2026-05-19).
- *
- * This PEM is committed as a test fixture for deterministic thumbprint
- * assertions. The cert is not trusted anywhere — it exists purely to pin
- * the thumbprint computation against a known value.
- *
- * Pre-computed expected thumbprint (SHA-256 of DER, base64url, no padding):
- *   ixxC3Iu02KfsoIX8SaMQS0-nHDkhl4CtXw-kKsC1Lws
+ * Fixed test certificate (P-256, CN=test, self-signed, valid 2026-05-19),
+ * trusted nowhere: it pins the thumbprint computation against a known value
+ * (`EXPECTED_THUMBPRINT`, SHA-256 of DER, base64url, no padding).
  */
 const TEST_CERT_PEM = `-----BEGIN CERTIFICATE-----
 MIIBdDCCARmgAwIBAgIUaBppoI8WPFk51saIFsb3ITafYDMwCgYIKoZIzj0EAwIw
@@ -57,11 +52,8 @@ describe("computeCertThumbprint — RFC 8705 §3.1 DER SHA-256 thumbprint", () =
 	});
 
 	it("output length is 43 characters (SHA-256 base64url without padding)", () => {
-		// SHA-256 produces 32 bytes = 256 bits. Base64 encodes in 6-bit groups,
-		// so 256 / 6 = 42 full chars + 4 leftover bits → 43 chars total (the
-		// 43rd char encodes those 4 bits with 2 zero-padding bits). Standard
-		// base64 would then pad to 44 chars with one trailing `=`; base64url
-		// without padding drops the `=`, yielding 43 chars.
+		// 256 bits / 6 = 42 full chars + 4 leftover bits → 43 chars; standard
+		// base64 pads to 44 with one `=`, which unpadded base64url drops.
 		const thumbprint = computeCertThumbprint(TEST_CERT_DER);
 		expect(thumbprint.length).toBe(43);
 	});

@@ -15,28 +15,11 @@
  */
 
 /**
- * module.integration.test.mts
- *
- * Integration test for `mtlsModule` composition via `createApp`. Mirrors the
- * pattern from `@o3co/auth-provider-dpop`'s module integration test.
- *
- * Sub-PR 3b scope (matches the spec §12.2 scope for module wiring):
- *   - `mtlsModule` wires correctly with `createApp`.
- *   - `oauth.mtls.enabled = false` (default) → no mTLS middleware mounted;
- *     requests without a cert header succeed and `req.tokenBinding` is
- *     unset.
- *   - `oauth.mtls.enabled = true` + a well-formed cert in the configured
- *     header → `req.tokenBinding` populated with `kind: "mtls"` and
- *     `confirmation.x5t#S256` matching the pre-computed thumbprint.
- *   - Malformed header → HTTP 400 with `error: "invalid_certificate"` (the
- *     hardcoded MtlsError.code; the `reason` field is internal-audit only,
- *     mirrors DPoP's `invalid_dpop_proof` discipline per spec §3.4).
- *   - Boot-time fail-loud: `mode = "pki"` + empty `trusted-cas` → throw.
- *   - Boot-time fail-loud: `mode = "pki"` + `source = "tls-layer"` → throw.
- *
- * Sub-PR 3c deferred: grant-side cnf emission + RT binding.
- *
- * Per Wave 2 Phase 3 spec §12.2 + §11.2.
+ * `mtlsModule` composed via `createApp`: disabled by default (no middleware,
+ * no binding); enabled, a well-formed certificate header populates
+ * `req.tokenBinding` (`kind: "mtls"`, `x5t#S256`) and a malformed one is
+ * answered 400 `invalid_certificate`; boot refuses the configurations the
+ * module cannot honour. Also the schema's secure defaults.
  */
 
 import { createHash, X509Certificate } from "node:crypto";
@@ -241,17 +224,15 @@ describe("mtlsModule — integration via createApp", () => {
 		app.use(express.json());
 		app.use(handle.router);
 
-		// XFCC without Cert= → parser throws → MtlsError("malformed_header") →
-		// tokenBindingMw forwards reason as the OAuth `error` field.
+		// XFCC without Cert= → the parser throws MtlsError("malformed_header").
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("x-forwarded-client-cert", "By=spiffe://example;NoCertField=here")
 			.send({});
 
-		// The wire-level OAuth error code is the MtlsError.code constant
-		// "invalid_certificate" (spec §5.5). The granular MtlsReasonCode
-		// (`malformed_header`) is an internal-audit field and MUST NOT
-		// reach the wire — mirrors the DPoP `invalid_dpop_proof` discipline.
+		// The wire error is MtlsError.code, "invalid_certificate". The reason
+		// (`malformed_header`) is internal-audit only and MUST NOT reach the
+		// wire, as with DPoP's `invalid_dpop_proof`.
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_certificate");
 
@@ -308,9 +289,8 @@ describe("mtlsModule — integration via createApp", () => {
 
 	it("when enabled + header source + a peer outside trusted-proxies: HTTP 400 (#280)", async () => {
 		// supertest connects over loopback; the allowlist names a different
-		// address, so the forwarded certificate must be refused. This is the
-		// #280 threat end-to-end: reaching the app directly and asserting an
-		// identity by setting the header.
+		// address, so the forwarded certificate must be refused: reaching the
+		// app directly must not assert an identity by setting the header.
 		const boot = makeBoot({
 			enabled: true,
 			source: "header",
@@ -374,15 +354,15 @@ describe("mtlsModule — integration via createApp", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #280 — config defaults
+// Config defaults
 // ---------------------------------------------------------------------------
 
 describe("mtlsConfigSchema — secure defaults (#280)", () => {
 	it("defaults `source` to tls-layer, not the forwarded header", () => {
-		// The pre-#280 default was "header", so simply enabling mTLS trusted an
+		// A "header" default would make merely enabling mTLS trust an
 		// X-Forwarded-Client-Cert from whoever opened the connection. The
-		// certificate now comes from the transport unless an operator opts out
-		// AND names the proxies allowed to speak for it.
+		// certificate comes from the transport unless an operator opts out AND
+		// names the proxies allowed to speak for it.
 		const parsed = mtlsConfigSchema.parse({ oauth: {} });
 		expect(parsed.oauth.mtls.source).toBe("tls-layer");
 	});

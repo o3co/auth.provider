@@ -17,23 +17,15 @@
 /**
  * In-process PKI factory for the `full-pki` tests.
  *
- * **Why not committed PEM fixtures.** The narrow-mode tests use committed
- * fixtures (`__tests__/fixtures/`) and those stay exactly as they are — five
- * certificate shapes is a set you can name in a README. Full RFC 5280 path
- * validation is not: these tests need name constraints, path-length
- * constraints, `keyCertSign`, unrecognised critical extensions, algorithm
- * policy, CRL distribution points, and CRLs that are fresh, stale, forged,
- * and revoking — in combinations, at several chain depths. Committing that
- * as PEM would be dozens of opaque files, and every CRL carries a
- * `nextUpdate` that turns into a test that starts failing on a calendar date
- * nobody chose.
+ * Minted, not committed as PEM like the narrow-mode `__tests__/fixtures/`:
+ * full RFC 5280 path validation needs name and path-length constraints,
+ * `keyCertSign`, unrecognised critical extensions, algorithm policy, CRL
+ * distribution points, and fresh, stale, forged and revoking CRLs, combined at
+ * several chain depths. As PEM that is dozens of opaque files, and every CRL's
+ * `nextUpdate` would make a test start failing on a date nobody chose. Minting
+ * lets each test state its shape and pass the clock as an argument.
  *
- * Minting in-process makes each test say what shape it needs, and lets the
- * clock be an argument instead of a countdown. It costs no new dependency:
- * `pkijs` is already the path-validation engine under test.
- *
- * Everything here is ECDSA P-256 unless a test asks otherwise, because RSA
- * key generation is slow enough to notice across a suite this size.
+ * ECDSA P-256 unless a test asks otherwise: RSA key generation is slow.
  */
 
 import { X509Certificate } from "node:crypto";
@@ -188,8 +180,8 @@ export const criticalClientAuthEku = (): pkijs.Extension =>
 /**
  * A `cRLDistributionPoints` extension carrying exactly `points`, in order —
  * for a certificate that mixes point shapes (a plain point beside a
- * partitioned or indirect one, #469). The builders below produce the
- * individual points.
+ * partitioned or indirect one). The builders below produce the individual
+ * points.
  */
 export const distributionPointsExtension = (
 	points: readonly pkijs.DistributionPoint[],
@@ -358,23 +350,17 @@ export const nameConstraints = (opts: {
 };
 
 /**
- * A CRITICAL `keyUsage` that parses but carries no bits.
- *
- * RFC 5280 §6.1.2 covers an unrecognised critical extension **or** "a
- * critical extension that contains information that it cannot process". This
- * is the second half in its subtler form: everything parses, and the
- * restriction simply reads as empty — which is indistinguishable from
- * "unconstrained" unless the absent-vs-unreadable distinction is made
- * explicitly.
+ * A CRITICAL `keyUsage` that parses but carries no bits: the subtle form of
+ * RFC 5280 §6.1.2's "a critical extension that contains information that it
+ * cannot process". The empty restriction is indistinguishable from
+ * "unconstrained" unless absent and unreadable are told apart explicitly.
  */
 export const emptyCriticalKeyUsage = (): pkijs.Extension =>
 	new pkijs.Extension({
 		extnID: OID.keyUsage,
 		critical: true,
-		// Well-formed DER, zero content octets. `parsedValue` is populated, so
-		// the "did it parse" check passes — and the bit string then yields no
-		// bits, which reads as "no restrictions" unless something says
-		// otherwise.
+		// Well-formed DER, zero content octets: `parsedValue` is populated, so a
+		// "did it parse" check passes.
 		extnValue: new asn1js.BitString({
 			valueHex: new ArrayBuffer(0),
 			unusedBits: 0,
@@ -621,7 +607,7 @@ export interface MintCrlOptions {
 	readonly extensions?: readonly pkijs.Extension[];
 	/** CRL *entry* extensions, attached to every revoked entry. */
 	readonly entryExtensions?: readonly pkijs.Extension[];
-	/** Digest for the signature. `"SHA-1"` exercises the algorithm policy on revocation material (#470). */
+	/** Digest for the signature. `"SHA-1"` exercises the algorithm policy on revocation material. */
 	readonly hash?: "SHA-256" | "SHA-1";
 }
 
@@ -672,7 +658,7 @@ export const mintCrl = async (options: MintCrlOptions): Promise<Uint8Array> => {
 };
 
 // ---------------------------------------------------------------------------
-// OCSP (#431)
+// OCSP
 // ---------------------------------------------------------------------------
 
 /**
@@ -762,7 +748,7 @@ export interface MintOcspResponseOptions {
 	readonly responseStatus?: number;
 	/** Sign with this key instead of the signer's own. */
 	readonly signingKeys?: CryptoKeyPair;
-	/** Digest for the response signature. `"SHA-1"` exercises the algorithm policy on revocation material (#470). */
+	/** Digest for the response signature. `"SHA-1"` exercises the algorithm policy on revocation material. */
 	readonly hash?: "SHA-256" | "SHA-1";
 }
 

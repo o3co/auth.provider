@@ -15,13 +15,10 @@
  */
 
 /**
- * The `full-pki` config surface (#341) — what boot refuses, and why each
- * refusal is a refusal rather than a default.
- *
- * The theme is #363's absence policy applied to configuration: the settings
- * that encode a security decision are optional to *wire* and not optional to
- * *decide*. A deployment that never states its revocation posture does not
- * get one chosen for it.
+ * The `full-pki` config surface: what boot refuses, and why each refusal is a
+ * refusal rather than a default. Settings that encode a security decision are
+ * optional to *wire* and not optional to *decide*: a deployment that never
+ * states its revocation posture does not get one chosen for it.
  */
 
 import { readFileSync } from "node:fs";
@@ -94,16 +91,13 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 	});
 
 	it("refuses to boot without an explicit revocation decision", async () => {
-		// The whole point: not stating a revocation posture must not silently
-		// become one. Whichever default were chosen, half of the deployments
-		// that never read this far would get the wrong one, and would find out
-		// during an outage or after a compromise.
+		// Not stating a revocation posture must not silently become one: any
+		// default would be wrong for half the deployments that never read this far.
 		//
-		// Asserted against the *module's* message specifically. `createMtlsMechanism`
-		// refuses the same configuration as a backstop, with wording close
-		// enough that a looser matcher would pass on the backstop alone and stop
-		// noticing if the boot check were removed — which is the check that
-		// produces an error naming config keys the operator can act on.
+		// Matched against the *module's* message: `createMtlsMechanism` refuses
+		// the same configuration as a backstop with close wording, so a looser
+		// matcher would pass on the backstop alone and miss the removal of the
+		// boot check, the one naming config keys the operator can act on.
 		await expect(boot({ "full-pki": FULL_PKI_DEFAULTS })).rejects.toThrow(
 			/mtlsModule:[\s\S]*oauth\.mtls\.full-pki\.revocation\.mode and \.on-unavailable/,
 		);
@@ -214,8 +208,8 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 	});
 
 	it("boots with source = tls-layer, which the narrow mode still refuses", async () => {
-		// #341's "Related: TLS-layer chains". #280 made tls-layer the default
-		// source, which left the most likely PKI configuration unreachable.
+		// tls-layer is the default source, so refusing it here would leave the
+		// most likely PKI configuration unreachable.
 		const handle = await boot({
 			source: "tls-layer",
 			"full-pki": {
@@ -244,9 +238,8 @@ describe("mtlsConfigSchema — full-pki (#341)", () => {
 	it.each(["ocsp", "both"] as const)(
 		"accepts revocation.mode = %s now that OCSP is implemented (#431)",
 		(mode) => {
-			// Until #431 this value was refused rather than accepted and ignored —
-			// the #283/#284 posture. Accepting it now is the same posture: the
-			// code honours the claim.
+			// Accepted because the code honours it; a mode it does not implement
+			// is refused rather than accepted and ignored (next case).
 			const result = parse({
 				enabled: true,
 				mode: "full-pki",
