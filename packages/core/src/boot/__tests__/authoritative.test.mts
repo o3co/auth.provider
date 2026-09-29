@@ -465,6 +465,32 @@ describe("the host maps are read once", () => {
 		}
 	});
 
+	it("refuses an own __proto__ accessor without running it", async () => {
+		let ran = 0;
+		const host = {} as Record<string, unknown>;
+		Object.defineProperty(host, "__proto__", {
+			enumerable: true,
+			get() {
+				ran++;
+				throw new Error("the accessor ran");
+			},
+		});
+		const err = await refusal(
+			createApp({
+				modules: [owner, reader({})],
+				bootstrapComponents: bootstrap(),
+				overrideComponents: host as never,
+			}),
+		);
+		expect(err.reason).toBe("reserved-component-key");
+		expect(err.details).toEqual({
+			reason: "reserved-component-key",
+			componentKey: "__proto__",
+			source: "overrideComponents",
+		});
+		expect(ran).toBe(0);
+	});
+
 	it("reads a bootstrap map's keys once", async () => {
 		let reads = 0;
 		const host = bootstrap() as Record<string, unknown>;
