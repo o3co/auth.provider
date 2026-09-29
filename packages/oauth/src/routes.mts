@@ -120,9 +120,9 @@ declare module "express-session" {
 
 /**
  * Every path this router serves, its sub-routers' included — the only
- * requests whose bodies it parses. The logout, federation-token and consent
- * routes are listed only when mounted, so a deployment's own route at one of
- * those paths receives its body unread too.
+ * requests whose bodies it parses. The authorize, logout, federation-token
+ * and consent routes are listed only when mounted, so a deployment's own
+ * route at one of those paths receives its body unread too.
  *
  * Other modules mount routes under `/oauth` too (the device grant,
  * federation grants, WebAuthn, a deployment's own), and `body-parser` does
@@ -136,13 +136,14 @@ declare module "express-session" {
  * @internal Exported for that test only; not part of the package's API.
  */
 export const oauthRoutePaths = (mounted: {
+	readonly authorize: boolean;
 	readonly logout: boolean;
 	readonly federationToken: boolean;
 	readonly consent: boolean;
 }): string[] => [
 	"/token",
 	"/introspect",
-	"/authorize",
+	...(mounted.authorize ? ["/authorize"] : []),
 	"/userinfo",
 	"/revoke",
 	...(mounted.logout ? ["/logout", "/federation/:name/logout"] : []),
@@ -183,7 +184,8 @@ export const createOAuthRouter = async (
 		logger = consoleLogger,
 	}: {
 		/**
-		 * Where `/oauth/token` looks a `grant_type` up. Only `get` is read —
+		 * Where `/oauth/token` looks a `grant_type` up, and whether `/authorize`
+		 * is mounted: only with the `authorization_code` grant. Only `get` is read —
 		 * `grant_types_supported` is derived in `module.mts` from the planner's
 		 * resolver, not from this one — so this is the contract: the
 		 * planner's `GrantHandlerResolver` satisfies it, and so does a test's
@@ -192,7 +194,12 @@ export const createOAuthRouter = async (
 		registry: Pick<GrantHandlerResolver, "get">;
 		config: AppConfig;
 		clientRepository: ClientRepository;
-		codeRepository: CodeRepository;
+		/**
+		 * Where `/authorize` issues its codes. Required when `registry` holds
+		 * the `authorization_code` grant, which redeems them; the router
+		 * mounts no `/authorize` without that grant and reads none.
+		 */
+		codeRepository?: CodeRepository;
 		keyStore: KeyStore;
 		rateLimiter?: RateLimiter;
 		auditSink?: AuditSink;
@@ -274,6 +281,15 @@ export const createOAuthRouter = async (
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
 	checkResolver(requirements, "createOAuthRouter");
+	// `/authorize` issues the codes the authorization_code grant redeems, so it
+	// is mounted exactly when that grant is registered — the registry
+	// `/oauth/token` dispatches against — and needs the code repository then.
+	const authorizationEndpoint = registry.get("authorization_code") !== undefined;
+	if (authorizationEndpoint && codeRepository === undefined) {
+		throw new Error(
+			"createOAuthRouter: the authorization_code grant is registered but no codeRepository is wired — /authorize issues its codes into it; wire one, or leave the grant out",
+		);
+	}
 	const router = express.Router();
 
 	// Every `oauth.*` knob this router consumes is resolved exactly once,
@@ -376,31 +392,34 @@ export const createOAuthRouter = async (
 			: (_req, _res, next) => next();
 
 	// One handler instance behind both methods, so a check can never be
-	// mounted on GET and forgotten on POST.
-	const authorizeHandler = createAuthorizeHandler({
-		clientRepository,
-		codeRepository,
-		grantPolicy,
-		auditSink,
-		logger,
-		issuer: canonicalIssuer,
-		// The session module's login entry when a module provides it;
-		// otherwise the login page read from the configuration per request.
-		login: loginEntry ?? loginTripFromConfig(() => config.endpoints.login.url),
-		// The consent page, read like the login page. The default lives
-		// in HOCON; a hand-built config without the key falls back the same way.
-		consentUrl: () => config.endpoints.consent?.url ?? "/consent",
-		consentStore,
-		pendingConsentStore,
-		oauth: { ...options, acrValues: acrValues.table },
-		// `/authorize` reads the cookie's session through admission with the
-		// router's own slots — the durable store (optional, as the slot is: a
-		// composition without session-backed login wires none), the
-		// subject-revocation boundary (applied when wired) and the resolver.
-		userSessionStore,
-		subjectRevocation,
-		requirements,
-	});
+	// mounted on GET and forgotten on POST. None without the grant.
+	const authorizeHandler =
+		authorizationEndpoint && codeRepository !== undefined
+			? createAuthorizeHandler({
+					clientRepository,
+					codeRepository,
+					grantPolicy,
+					auditSink,
+					logger,
+					issuer: canonicalIssuer,
+					// The session module's login entry when a module provides it;
+					// otherwise the login page read from the configuration per request.
+					login: loginEntry ?? loginTripFromConfig(() => config.endpoints.login.url),
+					// The consent page, read like the login page. The default lives
+					// in HOCON; a hand-built config without the key falls back the same way.
+					consentUrl: () => config.endpoints.consent?.url ?? "/consent",
+					consentStore,
+					pendingConsentStore,
+					oauth: { ...options, acrValues: acrValues.table },
+					// `/authorize` reads the cookie's session through admission with the
+					// router's own slots — the durable store (optional, as the slot is: a
+					// composition without session-backed login wires none), the
+					// subject-revocation boundary (applied when wired) and the resolver.
+					userSessionStore,
+					subjectRevocation,
+					requirements,
+				})
+			: undefined;
 
 	/**
 	 * Introspection that could not verify the token because the keystore or a
@@ -497,6 +516,7 @@ export const createOAuthRouter = async (
 	router
 		.all(
 			oauthRoutePaths({
+				authorize: authorizeHandler !== undefined,
 				logout: logoutSupported,
 				federationToken: federationTokenSupported,
 				consent: consentMounted,
@@ -1051,16 +1071,20 @@ export const createOAuthRouter = async (
 					return res.status(200).json({ active: false });
 				}
 			},
-		)
-		// /authorize — the RFC 6749 §4.1 authorization-code sequence lives in
-		// routes/authorize.mts, behind the rate-limit guard; the handler
-		// consumes the composition-time `options`, so no request re-reads config.
-		// OIDC Core §3.1.2.1: "Authorization Servers MUST support the use of the
-		// HTTP GET and POST methods". The handler reads its parameters through
-		// one accessor (`authorizeParams`), so both methods run the identical
-		// sequence of checks.
-		.get("/authorize", rateLimitGuard("authorize"), authorizeHandler)
-		.post("/authorize", rateLimitGuard("authorize"), authorizeHandler);
+		);
+
+	// /authorize — the RFC 6749 §4.1 authorization-code sequence lives in
+	// routes/authorize.mts, behind the rate-limit guard; the handler consumes
+	// the composition-time `options`, so no request re-reads config. OIDC Core
+	// §3.1.2.1: "Authorization Servers MUST support the use of the HTTP GET and
+	// POST methods". The handler reads its parameters through one accessor
+	// (`authorizeParams`), so both methods run the identical sequence of
+	// checks. Mounted only with the authorization_code grant.
+	if (authorizeHandler !== undefined) {
+		router
+			.get("/authorize", rateLimitGuard("authorize"), authorizeHandler)
+			.post("/authorize", rateLimitGuard("authorize"), authorizeHandler);
+	}
 
 	// OIDC Core §5.3 — UserInfo endpoint
 	router.use(

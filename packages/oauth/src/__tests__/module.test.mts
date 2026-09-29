@@ -27,6 +27,7 @@ import {
 	defineModule,
 	type FederationProvider,
 	type FederationTokenStore,
+	type GrantHandler,
 	jwksModule,
 	type Module,
 	memoryAccessTokenDenylistModule,
@@ -109,6 +110,15 @@ const keyStoreModule = defineModule({
 	provides: {
 		keyStore: () => createSymmetricKeyStore("test-secret-for-oauth-module!!!!!"),
 	},
+});
+
+/**
+ * A stand-in authorization_code grant: what makes `oauthModule` serve
+ * `/authorize` and name it in discovery. Never dispatched to.
+ */
+const authorizationCodeGrantModule = defineModule({
+	name: "test:authorization-code-grant",
+	contributes: { grants: { authorization_code: () => ({}) as GrantHandler } },
 });
 
 // The JWKS route refuses to publish an empty key set, so the
@@ -464,6 +474,7 @@ describe("oauthModule — the acr table in the served discovery document", () =>
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
+				authorizationCodeGrantModule,
 				asymmetricKeyStoreModule,
 				...extraModules,
 			],
@@ -610,7 +621,9 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		// `grant_types_supported` is `[]` because this composition registers no
 		// grant module: POST /oauth/token answers `unsupported_grant_type` for
 		// every value. Omitting the field would claim `authorization_code` +
-		// `implicit` (RFC 8414 §2's default).
+		// `implicit` (RFC 8414 §2's default). With no authorization_code grant
+		// there is no authorization endpoint: none is named, no response type
+		// is listed, and nothing a client sends to it is advertised.
 		const config = issuerConfig();
 		const handle = await createTestApp({
 			modules: [
@@ -631,7 +644,6 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const iss = "https://auth.example.com";
 		expect(body).toEqual({
 			issuer: iss,
-			authorization_endpoint: `${iss}/oauth/authorize`,
 			token_endpoint: `${iss}/oauth/token`,
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
 			jwks_uri: `${iss}/.well-known/jwks.json`,
@@ -639,12 +651,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			// /oauth/revoke is always mounted, and this composition wires the
 			// memory denylist, so it can actually revoke something.
 			revocation_endpoint: `${iss}/oauth/revoke`,
-			response_types_supported: ["code"],
-			// Emitted BECAUSE its OIDC Discovery default is `true`: an omitted
-			// field would claim support for `request_uri`, which `/authorize`
-			// refuses. The sibling `*_parameter_supported` fields
-			// default to `false` and stay absent.
-			request_uri_parameter_supported: false,
+			response_types_supported: [],
 			subject_types_supported: ["public"],
 			// keyStoreModule signs HS256, so the aggregator advertises exactly that.
 			id_token_signing_alg_values_supported: ["HS256"],
@@ -661,7 +668,6 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				"client_secret_post",
 				"none",
 			],
-			code_challenge_methods_supported: ["S256"],
 		});
 		await handle.dispose();
 	});
@@ -1188,6 +1194,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 				jwksModule,
 				clientsWithOne,
 				codeRepositoryModule,
+				authorizationCodeGrantModule,
 				keyStoreModule,
 				...modules,
 			],

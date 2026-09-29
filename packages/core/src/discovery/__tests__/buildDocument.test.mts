@@ -168,7 +168,7 @@ describe("buildDiscoveryDocument", () => {
 		const items: OidcDiscoveryContribution[] = [
 			{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
 		];
-		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/missing OIDC-required field/);
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/missing required field/);
 	});
 
 	it("throws when jwks_uri is absent (the structural anti-dangling guarantee)", () => {

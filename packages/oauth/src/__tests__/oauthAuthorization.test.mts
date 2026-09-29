@@ -34,7 +34,6 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
-	GrantRegistry,
 	makeValidAppConfig,
 	resolverForTests,
 } from "@o3co/auth-provider-core/testing";
@@ -45,6 +44,7 @@ import { type AuthorizationGrantDeps, createAuthorizationGrant } from "#/grants/
 import { createRefreshTokenGrant, type RefreshTokenGrantDeps } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ async function buildAuthorizeApp(opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: authorizationServerRegistry(),
 		config: mergedConfig,
 		clientRepository: opts.clientRepo ?? authorizeClientRepo,
 		codeRepository: codeRepo,
@@ -1531,7 +1531,7 @@ describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () =
 
 		const { router } = await createOAuthRouter(express, {
 			requirements: resolverForTests([]),
-			registry: new GrantRegistry(),
+			registry: authorizationServerRegistry(),
 			config: authorizeConfig,
 			clientRepository: publicClientRepo,
 			codeRepository: codeRepo,

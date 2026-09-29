@@ -35,6 +35,7 @@ import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -210,12 +211,12 @@ describe("createOAuthRouter", () => {
 		expect(typeof tokenCall[1]).toBe("function");
 	});
 
-	it("registers authorize and UserInfo GET/POST routes", async () => {
+	it("registers authorize and UserInfo GET/POST routes, with the authorization_code grant", async () => {
 		const { calls, expressLike } = createTrackingExpress();
 
 		await createOAuthRouter(expressLike, {
 			requirements: resolverForTests([]),
-			registry: new GrantRegistry(),
+			registry: authorizationServerRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
 			codeRepository: {} as CodeRepository,

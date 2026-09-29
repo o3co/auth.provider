@@ -42,6 +42,7 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Router } f
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter, oauthRoutePaths } from "#/routes.mjs";
+import { authorizationServerRegistry } from "./_helpers/authorizationServerRegistry.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const config = {
@@ -70,15 +71,16 @@ const codeRepository: CodeRepository = {
 };
 
 /**
- * The router with every optional surface mounted — logout, federation
- * token, consent — or with none of them. The stores are never called: only
- * construction and body parsing are exercised.
+ * The router with every optional surface mounted — authorize (with the
+ * authorization_code grant registered), logout, federation token, consent —
+ * or with none of them. The stores are never called: only construction and
+ * body parsing are exercised.
  */
 const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 	const unused = {} as never;
 	const { router } = await createOAuthRouter(express, {
 		requirements: resolverForTests([]),
-		registry: new GrantRegistry(),
+		registry: surfaces === "all" ? authorizationServerRegistry() : new GrantRegistry(),
 		config,
 		clientRepository,
 		codeRepository,
@@ -193,11 +195,11 @@ describe("the OAuth router's body parsing", () => {
 		// The list the parsers are scoped to is exactly the mounted set: a
 		// path left in it without its route — a stale entry — fails here.
 		const on = surfaces === "all";
-		expect(new Set(oauthRoutePaths({ logout: on, federationToken: on, consent: on }))).toEqual(
-			mounted,
-		);
+		expect(
+			new Set(oauthRoutePaths({ authorize: on, logout: on, federationToken: on, consent: on })),
+		).toEqual(mounted);
 		if (surfaces === "none") {
-			for (const conditional of ["/logout", "/consent", "/federation/:name/token"]) {
+			for (const conditional of ["/authorize", "/logout", "/consent", "/federation/:name/token"]) {
 				expect(mounted.has(conditional), conditional).toBe(false);
 			}
 		}

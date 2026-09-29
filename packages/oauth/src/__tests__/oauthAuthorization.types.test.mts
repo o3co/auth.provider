@@ -16,6 +16,7 @@
 
 import type {
 	AssertionVerifier,
+	CodeRepository,
 	GrantPolicyHook,
 	ProviderDeps,
 	UserRepository,
@@ -39,14 +40,9 @@ import {
 // proves nothing about them. The `if (false as boolean)` blocks keep the
 // negative assertions from executing.
 
-const REQUIRES = [
-	"config",
-	"clientRepository",
-	"codeRepository",
-	"keyStore",
-	"sessionRequirementResolver",
-] as const;
+const REQUIRES = ["config", "clientRepository", "keyStore", "sessionRequirementResolver"] as const;
 const OPTIONAL = [
+	"codeRepository",
 	"auditSink",
 	"refreshTokenFamilyRotation",
 	"refreshTokenFamilyRevocation",
@@ -106,9 +102,14 @@ describe("the grant factories declare the slots they read", () => {
 	type SessionDeps = Parameters<typeof createSessionGrant>[0];
 
 	it("are satisfied by the module's typed deps where the module hands them over whole", () => {
-		expectTypeOf<OAuthAuthorizationModuleDeps>().toMatchTypeOf<AuthorizationDeps>();
 		expectTypeOf<OAuthAuthorizationModuleDeps>().toMatchTypeOf<RefreshDeps>();
 		expectTypeOf<OAuthAuthorizationModuleDeps>().toMatchTypeOf<ClientCredentialsDeps>();
+		expect(true).toBe(true);
+	});
+
+	it("authorization_code requires the code repository the module lists optional, so the module checks before handing over", () => {
+		expectTypeOf<OAuthAuthorizationModuleDeps>().not.toMatchTypeOf<AuthorizationDeps>();
+		expectTypeOf<AuthorizationDeps["codeRepository"]>().toEqualTypeOf<CodeRepository>();
 		expect(true).toBe(true);
 	});
 

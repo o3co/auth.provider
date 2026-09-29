@@ -16,6 +16,7 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	type CodeRepository,
 	defineModule,
 	type GrantHandler,
 	type Module,
@@ -42,7 +43,6 @@ function isExplicitlyEnabled(value: unknown): boolean {
 const REQUIRES = [
 	"config",
 	"clientRepository",
-	"codeRepository",
 	"keyStore",
 	// The synthetic key every consumer of admission takes (ADR
 	// 2026-09-28-session-admission). The authorization_code grant reads the
@@ -51,6 +51,10 @@ const REQUIRES = [
 	"sessionRequirementResolver",
 ] as const;
 const OPTIONAL = [
+	// Where the authorization_code grant redeems the codes `/authorize` issues.
+	// Optional to wire, not to decide: with the grant on, its factory below
+	// refuses to boot without one (`requireCodeRepository`).
+	"codeRepository",
 	// The audit sink admission emits `session.admission.subject_mismatch`
 	// through, when wired.
 	"auditSink",
@@ -116,6 +120,21 @@ function requireRefreshTokenFamilies(deps: OAuthAuthorizationModuleDeps): void {
 }
 
 /**
+ * The code repository the authorization_code grant redeems codes from, or a
+ * refusal at boot naming the switch. No other grant reads one, so a
+ * composition with the grant off wires none.
+ */
+function requireCodeRepository(deps: OAuthAuthorizationModuleDeps): CodeRepository {
+	if (deps.codeRepository !== undefined) return deps.codeRepository;
+	throw new Error(
+		"The authorization_code grant is enabled (oauth.grants.authorization_code.enabled) but " +
+			"codeRepository is not wired. The grant redeems the codes /authorize issues into it. " +
+			"Wire a code repository (redisCodeRepositoryModule for more than one replica), or turn " +
+			"the grant off.",
+	);
+}
+
+/**
  * The deps every contribution of {@link oauthAuthorizationModule} receives:
  * exactly its `requires` / `optional`, typed. Each grant factory
  * declares the subset it reads, so the wiring below is checked, not trusted.
@@ -150,7 +169,8 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// each deployment's application.conf (or env override) must explicitly
 	// flip individual grants to activate them.
 	if (isExplicitlyEnabled(grantsCfg.authorization_code?.enabled)) {
-		grants.authorization_code = (deps) => createAuthorizationGrant(deps);
+		grants.authorization_code = (deps) =>
+			createAuthorizationGrant({ ...deps, codeRepository: requireCodeRepository(deps) });
 	}
 	if (isExplicitlyEnabled(grantsCfg.refresh_token?.enabled)) {
 		grants.refresh_token = (deps) => {

@@ -166,7 +166,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
 		const meta = await factory({
 			config,
-			grantHandlerResolver: grantResolver(),
+			grantHandlerResolver: grantResolver("authorization_code"),
 			sessionRequirementResolver: resolverForTests([]),
 		} as never);
 		expect(meta.metadata?.code_challenge_methods_supported).toEqual(["S256"]);
