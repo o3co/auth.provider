@@ -651,7 +651,9 @@ record the adapter cannot read back refuses the subject's whole list: never
 "no factor", which would open a first binding. So `create` and `update`
 refuse with a `RangeError`, before anything is written, whatever a read would
 refuse — a binding outside D24's three, a field that is not the type the
-record declares, a date that is not a valid one, and, for `update`, a record
+record declares, a date that is not a whole instant within the Date range
+(±8.64e15 ms; a stored one past it would read back as an Invalid Date, a
+fraction as another instant), and, for `update`, a record
 at `Number.MAX_SAFE_INTEGER`, whose next version would be no safe integer
 (core's `checkMfaVersionAdvances`, which the transactions' `update` applies
 too).
