@@ -61,7 +61,7 @@ Two more things can look like an axis and are not one:
 
 **Packages depend on core alone** ([#728](https://github.com/o3co/auth.provider/issues/728), its decided B4 and B13). In code, a package imports only `@o3co/auth-provider-core`; at run time, one package depends on another only through a slot whose contract lives in core. Four edges predate the rule and are tolerated on a list that may only shrink, never grow: `device-grant` → `oauth`, `federation-grants` → `oauth`, `device-grant` → `session`, and the federation adapters (`federation-google`, `federation-github`, `federation-apple`, `federation-oidc`) → `session`. #728's parser-based guard holds that list once it lands; until then, review does.
 
-`packages/session` exports `establishSession` and `answerInterruption` today for a peer: the MFA package, which is to finish a login with them. The session-admission ADR planned that as an import (its D5 and §7), which the rule above would count as a new edge. How the MFA package reaches them is an open owner decision; the direction #728 points to is a slot whose contract core declares and the session module provides.
+`packages/session` exports `establishSession` and `answerInterruption` today for a peer: the MFA package, which is to finish a login with them. The session-admission ADR planned that as an import (its D5 and §7), which the rule above would count as a new edge. #728 decided that the MFA package reaches them through a slot instead: core declares the contract, `loginCompletion` (`packages/core/src/session-admission/login-completion.mts`), the session module is to provide it and the MFA package to require it. Until the session module provides it, the two stay exported.
 
 ## Development Process
 
