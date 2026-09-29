@@ -15,33 +15,22 @@
  */
 
 /**
- * The router both routes live in, and the order its middleware runs in
- * (#593, D9).
+ * The router for this package's client-authenticated routes, and the order its
+ * middleware runs in, which is the security property. See ADR
+ * 2026-09-17-federation-grants-offline-delegation, D9.
  *
  *   1. cache directives and correlation, ahead of anything that can answer;
  *   2. the throttle, keyed on the IP, BEFORE client authentication, so that
- *      repeated unauthenticated hits are bounded before they reach a
- *      repository lookup;
- *   3. content type and body parsing, and right after them the answer to
- *      what the parsers reject (`parserRefusals`);
- *   4. client authentication;
+ *      repeated unauthenticated hits are bounded before a repository lookup;
+ *   3. content type and body parsing, then `parserRefusals`;
+ *   4. client authentication, before domain validation, so an unauthenticated
+ *      caller learns nothing about a grant, not even from a refusal's timing;
  *   5. the handlers;
  *   6. everything this package does not serve, as a 404;
- *   7. the last error handler, for what escaped every handler: a logged 500
- *      (`unexpectedErrors`).
+ *   7. `unexpectedErrors`, a logged 500 for what escaped every handler.
  *
- * The throttle and client authentication are core's and oauth's, and they log
- * and audit through the deployment's own logger and sink — the lines every
- * other throttled, client-authenticated route writes. Client authentication's
- * lines carry `site: "federation_grants"`.
- *
- * Authentication before domain validation, deliberately: an unauthenticated
- * caller must not be able to learn anything about a grant, including by
- * measuring how long a refusal took.
- *
- * Exported so a composition root that mounts the handlers itself gets the same
- * chain rather than a hand-assembled approximation of it — the ordering above
- * is the security property, not a convenience.
+ * Client authentication's lines carry `site: "federation_grants"`. Exported so
+ * a composition root that mounts the handlers itself gets the same chain.
  */
 
 import {
@@ -80,17 +69,11 @@ const BODY_LIMIT = "16kb";
 const BODY_LIMIT_BYTES = 16 * 1024;
 
 /**
- * The body limit, restated ahead of the parsers.
- *
- * These routes live under `/oauth`, beside `oauthModule`'s router, which
- * parses the bodies of its own routes only — so in a composition with it,
- * these routes' own parsers are the first to read their bodies, whatever the
- * module order. The bound is still checked from `Content-Length` first: it
- * refuses a declared oversized body before any of it is read, and it holds
- * even if some other module mounts a parser under `/oauth` that runs for
- * every request beneath it (`body-parser` does not parse a body twice, so the
- * `limit` below would then be skipped). A body with no `Content-Length` is
- * bounded by the parsers below.
+ * The body limit, checked from `Content-Length` ahead of the parsers, so a
+ * declared oversized body is refused unread and the bound holds even if
+ * another module's parser under `/oauth` runs first (`body-parser` does not
+ * parse a body twice, so the `limit` below would be skipped). See README,
+ * "Beside `oauthModule`".
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
@@ -114,17 +97,9 @@ export const noStore: RequestHandler = (_req, res, next) => {
 
 /**
  * The last handler under the mount path: every method and sub-path this
- * package does not serve.
- *
- * The body carries no description, unlike the neighbouring packages'
- * refusals. That is what a disabled deployment needs:
- * `{"error":"not_found"}` names no feature, so an unauthenticated caller
- * cannot learn that offline delegation is one configuration key away. It is
- * not byte-identical to a deployment without the package installed — there
- * the host's own fallback answers, with its own headers and content type —
- * but nothing in it says what is missing. On an enabled deployment
- * it is the answer for a method that does not exist — and there is no `GET`
- * status alias to point anyone at.
+ * package does not serve. The body carries no description, so on a disabled
+ * deployment it names no feature to an unauthenticated caller. See README, "A
+ * disabled deployment names no feature and runs nothing".
  */
 export const notFound: RequestHandler = (_req, res) => {
 	res.status(404).json({ error: "not_found" });
@@ -179,18 +154,12 @@ export const undecodablePath = (error: unknown): boolean =>
 	isInstance(error, URIError) && readField(error, "status") === 400;
 
 /**
- * A refusal that is the caller's mistake, as the answer it gets.
- *
- * body-parser raises `http-errors`: `expose: true` with a 4xx `status` for
- * everything the request got wrong — a body over the limit or with more
- * parameters than it takes (`413 body_too_large`), a charset or
- * `Content-Encoding` it cannot decode (`415 unsupported_encoding`), JSON it
- * cannot read or a compressed body that does not decompress (`400
- * malformed_body`). A path parameter Express could not decode is `400
- * malformed_path` (`undecodablePath`). Answered as a 500 instead, any caller
- * could produce server errors at will. `null` for anything else. Shared by
- * both routers, and only ever applied where these are the errors that can
- * arrive (`parserRefusals`).
+ * A refusal that is the caller's mistake, as the answer it gets; `null` for
+ * anything else. Answered as a 500, any caller could produce server errors at
+ * will. It recognises body-parser's `http-errors` (`expose` with a 4xx
+ * `status`, then `type`) and an undecodable path, and is only applied where
+ * these are the errors that can arrive (`parserRefusals`). See README,
+ * "Beside `oauthModule`".
  */
 export const parserRefusal = (
 	error: unknown,
@@ -212,15 +181,12 @@ export const parserRefusal = (
 };
 
 /**
- * The parsers' refusals, answered in this package's own vocabulary — mounted
- * directly after the parsers, so the errors it sees are theirs and those of
- * the middleware ahead of them. Nothing of the parser's error reaches the
- * caller: `body-parser` puts the offending input into its message for a JSON
- * syntax error, so only `expose`, `status` and `type` are read. Anything
- * `parserRefusal` does not recognise passes on to `unexpectedErrors`.
- *
- * Mounted last instead, it read an `expose`d 4xx from anywhere — a store, a
- * handler — as a refused body.
+ * The parsers' refusals, in this package's own vocabulary. Mounted directly
+ * after the parsers, so the errors it sees are theirs and those of the
+ * middleware ahead of them; mounted last, it would read an `expose`d 4xx from
+ * a store or a handler as a refused body. Nothing of the parser's error
+ * reaches the caller: `body-parser` puts the offending input into its message
+ * for a JSON syntax error, so only `expose`, `status` and `type` are read.
  */
 export const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
 	const refusal = res.headersSent ? null : parserRefusal(error);
@@ -232,15 +198,12 @@ export const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
 };
 
 /**
- * The routers' last error handler. An error that reaches it has escaped
- * every handler: it is `500 server_error` (`unexpected_error`), a fixed
- * description because whatever is in the error is not the caller's business,
- * and it is logged as `federation_grants_unexpected_error` with `site` — the
- * router it escaped: `federation_grants` or `federation_grants_browser` — the
- * request's `correlationId` and the error's projection (`loggableError`). The
- * one exception is a path parameter Express could not decode at a route
- * itself (`undecodablePath`), which is the caller's `400 malformed_path`
- * wherever it surfaces.
+ * The routers' last error handler, for an error that escaped every handler: a
+ * fixed `500 server_error` (`unexpected_error`), since what is in the error is
+ * not the caller's business, logged as `federation_grants_unexpected_error`
+ * with `site` (the router it escaped), the request's `correlationId` and the
+ * error's projection. An undecodable path parameter (`undecodablePath`) is the
+ * caller's `400 malformed_path` wherever it surfaces.
  */
 export const unexpectedErrors = (
 	logger: Logger | undefined,
@@ -260,7 +223,7 @@ export const unexpectedErrors = (
 
 export interface FederationGrantRouterOptions extends FederationGrantTokenHandlerOptions {
 	/**
-	 * Slice 6: what creating a grant needs. Absent, the two lodging routes are
+	 * What creating a grant needs. Absent, the two lodging routes are
 	 * not mounted and answer as any unknown path does; the module always passes
 	 * it, having refused at boot a deployment that could not supply it.
 	 */
@@ -274,7 +237,7 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 	readonly issuer: string;
 	readonly rateLimiter: RateLimiter;
 	readonly failMode: RateLimitFailMode;
-	/** #484: where a `private_key_jwt` assertion's single-use `jti` is recorded. */
+	/** Where a `private_key_jwt` assertion's single-use `jti` is recorded. */
 	readonly replaySeenSet?: ReplaySeenSet;
 }
 
@@ -293,10 +256,9 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	router.use(transport());
 	// Before the throttle and before authentication, because what it watches
 	// for is a response those two write themselves: the handler is not the only
-	// thing that can refuse a token request, and until this existed it was the
-	// only thing auditing one. Each a route (`router.all`) on its own path, not
-	// `router.use`, which would match every path beneath it too and audit a
-	// 404 at `/:grantId/token/extra` as a token denial.
+	// thing that can refuse a token request. Each a route (`router.all`) on its
+	// own path, not `router.use`, which would match every path beneath it too
+	// and audit a 404 at `/:grantId/token/extra` as a token denial.
 	for (const operation of ["token", "revoke"] as const) {
 		router.all(
 			`/:grantId/${operation}`,

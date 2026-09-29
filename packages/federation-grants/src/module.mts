@@ -15,41 +15,21 @@
  */
 
 /**
- * The two manifests this package installs (#593, D9–D12).
+ * The two manifests this package installs (the federation-grants ADR, D9–D12;
+ * D9 says why a package of its own rather than `/oauth/token`).
  *
- * ### Why a package, and not `/oauth/token`
+ * Two modules, because their dependency edges point different ways:
+ * `federationGrantBackgroundModule` provides the registry a shutdown drains,
+ * built *after* the store, the revocation boundary and the sink so that its
+ * cleanup runs *before* theirs; `federationGrantsModule` mounts the routes and
+ * requires it. Install both through {@link federationGrantsModules}; routes
+ * without the registry are a boot refusal.
  *
- * What these routes disclose is an *upstream* access token, held on a user's
- * standing consent, for a backend the user is not present at. Behind
- * `/oauth/token` it would inherit grant dispatch, `token.issued`, this
- * provider's token minting and a sender-constraint policy that cannot bind a
- * credential another issuer minted. Inside the oauth package it would make an
- * optional feature part of every deployment's routing surface, so enabling
- * ordinary OAuth would acquire this lifecycle by accident.
- *
- * ### Why two modules
- *
- * `federationGrantBackgroundModule` provides the registry that a shutdown
- * drains; `federationGrantsModule` mounts the routes and requires it. They are
- * separate because their dependency edges point in different directions: the
- * registry must be built *after* the store, the revocation boundary and the
- * sink so that its cleanup runs *before* theirs, while the routes need nothing
- * of the sort. Install them together —
- *
- *     modules: [...federationGrantsModules, ...]
- *
- * — which is what {@link federationGrantsModules} is for. Mounting the routes
- * without the registry is a boot refusal rather than a shutdown that silently
- * drops rotated credentials.
- *
- * ### Secure-default opt-in
- *
- * `federationGrants.enabled = false` in `reference.conf`. Installing a package
- * must not turn on offline delegation; the operator says so. A disabled
- * deployment answers a 404 that names no feature — JSON on the client routes,
- * plain text on the browser half — and reads none of the feature's
- * configuration or components on the way. It is not byte-identical to a
- * deployment without the package, whose host's own fallback answers instead.
+ * `federationGrants.enabled = false` in `reference.conf`: installing the
+ * package does not turn on offline delegation. A disabled deployment answers a
+ * 404 that names no feature and reads none of the feature's configuration or
+ * components (README, "A disabled deployment names no feature and runs
+ * nothing").
  */
 
 import {
@@ -88,16 +68,13 @@ import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 /**
  * The slice both routes read — core's own declaration of it, projected.
  *
- * Not a restatement. `AppConfigSchema` is a strip-mode object and the boot
- * planner composes every module's `configSchema` into one parse, so a key this
- * module does not declare is GONE by the time the factory reads it: a narrower
- * copy here would leave the connections and every retrieval limit at their
- * defaults while an operator's file said otherwise, and the boot refusals that
- * exist to catch a bad one would never see it. That is how this was found.
- *
- * Taking core's shape rather than mirroring it also keeps the `${?VAR}`
- * coercions (#288) in one place: HOCON substitutes every environment override
- * as a string, and `enabled` is the one where a leftover string reads as off.
+ * Not a restatement: the boot planner composes every module's `configSchema`
+ * into one strip-mode parse, so a key this module does not declare is GONE by
+ * the time the factory reads it, and a narrower copy would leave connections
+ * and retrieval limits at their defaults whatever the operator wrote. Core's
+ * shape also keeps the `${?VAR}` coercions in one place: HOCON substitutes
+ * every environment override as a string, and a leftover string `enabled`
+ * reads as off.
  */
 export const federationGrantsConfigSchema = z.object({
 	federationGrants: fullSectionsSchema.shape.federationGrants,
@@ -124,17 +101,17 @@ const OPTIONAL = [
 	"userRepository",
 	"userSessionStore",
 	// The login page connect sends a browser that is not signed in to, which
-	// the session module provides (#728): required once grants are enabled.
+	// the session module provides: required once grants are enabled.
 	"loginEntry",
-	// What the oauth module provides of `oauth {}` (#728): the issuer every
-	// route and the acquisition settings are built on. Read from the
-	// configuration when no module provides it, as before.
+	// What the oauth module provides of `oauth {}`: the issuer every route
+	// and the acquisition settings are built on. Read from the configuration
+	// when no module provides it.
 	"oauthTokenSettings",
 ] as const;
 
 /**
  * The deps every contribution of {@link federationGrantsModule} receives:
- * exactly its `requires` / `optional`, typed (#626 P2). Every `require*`
+ * exactly its `requires` / `optional`, typed. Every `require*`
  * helper below is the presence check for one optional slot.
  */
 type Requires = (typeof REQUIRES)[number];
@@ -143,7 +120,7 @@ export type FederationGrantsModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
  * The issuer the routes and the acquisition settings are built on: the
- * `oauthTokenSettings` slot's when the composition holds it (#728), the slot
+ * `oauthTokenSettings` slot's when the composition holds it, the slot
  * read whole and checked first, otherwise `oauth.jwt.issuer` as the
  * configuration carries it.
  */
@@ -156,7 +133,7 @@ const isEnabled = (deps: FederationGrantsModuleDeps): boolean =>
 	deps.config.federationGrants?.enabled === true;
 
 /**
- * §5 refusal 1. An enabled deployment with nowhere to keep grants would
+ * An enabled deployment with nowhere to keep grants would
  * authenticate a client and then answer 503 to everything, having accepted
  * `enabled = true` as if it meant something.
  */
@@ -177,7 +154,7 @@ const requireStore = (
 };
 
 /**
- * §5 refusal 2. Both routes are throttled before client authentication, so
+ * Both routes are throttled before client authentication, so
  * that repeated unauthenticated hits are bounded before they reach a
  * repository lookup — and what happens when the limiter backend is down is the
  * product's decision (`rateLimit.failMode`), not this module's to default.
@@ -209,23 +186,16 @@ const requireFailMode = (deps: FederationGrantsModuleDeps): RateLimitFailMode =>
 };
 
 /**
- * §5 refusals 5 and 6, together, because they are one question asked of the
- * same map: can this deployment actually refresh a grant on this connection
- * without the user?
+ * Can this deployment act on each connection for a user who is not present?
+ * The provider must be contributed and have ALL THREE delegated methods (the
+ * authorization URL, the connect callback's code exchange, the refresh). An
+ * ordinary `refreshToken` is not enough: it refreshes a session's token with
+ * the session's own credentials.
  *
  * Resolved in the route contribution phase rather than while components are
  * materialised: named federation contributions are assembled first, and
  * checking the synthetic map earlier would refuse a configuration whose
  * provider simply had not been contributed yet.
- *
- * Refusal 6 is about ALL THREE delegated methods (slice 6 added the code
- * exchange the connect callback makes). An adapter with an ordinary
- * `refreshToken` is not enough: that one refreshes a session's token with the
- * session's own credentials, and says nothing about whether this provider may
- * act for a user who is not here. Slice 2 implemented the pair for the generic
- * OIDC adapter only, so a `form_post` federation such as Apple's is refused
- * here, by this rule, for the true reason — which is why this slice has no
- * separate refusal about response modes.
  */
 const requireDelegatedCapability = (
 	deps: FederationGrantsModuleDeps,
@@ -253,10 +223,10 @@ const requireDelegatedCapability = (
 					"inside a session and says nothing about acting for a user who is not present.",
 			);
 		}
-		// Slice 6: the connect callback proves whose grant it is from the browser's
+		// The connect callback proves whose grant it is from the browser's
 		// session, and a `form_post` callback arrives as a cross-site POST without
-		// the session cookie — check 3 of D7 could not run. No bundled adapter with
-		// the capability declares it; a custom one may.
+		// the session cookie. No bundled adapter with the capability declares it;
+		// a custom one may.
 		if (provider.responseMode === "form_post") {
 			throw new Error(
 				`federationGrantsModule: the federation "${connection.federation}", named by ` +
@@ -269,16 +239,13 @@ const requireDelegatedCapability = (
 };
 
 /**
- * §5 refusal 9. #363's rule — optional to wire, not optional to decide — for
- * the events an operator needs most: every disclosure of a credential that
- * works while nobody is watching.
- *
- * Checked here rather than through `absencePolicies`, which the boot planner
- * applies to a module whether or not its feature is on. A deployment that
- * installs this package and leaves `enabled = false` must owe nothing, and a
- * configuration declaration is still something to owe. The message is built
- * from the shared policy so it cannot drift from the one every other module
- * gives for the same slot.
+ * The audit sink is optional to wire, not optional to decide — here for the
+ * events an operator needs most: every disclosure of a credential that works
+ * while nobody is watching. Checked here rather than through
+ * `absencePolicies`, which the boot planner applies whether or not the
+ * feature is on: with `enabled = false` a deployment must owe nothing, not
+ * even a configuration declaration. The message is built from the shared
+ * policy so it cannot drift from every other module's for the same slot.
  */
 const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
 	if (deps.auditSink !== undefined) return;
@@ -292,7 +259,7 @@ const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
 	);
 };
 
-/** The authorizer the connect flow sends a user upstream with: the connection's provider's (D17). */
+/** The authorizer the connect flow sends a user upstream with: the connection's provider's. */
 const authorizerFor =
 	(deps: FederationGrantsModuleDeps) =>
 	(federation: string): FederationGrantDelegatedAuthorizer | undefined => {
@@ -302,11 +269,11 @@ const authorizerFor =
 	};
 
 /**
- * Slice 6: the connect flow re-reads the durable session behind the cookie at
- * every step (D7) — through session admission, which reads the store the
- * module hands it — so a deployment that creates grants needs the store it
- * lives in. Every deployment that enables a federation already has one — the
- * federation guard asks for it — and this says why this feature needs it too.
+ * The connect flow re-reads the durable session behind the cookie at every
+ * step — through session admission, which reads the store the module hands
+ * it — so a deployment that creates grants needs the store it lives in. Every
+ * deployment that enables a federation already has one — the federation
+ * guard asks for it — and this says why this feature needs it too.
  */
 const requireUserSessionStore = (deps: FederationGrantsModuleDeps): UserSessionStore => {
 	const store = deps.userSessionStore;
@@ -330,18 +297,14 @@ const refresherFor =
 	};
 
 /**
- * The subject's grants boundary (#593, D13).
+ * The subject's grants boundary: `grantsRevokedBefore`, deliberately not
+ * `revokedBefore`. The two move independently: a subject-wide revocation
+ * asked to keep this subject's grants advances the sessions boundary alone,
+ * and reading that one here would revoke the grants the policy chose to keep.
  *
- * `grantsRevokedBefore`, and deliberately not `revokedBefore`: the two move
- * independently now. A subject-wide revocation that was asked to keep this
- * subject's grants advances the sessions boundary alone, and reading that one
- * here would revoke the grants an operator's policy just chose to keep — the
- * feature would look implemented and do the opposite.
- *
- * The adapter is the one the boot refusal above returned, so this no longer
- * has an absent-capability branch: a deployment without the capability does
- * not get here. What stays is the answer's own validation, because boot cannot
- * establish what a backend will say about a subject that does not exist yet.
+ * The adapter is the one the boot refusal returned, so the capability is
+ * present; the answer is still validated, because boot cannot establish what
+ * a backend will say about a subject that does not exist yet.
  */
 const boundaryFor =
 	(revocation: SupportsSessionsOnlyRevocation): ((subject: string) => Promise<Date | null>) =>
@@ -350,10 +313,8 @@ const boundaryFor =
 		// The port says `Date | null`, and a `null` is a STATEMENT: nothing was
 		// revoked for this subject. An adapter that answers `undefined` — or
 		// anything else — has made no statement at all, and reading it as one
-		// switches the backstop off for that subject silently. Review found
-		// `/status` doing exactly that while `/token` failed closed on the same
-		// input, so the two disagreed about the same grant. This is where the
-		// contract belongs, and now both read it the same way.
+		// would silently switch the backstop off for that subject. `/status` and
+		// `/token` both read the contract here.
 		if (watermark === null) return null;
 		if (watermark instanceof Date && !Number.isNaN(watermark.getTime())) return watermark;
 		throw new Error(
@@ -366,21 +327,14 @@ const boundaryFor =
 export const federationGrantBackgroundModule = defineModule({
 	name: "federation-grant-background",
 	/**
-	 * Not read — and that is what they are for.
-	 *
-	 * `dispose()` runs component cleanups in reverse of the order the
-	 * components were built in, so the registry's drain precedes the cleanup of
-	 * everything it depends on. The work it is draining is writes *through*
-	 * these: a rotated refresh token going into the store, an audit event going
-	 * into the sink. An adapter that closed its client first would fail the
-	 * write this drain exists to wait for.
-	 *
-	 * `optional`, not `requires`, because a deployment that installs the
-	 * package and leaves the feature off must still boot with none of them —
-	 * and an optional key produces the same ordering edge whenever a *module*
-	 * fills it. A slot filled from `bootstrapComponents` is the host's own
-	 * value, which the boot planner neither orders nor disposes of, so there is
-	 * nothing to be ordered against.
+	 * Not read: they order the build. `dispose()` runs component cleanups in
+	 * reverse build order, so the registry's drain precedes the cleanup of what
+	 * it writes *through* (a rotated refresh token into the store, an audit event
+	 * into the sink); an adapter that closed its client first would fail the
+	 * write the drain waits for. `optional`, not `requires`, so a deployment with
+	 * the feature off still boots without them; an optional key produces the
+	 * same ordering edge whenever a *module* fills it. A slot filled from
+	 * `bootstrapComponents` is the host's own, neither ordered nor disposed of.
 	 */
 	optional: ["federationGrantStore", "subjectRevocation", "auditSink"] as const,
 	provides: {
@@ -411,16 +365,15 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						handler: createDisabledFederationGrantRouter(),
 					};
 				}
-				// In §5's order, so that the most fundamental omission is the one
+				// In this order, so that the most fundamental omission is the one
 				// an operator is told about: a deployment with no store has not
 				// half-configured the feature, it has not configured it.
 				const store = requireStore(deps);
 				// Second, because it is the same question asked of the other
 				// half: a grant that can be read from somewhere and ended
-				// nowhere is worse than one that cannot be read at all. Slice 4
-				// answered this per request, with a bridge that threw; a
-				// composition error belongs at boot, where a deployment finds
-				// out before it has told a user it was set up.
+				// nowhere is worse than one that cannot be read at all. A
+				// composition error belongs at boot, before a user is told the
+				// deployment was set up.
 				const revocation = requireFederationGrantSubjectRevocation({
 					module: "federationGrantsModule",
 					subjectRevocation: deps.subjectRevocation,
@@ -432,11 +385,10 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 				const connections = resolveFederationGrantConnections(deps.config);
 				requireDelegatedCapability(deps, connections);
 				requireAuditDecision(deps);
-				// Slice 6: what creating a grant needs, refused here rather than at
-				// the end of somebody's consent. The consent page, a callback per
-				// connection on the provider's own origin, somewhere to lodge an
-				// intent, and — unless the deployment records that it has none —
-				// the lookup D7 check 5 asks.
+				// What creating a grant needs, refused here rather than at the end
+				// of somebody's consent: the consent page, a callback per connection
+				// on the provider's own origin, somewhere to lodge an intent, and —
+				// unless the deployment records that it has none — the identity lookup.
 				const acquisition = resolveFederationGrantAcquisitionSettings(
 					deps.config,
 					connections,
@@ -475,7 +427,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					}),
 				};
 			},
-			// Slice 6: the browser half — connect and consent — under `/session`.
+			// The browser half — connect and consent — under `/session`.
 			// Its own contribution because it must mount AFTER the session
 			// middleware: it reads `req.session`, and a declaration-order accident
 			// would hand it a request with none, which reads as "not signed in"
@@ -517,7 +469,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						clientRepository: deps.clientRepository,
 						userSessionStore: requireUserSessionStore(deps),
 						// Where session admission reads the SESSIONS boundary — what a
-						// session must have authenticated after (D7) — and the
+						// session must have authenticated after — and the
 						// requirements it asks. Not the grants boundary, which the
 						// callback reads through `grantsBoundary`.
 						subjectRevocation: revocation,

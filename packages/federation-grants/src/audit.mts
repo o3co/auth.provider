@@ -15,41 +15,23 @@
  */
 
 /**
- * Core's audit events carried to the deployment's sink (#593, D18).
+ * Core's audit events carried to the deployment's sink (the federation-grants
+ * ADR, D18; README, "What is audited, and where it goes").
  *
- * **The sink's promise is returned, not detached.** `emitAuditEvent` — which
- * most module-side emissions go through — hands the event to core's
- * `recordAuditEvent` and swallows the promise; oauth's subject-revocation
- * auditor calls `recordAuditEvent` itself and logs a rejection rather than
- * waiting. That is right where the emitter is answering a
- * request and will be gone before the sink settles; it is wrong here, because
+ * **The sink's promise is returned, not detached**, unlike `emitAuditEvent`:
  * core bounds its own audit waits and hands them to the background registry,
- * and a promise nobody holds is one a shutdown cannot drain. The event most
- * often lost that way is the audit of a refresh that landed after the
- * response — the one an operator goes looking for.
+ * and a promise nobody holds is one a shutdown cannot drain — typically the
+ * audit of a refresh that landed after the response.
  *
- * **Core's omissions are preserved.** For a grant that is unknown to the
- * caller, or one that was never authorized, core supplies no connection, no
- * upstream and no scopes. This does not read them: for the never-authorized
- * case there is nothing to read, and for the unknown-grant case a read would
- * answer the question that the identical 404 exists to refuse.
+ * **Core's omissions are preserved.** For a grant unknown to the caller, or
+ * never authorized, core supplies no connection, upstream or scopes, and this
+ * does not read them: for an unknown grant a read would answer the question
+ * the identical 404 exists to refuse. The outcome is copied as core built it;
+ * core applies the allow-list where the reason is constructed.
  *
- * The outcome is copied as core built it. It needs no sanitizing here because
- * core no longer builds one from an unchecked stored code — the allow-list is
- * applied where the reason is constructed (D11), which is the only place a
- * mutation pass can hold it.
- *
- * **A caller's own text is bounded.** Two fields are the caller's before
- * anything has checked them: the grant id, a path parameter audited by the
- * denial hook ahead of client authentication and by core for a grant nobody
- * holds, and the subject, which the body asserts. Both reach the sink through
- * core's `auditErrorText` — sanitised, capped at 200 characters — as every
- * string on this package's log lines already is: a sink is read by systems
- * that split on a line break, and the standalone writes every event into its
- * log. A well-formed id or subject is carried unchanged. The request's `ip`
- * (an address, or left out) and `userAgent` are bounded by
- * `recordAuditEvent` itself, which is how this hands every event to the sink
- * and still returns its promise.
+ * **A caller's own text is bounded.** The grant id and the subject the body
+ * asserts go through core's `auditErrorText`; the request's `ip` and
+ * `userAgent` are bounded by `recordAuditEvent` itself.
  */
 
 import {
@@ -95,7 +77,7 @@ export function createFederationGrantAuditBridge(
 				// Copies, so that a sink which holds its argument cannot be
 				// handed a reference into a record core is still working with.
 				// Projected, not spread: the established pair and nothing else an
-				// object handed in might carry (#611).
+				// object handed in might carry.
 				...(event.upstream === undefined
 					? {}
 					: { upstream: { issuer: event.upstream.issuer, subject: event.upstream.subject } }),
@@ -106,13 +88,10 @@ export function createFederationGrantAuditBridge(
 			},
 		};
 		// A sink that throws, rejects or never answers skips no write, holds no
-		// lock and delays no answer — but that is CORE's doing, not this
-		// bridge's: core settles this promise, bounds the wait and reports a
-		// failure through `report`. Swallowing it here made the bridge resolve,
-		// so core never reached that branch and an operator learned nothing
-		// about a sink that was dropping everything. The one thing this does
-		// add is that a synchronous throw arrives as a rejection, so both
-		// failures look the same to whoever is waiting.
+		// lock and delays no answer — but that is core's doing: core settles this
+		// promise, bounds the wait and reports a failure through `report`, so it
+		// must not be swallowed here. Awaiting it also turns a synchronous throw
+		// into a rejection, so both failures look the same to whoever is waiting.
 		await recordAuditEvent(sink, mapped);
 	};
 }
@@ -137,7 +116,7 @@ export interface RouteDeniedEventInput {
 	readonly clientId?: string;
 	/** Only once the body has been parsed; it is an assertion, not an identity. */
 	readonly subject?: string;
-	/** Slice 6: the connection a connect flow was for, once its intent is known. */
+	/** The connection a connect flow was for, once its intent is known. */
 	readonly connection?: string;
 }
 
@@ -146,11 +125,9 @@ export interface RouteDeniedEventInput {
  * parse, an authentication that failed, this provider's own throttle, a
  * request admitted as the process began to shut down.
  *
- * `clientId` and `subject` are empty until each has been established. Before
- * authentication there is a Basic username and an assertion `iss` on the
- * request, and neither has been verified — promoting one into `clientId` puts
- * an unauthenticated caller's claim into the field an operator reads as "this
- * client did it".
+ * `clientId` and `subject` are empty until each has been established: before
+ * authentication the Basic username and an assertion `iss` are unverified,
+ * and `clientId` is the field an operator reads as "this client did it".
  */
 export function routeDeniedEvent(input: RouteDeniedEventInput): FederationGrantAuditEvent {
 	return {

@@ -15,21 +15,16 @@
  */
 
 /**
- * The correlation both routes and the background audit bridge carry
- * (#593, D18).
+ * The `x-request-id` correlation the routes and the background audit bridge
+ * carry. See README, `x-request-id`, and ADR
+ * 2026-09-17-federation-grants-offline-delegation, D18.
  *
- * A refresh that is persisted after the HTTP response has been sent is the
- * reason this is the *request's* identifier and not one the late worker mints:
- * an ID generated there cannot be tied back to the call that started the
- * rotation, which is the one question an operator has when a credential
- * changed under them.
- *
- * It is caller-controlled metadata and nothing more. Never authentication,
- * never an idempotency key, never a lock key, never a trusted identifier of a
- * person — so the accepted shape is narrow, and a value outside it is
- * *replaced* rather than repaired. Trimming "job 42" down to "job" would echo
- * a prefix the caller never asked to be correlated by into an operator's logs,
- * and would let a caller choose the bytes that land there.
+ * It is the *request's* ID so that a refresh persisted after the response still
+ * ties back to the call that started the rotation. It is caller-controlled
+ * metadata only, never authentication, an idempotency or lock key, or a
+ * trusted identifier of a person. A value outside the narrow accepted shape is
+ * *replaced*, not trimmed: "job 42" trimmed to "job" would put a prefix the
+ * caller never asked to be correlated by into an operator's logs.
  */
 
 import { randomUUID } from "node:crypto";
@@ -51,11 +46,9 @@ const ACCEPTED = /^[A-Za-z0-9._:+/=#-]{1,128}$/;
  * The ID for this request: the caller's when it is usable, a fresh one
  * otherwise.
  *
- * `raw` is `req.headers[REQUEST_ID_HEADER]`, which Node types as
- * `string | string[] | undefined`. The array is the case worth naming: it is
- * what a stack that keeps duplicate occurrences apart produces, and no element
- * of it is a value *one* caller chose, so it is refused as a whole rather than
- * resolved by taking the first.
+ * `raw` is `req.headers[REQUEST_ID_HEADER]`. An array comes from a stack that
+ * keeps duplicate occurrences apart; no element of it is a value *one* caller
+ * chose, so it is refused as a whole rather than resolved by taking the first.
  */
 export function resolveRequestId(raw: string | readonly string[] | undefined): string {
 	if (typeof raw === "string" && ACCEPTED.test(raw)) return raw;

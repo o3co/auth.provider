@@ -15,21 +15,16 @@
  */
 
 /**
- * The domain body of `POST /oauth/federation-grants/:grantId/token` (#593, D10).
+ * The domain body of `POST /oauth/federation-grants/:grantId/token` (the
+ * federation-grants ADR, D10).
  *
- * Every field is an *assertion*: something the caller claims about the grant
- * it is asking against, which core then checks against what was consented to.
- * None of them widens anything — asking for a scope the grant does not carry
- * is a refusal, never a request — so this hands core exactly what was written,
- * or refuses before core is asked at all.
- *
- * It deliberately does not judge `min_ttl`. Whether the number is negative, or
- * larger than the connection permits, is core's decision and comes back as
- * `invalid_request/min_ttl_out_of_range`: one answer to one question, rather
- * than two layers each carrying their own idea of a bound only one of them
- * can see. It does read `scope` by RFC 6749 §3.3's grammar, strictly: a value
- * that is not a space-delimited list of scope-tokens is not an assertion core
- * could check, and is refused here as `invalid_scope`.
+ * Every field is an *assertion* core checks against what was consented to.
+ * None widens anything — a scope the grant does not carry is a refusal, never
+ * a request — so this hands core exactly what was written, or refuses first.
+ * It does not judge `min_ttl`'s range: core answers that, as
+ * `invalid_request/min_ttl_out_of_range`, from a bound only core can see. It
+ * reads `scope` strictly by RFC 6749 §3.3's grammar: anything but a
+ * space-delimited list of scope-tokens is refused here as `invalid_scope`.
  */
 
 import { readSpaceDelimitedParameter } from "@o3co/auth-provider-core";
@@ -46,18 +41,12 @@ export interface FederationGrantTokenRequestBody {
 export type ParsedFederationGrantTokenRequest =
 	| { readonly ok: true; readonly value: FederationGrantTokenRequestBody }
 	/**
-	 * A stable identifier, and never prose (D9).
-	 *
-	 * It used to be a sentence — `"sub is required"` — which reads well and is
-	 * useless: a caller that wants to branch on it has to match on English,
-	 * and the day the wording improves every one of those callers breaks. The
-	 * identifiers are `snake_case`, are part of the contract, and are what the
-	 * exit tables in the README and the ADR list.
-	 *
-	 * The promise covers what **this package** answers. What it inherits —
-	 * client authentication's 401s, the shared limiter's 503 — still carries
-	 * that middleware's own wording, and rewriting it per route would make the
-	 * same failure read differently on `/token` and on `/revoke`.
+	 * A stable `snake_case` identifier, never prose, so a caller can branch on
+	 * it: part of the contract, and what the exit tables in the README and the
+	 * ADR list. The promise covers what **this package** answers; what it
+	 * inherits — client authentication's 401s, the shared limiter's 503 — keeps
+	 * that middleware's own wording, so the same failure reads the same on
+	 * `/token` and on `/revoke`.
 	 */
 	| { readonly ok: false; readonly description: string };
 
@@ -241,7 +230,7 @@ function parseWithout(
 }
 
 // ---------------------------------------------------------------------------
-// Slice 6: lodging (D6)
+// Lodging
 // ---------------------------------------------------------------------------
 
 /** What a lodging body says, in the shape core's lodging takes. */

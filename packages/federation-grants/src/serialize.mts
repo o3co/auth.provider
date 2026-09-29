@@ -15,14 +15,13 @@
  */
 
 /**
- * Core's result union as HTTP (#593, D11).
+ * Core's result union as HTTP: all a route decides about an answer, in one
+ * exhaustive switch. See ADR 2026-09-17-federation-grants-offline-delegation,
+ * D11.
  *
- * The route adds transport; this is the whole of what it decides about an
- * answer, which is why it is one exhaustive switch in one file. `code` is
- * never widened and `reason` is never turned into prose: within this package
- * `error_description` is a stable identifier a client may switch on, not a
- * sentence — prose is what clients end up parsing when nothing else is
- * offered, and then it can no longer be reworded.
+ * `code` is never widened and `reason` is never turned into prose: here
+ * `error_description` is a stable identifier a client may switch on, since
+ * prose that clients parse could never be reworded.
  */
 
 import type {
@@ -42,7 +41,7 @@ export interface SerializedFederationGrantResponse {
 	readonly retryAfterSeconds?: number;
 }
 
-/** The status D11 gives each code. Exhaustive: a new code is a compile error. */
+/** The HTTP status of each code. Exhaustive: a new code is a compile error. */
 function statusOf(result: Exclude<FederationGrantTokenResult, { ok: true }>): number {
 	switch (result.code) {
 		case "grant_not_found":
@@ -57,10 +56,10 @@ function statusOf(result: Exclude<FederationGrantTokenResult, { ok: true }>): nu
 			return 400;
 		case "access_denied":
 			return 403;
-		// 410 Gone, for the four ways a grant has ended — and for the one way it
-		// has not, the upstream asking for the user (#616), whose credential is
-		// kept: either way the user has to be asked again, and no amount of
-		// retrying changes that.
+		// 410 Gone, for the four ways a grant has ended, and for the one way it
+		// has not, the upstream asking for the user, whose credential is kept:
+		// either way the user has to be asked again, and no amount of retrying
+		// changes that.
 		case "grant_expired":
 		case "grant_revoked":
 		case "connection_identity_changed":
@@ -112,8 +111,8 @@ export function serializeFederationGrantTokenResult(
 }
 
 // ---------------------------------------------------------------------------
-// Slice 6: lodging's refusals as HTTP (D6), in the same vocabulary — `error` a
-// code, `error_description` a stable identifier, never prose.
+// Lodging's refusals as HTTP, in the same vocabulary: `error` a code,
+// `error_description` a stable identifier, never prose.
 // ---------------------------------------------------------------------------
 
 type LodgingRefusal = Exclude<FederationGrantReauthorizationResult, { ok: true }>;

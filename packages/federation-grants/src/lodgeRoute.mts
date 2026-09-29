@@ -16,29 +16,17 @@
 
 /**
  * `POST /oauth/federation-grants` and `POST /oauth/federation-grants/:grantId/reauthorize`
- * (#593, D6, slice 6) — a confidential client lodging an intent: a first grant,
- * or a renewal of one it holds.
+ * — a confidential client lodging an intent: a first grant, or a renewal of
+ * one it holds (the federation-grants ADR, D6).
  *
- * A shell around core's lodging, as the token route is around the retrieval. It
- * adds transport, client authentication (the router's), serialization,
- * correlation and audit, and decides nothing core decides: which connections a
- * client may use, what a redirect URI must be, which scopes an intent may ask
- * for, the lifetime, the bound, the order of the two writes, the backstop.
- *
- * What it does NOT do: look up or provision a local user — `sub` is an
- * assertion until a browser session proves it (D7) — contact the upstream,
- * create a consent, write a credential, establish a session, or activate
- * anything. The answer is where to send the user, and nothing more.
- *
- * Every `503` it answers — a store that failed (core carries what failed on
- * the refusal), a key missing from the ring, a connection permitted but not
- * configured — is one line at error, `federation_grant_lodge_unavailable`,
- * naming the connection the refusal is about (a renewal's is its grant's).
- * Every store error core met that the answer does not stand for — a write
- * that threw and landed all the same, a question that could not be asked, an
- * intent it could not close — is one warn each,
- * `federation_grant_lodge_step_failed`, whichever answer the client got, a
- * `201` included.
+ * A shell around core's lodging, as the token route is around the retrieval:
+ * it adds transport, client authentication (the router's), serialization,
+ * correlation and audit, and decides nothing core decides (connections,
+ * redirect URI, scopes, lifetime, bound, write order, backstop). It does not
+ * look up or provision a local user — `sub` is an assertion until a browser
+ * session proves it — contact the upstream, create a consent, write a
+ * credential, establish a session, or activate anything: the answer is where
+ * to send the user. What it logs: README, "What is logged".
  */
 
 import {
@@ -81,7 +69,7 @@ export interface FederationGrantAcquisitionRouteOptions {
 export interface FederationGrantLodgeHandlerOptions {
 	readonly store: FederationGrantStore;
 	readonly acquisition: FederationGrantAcquisitionRouteOptions;
-	/** The subject's GRANTS boundary (D13). */
+	/** The subject's GRANTS boundary. */
 	readonly grantsBoundary: (subject: string) => Promise<Date | null>;
 	readonly limits: { readonly maxExpiresInMs: number; readonly revocationSkewMs: number };
 	readonly background: FederationGrantBackground;
@@ -260,7 +248,7 @@ function createLodgeHandler(
 				) {
 					// The backstop this renewal found, written down by this call:
 					// audited as the revocation it is, from the record the write
-					// returned — never from what the caller claimed (D18).
+					// returned — never from what the caller claimed.
 					const revoked = result.revoked;
 					options.background.register(
 						audit({
@@ -307,7 +295,7 @@ function createLodgeHandler(
 					grantId: result.grantId,
 					clientId: client.clientId,
 					// Asserted, not yet proven: the connect flow is where a session
-					// establishes whose grant this is (D7).
+					// establishes whose grant this is.
 					subject: body.subject,
 					connection: result.connection,
 					scopes: result.scopes,
@@ -326,7 +314,7 @@ function createLodgeHandler(
 					Math.ceil((result.intentExpiresAt.getTime() - at.getTime()) / 1000),
 				),
 				// The lifetime that applied. There is no `expires_at` yet: a grant
-				// is dated from the consent, which has not happened (D3).
+				// is dated from the consent, which has not happened.
 				expires_in: Math.floor(result.lifetimeMs / 1000),
 			});
 		} catch (error) {
