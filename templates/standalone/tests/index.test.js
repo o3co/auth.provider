@@ -174,7 +174,7 @@ describe("POST /session/login", () => {
 	});
 });
 
-describe("CSRF on the state-changing session routes (#272)", () => {
+describe("CSRF on the state-changing session routes", () => {
 	it("rejects a login carrying neither an origin signal nor a token", async () => {
 		// The bypass this replaced: omitting `Origin` skipped the check entirely.
 		const res = await client.post("/session/login", {

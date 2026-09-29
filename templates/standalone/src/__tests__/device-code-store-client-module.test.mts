@@ -56,7 +56,7 @@ const baseConfig = {
 	},
 };
 
-describe("#433 / standaloneRedisClientsModule.deviceCodeStoreClient", () => {
+describe("standaloneRedisClientsModule.deviceCodeStoreClient", () => {
 	beforeEach(() => {
 		redisCtorCalls.length = 0;
 	});

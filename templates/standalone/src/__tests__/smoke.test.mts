@@ -234,7 +234,7 @@ describe("standalone smoke test", () => {
 		);
 	});
 
-	it("Dockerfile pins its mutable build inputs (#289)", () => {
+	it("Dockerfile pins its mutable build inputs", () => {
 		// Base image by digest — the tag alone is a moving pointer, and
 		// Dependabot's docker ecosystem bumps tag and digest together.
 		expect(dockerfile).toMatch(/FROM node:26-alpine@sha256:[0-9a-f]{64} AS node-base/);
@@ -375,7 +375,7 @@ describe("standalone smoke test", () => {
 	// and the ioredis client module, NOT the in-memory store: multi-replica
 	// deployments lose RT family persistence when each replica holds families
 	// in-process. The smoke tests above exercise the memory override.
-	describe("D-2 v2 + Wave 5d: redis-clients + adapter wiring", () => {
+	describe("redis-clients + adapter wiring", () => {
 		it("buildModules includes the shared redis-clients module + redis store by default", () => {
 			const modules = buildModules(config, {
 				keyStoreModule: testKeyStoreModule,
@@ -399,7 +399,7 @@ describe("standalone smoke test", () => {
 			expect(names).not.toContain("redis-refresh-token-family-store");
 		});
 
-		it("buildModules wires memoryRateLimiterModule by default (closes IH-14)", () => {
+		it("buildModules wires memoryRateLimiterModule by default", () => {
 			const modules = buildModules(config, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
@@ -482,7 +482,7 @@ describe("standalone smoke test", () => {
 	// always wires one, and its own application.conf selects the Redis-backed
 	// adapter — the memory one forks per replica and `deployment.mode =
 	// "multi"` refuses it.
-	describe("#277: access-token denylist wiring", () => {
+	describe("access-token denylist wiring", () => {
 		it("always wires a denylist, so /oauth/revoke can keep its promise", () => {
 			const modules = buildModules(config, {
 				keyStoreModule: testKeyStoreModule,
@@ -555,7 +555,7 @@ describe("standalone smoke test", () => {
 	// Adapter switch for the OAuth code repository: the memory branch wires
 	// `inMemoryCodeRepositoryModule`; the redis branch wires
 	// `redisCodeRepositoryModule` against the shared ioredis socket.
-	describe("OR-9: code-repository adapter wiring", () => {
+	describe("code-repository adapter wiring", () => {
 		it("buildModules wires inMemoryCodeRepositoryModule by default (oauth.code.adapter = 'memory')", () => {
 			const modules = buildModules(config, {
 				keyStoreModule: testKeyStoreModule,

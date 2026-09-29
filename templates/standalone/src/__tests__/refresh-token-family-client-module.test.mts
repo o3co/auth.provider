@@ -66,7 +66,7 @@ const baseConfig = {
 	},
 };
 
-describe("D-2 / standaloneRedisClientsModule", () => {
+describe("standaloneRedisClientsModule", () => {
 	beforeEach(() => {
 		redisCtorCalls.length = 0;
 		quitSpies.length = 0;
@@ -77,7 +77,7 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		vi.restoreAllMocks();
 	});
 
-	it("passes operator-supplied Redis URL + password from config to the ioredis constructor (BLOCKER 1 closure)", async () => {
+	it("passes operator-supplied Redis URL + password from config to the ioredis constructor", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
 			standaloneRedisClientsModule as unknown as {
@@ -166,7 +166,7 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		expect(onSpies[0]).toHaveBeenCalledWith("error", expect.any(Function));
 	});
 
-	it("bounds every command and every connect attempt (#286)", async () => {
+	it("bounds every command and every connect attempt", async () => {
 		// Without these the driver's defaults apply: no command timeout at all,
 		// a 10s connect timeout, and 20 reconnect attempts before a queued
 		// command is failed. A partition therefore parks in-flight `/token`
@@ -190,7 +190,7 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		expect(options?.lazyConnect).toBe(false);
 	});
 
-	it("keeps the offline queue ON, explicitly, because one socket serves every purpose (#286)", async () => {
+	it("keeps the offline queue ON, explicitly, because one socket serves every purpose", async () => {
 		// `enableOfflineQueue` is a per-CONNECTION option and every adapter in
 		// this template draws from the single socket built below, so the
 		// "off for the rate limiter, on elsewhere" split is not expressible

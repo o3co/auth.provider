@@ -44,7 +44,7 @@ const credentials = {
 	callbackURL: "https://auth.example.com/session/oauth/federation/google/callback",
 };
 
-describe("googleFederationConfigModule — redirect-policy plumbing (#278)", () => {
+describe("googleFederationConfigModule — redirect-policy plumbing", () => {
 	it("forwards sessionDomain, authCallbackUrl, clientUrl and redirectAllowlist", () => {
 		const out = buildConfig({
 			...credentials,
@@ -112,7 +112,7 @@ describe("googleFederationConfigModule — redirect-policy plumbing (#278)", () 
 	});
 });
 
-describe("googleFederationConfigModule — requireAuthorizationResponseIss (#597)", () => {
+describe("googleFederationConfigModule — requireAuthorizationResponseIss", () => {
 	it("is absent by default, so the provider's own default (required) applies", () => {
 		expect("requireAuthorizationResponseIss" in buildConfig(credentials)).toBe(false);
 	});

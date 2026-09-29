@@ -225,7 +225,7 @@ const messageChain = (err: unknown): string => {
 	return `${e.message ?? ""} ${e.cause?.message ?? ""}`;
 };
 
-describe("#593 slice 7: the standalone composes federation grants from its config", () => {
+describe("the standalone composes federation grants from its config", () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -348,7 +348,7 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 			/is not a cookie name \(an RFC 6265 token\)/,
 		],
 	])(
-		"refuses at boot a session cookie no browser keeps, %s, once the subject revocation service is installed (#728)",
+		"refuses at boot a session cookie no browser keeps, %s, once the subject revocation service is installed",
 		async (_what, cookie, refusal) => {
 			// The service lists the session store's sessionCookiePolicy to size
 			// its horizon, and it is eager, so the store's provider runs at boot
@@ -372,7 +372,7 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		},
 	);
 
-	it("refuses Redis grants beside memory user-session stores, naming the boundary (D13)", async () => {
+	it("refuses Redis grants beside memory user-session stores, naming the boundary", async () => {
 		// The grants would outlive the process; the boundary that ends them
 		// would not. The routes module refuses the pairing on a single replica
 		// too, and its message names the remedy.
@@ -391,7 +391,7 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		expect(messageChain(error)).toMatch(/subject boundary is kept in "memory"/);
 	});
 
-	it("hands the Redis grant store the environment the config was selected by, so its plaintext guard reads it (#473)", async () => {
+	it("hands the Redis grant store the environment the config was selected by, so its plaintext guard reads it", async () => {
 		// The federation-token store's guard reads `environment` beside
 		// NODE_ENV so that CONFIG_ENV=production is production to it; the grant
 		// store's must too, or a deployment selecting its config by CONFIG_ENV

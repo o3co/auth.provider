@@ -93,7 +93,7 @@ function bootableEnv(rel: string): Record<string, string> {
 	return env;
 }
 
-describe("#407 — the Dockerfile installs with everything pnpm needs", () => {
+describe("the Dockerfile installs with everything pnpm needs", () => {
 	it("copies pnpm-workspace.yaml into the deps stage", () => {
 		// `create-auth-provider` generates it to carry the bcrypt
 		// `onlyBuiltDependencies` allowlist, because pnpm >= 10.29 reads that
@@ -115,7 +115,7 @@ describe("#407 — the Dockerfile installs with everything pnpm needs", () => {
 	});
 });
 
-describe("#407 — the dev compose can reach every Redis it configures", () => {
+describe("the dev compose can reach every Redis it configures", () => {
 	it("sets every *_REDIS_URL the template config reads", () => {
 		// The template's application.conf substitutes several Redis URLs, each
 		// defaulting to `redis://localhost:6379` — which inside the container is
@@ -133,7 +133,7 @@ describe("#407 — the dev compose can reach every Redis it configures", () => {
 	});
 });
 
-describe("#407 — the scaffold does not invite committing its own secrets", () => {
+describe("the scaffold does not invite committing its own secrets", () => {
 	it("ships a .gitignore", () => {
 		// Without one, the first `git add .` in a scaffolded project commits
 		// `.env` and `jwt-private.pem` — both of which the README tells the
@@ -155,7 +155,7 @@ describe("#407 — the scaffold does not invite committing its own secrets", () 
 	});
 });
 
-describe("#407 — the production compose matches the topology it documents", () => {
+describe("the production compose matches the topology it documents", () => {
 	it("does not publish the app port on every interface", () => {
 		// The README says to keep `/metrics` off the public listener and the
 		// file assumes TLS is terminated in front, so a bare "3000:3000"
@@ -173,7 +173,7 @@ describe("#407 — the production compose matches the topology it documents", ()
  * copy, client secrets included, would be baked into the runtime image.
  * Production is given the registry from outside the image instead.
  */
-describe("#705 — what .gitignore keeps out of git stays out of the image, and production is given it", () => {
+describe("what .gitignore keeps out of git stays out of the image, and production is given it", () => {
 	/**
 	 * `.gitignore`'s "Secrets and per-machine configuration" section: each
 	 * pattern, with files it matches. A pattern without a `/` matches at any
@@ -339,7 +339,7 @@ describe("the production compose refuses to guess HTTP_TRUST_PROXY", () => {
 	});
 });
 
-describe("#407 — the two READMEs agree on security advice", () => {
+describe("the READMEs' security advice", () => {
 	it("does not recommend HTTP_TRUST_PROXY=true in the Japanese README", () => {
 		// `trust proxy` is a CIDR/hop policy because `true` means "believe the
 		// leftmost forwarded entry from whoever opened the connection". The
@@ -357,7 +357,7 @@ describe("#407 — the two READMEs agree on security advice", () => {
  * inlines anyway. And `make test` runs this suite inside the `test` image,
  * where a file the Dockerfile never copied does not exist.
  */
-describe("#512 — the shipped suite is green outside this repository", () => {
+describe("the shipped suite carries what it needs to run outside this repository", () => {
 	it("runs the published packages through vitest, so module mocks reach them", async () => {
 		// The config is loaded, not grepped: what matters is the value vitest
 		// resolves, and a `server.deps.inline` naming the wrong package would
@@ -423,7 +423,7 @@ describe("#512 — the shipped suite is green outside this repository", () => {
 		}
 	});
 
-	it("ships every setup file vitest.config.mts loads, into the `test` image as well (#556)", async () => {
+	it("ships every setup file vitest.config.mts loads, into the `test` image as well", async () => {
 		// vitest refuses to start when a `setupFiles` entry is missing, so a setup
 		// file the image never copied fails the whole of `make test`, not one test.
 		const configPath = fileURLToPath(new URL("../../vitest.config.mts", import.meta.url));
@@ -526,7 +526,7 @@ function dockerignoreExcludes(dockerignore: string, file: string): boolean {
 	return excluded;
 }
 
-describe("#593 slice 7 — the compose files give the process time to finish a shutdown", () => {
+describe("the compose files give the process time to finish a shutdown", () => {
 	it.each(["/docker-compose.yml", "/docker-compose.production.yml"])(
 		"%s declares a stop_grace_period covering the HTTP drain, the grants cleanup and an exit margin",
 		(rel) => {

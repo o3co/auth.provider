@@ -135,7 +135,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	// `audit` block would vanish between `parseFile` and `buildModules` and the
 	// sink selector would read `undefined`. These assertions run the real
 	// three-tier merge, so they fail if either layer stops carrying the key.
-	describe("#287: the audit sink as the shipped artifact resolves it", () => {
+	describe("the audit sink as the shipped artifact resolves it", () => {
 		it("resolves audit.sink.type to the template's logger sink with nothing set", () => {
 			const config = buildResolvedConfig("production");
 			expect(config.audit?.sink.type).toBe("logger");
@@ -173,7 +173,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	// A memory denylist under `multi` is refused by the replica-safety guard,
 	// and NO denylist by core's denylist boot guard, so the template has to
 	// land on "redis" without the deployment naming it.
-	describe("#277: access-token revocation as the shipped artifact resolves it", () => {
+	describe("access-token revocation as the shipped artifact resolves it", () => {
 		it("resolves accessTokenDenylist.adapter to redis with nothing set", () => {
 			const config = buildResolvedConfig("production");
 			expect(config.accessTokenDenylist?.adapter).toBe("redis");

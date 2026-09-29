@@ -285,7 +285,7 @@ const claimsOf = (jwt: string): Record<string, unknown> =>
 		unknown
 	>;
 
-describe("#593 AC8: a grant outlives the browser session at both logout endpoints (D14)", () => {
+describe("a grant outlives the browser session at both logout endpoints", () => {
 	let handleRef: Awaited<ReturnType<typeof createApp>> | undefined;
 
 	afterEach(async () => {

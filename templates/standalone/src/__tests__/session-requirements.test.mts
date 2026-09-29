@@ -36,7 +36,7 @@ afterEach(async () => {
 	current = undefined;
 });
 
-describe("sessionRequirements.expected, derived from the parsed mfa.mode (D7)", () => {
+describe("sessionRequirements.expected, derived from the parsed mfa.mode", () => {
 	it("declares nothing under the shipped default, off, and boots", async () => {
 		current = await compose();
 		expect(current.config.sessionRequirements).toEqual({ expected: [] });

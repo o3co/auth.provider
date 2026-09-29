@@ -377,7 +377,7 @@ function liveSubstitutions(): Set<string> {
 	]);
 }
 
-describe("#288: the shipped config boots with every documented override supplied as a string", () => {
+describe("the shipped config boots with every documented override supplied as a string", () => {
 	it("parses with every documented environment variable set", async () => {
 		await expect(bootParsed(DOCUMENTED_ENV)).resolves.toBeDefined();
 	});
@@ -445,7 +445,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		]);
 	});
 
-	describe("CORS_ALLOWED_ORIGINS (#500)", () => {
+	describe("CORS_ALLOWED_ORIGINS", () => {
 		it("reads an exported-but-empty variable as no origins, not as an error", async () => {
 			// The .env / compose / ConfigMap shape. "CORS off" is what both the
 			// unset key and the empty string mean, so they must agree.
@@ -620,7 +620,7 @@ describe("#288: the shipped config boots with every documented override supplied
 	});
 
 	describe("variables whose documented behaviour is to fail boot", () => {
-		it("still refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS (#330 tombstone)", async () => {
+		it("refuses OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS, naming allowUnmarkedClients", async () => {
 			await expect(
 				bootParsed({
 					...DOCUMENTED_ENV,
@@ -649,7 +649,7 @@ describe("#288: the shipped config boots with every documented override supplied
 			});
 		}
 
-		it("parses each MFA_MODE, and derives sessionRequirements.expected from the parsed mode, never from the variable (the session-admission ADR's D7)", () => {
+		it("parses each MFA_MODE, and derives sessionRequirements.expected from the parsed mode, never from the variable", () => {
 			// Phase one: the mode is a switch, read before boot, and the posture
 			// is derived from what it parsed.
 			for (const [mode, expected] of [
@@ -670,7 +670,7 @@ describe("#288: the shipped config boots with every documented override supplied
 			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
 		});
 
-		it("still refuses an empty SESSION_CSRF_TTL_SECONDS (#272)", async () => {
+		it("still refuses an empty SESSION_CSRF_TTL_SECONDS", async () => {
 			// Pinned alongside the boolean cases because it is the same trap
 			// read from the other side: for a *number*, empty means fail loudly.
 			await expect(

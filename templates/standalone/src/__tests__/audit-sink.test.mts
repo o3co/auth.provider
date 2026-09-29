@@ -173,7 +173,7 @@ async function resolveSink(config: AppConfig): Promise<AuditSink> {
 	return (await provider({ config } as never)) as AuditSink;
 }
 
-describe("#287: the template's audit sink", () => {
+describe("the template's audit sink", () => {
 	describe("createLoggerAuditSink — one event, one line, through the app's own JSON stream", () => {
 		it("records the event through the injected logger", async () => {
 			const logger = fakeLogger();

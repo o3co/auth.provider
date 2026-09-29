@@ -298,7 +298,7 @@ async function tokensFor(
 	};
 }
 
-describe("an upstream IdP's amr counts only for a federation that trusts it (the MFA ADR's D13)", () => {
+describe("an upstream IdP's amr counts only for a federation that trusts it", () => {
 	let deployment: Deployment | undefined;
 
 	afterEach(async () => {
