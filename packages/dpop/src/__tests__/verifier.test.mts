@@ -466,7 +466,7 @@ describe("createDPoPMechanism", () => {
 
 	// parseProof's private_jwk screen propagates through the verifier intact,
 	// not swallowed at the verifier's parseProof call site.
-	it("propagates private_jwk error from parseProof (step 7 / Sub-PR 2a)", async () => {
+	it("propagates private_jwk error from parseProof", async () => {
 		const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
 		const pubJwk = await exportJWK(publicKey);
 		const legitProof = await new SignJWT({
