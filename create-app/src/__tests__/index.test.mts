@@ -17,6 +17,7 @@ vi.mock("node:child_process", () => ({ spawnSync: spawnSyncMock }));
 const {
 	availableTemplates,
 	DEFAULT_TEMPLATE,
+	templateRefusal,
 	generateLockfile,
 	isValidDirName,
 	isValidProjectName,
@@ -235,6 +236,25 @@ describe("availableTemplates", () => {
 	it("includes the default template in what this package ships", () => {
 		expect(availableTemplates()).toContain(DEFAULT_TEMPLATE);
 		expect(DEFAULT_TEMPLATE).toBe("standalone");
+	});
+});
+
+describe("templateRefusal", () => {
+	it("refuses nothing for a template that is there", () => {
+		expect(templateRefusal("standalone", ["m2m", "standalone"])).toBeUndefined();
+	});
+
+	it("names the templates there are when the one asked for is not", () => {
+		expect(templateRefusal("nope", ["m2m", "standalone"])).toBe(
+			"Unknown template 'nope'. Available templates: m2m, standalone.",
+		);
+	});
+
+	it("says how to bundle the templates when there are none", () => {
+		// A checkout that never ran the prebuild script has no templates at all;
+		// "Unknown template 'standalone'. Available templates: ." would send the
+		// developer looking for the wrong thing.
+		expect(templateRefusal("standalone", [])).toMatch(/No templates found.*prebuild/);
 	});
 });
 
@@ -543,6 +563,25 @@ describe("main (argv parsing and directory derivation)", () => {
 		const r = runMain(["--template=standalone", "my-auth"]);
 		expect(r.exitCode).toBe(0);
 		expect(existsSync(join(workdir, "my-auth", "src", "app.mts"))).toBe(true);
+	});
+
+	it("an empty --template is refused as a missing value", () => {
+		const r = runMain(["my-auth", "--template="]);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr).toMatch(/--template requires a value/);
+	});
+
+	it("a --template given twice is refused, even when both name the same template", () => {
+		const r = runMain(["my-auth", "--template", "standalone", "--template", "standalone"]);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr).toMatch(/--template specified more than once/);
+	});
+
+	it("checks the project name before the template, in the order the README gives", () => {
+		const r = runMain(["UPPER", "--template", "nope"]);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr).toMatch(/<project-name> must be a valid npm package name/);
+		expect(r.stderr).not.toMatch(/Unknown template/);
 	});
 
 	it("an unknown --template is refused before anything is written, naming the templates", () => {

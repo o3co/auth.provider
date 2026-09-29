@@ -13,29 +13,27 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { listTemplates } from "../../scripts/templates.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CREATE_APP_DIR = resolve(__dirname, "../..");
 
 /**
- * The templates the repository holds: every directory under `templates/` with
- * a `package.json`, which is what `copy-templates.mjs` copies. Read from the
- * repository rather than from the packed tarball, so a template the pack
+ * The templates the repository holds, as the build reads them
+ * (`scripts/templates.mjs`, which `copy-templates.mjs` and CI use). Read from
+ * the repository rather than from the packed tarball, so a template the pack
  * leaves out is a failure here instead of a smaller list.
  */
-const REPOSITORY_TEMPLATES: readonly string[] = readdirSync(
+const REPOSITORY_TEMPLATES: readonly string[] = listTemplates(
 	resolve(CREATE_APP_DIR, "../templates"),
-	{
-		withFileTypes: true,
-	},
-)
-	.filter(
-		(entry) =>
-			entry.isDirectory() &&
-			existsSync(resolve(CREATE_APP_DIR, "../templates", entry.name, "package.json")),
-	)
-	.map((entry) => entry.name)
-	.sort();
+);
+
+/** Every file under `dir`, relative to it, sorted. */
+const filesUnder = (dir: string): string[] =>
+	readdirSync(dir, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => join(entry.parentPath, entry.name).slice(dir.length + 1))
+		.sort();
 
 interface NpmPackResult {
 	readonly filename: string;
@@ -91,6 +89,22 @@ describe("published-package install context (e2e)", () => {
 			.sort();
 		expect(shipped).toEqual(REPOSITORY_TEMPLATES);
 	});
+
+	it("scaffolds the default template, standalone, when no --template is given", () => {
+		const cli = join(installRoot, "dist", "cli.mjs");
+		const byDefault = join(workspace, "scaffold-cwd-default");
+		const named = join(workspace, "scaffold-cwd-named-standalone");
+		mkdirSync(byDefault);
+		mkdirSync(named);
+		execFileSync("node", [cli, "my-test-project", "--no-lockfile"], { cwd: byDefault });
+		execFileSync("node", [cli, "my-test-project", "--no-lockfile", "--template", "standalone"], {
+			cwd: named,
+		});
+
+		const files = filesUnder(join(byDefault, "my-test-project"));
+		expect(files).toContain("src/app.mts");
+		expect(files).toEqual(filesUnder(join(named, "my-test-project")));
+	}, 30_000);
 
 	it.each(REPOSITORY_TEMPLATES)(
 		"scaffolds the %s template when installed under a path containing 'node_modules'",
