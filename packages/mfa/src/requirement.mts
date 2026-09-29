@@ -53,7 +53,9 @@
  *   (`mfa_enrollment_required`) with the counting factors the user may
  *   enroll — none at all, when each refuses the user, is said at warn
  *   (`mfa_enrollment_nothing_enrollable`, the kinds alone) and answered all
- *   the same; no enrollment witness is read before step 12 (owner decision 2).
+ *   the same; no enrollment witness is read before step 9, which makes a
+ *   first binding possible (owner decision 2; the module review of
+ *   2026-09-29 moved the read from step 12).
  *   A primary that is not a password login is established without a read:
  *   the baseline applies after `pwd` only (D13).
  *
