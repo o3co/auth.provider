@@ -41,7 +41,7 @@ The `mfa` section beside core's `mfa.mode`. Core's `AppConfigSchema` passes the 
 | `mfa.factors.totp.digits` | — | `6` | 6 to 8, for new enrollments |
 | `mfa.factors.totp.period` | — | `30` | 15 to 120 seconds, for new enrollments |
 | `mfa.factors.totp.window` | — | `1` | 0 to 2 steps either side of now, for every verification |
-| `mfa.factors.totp.issuer` | `MFA_TOTP_ISSUER` | for a factor that is on, the hostname of `oauth.jwt.issuer` | The issuer an authenticator app shows: well-formed text, not blank, with no control character and no colon |
+| `mfa.factors.totp.issuer` | `MFA_TOTP_ISSUER` | for a factor that is on, the hostname of the deployment's issuer — the oauth module's `oauthTokenSettings` when a composition holds it ([#728](https://github.com/o3co/auth.provider/issues/728)), `oauth.jwt.issuer` otherwise | The issuer an authenticator app shows: well-formed text, not blank, with no control character and no colon |
 | `mfa.transactionTtlSeconds` | — | `600` | How long one second-factor ceremony lives, 60 to 1800 seconds; every transaction's expiry is derived from it alone (D8) |
 | `mfa.maxAttemptsPerTransaction` | — | `5` | The attempts one transaction allows: 1 to 10 (D21) |
 | `mfa.lockout` | — | `threshold` 5, `baseSeconds` 900, `maxSeconds` 86400, `memorySeconds` 86400, `weeklyBudget` 10, `hardLimit` 100, `trustedBrowsers` 5, `trustedBrowserDays` 30 | The subject lock on guessable proofs (D21): each a positive whole number, held to core's `checkMfaLockoutPolicy` — `threshold` at most `hardLimit`, `hardLimit` at most 100, `maxSeconds` at least `baseSeconds` |

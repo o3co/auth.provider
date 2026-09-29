@@ -26,7 +26,9 @@
  *   - `discoveryMetadata[0]` — `tls_client_certificate_bound_access_tokens`
  *     while enabled; an empty contribution otherwise.
  *
- * DI requires: `config` (reads `config.oauth.mtls` + `config.oauth.tokenBinding`).
+ * DI requires: `config` (reads `config.oauth.mtls`; the dispatch policy under
+ * `oauth.tokenBinding` is core's to read, through the oauth module's
+ * `oauthTokenSettings` when a composition holds it — #728).
  * DI optional: `logger` (forwarded to `tokenBindingMw` + `createMtlsMechanism`).
  *
  * No `ComponentMap` augmentation is needed for mTLS — unlike DPoP, the

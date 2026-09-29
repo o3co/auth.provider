@@ -21,7 +21,7 @@ Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed bu
 
 - the verification page — the deployment's ([below](#the-library-provides-the-api-the-deployment-provides-the-page));
 - the `DeviceCodeStore` port, the code generators and the memory adapter — `@o3co/auth-provider-core`; the Redis adapter — `@o3co/auth-provider-redis` ([Storage](#storage));
-- `/oauth/token` and client authentication — `@o3co/auth-provider-oauth`;
+- `/oauth/token` and client authentication — `@o3co/auth-provider-oauth`; the token settings it reads — the issuer client authentication is held to, the access-token lifetime it mints, `requireEmailVerified` — are the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from the configuration when not ([#728](https://github.com/o3co/auth.provider/issues/728));
 - the browser session, login and the CSRF policy — `@o3co/auth-provider-session`, whose session module provides the policy as the `csrfGuard` slot; whether the session behind the cookie may act — core's session admission (`admitSession`), which reads the `UserSession` store (core's port, filled by a session-store module), the subject's sessions boundary and the registered session requirements;
 - the rate limiter and the seeding of its budget — core's and Redis's limiter modules;
 - what a log line may carry of an error — core's `loggableError`, which both routes log their failures through.

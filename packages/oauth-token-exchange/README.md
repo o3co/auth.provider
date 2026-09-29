@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth-token-exchange
 
-Last updated: 2026-09-26
+Last updated: 2026-09-29
 
 RFC 8693 Token Exchange grant for [auth.provider](https://github.com/o3co/auth.provider).
 Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
@@ -110,7 +110,7 @@ clients:
 
 A token-exchange request may carry an optional `expires_in` form parameter: the lifetime, in seconds, the client wants the issued token to have. RFC 8693 defines no such parameter and RFC 6749 §3.2 has a server ignore a parameter it does not recognise, so sending it is safe against any authorization server.
 
-- **Absent, or sent without a value** (`expires_in=`, RFC 6749 §3.2): the token gets `oauth.accessToken.defaultExpiresIn`.
+- **Absent, or sent without a value** (`expires_in=`, RFC 6749 §3.2): the token gets `oauth.accessToken.defaultExpiresIn`. Both lifetimes, and the issuer and `legacyTypAccept` a subject token is held to, are the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from the configuration when not ([#728](https://github.com/o3co/auth.provider/issues/728)).
 - **Present:** honoured up to `oauth.accessToken.maxExpiresIn` — a larger request is **clamped** to the max, not refused — and always capped at the subject token's remaining lifetime (Security note 16). The response's `expires_in` is the lifetime actually minted; read it rather than assuming the request was granted in full.
 - **`maxExpiresIn` unset means the default.** Until the operator raises it (`OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`), a request can shorten a token but not lengthen it. Security note 19 is what raising it costs.
 - **Malformed is refused** with `400 invalid_request` naming `expires_in`: sent more than once, zero, longer than 10 digits, or anything but ASCII decimal digits — no sign, decimal point, exponent or whitespace.
