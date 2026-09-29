@@ -36,18 +36,16 @@ import { createOAuthRouter } from "./routes.mjs";
 
 /**
  * Whether `url` — a path or an absolute URL — carries `redirect_to` in its own
- * query. Parsed with `URL` against a placeholder base, so a path and an
- * absolute URL read alike and the fragment is never mistaken for the query;
- * the name is matched as `URLSearchParams.has` matches it — exactly, after
- * decoding, so `redirect%5Fto` and a `redirect_to` with no value count. A URL
- * that does not parse carries none.
+ * query, read as `/authorize`'s login redirect writes it: the text before any
+ * `#`, after the first `?` — so a fragment is never mistaken for the query,
+ * and a URL `URL` could not parse is held to the rule all the same. The name
+ * is matched as `URLSearchParams.has` matches it — exactly, after decoding, so
+ * `redirect%5Fto` and a `redirect_to` with no value count.
  */
 const carriesRedirectTo = (url: string): boolean => {
-	try {
-		return new URL(url, "https://login.invalid").searchParams.has(REDIRECT_TO_PARAM);
-	} catch {
-		return false;
-	}
+	const page = url.split("#", 1)[0] ?? "";
+	const queryAt = page.indexOf("?");
+	return queryAt !== -1 && new URLSearchParams(page.slice(queryAt + 1)).has(REDIRECT_TO_PARAM);
 };
 
 /**
