@@ -265,6 +265,35 @@ test("relocatedFrom is a list of old paths moved whole, or a map from each old p
 	});
 });
 
+// ---------------------------------------------------------------------------
+// `authoritative` (#728): the provided keys no composition may substitute
+// while the module is loaded. Only a key of the module's own `provides`
+// compiles; `config` and `oauthTokenSettings` are real slots in this program.
+// ---------------------------------------------------------------------------
+
+test("authoritative names keys of the module's own provides", () => {
+	defineModule({
+		name: "owner",
+		requires: ["config"],
+		provides: { oauthTokenSettings: () => undefined as never },
+		authoritative: ["oauthTokenSettings"],
+	});
+});
+
+test("authoritative refuses a key the module does not provide", () => {
+	defineModule({
+		name: "owner",
+		provides: { oauthTokenSettings: () => undefined as never },
+		// @ts-expect-error — `config` is not among this module's provides
+		authoritative: ["config"],
+	});
+	defineModule({
+		name: "provides-nothing",
+		// @ts-expect-error — a module that provides nothing has no key to name
+		authoritative: ["oauthTokenSettings"],
+	});
+});
+
 test("a call that writes its type arguments and omits the schema's is refused a section", () => {
 	defineModule<"config", never>({
 		name: "explicit-without-schema",

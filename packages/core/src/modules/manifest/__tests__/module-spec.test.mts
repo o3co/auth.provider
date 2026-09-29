@@ -50,14 +50,16 @@ test("Module is the widened ModuleSpec alias (post-inference)", () => {
 	expectTypeOf<Module>().toEqualTypeOf<ModuleSpec<ComponentKey, ComponentKey>>();
 });
 
-test("ModuleSpec has the 11 baseline fields, all readonly", () => {
+test("ModuleSpec has the 12 baseline fields, all readonly", () => {
 	// A2-β §4.1 adds `lifecycle` as the 8th field (additive amendment to
 	// A2-α); #363 adds `absencePolicies` as the 9th; #455 adds
-	// `replicaSafety` as the 10th; #728 adds `section` as the 11th.
+	// `replicaSafety` as the 10th; #728 adds `section` as the 11th and
+	// `authoritative` as the 12th.
 	type Keys = keyof ModuleSpec;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "name"
 		| "section"
+		| "authoritative"
 		| "configSchema"
 		| "requires"
 		| "optional"
