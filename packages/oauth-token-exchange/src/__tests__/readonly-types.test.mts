@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 // readonly becomes mutable. The runtime body is a no-op — the type system
 // is the assertion. Wrapped in `if (false)` so no runtime mutation runs.
 
-describe("CC-5: validator types readonly (compile-time)", () => {
+describe("validator types are readonly (compile-time)", () => {
 	it("ExchangeTokenValidationContext.role is readonly", () => {
 		if (false as boolean) {
 			const ctx = { role: "subject" } as ExchangeTokenValidationContext;

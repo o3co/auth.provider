@@ -270,7 +270,7 @@ describe("token_exchange — integration", () => {
 	// in oauthAuthorizationModule.optional; without declaring it here as well,
 	// token-exchange would silently sit outside the policy gate while sibling
 	// grants are enforced — a structural inconsistency in the gate's coverage.
-	it("declares grantPolicy in optional so CP-18 enforcement reaches token-exchange", async () => {
+	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("grantPolicy");
 	});
@@ -1488,7 +1488,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	});
 });
 
-describe("absence policy (#375)", () => {
+describe("absence policy", () => {
 	it("carries the shared ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY constant, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
 		// policies for one key disagree; sharing oauthModule's constant makes
@@ -1501,7 +1501,7 @@ describe("absence policy (#375)", () => {
 	});
 });
 
-describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration (#728)", () => {
+describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration", () => {
 	// Beside oauthModule the slot is derived from the same `oauth {}` the
 	// configuration carries, and nothing substitutes it, so the two cannot
 	// disagree there. Which one a contribution reads shows only here, where

@@ -312,7 +312,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		});
 	});
 
-	it("Copilot review: standalone-wiring authenticate throw → 503 temporarily_unavailable (matches authenticated-client branch)", async () => {
+	it("returns 503 temporarily_unavailable when authenticate throws under standalone wiring", async () => {
 		// Standalone wiring (no `clientAuthMw`) — the in-grant `authenticate(...)`
 		// call must be guarded so a transient repository outage surfaces as a
 		// controlled 503 instead of an unhandled 500. This mirrors the
@@ -978,7 +978,7 @@ describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () =
 	});
 });
 
-describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
+describe("createTokenExchangeGrant — policy subset enforcement", () => {
 	// The request's own `scope` never reaches this check — a scope outside
 	// either ceiling is `invalid_scope` before the policy runs — so a widening
 	// here is the policy's fault, answered as every other grant answers a
@@ -1054,7 +1054,7 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 	});
 });
 
-describe("createTokenExchangeGrant — a malformed policy decision (#521, v0.13.0 audit)", () => {
+describe("createTokenExchangeGrant — a malformed policy decision", () => {
 	// Every grant refuses a non-array `grantedScope` / `grantedAudience`. Read
 	// on truthiness and then `.filter`ed, a JS policy returning a string would
 	// throw a TypeError out of the handler: an unhandled 500 with no
@@ -1719,7 +1719,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 // identity (and falling back to body credentials only when it is null) keeps
 // Basic-authenticated callers working AND retains the body-credential gate
 // for consumers wiring the grant onto a custom route.
-describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound flow", () => {
+describe("createTokenExchangeGrant — ctx.authenticatedClient route-bound flow", () => {
 	const authedConfidential = {
 		clientId: "client-a",
 		tokenEndpointAuthMethod: "client_secret_basic" as const,

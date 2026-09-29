@@ -46,7 +46,7 @@ const OPTIONAL = [
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("tokenExchangeModule's deps are the slots it declares (#626 P2)", () => {
+describe("tokenExchangeModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<TokenExchangeModuleDeps>().branded.toEqualTypeOf<Declared>();
 		expect([...(tokenExchangeModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
@@ -77,7 +77,7 @@ describe("tokenExchangeModule's deps are the slots it declares (#626 P2)", () =>
 	});
 });
 
-describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () => {
+describe("createTokenExchangeGrant declares the slots it reads", () => {
 	type GrantDeps = Parameters<typeof createTokenExchangeGrant>[0];
 
 	it("is TokenExchangeDependencies, and carries no slot the grant does not read", () => {
@@ -113,7 +113,7 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 	});
 });
 
-describe("#626 P1: the validator contract is core's", () => {
+describe("the validator contract is core's", () => {
 	// The same hard break as session's: one type, one path.
 	//
 	// A runtime check cannot pin this the way session's `index.test.mts` does.
