@@ -16,14 +16,11 @@
 
 /**
  * The Store client's transport, against real `node:http` servers: what the
- * identity lookup does to a connection it refuses (#613), and where each of
- * the four requests is allowed to go — the URL it was configured with, and
- * nowhere a redirect points.
- *
- * Its own file, without msw: what is being watched here is what the client
- * does to the connection, and an interceptor that hands back a re-wrapped
- * `Response` puts itself between the client's `cancel()` and the socket — or,
- * for a redirect, decides for itself whether to follow one.
+ * identity lookup does to a connection it refuses, and where each of the four
+ * requests may go (the URL it was configured with, never where a redirect
+ * points). No msw: an interceptor that hands back a re-wrapped `Response` puts
+ * itself between the client's `cancel()` and the socket, or, for a redirect,
+ * decides for itself whether to follow one.
  */
 
 import { createServer, type Server } from "node:http";
@@ -102,12 +99,10 @@ describe("the identity lookup on the wire (#613)", () => {
 });
 
 describe("where a request goes: only to the configured URL", () => {
-	// Were a redirect followed, a `307` or `308` would send the same POST, body
-	// and all, to the `Location` — which no https-or-loopback check has seen —
-	// and a `301`/`302`/`303` would send a GET there; either way the answer
-	// from there would be taken as the user, the link or the lookup's answer.
-	// So a Store that answers with a redirect is answered as any other
-	// unexpected status, and nothing is sent anywhere but the checked URL.
+	// A redirect is answered as any other unexpected status: following one
+	// would send the request, or a GET, to a `Location` no https-or-loopback
+	// check has seen, and take its answer as the user, the link or the
+	// lookup's. See README, "What the Store must enforce itself".
 	const REDIRECTS = [307, 308, 301, 302, 303] as const;
 	const LINK = {
 		provider: "apple",

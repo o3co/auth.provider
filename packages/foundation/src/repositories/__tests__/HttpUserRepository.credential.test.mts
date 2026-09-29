@@ -16,31 +16,23 @@
 
 /**
  * The credential auth.provider presents to the Store, against real
- * `node:http` servers: with `bearerToken` configured every one of the four
- * requests carries `Authorization: Bearer <token>`, and without it none
- * carries an `Authorization` header at all. A token the constructor would not
- * stand behind — below core's shared-secret floor, not a bare RFC 6750 token,
- * blank, or not a string — is refused at construction, from config as by
- * hand; and the token appears in nothing the repository throws and in no
- * inspection of the repository itself.
+ * `node:http` servers. No msw: the assertion is the header that reaches the
+ * socket, and an interceptor is one more thing between the two.
  *
- * And the other direction: with a token configured, a `401` or `403`
- * carrying a `Bearer` challenge (RFC 6750 §3) is the Store refusing this
- * deployment, so every one of the four requests throws a
- * StoreCredentialRefusedError — its status as `storeStatus`, never `status`;
- * one without the challenge — or any when no token is configured — keeps the
- * meaning the wire contract gives it.
- *
- * A transport failure — a refused connection, a TLS handshake refused, an
- * https URL on a plain-HTTP port, a peer that reflects the request into a
- * status line, header or body the parser rejects, a head too large, a close
- * after a 1xx — is a StoreTransportError: a fixed message naming the endpoint
- * and what failed (not reached, closed first, malformed, not readable) and at
- * most a transport code, never the transport's own error, which quotes the
- * bytes it choked on. A timeout, whichever half stalls, is a TimeoutError.
- *
- * Without msw: what is asserted is the header that reaches the socket, and an
- * interceptor is one more thing between the two.
+ *  - With `bearerToken`, all four requests carry `Authorization: Bearer
+ *    <token>`; without it, none carries an `Authorization` header. A token
+ *    below core's shared-secret floor, not a bare RFC 6750 token, blank, or not
+ *    a string is refused at construction, from config as by hand. The token
+ *    appears in nothing thrown and in no inspection of the repository.
+ *  - With a token configured, a `401` or `403` carrying a `Bearer` challenge
+ *    (RFC 6750 §3) is the Store refusing this deployment: each of the four
+ *    throws StoreCredentialRefusedError, its status as `storeStatus`, never
+ *    `status`. Without the challenge, or with no token configured, the status
+ *    keeps the meaning the wire contract gives it.
+ *  - A transport failure is a StoreTransportError: a fixed message naming the
+ *    endpoint and what failed, at most a transport code, never the transport's
+ *    own error, which quotes the bytes it choked on. A timeout, whichever half
+ *    stalls, is a TimeoutError.
  */
 
 import { createServer, type Server } from "node:http";
@@ -591,9 +583,8 @@ describe("a transport failure carries nothing the request carried", () => {
 		"%s: a timeout is a TimeoutError whether the headers or the body stall, so a reporter that reads names says timeout",
 		async (_name, path, call) => {
 			// A caller that reads an error's `name` — federation-grants' outage
-			// classification, a projected log line — tells a timeout by it; the
-			// identity lookup's timeout was already a TimeoutError and the other
-			// three were plain Errors.
+			// classification, a projected log line — tells a timeout by it, on
+			// every one of the four calls.
 			const stalls = {
 				"the headers": () =>
 					serve((req) => {
