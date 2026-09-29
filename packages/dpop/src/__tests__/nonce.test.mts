@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { createDPoPNonceIssuer } from "#/nonce.mjs";
 
 /**
- * #530 — server-provided DPoP nonces, stateless: a time bucket and an HMAC
+ * Server-provided DPoP nonces, stateless: a time bucket and an HMAC
  * under a shared secret. What matters is that only this server's secret can
  * mint one, that one from the previous bucket still counts, and that older
  * or foreign ones do not.
@@ -85,8 +85,8 @@ describe("createDPoPNonceIssuer (#530)", () => {
 
 	it("refuses to build on a short secret or a bad ttl", () => {
 		expect(() => createDPoPNonceIssuer({ secret: "short" })).toThrow(/at least 32 bytes/);
-		// Decoded length, not characters (v0.13.0 audit): 32 hex characters are
-		// 16 bytes, and a 32-character base64 body is 24.
+		// Decoded length, not characters: 32 hex characters are 16 bytes, and a
+		// 32-character base64 body is 24.
 		expect(() => createDPoPNonceIssuer({ secret: "0123456789abcdef0123456789abcdef" })).toThrow(
 			/at least 32 bytes/,
 		);

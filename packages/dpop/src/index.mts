@@ -16,12 +16,12 @@
 
 export { athMatches, computeAth } from "./ath.mjs";
 export { DPoPError, type DPoPErrorCode, type DPoPReasonCode } from "./errors.mjs";
-// `normalizeHtu` intentionally NOT exported per spec §7 — internal utility
-// only. The verifier consumes it via relative import. Promoting it to the
-// public surface would commit the package to maintaining its exact shape
-// (semver lock); the spec keeps it deliberately tight.
+// `normalizeHtu` intentionally NOT exported — internal utility only. The
+// verifier consumes it via relative import. Promoting it to the public
+// surface would commit the package to maintaining its exact shape (semver
+// lock); the surface is kept deliberately tight.
 export { dpopConfigSchema, dpopModule } from "./module.mjs";
-// #530: server-provided nonce (RFC 9449 §8 / §9).
+// Server-provided nonce (RFC 9449 §8 / §9).
 export {
 	createDPoPNonceIssuer,
 	DEFAULT_DPOP_NONCE_TTL_SECONDS,
