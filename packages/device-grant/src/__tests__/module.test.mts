@@ -15,7 +15,7 @@
  */
 
 /**
- * `deviceGrantModule` boot invariants (#298).
+ * `deviceGrantModule` boot invariants.
  *
  * Two settings have no default and fail boot instead, for two different
  * reasons — and both reasons are the point of the test.
@@ -135,7 +135,7 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			// The device_authorization guard reads the product-wide outage
 			// policy, `rateLimit.failMode`, like every other guarded route.
 			rateLimit: full.rateLimit,
-			// #363: the module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
+			// The module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
 			// with no sink must say so — which is what this fixture is.
 			...(overrides.withoutAuditDeclaration === true ? {} : { audit: full.audit }),
 			oauth: {
@@ -156,8 +156,8 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 		...(overrides.withUserSessionStore === false
 			? {}
 			: { userSessionStore: createInMemoryUserSessionStore() }),
-		// The verification route's CSRF guard is the `csrfGuard` slot (#728),
-		// which the session module provides: core's double stands in for it.
+		// The verification route's CSRF guard is the `csrfGuard` slot, which
+		// the session module provides: core's double stands in for it.
 		...(overrides.withCsrfGuard === false ? {} : { csrfGuard: createTestCsrfGuard() }),
 		...(overrides.withRateLimiter === false
 			? {}
@@ -258,7 +258,7 @@ describe("deviceGrantModule — boot", () => {
 		// POST /oauth/device/verification authorises on the session cookie, the
 		// credential a browser attaches to a request another site made (RFC 8628
 		// §5.4), and runs the one CSRF policy the session module provides as the
-		// `csrfGuard` slot (#728). Enabled without it, the endpoint would be
+		// `csrfGuard` slot. Enabled without it, the endpoint would be
 		// mounted with no CSRF defence, so boot is refused, as without a limiter.
 		await expect(boot({ deviceAuthorization: ENABLED, withCsrfGuard: false })).rejects.toThrow(
 			/enabled = true requires a csrfGuard component/,
@@ -286,9 +286,9 @@ describe("deviceGrantModule — boot", () => {
 	});
 
 	it("refuses to boot without a device code store, naming the config key", async () => {
-		// #363's absence policy: optional to wire, not optional to decide. A
-		// composition with no store cannot authorize any device at all, so the
-		// failure belongs at boot rather than on the first request.
+		// Optional to wire, not optional to decide: a composition with no
+		// store cannot authorize any device at all, so the failure belongs at
+		// boot rather than on the first request.
 		await expect(boot({ deviceAuthorization: ENABLED, withStore: false })).rejects.toThrow(
 			/oauth\.deviceAuthorization\.store/,
 		);
@@ -307,8 +307,8 @@ describe("deviceGrantModule — boot", () => {
 
 	it("refuses to boot enabled with the store declared absent, naming the component", async () => {
 		// `store = "unsupported"` says why the slot is empty; it does not make
-		// the grant work without one. An enabled grant with no store used to
-		// boot and mount endpoints that threw on the first request; the
+		// the grant work without one. An enabled grant with no store would
+		// boot and mount endpoints that throw on the first request; the
 		// refusal belongs at boot, beside `rateLimiter` and `verification-uri`.
 		// The phrase is the module's own, not the stage-1 policy message,
 		// which also names `deviceCodeStore`.
@@ -349,7 +349,7 @@ describe("deviceGrantModule — boot", () => {
 	});
 
 	it("refuses a switch read before boot without its schema: an environment string is on at boot, and off in the factory", async () => {
-		// The two phases (#728): a composition root reads the switch before
+		// The two phases: a composition root reads the switch before
 		// boot, and boot parses the configuration it resolved. Read without the
 		// schema core declares for it, `"true"` from an environment variable is
 		// not `true`, and the factory builds the grant off.
@@ -397,10 +397,9 @@ describe("deviceGrantModule — boot", () => {
 	});
 
 	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
-		// #363's rule, applied to the decision that turns a code into a token:
-		// `auditSink` is optional to wire, not optional to decide. A composition
-		// that silently discards every device approval must have written that
-		// down.
+		// On the decision that turns a code into a token, `auditSink` is
+		// optional to wire, not optional to decide. A composition that
+		// silently discards every device approval must have written that down.
 		await expect(
 			boot({ deviceAuthorization: ENABLED, withoutAuditDeclaration: true }),
 		).rejects.toThrow(/audit\.sink\.type/);
@@ -432,7 +431,7 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 	});
 
 	it("advertises nothing when disabled", async () => {
-		// #283's rule: the document must not claim a capability the deployment
+		// The discovery document must not claim a capability the deployment
 		// does not have.
 		const deps = {
 			config: {
@@ -482,7 +481,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		userSessionStore: liveSessionStore(),
-		// The `csrfGuard` slot (#728): core's double, which accepts this origin.
+		// The `csrfGuard` slot: core's double, which accepts this origin.
 		csrfGuard: createTestCsrfGuard(),
 		// The synthetic key the planner fills (the session-admission ADR's D1).
 		sessionRequirementResolver: resolverForTests([]),
@@ -526,10 +525,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("rate-limits the mounted device_authorization route, ahead of client authentication", async () => {
-		// Every other public entry point sits behind `createRateLimitGuard`;
-		// this one did not, and its store is what an unthrottled caller fills.
-		// The guard is mounted BEFORE client auth (the token endpoint's D-6
-		// ordering): the second unauthenticated hit is throttled, not 401'd,
+		// Every other public entry point sits behind `createRateLimitGuard`, and
+		// so does this one: its store is what an unthrottled caller would fill.
+		// The guard is mounted BEFORE client auth, as on the token endpoint:
+		// the second unauthenticated hit is throttled, not 401'd,
 		// which is what bounds repository lookups from a caller with no
 		// credentials at all.
 		const app = mountContributedRoute(
@@ -586,8 +585,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	});
 
 	it("refuses to mount device/verification without the outage policy, rateLimit.failMode (#457)", () => {
-		// The verification endpoint applies the same policy from the same key
-		// (#457). A composition that enables the grant with no `failMode` is
+		// The verification endpoint applies the same policy from the same key.
+		// A composition that enables the grant with no `failMode` is
 		// refused for this route too, not only for device_authorization — or
 		// the refusal would depend on which factory the planner ran first.
 		const deps = enabledDeps();
@@ -708,9 +707,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		"applies rateLimit.failMode = %s from config on the mounted device/verification route (#457)",
 		async (failMode, status, error) => {
 			// What no test of the handler alone can observe: that the module
-			// reads `rateLimit.failMode` and hands it to this route. Before
-			// #457 a limiter outage here was an unhandled throw — Express's
-			// default 500, whatever the config said.
+			// reads `rateLimit.failMode` and hands it to this route.
 			const deps = enabledDeps();
 			const app = mountVerificationRoute({
 				...deps,
@@ -1138,10 +1135,11 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 	it("answers a device-code store that cannot be reached with 503, asked once, and logs it through the same projection", async () => {
 		// An outage is not a collision: re-drawing a code cannot reach a store
-		// that is down, and a 500 blamed the server for what is, per the
+		// that is down, and a 500 would blame the server for what is, per the
 		// product's rule, a store outage — 503 temporarily_unavailable. Only
-		// the store's own collision signal is retried. The line used to carry
-		// `String(error)` — the whole message, command arguments included.
+		// the store's own collision signal is retried. The line carries the
+		// error's projection, never `String(error)` — the whole message,
+		// command arguments included.
 		const deps = enabledDeps();
 		const { lines, logger } = serialisingLogger();
 		let creates = 0;
@@ -1406,12 +1404,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	};
 
 	it("refuses to mount device/verification without the budget, oauth.deviceAuthorization.rateLimit", () => {
-		// #448: the "requires a rateLimiter" refusal reasons from a budget of
-		// five, and the limiter applies five only because its adapter module
-		// seeded `device_verification` from this key. The seed leaves the
-		// adapter's 60/60s default in place when the key is missing, so a
-		// hand-built config that never passed the schema booted with a
-		// refusal that argued from five while the limiter applied sixty.
+		// The "requires a rateLimiter" refusal reasons from a budget of five,
+		// and the limiter applies five only because its adapter module seeds
+		// `device_verification` from this key. The seed leaves the adapter's
+		// 60/60s default in place when the key is missing, so a hand-built
+		// config that never passed the schema would boot with a refusal that
+		// argued from five while the limiter applied sixty.
 		const deps = withVerificationBudget(undefined);
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);

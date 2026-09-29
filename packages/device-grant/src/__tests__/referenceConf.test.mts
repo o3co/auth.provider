@@ -15,7 +15,7 @@
  */
 
 /**
- * The package's `config/reference.conf` (#728): the modules that read it
+ * The package's `config/reference.conf`: the modules that read it
  * declare it as their section's reference, and it holds only their
  * sections, which their section schemas parse without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults

@@ -20,8 +20,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { type DeviceGrantModuleDeps, deviceGrantModule } from "#/module.mjs";
 
-// #626 P2 (D4): the manifest's contribution callbacks read only the slots it
-// declares, and an optional slot is used only behind a presence check.
+// The manifest's contribution callbacks read only the slots it declares, and
+// an optional slot is used only behind a presence check.
 // Compile-time facts: they fire under vitest's typecheck mode only, so this
 // file is in both typecheck lists (vitest.config.mts and tsconfig.test.json).
 
@@ -40,9 +40,9 @@ const OPTIONAL = [
 	"auditSink",
 	"userSessionStore",
 	"subjectRevocation",
-	// The one CSRF policy (#728, #710 C4): required once the grant is enabled.
+	// The one CSRF policy: required once the grant is enabled.
 	"csrfGuard",
-	// What the oauth module provides of `oauth {}` (#728); read with the
+	// What the oauth module provides of `oauth {}`; read with the
 	// configuration's value as the fallback.
 	"oauthTokenSettings",
 ] as const;

@@ -15,7 +15,7 @@
  */
 
 /**
- * Public exports for `@o3co/auth-provider-device-grant` (RFC 8628, #298).
+ * Public exports for `@o3co/auth-provider-device-grant` (RFC 8628).
  *
  * Deliberately NOT exported: the `DeviceCodeStore` port and the code
  * generators live in `@o3co/auth-provider-core`, so an adapter author depends
