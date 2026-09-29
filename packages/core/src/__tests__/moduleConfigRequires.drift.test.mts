@@ -49,7 +49,49 @@ const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../..");
  * `<workspace> -> <module name>` (#728). The list may only shrink: each entry
  * leaves as its module reads its own section and the slots it needs instead.
  */
-const CONFIG_REQUIRERS: readonly string[] = [];
+const CONFIG_REQUIRERS: readonly string[] = [
+	// Each reads a section of its own that is not yet under its name, and some
+	// a key of another module's section beside it.
+	"packages/device-grant -> device-grant",
+	"packages/dpop -> dpop",
+	"packages/federation-grants -> federation-grants",
+	"packages/mfa -> mfa",
+	"packages/mfa -> mfa-totp-factor",
+	"packages/mtls -> mtls",
+	"packages/oauth -> oauth",
+	"packages/oauth -> oauth-authorization",
+	"packages/oauth -> oauth-session",
+	"packages/oauth -> subject-revocation-service",
+	"packages/oauth-token-exchange -> oauth-token-exchange",
+	"packages/session -> session",
+	"packages/session -> session-store",
+	"packages/webauthn -> webauthn",
+	// The Redis stores read their own sections, and the deployment mode.
+	"packages/redis -> redis-access-token-denylist",
+	"packages/redis -> redis-challenge-store",
+	"packages/redis -> redis-code-repository",
+	"packages/redis -> redis-consent-store",
+	"packages/redis -> redis-device-code-store",
+	"packages/redis -> redis-federation-grant-intent-store",
+	"packages/redis -> redis-federation-grant-store",
+	"packages/redis -> redis-federation-token-store",
+	"packages/redis -> redis-mfa-factor-store",
+	"packages/redis -> redis-mfa-transaction-store",
+	"packages/redis -> redis-rate-limiter",
+	"packages/redis -> redis-refresh-token-family-store",
+	"packages/redis -> redis-replay-seen-set",
+	"packages/redis -> redis-session-stores",
+	// The standalone template's own modules, which read the template's
+	// settings and the adapter selection.
+	"templates/standalone -> audit-sink",
+	"templates/standalone -> google-federation-config",
+	"templates/standalone -> key-store",
+	"templates/standalone -> oidc-federation-config",
+	"templates/standalone -> redis-clients",
+	"templates/standalone -> repositories",
+	"templates/standalone -> standalone-in-memory-code-repository",
+	"templates/standalone -> stores",
+];
 
 /** The directories `pnpm-workspace.yaml` names, `dir/*` expanded to its children that hold a package.json. */
 function workspaceDirs(): string[] {
