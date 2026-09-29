@@ -33,9 +33,11 @@
  *   period 15-120 s — the step-8 owner decision, the ADR stating no bounds
  *   for either — SHA1, SHA256 or SHA512), the window every verification
  *   allows (0-2, D22), and the issuer an authenticator app shows, defaulting
- *   — for a factor that is on — to the host `oauth.jwt.issuer` names. Read on
- *   its own too, for the factor, which never holds a key and reads none of
- *   the keys below.
+ *   — for a factor that is on — to the host `oauth.jwt.issuer` names. Read by
+ *   the TOTP factor's module alone (`readMfaTotpSettings`), which never holds
+ *   a key and reads none of the keys below; the MFA module's settings read no
+ *   factor's section, so a composition without the TOTP factor is never
+ *   refused over it.
  * - `mfa.transactionTtlSeconds`, a transaction's life, 60-1800 seconds (the
  *   step-8 owner decision; the ADR states no bounds), from which every
  *   `expiresAtMs` is derived and nothing else; `mfa.maxAttemptsPerTransaction`,
@@ -190,6 +192,14 @@ export const mfaConfigSchema = z.object(
 );
 
 /**
+ * What the MFA module's settings parse: every key of {@link mfaConfigSchema}
+ * but the factors'. A factor's section, `mfa.factors.<kind>`, is its factor
+ * module's to read — a composition that does not install a factor is never
+ * refused over that factor's section.
+ */
+const mfaModuleSettingsSchema = mfaConfigSchema.omit({ factors: true });
+
+/**
  * `mfa.factors.totp` as the factor and its module read it: the switch and the
  * parameters, and — for a factor that is on — the issuer resolved. A
  * switched-off factor keeps only an issuer written for it: the default is not
@@ -202,7 +212,10 @@ export type MfaTotpSettings =
 			readonly issuer: string | undefined;
 	  });
 
-/** What this package reads from the `mfa` section. */
+/**
+ * What the MFA module reads from the `mfa` section: every key but a factor's
+ * own (`mfa.factors.<kind>`), which that factor's module reads.
+ */
 export interface MfaSettings {
 	/** The ring, in order: the first key seals, every key opens. */
 	readonly encryptionKeys: SealingKeyRing;
@@ -212,7 +225,6 @@ export interface MfaSettings {
 	 * say so at boot.
 	 */
 	readonly developmentSampleKeyAccepted: boolean;
-	readonly totp: MfaTotpSettings;
 	/** A transaction's life, in seconds: every `expiresAtMs` is derived from it and nothing else (D8). */
 	readonly transactionTtlSeconds: number;
 	/** The attempts one transaction allows (D21). */
@@ -406,16 +418,17 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
 }
 
 /**
- * Everything this package reads from the `mfa` section: the key ring and
- * whether it carries the development sample key, the TOTP factor's settings,
- * a transaction's life and attempts, and the subject lock — held to core's
- * `checkMfaLockoutPolicy` under `mfa.lockout`. `options.environment` is the
+ * What the MFA module reads from the `mfa` section: the key ring and whether
+ * it carries the development sample key, a transaction's life and attempts,
+ * and the subject lock — held to core's `checkMfaLockoutPolicy` under
+ * `mfa.lockout`. No factor's section: the TOTP factor's is
+ * {@link readMfaTotpSettings}'s. `options.environment` is the
  * name the composition root selected its configuration by (#473). A refusal
  * is a `RangeError` that names the key and quotes no key material.
  */
 export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {}): MfaSettings {
 	const shape = (config ?? {}) as ConfigShape;
-	const section = parseSection(mfaConfigSchema, shape.mfa, "mfa");
+	const section = parseSection(mfaModuleSettingsSchema, shape.mfa, "mfa");
 	const { ring, developmentSampleKeyAccepted } = readKeyRing(
 		section.encryptionKeys,
 		shape,
@@ -425,7 +438,6 @@ export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {
 	return {
 		encryptionKeys: ring,
 		developmentSampleKeyAccepted,
-		totp: totpSettings(section.factors.totp, shape),
 		transactionTtlSeconds: section.transactionTtlSeconds,
 		maxAttemptsPerTransaction: section.maxAttemptsPerTransaction,
 		lockout: { ...section.lockout },
