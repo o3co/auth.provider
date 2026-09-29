@@ -166,14 +166,12 @@ const acceptedFor = (verdict: CsrfVerdict | NavigationVerdict, what: string): vo
 	assert.deepEqual(verdict, { outcome: "accepted" }, `${what} must be accepted`);
 };
 
-/** Throws naming `what` when `run` throws, else answers what it answered. */
+/** Throws naming `what`, with what was thrown as its cause, when `run` throws; else answers what it answered. */
 const withoutThrowing = <T,>(run: () => T, what: string): T => {
 	try {
 		return run();
 	} catch (err) {
-		throw new assert.AssertionError({
-			message: `the guard threw on ${what}: ${err instanceof Error ? err.message : String(err)}`,
-		});
+		throw new Error(`the guard threw on ${what}`, { cause: err });
 	}
 };
 
