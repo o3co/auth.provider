@@ -355,8 +355,14 @@ describe("createRecordingLoginCompletion", () => {
 	});
 
 	it("holds a session record per login it established, and issues the 403's fresh token through the guard it is given", async () => {
-		const cookies: string[] = [];
-		const guard = { ...GUARD, issue: () => (cookies.push("issued"), "token") };
+		let issued = 0;
+		const guard = {
+			...GUARD,
+			issue: () => {
+				issued++;
+				return "token";
+			},
+		};
 		const completion = createRecordingLoginCompletion({ csrfGuard: guard });
 		const admission = await admitPrimary(deps([]), primary());
 		if (admission.outcome !== "establish") throw new Error("nothing interrupts");
@@ -370,7 +376,34 @@ describe("createRecordingLoginCompletion", () => {
 			reporter: silentReporter,
 		});
 		expect(completion.records).toBe(1);
-		expect(cookies).toEqual([]);
+		expect(issued, "establishSession leaves the token to its caller").toBe(0);
+		const interrupting: SessionRequirement = {
+			name: "fixture-interrupting",
+			reach: new Set(),
+			stepUpPage: undefined,
+			remediations: [],
+			hintKeys: [],
+			admit: async () => ({ outcome: "met" }),
+			admitPrimary: async () => ({
+				open: async () => ({ status: 403, body: { error: "fixture_required" } }),
+			}),
+		};
+		const interrupted = await admitPrimary(deps([interrupting]), primary());
+		if (interrupted.outcome !== "interrupt") throw new Error("the fixture interrupts");
+		const res = {
+			status() {
+				return this;
+			},
+			json() {
+				return this;
+			},
+		};
+		await completion.answerInterruption(interrupted, {
+			req: requestWithSession(),
+			res: res as never,
+			reporter: { storeUnavailable: () => {} },
+		});
+		expect(issued, "the 403 carries a fresh token").toBe(1);
 	});
 
 	it("stands in for a session store that is down until it recovers", async () => {

@@ -100,7 +100,7 @@ export interface LoginInterruptionReporter {
 /** What a caller hands `answerInterruption` besides the interruption. */
 export interface LoginInterruptionCall {
 	readonly req: Request;
-	/** Answered here: the requirement's `403`, or a `503`. */
+	/** Answered here: the requirement's `403` with a fresh CSRF token, or a `503`. */
 	readonly res: Response;
 	readonly reporter: LoginInterruptionReporter;
 }
@@ -126,7 +126,8 @@ export interface LoginCompletion {
 	 * `establishment.primary` alone: the session record, the express
 	 * session's regeneration, its signed-in state and its save, each outage
 	 * rolled back and answered as `unavailable`. Answers an outcome, never a
-	 * response.
+	 * response: the answer, and a fresh CSRF token on it (the deployment's
+	 * `csrfGuard.issue`), are the caller's.
 	 */
 	establishSession(
 		establishment: Establishment,
@@ -135,8 +136,10 @@ export interface LoginCompletion {
 	/**
 	 * Answer the login a requirement interrupted: regenerate the express
 	 * session and leave it unauthenticated, open the requirement's ceremony
-	 * on the new id, save, and answer the requirement's `403` — or `503` at
-	 * whichever of those failed, the cookie session dropped. Sends the
+	 * on the new id, save, and answer the requirement's `403` with a fresh
+	 * token from the deployment's `csrfGuard` (the MFA ADR's D27: the page
+	 * goes on posting on the regenerated session) — or `503`, with no token,
+	 * at whichever of those failed, the cookie session dropped. Sends the
 	 * response either way and answers what it sent.
 	 */
 	answerInterruption(

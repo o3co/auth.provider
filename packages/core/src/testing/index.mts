@@ -112,6 +112,7 @@ export {
 	type LoginCompletionContractInput,
 	loginCompletionContract,
 	type RecordingLoginCompletion,
+	type RecordingLoginCompletionOptions,
 } from "./slots/loginCompletion.mjs";
 export {
 	createTestLoginEntry,

@@ -22,26 +22,37 @@
  * `sessionRequirementContract` does. It drives the completion over the
  * fake request of `fake-http.mts` — an express session with `regenerate`,
  * `save` and `sessionID` — and holds it to what the session package's
- * `establishSession` and `answerInterruption` do: each refuses, with a
- * `RangeError` and before the session is touched, what core did not build;
- * an establishment leaves the browser signed in, as core's admission reads
- * a cookie (`cookieClaim`), for the establishment's subject, on a
- * regenerated session saved signed in, and leaves the response to its
- * caller; an interruption is answered with the requirement's `403`, its
- * ceremony opened on the regenerated session's id, saved and not signed in;
- * every outage — the session store at `create`, the cookie session's
- * `regenerate` or `save`, the ceremony's `open` — is reported to the
- * caller's reporter once, never established, and leaves the browser not
- * signed in, an interruption's answered `503 temporarily_unavailable`.
+ * `establishSession` and `answerInterruption` do.
  *
- * `createRecordingLoginCompletion` keeps that contract without a session
- * record of its own (its `sid`s are made up), records what it was handed,
+ * - Each refuses, with a `RangeError`, what core did not build, before the
+ *   session is touched: no regeneration, no save, no reporter built, no
+ *   ceremony opened, and — with `records` — no session record written.
+ * - An establishment builds the caller's reporter once, for the record it
+ *   writes (`{ sid, sub }`), and leaves the browser signed in, as core's
+ *   admission reads a cookie (`cookieClaim`), for the establishment's
+ *   subject, on a regenerated session saved signed in; with `records`, one
+ *   record is written when it answers a `sid`. It leaves the response to
+ *   its caller.
+ * - An interruption is answered with the requirement's `403` — with
+ *   `csrfCookieName`, a fresh token set in that cookie (the MFA ADR's D27)
+ *   — its ceremony opened on the regenerated session's id, saved and not
+ *   signed in.
+ * - Every outage — the session store at `create`, the cookie session's
+ *   `regenerate` or `save`, the ceremony's `open` — is reported to the
+ *   caller's reporter once, never established, and leaves the browser not
+ *   signed in; an establishment's leaves no record behind, and an
+ *   interruption's is answered `503 temporarily_unavailable` with no token.
+ *
+ * `createRecordingLoginCompletion` keeps that contract: it counts the
+ * session records it would hold (its `sid`s are made up), records what it
+ * was handed, issues the `403`'s token through the CSRF guard it is given,
  * and can stand in for a session store that is down. Published on
  * `@o3co/auth-provider-core/testing`.
  */
 
 import assert from "node:assert/strict";
 import type { Request, Response } from "express";
+import type { CsrfGuard } from "../../browser-session/types.mjs";
 import { readAcrTable } from "../../session-admission/acr.mjs";
 import {
 	admitPrimary,
@@ -67,7 +78,12 @@ import type {
 } from "../../session-admission/requirement.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
 import { resolverForTests } from "../../session-admission/testing/resolver.mjs";
-import { type FakeRequestOptions, fakeRequest, fakeResponse } from "./fake-http.mjs";
+import {
+	type FakeRequestOptions,
+	type FakeResponseRecord,
+	fakeRequest,
+	fakeResponse,
+} from "./fake-http.mjs";
 
 export interface LoginCompletionContractInput {
 	/** A fresh completion for each case, over a session store that answers. */
@@ -78,6 +94,14 @@ export interface LoginCompletionContractInput {
 	 * session record.
 	 */
 	readonly withSessionStoreOutage?: () => LoginCompletion;
+	/**
+	 * How many session records the store holds that the completion `build`
+	 * returned last writes to — read after `build`, before and after a call.
+	 * Absent for a completion whose records the test cannot count.
+	 */
+	readonly records?: () => number;
+	/** The CSRF token's cookie, when the completion answers a `403` with a fresh token: set on the `403`, never on a `503`. */
+	readonly csrfCookieName?: string;
 }
 
 const SUBJECT = "contract-subject";
@@ -128,24 +152,30 @@ async function interruption(
 	return admission as InterruptAdmission;
 }
 
-/** A reporter for `establishSession` that records every report. */
+/** The record a reporter for `establishSession` is built for. */
+type ReportedRecord = { readonly sid: string | undefined; readonly sub: string };
+
+/** A reporter for `establishSession` that records every record it is built for and every report. */
 function establishmentReporter(): {
-	readonly reporter: (record: {
-		readonly sid: string | undefined;
-		readonly sub: string;
-	}) => LoginEstablishmentReporter;
+	readonly reporter: (record: ReportedRecord) => LoginEstablishmentReporter;
+	readonly built: ReportedRecord[];
 	readonly unavailable: Array<readonly [string, string]>;
 } {
+	const built: ReportedRecord[] = [];
 	const unavailable: Array<readonly [string, string]> = [];
 	return {
+		built,
 		unavailable,
-		reporter: () => ({
-			storeUnavailable: (store, step) => {
-				unavailable.push([store, step]);
-			},
-			cleanupFailed: () => {},
-			subjectIndexWriteFailed: () => {},
-		}),
+		reporter: (record) => {
+			built.push({ sid: record?.sid, sub: record?.sub });
+			return {
+				storeUnavailable: (store, step) => {
+					unavailable.push([store, step]);
+				},
+				cleanupFailed: () => {},
+				subjectIndexWriteFailed: () => {},
+			};
+		},
 	};
 }
 
@@ -178,17 +208,24 @@ const OUTAGE = new Error("contract: store down");
 export function loginCompletionContract(
 	input: LoginCompletionContractInput,
 ): readonly ContractCase[] {
-	const { build, withSessionStoreOutage } = input;
+	const { build, withSessionStoreOutage, records, csrfCookieName } = input;
+	/** The token cookies `record` was set, when the input names the cookie. */
+	const tokensSet = (record: FakeResponseRecord): number =>
+		csrfCookieName === undefined
+			? 0
+			: record.cookies.filter((cookie) => cookie.name === csrfCookieName).length;
 	const cases: ContractCase[] = [
 		{
 			name: "establishSession refuses, before the session is touched, an establishment core did not build",
 			run: async () => {
 				const real = await establishment();
 				for (const forged of [{ ...real }, { primary: real.primary }]) {
+					const completion = build();
+					const before = records?.();
 					const { req, session } = fakeRequest();
-					const { reporter, unavailable } = establishmentReporter();
+					const { reporter, built, unavailable } = establishmentReporter();
 					await assert.rejects(
-						build().establishSession(forged as unknown as Establishment, { req, reporter }),
+						completion.establishSession(forged as unknown as Establishment, { req, reporter }),
 						RangeError,
 						"an object shaped like an establishment, or a copy of one, must be refused with a RangeError",
 					);
@@ -203,6 +240,10 @@ export function loginCompletionContract(
 						[],
 						"a forged establishment is the caller's fault, not an outage",
 					);
+					assert.deepEqual(built, [], "a reporter was built for a forged establishment");
+					if (records !== undefined) {
+						assert.equal(records(), before, "a forged establishment wrote a session record");
+					}
 					assert.equal(signedIn(req), false);
 				}
 			},
@@ -210,10 +251,12 @@ export function loginCompletionContract(
 		{
 			name: "an established login is one admission reads as signed in, for its subject, on a regenerated session saved signed in",
 			run: async () => {
+				const completion = build();
+				const held = records?.();
 				const { req, session } = fakeRequest();
 				const before = sessionIdOf(req);
-				const { reporter, unavailable } = establishmentReporter();
-				const result = await build().establishSession(await establishment(), { req, reporter });
+				const { reporter, built, unavailable } = establishmentReporter();
+				const result = await completion.establishSession(await establishment(), { req, reporter });
 				assert.equal(result.outcome, "established", `answered ${result.outcome}`);
 				assert.deepEqual(unavailable, [], "an established login reported an outage");
 				assert.equal(
@@ -232,6 +275,18 @@ export function loginCompletionContract(
 				);
 				if (sid !== undefined)
 					assert.equal(claim.sid, sid, "the cookie names another session record");
+				assert.deepEqual(
+					built,
+					[{ sid, sub: SUBJECT }],
+					"the reporter is built once, for the record the login wrote",
+				);
+				if (records !== undefined) {
+					assert.equal(
+						records(),
+						(held as number) + (sid === undefined ? 0 : 1),
+						"an established login writes one session record when it answers a sid, none otherwise",
+					);
+				}
 				assert.ok(session.saved >= 1, "the session was not saved before the outcome was answered");
 				assert.equal(
 					cookieClaim({ session: session.lastSaved }).authenticated,
@@ -248,15 +303,23 @@ export function loginCompletionContract(
 					[{ saveFails: OUTAGE }, "save"],
 				];
 				for (const [options, step] of failures) {
+					const completion = build();
+					const held = records?.();
 					const { req } = fakeRequest(options);
 					const { reporter, unavailable } = establishmentReporter();
-					const result = await build().establishSession(await establishment(), { req, reporter });
+					const result = await completion.establishSession(await establishment(), {
+						req,
+						reporter,
+					});
 					assert.deepEqual(
 						result,
 						{ outcome: "unavailable", store: "cookie_session", step },
 						`a cookie session whose ${step} fails is answered as its outage`,
 					);
 					assert.deepEqual(unavailable, [["cookie_session", step]], "the outage is reported once");
+					if (records !== undefined) {
+						assert.equal(records(), held, `the ${step} failure left a session record behind`);
+					}
 					assert.equal(
 						signedIn(req),
 						false,
@@ -291,10 +354,21 @@ export function loginCompletionContract(
 		{
 			name: "answerInterruption refuses, before the session is touched, an interruption core did not answer",
 			run: async () => {
-				const real = await interruption(async () => ANSWER);
+				let opened = 0;
+				const real = await interruption(async () => {
+					opened++;
+					return ANSWER;
+				});
 				for (const forged of [
 					{ ...real },
-					{ outcome: "interrupt", requirement: REQUIREMENT, open: async () => ANSWER },
+					{
+						outcome: "interrupt",
+						requirement: REQUIREMENT,
+						open: async () => {
+							opened++;
+							return ANSWER;
+						},
+					},
 				]) {
 					const { req, session } = fakeRequest();
 					const { res, record } = fakeResponse();
@@ -315,6 +389,7 @@ export function loginCompletionContract(
 					);
 					assert.equal(record.ended, false, "a forged interruption was answered");
 					assert.deepEqual(unavailable, []);
+					assert.equal(opened, 0, "a forged interruption's ceremony was opened");
 				}
 			},
 		},
@@ -357,6 +432,13 @@ export function loginCompletionContract(
 				assert.deepEqual(record.body, ANSWER.body, "the requirement's body is the answer's");
 				assert.equal(signedIn(req), false, "an interrupted login is signed in");
 				assert.equal(cookieClaim({ session: session.lastSaved }).authenticated, false);
+				if (csrfCookieName !== undefined) {
+					assert.equal(
+						tokensSet(record),
+						1,
+						`the 403 carries no fresh token in ${csrfCookieName}: the page cannot post on the regenerated session`,
+					);
+				}
 			},
 		},
 		{
@@ -389,6 +471,7 @@ export function loginCompletionContract(
 						(record.body as { readonly error?: unknown } | undefined)?.error,
 						"temporarily_unavailable",
 					);
+					assert.equal(tokensSet(record), 0, `the ${step} failure's 503 carries a fresh token`);
 					assert.equal(signedIn(req), false);
 				}
 			},
@@ -403,6 +486,8 @@ export interface RecordingLoginCompletion extends LoginCompletion {
 	readonly establishments: readonly Establishment[];
 	/** Every interruption core answered that `answerInterruption` was handed, oldest first. */
 	readonly interruptions: readonly InterruptAdmission[];
+	/** The session records it holds: one per login established, none for one rolled back. */
+	readonly records: number;
 	/** From now on, `establishSession` answers the session store's outage at `create` and writes nothing. */
 	failSessionStore(error: unknown): void;
 	/** Answer again. */
@@ -444,18 +529,28 @@ const UNAVAILABLE = Object.freeze({
 	error_description: "The login could not be completed. Try again.",
 });
 
+export interface RecordingLoginCompletionOptions {
+	/** The deployment's CSRF guard: `answerInterruption` issues the `403`'s fresh token through it. */
+	readonly csrfGuard?: CsrfGuard;
+}
+
 /**
  * A `LoginCompletion` that keeps the contract over the express session it
- * is handed, without a session record of its own: `establishSession`
- * regenerates the session, writes the signed-in state and saves it,
- * answering a made-up `sid`; `answerInterruption` regenerates, opens the
- * ceremony on the new id, saves and answers the requirement's `403`.
+ * is handed: `establishSession` counts a session record, regenerates the
+ * session, writes the signed-in state and saves it, answering a made-up
+ * `sid` — a failure after the record is counted rolls it back;
+ * `answerInterruption` regenerates, opens the ceremony on the new id,
+ * saves and answers the requirement's `403`, with a fresh token from
+ * `options.csrfGuard` when it is given one.
  */
-export function createRecordingLoginCompletion(): RecordingLoginCompletion {
+export function createRecordingLoginCompletion(
+	options: RecordingLoginCompletionOptions = {},
+): RecordingLoginCompletion {
 	let established: readonly Establishment[] = Object.freeze([]);
 	let interrupted: readonly InterruptAdmission[] = Object.freeze([]);
 	let storeFailure: { readonly error: unknown } | undefined;
 	let records = 0;
+	let made = 0;
 
 	return {
 		get establishments() {
@@ -463,6 +558,9 @@ export function createRecordingLoginCompletion(): RecordingLoginCompletion {
 		},
 		get interruptions() {
 			return interrupted;
+		},
+		get records() {
+			return records;
 		},
 		failSessionStore(error: unknown): void {
 			storeFailure = { error };
@@ -478,16 +576,18 @@ export function createRecordingLoginCompletion(): RecordingLoginCompletion {
 			}
 			established = Object.freeze([...established, establishment]);
 			const { subject: sub, user, redirectTo } = establishment.primary;
-			records++;
-			const sid = `recording-sid-${records}`;
+			made++;
+			const sid = `recording-sid-${made}`;
 			const report = reporter({ sid, sub });
 			if (storeFailure !== undefined) {
 				report.storeUnavailable("user_session", "create", storeFailure.error);
 				return { outcome: "unavailable", store: "user_session", step: "create" };
 			}
+			records++;
 			const regenerated = await sessionOperation("regenerate", req);
 			if (regenerated.failed) {
 				report.storeUnavailable("cookie_session", "regenerate", regenerated.cause);
+				records--;
 				abandon(req);
 				return { outcome: "unavailable", store: "cookie_session", step: "regenerate" };
 			}
@@ -499,6 +599,7 @@ export function createRecordingLoginCompletion(): RecordingLoginCompletion {
 			const saved = await sessionOperation("save", req);
 			if (saved.failed) {
 				report.storeUnavailable("cookie_session", "save", saved.cause);
+				records--;
 				abandon(req);
 				return { outcome: "unavailable", store: "cookie_session", step: "save" };
 			}
@@ -531,6 +632,7 @@ export function createRecordingLoginCompletion(): RecordingLoginCompletion {
 			}
 			const saved = await sessionOperation("save", req);
 			if (saved.failed) return unavailable("cookie_session", "save", saved.cause);
+			options.csrfGuard?.issue(res);
 			res.status(answer.status).json(answer.body);
 			return { outcome: "answered" };
 		},

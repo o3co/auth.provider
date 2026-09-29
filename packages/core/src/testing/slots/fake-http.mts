@@ -22,9 +22,10 @@
  * and an express session — `session` with `regenerate` and `save` as
  * express-session has them, and `sessionID` — whose regenerations and saves
  * are counted. A response records `status`, `json` / `send` / `end`, the
- * headers `set` / `setHeader` / `header` wrote, and each `cookie` it was
- * given. A component that needs more of Express than this is outside the
- * contracts. Not on the testing entry.
+ * headers `set` / `setHeader` / `header` / `append` / `vary` / `type`
+ * wrote, `sendStatus`, each `cookie` it was given and each `clearCookie`. A
+ * component that needs more of Express than this is outside the contracts.
+ * Not on the testing entry.
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
@@ -148,6 +149,8 @@ export interface FakeResponseRecord {
 		readonly value: string;
 		readonly options: Readonly<Record<string, unknown>> | undefined;
 	}>;
+	/** The names `clearCookie` was called with, in order. */
+	readonly cleared: string[];
 }
 
 export function fakeResponse(): { readonly res: Response; readonly record: FakeResponseRecord } {
@@ -157,6 +160,13 @@ export function fakeResponse(): { readonly res: Response; readonly record: FakeR
 		ended: false,
 		headers: {},
 		cookies: [],
+		cleared: [],
+	};
+	/** Adds `value` to a header that may already carry some, comma-separated as Express appends. */
+	const appendHeader = (name: string, value: unknown): void => {
+		const key = name.toLowerCase();
+		const current = record.headers[key];
+		record.headers[key] = current === undefined ? String(value) : `${current}, ${String(value)}`;
 	};
 	const res = {
 		statusCode: 200,
@@ -208,6 +218,26 @@ export function fakeResponse(): { readonly res: Response; readonly record: FakeR
 				options: options === undefined ? undefined : Object.freeze({ ...options }),
 			});
 			return res;
+		},
+		clearCookie(name: string, _options?: Record<string, unknown>) {
+			record.cleared.push(name);
+			return res;
+		},
+		append(name: string, value: unknown) {
+			appendHeader(name, value);
+			return res;
+		},
+		vary(field: string) {
+			appendHeader("vary", field);
+			return res;
+		},
+		type(value: string) {
+			record.headers["content-type"] = value;
+			return res;
+		},
+		sendStatus(code: number) {
+			res.status(code);
+			return res.send(String(code));
 		},
 	};
 	return { res: res as unknown as Response, record };
