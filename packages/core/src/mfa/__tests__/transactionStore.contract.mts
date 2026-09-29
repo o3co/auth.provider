@@ -15,10 +15,12 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+	getBoundMfaTransaction,
 	MFA_WEEKLY_WINDOW_MS,
 	type MfaLockoutPolicy,
 	type MfaSubjectAttemptReservation,
 	type MfaTransaction,
+	type MfaTransactionBinding,
 	type MfaTransactionStore,
 } from "#/mfa/transactionStore.mjs";
 
@@ -75,12 +77,20 @@ const POLICY: MfaLockoutPolicy = {
 	trustedBrowserDays: 30,
 };
 
+/**
+ * The session a transaction is bound to: an express session id as
+ * express-session mints one — 32 characters of base64url, mixed case, with
+ * `-` and `_` — so a store that folds case, trims or re-encodes the id fails
+ * the round-trip.
+ */
+const SESSION_ID = "Qx7-dP_2mZkL9vRt3YbN8cW-4sHj_E1a";
+
 const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 	const now = Date.now();
 	return {
 		id: "tx-1",
 		purpose: "login",
-		sessionId: "express-session-1",
+		binding: { kind: "session", id: SESSION_ID },
 		subject: "user-1",
 		sid: undefined,
 		continuation: {
@@ -182,6 +192,44 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("never")).toBeNull();
 		});
 
+		it("keeps the binding whole: a transaction is not readable through a binding of another kind or id", async () => {
+			const store = await factory();
+			const tx = TX();
+			await store.create(tx);
+			const bound: MfaTransactionBinding = { kind: "session", id: SESSION_ID };
+			expect((await store.get("tx-1"))?.binding).toStrictEqual(bound);
+			expect(await getBoundMfaTransaction(store, "tx-1", bound)).toStrictEqual(tx);
+			const others: [string, unknown][] = [
+				["another id", { kind: "session", id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b" }],
+				["another kind, the same id", { kind: "client", id: SESSION_ID }],
+				["the id case-folded", { kind: "session", id: SESSION_ID.toLowerCase() }],
+				["the id padded", { kind: "session", id: ` ${SESSION_ID} ` }],
+				["the id and more", { kind: "session", id: `${SESSION_ID}x` }],
+				["a prefix of the id", { kind: "session", id: SESSION_ID.slice(0, -1) }],
+				["the id alone, as a bare session id", SESSION_ID],
+				["the id without a kind", { id: SESSION_ID }],
+				["nothing", undefined],
+			];
+			for (const [name, other] of others) {
+				expect(
+					await getBoundMfaTransaction(store, "tx-1", other as MfaTransactionBinding),
+					name,
+				).toBeNull();
+			}
+			// A read through another binding changes nothing.
+			expect(await store.get("tx-1")).toStrictEqual(tx);
+			expect(await getBoundMfaTransaction(store, "never", bound)).toBeNull();
+		});
+
+		it("keeps a binding to its known fields", async () => {
+			const store = await factory();
+			await store.create(TX({ binding: { kind: "session", id: SESSION_ID, note: "x" } as never }));
+			expect((await store.get("tx-1"))?.binding).toStrictEqual({
+				kind: "session",
+				id: SESSION_ID,
+			});
+		});
+
 		it("lets exactly one of N concurrent creates of one id through", async () => {
 			// Ten transactions every record rule admits — step-ups, so no
 			// continuation ties the subject — under one id: only the store's
@@ -194,7 +242,7 @@ export function runMfaTransactionStoreContract(
 					continuation: undefined,
 					redirectTo: undefined,
 					subject: `user-${i}`,
-					sessionId: `express-session-${i}`,
+					binding: { kind: "session", id: `express-session-${i}` },
 				}),
 			);
 			const results = await Promise.allSettled(racing.map((tx) => store.create(tx)));
@@ -256,7 +304,22 @@ export function runMfaTransactionStoreContract(
 				["lastSentAtMs NaN", { lastSentAtMs: Number.NaN }],
 				["lastSentAtMs text", { lastSentAtMs: "5" }],
 				["id not a string", { id: 7 }],
-				["sessionId not a string", { sessionId: null }],
+				["binding missing", { binding: undefined }],
+				["binding a bare session id", { binding: SESSION_ID }],
+				["binding a list", { binding: ["session", SESSION_ID] }],
+				["binding of a kind it does not know", { binding: { kind: "client", id: "c-1" } }],
+				["binding without a kind", { binding: { id: SESSION_ID } }],
+				["binding whose id is not a string", { binding: { kind: "session", id: 7 } }],
+				["binding whose id is empty", { binding: { kind: "session", id: "" } }],
+				[
+					"binding whose id holds a lone high surrogate",
+					{ binding: { kind: "session", id: "s\uD800" } },
+				],
+				[
+					"binding whose id holds a lone low surrogate",
+					{ binding: { kind: "session", id: "s\uDC00" } },
+				],
+				["binding whose id ends in half a pair", { binding: { kind: "session", id: "s\uDBFF" } }],
 				["subject not a string", { subject: {} }],
 				["sid not a string", { sid: 7 }],
 				["redirectTo not a string", { redirectTo: ["/"] }],
@@ -545,7 +608,7 @@ export function runMfaTransactionStoreContract(
 				purpose: "enroll",
 				attempts: 0,
 				version: 99,
-				sessionId: "attacker-session",
+				binding: { kind: "session", id: "attacker-session" },
 				subject: "user-2",
 				sid: "sid-other",
 				user: { id: "user-2" },

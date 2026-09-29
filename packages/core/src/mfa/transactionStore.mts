@@ -20,7 +20,8 @@
  * `mfaTransactionStore` slot.
  *
  * A transaction is the short-lived, single-use record of one second-factor
- * ceremony, bound to the browser session that started it. Every operation a
+ * ceremony, bound to what started it — a browser session, today — through a
+ * typed binding every use compares whole (#742). Every operation a
  * race could split is atomic in the store: attempts are reserved before a
  * proof is checked, a challenge is taken once, and of the verifications in
  * flight one consumes the transaction.
@@ -48,16 +49,38 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { isStorableLifetime } from "../adapters/expiry.mjs";
+import { constantTimeStringEqual } from "../security/timingSafe.mjs";
 import { checkPrimaryContinuation } from "../session-admission/primary.mjs";
 import type { PrimaryContinuation } from "../session-admission/requirement.mjs";
+
+/**
+ * A transaction bound to a browser session: `id` is the express session id
+ * the login route regenerated, or the one a step-up or an enrollment began
+ * in.
+ */
+export interface MfaSessionBinding {
+	readonly kind: "session";
+	readonly id: string;
+}
+
+/**
+ * What a transaction is bound to (#742): the one party that may continue its
+ * ceremony. A union discriminated by `kind` — a browser session alone today;
+ * a transport without a browser adds its own kinds (a key, a client) — which
+ * a store keeps whole, as data, reading neither its kind nor its id. Every
+ * use compares the whole binding, kind included
+ * ({@link isMfaTransactionBoundTo}): a transaction bound to one party is not
+ * read through another's binding, even one that carries the same id.
+ */
+export type MfaTransactionBinding = MfaSessionBinding;
 
 /** One second-factor ceremony. Every field is a required key: a store that drops one does not compile. */
 export interface MfaTransaction {
 	/** 32 bytes from the CSPRNG, base64url. Never in a URL. */
 	readonly id: string;
 	readonly purpose: "login" | "step_up" | "enroll";
-	/** The express session it is bound to; every use compares it with the request's. */
-	readonly sessionId: string;
+	/** What it is bound to; every use compares the whole binding, kind included, with the request's. */
+	readonly binding: MfaTransactionBinding;
 	readonly subject: string;
 	/** `step_up` / `enroll`: the `UserSession` it upgrades. */
 	readonly sid: string | undefined;
@@ -138,6 +161,36 @@ const isText = (value: unknown): value is string => typeof value === "string";
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * `value` as a binding a transaction admits, copied to its known fields, or
+ * `undefined`: a session binding's `id` is a non-empty, well-formed string —
+ * a lone surrogate is no id, since every one encodes as U+FFFD's bytes and
+ * two different ids would compare alike — and a kind this version does not
+ * know is none. `kind` and `id` are read once, so a getter cannot pass the
+ * check and hand over something else; a read that throws (a getter, a proxy
+ * trap, a revoked proxy) is no binding either.
+ */
+const bindingOf = (value: unknown): MfaTransactionBinding | undefined => {
+	try {
+		if (!isRecord(value)) return undefined;
+		const { kind, id } = value;
+		return kind === "session" && isText(id) && id.length > 0 && id.isWellFormed()
+			? { kind, id }
+			: undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+/** The binding `holder` carries, read once through {@link bindingOf}; `undefined` when reading it throws. */
+const heldBinding = (holder: unknown): MfaTransactionBinding | undefined => {
+	try {
+		return isRecord(holder) ? bindingOf(holder.binding) : undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 /**
  * Each patch field's rule: the value as the store keeps it — sub-objects
@@ -296,9 +349,10 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 	if (tx.attempts !== 0) refuse("attempts must be 0");
 	if (!isCount(tx.version)) refuse("version must be a safe non-negative integer");
 	if (!isCount(tx.sends)) refuse("sends must be a safe non-negative integer");
-	if (!isText(tx.id) || !isText(tx.sessionId) || !isText(tx.subject)) {
-		refuse("id, sessionId and subject must be strings");
-	}
+	if (!isText(tx.id) || !isText(tx.subject)) refuse("id and subject must be strings");
+	const binding =
+		heldBinding(tx) ??
+		refuse('binding must be { kind: "session", id } with id a non-empty, well-formed string');
 	if (tx.purpose !== "login" && tx.purpose !== "step_up" && tx.purpose !== "enroll") {
 		refuse("purpose is not a value it admits");
 	}
@@ -338,7 +392,7 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 	return {
 		id: tx.id,
 		purpose: tx.purpose,
-		sessionId: tx.sessionId,
+		binding,
 		subject: tx.subject,
 		sid: tx.sid,
 		continuation,
@@ -355,6 +409,56 @@ export function newMfaTransactionRecord(tx: MfaTransaction): MfaTransaction {
 		expiresAtMs: tx.expiresAtMs,
 		version: tx.version,
 	};
+}
+
+/**
+ * Whether `tx` is bound to `binding` — the whole binding, kind included (#742):
+ * a binding of another kind never matches, whatever its id, and neither does
+ * one that is not a binding a transaction admits, on either side — an id that
+ * is not a well-formed string among them — nor one whose reading throws. Each
+ * side's kind and id are read once, and the ids compared in constant time.
+ * The one comparison every use of a transaction makes;
+ * {@link getBoundMfaTransaction} reads through it.
+ *
+ * Constant time holds for ids of one length only (`security/timingSafe.mts`'s
+ * contract): the comparison answers early when the lengths differ. For the
+ * session kind the length is public — an express session id is 32 characters,
+ * and the cookie carries it. A kind whose ids vary in length, and whose
+ * length is secret, must compare fixed-length digests instead.
+ */
+export function isMfaTransactionBoundTo(
+	tx: Pick<MfaTransaction, "binding">,
+	binding: MfaTransactionBinding,
+): boolean {
+	const held = heldBinding(tx);
+	const presented = bindingOf(binding);
+	if (held === undefined || presented === undefined) return false;
+	return held.kind === presented.kind && constantTimeStringEqual(held.id, presented.id);
+}
+
+/**
+ * The transaction `id` names when it is bound to `binding`, the whole binding
+ * compared ({@link isMfaTransactionBoundTo}); `null` otherwise. A transaction
+ * bound to anything else is answered as an id the store never held, so a
+ * mismatch says nothing of what exists (the MFA ADR's D8 and D27). A store
+ * that cannot answer rejects, as its `get` does.
+ *
+ * - **It comes first.** Every use of a transaction starts with this read, and
+ *   after it calls only operations that carry the version it read (`update`,
+ *   `takeChallenge`, `consume`) — and `reserveAttempt`, which carries none, only
+ *   once the read held: it deletes the transaction past `max`, so called on an
+ *   id alone it would let anyone holding the id destroy the ceremony.
+ * - **It is necessary, not sufficient.** A `step_up` or `enroll` transaction
+ *   upgrades one `UserSession`: the route also compares `tx.sid` with the
+ *   session's `sid`, outside the binding (the MFA ADR's F2 step 2).
+ */
+export async function getBoundMfaTransaction(
+	store: Pick<MfaTransactionStore, "get">,
+	id: string,
+	binding: MfaTransactionBinding,
+): Promise<MfaTransaction | null> {
+	const tx = await store.get(id);
+	return tx !== null && isMfaTransactionBoundTo(tx, binding) ? tx : null;
 }
 
 /**
