@@ -375,6 +375,21 @@ describe("the step_up member on the wire (/oauth/token)", () => {
 		expect(typeof res.body.error_description).toBe("string");
 	});
 
+	it("carries step_up for a requirement named with any of the error-code characters registration admits — deployment:requirement-page", async () => {
+		const name = "deployment:requirement-page";
+		const app = await buildApp([
+			{
+				...fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" })),
+				name,
+				remediations: [`${name}.step_up`],
+			},
+		]);
+		const res = await mint(app);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_grant");
+		expect(res.body.step_up).toBe(name);
+	});
+
 	const answering = (result: Record<string, unknown>): GrantHandler => ({
 		handle: async () => ({ result: result as unknown as GrantResult }),
 	});

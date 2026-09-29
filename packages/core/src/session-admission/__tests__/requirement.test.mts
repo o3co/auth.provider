@@ -356,6 +356,25 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		).toBeDefined();
 	});
 
+	it("holds a name to RFC 6749's error-code characters, the ones a step_up is sent in — printable ASCII without a quote or a backslash — and accepts any of them", () => {
+		for (const name of [
+			'a "quoted" name',
+			"back\\slash",
+			"tab\there",
+			"new\nline",
+			"del\u007f",
+			"caf\u00e9",
+			"\u{1F512}",
+		]) {
+			expect(() => resolverForTests([requirement(name)]), JSON.stringify(name)).toThrow(
+				/error-code characters/,
+			);
+		}
+		for (const name of ["deployment:requirement-page", "a b", "!#$%&'()*+,-./:;<=>?@[]^_`{|}~"]) {
+			expect(resolverForTests([requirement(name)]).get(name)?.name, name).toBe(name);
+		}
+	});
+
 	it("refuses two requirements of one name, and a requirement that is not one", () => {
 		expect(() => resolverForTests([requirement("a"), requirement("a")])).toThrow(RangeError);
 		for (const bad of [
