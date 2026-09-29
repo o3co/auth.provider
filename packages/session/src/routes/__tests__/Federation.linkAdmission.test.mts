@@ -363,20 +363,27 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 	});
 
 	it.each([
-		["the session store", { record: new Error("session store down") }, "user_session"],
+		[
+			"the session store",
+			{ record: new Error("session store down") },
+			"user_session",
+			"session store unavailable",
+		],
 		[
 			"the revocation boundary",
 			{ subjectRevocation: revocation(new Error("boundary down")) },
 			"revocation_boundary",
+			"revocation store unavailable",
 		],
 		[
 			"a requirement",
 			{ requirement: fixtureRequirement(new Error("requirement down")).requirement },
 			"fixture",
+			"session requirement unavailable",
 		],
-	] satisfies ReadonlyArray<readonly [string, Setup, string]>)(
-		"answers 503 temporarily_unavailable when %s cannot answer, logged once by admission",
-		async (_label, options, store) => {
+	] satisfies ReadonlyArray<readonly [string, Setup, string, string]>)(
+		"answers 503 temporarily_unavailable when %s cannot answer, described by what failed (core's describeAdmissionOutage), logged once by admission",
+		async (_label, options, store, description) => {
 			const logger = spyLogger();
 			const harness = setup({ ...options, logger: logger as unknown as Logger });
 			plant(harness, SIGNED_IN);
@@ -384,7 +391,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 			expect(res.status).toBe(503);
 			expect(res.body).toEqual({
 				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
+				error_description: description,
 			});
 			expect(recordedLink(harness)).toBeUndefined();
 			expect(logger.error).toHaveBeenCalledTimes(1);
@@ -588,27 +595,34 @@ describe("the link callback reads the session the start bound through admission 
 	});
 
 	it.each([
-		["the session store", { record: new Error("session store down") }, "user_session"],
+		[
+			"the session store",
+			{ record: new Error("session store down") },
+			"user_session",
+			"session store unavailable",
+		],
 		[
 			"the revocation boundary",
 			{ subjectRevocation: revocation(new Error("boundary down")) },
 			"revocation_boundary",
+			"revocation store unavailable",
 		],
 		[
 			"a requirement",
 			{ requirement: fixtureRequirement(new Error("requirement down")).requirement },
 			"fixture",
+			"session requirement unavailable",
 		],
-	] satisfies ReadonlyArray<readonly [string, Setup, string]>)(
-		"answers 503 temporarily_unavailable when %s cannot answer, logged once by admission, and asks no Store",
-		async (_label, options, store) => {
+	] satisfies ReadonlyArray<readonly [string, Setup, string, string]>)(
+		"answers 503 temporarily_unavailable when %s cannot answer, described by what failed (core's describeAdmissionOutage), logged once by admission, and asks no Store",
+		async (_label, options, store, description) => {
 			const logger = spyLogger();
 			const harness = setup({ ...options, logger: logger as unknown as Logger });
 			const res = await callback(harness);
 			expect(res.status).toBe(503);
 			expect(res.body).toEqual({
 				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
+				error_description: description,
 			});
 			expect(harness.repo.linkFederatedIdentity).not.toHaveBeenCalled();
 			expect(logger.error).toHaveBeenCalledTimes(1);
