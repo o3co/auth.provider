@@ -121,11 +121,13 @@ export function environmentCoercer<T extends z.ZodType>(schema: T): T {
 }
 
 /**
- * Whether `schema` reads the string an environment variable arrives as, for
- * a value it would otherwise refuse as a string: `false` for a bare
- * `z.boolean()`, a `z.number()` that does not coerce, or a non-string literal
- * — seen through its wrappers, and for a union only when none of its members
- * reads a string. A `z.preprocess` counts only as far as there is evidence:
+ * Whether `schema` reads the string an environment variable arrives as:
+ * `true` for a string, an enum, a template literal, a literal one of whose
+ * values is a string, any, unknown and every `z.coerce.*` scalar (and for the
+ * containers a leaf sits in); `false` for every other type — a plain boolean,
+ * number, bigint or date, null, NaN, a symbol, a custom schema, a type it
+ * does not know — seen through its wrappers, a lazy schema, both sides of an
+ * intersection, and for a union only when none of its members reads a string. A `z.preprocess` counts only as far as there is evidence:
  * one of core's environment coercers (`environmentCoercer`) reads it, and any
  * other is judged by the schema it hands on — its function sees the string
  * first, but may do nothing with it (`z.preprocess((v) => v, z.boolean())`
@@ -142,13 +144,40 @@ export function readsEnvironmentString(schema: z.ZodType): boolean {
 		return readsEnvironmentString(defOf(def.in).type === "transform" ? def.out : def.in);
 	}
 	if (def.type === "union" && def.options) return def.options.some(readsEnvironmentString);
-	if (def.type === "boolean") return false;
-	if (def.type === "number") return def.coerce === true;
+	if (def.type === "intersection" && def.left && def.right) {
+		return readsEnvironmentString(def.left) && readsEnvironmentString(def.right);
+	}
+	if (def.type === "lazy" && def.getter) return readsEnvironmentString(def.getter());
 	// No string equals `true` or `1`: a literal reads the string only if one
 	// of its values is a string.
 	if (def.type === "literal") return literalValues(def).some((value) => typeof value === "string");
-	return true;
+	// A scalar `z.coerce.*` converts the string: a number, a boolean, a
+	// bigint, a date (and a string).
+	if (COERCIBLE.has(def.type)) return def.coerce === true;
+	return READS_A_STRING.has(def.type);
 }
+
+/** The scalar types whose `z.coerce.*` form reads a string, and whose plain form does not. */
+const COERCIBLE: ReadonlySet<string> = new Set(["number", "boolean", "bigint", "date"]);
+
+/**
+ * The types that take the string itself — a string, an enum, a template
+ * literal, any and unknown — and the containers a leaf sits in (an object, a
+ * record, a list), which `unreadableLeaves` walks into rather than reads.
+ * Every other type — null, undefined, void, never, NaN, a symbol, a map, a
+ * set, a tuple, a custom schema, a file, a promise, a function, a type Zod
+ * adds later — does not read one: an unknown type is reported, not trusted.
+ */
+const READS_A_STRING: ReadonlySet<string> = new Set([
+	"string",
+	"enum",
+	"template_literal",
+	"any",
+	"unknown",
+	"object",
+	"record",
+	"array",
+]);
 
 /**
  * The kinds of value `schema` produces — `"boolean"`, `"number"`,
