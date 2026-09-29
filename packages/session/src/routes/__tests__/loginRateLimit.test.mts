@@ -27,6 +27,7 @@ import type {
 	AppConfig,
 	AuditEvent,
 	AuditSink,
+	DeploymentMode,
 	RateLimitDecision,
 	RateLimiter,
 	UserRepository,
@@ -255,26 +256,29 @@ describe("/session/login rate limiting — fallback", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The per-process fallback under the replica guard. Under
-// `deployment.mode = "multi"` with no shared limiter, its buckets would be per
-// replica, so the route refuses to mount; `"single"` is silent, like the
-// guard; unset keeps the warning.
+// The per-process fallback under the replica guard, by the `deploymentMode`
+// slot core fills from `deployment.mode`. Under `"multi"` with no shared
+// limiter, its buckets would be per replica, so the route refuses to mount;
+// `"single"` is silent, like the guard; `"unset"` keeps the warning. The
+// configuration's own `deployment` is not read.
 // ---------------------------------------------------------------------------
 
-describe("/session/login rate limiting — fallback under deployment.mode", () => {
-	const withMode = (mode: "single" | "multi" | undefined): AppConfig =>
-		({
-			...stubConfig,
-			...(mode === undefined ? {} : { deployment: { mode } }),
-		}) as unknown as AppConfig;
+describe("/session/login rate limiting — fallback under the deploymentMode slot", () => {
+	const withDeployment = (mode: "single" | "multi"): AppConfig =>
+		({ ...stubConfig, deployment: { mode } }) as unknown as AppConfig;
 
-	const build = (config: AppConfig, rateLimiter?: RateLimiter) => {
+	const build = (
+		deploymentMode: DeploymentMode,
+		rateLimiter?: RateLimiter,
+		config: AppConfig = stubConfig,
+	) => {
 		const warn = vi.fn();
 		const router = () =>
 			createRouter(express, {
 				userRepository,
 				requirements: resolverForTests([]),
 				config,
+				deploymentMode,
 				...(rateLimiter ? { rateLimiter } : {}),
 				logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
 			});
@@ -282,7 +286,7 @@ describe("/session/login rate limiting — fallback under deployment.mode", () =
 	};
 
 	it('refuses to mount under "multi" with no shared limiter, as a replica-unsafe-adapter BootError naming the route', () => {
-		const { router } = build(withMode("multi"));
+		const { router } = build("multi");
 		expect(router).toThrow(
 			expect.objectContaining({
 				name: "BootError",
@@ -295,7 +299,7 @@ describe("/session/login rate limiting — fallback under deployment.mode", () =
 
 	it('mounts under "multi" when a shared limiter is wired, without warning', () => {
 		const { router, warn } = build(
-			withMode("multi"),
+			"multi",
 			scriptedLimiter(() => ({ allowed: true })),
 		);
 		expect(router).not.toThrow();
@@ -303,14 +307,26 @@ describe("/session/login rate limiting — fallback under deployment.mode", () =
 	});
 
 	it('is silent under "single": the operator has declared one replica', () => {
-		const { router, warn } = build(withMode("single"));
+		const { router, warn } = build("single");
 		expect(router).not.toThrow();
 		expect(warn).not.toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
 	});
 
-	it("keeps the warning when the mode is unset", () => {
-		const { router, warn } = build(withMode(undefined));
+	it('keeps the warning when the mode is "unset"', () => {
+		const { router, warn } = build("unset");
 		expect(router).not.toThrow();
 		expect(warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
+	});
+
+	it("decides by the slot, whatever the configuration's deployment says", () => {
+		expect(build("multi", undefined, withDeployment("single")).router).toThrow(
+			expect.objectContaining({ reason: "replica-unsafe-adapter" }),
+		);
+		const single = build("single", undefined, withDeployment("multi"));
+		expect(single.router).not.toThrow();
+		expect(single.warn).not.toHaveBeenCalled();
+		const unset = build("unset", undefined, withDeployment("multi"));
+		expect(unset.router).not.toThrow();
+		expect(unset.warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
 	});
 });

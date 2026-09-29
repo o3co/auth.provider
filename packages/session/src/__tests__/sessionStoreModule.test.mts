@@ -11,10 +11,12 @@
 
 import {
 	checkReplicaSafety,
+	createApp,
 	type LifecycleRegistrar,
 	type Module,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -326,17 +328,25 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 	// A composition root that wires the static manifest has not told the
 	// stage-1 guard anything, so the route factory — which is where the
 	// storage type is first known for certain — refuses the same combination
-	// with the same reason rather than mounting a per-process store.
+	// with the same reason rather than mounting a per-process store. The mode
+	// is the `deploymentMode` slot core fills from `deployment.mode`; the
+	// configuration's own `deployment` is not read.
 	const factoryOf = (m: unknown) => {
 		const factory = (m as Module).contributes?.routes?.[0];
 		if (typeof factory !== "function") throw new Error("not a factory");
 		return factory;
 	};
 
-	it('refuses memory storage under deployment.mode = "multi"', async () => {
+	it("requires the deploymentMode slot, as the configured module does", () => {
+		expect(sessionStoreModule.requires).toContain("deploymentMode");
+		expect(sessionStoreModuleFor(memoryConfig as never).requires).toContain("deploymentMode");
+	});
+
+	it('refuses memory storage when the slot says "multi"', async () => {
 		await expect(
 			factoryOf(sessionStoreModule)({
-				config: { ...memoryConfig, deployment: { mode: "multi" } } as never,
+				config: memoryConfig as never,
+				deploymentMode: "multi",
 				lifecycleRegistrar: undefined,
 			} as never),
 		).rejects.toMatchObject({
@@ -346,21 +356,75 @@ describe("sessionStoreModule (static manifest) — factory-time refusal under mu
 		});
 	});
 
-	it('mounts memory storage under deployment.mode = "single" and when the mode is unset', async () => {
-		for (const deployment of [{ mode: "single" }, undefined]) {
+	it('mounts memory storage when the slot says "single" or "unset"', async () => {
+		for (const deploymentMode of ["single", "unset"] as const) {
 			const route = await factoryOf(sessionStoreModule)({
-				config: { ...memoryConfig, ...(deployment ? { deployment } : {}) } as never,
+				config: memoryConfig as never,
+				deploymentMode,
 				lifecycleRegistrar: undefined,
 			} as never);
 			expect(route.id).toBe("session-middleware");
 		}
 	});
 
-	it('mounts redis storage under deployment.mode = "multi"', async () => {
+	it('mounts redis storage when the slot says "multi"', async () => {
 		const route = await factoryOf(sessionStoreModule)({
-			config: { ...redisConfig, deployment: { mode: "multi" } } as never,
+			config: redisConfig as never,
+			deploymentMode: "multi",
 			lifecycleRegistrar: undefined,
 		} as never);
 		expect(route.id).toBe("session-middleware");
 	});
+
+	it("decides by the slot, whatever the configuration's deployment says", async () => {
+		await expect(
+			factoryOf(sessionStoreModule)({
+				config: { ...memoryConfig, deployment: { mode: "single" } } as never,
+				deploymentMode: "multi",
+				lifecycleRegistrar: undefined,
+			} as never),
+		).rejects.toMatchObject({ reason: "replica-unsafe-adapter" });
+		const route = await factoryOf(sessionStoreModule)({
+			config: { ...memoryConfig, deployment: { mode: "multi" } } as never,
+			deploymentMode: "single",
+			lifecycleRegistrar: undefined,
+		} as never);
+		expect(route.id).toBe("session-middleware");
+	});
+
+	it.each([
+		["deployment.mode = multi", { mode: "multi" }, "refused"],
+		["deployment.mode = single", { mode: "single" }, "mounted"],
+		["an empty deployment section", {}, "mounted"],
+		["no deployment section", undefined, "mounted"],
+	] as const)(
+		"through createApp, decides %s for memory storage as it did when it read the configuration",
+		async (_what, deployment, outcome) => {
+			const base = makeValidAppConfig();
+			const boot = createApp({
+				modules: [sessionStoreModule],
+				bootstrapComponents: {
+					config: {
+						...base,
+						session: { ...base.session, storage: { type: "memory" } },
+						...(deployment === undefined ? {} : { deployment }),
+					},
+					pathResolver: (p: string) => p,
+				} as never,
+			});
+			if (outcome === "refused") {
+				await expect(boot).rejects.toMatchObject({
+					reason: "contribute-factory-failed",
+					cause: { reason: "replica-unsafe-adapter", details: { modules: ["session-store"] } },
+				});
+				return;
+			}
+			const handle = await boot;
+			try {
+				expect(handle.routes.map((r) => r.contribution.id)).toContain("session-middleware");
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });

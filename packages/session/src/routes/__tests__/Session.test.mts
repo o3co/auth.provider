@@ -16,6 +16,7 @@
 
 import type {
 	AppConfig,
+	DeploymentMode,
 	FederationTokenStore,
 	Logger,
 	SessionFederationIndex,
@@ -155,6 +156,8 @@ function buildApp(
 		destroyError?: Error;
 		saveError?: Error;
 		config?: AppConfig;
+		/** The `deploymentMode` slot's value; `unset` warns about the per-process login limiter. */
+		deploymentMode?: DeploymentMode;
 	} = {},
 ) {
 	const {
@@ -177,6 +180,7 @@ function buildApp(
 		destroyError,
 		saveError,
 		config = stubConfig,
+		deploymentMode = "unset",
 	} = opts;
 
 	const app = express();
@@ -226,6 +230,7 @@ function buildApp(
 	const router = createRouter(express, {
 		userRepository,
 		config,
+		deploymentMode,
 		requirements: resolverForTests([]),
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(subjectSessionIndex !== undefined ? { subjectSessionIndex } : {}),
@@ -1271,7 +1276,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 
 	// One replica, so the router's construction-time notice about its
 	// per-process login limiter is not among the lines a test counts.
-	const config = { ...stubConfig, deployment: { mode: "single" } } as unknown as AppConfig;
+	const deploymentMode = "single";
 
 	const login = (app: express.Express) =>
 		loginRequest(app)
@@ -1286,7 +1291,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await login(app);
@@ -1315,7 +1320,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 				delete: vi.fn(),
 			} as unknown as UserSessionStore,
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await login(app);
@@ -1345,7 +1350,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			userSessionStore: store,
 			regenerateError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await login(app);
@@ -1378,7 +1383,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			}),
 			regenerateError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await login(app);
@@ -1408,7 +1413,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			userSessionStore: store,
 			saveError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
-			config,
+			deploymentMode,
 		});
 
 		const res = await login(app);
