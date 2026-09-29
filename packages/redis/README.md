@@ -667,7 +667,9 @@ so it has the in-process store's shape; one that does not read back is
 answered as absent, and the ceremony starts again. So is one at or past its
 `expiresAtMs` on the store's own clock (`now`, `Date.now` by default), by every
 operation — `reserveAttempt` and `takeChallenge` in their scripts, which are
-handed that clock and spend or take nothing then: the key expires on the
+handed that clock, read the deadline from a hash field of its own (never
+decoding the record, which `cjson` reads more narrowly than `JSON.parse`), and
+spend or take nothing then: the key expires on the
 server's clock, and a server running behind must not let a ceremony spend an
 attempt, take a challenge or complete past its deadline. The record travels as JSON,
 as the session envelope's `claims` and the cookie session's `user` do, so a

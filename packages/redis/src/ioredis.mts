@@ -2756,21 +2756,25 @@ return redis.call('HGETALL', KEYS[1])
  * Shared by the two operations that decide on a live transaction inside a
  * script — `reserveAttempt` and `takeChallenge` — whose caller's clock has
  * to reach the script: whether the transaction at `key` is gone at `now`,
- * as a read (`transactionOf`) judges it — at or past the `expiresAtMs` its
- * `record` holds, or holding none that decodes to a number. `cjson` reads
- * that number as the double `JSON.parse` does, so both sides judge the same
- * instant alike, to the fraction of a millisecond. Nothing here deletes:
- * the key stays until its deadline on the server's clock, so a caller whose
- * clock runs ahead is told the transaction is gone and costs no other caller
- * the transaction — as `fg_visible` treats a federation grant.
+ * as a read (`transactionOf`) judges it — at or past its `expiresAtMs`, or
+ * holding none that is a finite number. The deadline is read from the hash
+ * field `create` writes it to, as text: `tonumber` reads the text `String`
+ * wrote as the same double, so both sides judge one instant alike, to the
+ * fraction of a millisecond. The `record` is never decoded here: `cjson`
+ * refuses a lone-surrogate escape and nesting past a thousand levels, both
+ * of which `JSON.parse` reads, and a transaction every read answers live
+ * would be refused for its whole life. Nothing here deletes: the key stays
+ * until its deadline on the server's clock, so a caller whose clock runs
+ * ahead is told the transaction is gone and costs no other caller the
+ * transaction — as `fg_visible` treats a federation grant.
  */
 const LUA_MFA_TX_PRELUDE = `
 local function mfa_tx_gone(key, now)
-  local text = redis.call('HGET', key, 'record')
-  if not text then return true end
-  local ok, fixed = pcall(cjson.decode, text)
-  if not ok or type(fixed) ~= 'table' or type(fixed['expiresAtMs']) ~= 'number' then return true end
-  return not (now < fixed['expiresAtMs'])
+  local deadline = tonumber(redis.call('HGET', key, 'expiresAtMs'))
+  if deadline == nil or deadline ~= deadline or deadline == math.huge or deadline == -math.huge then
+    return true
+  end
+  return not (now < deadline)
 end
 `;
 

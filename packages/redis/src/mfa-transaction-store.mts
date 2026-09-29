@@ -123,6 +123,12 @@ function fieldsOf(record: MfaTransaction, incarnation: string): Record<string, s
 		sends: String(record.sends),
 		enrollment: record.enrollment,
 		emailProof: JSON.stringify(record.emailProof),
+		// The deadline again, on its own, as the text the reservation and take
+		// scripts read with `tonumber`: they never decode `record`, since
+		// `cjson` refuses what `JSON.parse` accepts (a lone-surrogate escape,
+		// nesting past a thousand levels). `String` of a number reads back as
+		// the same double.
+		expiresAtMs: String(record.expiresAtMs),
 		// What never changes after `create`, as one JSON document; absent is null.
 		record: JSON.stringify({
 			purpose: record.purpose,

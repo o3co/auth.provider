@@ -225,6 +225,27 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 		expect(await onTime.get("tx-1")).toMatchObject({ attempts: 0, challenge: CHALLENGE });
 	});
 
+	it("answers a reservation and a take on a transaction whose deadline field is missing or no finite number as absent, spending and taking nothing", async () => {
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
+		for (const value of [undefined, "", "soon", "inf", "-inf", "nan", "1e999"]) {
+			await first().del(key);
+			await store.create(TX({ challenge: CHALLENGE }));
+			if (value === undefined) await first().hdel(key, "expiresAtMs");
+			else await first().hset(key, "expiresAtMs", value);
+			expect(await store.reserveAttempt("tx-1", 5), String(value)).toEqual({
+				ok: false,
+				attempts: 0,
+			});
+			expect(await store.takeChallenge("tx-1", 1), String(value)).toBeNull();
+			expect(await first().hmget(key, "attempts", "challenge"), String(value)).toEqual([
+				"0",
+				JSON.stringify(CHALLENGE),
+			]);
+		}
+	});
+
 	it("spends an attempt on, and takes the challenge of, a login whose continuation nests deeper than cjson decodes: the scripts judge the deadline without decoding the record", async () => {
 		// JSON.parse reads a thousand-and-more levels; Redis's cjson refuses
 		// past a thousand. What a read answers live, the scripts must too.
