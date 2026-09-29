@@ -606,10 +606,12 @@ export const createRouter = (
 		// the two are one; a "form_post" callback is a cross-site POST that the
 		// application session cookie (SameSite=Lax) does not accompany, so
 		// `req.session` is a fresh one there and the recorded sid is the only
-		// binding. A request that does carry an authenticated session must be
-		// that same one: switching accounts in between links nothing.
+		// binding. A request that does carry an authenticated session — read as
+		// every reader reads the cookie, its claim — must be that same one:
+		// switching accounts in between links nothing.
 		const currentSid = link.sid;
-		if (req.session.isAuthenticated === true && req.session.sid !== currentSid) {
+		const cookie = cookieClaim(req);
+		if (cookie.authenticated && cookie.sid !== currentSid) {
 			return res.status(401).json({
 				error: "login_required",
 				error_description: "The link was started from a different session",
