@@ -26,9 +26,10 @@ const TEMPLATES_ROOT = resolve(__dirname, "../templates");
 export const DEFAULT_TEMPLATE = "standalone";
 
 /**
- * The templates under `templatesRoot`: every directory holding a
- * `package.json`, sorted. `copy-templates.mjs` puts every template of the
- * repository there, beside `versions.json`, which is not one. A name is only
+ * The templates under `templatesRoot`: every directory — not a symbolic link,
+ * not dot-named — holding a `package.json`, sorted; none when the directory is
+ * missing. This is the rule `scripts/templates.mjs` copies templates by, read
+ * here from the copy, where `versions.json` sits beside them. A name is only
  * ever looked up in this list, so nothing outside the templates directory can
  * be named as a template.
  */
@@ -37,10 +38,30 @@ export const availableTemplates = (templatesRoot: string = TEMPLATES_ROOT): stri
 	return readdirSync(templatesRoot, { withFileTypes: true })
 		.filter(
 			(entry) =>
-				entry.isDirectory() && existsSync(resolve(templatesRoot, entry.name, "package.json")),
+				entry.isDirectory() &&
+				!entry.name.startsWith(".") &&
+				existsSync(resolve(templatesRoot, entry.name, "package.json")),
 		)
 		.map((entry) => entry.name)
 		.sort();
+};
+
+/**
+ * Why `template` cannot be scaffolded from `templates`, or `undefined` when it
+ * can: none is bundled (a checkout that never ran the prebuild script), or it
+ * is not one of them.
+ */
+export const templateRefusal = (
+	template: string,
+	templates: readonly string[],
+): string | undefined => {
+	if (templates.length === 0) {
+		return `No templates found at ${TEMPLATES_ROOT}. If developing locally, run the prebuild script first.`;
+	}
+	if (!templates.includes(template)) {
+		return `Unknown template '${template}'. Available templates: ${templates.join(", ")}.`;
+	}
+	return undefined;
 };
 
 const getPackageVersions = (): Record<string, string> => {
@@ -72,17 +93,8 @@ export const scaffold = (
 	projectName: string,
 	template: string = DEFAULT_TEMPLATE,
 ): void => {
-	const templates = availableTemplates();
-	if (templates.length === 0) {
-		throw new Error(
-			`No templates found at ${TEMPLATES_ROOT}. If developing locally, run the prebuild script first.`,
-		);
-	}
-	if (!templates.includes(template)) {
-		throw new Error(
-			`Unknown template '${template}'. Available templates: ${templates.join(", ")}.`,
-		);
-	}
+	const refusal = templateRefusal(template, availableTemplates());
+	if (refusal !== undefined) throw new Error(refusal);
 	const templateDir = resolve(TEMPLATES_ROOT, template);
 
 	// Copy template to target
@@ -237,6 +249,7 @@ const parseArgs = (args: string[]): ParsedArgs => {
 
 	const setValue = (flag: ValueFlag, value: string): void => {
 		if (values.has(flag)) throw new Error(`${flag} specified more than once`);
+		if (value === "") throw new Error(`${flag} requires a value`);
 		values.set(flag, value);
 	};
 
@@ -310,13 +323,6 @@ export const main = (): void => {
 	const { projectName, dir, lockfile } = parsed;
 	const template = parsed.template ?? DEFAULT_TEMPLATE;
 
-	if (!availableTemplates().includes(template)) {
-		console.error(
-			`Error: Unknown template '${template}'. Available templates: ${availableTemplates().join(", ")}.`,
-		);
-		process.exit(1);
-	}
-
 	if (!isValidProjectName(projectName)) {
 		console.error(
 			"Error: <project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped; max 214 chars; no backslashes; no extra '/' beyond the single scope separator).",
@@ -328,6 +334,12 @@ export const main = (): void => {
 		console.error(
 			"Error: --dir must be a valid unscoped package name (no '/', '\\', '@'; not '.' or '..'; max 214 chars).",
 		);
+		process.exit(1);
+	}
+
+	const refusal = templateRefusal(template, availableTemplates());
+	if (refusal !== undefined) {
+		console.error(`Error: ${refusal}`);
 		process.exit(1);
 	}
 

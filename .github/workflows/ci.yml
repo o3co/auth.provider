@@ -652,18 +652,20 @@ jobs:
       - name: Build and test every template against packed tarballs
         run: |
           set -euo pipefail
-          # Every directory under templates/ with a package.json is a template:
-          # the set create-app's copy-templates.mjs ships and scaffolds from.
-          # Each one is built and tested here the way a scaffold of it is.
-          TEMPLATES=()
-          for dir in templates/*/; do
-            if [ -f "${dir}package.json" ]; then TEMPLATES+=("$(basename "$dir")"); fi
-          done
+          # The templates are what create-app's scripts/templates.mjs says they
+          # are — the rule the package is built by — so this builds and tests
+          # exactly the set that ships, each the way a scaffold of it runs. It
+          # refuses a templates/ holding none, or a misnamed one.
+          LIST=$(node --input-type=module -e 'const { listTemplates } = await import("./create-app/scripts/templates.mjs"); console.log(listTemplates("templates").join(" "));')
+          read -r -a TEMPLATES <<< "$LIST"
           if [ "${#TEMPLATES[@]}" -eq 0 ]; then
             echo "::error::no template under templates/"
             exit 1
           fi
           SCRATCH=$(mktemp -d)
+          # A failure inside a template's group closes it, so the error is not
+          # folded away under that template's collapsed log.
+          trap 'echo "::endgroup::"' ERR
           for name in "${TEMPLATES[@]}"; do
             echo "::group::templates/$name"
             cp -R "templates/$name" "$SCRATCH/$name"
@@ -767,6 +769,7 @@ jobs:
           if (!bcrypt.compareSync("probe", bcrypt.hashSync("probe", 4))) process.exit(1);
           console.log("bcrypt loads on", process.version, process.platform, process.arch);
           EOF
+          trap 'echo "::endgroup::"' ERR
           for name in $TEMPLATES; do
             echo "::group::templates/$name"
             docker build --target node-base -t "scaffold-node-base-$name" "templates/$name"
