@@ -274,11 +274,14 @@ Module-level messages that arrive wrapped in a factory failure:
   it; the package's settings, each a `RangeError` `cause` naming its key — the
   key ring and the development sample key as `packages/mfa/README.md` lists
   them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
-  `mfa.maxAttemptsPerTransaction` not a positive whole number, and an
+  `mfa.maxAttemptsPerTransaction` outside 1 to 10, and an
   `mfa.lockout` core's `checkMfaLockoutPolicy` refuses (`mfa.lockout.threshold
   must be at most mfa.lockout.hardLimit`, …); `endpoints.mfa.url is not set`
   (`ENDPOINTS_MFA_URL`, `/mfa` in core's reference.conf), the page a step-up
   starts on; and, from its routes' factory once every factor has registered,
+  `the MFA factor of kind "<kind>" cannot be offered` — an enabled factor
+  whose kind is not a hint core admits (`^[a-z][a-z0-9_-]{0,63}$`), which a
+  first binding's answer would list: contribute it under such a kind — and
   an `MfaNoCountingFactorError` `cause` whose `reason` is
   `mfa-no-counting-factor` — `mfa.mode = "required"` with no counting factor
   enabled, which nobody could meet: turn one on (`mfa.factors.totp.enabled`,
