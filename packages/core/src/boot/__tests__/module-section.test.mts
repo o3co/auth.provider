@@ -15,7 +15,7 @@
  */
 
 /**
- * A module's own configuration section, delivered by boot (#728): the
+ * A module's own configuration section, delivered by boot: the
  * manifest's `section.schema` parses the value at `section.at` (the module's
  * name when unset) out of the configuration boot already has, and every
  * factory of the module — `provides`, name-keyed and list-shaped
@@ -339,7 +339,7 @@ describe("a module without a section", () => {
 describe("a module's section — read from the parsed configuration", () => {
 	it("sees what core's schema made of the path: coerced, with the keys core does not declare kept", async () => {
 		// The choice pinned: the section is read out of the composed parse's
-		// output — core's schema laid over what was written (#728). Under a
+		// output — core's schema laid over what was written. Under a
 		// parent core's schema declares, a value core coerces arrives coerced —
 		// so a section read raw would refuse `port: "3000"` — and a key core
 		// does not declare is still there.

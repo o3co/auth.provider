@@ -15,7 +15,7 @@
  */
 
 /**
- * `assertRelocationTombstone` (#728): a tombstone — an old path's
+ * `assertRelocationTombstone`: a tombstone — an old path's
  * `${?VARIABLE}` binding a `reference.conf` keeps after the path moved, so a
  * variable an operator still exports is refused rather than ignored — is for a
  * variable whose name changed with the path. One whose name is what the new

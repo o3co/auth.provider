@@ -42,7 +42,7 @@ export type UserEntry = z.infer<typeof UserEntrySchema>;
 export class InMemoryUserRepository implements UserRepository {
 	private users: Map<string, UserEntry>;
 	/**
-	 * #482: identities linked at runtime, token → username. In memory only —
+	 * Identities linked at runtime, token → username. In memory only —
 	 * a restart forgets them. This repository is the development and test
 	 * adapter; a deployment's Store persists its own links.
 	 */
@@ -99,7 +99,7 @@ export class InMemoryUserRepository implements UserRepository {
 		return null;
 	}
 	/**
-	 * #611 — see {@link UserRepository.supportsFederatedIdentityLookup}. No
+	 * See {@link UserRepository.supportsFederatedIdentityLookup}. No
 	 * registration: this repository keys links by federation name and `sub`,
 	 * and knows neither which registration a name is nor which other
 	 * registrations of an IdP a person signed in through. A deployment that
@@ -114,7 +114,7 @@ export class InMemoryUserRepository implements UserRepository {
 	}
 
 	/**
-	 * #593, #611 — see {@link UserRepository.findSubjectByFederatedIdentity}.
+	 * See {@link UserRepository.findSubjectByFederatedIdentity}.
 	 * Always `indeterminate`, including where a name-and-`sub` entry matches: a
 	 * hit under one registration does not show that no link under another names
 	 * somebody else, and a miss does not show that nobody holds the person.
@@ -125,7 +125,7 @@ export class InMemoryUserRepository implements UserRepository {
 		return { kind: "indeterminate", reason: "registration_not_covered" };
 	}
 
-	/** #482 — see {@link UserRepository.linkFederatedIdentity}. In memory only. */
+	/** See {@link UserRepository.linkFederatedIdentity}. In memory only. */
 	async linkFederatedIdentity(
 		userId: string,
 		identity: FederatedIdentityLink,

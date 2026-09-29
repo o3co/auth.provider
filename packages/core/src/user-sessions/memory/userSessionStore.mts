@@ -36,7 +36,7 @@ interface Stored {
 	createdAt: Date;
 	expiresAt: Date;
 	claims: Record<string, unknown>;
-	/** A required key, as on the session (#626): the copy into a record names it. */
+	/** A required key, as on the session: the copy into a record names it. */
 	amr: readonly string[] | undefined;
 	/** The MFA ADR's D9; a required key, as on the session. Kept as a copy that shares nothing. */
 	authentication: SessionAuthentication | undefined;
@@ -74,8 +74,6 @@ const toSession = (s: Stored): UserSession => ({
  * `Map.get/set/delete` are synchronous, and `recordSecondFactor` reads,
  * computes and writes with no `await` between, so two recorded at once apply
  * one after the other.
- *
- * Per A4 §5.1 + §7.1 (lines 469-505).
  */
 export function createInMemoryUserSessionStore(): UserSessionStore & SupportsSecondFactorUpdate {
 	const sessions = new Map<string, Stored>();

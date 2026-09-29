@@ -52,7 +52,7 @@ describe("federation response mode", () => {
 	});
 
 	it("treats an unknown declared mode as the default rather than trusting it", () => {
-		// The adapter boundary is untyped at runtime (A2 adapter contract): a
+		// The adapter boundary is untyped at runtime: a
 		// provider compiled against an older/newer contract must not be able to
 		// push an unrecognised token into the authorization request.
 		expect(resolveFederationResponseMode(makeProvider({ responseMode: "fragment" } as never))).toBe(

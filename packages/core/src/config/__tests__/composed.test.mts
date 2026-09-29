@@ -15,7 +15,7 @@
  */
 
 /**
- * The transitional base of boot's one composed parse (#728), and the reader a
+ * The transitional base of boot's one composed parse, and the reader a
  * composition root uses before it knows its modules: core's own sections and
  * every section core's schema still mirrors for a package, each optional,
  * with the coercions they always had — laid over what was written, so a key

@@ -253,10 +253,11 @@ describe("effectiveFederationGrantStatus (#593, D1)", () => {
 
 	describe("an upstream that asked for the user (#616, D11, D12)", () => {
 		// A refresh refused with one of the four interaction codes leaves the
-		// stamp any refusal leaves (D12). What the stamp means is different: the
-		// IdP wants the user, not a new token, so the grant reads as needing a
-		// reauthorization — for as long as the stamp stands, since time mends
-		// nothing here — and the credential is kept, since nothing said it was bad.
+		// stamp any refusal leaves (ADR 2026-09-17-federation-grants-offline-delegation,
+		// D12). What the stamp means is different: the IdP wants the user, not a
+		// new token, so the grant reads as needing a reauthorization — for as long
+		// as the stamp stands, since time mends nothing here — and the credential
+		// is kept, since nothing said it was bad.
 		const codes = [
 			"interaction_required",
 			"login_required",
@@ -370,9 +371,9 @@ describe("effectiveFederationGrantStatus (#593, D1)", () => {
 	});
 
 	describe("a maximum no token can satisfy", () => {
-		// A hand-built config bypasses the schema (#448). Under such a maximum
+		// A hand-built config bypasses the schema. Under such a maximum
 		// `judgeUpstreamAccessToken` refuses every token, so the grant cannot
-		// yield one, and D9 says such a grant never reads as `active`.
+		// yield one, and such a grant never reads as `active`.
 		const unusable = [Number.NaN, undefined as unknown as number, 0, -1, Number.POSITIVE_INFINITY];
 		const under = (maxAccessTokenLifetime: number) => ({
 			...context,

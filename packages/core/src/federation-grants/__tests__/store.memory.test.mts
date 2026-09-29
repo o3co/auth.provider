@@ -172,7 +172,7 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 
 		const still = await store.find("g-1", at(DAY));
 		expect(still).toMatchObject({ status: "active", version: 2 });
-		// Named, and never set (#626).
+		// Named, and never set.
 		expect(still).toHaveProperty("lastUsedAt", undefined);
 		expect(await store.isCurrentIntent("g-1", "h-re", at(DAY))).toBe(true);
 	});

@@ -15,12 +15,12 @@
  */
 
 /**
- * The in-config stores against the shared contract (#303).
+ * The in-config stores against the shared contract.
  *
- * Running the two implementations that already shipped is what makes the
- * contract a description of the port rather than a description of the new
- * adapter. If a rule only the remote store satisfies were written into it, one
- * of these would fail here.
+ * Running these two implementations too is what makes the contract a
+ * description of the port rather than a description of the remote adapter. If
+ * a rule only the remote store satisfies were written into it, one of these
+ * would fail here.
  */
 
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";

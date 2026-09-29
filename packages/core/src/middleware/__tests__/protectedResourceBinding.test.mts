@@ -131,7 +131,7 @@ describe("protectedResourceBindingMw — pass-through", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The bug in #264 — a bound token replayed as a plain Bearer
+// A bound token replayed as a plain Bearer
 // ---------------------------------------------------------------------------
 
 describe("protectedResourceBindingMw — enforcement", () => {

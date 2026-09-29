@@ -76,7 +76,7 @@ describe("matchConfirmation — jkt member (DPoP matrix rows 3-5)", () => {
 	it("refuses to let a third-party mechanism kind satisfy a jkt binding", () => {
 		// `Confirmation` is mechanism-extensible: a mechanism of another kind
 		// emitting `{ jkt }` never validated a DPoP proof, so an equal value
-		// must NOT satisfy the binding (kind boundary, PR #185).
+		// must NOT satisfy the binding (kind boundary).
 		const acme: TokenBinding = { kind: "acme", confirmation: { jkt: "abc" } };
 		expect(matchConfirmation({ jkt: "abc" }, acme)).toEqual({
 			status: "no-proof",

@@ -15,7 +15,7 @@
  */
 
 /**
- * The `csrfTokenSigner` slot (#728): the CSRF token's signing key has one
+ * The `csrfTokenSigner` slot: the CSRF token's signing key has one
  * owner — the session store's module, which owns `session.secret` — and it
  * reaches the session module's `csrfGuard` provider as this narrow signer, the
  * key derived and kept inside it. Its contract suite and the test double: the

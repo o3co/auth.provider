@@ -34,10 +34,10 @@ test("RefreshTokenFamily fields are readonly with correct types", () => {
 	}>();
 });
 
-// #274: the updater's decision is a 2-variant union carrying an opaque
-// `reason`, replacing the pre-#274 `RefreshTokenFamily | null`. `null` meant
-// both "write nothing" and "the precondition failed", which left no way to
-// describe a commit that is itself a rejection (a replay revocation).
+// The updater's decision is a 2-variant union carrying an opaque `reason`. A
+// bare `RefreshTokenFamily | null` would make `null` mean both "write nothing"
+// and "the precondition failed", which leaves no way to describe a commit that
+// is itself a rejection (a replay revocation).
 test("RefreshTokenFamilyUpdateDecision is a 2-variant discriminated union carrying an opaque reason", () => {
 	expectTypeOf<RefreshTokenFamilyUpdateDecision>().toEqualTypeOf<
 		| {
@@ -92,14 +92,12 @@ test("RefreshTokenFamilyUpdateResult committed variant carries family", () => {
 });
 
 test("RefreshTokenFamilyRotationOutcome is a 4-variant discriminated union", () => {
-	// IH-13 (v0.5.1): "rotated" variant carries optional `cappedExpiresAtMs`.
-	// Optional, not required, so existing stubs returning `{ outcome: "rotated" }`
-	// without the field continue to type-check (Codex Delta 2).
+	// "rotated" carries optional `cappedExpiresAtMs`. Optional, not required,
+	// so a stub returning `{ outcome: "rotated" }` without the field type-checks.
 	//
-	// #274: "replayed" carries optional `familyRevoked`, on the same
-	// compatibility grounds — a custom rotation predating #274 reports a bare
-	// `{ outcome: "replayed" }`, and the caller reads absence as "not revoked"
-	// and revokes separately.
+	// "replayed" carries optional `familyRevoked`, on the same grounds — a
+	// custom rotation may report a bare `{ outcome: "replayed" }`, and the
+	// caller reads absence as "not revoked" and revokes separately.
 	expectTypeOf<RefreshTokenFamilyRotationOutcome>().toEqualTypeOf<
 		| { readonly outcome: "rotated"; readonly cappedExpiresAtMs?: number }
 		| { readonly outcome: "replayed"; readonly familyRevoked?: boolean }

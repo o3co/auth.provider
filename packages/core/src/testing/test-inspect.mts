@@ -22,8 +22,8 @@ import type {
 } from "../modules/manifest/contributes-map.mjs";
 
 /**
- * Read-only inspection surface for tests. Per A2-γ §7.2: NEVER exposed on the
- * production AppHandle. The `createTestApp` factory attaches an instance of
+ * Read-only inspection surface for tests. NEVER exposed on the production
+ * AppHandle. The `createTestApp` factory attaches an instance of
  * this interface to the returned handle for fixture noise reduction.
  *
  * Stability: additive evolution only. Adding new entries is a minor; signature

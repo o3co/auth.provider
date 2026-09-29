@@ -15,7 +15,7 @@
  */
 
 /**
- * The `loginCompletion` slot (#728; the session-admission ADR's D5): the
+ * The `loginCompletion` slot (the session-admission ADR's D5): the
  * session package's `establishSession` and `answerInterruption` as a
  * contract, which a requirement's completion — the MFA package's —
  * requires instead of importing the session package. Its contract suite

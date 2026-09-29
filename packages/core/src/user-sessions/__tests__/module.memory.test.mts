@@ -33,7 +33,7 @@ describe("memorySessionStoresModule", () => {
 		expect(typeof provides.sessionRPRegistry).toBe("function");
 		expect(typeof provides.sessionFamilyIndex).toBe("function");
 		expect(typeof provides.sessionFederationIndex).toBe("function");
-		// #296 — bundled here so a single-node deployment gets subject-level
+		// Bundled here so a single-node deployment gets subject-level
 		// revocation by installing the module it already installs.
 		expect(typeof provides.subjectSessionIndex).toBe("function");
 		expect(typeof provides.subjectRevocation).toBe("function");
@@ -74,7 +74,7 @@ describe("memorySessionStoresModule", () => {
 		expect((components.sessionRPRegistry as { kind: string }).kind).toBe("memory");
 		expect((components.sessionFamilyIndex as { kind: string }).kind).toBe("memory");
 		expect((components.sessionFederationIndex as { kind: string }).kind).toBe("memory");
-		// #296 — without these two slots `revokeAllForSubject` reports both as
+		// Without these two slots `revokeAllForSubject` reports both as
 		// unavailable and revokes nothing, so the bundle providing them is part
 		// of the contract, not an implementation detail.
 		expect((components.subjectSessionIndex as { kind: string }).kind).toBe("memory");

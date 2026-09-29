@@ -18,11 +18,11 @@ import type { MfaFactorRecord, MfaFactorStore } from "#/mfa/factorStore.mjs";
 
 /**
  * The `MfaFactorStore` contract (the MFA ADR's D7), for every adapter.
- * "Only zero records open a first binding" (F3) is only as strong as the
- * store: a record that comes back without a field, a version that two writers
- * both win, or a removal that reaches another subject each loses or forges a
- * factor. `data` is sealed by the coordinator and opaque here; the store must
- * keep it byte for byte.
+ * "Only zero records open a first binding" (the same ADR's F3) is only as
+ * strong as the store: a record that comes back without a field, a version
+ * that two writers both win, or a removal that reaches another subject each
+ * loses or forges a factor. `data` is sealed by the coordinator and opaque
+ * here; the store must keep it byte for byte.
  */
 export type MfaFactorStoreContractFactory = () => Promise<MfaFactorStore>;
 

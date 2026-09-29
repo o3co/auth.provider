@@ -110,7 +110,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 	it("no longer enforces clientId/clientSecret/callbackURL when enabled=true (responsibility shift to builder)", () => {
 		// Schema-level: parse succeeds even with enabled=true and no credentials.
 		// The builder (factory.create) will throw at runtime instead.
-		// This test documents the intentional schema-vs-builder separation per spec Section 2 / Q2'-1.
+		// This test documents the intentional schema-vs-builder separation.
 		expect(() =>
 			federationsSchema.parse({
 				google: {

@@ -93,7 +93,8 @@ describe("upstream token eligibility (#593, D5)", () => {
 			// A hand-built config that omits the key hands `undefined` through a
 			// cast, and `lifetime > undefined` is false: a 30-day token would pass.
 			// Infinity is no maximum either: every finite lifetime is within it,
-			// and residual access would be a number nobody chose (D15).
+			// and residual access would be a number nobody chose (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D15).
 			for (const bad of [
 				Number.NaN,
 				undefined as unknown as number,

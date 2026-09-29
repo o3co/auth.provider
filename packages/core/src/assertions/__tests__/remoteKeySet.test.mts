@@ -25,11 +25,10 @@ import {
 } from "#/assertions/remoteKeySet.mjs";
 
 /**
- * v0.13.0 audit — the one place a `jwks_uri` becomes a key resolver. There
- * were two (`private_key_jwt` client assertions, #484; the trust-registry
- * assertion verifier, #525), with the same memo and the same tuning, and only
- * one of them took a fetch: a deployment behind an egress proxy could fetch a
- * client's keys but not a trusted issuer's.
+ * The one place a `jwks_uri` becomes a key resolver, shared by
+ * `private_key_jwt` client assertions and the trust-registry assertion
+ * verifier: one memo, one tuning and one fetch, so a deployment behind an
+ * egress proxy fetches a client's keys and a trusted issuer's the same way.
  */
 
 const URI = "https://keys.example/jwks.json";

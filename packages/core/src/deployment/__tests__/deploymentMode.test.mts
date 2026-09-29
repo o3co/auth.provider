@@ -15,7 +15,7 @@
  */
 
 /**
- * The `deploymentMode` slot (#728): how many replicas the operator says
+ * The `deploymentMode` slot: how many replicas the operator says
  * this deployment runs — `single`, `multi`, or `unset` when nothing was
  * said — which core is to fill from its own `core.deployment.mode` for
  * every module that refuses or warns by it. Its contract suite; a test

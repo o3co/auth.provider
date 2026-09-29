@@ -179,7 +179,7 @@ describe("JWKS Cache-Control", () => {
 	}
 
 	async function getHeaderFor(opts?: Parameters<typeof createRouter>[2]) {
-		// #282: only a non-empty published key set is cacheable, so the
+		// Only a non-empty published key set is cacheable, so the
 		// success-path header assertions run against an asymmetric keystore.
 		const ks = await makeEs256KeyStore();
 		const express = createMockExpress();
@@ -213,9 +213,9 @@ describe("JWKS Cache-Control", () => {
 	});
 
 	it("does NOT cache the HS256 refusal — it is a misconfiguration, not public data", async () => {
-		// #282: HS256 no longer answers `{ keys: [] }` with a long public
-		// max-age. A shared cache pinning that answer turns a fixable config
-		// mistake into a stuck JWKS for the whole cache lifetime.
+		// HS256 does not answer `{ keys: [] }` with a long public max-age. A
+		// shared cache pinning that answer would turn a fixable config mistake
+		// into a stuck JWKS for the whole cache lifetime.
 		expect(await getHs256HeaderFor({ cacheMaxAgeSeconds: 60 })).toBe("no-store");
 	});
 
@@ -256,10 +256,10 @@ describe("JWKS Cache-Control", () => {
 
 describe("JWKS endpoint — never publishes an empty key set (#282)", () => {
 	it("refuses to serve for HS256 instead of publishing `{ keys: [] }`", async () => {
-		// Pre-#282 this answered 200 `{ keys: [] }`. A relying party cannot tell
-		// that apart from "this issuer has rotated all its keys away", so it
-		// caches the empty set and then fails every verification with an
-		// unknown-kid error that points nowhere near the actual cause.
+		// A 200 `{ keys: [] }` would mislead: a relying party cannot tell it
+		// apart from "this issuer has rotated all its keys away", so it caches
+		// the empty set and then fails every verification with an unknown-kid
+		// error that points nowhere near the actual cause.
 		const ks = createSymmetricKeyStore("test-secret");
 		const express = createMockExpress();
 		createRouter(express, ks);
@@ -406,9 +406,9 @@ describe("JWKS endpoint — never publishes an empty key set (#282)", () => {
 	it("excludes an oct (symmetric) key a custom adapter mistakenly returns (never publish `k`)", async () => {
 		// exportJWK of a symmetric KeyObject yields `{ kty: "oct", k: <secret> }`.
 		// A symmetric key has no public representation, so it must be dropped from
-		// the JWKS entirely rather than sanitized to a keyless entry. #282: with
-		// nothing left to publish the route now refuses rather than answering
-		// 200 with an empty set — but the secret still never reaches the wire.
+		// the JWKS entirely rather than sanitized to a keyless entry. With
+		// nothing left to publish the route refuses rather than answering 200
+		// with an empty set, and the secret never reaches the wire.
 		const secret = createSecretKey(Buffer.from("super-secret-value-for-oct-jwks-test!!"));
 		const octKeyStore = {
 			algorithm: "ES256" as const,

@@ -22,9 +22,8 @@ import type { BootstrapMap as BM, BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
 
-// AS-M1 (Phase F F9 PR6): typed AuditSink stub for the auditHooks
-// contributions. Pre-AS-M1 the inline literal `{ name, run }` worked because
-// `AuditHook` was `unknown`; post-narrow it must satisfy `AuditSink`.
+// Typed AuditSink stub for the auditHooks contributions: `AuditHook` is
+// `AuditSink`, so a contribution must satisfy it.
 const fakeAuditSink = (kind = "stub"): AuditSink => ({
 	kind,
 	record: async () => {},

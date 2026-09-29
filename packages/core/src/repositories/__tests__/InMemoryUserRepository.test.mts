@@ -163,7 +163,7 @@ describe("InMemoryUserRepository", () => {
 		// registrations of the same IdP a person signed in through. So it can
 		// establish neither answer, and says so, even where a name-and-sub
 		// entry matches: a hit under one registration does not show that no
-		// other registration's link names somebody else (#611).
+		// other registration's link names somebody else.
 		const registration = {
 			provider: "okta",
 			issuer: "https://okta.example",

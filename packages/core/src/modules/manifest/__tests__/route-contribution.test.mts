@@ -8,7 +8,6 @@ import type {
 } from "../route-contribution.mjs";
 
 test("RouteContribution has mountPath + handler + optional id + A2-β §4.2 fields", () => {
-	// A2-β §4.2 adds routes?, before?, after? (additive amendment to A2-α §4.6).
 	expectTypeOf<RouteContribution>().toEqualTypeOf<{
 		readonly mountPath: string;
 		readonly handler: RouteHandler;

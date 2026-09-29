@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import type { GrantContext } from "../grants/types.mjs";
 
-// CC-5 readonly compile-time assertions for GrantContext. See
+// Readonly compile-time assertions for GrantContext. See
 // readonly-types.test.mts in oauth-token-exchange for the rationale.
 
 describe("CC-5: GrantContext readonly (compile-time)", () => {

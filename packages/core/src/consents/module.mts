@@ -19,14 +19,14 @@ import { createMemoryConsentStore, createMemoryPendingConsentStore } from "./mem
 
 /**
  * Built-in module that provides the in-process memory {@link ConsentStore}
- * (#527) and, with it, the memory {@link PendingConsentStore} the consent
- * step parks requests in (#552): one feature, one switch, so the two cannot
- * be wired apart. Dev and single-replica only — no persistence across
- * restarts, and refused by name under `deployment.mode = "multi"`.
+ * and, with it, the memory {@link PendingConsentStore} the consent step
+ * parks requests in: one feature, one switch, so the two cannot be wired
+ * apart. Dev and single-replica only — no persistence across restarts, and
+ * refused by name under `deployment.mode = "multi"`.
  */
 export const memoryConsentStoreModule = defineModule({
 	name: "core-consent-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:

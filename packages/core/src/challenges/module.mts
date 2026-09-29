@@ -23,11 +23,10 @@ import { createChallengeCeremony } from "./ceremony.mjs";
  * at `challengeStore.memory.maxEntries` when the config sets it (the
  * adapter's default otherwise); a value that is not a positive whole number
  * refuses the boot, naming the key.
- * Per A1 §8.1.
  */
 export const memoryChallengeStoreModule = defineModule({
 	name: "core-challenge-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
@@ -49,10 +48,9 @@ export const memoryChallengeStoreModule = defineModule({
  * Built-in module that provides the default 3-outcome ChallengeCeremony
  * composed from challengeStore + replaySeenSet.
  *
- * Per A1 §8.1. Override path: replace this module with a custom one that
- * provides challengeCeremony from different deps; the boot planner enforces
- * provides uniqueness (BootError reason "duplicate-provides" if both are
- * added).
+ * Override path: replace this module with a custom one that provides
+ * challengeCeremony from different deps; the boot planner enforces provides
+ * uniqueness (BootError reason "duplicate-provides" if both are added).
  */
 export const defaultChallengeCeremonyModule = defineModule({
 	name: "core-default-challenge-ceremony",

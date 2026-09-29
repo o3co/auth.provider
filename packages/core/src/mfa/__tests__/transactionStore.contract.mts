@@ -32,7 +32,7 @@ import {
  * consecutive run, the weekly budget no success refunds, the browsers an
  * exempt success trusts against the weekly hold).
  *
- * The subject state is judged on the time its caller passes, so D21's
+ * The subject state is judged on the time its caller passes, so the lockout
  * schedule is driven by an injected clock; a transaction expires on the
  * store's own clock, read through {@link ExpiryClock} as the session-store
  * suite does.
@@ -61,7 +61,7 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const WEEK = 7 * DAY;
 
-/** D19's defaults. */
+/** The MFA ADR's D19 defaults. */
 const POLICY: MfaLockoutPolicy = {
 	threshold: 5,
 	baseSeconds: 900,
@@ -127,10 +127,10 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 };
 
 /**
- * A challenge a verification takes (a WebAuthn assertion's, F7). An email
- * code is read, not taken, and stays across attempts (F5): the store offers
- * both, and the factor's `reusableChallenge` (absent: taken) decides which
- * the coordinator calls.
+ * A challenge a verification takes (a WebAuthn assertion's, the MFA ADR's
+ * F7). An email code is read, not taken, and stays across attempts (the same
+ * ADR's F5): the store offers both, and the factor's `reusableChallenge`
+ * (absent: taken) decides which the coordinator calls.
  */
 const CHALLENGE = {
 	factorId: "factor-1",
@@ -282,7 +282,8 @@ export function runMfaTransactionStoreContract(
 
 		it("refuses, with a RangeError, a new transaction with a field its type does not admit, and records nothing", async () => {
 			// The same value rules as a patch: a transaction created with
-			// `emailProof` missing would carry no D24 gate at all.
+			// `emailProof` missing would carry no email-proof gate (the MFA
+			// ADR's D24) at all.
 			const store = await factory();
 			const bad: [string, unknown][] = [
 				["purpose unknown", { purpose: "admin" }],
@@ -456,8 +457,8 @@ export function runMfaTransactionStoreContract(
 
 		it("reads a key present with undefined as absent: it keeps the field, and never clears a limit", async () => {
 			// `{ sends: undefined }` compiles, and read as a write it would clear the
-			// send count (D21) or the email-proof gate (D24). Only null clears, and
-			// only a field that may be empty.
+			// send count or the email-proof gate (the MFA ADR's D21 and D24). Only
+			// null clears, and only a field that may be empty.
 			const store = await factory();
 			const tx = TX({
 				challenge: CHALLENGE,
@@ -514,9 +515,10 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("refuses, with a RangeError, a patch that would refund a limit or undo a requirement, and changes nothing", async () => {
-			// Sends only count up (D21's send limit). A required email proof is
-			// only ever met, never waived (D24), and a met one stays met. An
-			// enrollment requirement is never lowered.
+			// Sends only count up (the send limit of the MFA ADR's D21). A
+			// required email proof is only ever met, never waived (the same ADR's
+			// D24), and a met one stays met. An enrollment requirement is never
+			// lowered.
 			const store = await factory();
 			const tx = TX({ sends: 2, emailProof: "required", enrollment: "required", lastSentAtMs: 5 });
 			await store.create(tx);
@@ -701,7 +703,8 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("spends N attempts for N reservations in flight: at most max succeed", async () => {
-			// Fifty guesses sent at once spend fifty attempts, not one (F1).
+			// Fifty guesses sent at once spend fifty attempts, not one (the MFA
+			// ADR's F1).
 			const store = await factory();
 			await store.create(TX());
 			const results = await Promise.all(
@@ -792,7 +795,7 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("gives the record to exactly one of N consumes in flight", async () => {
-			// Two verifications in flight produce one session (F1).
+			// Two verifications in flight produce one session (the MFA ADR's F1).
 			const store = await factory();
 			await store.create(TX());
 			const results = await Promise.all(Array.from({ length: 10 }, () => store.consume("tx-1", 1)));
@@ -805,7 +808,7 @@ export function runMfaTransactionStoreContract(
 		/** An instant near the host's clock, so an adapter that expires state on its own clock keeps it. */
 		const start = () => Math.floor(Date.now() / 1000) * 1000;
 
-		/** D19's defaults with the week out of the way, for the cases about the run alone. */
+		/** The MFA ADR's D19 defaults with the week out of the way, for the cases about the run alone. */
 		const RUN_ONLY: MfaLockoutPolicy = { ...POLICY, weeklyBudget: 1000 };
 
 		const check = (
@@ -941,9 +944,9 @@ export function runMfaTransactionStoreContract(
 		});
 
 		it("starts the count again after memorySeconds without a failure, before any lock too", async () => {
-			// D21 forgets the backoff memorySeconds after the last lock ends; before
-			// any lock, the same quiet period after the previous failure forgets
-			// the failures that did not reach it.
+			// The MFA ADR's D21 forgets the backoff memorySeconds after the last
+			// lock ends; before any lock, the same quiet period after the previous
+			// failure forgets the failures that did not reach it.
 			const store = await factory();
 			const t = start();
 			for (let i = 0; i < 4; i++) await fail(store, t + i, undefined, RUN_ONLY);
@@ -1438,7 +1441,8 @@ export function runMfaTransactionStoreContract(
 				{ trustedBrowserDays: 2e8 },
 				// The backoff would never engage before the hard hold.
 				{ threshold: 10, hardLimit: 6 },
-				// NIST SP 800-63B-4 caps consecutive failures at 100, as D21 cites.
+				// NIST SP 800-63B-4 caps consecutive failures at 100, as the MFA
+				// ADR's D21 cites.
 				{ hardLimit: 101 },
 			] satisfies Partial<MfaLockoutPolicy>[]) {
 				const policy = { ...POLICY, ...bad };

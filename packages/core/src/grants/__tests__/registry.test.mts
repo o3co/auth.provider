@@ -130,7 +130,7 @@ describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
 	});
 
 	it("frozen precedence: duplicate-after-freeze throws reason='frozen' (NOT 'duplicate')", () => {
-		// Per A6+A7 §2.3: "After freeze(): register throws with reason='frozen'".
+		// After freeze(), register throws with reason='frozen'.
 		// This is unconditional — when both freeze and duplicate conditions
 		// hold, "frozen" wins. The frozen check runs before the duplicate
 		// check in the impl to honour this precedence.

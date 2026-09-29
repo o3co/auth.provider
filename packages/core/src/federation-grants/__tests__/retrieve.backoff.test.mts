@@ -35,11 +35,12 @@ import {
 } from "./retrieve.harness.mjs";
 
 /**
- * A refresh that failed is remembered on the record (D12): while the stamp
- * stands the upstream is not asked, a stored token that serves is answered as
- * it is, and otherwise the failure is, with how long to wait. Without the
- * stamp every request that needs a refresh asks a failing upstream again, and
- * N polls during an incident are N upstream calls.
+ * A refresh that failed is remembered on the record: while the stamp stands
+ * the upstream is not asked, a stored token that serves is answered as it is,
+ * and otherwise the failure is, with how long to wait. Without the stamp every
+ * request that needs a refresh asks a failing upstream again, and N polls
+ * during an incident are N upstream calls. See ADR
+ * 2026-09-17-federation-grants-offline-delegation, D12.
  */
 describe("retrieveFederationGrantToken — a failed refresh is remembered (#593, D12)", () => {
 	let h: Harness;
@@ -296,9 +297,10 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			// The stamp is data in the store, and the classifier's allow-list was
 			// applied when it was written — not when it is read back. A stamp
 			// seeded by a fixture, or written by another version, or edited in the
-			// keyspace, therefore reaches the reason field unchecked, and D11
-			// promises the opposite: "the code is repeated only when it is one of
-			// the codes this provider knows". Anything else is `unknown`.
+			// keyspace, therefore reaches the reason field unchecked, and D11 of ADR
+			// 2026-09-17-federation-grants-offline-delegation promises the
+			// opposite: "the code is repeated only when it is one of the codes this
+			// provider knows". Anything else is `unknown`.
 			for (const [carried, reported] of [
 				["invalid_client", "invalid_client"],
 				["rt-0f3c-the-refresh-token-itself", "unknown"],

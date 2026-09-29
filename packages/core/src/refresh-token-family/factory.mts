@@ -21,9 +21,9 @@ import type { RefreshTokenFamilyStore } from "./types.mjs";
 /**
  * Domain-specific AdapterFactory alias for RefreshTokenFamilyStore.
  *
- * Per A3 §5.6: register(type, builder) throws on duplicate; replace(type,
- * builder) is the explicit override path; NO freeze() method (composition-
- * root concern, not module registry). A6+A7 registry policy.
+ * register(type, builder) throws on duplicate; replace(type, builder) is the
+ * explicit override path; NO freeze() method (composition-root concern, not
+ * module registry).
  */
 export type RefreshTokenFamilyStoreFactory = AdapterFactory<RefreshTokenFamilyStore>;
 

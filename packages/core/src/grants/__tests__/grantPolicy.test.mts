@@ -28,10 +28,8 @@ import type {
 } from "#/policy/types.mjs";
 
 /**
- * #520 — the one answer every minting path gives a policy that throws,
- * denies, or exceeds its ceiling. Grants used to carry their own copies of
- * these rules, and the copies disagreed (WebAuthn let a policy originate an
- * audience with no client; four grants called a policy fault a client error).
+ * The one answer every minting path gives a policy that throws, denies, or
+ * exceeds its ceiling.
  */
 
 const hook = (decide: () => Promise<GrantPolicyDecision>): GrantPolicyHook => ({

@@ -19,7 +19,7 @@ import type { ComponentMap } from "../../modules/manifest/component-map.mjs";
 import type { ProviderDeps } from "../../modules/manifest/provider.mjs";
 import type { GrantDependencies } from "../types.mjs";
 
-// #626 P2 (D4): `GrantDependencies` is the one statement of what a grant may
+// `GrantDependencies` is the one statement of what a grant may
 // depend on, and every entry in it is a `ComponentMap` slot carrying that
 // slot's type. A grant factory narrows it with `Pick<GrantDependencies, …>`
 // to the slots it reads; a module's `ProviderDeps<R, O>` has to satisfy that

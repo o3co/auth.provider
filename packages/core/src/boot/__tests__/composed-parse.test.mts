@@ -15,7 +15,7 @@
  */
 
 /**
- * Boot's one composed parse (#728). A composition root hands `createApp` the
+ * Boot's one composed parse. A composition root hands `createApp` the
  * configuration it resolved — never parsed first — and boot parses it once:
  * with the transitional base (core's sections and every section core still
  * mirrors for a package, each optional), laid over what was written so

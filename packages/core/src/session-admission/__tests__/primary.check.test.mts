@@ -203,11 +203,11 @@ describe("checkPrimaryAdditions — what a completing requirement may add", () =
 		);
 	});
 
-	// The fail-closed guarantee the mfa requirement's own re-ask gave before
-	// resumePrimary stopped asking a requirement already done: a completion
-	// under mfa is a verified second factor — a factor's value, `mfa` beside
-	// it (unless the factor is the email code, whose `addsMfa` is off by
-	// default: the MFA ADR's D14, O7), and when it was verified.
+	// resumePrimary does not ask a requirement already done again, so the
+	// check fails closed on its own: a completion under mfa is a verified
+	// second factor — a factor's value, `mfa` beside it (unless the factor is
+	// the email code, whose `addsMfa` is off by default: the MFA ADR's D14,
+	// O7), and when it was verified.
 	it.each([
 		["nothing", { amr: [] }],
 		["a factor and mfa without mfaAt", { amr: ["otp", "mfa"] }],

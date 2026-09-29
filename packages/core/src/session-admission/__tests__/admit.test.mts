@@ -235,7 +235,7 @@ describe("the claim builders — one reading of each carrier (D2)", () => {
 		});
 		expect(tokenClaim({ sub: "user-1" })).toMatchObject({ sid: undefined, subject: "user-1" });
 		expect(tokenClaim({ sub: "user-1" })).not.toHaveProperty("tokenAmr");
-		// A token issued before #481, or one whose amr is not a well-formed list.
+		// A token without an amr, or one whose amr is not a well-formed list.
 		for (const amr of [undefined, [], [""], "pwd", [1]]) {
 			expect(tokenClaim({ sub: "user-1", amr }), JSON.stringify(amr)).not.toHaveProperty(
 				"tokenAmr",
@@ -817,8 +817,8 @@ describe("step 5 — the requirements", () => {
 		});
 		expect(input.session).not.toBe(record);
 		expect(Object.keys(input.session ?? {})).toEqual(["sid", "sub", "authTime", "expiresAt"]);
-		// The vouched amr, split as D9 reads a pre-upgrade record: `hwk` is an
-		// untrusted IdP's word.
+		// The vouched amr, split as the MFA ADR's D9 reads a pre-upgrade record:
+		// `hwk` is an untrusted IdP's word.
 		expect(input.authentication).toEqual({
 			authentication: {
 				primary: "fed",
@@ -879,7 +879,7 @@ describe("step 5 — the requirements", () => {
 			{ authentication: undefined, amr: [] },
 		]);
 		// With a record, the token's own amr is still what the requirements are
-		// asked about (D9); the record is only the view.
+		// asked about; the record is only the view.
 		await admitSession(
 			deps({ requirements: resolverForTests([watching]) }),
 			request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["hwk", "fed"] }) }),

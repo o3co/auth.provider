@@ -24,7 +24,7 @@ import { makeValidFullSections } from "#/testing/fixtures/valid-config.mjs";
  */
 function validSession(overrides: Record<string, unknown> = {}) {
 	return {
-		// #282: `session.secret` carries a 256-bit entropy floor.
+		// `session.secret` carries a 256-bit entropy floor.
 		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "__Host-auth.session",
 		maxAge: 3600000,
@@ -117,9 +117,8 @@ describe("schema open type", () => {
 				refreshToken: { expiresIn: 86400 },
 				grants: {
 					session: { enabled: true },
-					// The `pkce: { requireS256: false }` sub-object that used to sit
-					// here is gone with the knob (#273); this fixture is about the
-					// legacy top-level `clients` key, not about grants config.
+					// This fixture is about the legacy top-level `clients` key, not
+					// about grants config.
 					authorization_code: { enabled: true },
 					refresh_token: { enabled: true },
 				},
@@ -246,9 +245,9 @@ describe("schema nested repositories", () => {
 		expect(parsed.user.type).toBe("yaml");
 	});
 
-	// IH-10: dead schema fields `endpoints.client` / `endpoints.authCallback`
-	// removed. No production consumer reads them; pre-fix configs that wrote
-	// the env-var-only HOCON lines silently leaked them through to AppConfig.
+	// `endpoints.client` / `endpoints.authCallback` are not schema fields: no
+	// production consumer reads them, and a config that writes them has them
+	// stripped rather than passed through to AppConfig.
 	describe("IH-10: endpoints.client / endpoints.authCallback are removed from schema", () => {
 		it("parsed result does not expose client or authCallback keys", () => {
 			const result = fullSectionsSchema.parse(makeValidFullSections());
@@ -272,10 +271,9 @@ describe("schema nested repositories", () => {
 		});
 	});
 
-	// IH-17: `endpoints.login.url` tightened from `z.string().optional()` to
-	// `z.string()`. The runtime invariant was already enforced by the oauth
-	// module's `configSchema` at boot time; the base schema now matches that
-	// contract so AppConfig type no longer types the field as optional.
+	// `endpoints.login.url` is `z.string()`, not optional: the oauth module's
+	// `configSchema` requires it at boot, and the base schema matches that
+	// contract, so AppConfig does not type the field as optional.
 	describe("IH-17: endpoints.login.url is required at the base schema level", () => {
 		it("rejects config missing endpoints.login.url", () => {
 			const base = makeValidFullSections();
@@ -292,7 +290,7 @@ describe("schema nested repositories", () => {
 		});
 	});
 
-	// IH-18: `rateLimit.login.windowMs` (express-rate-limit) is intentionally
+	// `rateLimit.login.windowMs` (express-rate-limit) is intentionally
 	// distinct from the OAuth-endpoint `RateLimitSpec.windowSeconds`. Keep
 	// the field name as a semantic anchor — renaming requires updating every
 	// `express-rate-limit` consumer's unit conversion.

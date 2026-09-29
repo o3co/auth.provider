@@ -586,7 +586,7 @@ const REDIS_STORE_WHY =
  * whose read went away fails as stale.
  */
 const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
-	// The D9 reading itself.
+	// The MFA ADR's D9 reading itself.
 	{
 		file: "packages/core/src/user-sessions/authentication.mts",
 		read: "session.authentication",

@@ -22,11 +22,10 @@ import { createMemoryReplaySeenSet } from "./adapters/memory.mjs";
  * at `replaySeenSet.memory.maxEntries` when the config sets it (the adapter's
  * default otherwise); a value that is not a positive whole number refuses
  * the boot, naming the key.
- * Per A1 §8.1.
  */
 export const memoryReplaySeenSetModule = defineModule({
 	name: "core-replay-seen-set-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:

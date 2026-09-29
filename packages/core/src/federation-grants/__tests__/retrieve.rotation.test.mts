@@ -73,7 +73,8 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			expect(await retrieve({ minTtlSeconds: 3600 })).toMatchObject({
 				ok: true,
 				accessToken: "at-0",
-				// Its true lifetime, short of what was asked: the caller decides (D10).
+				// Its true lifetime, short of what was asked: the caller decides (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D10).
 				expiresIn: 1800,
 				refreshed: false,
 			});
@@ -251,7 +252,9 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				reason: "malformed_token_response",
 				retryAfterSeconds: 300,
 			});
-			// The rotated refresh token is kept (D5) — and so is what still worked.
+			// The rotated refresh token is kept (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D5) — and so is
+			// what still worked.
 			expect(await stored()).toMatchObject({
 				refreshToken: `${SECRET}-rotated`,
 				accessToken: { value: "at-0", obtainedAt: T0 },
@@ -427,7 +430,8 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				// is presented again whenever the next refresh comes: waiting out the
 				// lock would not change that, and an IdP with a grace window for
 				// exactly this takes a prompt retry, not a late one. Keeping the lock
-				// is for what is still in flight (D12).
+				// is for what is still in flight (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D12).
 				await h.seed();
 				setNow(at(HOUR));
 				h.refresh.mockRejectedValueOnce(

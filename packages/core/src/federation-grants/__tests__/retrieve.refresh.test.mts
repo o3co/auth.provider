@@ -189,7 +189,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		it("records the scopes and the token type the response names, and the grant's scopes and Bearer when it names none", async () => {
 			await h.seed();
 			setNow(DUE);
-			// As the upstream spelled it: a bearer token in any case is one (D5).
+			// As the upstream spelled it: a bearer token in any case is one (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D5).
 			h.refresh.mockResolvedValue(
 				refreshed("1", DUE, { scope: "openid  calendar.read", tokenType: "BEARER" }),
 			);
@@ -342,7 +343,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("a wider consent on the same connection does not widen the narrower grant (row 7: G1, G2)", async () => {
 			// G1 consented for the narrow set; G2, later, for the whole
-			// connection. An IdP that accumulates consent (D19) answers G1's
+			// connection. An IdP that accumulates consent (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D19) answers G1's
 			// refresh with G2's scopes. G1 is starved — the token is never
 			// written, the rotated refresh token is kept for the
 			// reauthorization — and G2, whose consent covers the answer, is
@@ -546,8 +548,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			it("but not beside a 5xx: an outage is never a verdict, whatever code its body names", async () => {
 				// A 503 whose body says login_required is the IdP down, not the user
 				// gone: answering it as the user's absence would send the user to
-				// connect again because the IdP had an outage (review of #690). A
-				// 429 is no outage, and stays the user (above).
+				// connect again because the IdP had an outage. A 429 is no outage,
+				// and stays the user (above).
 				await h.seed();
 				setNow(DUE);
 				h.refresh.mockRejectedValue(asksFor("login_required", { status: 503 }));
@@ -823,7 +825,9 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			[
 				"an error code this provider knows",
 				Object.assign(new Error("x"), { error: "invalid_client", status: 401 }),
-				// A refusal is remembered at once (D12): the wait is what the stamp says.
+				// A refusal is remembered at once (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D12): the wait
+				// is what the stamp says.
 				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
 			],
 			// An upstream that echoes what it was sent, in the one field that gets
@@ -868,7 +872,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
 				// Nothing but the failure stamp: the credentials whole, and the grant
-				// whole apart from it — key for key (#626).
+				// whole apart from it — key for key.
 				expect(after?.credentials).toStrictEqual(before?.credentials);
 				const { refreshFailure: _after, ...afterRest } = after?.grant ?? {};
 				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
@@ -1030,7 +1034,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				return written;
 			});
 			// A call refreshes once. What it wrote was replaced before its last look
-			// (D11): that is what it says, and not that the upstream failed it.
+			// (ADR 2026-09-17-federation-grants-offline-delegation, D11): that is
+			// what it says, and not that the upstream failed it.
 			expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
 				ok: false,
 				code: "temporarily_unavailable",

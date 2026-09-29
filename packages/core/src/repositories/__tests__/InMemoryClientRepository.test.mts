@@ -62,9 +62,9 @@ describe("InMemoryClientRepository", () => {
 			expect(client).toBeNull();
 		});
 
-		// D-6 (v0.5.1): findById exposes the configured authentication method on
-		// every PublicClient projection so downstream middleware (`clientAuthMw`)
-		// and grant handlers (`refreshToken`, `authorization`) can branch on it
+		// findById exposes the configured authentication method on every
+		// PublicClient projection so downstream middleware (`clientAuthMw`) and
+		// grant handlers (`refreshToken`, `authorization`) can branch on it
 		// without re-fetching the client record.
 		it("D-6: returns tokenEndpointAuthMethod from findById", async () => {
 			const repo = new InMemoryClientRepository(
@@ -293,13 +293,12 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	// #498 — `postLogoutRedirectUris` was on the http/https-only
-	// `httpUrlSchema` while `allowedRedirectUris` on the same record already
-	// used the richer `checkRedirectUri` grammar. A native app whose only
-	// redirect target is a reverse-DNS custom scheme could register where it
-	// receives the authorization response and NOT where it is sent after
-	// logout, so RP-initiated logout ended in a JSON body instead of back in
-	// the app.
+	// `postLogoutRedirectUris` takes the `checkRedirectUri` grammar that
+	// `allowedRedirectUris` on the same record takes, not the http/https-only
+	// `httpUrlSchema`: a native app whose only redirect target is a reverse-DNS
+	// custom scheme registers where it is sent after logout as well as where it
+	// receives the authorization response, so RP-initiated logout ends back in
+	// the app rather than in a JSON body.
 	describe("postLogoutRedirectUris uses the registered-redirect-URI grammar (#498)", () => {
 		const baseEntry = {
 			tokenEndpointAuthMethod: "client_secret_basic" as const,
@@ -316,8 +315,8 @@ describe("InMemoryClientRepository", () => {
 		});
 
 		it("accepts the same grammar allowedRedirectUris accepts", () => {
-			// The point of the change: one record, one vocabulary. Every shape
-			// that is a legal redirect target is a legal post-logout target.
+			// One record, one vocabulary: every shape that is a legal redirect
+			// target is a legal post-logout target.
 			const uris = [
 				"https://rp.example/logged-out",
 				"http://127.0.0.1:8080/logged-out",
@@ -607,12 +606,11 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	// D-6 (v0.5.1): tokenEndpointAuthMethod discriminator + ClientEntrySchema
-	// superRefine. The schema is now the single source of truth for whether a
-	// client is confidential (basic/post — secret required) or public (none —
-	// secret forbidden). Historically these tests would have been split between
-	// ClientEntrySchema and InMemoryClientRepository, but the schema is invoked
-	// from the constructor so both surfaces share the same RED tests.
+	// tokenEndpointAuthMethod discriminator + ClientEntrySchema superRefine.
+	// The schema is the single source of truth for whether a client is
+	// confidential (basic/post — secret required) or public (none — secret
+	// forbidden). The constructor parses each entry with the schema, so these
+	// tests cover ClientEntrySchema and InMemoryClientRepository alike.
 	describe("D-6 tokenEndpointAuthMethod discriminator (RED Group A)", () => {
 		it("A-1: client_secret_basic without clientSecret throws at construction", () => {
 			expect(

@@ -21,7 +21,6 @@ import type { ReplaySeenSet } from "./types.mjs";
 
 /**
  * Domain-specific AdapterFactory alias for ReplaySeenSet.
- * Per A1 §5.6.
  */
 export type ReplaySeenSetFactory = AdapterFactory<ReplaySeenSet>;
 

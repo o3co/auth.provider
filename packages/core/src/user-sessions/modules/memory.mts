@@ -23,16 +23,16 @@ import { createInMemorySubjectSessionIndex } from "../memory/subjectSessionIndex
 import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
 
 /**
- * Bundled module providing all 4 in-memory user-session stores. Single-decision
- * wiring for the common case (Codex Q4 finding). Per A4 §8.1 + §8.2.
+ * Bundled module providing the in-memory user-session stores. Single-decision
+ * wiring for the common case.
  *
  * For mixed wiring (e.g. memory userSessionStore + redis indexes), use
- * `overrideComponents` per A4 §8.3 — `provides[K]` is skipped when an
- * override is supplied for K.
+ * `overrideComponents` — `provides[K]` is skipped when an override is
+ * supplied for K.
  */
 export const memorySessionStoresModule = defineModule({
 	name: "core-session-stores-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:
@@ -43,7 +43,7 @@ export const memorySessionStoresModule = defineModule({
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
 		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
 		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
-		// #296: subject-keyed index + access-token watermark. Bundled here with
+		// Subject-keyed index + access-token watermark. Bundled here with
 		// the other memory session stores so a single-node deployment gets
 		// subject-level revocation by installing the module it already installs.
 		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),

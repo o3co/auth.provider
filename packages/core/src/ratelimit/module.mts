@@ -16,15 +16,13 @@ const rateLimitSpecSchema = z.object({
 });
 
 /**
- * In-memory RateLimiter module. Matches the existing memory branch of
+ * In-memory RateLimiter module. Matches the memory branch of
  * `registerBuiltinRateLimiters`. For production multi-instance deployments,
  * use `redisRateLimiterModule` from `@o3co/auth-provider-redis`.
- *
- * Phase 10 Q3: Module-pattern parity for the `rateLimiter` ComponentMap slot.
  */
 export const memoryRateLimiterModule = defineModule({
 	name: "core-rate-limiter-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:

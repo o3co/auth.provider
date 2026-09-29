@@ -15,7 +15,7 @@
  */
 
 /**
- * The login page's URL rule (#728, #750): the one home of what `/authorize`'s
+ * The login page's URL rule: the one home of what `/authorize`'s
  * fallback and the session package's `loginEntry` both do to a login page —
  * refuse one whose own query already carries `redirect_to`, and add
  * `redirect_to` to its query, before any fragment, the target encoded whole.

@@ -26,8 +26,8 @@ describe("Confirmation union", () => {
 	it("rejects unknown confirmation keys at compile time (Confirmation is closed)", () => {
 		// Compile-time guard: if someone widens Confirmation to a permissive
 		// index signature, the @ts-expect-error becomes unused and this test
-		// will fail to compile. Stage 1 confirmation kinds are core-owned per
-		// spec §4.2 (RFC 7800 / IANA registry domain).
+		// will fail to compile. Confirmation kinds are core-owned (RFC 7800 /
+		// IANA registry domain).
 		// @ts-expect-error — `foo` is not a valid Confirmation variant
 		const _bad: Confirmation = { foo: "bar" };
 		void _bad;

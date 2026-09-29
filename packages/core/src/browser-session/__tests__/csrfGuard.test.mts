@@ -15,7 +15,7 @@
  */
 
 /**
- * The `csrfGuard` slot (#728; #710's one browser-origin / CSRF policy):
+ * The `csrfGuard` slot, the one browser-origin / CSRF policy:
  * whether a browser's request may change state, and whether a navigation
  * may start a flow that will, decided once for every package's routes. Its
  * contract suite and the test double: the double keeps every case, and each

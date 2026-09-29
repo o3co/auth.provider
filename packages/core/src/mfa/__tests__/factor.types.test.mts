@@ -47,8 +47,8 @@ describe("the MfaFactor contract", () => {
 		expectTypeOf<MfaDigests["digest"]>().toEqualTypeOf<
 			(parts: readonly string[]) => MfaKeyedDigest
 		>();
-		// A digest whose key has left the ring is not a wrong code: D11 answers
-		// an unreadable factor 503, never "invalid".
+		// A digest whose key has left the ring is not a wrong code: the MFA
+		// ADR's D11 answers an unreadable factor 503, never "invalid".
 		expectTypeOf<MfaDigests["matchesDigest"]>().toEqualTypeOf<
 			(parts: readonly string[], stored: MfaKeyedDigest) => MfaDigestMatch
 		>();

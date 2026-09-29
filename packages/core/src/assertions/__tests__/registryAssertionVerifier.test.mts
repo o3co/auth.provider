@@ -30,10 +30,11 @@ import { createRegistryAssertionVerifier } from "#/assertions/registryAssertionV
 import { createMemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
 
 /**
- * #525 — "we trust these N issuers, each with their own keys and terms", where
- * the one-key verifier was "this key, this issuer". Almost every case is a
- * refusal or an ordering: the value of a registry is what it refuses before
- * doing any work, and what it lets one issuer's terms not leak into another's.
+ * A registry says "we trust these N issuers, each with their own keys and
+ * terms", where the one-key verifier says "this key, this issuer". Almost
+ * every case is a refusal or an ordering: the value of a registry is what it
+ * refuses before doing any work, and what it lets one issuer's terms not leak
+ * into another's.
  */
 
 const AS = "https://auth.example";
@@ -293,7 +294,7 @@ describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", ()
 	it("throws, rather than refusing, when the endpoint is down — the grant answers 503", async () => {
 		// A device whose issuer's JWKS endpoint is unreachable has not presented
 		// a bad credential; telling it so would send an operator to re-enrol a
-		// device that was fine (the #408 distinction).
+		// device that was fine.
 		const verifier = verifierOver([
 			entryA({ keys: { type: "jwks_uri", uri: jwks.uri, cooldownMs: 0, cacheMaxAgeMs: 0 } }),
 		]);
@@ -536,7 +537,7 @@ describe("createRegistryAssertionVerifier — what every entry refuses (#525)", 
 
 	it("reports the verified exp as expiresAt, in epoch seconds", async () => {
 		// The jwt-bearer grant caps the token it mints at the assertion's
-		// remaining lifetime (auth.proxy#90), and the verifier is the only
+		// remaining lifetime, and the verifier is the only
 		// party that has read `exp` off a verified signature.
 		const exp = Math.floor(Date.now() / 1000) + 120;
 		const result = await verifierOver([entryA()]).verify(await mint({ sub: "d" }, { expSec: exp }));
@@ -639,7 +640,7 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 	it("reports the verified exp as expiresAt — the grant caps the token at it", async () => {
 		// An ID-JAG is short-lived by construction (iat at most an hour old,
 		// often minutes in practice); the token minted from it must not
-		// outlive it (auth.proxy#90).
+		// outlive it.
 		const exp = Math.floor(Date.now() / 1000) + 90;
 		expect((await make().verify(await idJag({}, { exp }), asApp))?.expiresAt).toBe(exp);
 	});

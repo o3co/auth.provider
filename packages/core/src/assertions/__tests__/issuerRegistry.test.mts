@@ -23,7 +23,7 @@ import {
 } from "#/assertions/issuerRegistry.mjs";
 
 /**
- * #525 — the trust registry's admin surface and entry validation. What an
+ * The trust registry's admin surface and entry validation. What an
  * entry means at verification time is pinned in
  * `registryAssertionVerifier.test.mts`; this file is about the list itself.
  */

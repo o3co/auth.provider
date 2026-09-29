@@ -40,21 +40,16 @@ test("Module is the widened ModuleSpec alias (post-inference)", () => {
 	// Structural test: Module is ModuleSpec<ComponentKey, ComponentKey,
 	// SectionSchema> per the variance widening in module-spec.mts. Asserting
 	// against `ModuleSpec` (= `ModuleSpec<never, never, never>`) would pass by
-	// accident in Phase 1 (because ComponentKey = never in the empty baseline)
-	// and then silently fail in Phase 5+ when ComponentKey expands to real
-	// slots. The assertion below is Phase-5-stable: both sides expand
-	// identically. The third argument is the widest section schema (#728).
+	// accident only while ComponentKey is never, and fail silently once it
+	// names real slots. The assertion below holds either way: both sides
+	// expand identically. The third argument is the widest section schema.
 	expectTypeOf<Module>().toEqualTypeOf<ModuleSpec<ComponentKey, ComponentKey, SectionSchema>>();
 	// And that is `ModuleSpec`'s default for it, so the two-argument spelling
-	// integrators wrote before sections existed still names `Module`.
+	// also names `Module`.
 	expectTypeOf<Module>().toEqualTypeOf<ModuleSpec<ComponentKey, ComponentKey>>();
 });
 
 test("ModuleSpec has the 12 baseline fields, all readonly", () => {
-	// A2-β §4.1 adds `lifecycle` as the 8th field (additive amendment to
-	// A2-α); #363 adds `absencePolicies` as the 9th; #455 adds
-	// `replicaSafety` as the 10th; #728 adds `section` as the 11th and
-	// `authoritative` as the 12th.
 	type Keys = keyof ModuleSpec;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "name"

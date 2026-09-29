@@ -16,10 +16,11 @@
 
 /**
  * `federationGrants.*` as an operator writes it, turned into the limits the
- * retrieval takes (federation-grants ADR, D3/D10/D12). The conversion goes
- * wrong silently: seconds forwarded as milliseconds, or a default substituted
- * for an explicitly invalid value, which turns a typo into a deployment nobody
- * chose. So it is a named function, tested directly.
+ * retrieval takes (ADR 2026-09-17-federation-grants-offline-delegation, D3,
+ * D10 and D12). The conversion goes wrong silently: seconds forwarded as
+ * milliseconds, or a default substituted for an explicitly invalid value,
+ * which turns a typo into a deployment nobody chose. So it is a named
+ * function, tested directly.
  */
 
 import { readFileSync } from "node:fs";
@@ -141,10 +142,11 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 	});
 
 	it("takes the subject-revocation allowance rather than inventing a second one", () => {
-		// The D13 backstop (federation-grants ADR) is compared against the
-		// watermark `verifyJwt` reads, so a federation-grant-specific skew would
-		// be a second allowance for one comparison, and the boundary's
-		// retention would have to cover whichever is larger.
+		// The revocation backstop (ADR
+		// 2026-09-17-federation-grants-offline-delegation, D13) is compared
+		// against the watermark `verifyJwt` reads, so a federation-grant-specific
+		// skew would be a second allowance for one comparison, and the
+		// boundary's retention would have to cover whichever is larger.
 		const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
 		expect(limits.revocationSkewMs).toBe(1_000);
 	});

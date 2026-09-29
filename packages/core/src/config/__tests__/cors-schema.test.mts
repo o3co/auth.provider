@@ -13,7 +13,7 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 /**
- * #500 — `cors.allowedOrigins` is matched against the `Origin` header by exact
+ * `cors.allowedOrigins` is matched against the `Origin` header by exact
  * string equality, so an entry that cannot match is an allowlist that admits
  * nobody. Nothing anywhere would say so: the config parses, the middleware
  * mounts, every request just fails at the browser. So the entries are checked
@@ -49,8 +49,8 @@ describe("cors.allowedOrigins — accepted shapes", () => {
 
 	it("accepts the loopback http carve-out but not plaintext beyond it", () => {
 		// The same carve-out `checkSecureEndpoint`, `checkRedirectShape` and
-		// `checkRedirectUri` consume, through the one `isLoopbackHostname` home
-		// (#364): a front-end dev server works without a certificate, and a
+		// `checkRedirectUri` consume, through the one `isLoopbackHostname` home:
+		// a front-end dev server works without a certificate, and a
 		// plaintext origin does not get to read token responses.
 		expect(parse(["http://localhost:5173"]).success).toBe(true);
 		expect(parse(["http://app.example.com"]).success).toBe(false);
@@ -97,7 +97,7 @@ describe("cors.allowedOrigins — the CORS_ALLOWED_ORIGINS shape", () => {
 	it("splits a comma-separated string, trimming each entry", () => {
 		// HOCON substitutes `${?CORS_ALLOWED_ORIGINS}` as a string, always, and
 		// an array of strings is not something the zod bridge can coerce
-		// towards — the same wall #292 hit at `normalizeTrustProxy`.
+		// towards — the same wall `normalizeTrustProxy` meets.
 		const result = parse(" https://app.example.com , http://localhost:5173 ");
 		expect(result.success).toBe(true);
 		if (result.success) {
@@ -140,8 +140,8 @@ describe("cors.allowedOrigins — the CORS_ALLOWED_ORIGINS shape", () => {
 describe("cors.allowedOrigins — a shape neither reader reads refuses boot, by path", () => {
 	// The key has two spellings: a list, and the one comma-separated string an
 	// environment variable carries. Anything else — a number, an object, a
-	// boolean, which only a configuration file can write — used to read as
-	// "no origins": CORS silently off for a key someone wrote.
+	// boolean, which only a configuration file can write — would otherwise read
+	// as "no origins": CORS silently off for a key someone wrote.
 	it.each([
 		["a number", 42],
 		["an object", { origin: "https://app.example.com" }],

@@ -130,7 +130,8 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 	it("refuses a factor that names mfa among its own values: mfa comes from addsMfa alone", () => {
 		// Otherwise a factor that does not add `mfa` — the email code, by
 		// default — could put it on a session by listing it, and meet
-		// `urn:o3co:acr:mfa` with a mailbox (O7).
+		// `urn:o3co:acr:mfa` with a mailbox (ADR
+		// 2026-09-25-multi-factor-authentication, O7).
 		expect(() => composeAmr(["pwd"], { amr: [MFA_AMR], addsMfa: false })).toThrow(RangeError);
 		expect(() => composeAmr(["pwd"], { amr: ["otp", MFA_AMR], addsMfa: true })).toThrow(RangeError);
 	});
@@ -141,7 +142,8 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 	])(
 		"refuses a factor that names the primary marker %s: a second factor cannot forge a primary",
 		(_label, marker) => {
-			// The baseline is decided on the primary (D13), which the session's
+			// The baseline is decided on the primary (ADR
+			// 2026-09-25-multi-factor-authentication, D13), which the session's
 			// `pwd` / `fed` say; a factor listing either would change it.
 			expect(() => composeAmr(["pwd"], { amr: [marker], addsMfa: true })).toThrow(RangeError);
 			expect(() => composeAmr(["fed"], { amr: ["otp", marker], addsMfa: true })).toThrow(

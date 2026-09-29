@@ -15,7 +15,7 @@
  */
 
 /**
- * `moduleReferences` (#728): the `reference.conf` files the loaded modules
+ * `moduleReferences`: the `reference.conf` files the loaded modules
  * declare (`section.reference`), deduplicated, in module order, with core's
  * own at the bottom — the chain a composition root layers beneath its own
  * files. And `referenceConfProblems`, on core's testing entry: the check a

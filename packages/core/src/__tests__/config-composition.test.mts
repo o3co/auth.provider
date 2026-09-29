@@ -220,7 +220,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 		const schema = fullSectionsSchema.pick({ endpoints: true });
 		const result = schema.safeParse(endpointsWithDeadFields);
 		expect(result.success).toBe(true);
-		// IH-10: client/authCallback are stripped (not in schema anymore).
+		// client/authCallback are not in the schema, so they are stripped.
 		if (result.success) {
 			expect((result.data.endpoints as Record<string, unknown>).client).toBeUndefined();
 			expect((result.data.endpoints as Record<string, unknown>).authCallback).toBeUndefined();
@@ -302,8 +302,8 @@ describe("AppConfigSchema backward compatibility", () => {
 				code: { type: "memory", memory: { defaultExpiresIn: 600 } },
 			},
 			endpoints: {
-				// IH-17: login.url is now required at the base schema level.
-				// IH-10: client / authCallback are removed — stripped if present.
+				// login.url is required at the base schema level.
+				// client / authCallback are not in the schema — stripped if present.
 				login: { url: "/login" },
 			},
 			cors: { allowedOrigins: [] },

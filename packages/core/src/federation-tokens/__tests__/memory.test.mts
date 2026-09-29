@@ -75,9 +75,10 @@ describe("in-memory FederationTokenStore", () => {
 	] as const)("keeps tokenType through the defensive copy on %s (#645)", async (_label, write) => {
 		// The same field-by-field copy, and here a forgotten field fails OPEN:
 		// `POST /oauth/federation/:name/token` reads an absent `tokenType` as a
-		// record written before #645 and answers Bearer, so a store that dropped
-		// it would hand a DPoP-bound token on as a bearer one. `DPoP` rather than
-		// `Bearer` so the assertion cannot pass by coincidence with the default.
+		// record written before the field existed and answers Bearer, so a store
+		// that dropped it would hand a DPoP-bound token on as a bearer one.
+		// `DPoP` rather than `Bearer` so the assertion cannot pass by coincidence
+		// with the default.
 		const senderConstrained = { ...tokens, tokenType: "DPoP" };
 		if (write === "update") await store.attach("sid-1", "google", tokens);
 		await store[write]("sid-1", "google", senderConstrained);

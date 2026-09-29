@@ -16,7 +16,7 @@
 
 /**
  * The `RateLimiter` port's contract suite, with its optional `failMode` —
- * the limiter's own outage policy (#728) — and the test double. The suite
+ * the limiter's own outage policy — and the test double. The suite
  * runs against the double and against core's in-process limiter; each way a
  * limiter can break the contract fails the case that names it.
  */

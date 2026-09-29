@@ -24,7 +24,7 @@ import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { jwksModule } from "../module.mjs";
 
-// #282: the JWKS route only publishes a key set for an asymmetric keystore,
+// The JWKS route only publishes a key set for an asymmetric keystore,
 // so the module's serve-path tests run against EdDSA — the shipped default.
 const eddsaPair = await generateKeyPair("EdDSA", { extractable: true });
 const eddsaKeyStore = await createAsymmetricKeyStore({
@@ -148,7 +148,7 @@ describe("jwksModule — discoveryMetadata contribution (OIDC aggregator)", () =
 		const factory = jwksModule.contributes?.discoveryMetadata?.[0];
 		expect(factory).toBeDefined();
 		// Awaited as the boot planner does: a contribution factory may answer with
-		// a promise, and every kind's declared type says so since #626 P1.
+		// a promise, and every kind's declared type says so.
 		const meta = await factory?.({ config } as never);
 		// jwks owns `jwks_uri`; the aggregator prefixes it with the issuer. The
 		// path must match the route the same module registers (single source of

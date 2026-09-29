@@ -17,8 +17,7 @@
 /**
  * Private memory helper used by `SessionRPRegistry`. Mirrors the Redis
  * `createRedisSidHash` semantics: id-keyed upsert under a single sid-scoped
- * envelope, TTL-synced to `expiresAt`, no-op writes after expiry. Per A4 §7.1
- * (lines 510-531 of the spec).
+ * envelope, TTL-synced to `expiresAt`, no-op writes after expiry.
  */
 export interface MemorySidHash<T> {
 	setField(sid: string, entry: T, expiresAt: Date): void;
@@ -42,8 +41,8 @@ export function createMemorySidHash<T>(idOf: (t: T) => string): MemorySidHash<T>
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("expiresAt must be a valid date");
 			}
-			// Codex finding: writes after expiry MUST NOT recreate a zombie
-			// entry. Mirror redis adapter's PEXPIREAT-after-expiry no-op.
+			// Writes after expiry MUST NOT recreate a zombie entry. Mirror
+			// redis adapter's PEXPIREAT-after-expiry no-op.
 			if (expiresAtMs <= Date.now()) return;
 			const existing = store.get(sid);
 			// Lazy GC: same rationale as createMemorySidSortedSet.add — drop a

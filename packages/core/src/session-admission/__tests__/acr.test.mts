@@ -16,7 +16,7 @@
 
 /**
  * The provider's `acr` vocabulary (the MFA ADR's D15, the session-admission
- * ADR's D6): the table as it is read, D15's selection over what a session
+ * ADR's D6): the table as it is read, the selection over what a session
  * vouches for, what a step-up can reach, what the composition can produce,
  * and the drop of the entries nothing installed can satisfy.
  */
@@ -37,7 +37,7 @@ const PHR = "urn:o3co:acr:phr";
 const PWD = "urn:example:pwd";
 const KBA = "urn:example:kba";
 
-/** The template's table (D15), `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
+/** The template's table (the MFA ADR's D15), `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
 const TABLE: AcrTable = readAcrTable({
 	[MFA]: ["mfa"],
 	[PHR]: [["hwk"], ["swk"]],
@@ -240,7 +240,7 @@ describe("producibleAmr — what something installed can put in a session's amr 
 
 	it("is anything once a federation whose upstream amr counts is installed", () => {
 		// An upstream IdP may assert any value, and a trusted one is recorded
-		// beside `fed` (D13).
+		// beside `fed` (the MFA ADR's D13).
 		expect(
 			producibleAmr({ reach: NOTHING, federationInstalled: true, trustedFederation: true })
 				.anything,

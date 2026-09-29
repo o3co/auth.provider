@@ -9,7 +9,7 @@
  */
 
 /**
- * Issue #270 — `/session/login` now runs on the shared `RateLimiter`, keyed
+ * `/session/login` runs on the shared `RateLimiter`, keyed
  * `login:ip:<ip>`. An adapter resolves a spec by key prefix from its own
  * `limits` map, but the documented login window and limit live at
  * `config.rateLimit.login`. Without seeding, a `login:` key would fall through
@@ -58,7 +58,7 @@ describe("resolveLoginLimitSpec", () => {
 
 	it("does not seed when the config does not give rateLimit.login at all", () => {
 		// Absent: a config without the section, or without the key. The
-		// adapter's own default applies, as #270 intends.
+		// adapter's own default applies.
 		expect(resolveLoginLimitSpec({}, {}).login).toBeUndefined();
 		expect(resolveLoginLimitSpec({}, { rateLimit: {} }).login).toBeUndefined();
 		expect(resolveLoginLimitSpec({}, { rateLimit: { failMode: "open" } }).login).toBeUndefined();

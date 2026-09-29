@@ -34,12 +34,11 @@ const minBoot = {
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 
-// Activator: same pattern as Phase 5 wiring tests. The boot planner only
-// walks `requires` for closure roots (modules with `contributes` or
-// `overrides`), so a marker module that contributes a no-op route AND
-// requires both wrapper slots forces materialisation. Real downstream
-// consumers (oauth grant handlers, logout routes) naturally satisfy this
-// via their own route handler modules.
+// Activator: the boot planner only walks `requires` for closure roots
+// (modules with `contributes` or `overrides`), so a marker module that
+// contributes a no-op route AND requires both wrapper slots forces
+// materialisation. Real downstream consumers (oauth grant handlers, logout
+// routes) naturally satisfy this via their own route handler modules.
 const activatorModule = defineModule({
 	name: "test-activate-refresh-token-wrappers",
 	requires: ["refreshTokenFamilyRotation", "refreshTokenFamilyRevocation"] as const,

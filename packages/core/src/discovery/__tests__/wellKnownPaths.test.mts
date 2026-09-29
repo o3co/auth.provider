@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { discoveryPathsFor } from "#/discovery/wellKnownPaths.mjs";
 
 /**
- * #528 — where the one metadata document is served, per issuer shape. OIDC
+ * Where the one metadata document is served, per issuer shape. OIDC
  * Discovery appends its suffix to the issuer; RFC 8414 inserts its well-known
  * string between host and path. Both forms are served from one home.
  */

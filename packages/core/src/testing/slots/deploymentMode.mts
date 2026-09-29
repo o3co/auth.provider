@@ -15,7 +15,7 @@
  */
 
 /**
- * The contract suite of the `deploymentMode` slot (#728):
+ * The contract suite of the `deploymentMode` slot:
  * `deploymentModeContract(input)` holds the value to its three answers —
  * `single`, `multi`, or `unset` when the operator said nothing. There is no
  * double: a test fills the slot with the literal. Published on

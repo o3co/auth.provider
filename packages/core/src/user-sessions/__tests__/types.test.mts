@@ -58,7 +58,7 @@ test("CreateUserSessionInput drops federations field (now in SessionFederationIn
 		readonly authTime: Date;
 		readonly expiresAt: Date;
 		readonly claims: UserSessionClaims;
-		// #481; a required key since #626
+		// A required key
 		readonly amr: readonly string[] | undefined;
 		// The MFA ADR's D9; a required key, as `amr` is
 		readonly authentication: SessionAuthentication | undefined;
@@ -73,7 +73,7 @@ test("UserSession value type has no activeRPs/familyIds/federations fields", () 
 		readonly createdAt: Date;
 		readonly expiresAt: Date;
 		readonly claims: UserSessionClaims;
-		// #481; a required key since #626
+		// A required key
 		readonly amr: readonly string[] | undefined;
 		// The MFA ADR's D9; a required key, as `amr` is
 		readonly authentication: SessionAuthentication | undefined;
@@ -138,7 +138,7 @@ test("Factory aliases are AdapterFactory<T> over the 4 stores", () => {
 });
 
 test("RegisteredRP exposes immutable fields, every logout field a required key that may be undefined", () => {
-	// Required keys since #626: a registry that copies the record field by field
+	// Required keys: a registry that copies the record field by field
 	// and forgot one would drop the RP from the logout cascade without a sound.
 	// `registered-rp.types.test.mts` says why each one matters.
 	expectTypeOf<RegisteredRP>().toEqualTypeOf<{

@@ -51,7 +51,7 @@ describe("createMemorySidSortedSet", () => {
 
 	it("list GCs entries past expiry", async () => {
 		const z = createMemorySidSortedSet();
-		// Widen timing margins to avoid CI flake on loaded runners (per T2 review).
+		// Wide timing margins, so a loaded CI runner does not flake.
 		const soon = new Date(Date.now() + 50);
 		z.add("sid-1", "google", soon);
 		expect(z.list("sid-1")).toEqual(["google"]);

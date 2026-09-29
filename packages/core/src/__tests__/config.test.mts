@@ -39,7 +39,7 @@ describe("provider config", () => {
 
 		// algorithm and kid come from hocon (`reference.conf`); the schema
 		// is strict and supplies no defaults of its own (ADR 2026-04-30).
-		// #282: the shipped default is an ASYMMETRIC algorithm. HS256 makes
+		// The shipped default is an ASYMMETRIC algorithm. HS256 makes
 		// relying parties either unable to verify (no JWKS) or holders of a
 		// token-forging key, so it is opt-in rather than what you get by
 		// doing nothing.
@@ -52,8 +52,8 @@ describe("provider config", () => {
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session.name).toBe("__Host-auth.session");
 		expect(config.redisSessionStores?.keyPrefix).toBe("ss:");
-		// #282 wraps `session` in a cross-field refinement (SameSite/Secure) and
-		// #272 put `session.csrf` inside the same object. Resolve the real
+		// `session` is wrapped in a cross-field refinement (SameSite/Secure), and
+		// `session.csrf` sits inside the same object. Resolve the real
 		// reference.conf and assert the sub-section still arrives COERCED — a
 		// wrapper that broke ts.hocon's shape traversal would leave `ttlSeconds`
 		// as the string "7200" and fail only once the CSRF arithmetic ran.
@@ -62,9 +62,7 @@ describe("provider config", () => {
 	});
 
 	it("fails to build a keystore when reference.conf is loaded with NO key material (#282)", async () => {
-		// The headline requirement: a deployment that sets no signing key at all
-		// must not boot. Pre-#282 it silently got HS256 with whatever
-		// OAUTH_JWT_SECRET happened to be — including nothing useful.
+		// A deployment that sets no signing key at all must not boot.
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_ISSUER: "https://auth.test",
@@ -148,13 +146,13 @@ describe("provider config", () => {
 	});
 
 	it("fails loudly when the removed OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS is still set", () => {
-		// #330: the one-time migration flag for the /authorize first-party
-		// invariant (#316/#317) is gone. reference.conf deliberately keeps the
+		// The one-time migration flag for the /authorize first-party
+		// invariant is removed. reference.conf deliberately keeps the
 		// env-var substitution as a tombstone, so a deployment still exporting
 		// the variable fails at boot with migration instructions instead of
 		// having the value silently ignored. The value is irrelevant —
-		// presence is the failure ("false" was the strict endstate answer, and
-		// it must be deleted too).
+		// presence is the failure (even "false", the strict setting, must be
+		// deleted).
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
@@ -268,7 +266,7 @@ describe("jwt config schema", () => {
 	// accepted. Per ADR 2026-04-30 the schema is a pure type contract:
 	// algorithm/kid are required at the schema boundary, and hocon
 	// (`packages/core/config/reference.conf`) supplies the runtime
-	// defaults that production callers rely on. IH-9: the schema is a
+	// defaults that production callers rely on. The schema is a
 	// discriminated union on `algorithm`, so a bare local sub-section
 	// fails the discriminator check before per-branch field validation.
 

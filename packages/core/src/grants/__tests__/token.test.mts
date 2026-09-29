@@ -25,7 +25,7 @@ const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 describe("generateToken — a caller-supplied identity (v0.13.0 audit)", () => {
 	it("refuses an empty jti rather than signing a token with no identity", async () => {
 		// `jti` is supplied when a token's identity is reserved before it is
-		// signed (#449). An empty one would be signed as-is, and every replay
+		// signed. An empty one would be signed as-is, and every replay
 		// check keyed on it would share one key.
 		await expect(generateToken({}, { keyStore, jti: "" })).rejects.toThrow(/jti/);
 	});

@@ -9,8 +9,8 @@
  */
 
 /**
- * Issue #296 — the Store owns the password-reset flow; this library owns
- * killing what it issued against the old credential.
+ * The Store owns the password-reset flow; this library owns killing what it
+ * issued against the old credential.
  */
 
 import { describe, expect, it, vi } from "vitest";

@@ -296,16 +296,16 @@ describe("AdapterFactory.replace (A6+A7 §2.2: explicit override)", () => {
 
 describe("AdapterFactory contract: no freeze method (A6+A7 §2.3)", () => {
 	it("does NOT expose a freeze method (composition-root concern)", () => {
-		// Per A6+A7 §2.3: "AdapterFactory does not participate in module
-		// init phases and therefore has no freeze()." Infrastructure builder
-		// composition is not protocol-module registration.
+		// AdapterFactory does not participate in module init phases and
+		// therefore has no freeze(): infrastructure builder composition is not
+		// protocol-module registration.
 		const factory = createAdapterFactory<MockAdapter>("Mock");
 		expect("freeze" in factory).toBe(false);
 	});
 });
 
 // ---------------------------------------------------------------------------
-// D-5: createLifecycleRegistrar — LIFO drain, sequential await, error
+// createLifecycleRegistrar — LIFO drain, sequential await, error
 // continuation contract.
 // ---------------------------------------------------------------------------
 

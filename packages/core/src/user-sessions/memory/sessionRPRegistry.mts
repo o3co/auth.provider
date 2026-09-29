@@ -20,7 +20,6 @@ import { createMemorySidHash } from "./internalSidHash.mjs";
 /**
  * Defensive clone of a RegisteredRP. Constructs a fresh Date for `registeredAt`
  * so that callers cannot mutate the stored copy via the returned reference.
- * Per A4 §7.1 defensive-copy obligation.
  */
 const cloneRP = (rp: RegisteredRP): RegisteredRP => ({
 	clientId: rp.clientId,
@@ -36,8 +35,6 @@ const cloneRP = (rp: RegisteredRP): RegisteredRP => ({
  * by `clientId`. Provides idempotent upsert (replaces earlier registration when
  * back-channel logout URIs change between flows), expiry no-op on past
  * `expiresAt`, and defensive RP-clone on register and list.
- *
- * Per A4 §5.2 + §7.1 + §13.1.
  */
 export function createInMemorySessionRPRegistry(): SessionRPRegistry {
 	const hash = createMemorySidHash<RegisteredRP>((rp) => rp.clientId);

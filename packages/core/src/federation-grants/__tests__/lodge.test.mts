@@ -188,7 +188,7 @@ describe("lodging a first-time intent (D6, D16)", () => {
 		// A deployment's own `ClientRepository` validates nothing this code can
 		// see. Read with a bare `.includes`, a comma-joined string would let
 		// "okta-calendar-prod" permit "okta-calendar" — the rule the token
-		// route already applies (D9), applied at lodging too.
+		// route already applies, applied at lodging too.
 		const asString = (value: string) => value as unknown as readonly string[];
 		expect(
 			await lodgeFederationGrantIntent(

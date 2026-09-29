@@ -156,9 +156,10 @@ describe("connection revisions (#593, D4)", () => {
 				federation: "okta-2",
 				upstreamIssuer: "https://dev-2.okta.test",
 				upstreamClientId: "0oa-other",
-				// D5 and D10 judge every token against the CURRENT maximum, so a
-				// tightened value takes effect on the next call. Putting it here
-				// would turn a configuration slip into a reconnect for every user.
+				// D5 and D10 of ADR 2026-09-17-federation-grants-offline-delegation
+				// judge every token against the CURRENT maximum, so a tightened value
+				// takes effect on the next call. Putting it here would turn a
+				// configuration slip into a reconnect for every user.
 				maxAccessTokenLifetime: 60,
 				allowScopeSubsets: false,
 			});

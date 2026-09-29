@@ -356,7 +356,8 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 					reason: "malformed_token_response",
 					retryAfterSeconds: 300,
 				});
-				// Discarding the response would discard the only valid credential (D5).
+				// Discarding the response would discard the only valid credential (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D5).
 				expect(await stored()).toStrictEqual({
 					refreshToken: `${SECRET}-rotated`,
 					accessToken: undefined,
@@ -901,7 +902,8 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		});
 
 		it("is looked for with what is left of the persist budget, and not with a budget of its own", async () => {
-			// The lock is sized for the hard deadline plus ONE persist budget (D12).
+			// The lock is sized for the hard deadline plus ONE persist budget (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D12).
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));

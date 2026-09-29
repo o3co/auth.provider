@@ -100,7 +100,7 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 	});
 
 	it("concurrency property (N=30): exactly 1 'consumed', remaining are 'replayed' or 'unknown' (per §6.1 propagation gap)", async () => {
-		// Per master roadmap §3.6: assert single winner + zero false accepts ONLY.
+		// Assert single winner + zero false accepts ONLY.
 		// Do NOT assert exact replayed/unknown split — timing-dependent.
 		const { store, ceremony } = makeCeremonyWithMemoryBackends();
 		await store.issue("scope-A", "swarm", future());
@@ -111,7 +111,7 @@ describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 		const consumed = results.filter((r) => r.outcome === "consumed").length;
 		expect(consumed).toBe(1);
 		// Remaining N-1 split between "replayed" and "unknown" — exact split is
-		// timing-dependent and NOT asserted per §6.1.
+		// timing-dependent and NOT asserted.
 		const others = results.filter((r) => r.outcome !== "consumed").length;
 		expect(others).toBe(N - 1);
 	});

@@ -15,7 +15,7 @@
  */
 
 /**
- * The `sessionCookiePolicy` slot (#728): the session cookie's attributes, which
+ * The `sessionCookiePolicy` slot: the session cookie's attributes, which
  * other modules need to set a cookie of their own beside it or to size what
  * must outlive a session. Its contract suite and the test double: the
  * double keeps every case, and each way a policy can break the contract

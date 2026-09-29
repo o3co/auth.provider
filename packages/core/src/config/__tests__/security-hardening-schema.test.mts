@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 /**
- * #282 — schema-level hardening of the values an operator supplies:
+ * Schema-level hardening of the values an operator supplies:
  *
  *  - `session.secret` carries a 256-bit entropy floor (the JWT signing
  *    secret's floor lives in the keystore builder, per ADR 2026-04-30).
@@ -47,8 +47,8 @@ function issueMessages(result: ReturnType<typeof AppConfigSchema.safeParse>): st
 }
 
 describe("the session object's cross-field check does not swallow its sub-sections", () => {
-	// #282 wraps `session` in a `.superRefine(...)` for the SameSite/Secure
-	// rule. #272's `session.csrf` sub-section landed inside the same object.
+	// `session` is wrapped in a `.superRefine(...)` for the SameSite/Secure
+	// rule, and the `session.csrf` sub-section sits inside the same object.
 	// A refinement wrapper that stopped exposing `.shape` would break ts.hocon's
 	// schema-aware coercion for everything under `session` — and it would break
 	// it SILENTLY: `ttlSeconds` would survive as the string "7200", pass a

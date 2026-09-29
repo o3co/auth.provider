@@ -19,16 +19,16 @@
  *
  * `withRemovedKeys` puts `removedIn` verbatim into the boot error an operator
  * reads when a retired key is still in their config. A removal landing on HEAD
- * carries a neutral placeholder citing its PR (`"this release (#NNN)"`,
- * docs/release-policy.md R5), replaced with the released tag at cut time (R6
- * step 5); a placeholder that ships points operators at a release with no
+ * carries a neutral placeholder citing its PR (`"this release (#NNN)"`),
+ * replaced with the released tag at cut time (docs/release-policy.md R5 and
+ * R6 step 5); a placeholder that ships points operators at a release with no
  * name.
  *
  * So a stamp is either a released tag (`vX.Y.Z ...`) or a placeholder citing
  * a PR that no CHANGELOG version section lists yet: the section is written at
- * cut time (R2), so between cuts a placeholder's PR appears nowhere. The cut
- * that lists the PR under a version heading is when this starts failing, and
- * the failure names the section to copy the tag from.
+ * cut time (docs/release-policy.md R2), so between cuts a placeholder's PR
+ * appears nowhere. The cut that lists the PR under a version heading is when
+ * this starts failing, and the failure names the section to copy the tag from.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -85,8 +85,9 @@ const cites = (body: string, pr: string): boolean => new RegExp(`#${pr}(?!\\d)`)
 /**
  * The oldest *version* section citing `#<pr>`: a later release may mention
  * the PR in passing. A `## [Unreleased]` heading is never a release: the
- * policy has no standing one (R2), and one left behind must not force a tag
- * to be stamped before the version section exists.
+ * release policy has no standing one (docs/release-policy.md R2), and one
+ * left behind must not force a tag to be stamped before the version section
+ * exists.
  */
 const versionSectionCiting = (
 	sections: readonly [string, string][],
@@ -122,8 +123,8 @@ describe("removedIn stamps (#458)", () => {
 					`${file}: "${value}" is neither a released tag nor a placeholder citing its PR as #NNN`,
 				];
 			}
-			// The section is written at cut time (R2): a PR no version section
-			// lists has not been cut, and its placeholder stands.
+			// The section is written at cut time (docs/release-policy.md R2): a PR
+			// no version section lists has not been cut, and its placeholder stands.
 			const shipped = versionSectionCiting(sections, pr);
 			if (shipped === undefined) return [];
 			return [
