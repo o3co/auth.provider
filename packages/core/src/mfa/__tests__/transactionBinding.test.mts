@@ -42,7 +42,6 @@ describe("MfaTransactionBinding", () => {
 		}>();
 		expectTypeOf<MfaTransaction["binding"]>().toEqualTypeOf<MfaTransactionBinding>();
 		expectTypeOf<MfaTransaction>().not.toHaveProperty("sessionId");
-		expect(true).toBe(true);
 	});
 
 	it("and its comparison and bound read are on the package's root", () => {

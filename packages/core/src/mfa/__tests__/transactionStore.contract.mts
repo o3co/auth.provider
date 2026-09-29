@@ -77,12 +77,20 @@ const POLICY: MfaLockoutPolicy = {
 	trustedBrowserDays: 30,
 };
 
+/**
+ * The session a transaction is bound to: an express session id as
+ * express-session mints one — 32 characters of base64url, mixed case, with
+ * `-` and `_` — so a store that folds case, trims or re-encodes the id fails
+ * the round-trip.
+ */
+const SESSION_ID = "Qx7-dP_2mZkL9vRt3YbN8cW-4sHj_E1a";
+
 const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 	const now = Date.now();
 	return {
 		id: "tx-1",
 		purpose: "login",
-		binding: { kind: "session", id: "express-session-1" },
+		binding: { kind: "session", id: SESSION_ID },
 		subject: "user-1",
 		sid: undefined,
 		continuation: {
@@ -188,16 +196,18 @@ export function runMfaTransactionStoreContract(
 			const store = await factory();
 			const tx = TX();
 			await store.create(tx);
-			const bound: MfaTransactionBinding = { kind: "session", id: "express-session-1" };
+			const bound: MfaTransactionBinding = { kind: "session", id: SESSION_ID };
 			expect((await store.get("tx-1"))?.binding).toStrictEqual(bound);
 			expect(await getBoundMfaTransaction(store, "tx-1", bound)).toStrictEqual(tx);
 			const others: [string, unknown][] = [
-				["another id", { kind: "session", id: "express-session-2" }],
-				["another kind, the same id", { kind: "client", id: "express-session-1" }],
-				["the id and more", { kind: "session", id: "express-session-1x" }],
-				["a prefix of the id", { kind: "session", id: "express-session-" }],
-				["the id alone, as a bare session id", "express-session-1"],
-				["the id without a kind", { id: "express-session-1" }],
+				["another id", { kind: "session", id: "Rk2_aW-9pLmX3vQt7ZbN0cY-5sJh_F8b" }],
+				["another kind, the same id", { kind: "client", id: SESSION_ID }],
+				["the id case-folded", { kind: "session", id: SESSION_ID.toLowerCase() }],
+				["the id padded", { kind: "session", id: ` ${SESSION_ID} ` }],
+				["the id and more", { kind: "session", id: `${SESSION_ID}x` }],
+				["a prefix of the id", { kind: "session", id: SESSION_ID.slice(0, -1) }],
+				["the id alone, as a bare session id", SESSION_ID],
+				["the id without a kind", { id: SESSION_ID }],
 				["nothing", undefined],
 			];
 			for (const [name, other] of others) {
@@ -213,12 +223,10 @@ export function runMfaTransactionStoreContract(
 
 		it("keeps a binding to its known fields", async () => {
 			const store = await factory();
-			await store.create(
-				TX({ binding: { kind: "session", id: "express-session-1", note: "x" } as never }),
-			);
+			await store.create(TX({ binding: { kind: "session", id: SESSION_ID, note: "x" } as never }));
 			expect((await store.get("tx-1"))?.binding).toStrictEqual({
 				kind: "session",
-				id: "express-session-1",
+				id: SESSION_ID,
 			});
 		});
 
@@ -297,10 +305,10 @@ export function runMfaTransactionStoreContract(
 				["lastSentAtMs text", { lastSentAtMs: "5" }],
 				["id not a string", { id: 7 }],
 				["binding missing", { binding: undefined }],
-				["binding a bare session id", { binding: "express-session-1" }],
-				["binding a list", { binding: ["session", "express-session-1"] }],
+				["binding a bare session id", { binding: SESSION_ID }],
+				["binding a list", { binding: ["session", SESSION_ID] }],
 				["binding of a kind it does not know", { binding: { kind: "client", id: "c-1" } }],
-				["binding without a kind", { binding: { id: "express-session-1" } }],
+				["binding without a kind", { binding: { id: SESSION_ID } }],
 				["binding whose id is not a string", { binding: { kind: "session", id: 7 } }],
 				["binding whose id is empty", { binding: { kind: "session", id: "" } }],
 				[

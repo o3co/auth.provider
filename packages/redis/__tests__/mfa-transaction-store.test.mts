@@ -332,6 +332,35 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 		expect(await store.consume("tx-1", 1)).toBeNull();
 	});
 
+	it("answers a record written before the binding, or bound by a kind it does not know, as absent: no reading of it as a session's", async () => {
+		// No migration and no back-compat read (#742): a `record` holding the
+		// old `sessionId`, or a binding of another kind, is unreadable, and a
+		// transaction it cannot read fails closed.
+		const prefix = freshPrefix();
+		const store = storeAt(prefix);
+		const key = `${prefix}tx:{${keyPart("tx-1")}}`;
+		type Fixed = Record<string, unknown> & { readonly binding: { readonly id: string } };
+		const rewrites: readonly [string, (fixed: Fixed) => Record<string, unknown>][] = [
+			[
+				"a sessionId in place of the binding",
+				({ binding, ...rest }) => ({ ...rest, sessionId: binding.id }),
+			],
+			[
+				"a binding of a kind it does not know",
+				(fixed) => ({ ...fixed, binding: { kind: "client", id: fixed.binding.id } }),
+			],
+		];
+		for (const [what, rewrite] of rewrites) {
+			await first().del(key);
+			await store.create(TX());
+			const fixed = JSON.parse((await first().hget(key, "record")) ?? "null") as Fixed;
+			await first().hset(key, "record", JSON.stringify(rewrite(fixed)));
+			expect(await store.get("tx-1"), what).toBeNull();
+			expect(await store.update("tx-1", 1, { sends: 1 }), what).toBeNull();
+			expect(await store.consume("tx-1", 1), what).toBeNull();
+		}
+	});
+
 	it("refuses a keyPrefix that carries a brace, which would take the hash tags over", () => {
 		for (const keyPrefix of ["mfat:{x}:", "mfat}:", "{mfat:"]) {
 			expect(() => storeAt(keyPrefix), keyPrefix).toThrow(RangeError);
