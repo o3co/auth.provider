@@ -33,6 +33,7 @@ import {
 	ADMISSION_ACTIONS,
 	ADMISSION_INFRASTRUCTURE_STORES,
 	checkStepUpPage,
+	describeAdmissionOutage,
 	issuedRemediationActions,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -372,6 +373,17 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		}
 		for (const name of ["deployment:requirement-page", "a b", "!#$%&'()*+,-./:;<=>?@[]^_`{|}~"]) {
 			expect(resolverForTests([requirement(name)]).get(name)?.name, name).toBe(name);
+		}
+	});
+
+	it("describes an outage by the store an unavailable admission names — each of admission's own by name, anything else as a requirement's", () => {
+		expect(describeAdmissionOutage("user_session")).toBe("session store unavailable");
+		expect(describeAdmissionOutage("revocation_boundary")).toBe("revocation store unavailable");
+		for (const name of ADMISSION_INFRASTRUCTURE_STORES) {
+			expect(describeAdmissionOutage(name), name).not.toBe("session requirement unavailable");
+		}
+		for (const name of ["fixture", "mfa", "deployment:requirement-page"]) {
+			expect(describeAdmissionOutage(name), name).toBe("session requirement unavailable");
 		}
 	});
 
