@@ -539,7 +539,7 @@ describe("a password login the mfa requirement interrupts (the MFA ADR's F1 step
 		expect(signed.startsWith("s:")).toBe(true);
 		expect(transaction).toMatchObject({
 			purpose: "login",
-			sessionId: signed.slice(2, signed.lastIndexOf(".")),
+			binding: { kind: "session", id: signed.slice(2, signed.lastIndexOf(".")) },
 			subject: ALICE.sub,
 			continuation: { interruptedBy: "mfa", primary: { subject: ALICE.sub } },
 		});
