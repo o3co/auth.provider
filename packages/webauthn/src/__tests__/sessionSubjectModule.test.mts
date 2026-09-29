@@ -50,7 +50,7 @@ import { webauthnSessionSubjectModule } from "#/sessionSubject.mjs";
 const SUBJECT = "u-1";
 const SID = "s-1";
 const T0 = Date.now();
-/** `oauth.jwt.issuer`, which the planner hands the module in `config`: what a step-up page is resolved on. */
+/** The issuer the resolver registers each page on, as boot registers it on `oauth.jwt.issuer`. */
 const ISSUER = "https://as.example.test";
 
 const live = (over: Partial<UserSession> = {}): UserSession => ({
@@ -166,8 +166,9 @@ function setup(options: Setup = {}) {
 	} as unknown as UserSessionStore;
 	const subjectFor = vi.fn(options.subjectFor ?? bySubject);
 	const contribution = routeFactory(subjectFor)({
-		config: { oauth: { jwt: { issuer: ISSUER } } },
-		sessionRequirementResolver: resolverForTests(options.requirement ? [options.requirement] : []),
+		sessionRequirementResolver: resolverForTests(options.requirement ? [options.requirement] : [], {
+			issuer: ISSUER,
+		}),
 		...(options.noStore ? {} : { userSessionStore }),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
 		...(options.logger ? { logger: options.logger as unknown as Logger } : {}),
@@ -198,10 +199,10 @@ const register = (app: express.Express, route: "options" | "verify" = "options")
 describe("webauthnSessionSubjectModule — the manifest", () => {
 	const module = webauthnSessionSubjectModule({ subjectFor: bySubject });
 
-	it("requires the resolver and the user-session store — the cookie path it serves is the store-backed one — and the config, whose issuer a step-up page is resolved on", () => {
+	it("requires the resolver and the user-session store — the cookie path it serves is the store-backed one — and not the config: the step-up page comes resolved from registration", () => {
 		expect(module.name).toBe("webauthn-session-subject");
 		expect([...(module.requires ?? [])].sort()).toEqual(
-			["config", "sessionRequirementResolver", "userSessionStore"].sort(),
+			["sessionRequirementResolver", "userSessionStore"].sort(),
 		);
 	});
 
@@ -404,9 +405,10 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 			error_description: "Registering a passkey requires a step-up first",
 			requirement: "fixture",
 			// The shape every consumer answers (the session-admission ADR's D8, as
-			// amended): the registered page resolved on the issuer, its params on
-			// the query, no return parameter — the account page knows where it
-			// comes back to.
+			// amended): the page as registered, resolved on the issuer, its params
+			// on the query, no return parameter — the account page knows where it
+			// comes back to. The module is handed no config: nothing here reads
+			// the issuer.
 			page: `${ISSUER}/fixture/step-up?requirement=fixture`,
 		});
 		expect(subjectFor).not.toHaveBeenCalled();

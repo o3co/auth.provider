@@ -68,7 +68,11 @@ export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookie
 	HARNESS_SESSION_COOKIE_NAME,
 );
 
-/** `oauth.jwt.issuer` in the config the harness hands the router: what a step-up page is resolved on. */
+/**
+ * The issuer a harness test registers its requirements' pages on, as boot
+ * registers them on `oauth.jwt.issuer`. The router is handed no issuer: the
+ * page arrives resolved.
+ */
 export const HARNESS_ISSUER = "https://as.example.com";
 
 /**
@@ -302,7 +306,7 @@ export function buildFederationApp({
 
 	app.use(
 		createRouter(express, {
-			config: { oauth: { jwt: { issuer: HARNESS_ISSUER } } } as never,
+			config: {} as never,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(
 				[...providers.keys()].map((name) => [name, makePermissivePolicy()]),

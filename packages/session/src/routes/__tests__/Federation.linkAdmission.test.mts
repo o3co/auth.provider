@@ -198,7 +198,9 @@ function setup(options: Setup = {}): HarnessApp & { repo: LinkableRepo } {
 		providers,
 		providerCallbackUrls,
 		userRepository: repo,
-		requirements: resolverForTests(options.requirement ? [options.requirement] : []),
+		requirements: resolverForTests(options.requirement ? [options.requirement] : [], {
+			issuer: HARNESS_ISSUER,
+		}),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
 		...(options.logger ? { logger: options.logger } : {}),
 		...(options.auditSink ? { auditSink: options.auditSink } : {}),
@@ -426,9 +428,10 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 			error_description: "Linking a federated identity requires a step-up first",
 			requirement: "fixture",
 			// The shape every consumer answers (the session-admission ADR's D8, as
-			// amended): the registered page resolved on the issuer — not on the
-			// account page's origin — its params on the query, no return
+			// amended): the page as registered, resolved on the issuer — not on
+			// the account page's origin — its params on the query, no return
 			// parameter: the page that probed the start knows where it returns.
+			// The router's config carries no issuer: nothing here reads one.
 			page: `${HARNESS_ISSUER}/fixture/step-up?requirement=fixture`,
 		});
 		expect(recordedLink(harness)).toBeUndefined();

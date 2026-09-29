@@ -205,6 +205,53 @@ describe("stepUpPageUrl — the step-up page as a browser is sent to it (D2, D8)
 	});
 });
 
+describe("the registered page — resolved once, at registration, on the issuer it was validated on (D3, D8)", () => {
+	const paged = (stepUpPage: SessionRequirement["stepUpPage"]): SessionRequirement => ({
+		name: "x",
+		reach: new Set(),
+		stepUpPage,
+		remediations: [],
+		hintKeys: [],
+		admit: async () => ({ outcome: "met" }),
+	});
+
+	it("carries href: the page's url resolved on the issuer, its params on the query — one absolute URL with no return parameter, frozen with the copy", () => {
+		const page = { url: "/mfa/step-up", params: { flow: "x" } };
+		const registered = registeredRequirement(paged(page), ISSUER);
+		expect(registered.stepUpPage).toEqual({ ...page, href: `${ISSUER}/mfa/step-up?flow=x` });
+		expect(registered.stepUpPage?.href).toBe(stepUpPageUrl(page, ISSUER));
+		expect(Object.isFrozen(registered.stepUpPage)).toBe(true);
+		expect(new URL(registered.stepUpPage?.href ?? "").searchParams.has("redirect_to")).toBe(false);
+	});
+
+	it("resolves an absolute page on the issuer's origin as it is — and, with no issuer, on itself", () => {
+		expect(
+			registeredRequirement(paged({ url: `${ISSUER}/mfa?x=1`, params: { flow: "y" } }), ISSUER)
+				.stepUpPage?.href,
+		).toBe(`${ISSUER}/mfa?x=1&flow=y`);
+		expect(
+			registeredRequirement(paged({ url: "https://other.test/mfa", params: {} })).stepUpPage?.href,
+		).toBe("https://other.test/mfa");
+	});
+
+	it("refuses a path page with no issuer to resolve it on, saying where the issuer comes from", () => {
+		const path = paged({ url: "/mfa", params: {} });
+		expect(() => registeredRequirement(path)).toThrow(RangeError);
+		expect(() => registeredRequirement(path)).toThrow(
+			/stepUpPage\.url "\/mfa" is a path, resolved on the issuer: none was given/,
+		);
+		expect(() => resolverForTests([path])).toThrow(/resolverForTests\(requirements, \{ issuer \}\)/);
+		expect(resolverForTests([path], { issuer: ISSUER }).get("x")?.stepUpPage?.href).toBe(
+			`${ISSUER}/mfa`,
+		);
+	});
+
+	it("registers no page for a requirement that declares none", () => {
+		expect(registeredRequirement(paged(undefined)).stepUpPage).toBeUndefined();
+		expect(registeredRequirement(paged(undefined), ISSUER).stepUpPage).toBeUndefined();
+	});
+});
+
 describe("resolverForTests — the resolver a test builds (D1)", () => {
 	const requirement = (
 		name: string,
@@ -488,7 +535,10 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 			stepUpPage: { url: "https://other.test/x", params: {} },
 		});
 		expect(() => anyReach([paged], ISSUER)).toThrow(RangeError);
-		expect(anyReach([paged]).get("x")?.stepUpPage).toEqual(paged.stepUpPage);
+		expect(anyReach([paged]).get("x")?.stepUpPage).toEqual({
+			...paged.stepUpPage,
+			href: "https://other.test/x",
+		});
 	});
 });
 

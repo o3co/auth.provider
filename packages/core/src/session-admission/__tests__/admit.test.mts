@@ -48,6 +48,8 @@ import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
+/** The issuer each resolver here registers its pages on. */
+const ISSUER = "https://auth.test";
 const minutesAgo = (minutes: number): Date => new Date(NOW.getTime() - minutes * 60_000);
 
 const session = (over: Partial<UserSession> = {}): UserSession => ({
@@ -156,7 +158,7 @@ const deps = (over: Partial<AdmissionDeps> = {}): AdmissionDeps => ({
 
 /** A resolver over reaching non-mfa fixtures: a test of admission's own mechanics, the reach rules boot holds lifted. */
 const anyReach = (requirements: SessionRequirement[]) =>
-	resolverForTests(requirements, { allowAnyReach: true });
+	resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER });
 
 const request = (over: Partial<AdmissionRequest> = {}): AdmissionRequest => ({
 	claim: cookie(),
@@ -1077,7 +1079,9 @@ describe("step 5 — the requirements", () => {
 			outcome: "step_up",
 			requirement: "r",
 			session: record,
-			page: { url: "/r", params: { v: "1" } },
+			// As registered: resolved once, on the issuer, to the URL a
+			// consumer answers.
+			page: { url: "/r", params: { v: "1" }, href: `${ISSUER}/r?v=1` },
 			acrValues: [],
 			whenStillUnmet: "unmet",
 		});
@@ -1176,13 +1180,20 @@ describe("step 5 — the requirements", () => {
 		});
 		expect(
 			await admitSession(
-				deps({ userSessionStore: holding(record), requirements: resolverForTests([consent]) }),
+				deps({
+					userSessionStore: holding(record),
+					requirements: resolverForTests([consent], { issuer: ISSUER }),
+				}),
 				request(),
 			),
 		).toMatchObject({
 			outcome: "step_up",
 			requirement: "consent",
-			page: { url: "/consent", params: { reason: "terms" } },
+			page: {
+				url: "/consent",
+				params: { reason: "terms" },
+				href: `${ISSUER}/consent?reason=terms`,
+			},
 			session: record,
 		});
 	});

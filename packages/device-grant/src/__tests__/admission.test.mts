@@ -123,7 +123,6 @@ const harness = async (options: HarnessOptions = {}) => {
 				? {}
 				: { subjectRevocation: options.subjectRevocation }),
 			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
-			issuer: ISSUER,
 			requireEmailVerified: options.requireEmailVerified ?? false,
 			now: () => NOW,
 			logger,
@@ -418,7 +417,6 @@ describe("device verification on session admission (the session-admission ADR's 
 				failMode: "closed",
 				userSessionStore: liveSessionStore(),
 				requirements: forged,
-				issuer: ISSUER,
 				requireEmailVerified: false,
 			} as never),
 		).toThrow(
@@ -426,54 +424,35 @@ describe("device verification on session admission (the session-admission ADR's 
 		);
 	});
 
-	it("refuses to be built without an issuer to resolve a step-up page on", () => {
-		for (const issuer of [undefined, "", "not a url"]) {
-			expect(
-				() =>
-					createDeviceVerificationHandler({
-						store: createMemoryDeviceCodeStore(),
-						settings,
-						rateLimiter: createMemoryRateLimiter({
-							limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-							defaultLimit: { limit: 60, windowSeconds: 60 },
-						}),
-						failMode: "closed",
-						userSessionStore: liveSessionStore(),
-						requirements: resolverForTests([]),
-						...(issuer === undefined ? {} : { issuer }),
-						requireEmailVerified: false,
-					} as never),
-				String(issuer),
-			).toThrow(/issuer/);
-		}
-	});
-
-	it("refuses to be built on an issuer that is not an absolute http(s) URL: a step-up page resolved on mailto:, urn: or data: throws, a 500 where step_up_required belongs", () => {
-		for (const issuer of [
-			"mailto:admin@example.com",
-			"urn:example:issuer",
-			"data:text/plain,issuer",
-			"as.example.test/relative",
-			"/relative",
-		]) {
-			expect(
-				() =>
-					createDeviceVerificationHandler({
-						store: createMemoryDeviceCodeStore(),
-						settings,
-						rateLimiter: createMemoryRateLimiter({
-							limits: { device_verification: { limit: 5, windowSeconds: 300 } },
-							defaultLimit: { limit: 60, windowSeconds: 60 },
-						}),
-						failMode: "closed",
-						userSessionStore: liveSessionStore(),
-						requirements: resolverForTests([]),
-						issuer,
-						requireEmailVerified: false,
-					}),
-				issuer,
-			).toThrow(/issuer/);
-		}
+	it("reads no issuer: the page it answers is the one registration resolved on the issuer — built without one, it answers that page", async () => {
+		const handler = createDeviceVerificationHandler({
+			store: createMemoryDeviceCodeStore(),
+			settings,
+			rateLimiter: createMemoryRateLimiter({
+				limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+			}),
+			failMode: "closed",
+			userSessionStore: liveSessionStore(),
+			requirements: resolverForTests(
+				[fixture(() => ({ outcome: "step_up", whenStillUnmet: "reauthenticate" }))],
+				{ issuer: "https://pages.example.test" },
+			),
+			requireEmailVerified: false,
+			now: () => NOW,
+		});
+		const app = express();
+		app.use(express.json());
+		app.use((req, _res, next) => {
+			(req as unknown as { session: unknown }).session = liveCookieSession();
+			next();
+		});
+		app.post("/oauth/device/verification", handler);
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.send({ action: "approve", user_code: USER_CODE });
+		expect(res.status).toBe(403);
+		expect(res.body.page).toBe("https://pages.example.test/step-up");
 	});
 
 	it("refuses to be built without requirements, as it refuses to be built without a store", () => {
