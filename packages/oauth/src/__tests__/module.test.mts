@@ -184,6 +184,11 @@ describe("oauthModule — manifest shape", () => {
 		["an absolute URL", "https://login.example/signin?tenant=x&redirect_to=https%3A%2F%2Fx"],
 		["a name written percent-encoded", "/login?redirect%5Fto=x"],
 		["a name with no value", "/login?tenant=x&redirect_to"],
+		// The rule reads the query as the redirect writes it — the text before
+		// any `#`, after the first `?` — so a URL `URL` cannot parse is held to
+		// it too: the redirect would append a second one all the same.
+		["a URL that does not parse", "http://[::1/login?redirect_to=x"],
+		["a URL that does not parse, with a fragment", "http://[::1/login?tenant=x&redirect_to=y#z"],
 	])(
 		"configSchema refuses %s whose own query carries redirect_to, naming the key: the provider adds it",
 		(_label, url) => {
@@ -205,8 +210,8 @@ describe("oauthModule — manifest shape", () => {
 		["a query, and redirect_to inside the fragment", "/login?tenant=x#redirect_to=y"],
 		["a name that differs in case", "/login?Redirect_To=x"],
 		["a longer name", "/login?redirect_to_after=x"],
-		// Not this rule's to judge: a URL that does not parse carries no query.
-		["no parse as a URL", "http://[::1/login?redirect_to=x"],
+		["a URL that does not parse, without redirect_to", "http://[::1/login?tenant=x"],
+		["a `?` inside the fragment alone", "/login#a?redirect_to=x"],
 	])("configSchema accepts a login URL with %s", (_label, url) => {
 		const schema = oauthModule({ config: makeValidAppConfig() }).configSchema;
 		if (!schema) throw new Error("configSchema must be defined");
