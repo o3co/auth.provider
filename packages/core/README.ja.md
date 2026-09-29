@@ -227,6 +227,8 @@ JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるとき�
 
 モジュールはルート、グラントハンドラー、DI グラフのコンポーネントをアプリに追加します。モジュールは `defineModule({...})` で書く宣言的なマニフェストです: `requires` / `optional`（型付きの `ProviderDeps` キー）を宣言し、コンポーネントを `provides` し、`grants`、`routes`、`federations` などの `ContributesMap` の種別に contribute します。boot planner が型付きの deps をすべてのファクトリーに注入するので、モジュールが共有状態を書き換えることはありません。語彙は [`src/modules/manifest/`](src/modules/manifest/README.md) にあり、`@o3co/auth-provider-core/modules/manifest` サブパスとしても公開されています。
 
+それぞれの仕組みが拡張面の 1 つの軸です: `routes`・`grants`・`federations` への contribution は振る舞いを足し（plugin）、`provides` はポートのスロットを埋め（adapter）、`supportsX` ガードで検出される任意のメソッドはアダプターの追加機能であり（capability）、core が合成する contribution の種別は core の判断の意味を変えます（extension）。新しいポリシーをどの軸に載せるかは [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) の規則です。
+
 ```typescript
 const myModule = defineModule({
   name: "my-module",

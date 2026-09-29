@@ -1,10 +1,12 @@
 # modules/manifest
 
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 
 ## Responsibility
 
 The vocabulary a module is written in: `defineModule`, `ModuleSpec` / `Module`, `ComponentMap` / `ComponentKey`, `ProviderDeps` / `Provider`, `ContributesMap` with one factory type per contribution kind, the `RouteContribution` family, `ComponentLifecycle`, `ReplicaSafetyDeclaration`, `AbsencePolicy`, and the synthetic-key set with its resolver projections.
+
+Which mechanism a new policy is written on — a contribution that adds behaviour, a slot that fills a port, a contribution kind that changes a core decision, or, outside this vocabulary, a capability an adapter opts into — is chosen by the four axes in [AGENTS.md](../../../../../AGENTS.md#extension-surface-four-axes).
 
 It decides nothing at runtime. `defineModule` returns its argument unchanged; every check on a manifest — uniqueness, closure, collisions, pairing, declared absence, replica safety — is a stage-1 row in [`../../boot/`](../../boot/README.md). It owns no slot's value type either: `ComponentMap` is an empty interface that the directory owning a value augments (`../../repositories/ClientRepository.mts` for `clientRepository`, `../../boot/types.mts` for `config` / `pathResolver` / the two registrars, `synthetic-keys.mts` for the resolvers).
 

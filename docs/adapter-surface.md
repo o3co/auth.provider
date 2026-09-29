@@ -6,6 +6,12 @@ composition root and consumed by whichever modules declare it. This document is
 the one place that lists them, says what each is for, and states the boundary
 that decides what may become one.
 
+A slot is one of four ways a package changes the provider: it is the adapter
+axis, beside plugins, capabilities and extensions.
+[AGENTS.md](../AGENTS.md#extension-surface-four-axes) names the four, and the
+rule for which one a new policy takes: a slot for one deployment policy, a
+contribution kind for a decision a deployment adds to.
+
 It is enforced, not aspirational: `packages/core/src/__tests__/adapterSurface.drift.test.mts`
 checks both directions — every slot declared in source appears here, and every
 slot named here still exists. A slot added without an entry fails that test.

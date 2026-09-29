@@ -227,6 +227,8 @@ Key contract properties:
 
 Modules extend the app with routes, grant handlers and DI-graph components. A module is a declarative manifest written with `defineModule({...})`: it declares `requires` / `optional` (typed `ProviderDeps` keys), `provides` components, and contributes to `ContributesMap` kinds such as `grants`, `routes` and `federations`. The boot planner injects the typed deps into every factory; a module never mutates shared state. The vocabulary is [`src/modules/manifest/`](src/modules/manifest/README.md), also published as the `@o3co/auth-provider-core/modules/manifest` subpath.
 
+Each mechanism is one axis of the extension surface: a `routes`, `grants` or `federations` contribution adds behaviour (a plugin), a `provides` fills a port's slot (an adapter), an optional method detected by a `supportsX` guard is an adapter's extra (a capability), and a contribution kind core composes changes what a core decision means (an extension). [AGENTS.md](../../AGENTS.md#extension-surface-four-axes) says which one a new policy takes.
+
 ```typescript
 const myModule = defineModule({
   name: "my-module",
