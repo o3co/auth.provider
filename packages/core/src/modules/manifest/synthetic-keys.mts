@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { SessionRequirementResolver } from "../../session-admission/requirement.mjs";
 import type {
 	ExchangeTokenValidator,
@@ -58,6 +59,19 @@ export interface MfaFactorResolver {
 }
 
 /**
+ * Read-only projection of the boot planner's `rateLimitBudgets` collector
+ * (#728): every contributed budget by the prefix it limits. A prefix whose
+ * factory answered `null` — switched off by its module's settings — is
+ * absent from both `get` and `entries`. A limiter reads it at request time;
+ * what an operator configures on the limiter itself for a prefix is the
+ * limiter's to weigh against it.
+ */
+export interface RateLimitBudgetResolver {
+	readonly get: (prefix: string) => RateLimitSpec | undefined;
+	readonly entries: () => IterableIterator<readonly [string, RateLimitSpec]>;
+}
+
+/**
  * Re-export of `FederationProvider` for consumers that name the slot's value
  * type. It is the adapter port itself since #626 P1 — it was a placeholder
  * while the contract lived in `packages/session`.
@@ -77,7 +91,8 @@ export type { FederationProvider };
  * `mfaFactorResolver` is the projection for `mfaFactors` (the MFA ADR's D3);
  * `sessionRequirementResolver` for `sessionRequirements` (the
  * session-admission ADR's D3), whose contract is in
- * `session-admission/requirement.mts` and whose value the boot planner brands.
+ * `session-admission/requirement.mts` and whose value the boot planner brands;
+ * `rateLimitBudgetResolver` for `rateLimitBudgets` (#728).
  *
  * Per A2-α §6.5 NORMATIVE constraints. The PRIMARY immutability guard
  * is the TypeScript declared type `ReadonlySet<string>` — `.add()`,
@@ -97,6 +112,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"federationRedirectPolicyResolver",
 		"mfaFactorResolver",
 		"sessionRequirementResolver",
+		"rateLimitBudgetResolver",
 		// D-5: lifecycleRegistrar is boot-planner-owned (pre-seeded into the
 		// bootstrap map by createApp). Consumer-supplied values via
 		// bootstrapComponents/overrideComponents would create two registrars
@@ -158,5 +174,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly mfaFactorResolver?: MfaFactorResolver;
 		/** The registered session requirements, in registration order (the session-admission ADR's D3): branded, the planner's alone. */
 		readonly sessionRequirementResolver?: SessionRequirementResolver;
+		/** Every module's rate-limit budget by prefix (#728), read by a limiter at request time. */
+		readonly rateLimitBudgetResolver?: RateLimitBudgetResolver;
 	}
 }

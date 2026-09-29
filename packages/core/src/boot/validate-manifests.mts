@@ -74,6 +74,20 @@ export interface ValidateManifestsInput {
 // ---------------------------------------------------------------------------
 
 /**
+ * The factory a name-keyed entry registers through. A `federations` entry
+ * may be a declaration — `{ type, entrySchema, factory }` (#728) — whose
+ * factory is registered exactly as a bare one is; its `type` and
+ * `entrySchema` stay on the manifest, unread by boot until federation
+ * entries are dispatched by type. Every other value is its own factory.
+ */
+function nameKeyedFactory(kind: string, value: unknown): unknown {
+	if (kind === "federations" && typeof value === "object" && value !== null) {
+		return (value as { readonly factory?: unknown }).factory;
+	}
+	return value;
+}
+
+/**
  * Flatten a raw Module manifest into a NormalisedModule for fast lookup
  * by subsequent checks. Collects:
  * - `requires` / `optional` key arrays
@@ -101,12 +115,12 @@ function normaliseModule(m: Module): NormalisedModule {
 				});
 			}
 		} else if (kindMap !== null && typeof kindMap === "object") {
-			// Name-keyed kinds: grants, federations, tokenExchangeValidators, mfaFactors
-			for (const [name, factory] of Object.entries(kindMap as Record<string, unknown>)) {
+			// Name-keyed kinds: grants, federations, tokenExchangeValidators, mfaFactors, …
+			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
 				contributesEntries.push({
 					kind: kind as ContributionKind,
 					key: name,
-					factory,
+					factory: nameKeyedFactory(kind, value),
 					contributedBy: m.name,
 				});
 			}
@@ -125,11 +139,11 @@ function normaliseModule(m: Module): NormalisedModule {
 				});
 			}
 		} else if (kindMap !== null && typeof kindMap === "object") {
-			for (const [name, factory] of Object.entries(kindMap as Record<string, unknown>)) {
+			for (const [name, value] of Object.entries(kindMap as Record<string, unknown>)) {
 				overridesEntries.push({
 					kind: kind as ContributionKind,
 					key: name,
-					factory,
+					factory: nameKeyedFactory(kind, value),
 					contributedBy: m.name,
 				});
 			}
@@ -166,6 +180,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"grantMiddleware",
 	"tokenBindingMechanisms",
 	"discoveryMetadata",
+	"rateLimitBudgets",
 ]);
 
 // ---------------------------------------------------------------------------

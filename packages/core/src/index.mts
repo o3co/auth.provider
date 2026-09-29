@@ -604,6 +604,8 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
+	// #728: a federation contribution that declares the type it handles.
+	FederationContribution,
 	FederationFactory,
 	FederationProvider,
 	// GrantFactory, GrantHandler: excluded — names collide with legacy
@@ -631,6 +633,10 @@ export type {
 	PathResolver,
 	Provider,
 	ProviderDeps,
+	// #728: a module's budget for a rate-limit prefix it owns, and the view
+	// core composes the budgets into.
+	RateLimitBudgetFactory,
+	RateLimitBudgetResolver,
 	// #455 / #474: the manifest's replica-safety declaration, so a package
 	// building its manifest from config can type the value it attaches.
 	ReplicaSafetyDeclaration,

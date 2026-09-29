@@ -22,7 +22,7 @@
  * `createApp` function. The orchestrator owns no per-call state: it receives
  * inputs, calls each stage function in order, and forwards the output.
  *
- * Built-in defaults for the twelve built-in contribution kinds are seeded by
+ * Built-in defaults for the thirteen built-in contribution kinds are seeded by
  * `mergeWithBuiltins`; consumer-supplied kinds (via `contributionKinds`)
  * overlay on top.
  *
@@ -43,6 +43,7 @@ import type {
 	GrantPolicyHookContribution,
 	MfaFactor,
 } from "../modules/manifest/contributes-map.mjs";
+import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import { createReadinessRegistrar } from "../readiness/registrar.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
@@ -187,7 +188,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the twelve built-in contribution kinds and overlay any consumer-supplied
+ * Seed the thirteen built-in contribution kinds and overlay any consumer-supplied
  * collectors on top.
  *
  * Built-in defaults:
@@ -220,6 +221,7 @@ export function mergeWithBuiltins(
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
 		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
 		sessionRequirements: withoutReplace(makeMapNameKeyedCollector<RegisteredRequirement>()),
+		rateLimitBudgets: makeMapNameKeyedCollector<RateLimitSpec | null>(),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),

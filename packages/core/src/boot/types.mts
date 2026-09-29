@@ -52,6 +52,7 @@ import type {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { HttpMethod, RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import type { PathResolver } from "../modules/types.mjs";
+import type { RateLimitSpec } from "../ratelimit/types.mjs";
 import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 import type { RegisteredRequirement } from "../session-admission/requirement.mjs";
 
@@ -106,9 +107,10 @@ declare module "@o3co/auth-provider-core" {
 
 /**
  * The set of contribution kinds used internally by the boot planner.
- * Built-in kinds are the twelve listed (the 7 v0.5.0 originals, A5's
+ * Built-in kinds are the thirteen listed (the 7 v0.5.0 originals, A5's
  * `federationRedirectPolicies`, `grantMiddleware`, `tokenBindingMechanisms`,
- * `discoveryMetadata`, and the session-admission ADR's `sessionRequirements`);
+ * `discoveryMetadata`, the session-admission ADR's `sessionRequirements`,
+ * and #728's `rateLimitBudgets`);
  * the structural escape
  * `(string & { readonly __consumerKind?: unique symbol })` admits
  * consumer-defined kinds added via `declare module` augmentation of
@@ -129,6 +131,7 @@ export type ContributionKind =
 	| "grantMiddleware"
 	| "tokenBindingMechanisms"
 	| "discoveryMetadata"
+	| "rateLimitBudgets"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -466,6 +469,13 @@ export interface ContributionCollectorMap {
 	 * `sessionRequirementResolver` projects in registration order.
 	 */
 	readonly sessionRequirements?: NameKeyedCollector<RegisteredRequirement>;
+	/**
+	 * Collector for `rateLimitBudgets` contributions (#728), by prefix: the
+	 * frozen copy of each budget, or `null` for one its module's settings
+	 * switched off — which claims the prefix, and which
+	 * `rateLimitBudgetResolver` leaves out.
+	 */
+	readonly rateLimitBudgets?: NameKeyedCollector<RateLimitSpec | null>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;

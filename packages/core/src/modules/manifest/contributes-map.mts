@@ -15,6 +15,7 @@
  */
 
 import type { RequestHandler } from "express";
+import type { z } from "zod";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { OidcDiscoveryContribution } from "../../discovery/types.mjs";
 import type { FederationProvider as ConcreteFederationProvider } from "../../federations/types.mjs";
@@ -22,6 +23,7 @@ import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mj
 import type { MfaFactor as ConcreteMfaFactor } from "../../mfa/factor.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
+import type { RateLimitSpec } from "../../ratelimit/types.mjs";
 import type { SessionRequirement as ConcreteSessionRequirement } from "../../session-admission/requirement.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { Contributed } from "./contributed.mjs";
@@ -115,6 +117,36 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
 
 export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
 export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProvider>;
+
+/**
+ * A `federations` entry that declares what it handles (#728): the `type` an
+ * entry of the `federations` configuration names to select this adapter
+ * (`"oidc"`, `"google"`), and the schema an entry of that type is parsed
+ * with, beside the factory that builds the provider.
+ *
+ * #728 makes one module per federation package register one federation per
+ * configured entry of its type, each entry parsed by that package's schema;
+ * this is the declaration that dispatch will read. It is not read yet: boot
+ * registers the provider `factory` builds under the entry's name, exactly as
+ * it registers a bare `FederationFactory`'s, and reads neither `type` nor
+ * `entrySchema`.
+ */
+export interface FederationContribution<Deps> {
+	/**
+	 * The `type` an entry of the `federations` configuration names to select
+	 * this adapter. Several instances of one type — `oidc`, say — may exist,
+	 * each under its own name.
+	 */
+	readonly type: string;
+	/**
+	 * The schema of an entry of that type: the keys this adapter reads. The
+	 * keys every entry carries whatever its type (`enabled`, `type`,
+	 * `trustUpstreamAmr`) are the map owner's, not the type's.
+	 */
+	readonly entrySchema: z.ZodType;
+	/** Builds the provider registered under the entry's name, as a bare factory does. */
+	readonly factory: FederationFactory<Deps>;
+}
 export type ExchangeTokenValidatorFactory<Deps> = (
 	deps: Deps,
 ) => Contributed<ExchangeTokenValidator>;
@@ -187,6 +219,16 @@ export type TokenBindingMechanismFactory<Deps> = (
 ) => Contributed<TokenBindingMechanism | null>;
 
 /**
+ * A `rateLimitBudgets` entry (#728): the budget of one rate-limit prefix the
+ * contributing module owns — the default limit and window a limiter applies
+ * to keys under that prefix, which the module reads from its own settings.
+ * It answers `null` when the module's settings switch that budget off; the
+ * prefix is then absent from `rateLimitBudgetResolver`, and still claimed —
+ * a second contribution of it is a duplicate.
+ */
+export type RateLimitBudgetFactory<Deps> = (deps: Deps) => Contributed<RateLimitSpec | null>;
+
+/**
  * Declaration-merged map of contribution kinds.
  *
  * Per A2-α §4.1 the v0.5.0 baseline declares 7 kinds. A5 (Phase 7) adds
@@ -195,7 +237,8 @@ export type TokenBindingMechanismFactory<Deps> = (
  *
  * Per A2-α §4.5 collision policy:
  * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
- *   `mfaFactors`, `sessionRequirements`): throw on duplicate at boot (enforced in Phase 4 / A2-β).
+ *   `mfaFactors`, `sessionRequirements`, `rateLimitBudgets`): throw on
+ *   duplicate at boot (enforced in Phase 4 / A2-β).
  * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
  *   `grantMiddleware`): allow duplicates; routes additionally throw on
  *   duplicate `id` / undecorated-mountPath collisions.
@@ -206,8 +249,15 @@ export type TokenBindingMechanismFactory<Deps> = (
  */
 export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	readonly grants?: { readonly [grantType: string]: GrantFactory<Deps> };
+	/**
+	 * Federations, name-keyed by the name the login route carries
+	 * (`/session/oauth/federation/:name`). An entry is the factory that builds
+	 * the provider, or a {@link FederationContribution} that declares, beside
+	 * that factory, the `type` it handles and the schema of an entry of that
+	 * type (#728) — registered the same way, by name.
+	 */
 	readonly federations?: {
-		readonly [name: string]: FederationFactory<Deps>;
+		readonly [name: string]: FederationFactory<Deps> | FederationContribution<Deps>;
 	};
 	readonly tokenExchangeValidators?: {
 		readonly [tokenType: string]: ExchangeTokenValidatorFactory<Deps>;
@@ -224,6 +274,18 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 */
 	readonly sessionRequirements?: {
 		readonly [name: string]: SessionRequirementFactory<Deps>;
+	};
+	/**
+	 * Rate-limit budgets (#728), name-keyed by the prefix a limiter key
+	 * carries before its first `:` (`login` for `login:ip:<ip>`): each module
+	 * contributes the budgets of the prefixes it owns, and core composes them
+	 * into one view, the synthetic key `rateLimitBudgetResolver`, which a
+	 * limiter reads at request time. Two modules contributing one prefix
+	 * refuse boot (`duplicate-contribute`); a budget no limiter can apply as
+	 * written, or a prefix no key can carry, fails its contribution.
+	 */
+	readonly rateLimitBudgets?: {
+		readonly [prefix: string]: RateLimitBudgetFactory<Deps>;
 	};
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];

@@ -26,6 +26,8 @@ export type {
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
+	// #728: a federation contribution that declares the type it handles.
+	FederationContribution,
 	FederationFactory,
 	FederationProvider,
 	GrantFactory,
@@ -39,6 +41,8 @@ export type {
 	MfaFactor,
 	MfaFactorFactory,
 	OidcDiscoveryContributionFactory,
+	// #728: a module's budget for a rate-limit prefix it owns.
+	RateLimitBudgetFactory,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 } from "./contributes-map.mjs";
@@ -64,6 +68,7 @@ export type {
 export type {
 	GrantHandlerResolver,
 	MfaFactorResolver,
+	RateLimitBudgetResolver,
 	TokenExchangeValidatorResolver,
 } from "./synthetic-keys.mjs";
 export { SYNTHETIC_COMPONENT_KEYS } from "./synthetic-keys.mjs";
