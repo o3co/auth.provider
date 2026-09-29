@@ -61,10 +61,12 @@ export interface RateLimiter {
 	 * `check` throws — `"open"` lets the request through, `"closed"` answers
 	 * `503` — reported through the guard's log line and audit event either
 	 * way. It belongs to the limiter because only its backend can be down:
-	 * the module that builds the limiter owns the setting. Absent on a
-	 * limiter with no backend of its own, such as the in-process one, and on
-	 * one written before the member. Declared ahead of its readers: the guard
-	 * and its callers still take the policy from `rateLimit.failMode`.
+	 * the module that builds the limiter owns the setting. Absent means
+	 * `closed`, the default `reference.conf` ships for `rateLimit.failMode` —
+	 * as on a limiter with no backend of its own, such as the in-process one,
+	 * and on one written before the member. Declared ahead of its readers:
+	 * the guard and its callers still take the policy from
+	 * `rateLimit.failMode`.
 	 */
 	readonly failMode?: RateLimitFailMode;
 	/**

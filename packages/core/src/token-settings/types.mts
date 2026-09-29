@@ -23,8 +23,15 @@
  * the others receive it through a slot whose contract is core's: the owner
  * parses its section once and provides these values, and a reader requires
  * the slot rather than reading the section. The members are what modules
- * outside `packages/oauth` read today; a setting only the oauth module reads
- * (the revocation modes, the grant-type allowlist switch) is not here.
+ * outside `packages/oauth` read today. Two settings of the section are not
+ * here: the grant-type allowlist switch, which only the oauth module reads,
+ * and the revocation modes (`oauth.revocation.accessToken`,
+ * `oauth.revocation.subject`). Those are the declarations core's
+ * declared-absence guard reads for the absence policies `oauth-token-exchange`,
+ * `session` and `webauthn` attach as well as oauth: the guard reads them at
+ * validation, before any provider runs, so a slot cannot serve them, and
+ * where they live once `oauth {}` is the oauth module's alone is decided
+ * with that move.
  *
  * Each value is resolved — no deprecated alias and no absence left for a
  * reader to interpret — and the whole is frozen, so a reader cannot change

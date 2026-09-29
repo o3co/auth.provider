@@ -64,8 +64,8 @@ declare module "@o3co/auth-provider-core" {
 		readonly httpSettings?: HttpSettings;
 		/**
 		 * How many replicas run (#728): core is to fill it from `core.deployment.mode`
-		 * for every composition, as it fills the synthetic keys, and no module
-		 * provides it.
+		 * for every composition, as it fills the synthetic keys, and the key is
+		 * to be reserved when it does.
 		 */
 		readonly deploymentMode?: DeploymentMode;
 	}

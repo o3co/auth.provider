@@ -54,6 +54,8 @@ A package changes what the provider does in one of four ways, and each has its o
 - An adapter's optional extra beyond its port: a capability.
 - A pure predicate with one home: a shared helper (below).
 
+The adapter axis is "one implementation per composition", not only a port's: a key one module owns and others read is a slot too — a settings slot (`oauthTokenSettings`, `httpSettings`, `sessionCookiePolicy`, `deploymentMode`), filled once by its owner and read through its contract in core ([#728](https://github.com/o3co/auth.provider/issues/728)).
+
 Two more things can look like an axis and are not one:
 
 - **A shared helper** is a pure predicate, or the one reading of a value, with one home in [docs/design-vocabulary.md](docs/design-vocabulary.md): `isLoopbackHostname` and `coveredByRevocationBoundary`, for example. It is replaced by editing its home, never by a deployment. A second definition is a defect, not a second implementation, and the vocabulary's drift guard catches it for every row marked guarded.
