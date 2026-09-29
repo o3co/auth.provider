@@ -211,4 +211,8 @@ describe("core barrel — the trusted-proxy address vocabulary (#292)", () => {
 		// `checkTrustedProxyEntry(value) === null` is the one reading.
 		expect(Object.hasOwn(core, "isTrustedProxyEntry")).toBe(false);
 	});
+
+	it("re-exports the hop ceiling http.trustProxy is held to, which the httpSettings contract reads (#728)", () => {
+		expect(core.MAX_TRUST_PROXY_HOPS).toBe(255);
+	});
 });

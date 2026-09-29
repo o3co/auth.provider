@@ -702,9 +702,10 @@ const authorizeSchema = withRemovedKeys(
  * it, and a large number written to mean "trust everything" produces exactly
  * the blanket trust `true` expresses — except silently, and without the
  * operator having decided it. Making them write `true` keeps that decision
- * visible in the config.
+ * visible in the config. Exported so the `httpSettings` contract suite holds
+ * the slot's value to the same ceiling.
  */
-const MAX_TRUST_PROXY_HOPS = 255;
+export const MAX_TRUST_PROXY_HOPS = 255;
 
 /**
  * A decimal integer, optionally signed and optionally fractional — the shapes

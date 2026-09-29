@@ -64,7 +64,13 @@
 		"src/mfa/**/*.mts",
 		"src/mail/**/*.mts",
 		// The MFA enrollment witness; paired with vitest.config.mts.
-		"src/repositories/__tests__/mfaEnrollmentWitness.test.mts"
+		"src/repositories/__tests__/mfaEnrollmentWitness.test.mts",
+		// The slots modules share what one of them owns through (#728); paired
+		// with vitest.config.mts.
+		"src/token-settings/**/*.mts",
+		"src/browser-session/**/*.mts",
+		"src/deployment/**/*.mts",
+		"src/ratelimit/__tests__/rateLimiter.contract.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
