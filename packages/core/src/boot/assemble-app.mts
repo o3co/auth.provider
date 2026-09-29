@@ -624,11 +624,11 @@ export function assembleApp(
 			| undefined;
 		const configured = config?.cors?.allowedOrigins;
 		const logger = components.logger as Logger | undefined;
-		// Read through the shared shape normaliser rather than testing for an
-		// array: `assembleApp` is a stage of its own and may be handed raw
-		// config, where the documented `${?CORS_ALLOWED_ORIGINS}` is a
-		// comma-separated string (the only way an environment variable carries
-		// a list). An `Array.isArray` test would silently skip the middleware.
+		// Read through the shape normaliser the schema shares, rather than testing
+		// for an array, so the two cannot disagree: the documented
+		// `${?CORS_ALLOWED_ORIGINS}` is a comma-separated string (the only way an
+		// environment variable carries a list), and an `Array.isArray` test would
+		// skip the middleware for any config that reaches here unparsed.
 		const allowedOrigins = normalizeAllowedOrigins(configured);
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({

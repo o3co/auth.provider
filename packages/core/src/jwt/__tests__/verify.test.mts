@@ -296,7 +296,7 @@ describe("verifyJwt", () => {
 	});
 
 	it("Test 8b — distinguishes expired kid from unknown kid (reason=kid_expired)", async () => {
-		// Multi-agent review (Claude Important): expired and unknown kids
+		// Expired and unknown kids
 		// represent different operator-vs-attacker signals. The verifier must
 		// surface them as separate reasons so SIEM rules can page differently.
 		const SECRET = "test-secret-32-bytes-long-string12";

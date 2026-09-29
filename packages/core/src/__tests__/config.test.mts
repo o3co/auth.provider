@@ -8,7 +8,7 @@ import {
 	registerBuiltinKeyStores,
 } from "#/keys/factory.mjs";
 
-// jwtSchema now describes the nested signingKey shape (Task 5 migration).
+// jwtSchema describes the nested signingKey shape.
 // Schema only enforces shape; field-level validation lives in the local builder.
 const jwtSchema = CoreConfigSchema.shape.oauth.shape.jwt;
 

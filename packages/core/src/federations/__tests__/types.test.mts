@@ -72,8 +72,8 @@ describe("FederationProvider type guards", () => {
 			}),
 			refreshDelegatedToken: async () => ({}),
 		};
-		// Every subset of two — including the pair slice 2 shipped, which is what
-		// a custom adapter written before slice 6 has.
+		// Every subset of two, including the one a custom adapter written against
+		// the earlier pair has (no `exchangeDelegatedCode`).
 		for (const missing of Object.keys(methods) as (keyof typeof methods)[]) {
 			const { [missing]: _dropped, ...rest } = methods;
 			const partial: FederationProvider & Partial<SupportsDelegatedAuthorization> = {

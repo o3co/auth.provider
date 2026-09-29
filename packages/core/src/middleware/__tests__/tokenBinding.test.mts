@@ -104,7 +104,7 @@ describe("tokenBindingMw", () => {
 	});
 
 	it("hard-fails (no downgrade) when an earlier mechanism succeeded and a later one throws", async () => {
-		// Pins spec §3.6 no-downgrade rule under mixed success/failure:
+		// Pins the no-downgrade rule under mixed success/failure:
 		// a successful explicit mechanism must NOT survive a subsequent
 		// mechanism's invalid material — the entire request is rejected
 		// rather than silently downgraded to the partial binding.
@@ -124,7 +124,7 @@ describe("tokenBindingMw", () => {
 	});
 
 	it("hard-fails (no downgrade) when an earlier ambient mechanism throws before a later explicit could succeed", async () => {
-		// Pins spec §3.6 from the opposite direction: an earlier failure
+		// Pins the no-downgrade rule from the opposite direction: an earlier failure
 		// short-circuits — the middleware never reaches the later (would-
 		// succeed) mechanism. The downstream observable is identical to
 		// the "later throws" case but the implementation invariant is the

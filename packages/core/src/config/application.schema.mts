@@ -1257,9 +1257,8 @@ export const fullSectionsSchema = z.object({
 		allowedOrigins: z
 			.preprocess(
 				// Normalisation is shared with `assembleApp`'s mount site
-				// (`net/origin.mts`), which reads the key off configs that may skip
-				// this schema, so the two cannot disagree. A shape neither reads is
-				// refused here; the mount site only warns
+				// (`net/origin.mts`), so the two cannot disagree. A shape neither
+				// reads is refused here; the mount site only warns
 				// (`cors_allowed_origins_unreadable`).
 				(raw, ctx) => {
 					if (raw === undefined) return raw;

@@ -1225,6 +1225,10 @@ export interface FederatedLogin {
  * `federatedSessionAuthentication`, so a caller cannot mark an arbitrary
  * `amr` or an `mfaAt` as a federated primary. A drift guard pins its
  * callers to the callback.
+ *
+ * A federated login asks no requirement's `admitPrimary`: the requirements
+ * judge the resulting session only through `admit`, when a consumer admits it
+ * (ADR 2026-09-28-session-admission, D5).
  */
 export function establishWithoutAsking(login: FederatedLogin): Establishment {
 	if (!isObject(login)) throw new RangeError("establishWithoutAsking: the login must be an object");
