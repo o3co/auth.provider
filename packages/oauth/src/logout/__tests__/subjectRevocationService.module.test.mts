@@ -35,6 +35,10 @@ import {
 	type SubjectRevocation,
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
+import {
+	createTestOAuthTokenSettings,
+	createTestSessionCookiePolicy,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { subjectRevocationServiceModule } from "../subjectRevocationService.mjs";
 
@@ -198,8 +202,21 @@ describe("subjectRevocationServiceModule", () => {
 	});
 
 	describe("what it refuses when grants are on", () => {
-		it("refuses a deployment with nowhere to read the grants from", () => {
-			expect(() => build({ config: enabled() })).toThrow(/requires a federationGrantStore/);
+		it("is the service of a deployment without grants when no grant store is wired, whatever federationGrants.enabled says (#728)", () => {
+			// Whether grants exist is whether the composition holds a store for
+			// them — the federation-grants module refuses to enable them without
+			// one — not a key of another module's section.
+			expect(() => build({ config: enabled(), subjectRevocation: olderAdapter() })).not.toThrow();
+		});
+
+		it("holds a composition with a grant store to the grants boundary, whatever federationGrants.enabled says (#728)", () => {
+			expect(() =>
+				build({
+					config: config(),
+					federationGrantStore: createMemoryFederationGrantStore(),
+					subjectRevocation: olderAdapter(),
+				}),
+			).toThrow(/grantsRevokedBefore/);
 		});
 
 		it("refuses an adapter that cannot carry the grants boundary", () => {
@@ -276,6 +293,62 @@ describe("subjectRevocationServiceModule", () => {
 					subjectRevocation: olderAdapter(),
 				}),
 			).not.toThrow();
+		});
+	});
+
+	describe("the horizon: what the boundary must outlive (#728)", () => {
+		/** A boundary that records how long each stamp is kept, in milliseconds. */
+		const recording = () => {
+			const kept: number[] = [];
+			const revocation: SubjectRevocation = {
+				kind: "memory",
+				revokeBefore: async (_subject, before, expiresAt) => {
+					kept.push(expiresAt.getTime() - before.getTime());
+				},
+				revokedBefore: async () => null,
+			};
+			return { kept, revocation };
+		};
+
+		it("sizes it from the configuration when the composition holds neither slot", async () => {
+			const { kept, revocation } = recording();
+			await build({ subjectRevocation: revocation }).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([resolveSubjectRevocationHorizonMs(config())]);
+		});
+
+		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds, over session.maxAge", async () => {
+			const { kept, revocation } = recording();
+			await build({
+				subjectRevocation: revocation,
+				sessionCookiePolicy: createTestSessionCookiePolicy({ maxAgeMs: 10 * 24 * HOUR }),
+			}).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(config({ session: { maxAge: 10 * 24 * HOUR } })),
+			]);
+		});
+
+		it("sizes it from the token lifetimes of the oauthTokenSettings the composition holds, over the configuration's", async () => {
+			const { kept, revocation } = recording();
+			await build({
+				subjectRevocation: revocation,
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+					refreshTokenExpiresIn: 20 * 86_400,
+				}),
+			}).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(
+					config({
+						oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 20 * 86_400 } },
+					}),
+				),
+			]);
+		});
+
+		it("lists both slots as optional", () => {
+			expect(subjectRevocationServiceModule.optional).toEqual(
+				expect.arrayContaining(["oauthTokenSettings", "sessionCookiePolicy"]),
+			);
 		});
 	});
 

@@ -47,6 +47,10 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
+	// What the horizon is sized from (#728): the oauth module's token
+	// settings and the session store's cookie policy.
+	"oauthTokenSettings",
+	"sessionCookiePolicy",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
