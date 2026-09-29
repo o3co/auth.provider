@@ -30,6 +30,7 @@
  * Per A2-β §5.1.
  */
 
+import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
 import {
@@ -1665,12 +1666,18 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 	const overlaid = base.success ? overlayConfig(raw, base.data) : raw;
 
 	let composed = overlaid;
+	const outputs: { readonly module: string; readonly data: unknown }[] = [];
 	for (const m of base.success ? modules : []) {
 		if (!m.configSchema) continue;
 		const result = m.configSchema.safeParse(overlaid);
-		if (result.success) composed = overlayConfig(composed, result.data);
-		else issues.push(...result.error.issues);
+		if (!result.success) {
+			issues.push(...result.error.issues);
+			continue;
+		}
+		outputs.push({ module: m.name, data: result.data });
+		composed = overlayConfig(composed, result.data);
 	}
+	issues.push(...conflictingOutputs(outputs));
 
 	if (issues.length > 0) {
 		throw new BootError({
@@ -1685,6 +1692,57 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 		});
 	}
 	return composed;
+}
+
+/**
+ * Every key two modules' `configSchema`s make different values of, as one
+ * issue each at its path naming both modules — never the values, which may be
+ * secrets. Their outputs are laid over each other in module order, so a
+ * disagreement would otherwise go to whichever module is listed later: the
+ * refusal Zod's intersection gave (`Unmergable intersection`) when the
+ * schemas were composed into one. A leaf is a value that is not a plain
+ * object (a list is one value); a leaf one output holds where another holds
+ * keys under it disagrees too. Equal values (`isDeepStrictEqual`) agree.
+ */
+function conflictingOutputs(
+	outputs: readonly { readonly module: string; readonly data: unknown }[],
+): z.core.$ZodIssue[] {
+	const leaves = new Map<string, { readonly module: string; readonly value: unknown }>();
+	const branches = new Map<string, string>();
+	const conflicts = new Map<
+		string,
+		{ readonly path: readonly string[]; readonly modules: [string, string] }
+	>();
+	const conflict = (path: readonly string[], first: string, second: string) => {
+		const key = JSON.stringify(path);
+		if (first !== second && !conflicts.has(key))
+			conflicts.set(key, { path, modules: [first, second] });
+	};
+	const walk = (module: string, value: unknown, path: readonly string[]) => {
+		const key = JSON.stringify(path);
+		if (isPlainConfigObject(value) && Object.keys(value).length > 0) {
+			const leaf = leaves.get(key);
+			if (leaf !== undefined) conflict(path, leaf.module, module);
+			if (!branches.has(key)) branches.set(key, module);
+			for (const name of Object.keys(value)) walk(module, value[name], [...path, name]);
+			return;
+		}
+		const branch = branches.get(key);
+		if (branch !== undefined) conflict(path, branch, module);
+		const leaf = leaves.get(key);
+		if (leaf === undefined) leaves.set(key, { module, value });
+		else if (!isDeepStrictEqual(leaf.value, value)) conflict(path, leaf.module, module);
+	};
+	for (const { module, data } of outputs) walk(module, data, []);
+	return [...conflicts.values()].map(
+		({ path, modules: [first, second] }) =>
+			({
+				code: "custom",
+				path: [...path],
+				message: `module "${first}"'s configSchema and module "${second}"'s make different values of it`,
+				input: undefined,
+			}) as z.core.$ZodIssue,
+	);
 }
 
 /**
