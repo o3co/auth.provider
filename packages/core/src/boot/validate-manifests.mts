@@ -45,7 +45,6 @@ import {
 	type RelocatedPath,
 	relocatedKeyMessage,
 } from "../config/removed-keys.mjs";
-import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -2440,6 +2439,16 @@ function checkModuleSectionOwners(rawModules: readonly Module[]): void {
 	}
 }
 
+/**
+ * Where stage 1's warnings go — the replica-safety warning and
+ * `config_sections_ignored` (#728 B8), one rule for both: the logger the
+ * composition root wired as a bootstrap component. A composition that wired
+ * none hears nothing from stage 1.
+ */
+function warningLogger(bootstrap: BootstrapMap): BootstrapMap["logger"] {
+	return bootstrap.logger;
+}
+
 // ---------------------------------------------------------------------------
 // The stage-1 check registries (#368)
 // ---------------------------------------------------------------------------
@@ -2643,7 +2652,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		// own `replicaSafety` declaration (#455), which normalisation does not
 		// carry.
 		run: (ctx) => {
-			const bootLogger = ctx.bootstrapComponents.logger;
+			const bootLogger = warningLogger(ctx.bootstrapComponents);
 			checkReplicaSafety({
 				modules: ctx.rawModules,
 				config: ctx.parsedConfig,
@@ -2721,8 +2730,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// boot notice is.
 	const ignored = ignoredSections(modules, (bootstrapComponents as Record<string, unknown>).config);
 	if (ignored.length > 0) {
-		const logger = overrideComponents?.logger ?? bootstrapComponents.logger ?? consoleLogger;
-		logger.warn({ sections: [...ignored] }, "config_sections_ignored");
+		warningLogger(bootstrapComponents)?.warn({ sections: [...ignored] }, "config_sections_ignored");
 	}
 
 	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
