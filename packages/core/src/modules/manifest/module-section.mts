@@ -64,9 +64,11 @@ export type SectionSchema = z.ZodType;
  * (`z.unknown()`); a value that is not plain data (a `URL`, a `Buffer`, a
  * class instance a transform built) is handed over as the schema made it.
  *
- * `section` is not a slot, and the name is reserved: a module that provides,
- * requires or optionally reads a component named `section`, or a host that
- * bootstraps or overrides one, refuses boot (`reserved-component-key`).
+ * `section` is not a slot, and a module that declares a section may not also
+ * require or optionally read a component named `section` — its deps would
+ * carry both under one name — which refuses boot (`reserved-component-key`).
+ * A component named `section` is otherwise an ordinary slot: provided, read
+ * by a module that declares no section, bootstrapped or overridden.
  */
 export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	/**

@@ -888,25 +888,19 @@ export interface InvalidRouteAdvertisementPathDetails {
 }
 
 /**
- * A component key reserved for something that is not a slot (#728): `section`
- * is the key under which a module's own configuration section is set on its
- * deps, so no module may provide, require or optionally read a component of
- * that name, and no host may bootstrap or override one — the section would
- * shadow it, or it the section. A module source carries `module`; the host
- * sources are composition-root data and carry none.
+ * A module that declares its own configuration section and also requires or
+ * optionally reads a component under the key the section is set on (#728):
+ * `section`. Its deps would carry both under one name, the section shadowing
+ * the slot. A component named `section` is otherwise an ordinary slot — a
+ * module without a section may provide or read one, and a host may bootstrap
+ * or override one — so only this module is refused.
  */
-export type ReservedComponentKeyDetails =
-	| {
-			readonly reason: "reserved-component-key";
-			readonly componentKey: string;
-			readonly source: "module-provides" | "module-requires" | "module-optional";
-			readonly module: string;
-	  }
-	| {
-			readonly reason: "reserved-component-key";
-			readonly componentKey: string;
-			readonly source: "bootstrapComponents" | "overrideComponents";
-	  };
+export interface ReservedComponentKeyDetails {
+	readonly reason: "reserved-component-key";
+	readonly componentKey: string;
+	readonly source: "module-requires" | "module-optional";
+	readonly module: string;
+}
 
 /**
  * A manifest's `section.at` that is not a dot-separated path of non-empty

@@ -45,7 +45,6 @@ import type {
 	ContributionKind,
 	ContributionKindMap,
 	NormalisedModule,
-	ReservedComponentKeyDetails,
 	ValidatedManifests,
 	ValidatedModule,
 } from "./types.mjs";
@@ -1733,71 +1732,55 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Component keys that are not slots. `section` is the key a module's own
- * configuration section is set under on its deps object, beside its slots.
+ * The key a module's own configuration section is set under on its deps
+ * object, beside its slots.
  */
-const RESERVED_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(new Set(["section"]));
+const SECTION_DEPS_KEY = "section";
 
 /**
- * No module provides, requires or optionally reads a component named like a
- * reserved key, and no host bootstraps or overrides one: the deps object would
- * carry both under one name, and one would shadow the other.
+ * A module that declares a section may not also require or optionally read a
+ * component named `section`: its deps would carry both under one name, the
+ * section shadowing the slot. Only that module is refused. A component named
+ * `section` is otherwise an ordinary slot — provided, read by a module that
+ * declares no section, bootstrapped or overridden — so a composition that
+ * had one before sections existed boots as it did.
  * Throws `reserved-component-key`.
  * @internal
  */
 function checkReservedComponentKeys(
+	rawModules: readonly Module[],
 	modules: readonly NormalisedModule[],
-	bootstrap: BootstrapMap,
-	override: Partial<ComponentMap> | undefined,
 ): void {
-	const refuse = (key: string, where: string, details: ReservedComponentKeyDetails): never => {
-		throw new BootError({
-			message: `${where} "${key}", a name reserved for the module's own configuration section on its deps; name the component otherwise.`,
-			reason: "reserved-component-key",
-			stage: "validateManifests",
-			details,
-		});
-	};
-	for (const m of modules) {
+	modules.forEach((m, index) => {
+		if (rawModules[index]?.section === undefined) return;
 		const sources = [
-			["module-provides", m.providesKeys, "provides"],
 			["module-requires", m.requires, "requires"],
 			["module-optional", m.optional, "optionally reads"],
 		] as const;
 		for (const [source, keys, verb] of sources) {
-			for (const key of keys as readonly string[]) {
-				if (RESERVED_COMPONENT_KEYS.has(key)) {
-					refuse(key, `Module "${m.name}" ${verb} a component named`, {
-						reason: "reserved-component-key",
-						componentKey: key,
-						source,
-						module: m.name,
-					});
-				}
-			}
-		}
-	}
-	const hostSources = [
-		["bootstrapComponents", bootstrap],
-		["overrideComponents", override ?? {}],
-	] as const;
-	for (const [source, components] of hostSources) {
-		for (const key of Object.keys(components)) {
-			if (RESERVED_COMPONENT_KEYS.has(key)) {
-				refuse(key, `${source} contains a component named`, {
+			if (!(keys as readonly string[]).includes(SECTION_DEPS_KEY)) continue;
+			throw new BootError({
+				message: `Module "${m.name}" declares its own section and ${verb} a component named "${SECTION_DEPS_KEY}": its deps carry the section under that name. Name the component otherwise.`,
+				reason: "reserved-component-key",
+				stage: "validateManifests",
+				details: {
 					reason: "reserved-component-key",
-					componentKey: key,
+					componentKey: SECTION_DEPS_KEY,
 					source,
-				});
-			}
+					module: m.name,
+				},
+			});
 		}
-	}
+	});
 }
 
 /**
  * Every `section.at` is a dot-separated path of non-empty keys. `""`,
  * `"a..b"`, `".a"` and `"a."` — or a value that is not a string — name no
- * section anyone wrote. Throws `module-section-path-invalid`.
+ * section anyone wrote. Throws `module-section-path-invalid`: a string is
+ * quoted in the message, anything else named by its type — rendering it could
+ * throw (a bigint, a cyclic object) before the refusal exists — and the value
+ * itself is in `details.at`.
  * @internal
  */
 function checkModuleSectionPaths(rawModules: readonly Module[]): void {
@@ -1805,8 +1788,9 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 		const at: unknown = m.section?.at;
 		if (at === undefined) continue;
 		if (typeof at === "string" && at.split(".").every((key) => key.length > 0)) continue;
+		const shown = typeof at === "string" ? JSON.stringify(at) : `a ${typeof at}`;
 		throw new BootError({
-			message: `Module "${m.name}" declares its section at ${JSON.stringify(at) ?? String(at)}, which is not a dot-separated path of non-empty keys.`,
+			message: `Module "${m.name}" declares its section at ${shown}, which is not a dot-separated path of non-empty keys.`,
 			reason: "module-section-path-invalid",
 			stage: "validateManifests",
 			details: { reason: "module-section-path-invalid", module: m.name, at },
@@ -1898,8 +1882,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	{
 		id: "reserved-component-keys",
 		spec: "issue #728 (the module section's deps key)",
-		run: (ctx) =>
-			checkReservedComponentKeys(ctx.modules, ctx.bootstrapComponents, ctx.overrideComponents),
+		run: (ctx) => checkReservedComponentKeys(ctx.rawModules, ctx.modules),
 	},
 	{
 		id: "session-requirement-kind-guard",
