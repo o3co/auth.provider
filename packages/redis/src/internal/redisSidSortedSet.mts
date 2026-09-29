@@ -21,10 +21,9 @@ export interface RedisSidSortedSetOptions {
 	readonly client: SessionSidSortedSetClient;
 	readonly keyPrefix: string;
 	/**
-	 * Members read per `ZRANGE` round-trip in `list`. Default 100.
-	 *
-	 * Must be a positive integer — this is the loop step, so a value that does
-	 * not advance the cursor hangs `list()`. Validated at construction.
+	 * Members read per `ZRANGE` round-trip in `list`. Default 100. A positive
+	 * integer, checked at construction: it is the loop step, and a value that
+	 * does not advance the cursor hangs `list()`.
 	 */
 	readonly pageSize?: number;
 }
@@ -39,84 +38,43 @@ export interface RedisSidSortedSet {
 }
 
 /**
- * Module-level monotonic counter used as the ZADD score.
+ * The ZADD score: a process-wide counter, so adds within one millisecond
+ * still get strictly increasing scores. Redis returns equal scores in an order
+ * of its own, which would break `SessionFederationIndex`'s insertion-order
+ * contract.
  *
- * Using `Date.now()` alone is insufficient for insertion-order guarantees:
- * multiple sequential `await add(...)` calls within the same millisecond
- * receive the same score, and Redis returns members with equal scores in an
- * undefined (lexicographic or internal hash) order — violating the
- * load-bearing ordering contract of `SessionFederationIndex` (A4 §5.4).
- *
- * A module-level auto-increment counter guarantees strict monotonicity across
- * all add() calls in the current process:
- *   - ZADD NX assigns the score on first add; subsequent adds for the same
- *     member are no-ops (score preserved), satisfying the NX contract.
- *   - ZRANGE ascending score == call-site insertion order unconditionally.
- *
- * Process-restart behaviour (OR-8): the counter is initialised from
- * `Date.now()` at module load. Epoch-ms in 2026 (~1.75×10^12) exceeds any
- * pre-crash counter that started at 0 and incremented once per `add()`,
- * provided the process did not run continuously at ~100k adds/sec for ~200
- * days — sufficient under realistic operational throughput, not
- * mathematically absolute. Post-restart members therefore receive scores
- * strictly greater than pre-crash members in the same Redis key, preserving
- * insertion order across restart boundaries for long-lived sessions (e.g.
- * 24 h TTL). Verified live path: `SessionFamilyIndex.addFamilyId` is called
- * after restart on a surviving session during the auth-code grant
- * (`packages/oauth/src/grants/authorization.mts`).
- *
- * Edge case: a backward system-clock step (NTP correction, VM migration)
- * can invert the guarantee. Phase F may switch to `process.hrtime.bigint()`.
- *
- * Non-goal: cluster-wide total ordering. Two replicas starting in the same
- * millisecond can independently emit identical scores against the same
- * Redis key — only single-process restart baseline inversion is fixed.
- * Cross-replica monotonic scores remain Phase F (e.g. Redis `INCR`).
- *
- * JavaScript `number` range: 2^53 - 1 ≈ 9 × 10^15. At 1M adds/second from
- * the Date.now() baseline (~1.75×10^12), headroom is ~7.25×10^15 — still
- * ~285 years before overflow. Treated as unbounded in practice.
+ * It starts at `Date.now()` at module load, so members added after a restart
+ * score above those added before it to the same key (a session that survives
+ * the restart keeps gaining family ids in the auth-code grant), unless the
+ * previous process made more adds than milliseconds passed between the two
+ * starts. A backward clock step (NTP, VM migration) can invert that. Not
+ * cluster-wide: two replicas can emit the same score for one key. At 1M adds
+ * a second it takes about 285 years to pass 2^53.
  */
 let _insertionCounter = Date.now();
 
 /**
- * Private redis helper used by `SessionFamilyIndex` + `SessionFederationIndex`.
- * Single-key ZADD NX + (`PEXPIREAT … NX` + `PEXPIREAT … GT`) pipeline keyed
- * by `${keyPrefix}${sid}`.
+ * Private Redis helper for `SessionFamilyIndex` and `SessionFederationIndex`:
+ * a ZSET at `${keyPrefix}${sid}`, scored by `_insertionCounter`. `ZADD … NX`
+ * keeps an existing member's score, so re-adding a member does not move it;
+ * `SessionFederationIndex`'s ordering contract depends on that.
  *
- * Per A4 §7.2.2.
+ * TTL, as in `createRedisSidHash`: callers MUST pass `session.expiresAt`, the
+ * same one for every write under a sid, and a write after expiry does nothing.
+ * `pExpireGT` sends `PEXPIREAT … NX` then `PEXPIREAT … GT`: NX sets the TTL on
+ * the first write (a bare GT does nothing on a key without a TTL), and GT
+ * keeps a writer with a stale `expiresAt` from shortening a longer TTL. See
+ * README, Requirements (Redis 7.0+).
  *
- * **NX semantics on ZADD**: ZADD ... NX does NOT update the existing member's
- * score. Original insertion-time score is preserved, so re-add of an existing
- * member does NOT promote its position. Load-bearing for
- * `SessionFederationIndex` ordering contract (A4 §5.4).
- *
- * **TTL contract** (identical to `createRedisSidHash`): callers MUST pass
- * `session.expiresAt`; same-sid writes use the SAME `expiresAt`; writes
- * after expiry no-op. The `pExpireGT` method emits a `PEXPIREAT … NX` +
- * `PEXPIREAT … GT` pair: NX sets the TTL on first write (a bare GT silently
- * no-ops on a key with no existing TTL), GT prevents TTL truncation when
- * a stale-`expiresAt` writer races against a longer existing TTL
- * (D-10 / CR-3). Requires Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
- *
- * **Score**: monotonic module-level counter (see `_insertionCounter` above).
- * The counter replaces `Date.now()` as the score source to guarantee strict
- * insertion-order even when multiple adds execute within the same millisecond.
- *
- * **`list` pages by rank** (#291). `ZRANGE key 0 -1` returned the whole set in
- * one reply whose size grew with how many families or federations a session
- * had accumulated, on the connection every other adapter shares and on the
- * logout path. Paging is safe for the ordering contract because ZADD NX with a
- * monotonically increasing score only ever appends: a member added mid-read
- * lands after the ranks already walked. A concurrent `remove` shifts later
- * ranks down by one and can drop a member from that read — acceptable here,
- * where the two callers (cascade revoke, IdP-logout redirect) both re-read on
- * the next request and neither treats one listing as authoritative.
- *
- * The read is paged, **not truncated**: `listFamilyIds` drives cascade
- * revocation, and a cap would silently leave the families past it live.
- *
- * **Removal is `UNLINK`**, not `DEL`.
+ * `list` pages by rank and never truncates: one `ZRANGE key 0 -1` reply would
+ * grow with the session's families or federations and block the shared
+ * connection on the logout path, and a cap would leave the families past it
+ * live after a cascade revocation. Paging keeps the order, because `ZADD NX` with a rising
+ * score only appends: a member added mid-read lands after the ranks already
+ * walked. A concurrent `remove` shifts later ranks down by one and can drop a
+ * member from that read; both callers (cascade revoke, the IdP-logout
+ * redirect) re-read on the next request and treat no one listing as
+ * authoritative. Removal is `UNLINK`, not `DEL`.
  */
 export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSidSortedSet {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
@@ -130,10 +88,7 @@ export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSi
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError("expiresAt must be a valid date");
 			}
-			// Guard: no-op writes after expiry.
 			if (expiresAtMs <= Date.now()) return;
-			// Monotonically increasing score — guarantees insertion order even
-			// when multiple adds execute within the same millisecond.
 			const score = ++_insertionCounter;
 			const pipeline = opts.client.multi();
 			pipeline.zAdd(k(sid), { score, value: member }, { NX: true });

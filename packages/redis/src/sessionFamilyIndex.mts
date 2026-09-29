@@ -24,12 +24,9 @@ export interface RedisSessionFamilyIndexOptions {
 }
 
 /**
- * Redis-backed SessionFamilyIndex. Wraps `createRedisSidSortedSet` (ZSET
- * with insertion-time score, ZADD NX). Per A4 §5.3 + §7.2.
- *
- * Order is informational for cascade revoke (caller iterates
- * order-independently); the helper choice is made for consistency with
- * `SessionFederationIndex` rather than functional dependency.
+ * Redis-backed SessionFamilyIndex over `createRedisSidSortedSet` (a ZSET
+ * scored in insertion order, `ZADD NX`). Cascade revoke does not depend on
+ * the order; the sorted set is for consistency with `SessionFederationIndex`.
  */
 export function createRedisSessionFamilyIndex(
 	opts: RedisSessionFamilyIndexOptions,
@@ -50,16 +47,11 @@ export function createRedisSessionFamilyIndex(
 }
 
 /**
- * AdapterFactory builder for the Redis-backed `SessionFamilyIndex` (AS-9).
- *
- * Use when per-adapter `AdapterFactory` granularity is needed; for the common
- * case the bundled `redisSessionStoresModule` is sufficient. Default
- * `keyPrefix` matches the bundle's production layout (`ss:fi:`) so swapping
- * between bundle and individual builder does not change the keyspace.
- *
- * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
- * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op.
+ * AdapterFactory builder for the Redis-backed `SessionFamilyIndex`, for
+ * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
+ * common case. The default `keyPrefix` is the bundle's (`ss:fi:`), so
+ * switching between the two keeps the keyspace. A missing `client` throws at
+ * boot, as in `redisChallengeStoreBuilder`, rather than at the first command.
  */
 export const redisSessionFamilyIndexBuilder: AdapterBuilder<SessionFamilyIndex> = (
 	config,

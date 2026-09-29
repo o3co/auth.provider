@@ -20,30 +20,23 @@ import type {
 } from "@o3co/auth-provider-core";
 
 /**
- * How a federation grant's authorization and credential are written down
- * (#593, D16).
+ * How a federation grant's authorization and credential are written down.
  *
- * The canonical authorization text is stored in the grant HASH *and* is what
- * the credential's authenticated data is computed from, so the same
- * authorization must produce the same bytes in this process, in another
- * replica, and after a restart. What that rules out:
- *
- * - **Property names.** An object's key order is an encoder's choice; an
- *   array's element order is the format.
- * - **Numbers.** A JSON number is a formatting decision (`1e21`, `-0`), so
- *   every instant is a decimal millisecond string.
- * - **Separators.** Joining fields with a character lets one field's content
- *   move the boundary; JSON escapes what would.
- * - **Tidying.** Scopes are neither sorted nor deduplicated, strings are not
- *   normalized: what the upstream granted is the record, and a tamper test
- *   that cannot see a reordering is not one.
+ * The canonical authorization text is stored in the grant HASH and is what the
+ * credential's authenticated data is computed from, so one authorization must
+ * produce the same bytes in every process, replica and restart. Hence arrays,
+ * not objects (key order is an encoder's choice); every instant as a decimal
+ * millisecond string (a JSON number is a formatting decision: `1e21`, `-0`);
+ * JSON escaping rather than a separator one field's content could move; and
+ * no tidying: scopes are neither sorted nor deduplicated and strings are not
+ * normalized, because what the upstream granted is the record and a tamper
+ * test that cannot see a reordering is not one.
  *
  * The text is never decoded and re-encoded on the way to the authenticated
- * data — the bytes the HASH holds are the bytes that are authenticated, which
- * is also why no Lua script may re-encode it, or write anything derived from
- * a decode of it back to the record. A read-only decode is fine:
- * `LUA_FG_REVOKE` reads the expiry out of it for the horizon it honours
- * (#627), and writes nothing of what it read.
+ * data: the bytes the HASH holds are the bytes that are authenticated. So no
+ * Lua script may re-encode it or write anything derived from a decode of it
+ * back to the record. A read-only decode is fine: `LUA_FG_REVOKE` reads the
+ * expiry out of it for the horizon it honours, and writes nothing it read.
  */
 
 /** The instant as the format writes it: a decimal millisecond string. */
@@ -161,20 +154,19 @@ export interface FederationGrantCredentialBinding {
 
 /**
  * The authenticated data a credential is sealed under: the key it lives at,
- * the record's identity, and every field of the authorization (D1).
+ * the record's identity, and every field of the authorization.
  *
- * The key name is in there because the session-bound store binds a ciphertext
- * to its key (#293) and a credential copied to another grant's key must not
- * read as that grant's. The authorization is in there because here the binding
- * is a plaintext HASH: someone able to write to Redis, or a mismatched
- * restore, could re-point `clientId`, extend `expiresAt`, move `consent.at`
- * past a revocation watermark, or rewrite `authorizationRevision` to skip a
- * renewed consent — without touching the ciphertext. A tampered field then
- * fails authentication and the record reads as unreadable.
- *
- * The usage fields are deliberately outside it: `lastUsedAt`, the
- * ineligibility marker and the stamp of a failed refresh change while the
- * grant is in use, and none of them decides what the grant allows.
+ * The key name binds the ciphertext to its key, so a credential copied to
+ * another grant's key does not read as that grant's. The authorization is
+ * included because the binding is a plaintext HASH: a Redis writer or a
+ * mismatched restore could otherwise re-point `clientId`, extend `expiresAt`,
+ * move `consent.at` past a revocation watermark, or rewrite
+ * `authorizationRevision` to skip a renewed consent, all without touching the
+ * ciphertext. A tampered field fails authentication and the record reads as
+ * unreadable. The usage fields (`lastUsedAt`, the ineligibility marker, a
+ * failed refresh's stamp) change while the grant is in use and decide nothing
+ * it allows, so they are outside it.
+ * See ADR 2026-09-17-federation-grants-offline-delegation, D16.
  */
 export function credentialAad(binding: FederationGrantCredentialBinding): Buffer {
 	return Buffer.from(

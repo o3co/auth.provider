@@ -15,28 +15,24 @@
  */
 
 /**
- * How acquisition's three records are written down and read back (#593, D16,
- * slice 6).
+ * How acquisition's three records are written down and read back.
  *
- * **Canonical, field by field.** The text a record encodes to is a function of
- * the record alone: the same intent encodes to the same bytes on every
- * instance and every release, which is what lets the admission script answer
- * `unchanged` for a retried write by comparing the stored text with the
- * incoming one. A spread, or `JSON.stringify` over an object whose key order
- * came from the caller, would make one retry look like a collision.
+ * Canonical, field by field: the same record encodes to the same bytes on
+ * every instance and release, so the admission script answers `unchanged` for
+ * a retried write by comparing the stored text with the incoming one. A
+ * spread, or `JSON.stringify` over an object whose key order came from the
+ * caller, would make one retry look like a collision.
  *
- * **Nothing here heals a record it cannot read.** A text that does not decode
- * is refused, and the adapter turns that into a thrown error rather than a
- * `null`: reading it as absent would disable a live flow's checks, and
- * deleting it would make a rollback destroy flows a newer release wrote. That
- * is the grant store's treatment of unreadable state, deliberately unlike the
- * pending-consent adapter, which reclaims a corrupt record as it reads it.
+ * A text that does not decode is refused, and the adapter throws rather than
+ * returning `null`: reading it as absent would disable a live flow's checks,
+ * and deleting it would make a rollback destroy flows a newer release wrote.
+ * This follows the grant store, unlike the pending-consent adapter, which
+ * reclaims a corrupt record as it reads it.
  *
- * The values are not secret in the sense the grant credential is — a PKCE
- * verifier and a nonce are worthless once the flow ends, ten minutes at the
- * outside — so they are stored as the login flow's own transaction is: in the
- * clear, in a record with a deadline. What is sealed and why is D16's, and
- * this is the one record it does not seal.
+ * The PKCE verifier and nonce are stored in the clear, in a record with a
+ * deadline, as the login flow's own transaction is: they are worthless once
+ * the flow ends, ten minutes at the outside.
+ * See ADR 2026-09-17-federation-grants-offline-delegation, D16.
  */
 
 import type {
@@ -88,12 +84,12 @@ const params = (value: unknown, what: string): Readonly<Record<string, string>> 
 	for (const key of Object.keys(value as Record<string, unknown>).sort()) {
 		// A string, and possibly an empty one: the connection resolver accepts
 		// `login_hint: ""`, and a codec stricter than the configuration it stores
-		// turns a working connection into a storage failure (Codex).
+		// turns a working connection into a storage failure.
 		const param = (value as Record<string, unknown>)[key];
 		if (typeof param !== "string") throw BAD(`${what}.${key}`);
 		// Defined, not assigned: assigning `__proto__` calls the prototype
-		// setter and drops the key, where the memory store's spread keeps it
-		// (Copilot). The resolver refuses the name; this does not rely on it.
+		// setter and drops the key, where the memory store's spread keeps it.
+		// The resolver refuses the name; this does not rely on it.
 		Object.defineProperty(out, key, {
 			value: param,
 			enumerable: true,
@@ -128,7 +124,7 @@ export const federationGrantIntentPairText = (clientId: string, subject: string)
 	`${clientId.length}:${clientId}:${subject.length}:${subject}`;
 
 export function encodeFederationGrantIntent(record: FederationGrantIntent): string {
-	// Checked against the record's keys (#626): a field this encoding forgot, or
+	// Checked against the record's keys: a field this encoding forgot, or
 	// one added to the record and not here, is a compile error — the decode
 	// half is held the same way by its return type.
 	const stored = {

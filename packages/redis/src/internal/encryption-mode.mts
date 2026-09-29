@@ -17,28 +17,24 @@
 import { consoleLogger, type Logger } from "@o3co/auth-provider-core";
 
 /**
- * The production guard on storing upstream refresh tokens unencrypted
- * (OR-12 / #473), shared by the two stores that hold them: the session-bound
- * federation tokens (#293) and the federation grants of #593.
+ * The production guard on storing upstream refresh tokens unencrypted,
+ * shared by the two stores that hold them: the session-bound federation
+ * tokens and the federation grants.
  *
  * One escape hatch, not two: `FEDERATION_TOKENS_ALLOW_INSECURE=1` is about
- * "IdP refresh tokens at rest without encryption", which is what both stores
- * would be doing. A second variable would let a deployment permit it for one
- * and be surprised by the other. The `label` is what the messages name, so
- * an operator is told which store refused.
+ * "IdP refresh tokens at rest without encryption", which both stores would
+ * be doing, and a second variable would let a deployment permit it for one
+ * and be surprised by the other. The `label` names which store refused.
  *
- * What it writes where plaintext goes ahead is one object-first line with an
- * event name — `federation_store_plaintext` (warn) where plaintext is
- * allowed, `federation_store_plaintext_override` (error) where only the
- * escape hatch let it through — on the logger the composition handed the
- * store, or `consoleLogger` when it handed none: a store is built by a
- * module or a builder that may have the composition's logger, or by a
- * caller that has none.
+ * Where plaintext goes ahead it writes one line — `federation_store_plaintext`
+ * (warn) where plaintext is allowed, `federation_store_plaintext_override`
+ * (error) where only the escape hatch let it through — on the logger the
+ * composition handed the store, or `consoleLogger` when it handed none.
  */
 const PRODUCTION_ENVS = new Set(["production", "staging"]);
 
 /**
- * Where the guard looks beside the mode itself (#473). A deployment that has
+ * Where the guard looks beside the mode itself. A deployment that has
  * declared more than one replica is never a development box, whatever its
  * environment is named.
  */
@@ -54,14 +50,13 @@ export interface EncryptionGuardContext {
 }
 
 /**
- * OR-12 / #473 — refuse to construct a federation-token store with
- * `mode = "allow-plaintext"` where plaintext is not acceptable, unless the
- * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`, and any mode
- * but `required` and `allow-plaintext` everywhere. The refusals are
- * `RangeError`s, as every setting a store is given and cannot use is. Logs
- * `federation_store_plaintext_override` at error when the escape hatch is
- * active, naming what would have refused it. Everywhere else it logs
- * `federation_store_plaintext` at warn but does not throw.
+ * Refuse to construct a federation-token store with `mode = "allow-plaintext"`
+ * where plaintext is not acceptable, unless the operator explicitly sets
+ * `FEDERATION_TOKENS_ALLOW_INSECURE=1`, and any mode but `required` and
+ * `allow-plaintext` everywhere. Refusals are `RangeError`s. With the escape
+ * hatch active it logs `federation_store_plaintext_override` at error, naming
+ * what would have refused; everywhere else `federation_store_plaintext` at
+ * warn.
  *
  * Plaintext is refused when any of these holds:
  *   - the explicit `environment` is `production` or `staging`;

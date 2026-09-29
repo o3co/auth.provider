@@ -39,16 +39,15 @@ const aadBytes = (aad: Aad): Buffer => (typeof aad === "string" ? Buffer.from(aa
 
 /**
  * Encrypts a string and returns `${version}.${iv}.${ct}.${tag}` where each
- * component is base64url-encoded. Version is included so that future algorithm
- * migrations can be detected on decrypt.
+ * component is base64url-encoded. The version lets a future algorithm
+ * migration be detected on decrypt.
  *
- * `aad` is authenticated but not stored: the same value must be presented on
- * decrypt, and a ciphertext presented under a different one (or under none)
- * fails the tag check, so the caller can bind a ciphertext to where it is
- * kept. The federation-token store passes the Redis key here (#293), which
- * is what makes a value copied to another session's key fail to decrypt
- * instead of quietly reading as that session's tokens. The wire format is
- * unchanged whether or not `aad` is given.
+ * `aad` is authenticated but not stored: a ciphertext presented under a
+ * different one (or under none) fails the tag check, so the caller can bind
+ * a ciphertext to where it is kept. The federation-token store passes the
+ * Redis key, so a value copied to another session's key fails to decrypt
+ * instead of reading as that session's tokens. The wire format is the same
+ * whether or not `aad` is given.
  */
 export function encryptTokenField(plaintext: string, key: Buffer, aad?: Aad): string {
 	if (key.length !== KEY_LEN) throw new Error(`encryption key must be ${KEY_LEN} bytes`);
@@ -96,17 +95,16 @@ export function decryptTokenField(envelope: string, key: Buffer, aad?: Aad): str
 }
 
 /**
- * One key in the ring a federation grant's credential is sealed under
- * (#593, D16): core's {@link SealingKey}, under the name this package has
- * always exported it by. The first entry seals; every entry may open.
+ * One key in the ring a federation grant's credential is sealed under:
+ * core's {@link SealingKey}, under this package's exported name. The first
+ * entry seals; every entry may open.
  */
 export type FederationGrantKey = SealingKey;
 
 /**
- * The purpose every federation grant credential has been sealed under. The
- * envelope writes it into the authenticated data as `o3co:redis:v2\0`, the
- * header this store used before the envelope moved to core; changing it
- * leaves every grant at rest unreadable.
+ * The purpose every federation grant credential is sealed under. The
+ * envelope writes it into the authenticated data as `o3co:redis:v2\0`;
+ * changing it leaves every grant at rest unreadable.
  */
 const FEDERATION_GRANT_PURPOSE = "o3co:redis:v2";
 
@@ -116,7 +114,7 @@ const FEDERATION_GRANT_PURPOSE = "o3co:redis:v2";
  *
  * `record` is authenticated and not stored: the caller presents the same
  * bytes to open, which is what binds a credential to the record that
- * authorizes it (D16).
+ * authorizes it.
  */
 export function sealCredential(
 	plaintext: string,

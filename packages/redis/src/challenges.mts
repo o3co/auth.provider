@@ -41,13 +41,9 @@ export interface RedisChallengeStoreOptions {
  *   - find:    PTTL <prefix><key>                   → -2 absent, -1 no-TTL, ≥0 ms
  *   - consume: DEL <prefix><key>                    → count deleted
  *
- * No Lua, no MULTI/EXEC — explicitly rejected by Theme A (the entire reason
- * A1 split into primitives is to NOT need transaction blocks).
- *
- * No-TTL defensive handling: if PTTL returns -1 (key exists without expiry,
- * e.g. external mutation), `find` returns null (fail-closed for lifecycle).
- *
- * Per A1 §7.2.
+ * No Lua, no MULTI/EXEC: the contract is split into primitives so that no
+ * transaction block is needed. If PTTL returns -1 (key without expiry, e.g.
+ * external mutation), `find` returns null (fail-closed).
  */
 export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): ChallengeStore {
 	const { client, keyPrefix } = opts;
@@ -90,17 +86,16 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 }
 
 /**
- * AdapterFactory builder for runtime-config-driven backend selection
- * (composition pattern §8.4). Consumer registers via:
+ * AdapterFactory builder for runtime-config-driven backend selection.
+ * Consumer registers via:
  *   factory.register("redis", redisChallengeStoreBuilder);
  * Then calls:
  *   factory.create({ type: "redis", client, keyPrefix: "chal:" });
  */
 export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (config, _ctx) => {
 	const c = config as { client?: ChallengeStoreClient; keyPrefix?: string };
-	// TS-M2 (Wave 5g): structural guard. Mirrors the
-	// `redisFederationTokenStoreBuilder` pattern — fail at boot rather than
-	// at first Redis op with a cryptic `Cannot read properties of undefined`.
+	// Structural guard: fail at boot rather than at the first Redis op with
+	// a cryptic `Cannot read properties of undefined`.
 	if (!c.client) {
 		throw new Error("redisChallengeStoreBuilder: 'client' option is required");
 	}
@@ -112,10 +107,10 @@ export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (confi
 
 /**
  * `defineModule` manifest for the Redis ChallengeStore. Static composition
- * path (§8.1). For runtime-config-driven selection use the builder above.
+ * path. For runtime-config-driven selection use the builder above.
  *
- * configSchema: top-level key `redisChallengeStore` (module-namespaced per
- * master roadmap §3.5 — NO bare `keyPrefix` top-level key).
+ * configSchema: top-level key `redisChallengeStore` (module-namespaced — NO
+ * bare `keyPrefix` top-level key).
  */
 export const redisChallengeStoreModule = defineModule({
 	name: "redis-challenge-store",

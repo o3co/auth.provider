@@ -22,10 +22,8 @@ export interface RedisSidHashOptions {
 	readonly keyPrefix: string;
 	/**
 	 * Fields requested per `HSCAN` round-trip. A hint to Redis, not a hard
-	 * limit on a page's size. Default 100.
-	 *
-	 * Must be a positive integer — Redis refuses a non-positive `COUNT`.
-	 * Validated at construction rather than discovered mid-logout.
+	 * limit on a page's size. Default 100. A positive integer, checked at
+	 * construction: Redis refuses a non-positive `COUNT`.
 	 */
 	readonly scanCount?: number;
 }
@@ -39,38 +37,25 @@ export interface RedisSidHash {
 }
 
 /**
- * Private redis helper used by `SessionRPRegistry`. Single-key HSET +
- * (`PEXPIREAT … NX` + `PEXPIREAT … GT`) pipeline keyed by
- * `${keyPrefix}${sid}`. Per A4 §7.2.1.
+ * Private Redis helper for `SessionRPRegistry`: a HASH at `${keyPrefix}${sid}`
+ * with one field per relying party. A HASH rather than a SET of JSON, so an
+ * upsert dedups on the field name (`clientId`) when the RP's other fields
+ * change.
  *
- * **HASH-keyed-by-element-id rationale**: SADD-of-JSON cannot dedup by
- * `clientId` when other RP fields change (different bytewise JSON for the
- * same logical clientId would create duplicate entries). HSET dedups on
- * field name = `clientId`, semantically correct for RP upsert.
+ * TTL: callers MUST pass `session.expiresAt`, which is fixed when the session
+ * is created. `pExpireGT` sends `PEXPIREAT … NX` then `PEXPIREAT … GT`: NX sets
+ * the TTL on the first write (a bare GT does nothing on a key without a TTL,
+ * which Redis treats as infinite), and GT keeps a concurrent write with a
+ * stale `expiresAt` from shortening it. See README, Requirements (Redis 7.0+).
+ * A write after expiry does nothing, so no key is left without a TTL.
  *
- * **TTL contract**: callers MUST pass `session.expiresAt`. The `pExpireGT`
- * method emits a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair: NX sets the TTL
- * on first write (a bare GT silently no-ops on a key with no existing TTL —
- * Redis treats no-TTL as infinite TTL for the GT flag), GT prevents TTL
- * truncation on stale-`expiresAt` concurrent writes (D-10 / CR-3).
- * Requires Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
- * `UserSession.expiresAt` is post-create immutable per A4 §5.1, so the
- * legal value is fixed at session-create time.
- *
- * **Writes after expiry are no-op**: prevents zombie keys with no TTL.
- *
- * **Reads are cursor-based** (`HSCAN`, #291). `HVALS` returned every field in
- * one reply whose size was bounded by nothing but how many relying parties a
- * session had accumulated — a single blocking command on the connection every
- * other adapter in this package shares, issued on the logout path. The trade
- * is that `HSCAN` can hand back the same field on more than one cursor when
- * the hash rehashes mid-iteration, so the read de-duplicates by field name.
- *
- * The read is paged, **not truncated**: `listRPs` feeds back-channel logout,
- * and a cap would silently skip notifying the relying parties past it.
- *
- * **Removal is `UNLINK`**, not `DEL` — freeing a session's whole RP hash is
- * not worth blocking the shared connection during a logout.
+ * Reads are paged (`HSCAN`) and never truncated: one `HVALS` reply would be
+ * bounded only by how many RPs the session accumulated and would block the
+ * connection every adapter here shares, on the logout path, while a cap would
+ * skip notifying the RPs past it in back-channel logout. `HSCAN` can return a
+ * field on more than one cursor when the hash rehashes, so the read
+ * de-duplicates by field name. Removal is `UNLINK`, so freeing the hash does
+ * not block the shared connection during a logout.
  */
 export function createRedisSidHash(opts: RedisSidHashOptions): RedisSidHash {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;

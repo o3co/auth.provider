@@ -32,12 +32,9 @@ export interface FederationGrantLockOptions {
 	readonly pollIntervalMs?: number;
 	/**
 	 * The monotonic clock, in milliseconds. Default `performance.now`.
-	 *
-	 * A seam, and only for tests: what `waitedMs` rounds to, and which side of
-	 * the deadline an attempt falls on, are differences of one millisecond that
-	 * no test can produce on a real clock reliably — and the direction of the
-	 * rounding is the difference between a lease that is understated and one
-	 * that is overstated.
+	 * A seam for tests only: what `waitedMs` rounds to, and which side of the
+	 * deadline an attempt falls on, are one-millisecond differences no test can
+	 * produce reliably on a real clock.
 	 */
 	readonly now?: () => number;
 }
@@ -49,33 +46,23 @@ const TOKEN_BYTES = 32;
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * The lock a refresh holds (#593, D12), over a connection.
+ * The lock a refresh holds, over a connection.
  *
- * ## What `waitedMs` is, and why it is measured where it is
+ * `waitedMs` is the elapsed time recorded immediately before the attempt that
+ * succeeded was sent: a conservative lower bound on when the lease began. Core
+ * dates the lease at `askedAt + waitedMs` and measures the acknowledgement
+ * itself; including the answer's travel here would date the lease later than
+ * it began, the one unsafe direction, since two refreshes would then present
+ * one refresh token. It is measured on `performance.now()`, not `Date.now()`,
+ * which steps when the host's clock is set.
  *
- * The lease is spent from the moment the store took the lock, and the
- * acknowledgement's own travel is spent too: core dates the lease at
- * `askedAt + waitedMs` and measures the rest itself. So `waitedMs` is the
- * elapsed time recorded **immediately before the attempt that succeeded was
- * sent** — a conservative lower bound on when the lease began. Including the
- * answer's travel would put the lease later than it started, which is the one
- * direction that is unsafe: two refreshes would present one refresh token.
- *
- * It is measured on `performance.now()` and not on `Date.now()`, which steps
- * when the host's clock is set — a wait reported as negative, or as hours,
- * and core refusing the lease of a lock that was in fact taken at once.
- *
- * ## What it does not do
- *
- * It does not give back a lock it took because the answer was late. That
- * would say `timeout`, which means another holder has it, and core turns that
- * into "serve what is stored, come back later" — so a grant nothing was
- * competing for would go unrefreshed. Core already measures the
- * acknowledgement and refuses to start upstream work once the budget is
- * spent; that decision belongs there, with the whole call in view.
- *
- * It does not retry an attempt whose answer never came. A lock that may or
- * may not have been taken must not be taken again: the TTL is what frees it.
+ * A lock whose answer came late is handed over, not given back and answered
+ * `timeout`, which means another holder has it: a grant nothing competed for
+ * would go unrefreshed. Core refuses to start upstream work once the budget is
+ * spent.
+ * An attempt whose answer never came is not retried: a lock that may have been
+ * taken must not be taken again, and the TTL frees it.
+ * See ADR 2026-09-17-federation-grants-offline-delegation, D12 and D16.
  */
 export function createFederationGrantLock(options: FederationGrantLockOptions): {
 	acquire(
@@ -90,8 +77,8 @@ export function createFederationGrantLock(options: FederationGrantLockOptions): 
 	return {
 		async acquire(grantId, { ttlMs, waitForMs }) {
 			// A TTL of NaN compares as already expired: exclusion would be
-			// silently off, and two refreshes would present one refresh token
-			// (D12). An infinite one is not a lease.
+			// silently off, and two refreshes would present one refresh token.
+			// An infinite one is not a lease.
 			// And each must end within the Date range: a lease or a wait past it
 			// is one no clock reaches the end of, and no PX Redis can take.
 			if (!isStorableLifetime(ttlMs)) {

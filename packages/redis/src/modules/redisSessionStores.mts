@@ -32,37 +32,23 @@ const configSchema = z.object({
 });
 
 /**
- * Bundled module providing all 6 redis-backed user-session stores against
- * the per-purpose ComponentMap slots `userSessionStoreClient`,
+ * Bundled module providing the six Redis user-session stores off the
+ * per-purpose ComponentMap slots `userSessionStoreClient`,
  * `sessionRPRegistryClient`, `sessionFamilyIndexClient`,
  * `sessionFederationIndexClient`, `subjectSessionIndexClient` and
  * `subjectRevocationClient` (declared in `@o3co/auth-provider-core`'s
- * `user-sessions/types.mts`). Per A4 §8.1 + §10.1.
+ * `user-sessions/types.mts`).
  *
- * The last two arrived with #321. #296 shipped `revokeAllForSubject` with
- * in-memory adapters only, so a deployment on this module filled neither
- * subject slot: `verifyJwt` skipped the watermark check, the #376
- * refresh-redemption gate was inert, and a password reset answered
- * `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked
- * nothing — on exactly the deployments that need it, since the in-memory
- * pair is single-process only.
+ * `keyPrefix` is the outer namespace; each store gets a fixed subprefix
+ * (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:`). The subject-keyed stores
+ * do not share one with the sid-keyed stores, so a sid cannot collide with a
+ * subject. To override a single subprefix, use the per-adapter constructors.
  *
- * `keyPrefix` is the OUTER namespace; the bundled module appends fixed
- * subprefixes per store (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:`).
- * The two subject stores get their own subprefixes rather than sharing one
- * with the sid-keyed stores: those are keyed by session id and these by
- * subject, and one namespace holding both would let a sid collide with a
- * subject. Consumers that need to override individual subprefixes use the
- * per-adapter constructors with custom keyPrefix values; the bundled module
- * enforces a consistent scheme.
- *
- * Recurring issue class 2: `requires` includes `"config"` because
- * `deps.config` is read in `provides`.
- *
- * The optional `logger` slot is handed to the two stores that log — the
- * user-session store and the RP registry, which report a stored record they
- * cannot read (`user_session_corrupt_envelope`,
- * `session_rp_registry_corrupt_envelope`); `consoleLogger` when it is empty.
+ * `requires` includes `"config"` because `provides` reads `deps.config`. The
+ * optional `logger` goes to the two stores that report a stored record they
+ * cannot read, the user-session store (`user_session_corrupt_envelope`) and
+ * the RP registry (`session_rp_registry_corrupt_envelope`); `consoleLogger`
+ * when it is empty.
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redis-session-stores",

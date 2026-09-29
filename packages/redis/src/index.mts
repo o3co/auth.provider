@@ -92,13 +92,9 @@ export type {
 // makeIoredisClients lives at the `/ioredis` subpath
 // (`@o3co/auth-provider-redis/ioredis`) so the main entry stays
 // vendor-agnostic. Importing this main entry does NOT pull `ioredis` types
-// into the consumer's TS dependency closure. Per Phase 10 addendum +
-// Copilot review #102.
+// into the consumer's TS dependency closure.
 // ---------------------------------------------------------------------------
-// CodeRepository (Phase 10 Q4 / OR-9 Wave 5d).
-// Relocated from @o3co/auth-provider-foundation. v0.5.1 OR-9 added the module
-// pattern + migrated to ioredis-typed `CodeRepositoryClient`; the legacy
-// builder is retained as deprecated and now requires the new
+// CodeRepository. The deprecated builder takes the module's
 // `{ client, keyPrefix?, defaultExpiresIn? }` shape.
 // ---------------------------------------------------------------------------
 export {
@@ -108,7 +104,7 @@ export {
 	redisCodeRepositoryModule,
 } from "./code-repository.mjs";
 // ---------------------------------------------------------------------------
-// ConsentStore + PendingConsentStore (#561). The Redis half of the consent
+// ConsentStore + PendingConsentStore. The Redis half of the consent
 // step for clients that are not first-party: core's memory module is refused
 // under `deployment.mode = "multi"`, so this is what lets such clients be
 // served by a scaled deployment. One module provides both slots.
@@ -124,7 +120,7 @@ export {
 	redisPendingConsentStoreBuilder,
 } from "./consent-store.mjs";
 // ---------------------------------------------------------------------------
-// DeviceCodeStore (#433). The Redis half of the RFC 8628 device grant's
+// DeviceCodeStore. The Redis half of the RFC 8628 device grant's
 // storage: the memory adapter in core is refused under `deployment.mode =
 // "multi"`, so this is what makes the grant usable in a scaled deployment.
 // ---------------------------------------------------------------------------
@@ -146,12 +142,10 @@ export {
 // accepted proof in the `replaySeenSet` slot, which `redisReplaySeenSetModule`
 // fills for a scaled deployment.
 // ---------------------------------------------------------------------------
-// FederationTokenStore (Phase 10 Q1+Q5).
-// Adapter relocated from core; module pattern added for declarative wiring
-// parity with other v0.5.0 redis adapters.
+// FederationTokenStore, with a module for declarative wiring.
 // ---------------------------------------------------------------------------
-// Federation grants (#593, D16): the offline-delegation store, and
-// acquisition's records beside it (slice 6).
+// Federation grants: the offline-delegation store, and acquisition's records
+// beside it (ADR 2026-09-17-federation-grants-offline-delegation).
 // ---------------------------------------------------------------------------
 export {
 	createRedisFederationGrantStore,
@@ -175,9 +169,10 @@ export {
 	redisFederationTokenStoreModuleFor,
 } from "./federation-tokens.mjs";
 // ---------------------------------------------------------------------------
-// MFA (the MFA ADR's D7, D8, D12): enrolled second factors, and the
-// transactions, subject lock and email-proof requirement beside them. Each
-// module checks the server's eviction policy and persistence at boot.
+// MFA (ADR 2026-09-25-multi-factor-authentication): enrolled second
+// factors, and the transactions, subject lock and email-proof requirement
+// beside them. Each module checks the server's eviction policy and
+// persistence at boot.
 // ---------------------------------------------------------------------------
 export {
 	createRedisMfaFactorStore,
@@ -193,8 +188,7 @@ export {
 } from "./mfa-transaction-store.mjs";
 export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
 // ---------------------------------------------------------------------------
-// RateLimiter (Phase 10 Q3).
-// Adapter relocated from core; module pattern added.
+// RateLimiter.
 // ---------------------------------------------------------------------------
 export {
 	createRedisRateLimiter,
@@ -239,8 +233,7 @@ export {
 	redisSubjectSessionIndexBuilder,
 } from "./subjectSessionIndex.mjs";
 // ---------------------------------------------------------------------------
-// A4 user-session adapters (Phase 8b).
-// Per A4 §8.1 + §11.2.
+// User-session adapters.
 // ---------------------------------------------------------------------------
 export {
 	createRedisUserSessionStore,

@@ -33,23 +33,20 @@ const DEFAULT_KEY_PREFIX = "oauth:code:";
 const DEFAULT_EXPIRES_IN_SECONDS = 600;
 
 /**
- * Shape persisted as JSON in Redis for each authorization code (D-1): the
- * record but the code, which is the key.
+ * Shape persisted as JSON in Redis for each authorization code: the record
+ * but the code, which is the key.
  *
- * Derived from `Code` rather than declared again (#626). Declared by hand, a
- * field added to `CodeData` had to be destructured in `createCode`, added
- * here and copied back in `parseCodeValue`, and missing any one of the three
- * dropped it without an error — the IH-2 / TS-1 / TD-1 production bug v0.5.1
- * closed. Every key is required now, so each of those steps fails to compile
- * instead. `JSON.stringify` leaves out a key holding `undefined`, so what is
- * stored is byte-for-byte what it was.
+ * Derived from `Code` rather than declared again, with every key required,
+ * so a field added to `CodeData` but not written in `createCode` or copied
+ * back in `parseCodeValue` fails to compile instead of being dropped
+ * silently. `JSON.stringify` leaves out a key holding `undefined`.
  */
 type StoredCodePayload = Omit<Code, "code">;
 
 /**
  * Options accepted by the public `RedisCodeRepository` constructor.
  *
- * Per OR-9 (Wave 5d): the connection lifecycle is owned by the consumer
+ * The connection lifecycle is owned by the consumer
  * (composition root); the repository only consumes the typed
  * `CodeRepositoryClient` wrapper. No internal client construction, no
  * `quit()` call, no `[Symbol.asyncDispose]`.
@@ -70,12 +67,10 @@ export class RedisCodeRepository implements CodeRepository {
 		this.client = client;
 		this.keyPrefix = opts.keyPrefix ?? DEFAULT_KEY_PREFIX;
 		// Direct-construction guard: the module configSchema already rejects
-		// non-positive integers, but consumers calling
-		// `new RedisCodeRepository(client, { defaultExpiresIn: 0 })`
-		// directly would otherwise sail past validation and hit Redis with
-		// a bad PX argument. Reject at construction time with a clear
-		// message so the failure mode is the same regardless of wiring path.
-		// Per Copilot review on PR #122.
+		// non-positive integers, but a direct
+		// `new RedisCodeRepository(client, { defaultExpiresIn: 0 })` would
+		// otherwise reach Redis with a bad PX argument. Rejected here so the
+		// failure is the same on either wiring path.
 		const expiresIn = opts.defaultExpiresIn;
 		if (expiresIn !== undefined) {
 			if (!Number.isInteger(expiresIn) || !isStorableLifetime(expiresIn * 1000)) {
@@ -154,16 +149,14 @@ export class RedisCodeRepository implements CodeRepository {
 			// The cast trusts the stored format — `StoredCodePayload` is a private
 			// internal type that exactly mirrors what `createCode` serializes; no
 			// external writer touches this key namespace. `Partial`, because the
-			// JSON has no key for a field that held `undefined` (#626): a spread
+			// JSON has no key for a field that held `undefined`: a spread
 			// of it into the record below would leave the key out, and fails to
 			// compile, where naming each field does not.
 			const p = JSON.parse(value) as Partial<StoredCodePayload>;
-			// Pre-v0.5.1 codes lack `client_id` / `redirect_uri` (the IH-2 / TS-1
-			// production drop bug). Treat them as corrupt — the strict identity
-			// gates in /token would reject them anyway, but failing here keeps the
-			// failure mode aligned with the corrupted-JSON branch and prevents
-			// `client_id: undefined` from leaking into downstream gates as a
-			// runtime null.
+			// A record without `client_id` / `redirect_uri` is corrupt — the
+			// strict identity gates in /token would reject it anyway, but failing
+			// here aligns with the corrupted-JSON branch and keeps
+			// `client_id: undefined` out of downstream gates.
 			if (typeof p.client_id !== "string" || typeof p.redirect_uri !== "string") {
 				const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
 				this.logger.error(
@@ -208,11 +201,9 @@ export class RedisCodeRepository implements CodeRepository {
 }
 
 /**
- * @deprecated since v0.5.1 (OR-9). Use `redisCodeRepositoryModule` (DI module
- * pattern) instead. The builder now expects `{ client, keyPrefix?,
- * defaultExpiresIn? }` (the same shape the module passes internally) — the
- * pre-v0.5.1 `{ endpointUri }` shape is no longer supported. See CHANGELOG
- * for the removal version.
+ * @deprecated Use `redisCodeRepositoryModule` (DI module pattern) instead.
+ * The builder expects `{ client, keyPrefix?, defaultExpiresIn? }`, the shape
+ * the module passes internally. See CHANGELOG for the removal version.
  *
  * Migration: stop calling `factory.register("redis", redisCodeRepositoryBuilder)`;
  * instead include `redisCodeRepositoryModule` in the manifest and provide the
@@ -248,18 +239,15 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 };
 
 /**
- * `defineModule` manifest for the Redis CodeRepository (OR-9 / Wave 5d).
+ * `defineModule` manifest for the Redis CodeRepository: the static
+ * composition path, which replaces the deprecated
+ * `redisCodeRepositoryBuilder`.
  *
- * Static composition path. `redisCodeRepositoryBuilder` is still exported
- * but deprecated — operators wiring redis codes should switch to this
- * module + provide `codeRepositoryClient` from `makeIoredisClients()` —
- * see CHANGELOG for the removal version.
- *
- * configSchema: top-level key `redisCodeRepository` (module-namespaced per
- * master roadmap §3.5). No `.default()` per ADR — defaults live in
- * `application.conf`. The constructor falls back to its built-in defaults
- * (`oauth:code:` / 600s) when both HOCON and operator overrides omit a
- * field; mirrors the `?? DEFAULT_*` pattern in the constructor body.
+ * configSchema: top-level key `redisCodeRepository` (module-namespaced). No
+ * `.default()` (ADR 2026-04-30-config-schema-strict-defaults-from-hocon):
+ * defaults live in `application.conf`, and the constructor falls back to its
+ * built-in defaults (`oauth:code:` / 600s) when both HOCON and operator
+ * overrides omit a field.
  */
 export const redisCodeRepositoryModule = defineModule({
 	name: "redis-code-repository",
@@ -276,7 +264,7 @@ export const redisCodeRepositoryModule = defineModule({
 				// bad env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`,
 				// `="-1"`, or `="abc"`) fails Zod validation at boot rather
 				// than producing a non-positive PX argument that Redis rejects
-				// at first /authorize call. Per Copilot review on PR #122.
+				// at first /authorize call.
 				defaultExpiresIn: z.coerce.number().int().positive().optional(),
 			})
 			.optional(),

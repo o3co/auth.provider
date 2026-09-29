@@ -39,30 +39,23 @@ export interface RedisSessionRPRegistryOptions {
 }
 
 /**
- * JSON envelope stored as a single HSET field value: a `RegisteredRP` with
- * `registeredAt` held as epoch milliseconds.
+ * The JSON stored as one HASH field value: a `RegisteredRP` with
+ * `registeredAt` as epoch milliseconds, which is loss-free where a date string
+ * can drift in timezone or precision.
  *
- * Derived from `RegisteredRP` rather than written out, so every key the record
- * requires the envelope requires too — a write into it that forgot a logout
- * field fails to compile, where it would otherwise drop the RP from the logout
- * cascade — and a field added to the record cannot be left out of what the
- * store writes.
- *
- * `registeredAtMs: number` (epochMs hardening): a Date stored as a JSON string
- * is susceptible to timezone / precision drift on deserialize; epochMs is
- * loss-free and unambiguous.
- *
- * An unset logout field is `undefined`, which `JSON.stringify` leaves out, so
- * it is absent on the wire and read back as `undefined` — never `""` or
- * `null`. `isValidRPEnvelope` checks every field's type, present or not.
+ * Derived from `RegisteredRP`, so every key the record requires the envelope
+ * requires too: a write that forgot a logout field fails to compile rather
+ * than dropping the RP from the logout cascade, and a field added to the
+ * record cannot be left out of what the store writes. An unset logout field is
+ * `undefined`, left out by `JSON.stringify` and read back as `undefined`,
+ * never `""` or `null`. `isValidRPEnvelope` checks every field's type,
+ * present or not.
  */
 type RPEnvelope = Omit<RegisteredRP, "registeredAt"> & { readonly registeredAtMs: number };
 
 function serialize(rp: RegisteredRP): string {
-	// A literal naming every field, so forgetting one is a compile error rather
-	// than an RP silently dropped from the logout cascade. An unset field is
-	// `undefined`, which `JSON.stringify` leaves out — nothing is coerced to
-	// `""` or `false` on the way through.
+	// A literal naming every field, so forgetting one is a compile error (see
+	// `RPEnvelope`). Nothing is coerced to `""` or `false` on the way through.
 	const env: RPEnvelope = {
 		clientId: rp.clientId,
 		registeredAtMs: rp.registeredAt.getTime(),
@@ -75,13 +68,9 @@ function serialize(rp: RegisteredRP): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	// Reject arrays explicitly: `typeof [] === "object"` and `[] !== null`,
-	// so without this guard a JSON payload like `["client-1", ...]` would
-	// pass isRecord and be probed as an envelope (the field accesses would
-	// return undefined and `isValidRPEnvelope` would reject, but only by
-	// accident). Match the userSessionStore envelope guard's explicit
-	// `!Array.isArray(...)` so the shape check fails closed at the same
-	// layer as its sibling adapter.
+	// Arrays are refused here, as the userSessionStore envelope guard does, so
+	// a payload like `["client-1", ...]` fails the shape check at this layer
+	// rather than by accident in `isValidRPEnvelope`.
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -90,7 +79,7 @@ const isOptional = (value: unknown, type: "string" | "boolean"): boolean =>
 
 /**
  * Every field, including the four logout ones: a stored record is data this
- * store did not necessarily write (D5). `backchannelLogoutSessionRequired:
+ * store did not necessarily write. `backchannelLogoutSessionRequired:
  * "false"` would otherwise come back typed as a boolean and read as truthy —
  * `sid` sent to an RP that asked not to receive it — so a field of the wrong
  * type makes the whole record corrupt, as a bad `clientId` already does.
@@ -109,14 +98,11 @@ function isValidRPEnvelope(env: unknown): env is RPEnvelope {
 }
 
 function deserialize(json: string, sid: string, logger: Logger): RegisteredRP | null {
-	// Mirror the userSessionStore corrupt-envelope warn shape: object-first
-	// `{ sid, reason, err? }` so `sid` and `reason` are reliably emitted
-	// as structured fields, and the parse error is `err` — as core's
-	// `loggableError` projects it, because a SyntaxError's message quotes
-	// the stored value around the point the parse failed. The previous
-	// implementation logged a raw JSON snippet, which risked leaking
-	// sensitive data if a corrupt value happened to contain credentials —
-	// drop it entirely.
+	// The userSessionStore corrupt-envelope warn shape: object-first
+	// `{ sid, reason, err? }`. The parse error is `err` as core's
+	// `loggableError` projects it, because a SyntaxError's message quotes the
+	// stored value around the point the parse failed. No part of the stored
+	// value is logged: a corrupt value may contain credentials.
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(json);
@@ -144,28 +130,12 @@ function deserialize(json: string, sid: string, logger: Logger): RegisteredRP | 
 }
 
 /**
- * Redis-backed SessionRPRegistry. Per A4 §5.2 + §7.2.1.
- *
- * Storage shape: one Redis HASH per sid, key = `${keyPrefix}${sid}`.
- * Each field in the hash is a `clientId`; its value is a JSON-encoded
- * `RPEnvelope`. HSET deduplication: writing the same `clientId` replaces
- * the earlier value (upsert semantics), satisfying the "same clientId
- * upserts" contract without any CAS loop.
- *
- * Why HSET-keyed-by-clientId over SADD-of-JSON:
- *   SADD-of-JSON cannot dedup when other RP fields change: a different
- *   `backchannelLogoutUri` produces different bytewise JSON for the same
- *   logical clientId, creating duplicate set members. HSET uses the field
- *   name as the dedup key, which is exactly `clientId`.
- *
- * TTL: a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair is applied atomically in
- * the same pipeline as HSET via `createRedisSidHash.setField` (the bare GT
- * form silently no-ops on a key with no existing TTL — Redis treats no-TTL
- * as infinite TTL for the GT flag). The NX clause sets the TTL on first
- * write; the GT clause prevents TTL truncation under stale-`expiresAt`
- * concurrent writes. The timestamp is `session.expiresAt`, which is
- * post-create immutable per A4 §5.1. Required Redis floor is 7.2 LTS
- * per D-10.
+ * Redis-backed SessionRPRegistry: one HASH per sid at `${keyPrefix}${sid}`,
+ * each field a `clientId` holding its JSON `RPEnvelope`. Writing the same
+ * `clientId` replaces the earlier value, which meets the "same clientId
+ * upserts" contract with no CAS loop. The HASH layout and its TTL
+ * (`session.expiresAt`, set in the same pipeline as the `HSET`) are
+ * `createRedisSidHash`'s.
  */
 export function createRedisSessionRPRegistry(
 	opts: RedisSessionRPRegistryOptions,
@@ -195,21 +165,15 @@ export function createRedisSessionRPRegistry(
 }
 
 /**
- * AdapterFactory builder for the Redis-backed `SessionRPRegistry` (AS-9).
+ * AdapterFactory builder for the Redis-backed `SessionRPRegistry`, for
+ * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
+ * common case. The default `keyPrefix` is the bundle's (`ss:rp:`), so
+ * switching between the two keeps the keyspace. A missing `client` throws at
+ * boot, as in `redisChallengeStoreBuilder`, rather than at the first command.
  *
- * Use when per-adapter `AdapterFactory` granularity is needed; for the common
- * case the bundled `redisSessionStoresModule` is sufficient. Default
- * `keyPrefix` matches the bundle's production layout (`ss:rp:`) so swapping
- * between bundle and individual builder does not change the keyspace.
- *
- * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
- * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op. The corrupt-envelope warn inside `listRPs()` goes to
- * `config.logger`, else the factory context's logger, else `consoleLogger`;
- * the fail-closed behavior (corrupt entries are dropped from the result)
- * is independent of which. The spread idiom omits the field when neither
- * was supplied (preserves "absent" semantics under
- * `exactOptionalPropertyTypes`).
+ * The corrupt-envelope warn from `listRPs()` goes to `config.logger`, else the
+ * factory context's logger, else `consoleLogger`; corrupt entries are dropped
+ * from the result whichever it is.
  */
 export const redisSessionRPRegistryBuilder: AdapterBuilder<SessionRPRegistry> = (config, ctx) => {
 	const c = config as {

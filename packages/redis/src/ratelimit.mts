@@ -39,29 +39,23 @@ interface CreateRedisRateLimiterOptions {
 /**
  * Redis-backed RateLimiter. One atomic increment-and-expire per check, via
  * `RateLimiterClient.incrementWithTtlAndPttl` (or the count-only
- * `incrementWithTtl` for a client that predates it — see #458).
+ * `incrementWithTtl` of a client without it). A separate `EXPIRE` after `INCR`
+ * could leave the key with no TTL if the process died or the `EXPIRE` failed
+ * in between: the counter would never reset, that client would be refused for
+ * good, and `failMode` would never engage, since the check still succeeds.
  *
- * It used to be `INCR` followed by a separate `EXPIRE`, issued only when the
- * count came back as 1. A process death or an `EXPIRE` error in between left
- * the key with no TTL, so its counter never reset and every later window saw a
- * count above the limit — that client was 429'd permanently, and `failMode`
- * never engaged because the check kept succeeding, it just kept answering
- * "denied" (#269).
- *
- * Consumer passes their own redis client because RateLimiter has no dispose
- * lifecycle hook — client lifetime lives in the composition root alongside
- * other redis users.
+ * The consumer passes the Redis client because RateLimiter has no dispose
+ * hook; its lifetime belongs to the composition root.
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
 	// Every spec it was given, `defaultLimit` included, must be one it can
-	// apply as written — core's predicate, which the in-process limiter uses
-	// too. `redisRateLimiterBuilder` accepts a config object that never passed
+	// apply as written (core's predicate, which the in-process limiter uses
+	// too). `redisRateLimiterBuilder` accepts a config object that never passed
 	// the zod schema, so this is where a zero window (`EXPIRE key 0` deletes
 	// the counter), a limit of zero or less, NaN, a fraction, or a window past
-	// the Date range (an `EXPIRE` Redis refuses after the `INCR`, #269's shape)
-	// is refused. It used to drop such a spec and serve the default in its
-	// place: a looser budget than the operator wrote. Only a default nobody
-	// gave is the built-in 60 per 60 s.
+	// the Date range (an `EXPIRE` Redis refuses after the `INCR`) is refused,
+	// rather than replaced by the default, a looser budget than the operator
+	// wrote. Only a default nobody gave is the built-in 60 per 60 s.
 	assertUsableRateLimitSpecs("createRedisRateLimiter", opts);
 	// Held as they were checked, the default included, as the in-process
 	// limiter holds them: a later change to the caller's objects cannot reach
@@ -83,7 +77,7 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 		kind: "redis",
 		async check(key) {
 			const spec = limits[keyPrefix(key)] ?? defaultLimit;
-			// #458: take the PTTL with the count when the client offers it, so the
+			// Take the PTTL with the count when the client offers it, so the
 			// decision can say when the window ends — without `resetAt` the guard's
 			// 429 carries no `Retry-After` behind Redis while the memory adapter's
 			// does. A client on the one-method contract still works, minus that.

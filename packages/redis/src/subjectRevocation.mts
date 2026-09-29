@@ -22,60 +22,48 @@ import {
 } from "@o3co/auth-provider-core";
 import type { SubjectRevocationClient } from "./clients.mjs";
 
-/**
- * Redis {@link SubjectRevocation} (#321) — the per-subject not-before
- * watermark, shared across replicas.
- *
- * ## Why the write is not a `SET`
- *
- * The value is one number and the shape looks like `SET key value PX ttl`. It
- * is not, because the watermark is **monotonic**: two credential changes in
- * quick succession, the second computed on a replica whose clock is behind,
- * must not move the line backwards and resurrect every token the first one
- * killed. Last-writer-wins does exactly that. A client-side
- * read-compare-write loses the same race one round-trip later, with two
- * replicas interleaving between the `GET` and the `SET`.
- *
- * So the comparison happens on the server, in one command
- * (`setRevocationBoundaries`), and the same guard covers the entry's own expiry:
- * shortening an in-force watermark would retire the line while tokens it must
- * refuse are still presentable.
- *
- * An **expired** key is an absent key, so the guard does not resurrect a
- * lapsed watermark's larger value — a reset arriving after the previous
- * watermark timed out starts from its own value, matching the in-process
- * adapter.
- *
- * ## TTL sizing is the caller's contract, and the grants floor is this adapter's
- *
- * `expiresAt` must reach as far as the longest-lived credential the watermark
- * has to refuse; `resolveSubjectRevocationHorizonMs` in core is what sizes it.
- * This adapter stores what it is given — **except** that a write which
- * advances the grants boundary raises the stored expiry to
- * `SUBJECT_REVOCATION_MIN_RETENTION_MS` past that boundary (#593, D13). That
- * floor is not the caller's to shorten: what it has to outlive is a grant
- * lifetime the code bounds absolutely, and a Store that upgrades without
- * touching its call site would otherwise leave a boundary lapsing under a
- * grant consented for a year. A sessions-only stamp manufactures no such
- * floor.
- */
 export interface RedisSubjectRevocationOptions {
 	readonly client: SubjectRevocationClient;
 	/** Defaults to the bundle's production layout, `ss:rev:`. */
 	readonly keyPrefix?: string;
 }
 
+/**
+ * Redis {@link SubjectRevocation}: the per-subject not-before watermark,
+ * shared across replicas.
+ *
+ * The write is not a `SET`, because the watermark is monotonic: two credential
+ * changes in quick succession, the second computed on a replica whose clock is
+ * behind, must not move the line back and resurrect every token the first one
+ * killed. Last-writer-wins does that, and a client-side read-compare-write
+ * does it one round-trip later. So the comparison runs on the server in one
+ * command (`setRevocationBoundaries`), and the same guard covers the entry's
+ * expiry: shortening an in-force watermark would retire the line while tokens
+ * it must refuse are still presentable. An expired key is an absent key, so a
+ * reset after the previous watermark lapsed starts from its own value, as in
+ * the in-process adapter.
+ *
+ * `expiresAt` must reach as far as the longest-lived credential the watermark
+ * has to refuse; core's `resolveSubjectRevocationHorizonMs` sizes it, and this
+ * adapter stores what it is given, except that a write which advances the
+ * grants boundary raises the stored expiry to
+ * `SUBJECT_REVOCATION_MIN_RETENTION_MS` past that boundary. That floor is not
+ * the caller's to shorten: it must outlive a grant lifetime the code bounds
+ * absolutely, even when the caller knows nothing of grants. A sessions-only
+ * stamp sets no such floor.
+ * See ADR 2026-09-17-federation-grants-offline-delegation, D13.
+ */
 export function createRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
 ): SubjectRevocation & SupportsSessionsOnlyRevocation {
 	const prefix = deps.keyPrefix ?? "ss:rev:";
 	const key = (subject: string): string => `${prefix}${subject}`;
 
-	// #593, D13: a driver built before the second boundary existed cannot
-	// express a sessions-only stamp, and one that quietly ignored the mode
-	// would answer every such stamp by revoking the subject's grants — the one
-	// operation the caller asked not to perform. So it fails here, at
-	// construction, rather than at the first password change.
+	// A driver without `setRevocationBoundaries` cannot express a
+	// sessions-only stamp, and one that quietly ignored the mode would answer
+	// every such stamp by revoking the subject's grants, the one operation the
+	// caller asked not to perform. So it fails here, at construction, rather
+	// than at the first password change.
 	if (
 		typeof (deps.client as { setRevocationBoundaries?: unknown }).setRevocationBoundaries !==
 		"function"
@@ -101,13 +89,12 @@ export function createRedisSubjectRevocation(
 	};
 
 	/**
-	 * The stored value, in the two forms the script writes — and the one an
-	 * older release wrote, a bare decimal, which means both boundaries.
-	 *
-	 * Anything else is refused rather than read as `null`. Answering "nothing
-	 * was revoked" for a value this adapter does not understand would silently
-	 * disable revocation for that subject; `verifyJwt` already fails closed on
-	 * a throw from this store.
+	 * The stored value, in the two forms the script writes, or a bare decimal
+	 * (what older releases wrote), which means both boundaries. Anything else
+	 * is refused rather than read as `null`: "nothing was revoked" for a value
+	 * this adapter does not understand would silently disable revocation for
+	 * that subject, and `verifyJwt` already fails closed on a throw from this
+	 * store.
 	 */
 	const decode = (raw: string): { sessionsMs: number; grantsMs: number | null } => {
 		if (/^-?\d+$/.test(raw)) {
@@ -127,14 +114,10 @@ export function createRedisSubjectRevocation(
 	};
 
 	/**
-	 * Digits are not yet a date.
-	 *
-	 * Found by review: `Number("9".repeat(400))` is `Infinity`, which is all
-	 * digits and passes every shape check above. `new Date(Infinity)` is an
-	 * Invalid Date, every comparison against it is false, and a boundary that
-	 * compares false against everything reads as "this subject has revoked
-	 * nothing" — revocation silently off for that subject, which is the exact
-	 * failure this adapter refuses everywhere else. So the value has to be a
+	 * Digits are not yet a date: `Number("9".repeat(400))` is `Infinity`, which
+	 * passes every shape check above. `new Date(Infinity)` is an Invalid Date,
+	 * every comparison against it is false, and the subject would read as
+	 * having revoked nothing: revocation silently off. So the value has to be a
 	 * date a `Date` can hold, and anything else is an outage.
 	 */
 	const boundary = (digits: string): number => {
@@ -188,15 +171,11 @@ export function createRedisSubjectRevocation(
 }
 
 /**
- * AdapterFactory builder for the Redis-backed `SubjectRevocation` (#321).
- *
- * Use when per-adapter `AdapterFactory` granularity is needed; for the common
- * case the bundled `redisSessionStoresModule` is sufficient. Default
- * `keyPrefix` matches the bundle's production layout (`ss:rev:`) so swapping
- * between bundle and individual builder does not change the keyspace.
- *
- * Missing `client` throws at boot rather than crashing at the first Redis op,
- * matching every other builder in this package.
+ * AdapterFactory builder for the Redis-backed `SubjectRevocation`, for
+ * per-adapter granularity; the bundled `redisSessionStoresModule` covers the
+ * common case. The default `keyPrefix` is the bundle's (`ss:rev:`), so
+ * switching between the two keeps the keyspace. A missing `client` throws at
+ * boot, as in every other builder here, rather than at the first command.
  */
 export const redisSubjectRevocationBuilder: AdapterBuilder<SubjectRevocation> = (config, _ctx) => {
 	const c = config as { client?: SubjectRevocationClient; keyPrefix?: string };
