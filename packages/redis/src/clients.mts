@@ -1509,7 +1509,8 @@ export interface NoteMfaExemptSuccessInput {
  * one the port calls atomic is a read, a decision and a write, which Redis
  * makes one step only as a script (see `makeIoredisClients`). A transaction's
  * hash is written and read by the adapter; the operations here read its
- * `version`, `incarnation`, `attempts` and `challenge` fields by name.
+ * `version`, `incarnation`, `attempts`, `challenge` and `expiresAtMs` fields
+ * by name, and never decode its `record`.
  *
  * The subject state's decisions — D21's backoff, weekly budget, hard limit
  * and trusted browsers — are the port's rules, judged on the caller's
@@ -1543,15 +1544,24 @@ export interface MfaTransactionStoreClient {
 	/**
 	 * Atomically: `attempts` + 1 while that is within `max`; past it — or on
 	 * a count that is not a number — the transaction is deleted and the
-	 * attempts it had are answered with `ok: false`. No transaction:
-	 * `{ ok: false, attempts: 0 }`.
+	 * attempts it had are answered with `ok: false`. No transaction, or one
+	 * gone at `nowMs` — at or past the deadline its `expiresAtMs` field holds
+	 * as decimal text, or holding none that is a finite number — `{ ok:
+	 * false, attempts: 0 }`, spending
+	 * nothing: the store's clock is the transaction's, whatever the server's
+	 * says, and the key is left to its deadline on the server's.
 	 */
 	reserveAttempt(
 		key: string,
 		max: number,
+		nowMs: number,
 	): Promise<{ readonly ok: boolean; readonly attempts: number }>;
-	/** Atomically: the `challenge` field, removed, while the version is `expectedVersion`; `null` otherwise. */
-	takeChallenge(key: string, expectedVersion: string): Promise<string | null>;
+	/**
+	 * Atomically: the `challenge` field, removed, while the version is
+	 * `expectedVersion` and the transaction is not gone at `nowMs` (as
+	 * `reserveAttempt` judges it); `null` otherwise, taking nothing.
+	 */
+	takeChallenge(key: string, expectedVersion: string, nowMs: number): Promise<string | null>;
 	/** Atomically: every field, and the hash deleted, while the version is `expectedVersion`; `null` otherwise. */
 	consume(key: string, expectedVersion: string): Promise<Readonly<Record<string, string>> | null>;
 	/** D21's `reserveSubjectAttempt`, one script over both keys. */

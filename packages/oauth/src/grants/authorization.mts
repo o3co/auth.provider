@@ -24,6 +24,7 @@ import {
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	constantTimeStringEqual,
+	describeAdmissionOutage,
 	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
@@ -46,7 +47,7 @@ import {
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-import { requireRequirements, stepUpRefusal, unavailableDescription } from "../admission.mjs";
+import { requireRequirements, stepUpRefusal } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -101,7 +102,7 @@ const requirementOrOutageRefusal = (
 			return {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: unavailableDescription(admission.store),
+				errorDescription: describeAdmissionOutage(admission.store),
 			};
 	}
 };

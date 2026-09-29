@@ -43,8 +43,10 @@
  */
 
 import {
+	checkMfaVersionAdvances,
 	consoleLogger,
 	defineModule,
+	isStorableExpiry,
 	type MfaFactorRecord,
 	type MfaFactorRecordUpdate,
 	type MfaFactorStore,
@@ -74,10 +76,23 @@ const unreadable = (): Error =>
 const isWholeVersion = (value: unknown): value is number =>
 	typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-/** A date's epoch milliseconds, or a `RangeError` for one that is not a date. */
+/**
+ * Whether `value` is an instant a `Date` holds as written: a whole number of
+ * milliseconds within the Date range, ±8.64e15 (core's `isStorableExpiry`,
+ * the range every store keeps to). Past it `new Date` answers an Invalid
+ * Date, and a fraction another instant.
+ */
+const isInstant = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && isStorableExpiry(value);
+
+/**
+ * A date's epoch milliseconds, or a `RangeError` for one that is not a date
+ * or answers a time value {@link isInstant} refuses — what a read would not
+ * take back.
+ */
 const instantOf = (value: Date, name: string): number => {
 	const ms = value instanceof Date ? value.getTime() : Number.NaN;
-	if (Number.isNaN(ms)) throw RANGE(`${name} must be a valid date`);
+	if (!isInstant(ms)) throw RANGE(`${name} must be a valid date`);
 	return ms;
 };
 
@@ -135,13 +150,11 @@ const mutablePart = (next: MfaFactorRecordUpdate): string =>
 const isObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isInstant = (value: unknown): value is number =>
-	typeof value === "number" && Number.isFinite(value);
-
 /**
  * The record `value` holds, as plain data with every field named — or the
- * {@link unreadable} error, when it is not three well-formed lines, or names
- * another subject or another id than the field it was read from.
+ * {@link unreadable} error, when it is not three well-formed lines, names
+ * another subject or another id than the field it was read from, or holds a
+ * date that is no instant a `Date` holds as written ({@link isInstant}).
  */
 function recordOf(value: string, subject: string, field: string): MfaFactorRecord {
 	const lines = value.split("\n");
@@ -214,6 +227,10 @@ export function createRedisMfaFactorStore(options: RedisMfaFactorStoreOptions): 
 		async update(subject, id, expectedVersion, next) {
 			checkMutable(next);
 			const mutable = mutablePart(next);
+			// Refused before the script: the next version would be written as
+			// 9007199254740992, which `recordOf` refuses, and the subject's whole
+			// list would be unreadable from then on.
+			checkMfaVersionAdvances(expectedVersion, "MfaFactorStore.update");
 			// No stored record is at a version that is not a whole number.
 			if (!isWholeVersion(expectedVersion)) return null;
 			const field = mfaKeyPart(id);

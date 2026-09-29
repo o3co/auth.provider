@@ -71,6 +71,7 @@ import {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 } from "./transactionStore.mjs";
+import { checkMfaVersionAdvances } from "./version.mjs";
 
 /** Writing `create` calls between two sweeps of expired transactions. */
 export const DEFAULT_MEMORY_MFA_TRANSACTION_STORE_SWEEP_INTERVAL = 1_000;
@@ -386,6 +387,7 @@ export function createMemoryMfaTransactionStore(
 			patch: MfaTransactionPatch,
 		): Promise<MfaTransaction | null> {
 			const writes = mfaTransactionPatchWrites(patch);
+			checkMfaVersionAdvances(expectedVersion, "MfaTransactionStore.update");
 			const tx = live(id, clock());
 			if (tx === undefined || tx.version !== expectedVersion) return null;
 			checkMfaTransactionTransitions(tx, writes);

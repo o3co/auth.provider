@@ -644,12 +644,19 @@ operations is one script on one Cluster slot.
 
 **The factors.** `create` is `HSETNX`; `update` is one script that compares
 the version as text and carries the fixed part over byte for byte — it never
-decodes the JSON, since `cjson` writes an empty array back as `{}`. No key
-carries a TTL. A stored record the adapter cannot read back refuses the
-subject's whole list: never "no factor", which would open a first binding. So
-`create` and `update` refuse with a `RangeError`, before anything is written,
-whatever a read would refuse — a binding outside D24's three, a field that is
-not the type the record declares, a date that is not a valid one.
+decodes the JSON, since `cjson` writes an empty array back as `{}` — and
+answers `null` to a value that is not exactly three lines, never cutting one
+it did not write down to a record it did. No key carries a TTL. A stored
+record the adapter cannot read back refuses the subject's whole list: never
+"no factor", which would open a first binding. So `create` and `update`
+refuse with a `RangeError`, before anything is written, whatever a read would
+refuse — a binding outside D24's three, a field that is not the type the
+record declares, a date that is not a whole instant within the Date range
+(±8.64e15 ms; a stored one past it would read back as an Invalid Date, a
+fraction as another instant), and, for `update`, a record
+at `Number.MAX_SAFE_INTEGER`, whose next version would be no safe integer
+(core's `checkMfaVersionAdvances`, which the transactions' `update` applies
+too).
 
 **The transactions.** Every operation the port calls atomic is one script:
 insert-only `create`; `update`, a compare-and-set on the version and on the
@@ -658,9 +665,13 @@ incarnation `create` wrote, after core's own checks of the patch; and
 `newMfaTransactionRecord` answers it and read back through the same function,
 so it has the in-process store's shape; one that does not read back is
 answered as absent, and the ceremony starts again. So is one at or past its
-`expiresAtMs` on the store's own clock (`now`, `Date.now` by default): the key
-expires on the server's clock, and a server running behind must not let a
-ceremony complete past its deadline. The record travels as JSON,
+`expiresAtMs` on the store's own clock (`now`, `Date.now` by default), by every
+operation — `reserveAttempt` and `takeChallenge` in their scripts, which are
+handed that clock, read the deadline from a hash field of its own (never
+decoding the record, which `cjson` reads more narrowly than `JSON.parse`), and
+spend or take nothing then: the key expires on the
+server's clock, and a server running behind must not let a ceremony spend an
+attempt, take a challenge or complete past its deadline. The record travels as JSON,
 as the session envelope's `claims` and the cookie session's `user` do, so a
 login continuation's `user` and `claims` must be JSON-representable: a `Date`
 comes back as its string and an `undefined` value as a missing key, where the

@@ -30,6 +30,7 @@ import {
 	consentCovers,
 	cookieClaim,
 	deriveAudienceFromResources,
+	describeAdmissionOutage,
 	emitAuditEvent,
 	extractResourceParam,
 	type GrantPolicyHook,
@@ -54,7 +55,7 @@ import {
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import { requireRequirements, unavailableDescription } from "../admission.mjs";
+import { requireRequirements } from "../admission.mjs";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	PKCE_METHOD_S256,
@@ -1181,7 +1182,7 @@ const decideOnAdmission = async (
 ): Promise<{ readonly session: UserSession | null; readonly acr: string | undefined } | null> => {
 	switch (admission.outcome) {
 		case "unavailable":
-			redirectError(ctx, "temporarily_unavailable", unavailableDescription(admission.store));
+			redirectError(ctx, "temporarily_unavailable", describeAdmissionOutage(admission.store));
 			return null;
 		case "not_live":
 		case "revoked":

@@ -46,8 +46,10 @@
 
 import {
 	type ClientRepository,
+	checkCanonicalIssuer,
 	consoleLogger,
 	createRateLimitGuard,
+	describeIssuerRejection,
 	type Logger,
 	type RateLimiter,
 	type RateLimitFailMode,
@@ -264,7 +266,11 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 	 */
 	readonly acquisition?: FederationGrantAcquisitionRouteOptions;
 	readonly clientRepository: ClientRepository;
-	/** `oauth.jwt.issuer`: the Basic realm, and the audience an assertion may name. */
+	/**
+	 * `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: the Basic
+	 * realm, the audience an assertion may name, and what a lodging's
+	 * `connect_uri` is built on.
+	 */
 	readonly issuer: string;
 	readonly rateLimiter: RateLimiter;
 	readonly failMode: RateLimitFailMode;
@@ -273,6 +279,16 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 }
 
 export function createFederationGrantRouter(options: FederationGrantRouterOptions): Router {
+	// Refused where the composition is assembled: a lodging builds its
+	// `connect_uri` on the issuer, and on one that is not an absolute http(s)
+	// URL — `mailto:`, `urn:` — that throws, a 500 on every request. Core's
+	// canonical rule, the one `oauth.jwt.issuer` is held to.
+	const issuerRejection = checkCanonicalIssuer(options.issuer);
+	if (issuerRejection !== null) {
+		throw new TypeError(
+			`createFederationGrantRouter: issuer ${describeIssuerRejection(issuerRejection)} — it is oauth.jwt.issuer`,
+		);
+	}
 	const router = express.Router();
 	router.use(transport());
 	// Before the throttle and before authentication, because what it watches

@@ -570,6 +570,20 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("gone")).toBeNull();
 		});
 
+		it("refuses, with a RangeError, an update at Number.MAX_SAFE_INTEGER — the next version would be no safe integer — and changes nothing, whatever the stored version; the update that reaches it passes", async () => {
+			const store = await factory();
+			const max = Number.MAX_SAFE_INTEGER;
+			const tx = TX({ version: max - 1 });
+			await store.create(tx);
+			const reached = await store.update("tx-1", max - 1, { sends: 1 });
+			expect(reached).toStrictEqual({ ...tx, sends: 1, version: max });
+			await expect(store.update("tx-1", max, { sends: 2 })).rejects.toThrow(RangeError);
+			expect(await store.get("tx-1")).toStrictEqual(reached);
+			await expect(store.update("gone", max, { sends: 2 })).rejects.toThrow(RangeError);
+			// The version stays usable for what does not move it.
+			expect(await store.consume("tx-1", max)).toStrictEqual(reached);
+		});
+
 		it("lets exactly one of N concurrent updates at one version win", async () => {
 			const store = await factory();
 			await store.create(TX());
@@ -579,6 +593,27 @@ export function runMfaTransactionStoreContract(
 			const winners = results.filter((r) => r !== null);
 			expect(winners).toHaveLength(1);
 			expect(await store.get("tx-1")).toStrictEqual(winners[0]);
+		});
+
+		it("treats a transaction whose strings hold a lone surrogate as any other: a reservation spends, a take takes, for as long as a read answers it", async () => {
+			// Core admits any string; a store that judges the transaction by a
+			// reading of it stricter than its own read would refuse, for the
+			// transaction's whole life, what every read calls live.
+			const store = await factory();
+			const tx = TX({
+				purpose: "step_up",
+				subject: "user-\udc00",
+				sid: "sid-\ud800",
+				continuation: undefined,
+				redirectTo: undefined,
+				acrValues: ["urn:x:\ud800"],
+				challenge: CHALLENGE,
+			});
+			await store.create(tx);
+			expect(await store.get("tx-1")).toStrictEqual(tx);
+			expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
+			expect(await store.takeChallenge("tx-1", 1)).toStrictEqual(CHALLENGE);
+			expect(await store.get("tx-1")).toStrictEqual({ ...tx, attempts: 1, challenge: undefined });
 		});
 
 		it("reserves attempts up to max, then deletes the transaction", async () => {

@@ -2604,12 +2604,14 @@ export function makeIoredisFederationGrantIntentStoreClient(
  * The value is `<version>\n<fixed>\n<mutable>` (see `MfaFactorStoreClient`).
  * The version is compared as text and the fixed part is carried over byte
  * for byte: nothing here decodes the JSON, because `cjson` would write an
- * empty array back as `{}` (the MFA ADR's D7).
+ * empty array back as `{}` (the MFA ADR's D7). All three lines are matched,
+ * to the end of the value: one with a fourth line, even an empty one, is not
+ * a record this adapter wrote, and is answered nil rather than cut to three.
  */
 const LUA_MFA_FACTOR_UPDATE = `
 local current = redis.call('HGET', KEYS[1], ARGV[1])
 if not current then return false end
-local version, fixed = string.match(current, '^([^\\n]*)\\n([^\\n]*)\\n')
+local version, fixed = string.match(current, '^([^\\n]*)\\n([^\\n]*)\\n[^\\n]*$')
 if version ~= ARGV[2] or fixed == nil then return false end
 local written = ARGV[3] .. '\\n' .. fixed .. '\\n' .. ARGV[4]
 redis.call('HSET', KEYS[1], ARGV[1], written)
@@ -2733,7 +2735,10 @@ return 1
  * the incarnation, `ARGV[3]` = how many fields to write (n), then n field,
  * value pairs, then the fields to remove. Returns every field as written, or
  * nil. `HINCRBY` moves the version: Redis's integer arithmetic stays exact
- * where a Lua number's text (14 significant digits) would not.
+ * where a Lua number's text (14 significant digits) would not. It never
+ * leaves the safe integers: the store refuses an update at
+ * `Number.MAX_SAFE_INTEGER` before this runs (core's
+ * `checkMfaVersionAdvances`).
  */
 const LUA_MFA_TX_UPDATE = `
 local held = redis.call('HMGET', KEYS[1], 'version', 'incarnation')
@@ -2748,15 +2753,43 @@ return redis.call('HGETALL', KEYS[1])
 `.trim();
 
 /**
+ * Shared by the two operations that decide on a live transaction inside a
+ * script — `reserveAttempt` and `takeChallenge` — whose caller's clock has
+ * to reach the script: whether the transaction at `key` is gone at `now`,
+ * as a read (`transactionOf`) judges it — at or past its `expiresAtMs`, or
+ * holding none that is a finite number. The deadline is read from the hash
+ * field `create` writes it to, as text: `tonumber` reads the text `String`
+ * wrote as the same double, so both sides judge one instant alike, to the
+ * fraction of a millisecond. The `record` is never decoded here: `cjson`
+ * refuses a lone-surrogate escape and nesting past a thousand levels, both
+ * of which `JSON.parse` reads, and a transaction every read answers live
+ * would be refused for its whole life. Nothing here deletes: the key stays
+ * until its deadline on the server's clock, so a caller whose clock runs
+ * ahead is told the transaction is gone and costs no other caller the
+ * transaction — as `fg_visible` treats a federation grant.
+ */
+const LUA_MFA_TX_PRELUDE = `
+local function mfa_tx_gone(key, now)
+  local deadline = tonumber(redis.call('HGET', key, 'expiresAtMs'))
+  if deadline == nil or deadline ~= deadline or deadline == math.huge or deadline == -math.huge then
+    return true
+  end
+  return not (now < deadline)
+end
+`;
+
+/**
  * `MfaTransactionStoreClient.reserveAttempt`.
  *
- * `KEYS[1]` = the transaction; `ARGV[1]` = max. Returns `{ok, attempts}`:
- * `{1, n}` for the nth attempt within max; `{0, n}` — and the transaction
- * gone — for the one past it, n being what it had; `{0, 0}` for no
- * transaction, or for a count that is not a number (fails closed: deleted).
+ * `KEYS[1]` = the transaction; `ARGV[1]` = max, `ARGV[2]` = the store's
+ * clock. Returns `{ok, attempts}`: `{1, n}` for the nth attempt within max;
+ * `{0, n}` — and the transaction gone — for the one past it, n being what it
+ * had; `{0, 0}` for no transaction, for one gone at the store's clock (left
+ * as it is), or for a count that is not a number (fails closed: deleted).
  */
-const LUA_MFA_TX_RESERVE_ATTEMPT = `
+const LUA_MFA_TX_RESERVE_ATTEMPT = `${LUA_MFA_TX_PRELUDE}
 if redis.call('EXISTS', KEYS[1]) == 0 then return {0, 0} end
+if mfa_tx_gone(KEYS[1], tonumber(ARGV[2])) then return {0, 0} end
 local attempts = tonumber(redis.call('HGET', KEYS[1], 'attempts'))
 if attempts == nil then
   redis.call('DEL', KEYS[1])
@@ -2769,9 +2802,14 @@ end
 return {1, redis.call('HINCRBY', KEYS[1], 'attempts', 1)}
 `.trim();
 
-/** `MfaTransactionStoreClient.takeChallenge`. `KEYS[1]` = the transaction; `ARGV[1]` = the expected version. */
-const LUA_MFA_TX_TAKE_CHALLENGE = `
+/**
+ * `MfaTransactionStoreClient.takeChallenge`. `KEYS[1]` = the transaction;
+ * `ARGV[1]` = the expected version, `ARGV[2]` = the store's clock. Nothing
+ * is taken from a transaction gone at that clock.
+ */
+const LUA_MFA_TX_TAKE_CHALLENGE = `${LUA_MFA_TX_PRELUDE}
 if redis.call('HGET', KEYS[1], 'version') ~= ARGV[1] then return false end
+if mfa_tx_gone(KEYS[1], tonumber(ARGV[2])) then return false end
 local challenge = redis.call('HGET', KEYS[1], 'challenge')
 if not challenge then return false end
 redis.call('HDEL', KEYS[1], 'challenge')
@@ -3155,13 +3193,23 @@ export function makeIoredisMfaTransactionStoreClient(io: Redis): MfaTransactionS
 			);
 			return Array.isArray(reply) ? hashFields(reply) : null;
 		},
-		async reserveAttempt(key, max) {
-			const reply = await runScript(io, MFA_TX_RESERVE_ATTEMPT, [key], [String(max)]);
+		async reserveAttempt(key, max, nowMs) {
+			const reply = await runScript(
+				io,
+				MFA_TX_RESERVE_ATTEMPT,
+				[key],
+				[String(max), String(nowMs)],
+			);
 			const [ok, attempts] = Array.isArray(reply) ? reply : [0, 0];
 			return { ok: ok === 1, attempts: Number(attempts) };
 		},
-		async takeChallenge(key, expectedVersion) {
-			const reply = await runScript(io, MFA_TX_TAKE_CHALLENGE, [key], [expectedVersion]);
+		async takeChallenge(key, expectedVersion, nowMs) {
+			const reply = await runScript(
+				io,
+				MFA_TX_TAKE_CHALLENGE,
+				[key],
+				[expectedVersion, String(nowMs)],
+			);
 			return typeof reply === "string" ? reply : null;
 		},
 		async consume(key, expectedVersion) {

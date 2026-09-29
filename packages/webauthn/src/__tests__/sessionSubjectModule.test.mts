@@ -354,27 +354,34 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 	});
 
 	it.each([
-		["the session store", { record: new Error("session store down") }, "user_session"],
+		[
+			"the session store",
+			{ record: new Error("session store down") },
+			"user_session",
+			"session store unavailable",
+		],
 		[
 			"the revocation boundary",
 			{ subjectRevocation: revocation(new Error("boundary down")) },
 			"revocation_boundary",
+			"revocation store unavailable",
 		],
 		[
 			"a requirement",
 			{ requirement: fixtureRequirement(new Error("requirement down")).requirement },
 			"fixture",
+			"session requirement unavailable",
 		],
-	] satisfies ReadonlyArray<readonly [string, Setup, string]>)(
-		"answers 503 temporarily_unavailable when %s cannot answer, logged once by admission, and never reaches the route",
-		async (_label, options, store) => {
+	] satisfies ReadonlyArray<readonly [string, Setup, string, string]>)(
+		"answers 503 temporarily_unavailable when %s cannot answer, described by what failed (core's describeAdmissionOutage), logged once by admission, and never reaches the route",
+		async (_label, options, store, description) => {
 			const logger = spyLogger();
 			const { app } = setup({ ...options, logger });
 			const res = await register(app);
 			expect(res.status).toBe(503);
 			expect(res.body).toEqual({
 				error: "temporarily_unavailable",
-				error_description: "session store unavailable",
+				error_description: description,
 			});
 			expect(logger.error).toHaveBeenCalledTimes(1);
 			expect(logger.error.mock.calls[0]?.[1]).toBe("session_admission_unavailable");

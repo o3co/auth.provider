@@ -24,7 +24,7 @@
  * `establish-session.mts` and the two routers are its callers.
  */
 
-import { type Logger, loggableError } from "@o3co/auth-provider-core";
+import { describeAdmissionOutage, type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler } from "express";
 
 /**
@@ -37,6 +37,23 @@ export const SESSION_STORE_UNAVAILABLE = Object.freeze({
 	error: "temporarily_unavailable",
 	error_description: "Session store unavailable",
 });
+
+/**
+ * What the session package answers, with `503`, when session admission
+ * could not answer — the link start's and callback's session reads, the
+ * password login's `admitPrimary`: the same code as
+ * {@link SESSION_STORE_UNAVAILABLE}, described by core's
+ * `describeAdmissionOutage` from the store the admission names, so a
+ * requirement's outage or the revocation boundary's is never reported as the
+ * session store's.
+ */
+export const admissionUnavailable = (
+	store: string,
+): { readonly error: string; readonly error_description: string } =>
+	Object.freeze({
+		error: SESSION_STORE_UNAVAILABLE.error,
+		error_description: describeAdmissionOutage(store),
+	});
 
 /**
  * What the session package answers, with `503`, when the user directory (the

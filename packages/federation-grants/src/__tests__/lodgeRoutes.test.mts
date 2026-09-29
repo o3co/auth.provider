@@ -219,6 +219,18 @@ describe("POST /oauth/federation-grants — lodging a first-time intent", () => 
 		const event = h.events.find((e) => e.type === "federation.grant.request.denied");
 		expect(event).toMatchObject({ clientId: "", details: { outcome: "invalid_client" } });
 	});
+
+	it("refuses to be built on an issuer that is not an absolute http(s) URL: connect_uri is built on it, and on mailto:, urn: or data: that throws, a 500 on every lodging", () => {
+		for (const issuer of [
+			"mailto:admin@example.com",
+			"urn:example:issuer",
+			"data:text/plain,issuer",
+			"auth.test/relative",
+			"/relative",
+		]) {
+			expect(() => harness({ issuer }), issuer).toThrow(/issuer/);
+		}
+	});
 });
 
 describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a grant", () => {

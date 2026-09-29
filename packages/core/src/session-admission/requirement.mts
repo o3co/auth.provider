@@ -32,6 +32,7 @@
  */
 
 import type { AuditSink } from "../audit/types.mjs";
+import { isWellFormedErrorCode } from "../errors/envelope.mjs";
 import { FEDERATED_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { RecordedAuthentication } from "../user-sessions/authentication.mjs";
@@ -46,6 +47,47 @@ import { type AcrTable, SECOND_FACTOR_AMR } from "./acr.mjs";
 
 /** The one requirement that may reach or add a second-factor value, or a verification time (D3). */
 export const MFA_REQUIREMENT_NAME = "mfa";
+
+/**
+ * The stores admission reads itself, by the name an `unavailable` admission
+ * gives each one's outage (D10): the session store and the revocation
+ * boundary's. Every other `Admission.store` is a registered requirement's
+ * name, so no requirement is registered under one of these
+ * (`registeredRequirement`, D3): a consumer that tells an outage by its store
+ * — oauth describes each — never takes a requirement's for a store's.
+ */
+export const ADMISSION_INFRASTRUCTURE_STORES = Object.freeze([
+	"user_session",
+	"revocation_boundary",
+] as const);
+
+/** A store admission reads itself, by the name its outage is given. */
+export type AdmissionInfrastructureStore = (typeof ADMISSION_INFRASTRUCTURE_STORES)[number];
+
+/** Whether `store` names one of admission's own stores — else it is a requirement's name. */
+export const isAdmissionInfrastructureStore = (
+	store: unknown,
+): store is AdmissionInfrastructureStore =>
+	(ADMISSION_INFRASTRUCTURE_STORES as readonly unknown[]).includes(store);
+
+/** How each of admission's own stores is described when it could not answer: the revocation boundary's in the words the token side uses for it. */
+const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, string>> = {
+	user_session: "session store unavailable",
+	revocation_boundary: "revocation store unavailable",
+};
+
+/**
+ * What an `unavailable` admission is described as to the client, by the
+ * store it names (D10): one of {@link ADMISSION_INFRASTRUCTURE_STORES} by
+ * name, anything else as a requirement's outage — never by the
+ * requirement's name, which is the operator's, in the log line. One text
+ * for every consumer, so none reports a requirement's outage as the
+ * session store's.
+ */
+export const describeAdmissionOutage = (store: string): string =>
+	isAdmissionInfrastructureStore(store)
+		? INFRASTRUCTURE_OUTAGES[store]
+		: "session requirement unavailable";
 
 declare const claimBrand: unique symbol;
 declare const resolverBrand: unique symbol;
@@ -551,7 +593,11 @@ export type RegisteredRequirement = SessionRequirement;
 
 /**
  * `value` as it is registered (D3): its shape held to the contract — a
- * non-empty `name`, `remediations` the requirement's own routes
+ * `name` of RFC 6749's error-code characters (`isWellFormedErrorCode`, the
+ * rule `/oauth/token` sends a `step_up` under: printable ASCII without `"`
+ * or `\`, at least one) that is none of
+ * {@link ADMISSION_INFRASTRUCTURE_STORES}, `remediations` the requirement's
+ * own routes
  * (`checkRemediations`: `<name>.<route>`, each once), a `stepUpPage` that
  * is a page when present
  * (`checkStepUpPage`, on `issuer`'s origin when one is given), `hintKeys`
@@ -577,9 +623,23 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
 	if (!isNonEmptyString(name)) {
 		throw new RangeError("a session requirement's name must be a non-empty string");
 	}
+	// A `step_up` names the requirement on the wire, under RFC 6749's grammar
+	// for an error code: a name outside it would be dropped there, and the
+	// client left without the remediation. Quoted escaped: it may hold a
+	// control character.
+	if (!isWellFormedErrorCode(name)) {
+		throw new RangeError(
+			`session requirement ${JSON.stringify(name)}: the name must be RFC 6749's error-code characters — printable ASCII without " or \\ — the only ones a step_up is sent in`,
+		);
+	}
 	const refuse = (what: string): never => {
 		throw new RangeError(`session requirement "${name}": ${what}`);
 	};
+	if (isAdmissionInfrastructureStore(name)) {
+		refuse(
+			"the name is the one admission gives an outage of its own store (ADMISSION_INFRASTRUCTURE_STORES): a consumer telling an outage by its store would take the requirement's for the store's",
+		);
+	}
 	// A page that fails names what is wrong itself (`checkStepUpPage`).
 	const page = value.stepUpPage;
 	const stepUpPage = page === undefined ? undefined : checkStepUpPage(page, issuer);
@@ -733,7 +793,11 @@ export type Admission =
 			readonly requirement: string;
 			readonly session: UserSession | null;
 	  }
-	| { readonly outcome: "unavailable"; readonly store: string };
+	| {
+			readonly outcome: "unavailable";
+			/** One of {@link ADMISSION_INFRASTRUCTURE_STORES}, or the name of the requirement that could not answer; {@link describeAdmissionOutage} words it for a client. */
+			readonly store: string;
+	  };
 
 // ---------------------------------------------------------------------------
 // Establishment (D5)

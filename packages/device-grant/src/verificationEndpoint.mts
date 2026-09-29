@@ -129,8 +129,10 @@
  * consumer answers the page) — on any of the three actions: the MFA requirement never steps up `lookup` or `deny` (a
  * user refuses a phished device request without one, the ADR's D6), but
  * another requirement may. An outage — the store, the boundary, or a
- * requirement that throws — fails closed as `503 temporarily_unavailable`
- * ("session store unavailable", the answer `/oauth/consent` gives), not
+ * requirement that throws — fails closed as `503 temporarily_unavailable`,
+ * described by what could not answer as `/oauth/consent` describes it
+ * (core's `describeAdmissionOutage`: "session store unavailable",
+ * "revocation store unavailable" or "session requirement unavailable"), not
  * `login_required`, which would tell the page the user is signed out when
  * the store said nothing. Admission writes the lines — one at error for an
  * outage (`session_admission_unavailable`, with the store and the action,
@@ -203,10 +205,13 @@ import type {
 import {
 	ADMISSION_ACTIONS,
 	admitSession,
+	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
+	describeAdmissionOutage,
+	describeIssuerRejection,
 	emitAuditEvent,
 	isEmailVerified,
 	normaliseUserCode,
@@ -333,7 +338,10 @@ const refusalOf = (
 		case "unavailable":
 			return {
 				status: 503,
-				body: { error: "temporarily_unavailable", error_description: "session store unavailable" },
+				body: {
+					error: "temporarily_unavailable",
+					error_description: describeAdmissionOutage(admission.store),
+				},
 			};
 		case "step_up":
 			return {
@@ -387,8 +395,9 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 */
 	readonly requirements: SessionRequirementResolver;
 	/**
-	 * Required: `oauth.jwt.issuer`, an absolute URL — what a step-up page,
-	 * which may be a path, is answered on (see the file header).
+	 * Required: `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer` — an
+	 * absolute `https:` URL (`http:` on a loopback host) — what a step-up
+	 * page, which may be a path, is answered on (see the file header).
 	 */
 	readonly issuer: string;
 	/**
@@ -419,15 +428,20 @@ export const createDeviceVerificationHandler = (
 		);
 	}
 	// Likewise the resolver — missing, or one the planner did not build — and
-	// the issuer: refused here, not answered 500 on every request.
+	// the issuer: refused here, not answered 500 on every request. The issuer
+	// is held to core's canonical rule, the one `oauth.jwt.issuer` is held to:
+	// `URL.canParse` also accepts `mailto:` or `urn:`, on which no page can be
+	// resolved, so the first step-up would throw.
 	const requirements = checkResolver(options.requirements);
-	const issuer = options.issuer;
-	if (typeof issuer !== "string" || !URL.canParse(issuer)) {
+	const issuerRejection = checkCanonicalIssuer(options.issuer);
+	if (issuerRejection !== null) {
 		throw new TypeError(
-			"createDeviceVerificationHandler: issuer is required — an absolute URL (oauth.jwt.issuer), " +
-				"on which a step-up page is answered",
+			`createDeviceVerificationHandler: issuer ${describeIssuerRejection(issuerRejection)} — ` +
+				"it is oauth.jwt.issuer, on which a step-up page is answered",
 		);
 	}
+	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
+	const issuer = options.issuer;
 	const now = options.now ?? Date.now;
 	// Admission's dependencies: this handler's own slots and clock.
 	const admissionDeps: AdmissionDeps = {

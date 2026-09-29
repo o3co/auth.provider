@@ -72,7 +72,10 @@ export interface MfaFactorStore {
 	 * Compare-and-set on `version`: replaces `data`, `label` and `lastUsedAt`
 	 * and bumps `version` by one, only if the record is still at
 	 * `expectedVersion`. Answers the record as written, or `null` when the
-	 * version moved or the record is gone.
+	 * version moved or the record is gone. An `expectedVersion` of
+	 * `Number.MAX_SAFE_INTEGER`, whose next version would be no safe integer,
+	 * is a `RangeError`, whatever the stored version
+	 * (`checkMfaVersionAdvances`).
 	 */
 	update(
 		subject: string,

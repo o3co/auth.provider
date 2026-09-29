@@ -26,6 +26,7 @@
  */
 
 import type { MfaFactorRecord, MfaFactorRecordUpdate, MfaFactorStore } from "./factorStore.mjs";
+import { checkMfaVersionAdvances } from "./version.mjs";
 
 /** The record as plain data, every field named, its dates copied. */
 const copyOf = (record: MfaFactorRecord): MfaFactorRecord => ({
@@ -65,6 +66,7 @@ export function createMemoryMfaFactorStore(): MfaFactorStore {
 			expectedVersion: number,
 			next: MfaFactorRecordUpdate,
 		): Promise<MfaFactorRecord | null> {
+			checkMfaVersionAdvances(expectedVersion, "MfaFactorStore.update");
 			const records = bySubject.get(subject);
 			const current = records?.get(id);
 			if (records === undefined || current === undefined || current.version !== expectedVersion) {

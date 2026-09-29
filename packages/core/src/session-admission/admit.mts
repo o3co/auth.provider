@@ -89,6 +89,7 @@ import {
 	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionGrade,
+	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type Establishment,
@@ -548,7 +549,7 @@ export async function admitSession(
 		try {
 			record = await userSessionStore.get(presented.sid);
 		} catch (err) {
-			return unavailable("user_session", err);
+			return unavailable("user_session" satisfies AdmissionInfrastructureStore, err);
 		}
 		// `== null`: the port answers `null`, and a store of the deployment's own
 		// that answers `undefined` for a missing session is still no session.
@@ -596,7 +597,7 @@ export async function admitSession(
 				return { outcome: "revoked" };
 			}
 		} catch (err) {
-			return unavailable("revocation_boundary", err);
+			return unavailable("revocation_boundary" satisfies AdmissionInfrastructureStore, err);
 		}
 	}
 

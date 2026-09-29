@@ -562,6 +562,7 @@ export {
 	mfaTransactionPatchWrites,
 	newMfaTransactionRecord,
 } from "./mfa/transactionStore.mjs";
+export { checkMfaVersionAdvances } from "./mfa/version.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {
 	browserFacingCorsRoutes,
@@ -871,19 +872,23 @@ export {
 } from "./session-admission/primary.mjs";
 export {
 	ADMISSION_ACTIONS,
+	ADMISSION_INFRASTRUCTURE_STORES,
 	type Admission,
 	type AdmissionAction,
 	type AdmissionActionName,
 	type AdmissionAsks,
 	type AdmissionDeps,
 	type AdmissionGrade,
+	type AdmissionInfrastructureStore,
 	type AdmissionRequest,
 	type CompletedRequirement,
 	type CompletedRequirementDto,
 	checkStepUpPage,
+	describeAdmissionOutage,
 	type Establishment,
 	type InterruptAdmission,
 	type InterruptionAnswer,
+	isAdmissionInfrastructureStore,
 	isHintKey,
 	isHintToken,
 	issuedRemediationActions,

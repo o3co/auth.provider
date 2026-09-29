@@ -31,7 +31,9 @@ import type {
 } from "#/session-admission/requirement.mjs";
 import {
 	ADMISSION_ACTIONS,
+	ADMISSION_INFRASTRUCTURE_STORES,
 	checkStepUpPage,
+	describeAdmissionOutage,
 	issuedRemediationActions,
 	registeredRequirement,
 	sealRegisteredReach,
@@ -340,6 +342,49 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 		const resolver = resolverForTests([]);
 		expect(Object.keys(resolver).sort()).toEqual(["entries", "get"]);
 		expect(Object.isFrozen(resolver)).toBe(true);
+	});
+
+	it("refuses a name admission gives an outage of one of its own stores — ADMISSION_INFRASTRUCTURE_STORES, user_session and revocation_boundary — which a consumer telling an outage by its store would take the requirement's for", () => {
+		expect(ADMISSION_INFRASTRUCTURE_STORES).toEqual(["user_session", "revocation_boundary"]);
+		expect(Object.isFrozen(ADMISSION_INFRASTRUCTURE_STORES)).toBe(true);
+		for (const name of ADMISSION_INFRASTRUCTURE_STORES) {
+			expect(() => resolverForTests([requirement(name)]), name).toThrow(RangeError);
+			expect(() => resolverForTests([requirement(name)]), name).toThrow(/outage/);
+		}
+		// A name that only shares a prefix is another name.
+		expect(
+			resolverForTests([requirement("user_session_age")]).get("user_session_age"),
+		).toBeDefined();
+	});
+
+	it("holds a name to RFC 6749's error-code characters, the ones a step_up is sent in — printable ASCII without a quote or a backslash — and accepts any of them", () => {
+		for (const name of [
+			'a "quoted" name',
+			"back\\slash",
+			"tab\there",
+			"new\nline",
+			"del\u007f",
+			"caf\u00e9",
+			"\u{1F512}",
+		]) {
+			expect(() => resolverForTests([requirement(name)]), JSON.stringify(name)).toThrow(
+				/error-code characters/,
+			);
+		}
+		for (const name of ["deployment:requirement-page", "a b", "!#$%&'()*+,-./:;<=>?@[]^_`{|}~"]) {
+			expect(resolverForTests([requirement(name)]).get(name)?.name, name).toBe(name);
+		}
+	});
+
+	it("describes an outage by the store an unavailable admission names — each of admission's own by name, anything else as a requirement's", () => {
+		expect(describeAdmissionOutage("user_session")).toBe("session store unavailable");
+		expect(describeAdmissionOutage("revocation_boundary")).toBe("revocation store unavailable");
+		for (const name of ADMISSION_INFRASTRUCTURE_STORES) {
+			expect(describeAdmissionOutage(name), name).not.toBe("session requirement unavailable");
+		}
+		for (const name of ["fixture", "mfa", "deployment:requirement-page"]) {
+			expect(describeAdmissionOutage(name), name).toBe("session requirement unavailable");
+		}
 	});
 
 	it("refuses two requirements of one name, and a requirement that is not one", () => {

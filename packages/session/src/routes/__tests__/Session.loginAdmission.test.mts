@@ -432,7 +432,7 @@ describe("POST /session/login — a user core cannot copy into the primary", () 
 // ---------------------------------------------------------------------------
 
 describe("POST /session/login — admission answers unavailable", () => {
-	it("answers 503, logged once by admission, and writes nothing: no record, no regeneration, no save, no cookie", async () => {
+	it("answers 503, described as the requirement's outage — the only one admitPrimary reports — logged once by admission, and writes nothing: no record, no regeneration, no save, no cookie", async () => {
 		const { requirement } = fixture(() => new Error("requirement store down"));
 		const { app, userSessionStore, logger, trace, cookieStore } = setup({
 			requirements: [requirement],
@@ -441,7 +441,11 @@ describe("POST /session/login — admission answers unavailable", () => {
 		const res = await login(app);
 
 		expect(res.status).toBe(503);
-		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		// Core's describeAdmissionOutage: never the session store's words.
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session requirement unavailable",
+		});
 		expect(userSessionStore.create).not.toHaveBeenCalled();
 		expect(trace).toEqual([]);
 		expect(cookieSessionId(res)).toBeUndefined();

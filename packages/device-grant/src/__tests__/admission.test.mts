@@ -33,6 +33,7 @@ import {
 	type RequirementInput,
 	type RequirementVerdict,
 	type SessionRequirement,
+	type SubjectRevocation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -84,6 +85,7 @@ interface HarnessOptions {
 	readonly requirements?: readonly SessionRequirement[];
 	readonly session?: Record<string, unknown>;
 	readonly userSessionStore?: UserSessionStore;
+	readonly subjectRevocation?: SubjectRevocation;
 	readonly requireEmailVerified?: boolean;
 	/** The verification budget; five, as the module seeds it, unless a test needs it spent sooner. */
 	readonly limit?: number;
@@ -117,6 +119,9 @@ const harness = async (options: HarnessOptions = {}) => {
 			}),
 			failMode: "closed",
 			userSessionStore: options.userSessionStore ?? liveSessionStore(),
+			...(options.subjectRevocation === undefined
+				? {}
+				: { subjectRevocation: options.subjectRevocation }),
 			requirements: resolverForTests(options.requirements ?? [], { issuer: ISSUER }),
 			issuer: ISSUER,
 			requireEmailVerified: options.requireEmailVerified ?? false,
@@ -323,13 +328,45 @@ describe("device verification on session admission (the session-admission ADR's 
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "session store unavailable",
+			error_description: "session requirement unavailable",
 		});
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
 		expect(event).toBe("session_admission_unavailable");
 		expect(line).toMatchObject({ store: "fixture", action: "device.approve" });
 		expect(await undecided()).toBe(true);
+	});
+
+	it("describes each outage by what could not answer — the session store, the revocation boundary's store, a requirement — never a requirement's as the session store's", async () => {
+		const storeDown = {
+			...liveSessionStore(),
+			get: async () => {
+				throw new Error("session store down");
+			},
+		} as UserSessionStore;
+		const boundaryDown: SubjectRevocation = {
+			kind: "test",
+			revokeBefore: async () => undefined,
+			revokedBefore: async () => {
+				throw new Error("boundary down");
+			},
+		} as unknown as SubjectRevocation;
+		const requirementDown = fixture(() => {
+			throw new Error("risk engine down");
+		});
+		for (const [options, description] of [
+			[{ userSessionStore: storeDown }, "session store unavailable"],
+			[{ subjectRevocation: boundaryDown }, "revocation store unavailable"],
+			[{ requirements: [requirementDown] }, "session requirement unavailable"],
+		] as const) {
+			const { verify } = await harness(options as HarnessOptions);
+			const res = await verify({ action: "lookup", user_code: USER_CODE });
+			expect(res.status, description).toBe(503);
+			expect(res.body, description).toEqual({
+				error: "temporarily_unavailable",
+				error_description: description,
+			});
+		}
 	});
 
 	it("reads no session twice and no boundary itself: one admission per request", async () => {
@@ -405,6 +442,34 @@ describe("device verification on session admission (the session-admission ADR's 
 						requireEmailVerified: false,
 					} as never),
 				String(issuer),
+			).toThrow(/issuer/);
+		}
+	});
+
+	it("refuses to be built on an issuer that is not an absolute http(s) URL: a step-up page resolved on mailto:, urn: or data: throws, a 500 where step_up_required belongs", () => {
+		for (const issuer of [
+			"mailto:admin@example.com",
+			"urn:example:issuer",
+			"data:text/plain,issuer",
+			"as.example.test/relative",
+			"/relative",
+		]) {
+			expect(
+				() =>
+					createDeviceVerificationHandler({
+						store: createMemoryDeviceCodeStore(),
+						settings,
+						rateLimiter: createMemoryRateLimiter({
+							limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+							defaultLimit: { limit: 60, windowSeconds: 60 },
+						}),
+						failMode: "closed",
+						userSessionStore: liveSessionStore(),
+						requirements: resolverForTests([]),
+						issuer,
+						requireEmailVerified: false,
+					}),
+				issuer,
 			).toThrow(/issuer/);
 		}
 	});

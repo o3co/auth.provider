@@ -1356,9 +1356,10 @@ describe("the session check, further", () => {
 		const { app } = makeHarness({ subjectRevocation, logger });
 		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		expect(res.status).toBe(503);
+		// The boundary's store, by name — not the session store's.
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "session store unavailable",
+			error_description: "revocation store unavailable",
 		});
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];

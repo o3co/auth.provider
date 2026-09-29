@@ -40,7 +40,7 @@
  * (`deployment:requirement-page`, `deployment:requirement-bare`, in the
  * fixture). All three are registered, declared and said at boot here, and
  * refused when the declaration disagrees — the session-admission ADR's D7
- * through the template's boot; a password login both fixtures interrupt is
+ * through the template's boot; a password login that both fixtures interrupt is
  * resumed through each requirement's completion route and established once
  * (D5, its acceptance criterion 2), the `mfa` requirement establishing for a
  * subject with no factor under `optional`; and a subject who holds one is

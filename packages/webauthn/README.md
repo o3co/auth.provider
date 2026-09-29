@@ -241,7 +241,7 @@ const app = await createApp({
 | --- | --- |
 | `admitted` | `req.webauthnSubject` is `subjectFor(session)`, copied to `userId`, `userName`, `userDisplayName`; the route runs |
 | `step_up` | `403 {"error":"step_up_required","error_description":"Registering a passkey requires a step-up first","requirement":"<name>","page":{"url","params"}}` — the requirement's registered page, which the account page sends the user through and then retries; `page.url` is a path or an absolute URL on the issuer's origin, so it is resolved against the authorization server (`new URL(page.url, issuer)`), not the account page's origin |
-| `unavailable` | `503 temporarily_unavailable` "session store unavailable" — the session store, the revocation boundary or a requirement could not answer; logged once by admission as `session_admission_unavailable` (`action: "webauthn.register"`) |
+| `unavailable` | `503 temporarily_unavailable`, described by what could not answer (core's `describeAdmissionOutage`): "session store unavailable" for the session store, "revocation store unavailable" for the revocation boundary, "session requirement unavailable" for a requirement; logged once by admission as `session_admission_unavailable` (`action: "webauthn.register"`) |
 | not signed in (`unauthenticated`) | nothing set or cleared: a subject an earlier middleware set — a bearer-token bridge — stands; without one, the route answers its `401 unauthorized` |
 | anything else — not live, past its `expiresAt`, another subject's, revoked, a requirement's `reauthenticate` or `unmet` | no subject — one an earlier middleware set is **cleared**, so a dead cookie session registers nothing — and the route answers its `401 unauthorized` |
 

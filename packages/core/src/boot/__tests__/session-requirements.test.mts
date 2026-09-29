@@ -303,6 +303,40 @@ describe("the sessionRequirements kind and sessionRequirementResolver (D3)", () 
 		expect(misnamed.reason).toBe("contribute-factory-failed");
 		expect(misnamed.message).toMatch(/name/);
 	});
+
+	it("refuses a requirement named for a store admission names its own outage by — user_session, revocation_boundary — as the contribution's failure: a consumer telling an outage by its store would take the requirement's for the store's", async () => {
+		for (const name of ["user_session", "revocation_boundary"]) {
+			const err = await refusal(
+				boot([contributing("test:named", { [name]: () => requirement(name) })], {
+					sessionRequirements: { expected: [name] },
+				}),
+			);
+			expect(err.reason, name).toBe("contribute-factory-failed");
+			expect(err.details, name).toMatchObject({
+				module: "test:named",
+				kind: "sessionRequirements",
+				name,
+			});
+			expect(err.message, name).toMatch(/outage/);
+		}
+	});
+
+	it("refuses a requirement whose name is not RFC 6749's error-code characters — a quote, a backslash, a control character, non-ASCII — as the contribution's failure: a step_up names it on the wire, where such a name is dropped", async () => {
+		for (const name of ['a "quoted" name', "back\\slash", "tab\there", "caf\u00e9"]) {
+			const err = await refusal(
+				boot([contributing("test:named", { [name]: () => requirement(name) })], {
+					sessionRequirements: { expected: [name] },
+				}),
+			);
+			expect(err.reason, name).toBe("contribute-factory-failed");
+			expect(err.details, name).toMatchObject({
+				module: "test:named",
+				kind: "sessionRequirements",
+				name,
+			});
+			expect(err.message, name).toMatch(/error-code characters/);
+		}
+	});
 });
 
 describe("the three channels, three refusals (D3)", () => {
