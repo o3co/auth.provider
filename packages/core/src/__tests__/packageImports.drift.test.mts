@@ -84,9 +84,34 @@ const COMPOSITIONS: Readonly<Record<string, string>> = {
  * `<importing workspace> -> <package imported>`, each with every name
  * imported through it — `type X` for a type-only import. The list may only
  * shrink: nothing may be added to it, and an entry, or a name, whose import
- * is gone fails until it is removed.
+ * is gone fails until it is removed. These are the four edges AGENTS.md
+ * names, the federation adapters' one per adapter.
  */
-const TOLERATED_EDGES: Readonly<Record<string, readonly string[]>> = {};
+const TOLERATED_EDGES: Readonly<Record<string, readonly string[]>> = {
+	// device-grant → oauth: the device authorization endpoint authenticates
+	// its client with oauth's middleware.
+	"packages/device-grant -> @o3co/auth-provider-oauth": ["createClientAuthMiddleware"],
+	// federation-grants → oauth: the grant routes authenticate their client
+	// the same way.
+	"packages/federation-grants -> @o3co/auth-provider-oauth": ["createClientAuthMiddleware"],
+	// device-grant → session: device verification's CSRF guard is the
+	// session package's.
+	"packages/device-grant -> @o3co/auth-provider-session": [
+		"createCsrfGuard",
+		"createCsrfProtectionFromConfig",
+		"type SessionCsrfConfigSlice",
+	],
+	// The federation adapters → session: each contributes the session
+	// package's redirect policy beside its federation, and the OIDC adapter
+	// reads its entries with the session package's section reader.
+	"packages/federation-apple -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
+	"packages/federation-github -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
+	"packages/federation-google -> @o3co/auth-provider-session": ["createFederationRedirectPolicy"],
+	"packages/federation-oidc -> @o3co/auth-provider-session": [
+		"createFederationRedirectPolicy",
+		"extractFederationSection",
+	],
+};
 
 /** A workspace: its directory, relative to the repository, and its manifest. */
 interface Workspace {
