@@ -39,6 +39,7 @@ interface Def {
 	readonly getter?: () => z.ZodType;
 	readonly coerce?: boolean;
 	readonly element?: z.ZodType;
+	readonly values?: readonly unknown[];
 }
 
 const defOf = (schema: z.ZodType): Def => (schema as unknown as { _zod: { def: Def } })._zod.def;
@@ -114,21 +115,54 @@ export function readsEnvironmentString(schema: z.ZodType): boolean {
 	if (def.type === "union" && def.options) return def.options.some(readsEnvironmentString);
 	if (def.type === "boolean") return false;
 	if (def.type === "number") return def.coerce === true;
+	// No string equals `true` or `1`: a literal reads the string only if one
+	// of its values is a string.
+	if (def.type === "literal") return (def.values ?? []).some((value) => typeof value === "string");
 	return true;
 }
 
 /**
+ * The kinds of value `schema` produces — `"boolean"`, `"number"`,
+ * `"string"`, `"object"`… — seen through its wrappers and a preprocess, or
+ * `undefined` when it cannot be told without running it (a `.transform`, a
+ * custom schema): each member of a union adds its own.
+ */
+export function outputKinds(schema: z.ZodType): ReadonlySet<string> | undefined {
+	const def = defOf(schema);
+	if (WRAPPERS.has(def.type) && def.innerType) return outputKinds(def.innerType);
+	if (def.type === "pipe" && def.out) {
+		return defOf(def.out).type === "transform" ? undefined : outputKinds(def.out);
+	}
+	if (def.type === "union" && def.options) {
+		const kinds = new Set<string>();
+		for (const option of def.options) {
+			const found = outputKinds(option);
+			if (found === undefined) return undefined;
+			for (const kind of found) kinds.add(kind);
+		}
+		return kinds;
+	}
+	if (def.type === "literal") return new Set((def.values ?? []).map((value) => typeof value));
+	if (def.type === "enum") return new Set(["string"]);
+	if (["transform", "custom", "any", "unknown", "lazy"].includes(def.type)) return undefined;
+	return new Set([def.type]);
+}
+
+/**
  * Every leaf `schema` declares that does not read the string an environment
- * variable arrives as (`readsEnvironmentString`), as a dot path under
+ * variable arrives as (`readsEnvironmentString`), with its dot path under
  * `prefix`: through objects, a record's values (`*`) and a list's elements
  * (`[]`) — any of them a `${?VAR}` in an operator's own file can set, whether
- * or not a shipped file does. Sorted, each once.
+ * or not a shipped file does. Sorted by path, each path once.
  */
-export function unreadableLeafPaths(schema: z.ZodType, prefix = ""): string[] {
-	const found = new Set<string>();
+export function unreadableLeaves(
+	schema: z.ZodType,
+	prefix = "",
+): { readonly path: string; readonly leaf: z.ZodType }[] {
+	const found = new Map<string, z.ZodType>();
 	const walk = (node: z.ZodType, path: string) => {
 		if (!readsEnvironmentString(node)) {
-			found.add(path);
+			if (!found.has(path)) found.set(path, node);
 			return;
 		}
 		for (const body of bodiesOf(node)) {
@@ -144,7 +178,14 @@ export function unreadableLeafPaths(schema: z.ZodType, prefix = ""): string[] {
 		}
 	};
 	walk(schema, prefix);
-	return [...found].sort();
+	return [...found]
+		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+		.map(([path, leaf]) => ({ path, leaf }));
+}
+
+/** The paths of `unreadableLeaves`. */
+export function unreadableLeafPaths(schema: z.ZodType, prefix = ""): string[] {
+	return unreadableLeaves(schema, prefix).map(({ path }) => path);
 }
 
 /** A node of the tree `pickConfigSchema` builds: a picked leaf, or keys under it. */

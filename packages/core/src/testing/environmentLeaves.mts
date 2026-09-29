@@ -27,18 +27,37 @@
  * first); otherwise the module's own leaf must read it.
  */
 
+import type { z } from "zod";
 import { TransitionalConfigSchema } from "../config/composed.mjs";
 import {
+	outputKinds,
 	readsEnvironmentString,
 	schemasAtPath,
-	unreadableLeafPaths,
+	unreadableLeaves,
 } from "../config/schema-path.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 
-/** Whether core's base coerces the value at `path` (a `*` key: any) before a module reads it. */
-function coercedByBase(path: string): boolean {
+/**
+ * Whether core's base reads the value at `path` (a `*` key: any) from a
+ * string before a module does, and hands on the kind of value `leaf` takes —
+ * a base that reads the string and leaves it a string covers no module's
+ * number.
+ */
+function coveredByBase(path: string, leaf: z.ZodType): boolean {
+	const wanted = outputKinds(leaf);
 	const leaves = schemasAtPath(TransitionalConfigSchema, path.split("."));
-	return leaves.length > 0 && leaves.every(readsEnvironmentString);
+	return (
+		wanted !== undefined &&
+		leaves.length > 0 &&
+		leaves.every((base) => {
+			const produced = outputKinds(base);
+			return (
+				readsEnvironmentString(base) &&
+				produced !== undefined &&
+				[...produced].every((kind) => wanted.has(kind))
+			);
+		})
+	);
 }
 
 /**
@@ -51,13 +70,13 @@ function coercedByBase(path: string): boolean {
 export function unreadableModuleLeaves(modules: readonly Module[]): string[] {
 	return modules
 		.flatMap((module) => {
-			const configSchema = module.configSchema ? unreadableLeafPaths(module.configSchema) : [];
+			const configSchema = module.configSchema ? unreadableLeaves(module.configSchema) : [];
 			const section = module.section
-				? unreadableLeafPaths(module.section.schema, module.section.at ?? module.name)
+				? unreadableLeaves(module.section.schema, module.section.at ?? module.name)
 				: [];
 			return [...configSchema, ...section]
-				.filter((path) => !coercedByBase(path))
-				.map((path) => `${module.name}: ${path}`);
+				.filter(({ path, leaf }) => !coveredByBase(path, leaf))
+				.map(({ path }) => `${module.name}: ${path}`);
 		})
 		.filter((entry, index, all) => all.indexOf(entry) === index)
 		.sort();
