@@ -33,7 +33,9 @@ export {
 // guard on routes this package does not own. Another package reaches the guard
 // through the `csrfGuard` slot the session module provides;
 // `createSessionCsrfGuard` builds that slot's value, for a composition that
-// provides it without the module. Every one signs through a `CsrfTokenSigner`.
+// provides it without the module. `createCsrfProtection` and
+// `createCsrfProtectionFromConfig` sign through the `CsrfTokenSigner` they are
+// given.
 export type {
 	CsrfCookieAttributes,
 	CsrfGuardOptions,

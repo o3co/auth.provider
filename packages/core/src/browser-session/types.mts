@@ -84,9 +84,8 @@ export type NavigationVerdict =
  *
  * The token's signing key is derived from the session cookie's secret, which
  * the session store's module owns, while the session module provides the
- * guard: the key is to reach the guard's provider only as `csrfTokenSigner`,
- * never as the secret or the key. For now the session module still derives
- * it from the `session` section the two modules share.
+ * guard: the guard's provider signs and checks the token through
+ * `csrfTokenSigner`, and never holds the secret or the key.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */

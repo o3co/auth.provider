@@ -52,8 +52,8 @@ import { sessionStoreModule, sessionStoreModuleFor } from "#/modules/sessionStor
 
 /**
  * A token's payload (`<expiry-seconds>.<nonce>`, the expiry in 2100) and its
- * signature under `secret`: what `createCsrfProtection` accepted as a
- * well-signed token when it derived the key from the secret itself.
+ * signature under `secret`. Tokens of this derivation are in flight wherever a
+ * deployment keeps its secret, so the signature must not change.
  */
 const VECTOR = {
 	secret: "fixed-vector.session-secret.at-least-32-bytes.ok",
@@ -356,7 +356,7 @@ describe("the session module signs and verifies through the signer in the slot, 
 		return { app, signer, secretSigner };
 	};
 
-	it("GET /session/csrf and the slot's issue sign with the signer", async () => {
+	it("GET /session/csrf and the slot's issue sign with the slot's signer, not under the session secret", async () => {
 		const { app, signer, secretSigner } = await withOwnSigner();
 		for (const token of [
 			(await request(app).get("/session/csrf")).body.csrf_token as string,
@@ -471,7 +471,7 @@ describe("a token signed under session.secret verifies through the session store
 		expect((await withToken(request(app).post("/probe"), VECTOR_TOKEN).send({})).status).toBe(200);
 	});
 
-	it("fails both under another session secret", async () => {
+	it("is refused by both when the session secret is another", async () => {
 		const config = configWith(OTHER_SECRET);
 		const app = await bootApp(
 			[sessionStoreModuleFor(config), sessionModule, ...stores(), probe()],
