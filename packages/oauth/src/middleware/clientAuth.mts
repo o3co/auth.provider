@@ -28,10 +28,9 @@ import {
 import type { RequestHandler, Response } from "express";
 import { createClientAssertionVerifier, hasClientAssertion } from "./clientAssertion.mjs";
 
-// Module augmentation: expose `req.oauthClient` for consumers who compose this
-// middleware onto their own routes and need the authenticated client downstream.
-// Uses the global Express namespace (declared in @types/express-serve-static-core)
-// which is the stable, pnpm-friendly augmentation target for both Express v4 and v5.
+// Exposes `req.oauthClient` to consumers composing this middleware onto their
+// own routes. The global Express namespace is the augmentation target that
+// works for Express v4 and v5 under pnpm.
 declare global {
 	namespace Express {
 		interface Request {
@@ -58,22 +57,17 @@ export interface ClientAuthMiddlewareOptions {
 	 */
 	logger?: Logger;
 	/**
-	 * Whether `tokenEndpointAuthMethod === "none"` (public) clients are
-	 * accepted on this route. Defaults to `false` because the only routes that
-	 * can soundly admit them are `/oauth/token` (where PKCE/S256 is the
-	 * authenticity gate, enforced separately at `/oauth/authorize`).
-	 *
-	 * RFC 7662 §2.1 requires that introspection callers be authenticated;
-	 * accepting a public client there would let anyone who knows a client_id
-	 * (a non-secret value) query token metadata. Routes other than `/token`
-	 * MUST leave this option at the default.
+	 * Whether `tokenEndpointAuthMethod: "none"` clients are accepted. Only
+	 * `/oauth/token` may set this (PKCE S256 at `/authorize` is its
+	 * authenticity gate): RFC 7662 §2.1 requires introspection callers to be
+	 * authenticated, and a client_id is not a secret. Default `false`.
 	 */
 	allowPublicClients?: boolean;
 	/**
-	 * #484: the `jti` single-use record for `private_key_jwt` assertions.
-	 * Without it an assertion request is answered `server_error` — a jti
-	 * that cannot be recorded is one that could be replayed, so the path
-	 * fails closed rather than authenticating unchecked.
+	/**
+	 * The `jti` single-use record for `private_key_jwt` assertions. Without it
+	 * an assertion request is answered `server_error`: a jti that cannot be
+	 * recorded could be replayed, so the path fails closed.
 	 */
 	replaySeenSet?: ReplaySeenSet;
 	/**
@@ -92,18 +86,10 @@ export interface ClientAuthMiddlewareOptions {
 const SAFE_REALM_CHARS = /^[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/;
 
 /**
- * Resolves the `realm` parameter for a `WWW-Authenticate: Basic` challenge.
- *
- * Every emission site MUST route through this helper. Interpolating an
- * unfiltered value into the quoted-string lets it terminate the string early
- * and append attacker- or operator-controlled auth-params to the header, so a
- * value carrying anything outside {@link SAFE_REALM_CHARS} degrades to the
- * literal `"oauth"` rather than being emitted malformed.
- *
- * Callers pass the configured issuer (`oauth.jwt.issuer`). Request-derived
- * values (e.g. `req.get("host")`) MUST NOT be passed: a realm is a property of
- * the deployment, not of the request, and behind a trusted proxy the Host
- * header is caller-controlled.
+ * The `realm` for a `WWW-Authenticate: Basic` challenge. Every emission site
+ * must use it: an unfiltered value could close the quoted-string and inject
+ * auth-params, so a value outside {@link SAFE_REALM_CHARS} becomes `"oauth"`.
+ * Pass the configured issuer, never a request-derived value such as Host.
  */
 export function resolveRealm(issuer: string | undefined): string {
 	return issuer && issuer.length > 0 && SAFE_REALM_CHARS.test(issuer) ? issuer : "oauth";
@@ -148,83 +134,38 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
 }
 
 /**
- * Creates RFC 6749 §2.3.1 client-authentication middleware suitable for both
- * `/oauth/introspect` and `/oauth/token`.
+ * RFC 6749 §2.3.1 client-authentication middleware for `/oauth/token`,
+ * `/oauth/introspect` and `/oauth/revoke`. On success sets `req.oauthClient`
+ * and calls `next()`; on failure answers `invalid_client` (RFC 6749 §5.2).
  *
- * Authentication discriminator (RFC 6749 §2.3 / RFC 7591 §2):
- *
- * - `"client_secret_basic"` — credentials in HTTP Basic `Authorization` header.
- * - `"client_secret_post"`  — credentials in form-encoded body parameters.
- * - `"none"`                — public client; only `client_id` (in body) is
- *   supplied. PKCE/S256 is mandated separately at `/authorize` (see `routes.mts`).
- *
- * Enforcement (D-6 PB-2):
- *
- * 1. The configured `tokenEndpointAuthMethod` on the client record selects the
- *    accepted transport. Wrong-transport attempts (e.g. `client_secret_post`
- *    body sent to a `client_secret_basic` client) reject with `invalid_client`
- *    400/401, matching RFC 6749 §5.2.
- * 2. If both Basic and body credentials are present and the `client_id` (or
- *    `client_secret`) values disagree, reject with `invalid_client` 401 —
- *    prevents credential-confusion attacks where an attacker pins a victim's
- *    Basic header and supplies their own body credentials, or vice versa.
- * 3. `WWW-Authenticate: Basic realm="<issuer>"` is emitted in two cases:
- *    (a) the failed attempt was Basic (RFC 7235 §2.1 challenge advertisement),
- *    and (b) no credentials were supplied at all (so the caller is told that
- *    Basic is an accepted retry transport). It is NOT emitted on
- *    `client_secret_post` failures or public-client rejections — those callers
- *    should not be redirected to Basic. The `<issuer>` realm value is
- *    validated against a safe character set; misconfigured issuers fall back
- *    to the literal `oauth` realm.
- *
- * On success: sets `req.oauthClient` to the authenticated {@link PublicClient}
- * and calls `next()`.
- *
- * On failure: responds with 400/401, JSON body
- * `{ error: "invalid_client", error_description?: string }`, and (when
- * applicable) `WWW-Authenticate`.
- *
- * A client repository that cannot answer — `findById` or `authenticate`
- * throws — is not a failed authentication: the request is refused, but as
- * `503 temporarily_unavailable` ("client repository unavailable") with no
- * challenge, and logged at error level as `client_repository_unavailable`
- * with the error's projection. `invalid_client` says "client authentication
- * failed" (RFC 6749 §5.2), which a client reads as a bad secret or a revoked
- * registration; an outage is neither. The description names only the
- * dependency, never what the store said.
- *
- * A `client_id` that cannot name a client — a control character, or longer
- * than `MAX_CLIENT_ID_LENGTH` (core's `isWellFormedClientId`) — is refused
- * like an unknown client, `401 invalid_client`, before the repository is
- * asked. Now that a repository that throws is an outage, a client must not be
- * able to make one throw: a SQL driver refusing a NUL byte would otherwise
- * turn `client_id=%00` into the server's `503`. The id a
- * `client_repository_unavailable` line records is the client's input, so it
- * goes through `auditErrorText` (sanitised, capped), in core's
- * `logClientRepositoryUnavailable` — the one line every client lookup writes.
+ * - The client's configured `tokenEndpointAuthMethod` is authoritative: a
+ *   valid credential sent over another transport is refused.
+ * - Basic and body credentials that disagree are refused, so one identity
+ *   cannot be pinned in the header and another in the body.
+ * - `WWW-Authenticate: Basic` is sent only when the failed attempt was Basic
+ *   or no credentials were sent, never to steer other callers to Basic.
+ * - A repository that throws is an outage, `503 temporarily_unavailable`, not
+ *   `invalid_client` (which a client reads as a bad secret). A malformed
+ *   `client_id` (control characters, over-long) is refused as unknown before
+ *   the repository is asked, so a client cannot provoke that outage.
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
 	loggerOrOptions: Logger | ClientAuthMiddlewareOptions = {},
 ): RequestHandler {
-	// Backward-compat: F1 D-4 callers passed the Logger directly. Accept either
-	// form to avoid forcing every call site to migrate at once. New call sites
-	// SHOULD pass the options object so they can supply `issuer` for the
-	// realm parameter.
+	// Also accepts a bare Logger, as older call sites pass; the options object
+	// is needed to supply `issuer`.
 	const opts: ClientAuthMiddlewareOptions =
 		typeof loggerOrOptions === "object" && "warn" in loggerOrOptions
 			? { logger: loggerOrOptions as Logger }
 			: (loggerOrOptions as ClientAuthMiddlewareOptions);
 	const logger: Logger = opts.logger ?? consoleLogger;
-	// Copilot review: validate `issuer` against a safe character set before
-	// embedding it into the `WWW-Authenticate: Basic realm="..."` quoted-string.
-	// Shared with the sender-constrained reject path in `routes.mts` so the two
-	// emission sites cannot drift.
+	// `resolveRealm` sanitises the issuer. Shared with the sender-constrained
+	// reject path in `routes.mts` so the two emission sites cannot drift.
 	const wwwAuth = `Basic realm="${resolveRealm(opts.issuer)}"`;
 	const allowPublicClients = opts.allowPublicClients === true;
-	// #484: `private_key_jwt`. The verifier owns the trust decision; this
-	// middleware only decides how to answer it and that no second method
-	// rides along on the same request.
+	// `private_key_jwt`: the verifier owns the trust decision; this middleware
+	// decides how to answer it and that no second method rides along.
 	const assertionVerifier = createClientAssertionVerifier({
 		issuer: opts.issuer,
 		tokenEndpoint: opts.tokenEndpoint ?? (opts.issuer ? `${opts.issuer}/oauth/token` : undefined),
@@ -233,12 +174,9 @@ export function createClientAuthMiddleware(
 		fetch: opts.fetch,
 	});
 
-	// Every refusal is written by these three. This middleware answers on
-	// `/oauth/token`, `/oauth/introspect` (RFC 7662 §2.3) and `/oauth/revoke`
-	// (RFC 7009 §2.2.1), all in RFC 6749 §5.2's error format, so each
-	// description — its own and the assertion verifier's, which can quote a
-	// configured `tokenEndpointAuthMethod` — is held to that section's
-	// character set here rather than trusted at each call site.
+	// Every refusal goes through these. Descriptions — including the assertion
+	// verifier's, which can quote a configured method — are held to RFC 6749
+	// §5.2's character set here rather than at each call site.
 	function errorBody(error: string, errorDescription?: string) {
 		const body: { error: string; error_description?: string } = { error };
 		if (errorDescription !== undefined)
@@ -277,12 +215,9 @@ export function createClientAuthMiddleware(
 			return;
 		}
 
-		// RFC 7617 §2: Basic auth with an empty secret is a malformed credential.
-		// `ClientEntrySchema` already rejects empty `clientSecret` at startup, so
-		// any production deployment that has wired `clientAuthMw` cannot emit one
-		// — but rejecting the empty case at the parser keeps the contract uniform
-		// with the v0.5.0 behaviour and avoids exposing an "empty == empty" path
-		// through `authenticate()` for misconfigured custom repositories.
+		// RFC 7617 §2: an empty Basic secret is malformed. Refused at the parser
+		// so a misconfigured custom repository never sees an "empty == empty"
+		// comparison.
 		if (basic.kind === "ok" && basic.creds.clientSecret.length === 0) {
 			rejectBasic(res, 401, "Malformed client credentials");
 			return;
@@ -295,11 +230,10 @@ export function createClientAuthMiddleware(
 				? body.client_secret
 				: undefined;
 
-		// #484: a client assertion is its own method. RFC 6749 §2.3 allows one
-		// client authentication method per request, so an assertion next to a
-		// Basic header or a body secret is refused before either is examined —
-		// the combination is the signature of one party pinning an identity in
-		// a place the other check does not look.
+		// A client assertion is its own method, and RFC 6749 §2.3 allows one per
+		// request: an assertion beside Basic or a body secret is refused before
+		// either is examined, since the combination pins an identity where the
+		// other check does not look.
 		if (hasClientAssertion(body)) {
 			// Presence, not validity: `client_secret=` with an empty value is
 			// still a second method on the wire.
@@ -323,10 +257,9 @@ export function createClientAuthMiddleware(
 			}
 		}
 
-		// Codex M4: conflict detection. If both Basic and body identify a client,
-		// they MUST agree. Otherwise the request is ambiguous and an attacker
-		// could pin one identity in a header (typically less inspected by
-		// proxies) while sending another in the body.
+		// If both Basic and body identify a client they must agree: otherwise one
+		// identity could be pinned in a header (less inspected by proxies) and
+		// another sent in the body.
 		if (
 			basic.kind === "ok" &&
 			bodyClientId !== undefined &&
@@ -346,9 +279,7 @@ export function createClientAuthMiddleware(
 
 		const clientId = basic.kind === "ok" ? basic.creds.clientId : bodyClientId;
 		if (!clientId) {
-			// Distinguish the no-credentials-at-all path from a malformed Basic.
-			// We always include WWW-Authenticate because Basic is a valid retry,
-			// matching prior v0.5.0 behavior for the /oauth/introspect users.
+			// No credentials at all: advertise Basic as a valid retry.
 			rejectBasic(res, 401, "Client authentication is required");
 			return;
 		}
@@ -364,10 +295,8 @@ export function createClientAuthMiddleware(
 			return;
 		}
 
-		// Codex M1 selector: which transport did the caller actually use? We
-		// have to derive this BEFORE looking up the client so the wrong-method
-		// branch can return without burning a credential lookup on a known-bad
-		// transport.
+		// The transport the caller used, derived first so a wrong-method request
+		// is refused before any secret is checked.
 		const usedMethod: TokenEndpointAuthMethod =
 			basic.kind === "ok"
 				? "client_secret_basic"
@@ -375,12 +304,8 @@ export function createClientAuthMiddleware(
 					? "client_secret_post"
 					: "none";
 
-		// Look up the client without authenticating yet — `findById` returns the
-		// same projection regardless of method, and we need the configured
-		// `tokenEndpointAuthMethod` to gate the credential check below. For
-		// `"client_secret_basic"` / `"client_secret_post"` clients we still call
-		// `authenticate()` afterward to verify the secret; for `"none"` clients
-		// the `findById` result is the final answer.
+		// `findById` first: the configured `tokenEndpointAuthMethod` gates the
+		// credential check. For a `none` client it is the final answer.
 		let client: PublicClient | null;
 		try {
 			client = await clientRepository.findById(clientId);
@@ -400,10 +325,8 @@ export function createClientAuthMiddleware(
 			return;
 		}
 
-		// Codex M1: configured method must match the transport actually used.
-		// A `client_secret_basic` client cannot succeed via body auth, and vice
-		// versa — even with valid credentials. This makes the discriminator
-		// authoritative; without it the field would be partly documentary.
+		// The configured method must match the transport used, even with valid
+		// credentials; otherwise the discriminator would be only documentary.
 		if (client.tokenEndpointAuthMethod !== usedMethod) {
 			const description =
 				usedMethod === "none"

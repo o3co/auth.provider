@@ -16,47 +16,22 @@
 
 /**
  * The re-authentication ask: the record `/authorize` writes when it sends a
- * browser to the login page for `max_age` or `prompt=login`, and consumes when
- * the browser comes back (#481).
+ * browser to the login page for `max_age` or `prompt=login` (or to a step-up
+ * page), and consumes when the browser comes back.
  *
- * ## Why it is a record and not a parameter
+ * Not a request parameter: the caller could forge it and skip the round trip
+ * OIDC Core §3.1.2.1 puts on the OP. Not a session field: the login it asks
+ * for regenerates the session (against fixation), which would wipe it and
+ * make `prompt=login` ask forever.
  *
- * It was a parameter — `reauth_after=<epoch second>` on the authorize URL the
- * login page returns to — read straight back off the request. The value is the
- * caller's: `max_age=60&reauth_after=0` satisfied "authenticated at or after
- * the ask" for any live session and skipped the round trip the parameter
- * exists to force. OIDC Core §3.1.2.1 puts re-authentication on the OP, so a
- * forgeable marker turns a mandatory control into an RP's optional `auth_time`
- * check.
- *
- * ## Why it is not on the session either
- *
- * Because the login it asks for destroys the session: `/session/login`
- * regenerates (session fixation, correctly) and restores only
- * `isAuthenticated`, `user`, `redirectTo` and `sid`. A field on the session
- * would be wiped by the very authentication that satisfies it, and
- * `prompt=login` — whose staleness test is unconditional — would ask again
- * forever.
- *
- * ## What it is
- *
- * An opaque id on the URL, naming a record in the session store under a prefix
- * of its own. The id is 32 bytes from the CSPRNG, so a caller cannot invent one
- * that exists; the record survives session regeneration because it is not in
- * the session; and `consume` is one store operation, so a replay finds
- * nothing. The record carries the canonical authorize request it was minted
- * for, and is honoured only on a return to that same request — an outstanding
- * ask for one request cannot satisfy another request's freshness requirement.
- *
- * The store is taken off the request, as the federation transaction's is
- * (#494), rather than injected: that is where the store the session middleware
- * mounted actually is, and a second wiring of the same store is a second thing
- * that can point somewhere else.
- *
- * What this does **not** fix: a deployment login page that rebuilds the
- * authorize URL instead of returning `redirect_to` verbatim drops the id, so
- * the request is asked to authenticate again. That is the documented contract
- * of the login round trip and it was equally true of the parameter.
+ * An opaque 32-byte CSPRNG id on the URL names a record in the session store
+ * under its own prefix: a caller cannot invent one that exists, it survives
+ * session regeneration, `consume` is one store operation so a replay finds
+ * nothing, and it is honoured only on a return to the request it was minted
+ * for. The store is taken off the request (the one the session middleware
+ * mounted) rather than injected, so it cannot point elsewhere. A login page
+ * that rebuilds the authorize URL instead of returning `redirect_to` verbatim
+ * drops the id, and the user is asked again.
  */
 
 import { randomBytes } from "node:crypto";
@@ -65,11 +40,8 @@ import { randomBytes } from "node:crypto";
 export const REAUTH_ASK_TTL_MS = 10 * 60 * 1000;
 
 /**
- * Key prefix separating ask records from the sessions sharing the store.
- *
- * express-session generates its ids with `uid-safe`, which emits only
- * base64url characters, so no session id can collide with a key carrying this
- * prefix — the same reasoning as the federation transaction's prefix.
+ * Key prefix separating ask records from sessions in the same store.
+ * express-session ids (`uid-safe`) are base64url only, so none can collide.
  */
 export const REAUTH_ASK_KEY_PREFIX = "reauth:";
 
@@ -77,12 +49,10 @@ export const REAUTH_ASK_KEY_PREFIX = "reauth:";
 export const REAUTH_ASK_PARAM = "reauth_ask";
 
 /**
- * One ask per authorization request, accumulating what was asked (the MFA
- * ADR's D17, amended by the session-admission ADR): the login trip, and a
- * step-up trip per requirement. Every instant is epoch milliseconds, not
- * seconds: an authentication must come strictly after the ask, and in whole
- * seconds a session created earlier in the same second compared equal
- * (v0.13.0 audit).
+ * One ask per authorization request, accumulating the login trip and a
+ * step-up trip per requirement. Instants are epoch milliseconds: an
+ * authentication must come strictly after the ask, and in whole seconds one
+ * earlier in the same second would compare equal.
  */
 export interface ReauthAskRecord {
 	/**
@@ -91,9 +61,9 @@ export interface ReauthAskRecord {
 	 */
 	readonly request: string;
 	/**
-	 * When the first ask of this request was written: kept across the writes
-	 * of its later trips, for the cap the MFA ADR's D17 measures from it. A
-	 * record's window is measured from its last write.
+	 * When the first ask of this request was written, kept across its later
+	 * trips: the cap on a chain of trips is measured from it. A record's own
+	 * window is measured from its last write.
 	 */
 	readonly createdAt: number;
 	/**
@@ -104,20 +74,16 @@ export interface ReauthAskRecord {
 	 */
 	readonly loginAskedAt: number | undefined;
 	/**
-	 * When the browser was sent to each requirement's step-up page, by the
-	 * requirement's name: a session that comes back not later than its entry
-	 * was already sent and is refused rather than sent again, while a second
-	 * requirement's trip is not refused as "already sent" (D17, amended).
+	 * When the browser was sent to each requirement's step-up page, by name: a
+	 * session that comes back no later than its entry was already sent and is
+	 * refused rather than sent again, while another requirement's trip is not.
 	 */
 	readonly stepUpAskedAt: Readonly<Record<string, number>>;
 }
 
 /**
- * The slice of an express-session `Store` this module uses.
- *
- * Structural rather than `import type { Store }`, so a composition root may
- * hand over any store-shaped object and a test harness can supply one without
- * subclassing an abstract class.
+ * The slice of an express-session `Store` this module uses: structural, so any
+ * store-shaped object (or a test double) can be handed over.
  */
 export interface ReauthAskSessionStore {
 	get(sid: string, callback: (err: unknown, record?: unknown) => void): void;
@@ -140,11 +106,9 @@ const isInstant = (value: unknown): value is number =>
 	typeof value === "number" && Number.isFinite(value);
 
 /**
- * When `record` was last written: every write records a stage at the moment
- * it is written — the login trip `loginAskedAt`, a step-up trip its entry in
- * `stepUpAskedAt` — so the latest of them, or `createdAt` for a record with
- * none, is that write. Each write opens a window of its own
- * (`REAUTH_ASK_TTL_MS`); `createdAt` is kept across them (the MFA ADR's D17).
+ * When `record` was last written: each write stamps its stage (`loginAskedAt`
+ * or a `stepUpAskedAt` entry), so the latest of them, else `createdAt`. Each
+ * write opens its own `REAUTH_ASK_TTL_MS` window.
  */
 const lastWrittenAt = (record: ReauthAskRecord): number =>
 	Math.max(
@@ -187,16 +151,11 @@ const readRecord = (value: unknown): ReauthAskRecord | null => {
 };
 
 /**
- * Adapt the express-session store the deployment already runs into an ask
- * store.
- *
- * The record is shaped like a session — an envelope beside a `cookie` bearing
- * `expires` — because that shape is what the store implementations read to
- * decide when a record dies: `MemoryStore` drops one whose `cookie.expires`
- * has passed on the next read, and `connect-redis` turns the same field into
- * the key's `EX`. An abandoned ask is therefore reaped by the store itself,
- * with no sweeper of ours, in both deployments. The same envelope the
- * federation transaction uses (#494).
+ * Adapt the deployment's express-session store into an ask store. The record
+ * is shaped like a session (an envelope beside a `cookie` with `expires`)
+ * because that is what stores read to expire a record — `MemoryStore` on read,
+ * `connect-redis` as the key's `EX` — so an abandoned ask is reaped by the
+ * store itself.
  */
 export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskStore => {
 	const key = (id: string): string => `${REAUTH_ASK_KEY_PREFIX}${id}`;
@@ -224,11 +183,9 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 							createdAt: record.createdAt,
 							loginAskedAt: record.loginAskedAt,
 							stepUpAskedAt: { ...record.stepUpAskedAt },
-							// For one release: an older replica reads `askedAt` and
-							// `request` alone, so a login ask stays readable to it during a
-							// rolling upgrade; a step-up alone asked for no login and
-							// writes none. Drop it in the release after the one that
-							// ships session admission, when no replica reads it.
+							// Rolling-upgrade compatibility: older replicas read only
+							// `askedAt` and `request`, so a login ask stays readable to
+							// them. Remove once no replica predates session admission.
 							...(record.loginAskedAt === undefined ? {} : { askedAt: record.loginAskedAt }),
 						},
 					},

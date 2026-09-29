@@ -54,22 +54,17 @@ import type { JWTPayload } from "jose";
 import { stepUpRefusal } from "../admission.mjs";
 
 /**
- * Taken off the family ceiling a rotation reports before the refresh token's
- * `exp` is set from it. The reported `cappedExpiresAtMs` drifts forward by
- * milliseconds (its contract, `RefreshTokenFamilyRotationOutcome`), so a
- * token signed at the reported second could outlive the record that catches
- * its replay. A second is generous for a drift of milliseconds, and costs a
- * refresh token issued at the very end of its family one second of life.
+ * Subtracted from the family ceiling a rotation reports before the refresh
+ * token's `exp` is set from it: `cappedExpiresAtMs` may drift forward by
+ * milliseconds, and a token must not outlive the record that catches its
+ * replay.
  */
 const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
 
 /**
- * What the refresh grant reads (#626 P2); see `AuthorizationGrantDeps`.
- * `sessionRequirementResolver` and `auditSink` are what it hands admission
- * for the read of the token's session (the session-admission ADR's D9): the
- * resolver — the synthetic key, by its slot's name, so
- * `oauthAuthorizationModule` hands its deps over whole — is required, and a
- * factory built by hand without one is refused.
+ * What the refresh grant reads. `sessionRequirementResolver` and `auditSink`
+ * feed admission of the token's session; the resolver is required, and a
+ * factory built without one is refused.
  */
 export type RefreshTokenGrantDeps = Pick<
 	GrantDependencies,
@@ -85,27 +80,20 @@ export type RefreshTokenGrantDeps = Pick<
 	ProviderDeps<"sessionRequirementResolver", "auditSink">;
 
 /**
- * The token endpoint's answer to an admission that does not refresh (the
- * session-admission ADR's D8 and D9, the refresh grant's row), or `undefined`
- * for `admitted`: a session gone, past
- * its expiry or not the token's subject is `400 invalid_grant`
- * `session_invalid`, as a dead `sid` always was; `unmet` and
- * `reauthenticate` are `400 invalid_grant` naming the requirement — the
- * client re-authenticates the user; a `step_up` is the same with
- * `step_up: "<requirement>"` beside it, as the `session` grant answers — a
- * token has no browser to send anywhere; an outage is `503`, logged once by
- * admission.
+ * The token endpoint's answer to an admission that does not refresh, or
+ * `undefined` when admitted: a gone, expired or foreign session is
+ * `invalid_grant` `session_invalid`; `unmet`/`reauthenticate` is
+ * `invalid_grant` naming the requirement; `step_up` adds `step_up` beside it
+ * (a token has no browser to redirect); an outage is `503`.
  */
 const refusalFor = (admission: Admission): GrantError | undefined => {
 	switch (admission.outcome) {
 		case "admitted":
 			return undefined;
 		case "not_live":
-		// `revoked` and `unauthenticated` never reach here — admission skips
-		// the boundary for a token carrier (verifyJwt applied it), and a
-		// token's claim is authenticated by construction (`tokenClaim`) — and
-		// are listed so the switch stays exhaustive: an outcome left out would
-		// fall off it as `undefined`, which refreshes.
+		// `revoked` and `unauthenticated` cannot occur for a token carrier
+		// (verifyJwt applied the boundary; `tokenClaim` is authenticated) but are
+		// listed so the switch stays exhaustive: a missing case would refresh.
 		case "revoked":
 		case "unauthenticated":
 			return { status: 400, error: "invalid_grant", errorDescription: "session_invalid" };
@@ -129,8 +117,8 @@ const refusalFor = (admission: Admission): GrantError | undefined => {
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { config, keyStore, logger, subjectRevocation } = deps;
-	// What admission reads for the token's session (D1, D9): the module's own
-	// slots as wired, and no acr table — a refresh asks for no acr.
+	// What admission reads for the token's session; no acr table, since a
+	// refresh asks for no acr.
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation,
@@ -139,12 +127,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 		logger,
 		auditSink: deps.auditSink,
 	};
-	// The lifetimes it mints with, read once, when the grant is built. A
-	// configuration built by hand that the resolvers refuse is a composition
-	// fault: refused here, it never reaches a request — read per request, it
-	// answered every refresh with a 500, after client authentication had spent
-	// whatever it spends, and `generateToken` alone would have refused it only
-	// after the rotation had spent the presented token (#449).
+	// Read once at construction, so an invalid hand-built configuration is
+	// refused before any request — not after client authentication and the
+	// rotation have spent the presented token.
 	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 	const requestedRefreshExpiresIn = resolveRefreshTokenLifetime(config);
 
@@ -153,8 +138,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const { body, issuer } = ctx;
 			const { refresh_token: refreshTokenValue, scope: requestedScope } = body as {
 				refresh_token?: string;
-				// D-6: `client_id` from body is no longer authoritative — `clientAuthMw`
-				// populates `ctx.authenticatedClient` and we read identity from there.
+				// Not `client_id`: identity comes from `ctx.authenticatedClient`.
 				scope?: unknown;
 			};
 
@@ -168,11 +152,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
-			// D-6: client identity comes from RFC 6749 §2.3 token-endpoint
-			// authentication (clientAuthMw). A grant invocation that did not pass
-			// through that middleware (custom route, direct unit-test call) cannot
-			// be bound to a client and MUST be refused — accepting it would
-			// re-introduce the body-spoofable flow that PB-2 closes.
+			// Client identity comes only from RFC 6749 §2.3 authentication
+			// (clientAuthMw); the body's `client_id` is spoofable. A call that
+			// bypassed the middleware cannot be bound to a client and is refused.
 			if (!ctx.authenticatedClient) {
 				return {
 					result: {
@@ -187,44 +169,29 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			let tokenPayload: JWTPayload;
 			let typ: string | undefined;
 			try {
-				// SF-1: pin alg / iss / typ + signature in one place.
-				// aud + azp are NOT pinned at the verifier — the manual azp /
-				// aud-fallback check below produces a more specific error
-				// ("refresh_token was not issued to this client", which is the
-				// PB-2 binding-violation signal) and accommodates pre-D-6 RTs
-				// that emit aud only (no azp). v0.6+ can pass
-				// `expectedAzp: authenticatedClientId` once the legacy upgrade
-				// window closes and remove the manual check.
+				// The verifier pins alg / iss / typ and the signature. aud/azp are
+				// checked below instead, for a more specific error and to accept
+				// tokens that carry `aud` but no `azp`.
 				const verified = await verifyJwt(refreshTokenValue, keyStore, {
 					type: "refresh_token",
 					expectedIssuer: issuer ?? "",
 					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? false,
-					// #367/#376: no AT jti denylist here — RT revocation runs off
-					// the family store (`refreshTokenFamilyRevocation`, consulted
-					// below). The subject watermark IS consulted: it is the
-					// backstop for a partial #322 cascade failure, and a rotated
-					// RT carries a fresh `iat`, so only RTs minted before the
-					// credential change are refused.
+					// No access-token jti denylist: refresh tokens are revoked through
+					// the family store (below). The subject watermark is the backstop
+					// for a partial revocation cascade; a rotated token carries a
+					// fresh `iat`, so only tokens minted before the credential change
+					// are refused.
 					revocation: { subjectRevocation },
 					logger,
 				});
 				tokenPayload = verified.payload;
 				typ = verified.header.typ;
 			} catch (err) {
-				// #408: a dependency the verifier could not consult — a
-				// revocation store, or the keystore itself — is an outage, not a
-				// finding. The verifier fails closed either way — an unreachable
-				// store must never read as "not revoked" — but answering
-				// `invalid_grant` here told the client to discard its refresh
-				// token (RFC 6749 §5.2), so a transient Redis blip or a key
-				// service timing out force-logged-out every user who refreshed
-				// during it. This handler already answers a family-store outage
-				// with `503` below; the same event class gets the same answer.
-				//
-				// Only an outage is remapped. Every other verification failure —
-				// a bad signature, a kid nobody holds, the wrong `typ`, an
-				// expired or genuinely revoked token — is still the client's
-				// problem and still `invalid_grant`.
+				// A dependency the verifier could not consult (revocation store,
+				// keystore) is an outage: `503`, not `invalid_grant`, which tells
+				// the client to discard its refresh token (RFC 6749 §5.2) and would
+				// log out everyone who refreshed during a blip. The verifier still
+				// fails closed. Every other failure stays `invalid_grant`.
 				if (isVerificationUnavailable(err)) {
 					// The verifier's own closed vocabulary, not text a store wrote.
 					const { reason } = err;
@@ -249,12 +216,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
-			// Invariant — see RT-OC test: this gate keeps AT-as-RT confusion
-			// defended. A JWT with no `header.typ === "rt+jwt"` is rejected
-			// even when SF-1's `legacyTypAccept = true` opt-in lets a typ-less
-			// token through the central verifier (Phase G S2 flipped the
-			// default to false but operators can still opt back). Refactors that touch
-			// this condition MUST keep RT-OC green.
+			// Defends against an access token presented as a refresh token:
+			// `rt+jwt` is required here even when `legacyTypAccept` lets a
+			// typ-less token through the verifier. Keep the RT-OC test green.
 			if (typ !== "rt+jwt") {
 				return {
 					result: {
@@ -265,19 +229,14 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
-			// D-6: bind RT to its issuing client via `azp` (RFC 9068 §2.2). Pre-D-6
-			// tokens predate explicit `azp` issuance — for backward compat the
-			// gate falls back to `aud`. Tokens minted by post-D-6 issuers always
-			// emit `azp = ctx.authenticatedClient.clientId`, so once the legacy
-			// upgrade window closes the `aud` fallback is dead code.
+			// Bind the refresh token to its issuing client via `azp` (RFC 9068
+			// §2.2), falling back to `aud` for tokens issued without `azp`.
 			const tokenAud = Array.isArray(tokenPayload.aud) ? tokenPayload.aud[0] : tokenPayload.aud;
 			const claims = tokenPayload as Record<string, unknown>;
-			// #481 audit: how the user authenticated, carried from the presented
-			// token. A refresh does not repeat the authentication, so `amr` and `acr`
-			// are the original event's (as `auth_time` is, OIDC Core §12.2), and a
-			// resource server gating on them must see the same answer after a
-			// refresh as before it. Only well-formed values: a claim copied forward
-			// is a claim vouched for again.
+			// A refresh does not repeat authentication, so `amr`/`acr` carry
+			// forward from the presented token (as `auth_time` does, OIDC Core
+			// §12.2). Only well-formed values: a claim copied forward is vouched
+			// for again.
 			const carriedAmr = wellFormedAmr(claims.amr);
 			const carriedAcr = wellFormedAcr(claims.acr);
 			const authenticationClaims = {
@@ -296,66 +255,24 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
-			// Wave 2 Phase 2 §9.2 + Phase 3 §9.2 (mTLS rows): refresh-time
-			// binding matrices for DPoP (RFC 9449 §5) and mTLS (RFC 8705 §4).
-			// RT carries `cnf` (jkt or x5t#S256) only when issued to a public
-			// client with proof; confidential-client RTs are always plain.
-			// The matrix itself is core's `matchConfirmation` (#324) — one
-			// implementation shared with the token-exchange grant,
-			// `protectedResourceBindingMw`, and introspection; this grant
-			// keeps only the row → `invalid_grant` error mapping below. It is
-			// evaluated BEFORE any further work so rejections short-circuit
-			// ahead of policy evaluation, store I/O, and `generateToken`
-			// keystore signatures.
+			// Refresh-time binding continuity for DPoP (RFC 9449 §5) and mTLS
+			// (RFC 8705 §4), via core's `matchConfirmation` (shared with token
+			// exchange, resource binding and introspection). Checked before any
+			// policy, store I/O or signing so rejections short-circuit.
 			//
-			// DPoP matrix (unchanged from Phase 2):
-			//   RT cnf.jkt | proof JKT       | Outcome
-			//   no         | no              | issue plain Bearer (legacy)
-			//   no         | yes             | issue DPoP-bound AT (opt-in upgrade)
-			//   yes        | no              | reject invalid_grant
-			//   yes        | yes, differs    | reject invalid_grant (multi-key attack)
-			//   yes        | yes, equal      | issue DPoP-bound AT + bound RT (rotation preserves)
+			//   RT cnf | proof / cert  | outcome
+			//   no     | no            | plain Bearer
+			//   no     | yes           | bound access token (opt-in upgrade)
+			//   yes    | no            | invalid_grant "requires ..."
+			//   yes    | yes, differs  | invalid_grant "does not match ..."
+			//   yes    | yes, equal    | bound access token + bound refresh token
 			//
-			// mTLS matrix (new in Phase 3, parallel to DPoP):
-			//   RT cnf.x5t#S256 | client cert    | Outcome
-			//   no              | no             | issue plain Bearer (legacy)
-			//   no              | yes            | issue mTLS-bound AT (opt-in upgrade)
-			//   yes             | no             | reject invalid_grant — errorDescription
-			//                                       "refresh_token requires a client certificate"
-			//   yes             | yes, differs   | reject invalid_grant — errorDescription
-			//                                       "client certificate does not match refresh_token binding"
-			//   yes             | yes, equal     | issue mTLS-bound AT + bound RT (rotation preserves)
-			//
-			// Row 3 vs row 4 use distinct errorDescription strings so SIEMs
-			// can distinguish "stolen RT replayed without cert" from
-			// "mid-rotation / multi-cert attack" today. A future cross-cutting
-			// sub-PR will add audit-emission reason codes (spec §12.2:
-			// `rt_binding_mismatch` with `reason: "cert_absent" |
-			// "thumbprint_mismatch"`) — those are NOT wire strings and are
-			// out of Sub-PR 3c scope; do not grep the code for them.
-			//
-			// **Compound-cnf rejection (Codex Critical #2):** if the RT
-			// carries BOTH `cnf.jkt` AND `cnf.x5t#S256` we short-circuit
-			// with `invalid_grant` BEFORE running either matrix. Stage 1
-			// only supports single-mechanism bindings; a compound cnf could
-			// only arise from a bug or an attacker-crafted RT and accepting
-			// it would create ambiguous enforcement semantics. The reject
-			// makes the boundary explicit and structural.
-			//
-			// Error code is `invalid_grant` (RFC 6749 §5.2) — at refresh
-			// time the RT IS the grant; a missing/mismatched proof means
-			// the grant cannot be used. Neither RFC 9449 §5 nor RFC 8705
-			// §4 pin a specific OAuth error code for this branch;
-			// `invalid_grant` is more caller-actionable than
-			// `invalid_dpop_proof` / a future `invalid_client_certificate`
-			// (the proof / cert itself is well-formed; the grant is what
-			// cannot be honored).
-			// `presentedConfirmation` is the member the binding's mechanism
-			// kind owns (core's `ownedConfirmation`) and feeds the cnf claim
-			// emission below. `matchConfirmation` gates each cnf member on its
-			// owning mechanism kind the same way (PR #185 / Codex Important
-			// #2) — see `core/grants/confirmationMatch.mts` for the
-			// kind-boundary and thumbprint-timing rationale.
+			// The two rejections have distinct descriptions so a SIEM can tell a
+			// stolen token replayed without its key from a key mismatch. A
+			// compound `cnf` (both `jkt` and `x5t#S256`) can only come from a bug
+			// or a crafted token and is refused outright. `invalid_grant` because
+			// at refresh the token is the grant (RFC 6749 §5.2); neither binding
+			// RFC pins an error code here.
 			const presentedConfirmation = ownedConfirmation(ctx.tokenBinding);
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
 			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
@@ -414,15 +331,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
-			// RFC 6749 §3.3, two readings. The token's own claim is this server's
-			// record: read so it never widens (`readIssuedScope` — a legacy
-			// `openid<TAB>email` entry named no scope and must not start naming
-			// `email` now) and carried on in its canonical form, so a ragged
-			// claim is not passed to the next pair of tokens as it is. The
-			// request is the client's: read strictly, so a malformed one is
-			// refused as malformed. Present but naming nothing, or sent without a
-			// value (`null`), is no change, as an empty one always was. A
-			// repeated parameter arrives as an array.
+			// RFC 6749 §3.3, two readings. The token's claim is this server's
+			// record: read so it never widens (`readIssuedScope`) and carried on
+			// in canonical form. The request is the client's: read strictly, so a
+			// malformed one is refused; a repeated parameter arrives as an array.
+			// Empty or `null` means no change.
 			const originalScopes = readIssuedScope(scopeStr);
 			let requested: readonly string[] | undefined;
 			if (requestedScope !== undefined && requestedScope !== null) {
@@ -465,59 +378,45 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			}
 
 			let finalScope = grantedScope;
-			// D-6: token aud/azp default to the authenticated client. `tokenAud`
-			// from the input refresh token is no longer authoritative for new-
-			// token issuance — the binding gate above already proves authenticated
-			// client matched the input azp/aud, so reusing
-			// `ctx.authenticatedClient.clientId` directly is equivalent and avoids
-			// a body-spoofable identity flow.
+			// Issue to the authenticated client, which the binding gate above
+			// proved equals the presented token's azp/aud.
 			let finalAudience: string | null = authenticatedClientId;
 
-			// Stage 2 (#173): read outside the policy block. Enforcement below is
-			// gated on the flag ALONE — with no policy wired `finalAudience`
-			// stays the authenticated client id, and issuing that in response to
-			// a `resource` request is the RFC 8707 §2 violation Stage 2 closes.
+			// Read under the flag alone: with no policy wired, issuing the client
+			// id in answer to a `resource` request would violate RFC 8707 §2.
 			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
 			const requestedResource = resourceIndicatorEnabled
 				? extractResourceParam(body as Record<string, unknown>)
 				: null;
 
 			if (deps.grantPolicy) {
-				// CP-18: fail-closed. grantPolicy is a security boundary (it
-				// narrows scope/audience); if it throws we cannot know what
-				// the narrowed decision would have been. Failing open would
-				// effectively grant the pre-policy scope ceiling, which is
-				// exactly what policy exists to prevent.
+				// Fail closed: the policy narrows scope and audience, so a throw
+				// must not fall back to the pre-policy ceiling.
 				const outcome = await evaluateGrantPolicy(
 					deps.grantPolicy,
 					{
 						grantType: "refresh_token",
-						// D-6: policy gate sees the authenticated client, not the
-						// raw body — same rationale as for token aud/azp.
+						// The authenticated client, never the body's `client_id`.
 						clientId: authenticatedClientId,
 						subject: subjectStr,
 						requestedScope: requested === undefined ? undefined : [...requested],
 						originalScope: scopeStr ? originalScopes : undefined,
-						// RFC 8707: populated only when oauth.resourceIndicator.enabled
-						// is true; undefined otherwise (flag-off preserves pre-existing
-						// semantics and token-exchange's independent resource contract).
+						// RFC 8707: only under `oauth.resourceIndicator.enabled`.
 						resource: requestedResource ?? undefined,
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
 					requested ?? originalScopes,
-					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed the
-					// scope of the original grant — the ceiling here, wider than the
-					// scope this refresh asked for, which a silent policy leaves.
+					// RFC 6749 §6: the issued scope must not exceed the original
+					// grant — the ceiling, wider than what this refresh asked for,
+					// which a silent policy leaves.
 					{ scopeCeiling: { scopes: originalScopes, name: "original grant" }, logger },
 				);
 				if (!outcome.ok) return { result: outcome.result };
 				const { decision } = outcome;
-				// CP-15: an empty grant → null so the response omits scope.
+				// An empty grant → null so the response omits scope.
 				finalScope = outcome.scopes.length > 0 ? outcome.scopes.join(" ") : null;
-				// Fail-closed audience validation, bounded by this client's
-				// `allowedAudiences` (#520): a policy may narrow to one of them and
-				// nothing else. A decision that names none leaves `finalAudience`
-				// as it was.
+				// A policy may narrow the audience to one of this client's
+				// `allowedAudiences` and nothing else; naming none leaves it as is.
 				const policyAudience = boundPolicyAudience(
 					decision,
 					ctx.authenticatedClient.allowedAudiences ?? [],
@@ -526,11 +425,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				if (policyAudience.audience !== null) finalAudience = policyAudience.audience;
 			}
 
-			// RFC 8707 §2 audience derivation (Stage 2, #173). `finalAudience` is
-			// still the authenticated client id unless a policy narrowed it, so
-			// without this a request for an otherwise-allowed resource would be
-			// rejected even though the AS could satisfy it. Only applies when the
-			// policy left the audience alone — a policy decision always wins.
+			// RFC 8707 §2: when no policy narrowed the audience, derive it from
+			// the requested resource within `allowedAudiences ∪ {clientId}`. A
+			// policy decision always wins.
 			if (finalAudience === authenticatedClientId && requestedResource) {
 				const derived = deriveAudienceFromResources(
 					requestedResource,
@@ -539,10 +436,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				if (derived !== undefined) finalAudience = derived;
 			}
 
-			// RFC 8707 §2 (Stage 2, #173): the refreshed token's audience MUST be
-			// the resource indicator(s) the client asked for. Placed after both
-			// the policy block and the derivation above, so a request that could
-			// not be satisfied either way still fails closed.
+			// RFC 8707 §2: the audience must represent the requested resource.
+			// After both the policy and the derivation, so an unsatisfiable
+			// request fails closed.
 			const unrepresented = unrepresentedResources(requestedResource, finalAudience);
 			if (unrepresented.length > 0) {
 				return {
@@ -564,15 +460,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				typeof tokenPayloadClaims.jti === "string" ? tokenPayloadClaims.jti : null;
 			const newFamilyId = familyId ?? randomUUID();
 
-			// The token's session, through admission (the session-admission ADR's
-			// D9): the verified token's claim — its `sid` (optional: without one,
-			// or without a store, the read is skipped, as it always was), its
-			// `sub` and its `amr` — read before the rotation spends the presented
-			// token. Admission reads the live session by `sid` fail-closed, and
-			// asks the registered requirements about the token's own `amr` (the
-			// MFA ADR's O3: a token is judged on what it was issued with). The
-			// subject-revocation boundary is verifyJwt's, applied above; admission
-			// skips it for a token carrier, so the two readings do not double up.
+			// Admit the token's session before the rotation spends the presented
+			// token: the live session by `sid` (skipped without a `sid` or a
+			// store), fail-closed, with requirements judged on the token's own
+			// `amr`. Subject revocation was verifyJwt's; admission skips it for a
+			// token carrier.
 			const admission = await admitSession(admissionDeps, {
 				// `subjectStr` was refused above when the token carries no `sub`.
 				claim: tokenClaim({ sid, sub: subjectStr, amr: carriedAmr }),
@@ -581,15 +473,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			const refusal = refusalFor(admission);
 			if (refusal !== undefined) return { result: refusal };
 
-			// SF-6 / Phase G / M6: when rotation is wired, refresh
-			// tokens MUST carry both jti AND family_id. Fail-fast BEFORE
-			// `generateToken()` runs so (a) we don't burn keystore signatures
-			// on a request that is going to be rejected anyway, and (b) a
-			// transient keystore failure cannot mask the deterministic
-			// `invalid_grant / missing_jti_or_family_id` response. Pre-M6
-			// the gate sat after token mint because the `accept-with-warning`
-			// branch needed the minted tokens; with M6 removing that branch,
-			// rejection is unconditional and the gate is free to move.
+			// With rotation wired, a refresh token must carry `jti` and
+			// `family_id`. Checked before signing, so no signature is spent on a
+			// doomed request and a keystore failure cannot mask this answer.
 			if (deps.refreshTokenFamilyRotation && (previousJti === null || familyId === null)) {
 				logger?.warn(
 					{
@@ -608,62 +494,28 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
-			// CP-15: empty string (e.g. requested=" ") normalizes to null so the
-			// token response omits scope rather than emitting `scope: ""`.
+			// An empty string (e.g. requested=" ") becomes null so the token
+			// response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
 
-			// Wave 2 Phase 2 §9.2 + Phase 3 §9.2 (mTLS rows): new tokens
-			// inherit the request-time binding.
-			//
-			// **AT cnf** is `presentedConfirmation` (defined above): the
-			// member the binding's mechanism kind owns, and nothing for a
-			// kind that owns none. `ctx.tokenBinding` carries what a mechanism
-			// returned and `Confirmation` is extensible by mechanism, so a
-			// contributed kind presenting `{jkt}` or `{x5t#S256}`, a DPoP
-			// binding presenting an mTLS member, or a compound confirmation
-			// would otherwise be minted as a binding no owning mechanism
-			// validated.
-			//
-			// **New RT cnf** is gated on
-			// `(bindingIsDpop || bindingIsMtls) && isPublicClient`,
-			// mirroring §9.1's auth_code rule. The gate is a mechanism
-			// allowlist: only the mechanisms whose refresh-time matrix
-			// (above) actually enforces continuity may emit a bound RT.
-			// Adding a future mechanism MUST land its refresh-time matrix
-			// BEFORE being added here (PR #185 / Codex Important #1
-			// convergence — silent degradation prevention).
-			//
-			// The wire-level `token_type` is read off the new access token's
-			// confirmation by `generateTokenResponse`: "DPoP" for `cnf.jkt`,
-			// "Bearer" otherwise (mTLS keeps it per RFC 8705 §3).
+			// New tokens inherit the request-time binding. The access token's
+			// `cnf` is `presentedConfirmation`: only the member the binding's
+			// mechanism owns, so a contributed mechanism cannot mint a binding no
+			// owning mechanism validated. A new refresh token is bound only for
+			// DPoP and mTLS — the mechanisms whose refresh-time matrix above
+			// enforces continuity; a new mechanism must add its matrix before it
+			// is added here. `generateTokenResponse` reads `token_type` off the
+			// access token's `cnf` ("DPoP" for `jkt`, else "Bearer"; RFC 8705 §3).
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
-			// #275: `bindConfidentialClientRefreshTokens` opts a deployment out of
-			// the `isPublicClient` restriction.
-			//
-			// Neither RFC requires the restriction and neither forbids lifting
-			// it. RFC 9449 §5's "refresh tokens issued to confidential clients
-			// ... are not bound" is descriptive prose with no RFC 2119 keyword,
-			// sitting next to three MUSTs for public clients; RFC 8705 §7.1 says
-			// the same about certificates. Their shared rationale holds here —
-			// this grant refuses an unauthenticated caller and refuses an RT
-			// whose `azp` is not the authenticated client — so a stolen RT is
-			// unusable without the client's own credential and binding buys
-			// nothing against the threat as usually stated.
-			//
-			// It buys something only where the two credentials are protected
-			// differently: a client secret in an environment variable, a DPoP
-			// key in an HSM or TPM. Leaking the secret alone is then not enough.
-			// Off by default because the cost is real in the other direction — a
-			// bound RT pins the client to one key or certificate for the RT's
-			// whole lifetime, so rotating mid-lifetime breaks refresh.
-			//
-			// Mechanism-neutral, because the gate is and because
-			// `oauth.tokenBinding` is where cross-mechanism policy already
-			// lives — core's, read through its one reader of the section
-			// (#728). Nothing else is needed to make it mean something: the
-			// refresh-time continuity matrix runs off the RT's own `cnf`, so a
-			// confidential client's newly bound RT is enrolled in it by the same
-			// rule that already covers public clients.
+			// Confidential clients' refresh tokens are unbound unless
+			// `bindConfidentialClientRefreshTokens` is set. Neither RFC 9449 §5
+			// nor RFC 8705 §7.1 requires or forbids binding them: this grant
+			// already requires client authentication and a matching `azp`, so a
+			// stolen token is useless without the client's credential. Binding
+			// helps only when the key is better protected than the secret (HSM vs
+			// environment variable). Off by default because a bound token pins
+			// the client to one key or certificate for its lifetime, so rotating
+			// it mid-lifetime breaks refresh.
 			const bindConfidentialClients =
 				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindNewRefreshToken =
@@ -671,46 +523,35 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				presentedConfirmation !== undefined &&
 				(isPublicClient || bindConfidentialClients);
 
-			// #449: the rotation is a reservation, and a lost race must not have
-			// cost a signature. The new refresh token's identity — its `jti`, and
-			// the instant its lifetime is measured from — is decided here,
-			// committed to the family store below, and signed only once that
-			// commit holds. A replay or a revoked family therefore returns having
-			// signed nothing, which is what matters under a KMS-backed signing
-			// key (#303): a billable remote call per lost race, for tokens that
-			// are never issued.
+			// The rotation is a reservation: the new token's `jti` and issuance
+			// instant are fixed here, committed to the family store below, and
+			// signed only once the commit holds. A replay or revoked family
+			// returns having signed nothing, so a KMS-backed key is not billed for
+			// a lost race.
 			const issuedAt = Math.floor(Date.now() / 1000);
 			const newRefreshJti = randomUUID();
 			const newRefreshExp = issuedAt + requestedRefreshExpiresIn;
-			// What the rotation actually committed, once it has: IH-13 sets a
-			// family's TTL once at creation and never extends it, so a rotation
-			// late in a family's life commits a shorter expiry than it was asked
-			// for. Signing past that would outlive the record that catches the
-			// token's replay.
+			// What the rotation actually committed: a family's TTL is set once at
+			// creation and never extended, so a late rotation may commit a
+			// shorter expiry than asked. Signing past it would outlive the record
+			// that catches the token's replay.
 			let refreshExpiresIn = requestedRefreshExpiresIn;
 
-			// Whether the family store actually committed this rotation. Only then
-			// is the presented token spent and `newRefreshJti` reserved — the
-			// condition that makes a later signing failure an orphan rather than
-			// an ordinary signer outage. A composition with no rotation wired, and
-			// an unknown family under `accept`, both reach issuance having
-			// reserved nothing.
+			// Whether the family store committed this rotation: only then is the
+			// presented token spent and `newRefreshJti` reserved, which makes a
+			// later signing failure an orphan rather than an ordinary outage.
 			let rotationCommitted = false;
 			if (deps.refreshTokenFamilyRotation) {
-				// SF-6 fail-fast above already returned for missing
-				// jti/family_id when rotation is wired. The check below
-				// documents that invariant, narrows for TS, and acts as
-				// defense-in-depth if a future refactor moves the gate.
+				// Guaranteed by the fail-fast above; narrows the types and guards
+				// against a refactor that reorders the gates.
 				if (previousJti === null || familyId === null) {
 					throw new Error(
 						"invariant violation: SF-6 fail-fast must run before refresh-token rotation block",
 					);
 				}
-				// CP-17: fail-closed when the store is unavailable. Same
-				// rationale as CP-16 — we cannot atomically consume the old
-				// jti and register the new one, so replay detection cannot
-				// be guaranteed. Return 503 so the client retries rather
-				// than bubbling an unhandled 500 HTML from express.
+				// Fail closed when the store is unavailable: without an atomic
+				// consume-and-register, replay detection cannot be guaranteed.
+				// `503` so the client retries.
 				let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenFamilyRotation.rotate>>;
 				try {
 					rotateResult = await deps.refreshTokenFamilyRotation.rotate(
@@ -738,23 +579,15 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						},
 					};
 				}
-				// Exhaustive switch over the 4-outcome rotation union.
-				// Each case explicitly handles the security-relevant
-				// outcome; falling through to issuance (the v0.4.x
-				// behavior for unknown_family) is now an explicit
-				// policy decision under operator control (CC-2).
+				// Every outcome is handled explicitly; issuing for an unknown family
+				// is operator policy (`unknownFamilyPolicy`), never a fall-through.
 				switch (rotateResult.outcome) {
 					case "rotated": {
 						rotationCommitted = true;
-						// Successful rotation — fall through to the success path below
-						// (token issuance), at no more than the ceiling the store
-						// committed. The store reports that ceiling on every rotation;
-						// it caps only when it is earlier than the expiry asked for.
-						// When it did, the adapter reconstructs the epoch after its
-						// round-trip, so it drifts forward by milliseconds and its
-						// contract asks for a subtracted margin: flooring alone only
-						// truncates, and can land past the true ceiling (v0.13.0
-						// audit). An uncapped rotation keeps the lifetime it asked for.
+						// Issue at no more than the ceiling the store committed. A
+						// capped ceiling drifts forward by milliseconds after the
+						// adapter's round-trip, so a margin is subtracted; flooring
+						// alone can land past the true ceiling.
 						const capped = rotateResult.cappedExpiresAtMs;
 						if (capped !== undefined && capped < newRefreshExp * 1000) {
 							refreshExpiresIn = Math.min(
@@ -782,27 +615,14 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						break;
 					}
 					case "replayed": {
-						// PB-1: RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2
-						// require revoking the entire family on replay
-						// so siblings cannot continue to redeem.
-						//
-						// #274: the shipped rotation now revokes the family
-						// inside the same compare-and-swap that detected the
-						// replay and says so with `familyRevoked: true`. That
-						// is the ONLY ordering with no race — this handler
-						// used to issue the revoke as a second write, and a
-						// sibling holding the still-active token could rotate
-						// successfully in between.
-						//
-						// The fallback below is not dead code: `familyRevoked`
-						// is optional, so a custom `RefreshTokenFamilyRotation`
-						// written before #274 still reports a bare
-						// `{ outcome: "replayed" }`. Absence is treated as "not
-						// revoked" and we revoke separately — the pre-#274
-						// behaviour, race and all, but never worse than it.
-						// Fail closed when the revocation dep is missing or
-						// throws: silently rejecting only the present request
-						// would leave sibling RTs valid.
+						// RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2: a replay revokes the
+						// whole family so siblings cannot keep redeeming. The rotation
+						// should revoke it inside the compare-and-swap that detected the
+						// replay (`familyRevoked: true`), the only race-free ordering.
+						// `familyRevoked` is optional, so a custom rotation may not; then
+						// revoke separately, failing closed when the revocation dep is
+						// missing or throws — rejecting only this request would leave
+						// sibling tokens valid.
 						if (rotateResult.familyRevoked !== true) {
 							if (!deps.refreshTokenFamilyRevocation) {
 								logger?.error(
@@ -860,11 +680,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 							},
 						};
 					case "unknown_family": {
-						// CC-2: defense-in-depth — SF-6 already rejects
-						// tokens with familyId === null when rotation is
-						// wired, but if a future change reorders gates,
-						// fall through to a hard reject regardless of
-						// policy when there was never a family to consult.
+						// Defense in depth: the fail-fast above already refuses a
+						// token with no `family_id`; never accept one here.
 						if (familyId === null) {
 							logger?.warn(
 								{ clientId: authenticatedClientId },
@@ -909,30 +726,19 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						break;
 					}
 					default: {
-						// Exhaustiveness guard: every outcome above
-						// either returns or breaks. A future addition
-						// to RefreshTokenFamilyRotationOutcome that
-						// forgets to update this switch will produce a
-						// compile error here rather than silently
-						// falling through to token issuance.
+						// Compile-time exhaustiveness: a new rotation outcome must
+						// not fall through to issuance.
 						const _exhaustive: never = rotateResult;
 						throw new Error(`unhandled rotation outcome: ${JSON.stringify(_exhaustive)}`);
 					}
 				}
 			}
 
-			// #449 audit: from here the rotation is committed — the presented
-			// `jti` is spent and `newRefreshJti` is reserved — so a signer that
-			// fails now leaves the family with a token nobody holds. The client
-			// gets nothing, and its retry with the old token reads as a replay,
-			// which revokes the whole family and forces a re-authentication.
-			// That is the honest outcome of reserving before signing, and the
-			// price of the property it buys (#303: a KMS-backed key is not spent
-			// on a race that is already lost). What must not happen is an
-			// unhandled throw: an express 500 with no log naming the family is
-			// the one case an operator most needs to find. `503` says "retry"
-			// to a client whose retry will now fail — which is true of every
-			// answer here — and the log is what makes the orphan traceable.
+			// From here the rotation is committed, so a signer failure orphans
+			// the family's newest token: the client's retry with the old token
+			// reads as a replay and revokes the family — the price of reserving
+			// before signing. Answer `503` and log the family so the orphan is
+			// traceable, rather than an unhandled 500.
 			let newAccessToken: Awaited<ReturnType<typeof generateToken>>;
 			let newRefreshToken: Awaited<ReturnType<typeof generateToken>>;
 			try {
@@ -944,12 +750,8 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						issuer,
 						audience: finalAudience,
 						subject: subjectStr ?? null,
-						// D-6: new token `azp` is the authenticated client. The legacy
-						// `tokenAzp` resolution (`claims.azp ?? tokenAud`) has been
-						// subsumed by the binding gate above (which proves the input
-						// token's azp/aud equalled `authenticatedClientId`), so
-						// reading from `ctx.authenticatedClient.clientId` is strictly
-						// equivalent and removes the body-spoofable surface.
+						// The authenticated client, which the binding gate proved
+						// equals the presented token's azp/aud.
 						authorizedParty: authenticatedClientId,
 						scope: scopeClaim,
 						tokenType: "at+jwt",
@@ -966,12 +768,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						issuer,
 						audience: finalAudience,
 						subject: subjectStr ?? null,
-						// D-6: same rationale as above — `azp` is bound to the
-						// authenticated client at issuance.
+						// As above.
 						authorizedParty: authenticatedClientId,
 						scope: scopeClaim,
 						tokenType: "rt+jwt",
-						// #449: the identity reserved with the family store above.
+						// The identity reserved with the family store above.
 						jti: newRefreshJti,
 						issuedAt,
 						...(bindNewRefreshToken ? { confirmation: presentedConfirmation } : {}),
@@ -979,11 +780,9 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				);
 			} catch (err) {
 				if (!rotationCommitted) {
-					// Nothing was reserved — no rotation is wired, or the family was
-					// unknown and the policy accepted it — so this is the ordinary
-					// signer outage every other mint has, and it surfaces the way the
-					// runbook says they all do. Nothing to name and nothing to retry
-					// around: the presented token is still valid.
+					// Nothing was reserved (no rotation wired, or an unknown family
+					// accepted), so this is an ordinary signer outage and the
+					// presented token is still valid.
 					throw err;
 				}
 				logger?.error(

@@ -57,10 +57,8 @@ type ExpressLike = {
 
 /**
  * The slice of the express-session bag this route touches. Every field is
- * optional at runtime even where `@types/express-session` says otherwise: a
- * deployment may mount `/oauth/logout` with no session middleware at all (the
- * pure back-channel shape), and a session written before the login wiring
- * recorded `sid` carries none.
+ * optional at runtime: `/oauth/logout` may be mounted with no session
+ * middleware (the pure back-channel shape), and a session may carry no `sid`.
  */
 interface BrowserSessionLike {
 	sid?: unknown;
@@ -68,54 +66,21 @@ interface BrowserSessionLike {
 }
 
 /**
- * R1a — ends the browser session that owns `sid`.
+ * Ends the browser session that owns `sid`. The cascade deletes the
+ * `UserSession` record, but the express-session cookie is separate and would
+ * keep satisfying `/authorize`, minting codes for a dead `sid` that `/token`
+ * refuses — a login loop no RP could break.
  *
- * The cascade deletes the `UserSession` record, but the express-session is a
- * separate object: until this ran, the same cookie kept satisfying
- * `req.session.isAuthenticated` at `/authorize`, which went on minting
- * authorization codes carrying the now-dead `sid` that `/token` then refused
- * with `invalid_grant`. The user saw a login loop with no login page for up
- * to `session.maxAge`, and `prompt=login` is refused by this provider (#284),
- * so no RP could force its way out.
+ * Only a cookie whose `sid` matches is destroyed: RP-initiated logout is a
+ * request anyone may make about any session, so the cookie riding along is
+ * not evidence this browser owns it. A session with no `sid` is left alone;
+ * it cannot be the subject of an RP-initiated logout (a hint without `sid` is
+ * refused earlier), and a code minted from it is refused at the token
+ * endpoint when a session store is wired.
  *
- * Scope — the substance of this helper. RP-initiated logout is a request any
- * party may make about any session, so the cookie that happens to ride along
- * on the request is NOT evidence that this browser owns the session being
- * logged out. It is compared against `sid` first: a cookie naming a different
- * `sid`, or naming none at all, is left alone, because destroying it would
- * sign out an unrelated user on the strength of an id_token they never held.
- * A browser session that recorded no `sid` at all is therefore left alone by
- * both halves of R1 — this helper and `/authorize`'s liveness check, which
- * also stands aside when there is no `sid` to resolve. That is deliberate, and
- * it does not leave the loop open:
- *
- *   - Such a session cannot be the subject of an RP-initiated logout in the
- *     first place. Step 2 refuses an `id_token_hint` carrying no `sid` with
- *     `400 invalid_request` long before this helper runs, so there is no
- *     logout whose effect could be missed.
- *   - Where a `userSessionStore` IS wired, a code minted from such a session
- *     is refused at the token endpoint (`grants/authorization.mts`, the
- *     `userSessionStore && !sid` guard), so it buys no token either.
- *   - Where one is NOT wired there are no `UserSession` records to delete, no
- *     `sid` on any token, and no RP-initiated logout at all — the
- *     backward-compatible composition this endpoint has always declined to
- *     serve.
- *
- * Refusing such a session at `/authorize` instead would revoke authentication
- * from every deployment whose own login route sets `isAuthenticated` without
- * recording a `sid`, which is a supported wiring; absence of a `sid` is not
- * evidence of a dead session.
- *
- * Failure is logged, never propagated. By the time this runs the cascade has
- * already succeeded; reporting the whole logout as failed would invite a
- * retry of a cascade that already ran, and a cookie the session store could
- * not delete is the weaker of the two failures — R1b refuses it at
- * `/authorize` regardless.
- *
- * Takes `EventLogger`, not `Logger`: the route's own fallback is
- * `opts.logger ?? console`, and `console` cannot satisfy `Logger` (no `fatal`,
- * no `child`). This helper only ever emits one named structured event, which
- * is exactly the narrow shape `EventLogger` exists for.
+ * Failures are logged, never propagated: the cascade already succeeded, and
+ * `/authorize` refuses a surviving cookie regardless. Takes `EventLogger`
+ * because the route's fallback logger is `console`.
  */
 async function endBrowserSession(req: Request, sid: string, logger: EventLogger): Promise<void> {
 	const session = (req as unknown as { session?: BrowserSessionLike }).session;
@@ -201,13 +166,9 @@ function renderLogoutConfirmation(
 		state?: string;
 	},
 ): Response {
-	// Pass the original logout params through as hidden inputs so that the
-	// confirmed POST can complete the standard hint-based flow. Without this,
-	// the POST handler rejects with 400 invalid_request because id_token_hint
-	// is missing — the "Sign out" button would never actually log out.
-	// `action=""` posts to the current URL: this avoids a relative-URL trap
-	// when /oauth/logout is reached with a trailing slash (`/oauth/logout/`),
-	// where `action="logout"` would resolve to `/oauth/logout/logout`.
+	// The original logout params ride along as hidden inputs so the confirmed
+	// POST can complete the hint-based flow. `action=""` posts to the current
+	// URL, avoiding `/oauth/logout/logout` when reached with a trailing slash.
 	const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Confirm Logout</title></head>
@@ -236,10 +197,9 @@ export interface LogoutRouterOptions {
 	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	clientRepository: ClientRepository;
 	/**
-	 * Getter for the federation providers Map. Evaluated at request time (not at
-	 * router construction time) so module init order does not matter — Task 6b
-	 * will pass `() => context.federationProviders` rather than a captured Map
-	 * reference. Returns undefined when federation is not configured.
+	 * Getter for the federation providers Map, evaluated per request so module
+	 * init order does not matter. Returns undefined when federation is not
+	 * configured.
 	 */
 	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Override for unit tests. Defaults to the global `fetch`. */
@@ -249,54 +209,38 @@ export interface LogoutRouterOptions {
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
 	/**
-	 * SF-1 / Phase G / S2: when true, the central JWT verifier
-	 * accepts tokens whose `typ` header is absent and emits a
-	 * `jwt_verify_legacy_typ` deprecation warning. the default is
-	 * `false` (typ-less tokens rejected); `true` is an explicit
-	 * legacy-acceptance opt-in. The v0.5.x default was `true`. Forwarded
-	 * to `verifyJwt` for the bearer AT and id_token_hint paths.
+	 * Accept tokens with no `typ` header, logging `jwt_verify_legacy_typ`.
+	 * Default `false`; `true` is a legacy opt-in. Applies to the bearer access
+	 * token and the id_token_hint.
 	 */
 	legacyTypAccept?: boolean;
 }
 
 /**
- * OIDC RP-Initiated Logout 1.0 — GET/POST /oauth/logout
+ * OIDC RP-Initiated Logout 1.0 — GET/POST /oauth/logout, taking
+ * `id_token_hint` (required), `post_logout_redirect_uri` and `state`:
  *
- * Accepts application/x-www-form-urlencoded POST body or GET query with:
- *   - id_token_hint (required)
- *   - post_logout_redirect_uri (optional)
- *   - state (optional)
+ *   1. verify the hint (fail → 400 invalid_token; keystore outage → 503);
+ *   2. read `sid` (missing → 400) and the client the hint was issued to, and
+ *      hold `post_logout_redirect_uri` to that client's registered list; a
+ *      GET with a stale hint gets the confirmation page;
+ *   3. load the session (missing → 200 no-op);
+ *   4. broadcast back-channel logout (best effort);
+ *   5. resolve the first federation's IdP end-session URI, if supported;
+ *   6. run the cascade;
+ *   7. respond: front-channel HTML | IdP redirect | post-logout redirect | JSON.
  *
- * Flow:
- *   1. Verify id_token_hint via keyStore. Fail → 400 invalid_token, on GET as
- *      on POST; a keystore that cannot answer → 503.
- *   2. Extract `sid` and the client the hint was issued to (`issuedTo`).
- *      Missing sid → 400 invalid_request. Hold `post_logout_redirect_uri` to
- *      the client's registered `postLogoutRedirectUris` — the one value every
- *      later step uses. A GET whose hint is stale answers the confirmation
- *      page here.
- *   3. Load session from userSessionStore. Missing → 200 JSON { logged_out: true } (no-op).
- *   4. Broadcast Back-Channel Logout to all registered RPs (best-effort).
- *   5. Resolve IdP end-session URI for the first federation (if any, if provider supportsEndSession).
- *   6. Cascade logout (revokeFamily + removeBySid + delete session).
- *   7. Respond: front-channel HTML | IdP redirect | post-logout redirect | 200 JSON.
- *
- * `POST /oauth/federation/:name/logout`, the bearer-authenticated disconnect of
- * one federation, is the other route this router mounts; it holds
- * `post_logout_redirect_uri` to the same rule, for the access token's `azp`.
+ * Also mounts `POST /oauth/federation/:name/logout`, the bearer-authenticated
+ * disconnect of one federation, which holds `post_logout_redirect_uri` to the
+ * same rule for the access token's `azp`.
  */
 export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): Router {
 	const router = express.Router();
 
-	// Every store a logout route reads or writes that cannot answer is `503`,
-	// logged once at error level — `federation_logout_store_unavailable` for
-	// the federation logout, `logout_store_unavailable` for RP-initiated
-	// logout — `store` naming which and `step` the operation, with the error's
-	// projection, never the error: a store's error carries the command it
-	// refused. The client repository, asked only to check a
-	// `post_logout_redirect_uri`, is the one exception to the event name: its
-	// line is core's `client_repository_unavailable`, as at every other client
-	// lookup (`registeredPostLogoutRedirectUri`).
+	// A store that cannot answer is `503`, logged once at error
+	// (`federation_logout_store_unavailable` / `logout_store_unavailable`) with
+	// `store`, `step` and the error's projection, never the error. The client
+	// repository logs core's `client_repository_unavailable` instead.
 	const federationLogoutStoreUnavailable = (
 		logger: EventLogger,
 		federation: string,
@@ -322,41 +266,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 	/**
 	 * The `post_logout_redirect_uri` a logout may pass on: the caller's value
-	 * when it is exactly, byte for byte, one of the client's registered
-	 * `postLogoutRedirectUris`, and otherwise nothing — for no value, no client
-	 * to hold it to, or a client this deployment does not know. OIDC
-	 * RP-Initiated Logout 1.0 §3: the OP MUST NOT redirect to a
-	 * `post_logout_redirect_uri` that does not match one registered for the
-	 * client.
+	 * when it byte-for-byte matches one of the client's registered
+	 * `postLogoutRedirectUris` (OIDC RP-Initiated Logout 1.0 §3), else nothing.
+	 * Decided before any other step sees the value, since a federation's
+	 * `endSession()` may redirect straight to what it is handed.
 	 *
-	 * Decided before any other step sees the value, and nothing else is passed
-	 * on: a federation's `endSession()` is handed this or `undefined`. An
-	 * adapter for an upstream that publishes no end-session endpoint (Google,
-	 * GitHub, Apple) redirects straight to the URI it is handed, and one with an
-	 * endpoint forwards it to the upstream — handed the caller's value, this
-	 * provider's origin answered `303` to any site.
-	 *
-	 * The client repository is asked only when there is a value to check, so a
-	 * logout that names none does not depend on it. When it cannot answer, the
-	 * URI is not used — an outage says nothing about whether it is registered —
-	 * and the logout goes on as if none had been sent, logged once at error as
-	 * `client_repository_unavailable` with `site`. Refusing the logout instead
-	 * would keep the session, its refresh-token families and the relying
-	 * parties' sessions alive to protect a redirect, and OIDC RP-Initiated
-	 * Logout forbids only the redirect.
-	 *
-	 * A match is also held to the shape every registration is held to at boot
-	 * (core's `checkRedirectUri`: an absolute URL, no fragment or userinfo,
-	 * `https:` — `http:` on loopback — or a reverse-domain custom scheme).
-	 * `ClientEntrySchema` enforces it for the bundled repositories; a custom
-	 * `ClientRepository` bypasses that schema, and an entry it holds that the
-	 * parser cannot read, or in an executable scheme (`javascript:`), is no place
-	 * to send a browser: the first made the redirect's `new URL()` throw after
-	 * the cascade, the second ran on this origin from the front-channel page.
-	 * Such a match is dropped like an unregistered URI, and the logout goes on,
-	 * with one warn — `logout_registered_redirect_uri_refused`, naming `site`,
-	 * the client and the rejection's `reason`, never the entry — since it is a
-	 * registration the operator has to fix.
+	 * A client repository outage drops the URI and the logout goes on: refusing
+	 * would keep sessions alive to protect a redirect, and the spec forbids only
+	 * the redirect. A match must also pass `checkRedirectUri`: a custom
+	 * repository bypasses the boot schema, and an unparseable or `javascript:`
+	 * entry is no place to send a browser. Such a match is dropped with a warn.
 	 */
 	const registeredPostLogoutRedirectUri = async (
 		requested: unknown,
@@ -424,23 +343,19 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					.json({ error: "invalid_token", error_description: "missing access token" });
 			}
 
-			// Step 2: SF-1 — alg / iss / typ + signature pinned by the central
-			// verifier. typ must be at+jwt (refresh and id_tokens are signed by
-			// the same KeyStore so a typ check is the only defense against
-			// cross-type acceptance). Audience is deferred — bearer-as-credential
-			// route, calling-client identity is not separately authenticated
-			// here; the verifier records the gap via `jwt_verify_aud_skipped`.
+			// Step 2: alg / iss / typ and signature, pinned by the verifier. typ
+			// must be at+jwt: refresh and id tokens share the KeyStore, so typ is
+			// the only defense against cross-type acceptance. Audience is not
+			// checked (logged as `jwt_verify_aud_skipped`).
 			let payload: Record<string, unknown>;
 			try {
 				const verified = await verifyJwt(token, opts.keyStore, {
 					type: "access_token",
 					expectedIssuer: opts.issuer ?? "",
 					legacyTypAccept: opts.legacyTypAccept ?? false,
-					// #367: deliberate. Logout only destroys the session the token
-					// names — a safe, idempotent direction for a revoked token, and
-					// exactly what a user does right after a credential-change
-					// cascade (#322). Consulting revocation here would strand them
-					// logged in.
+					// No revocation check, deliberately: logout only destroys the
+					// session the token names, which is safe for a revoked token and
+					// what a user does right after a credential-change cascade.
 					revocation: "none",
 					logger: opts.logger,
 				});
@@ -451,12 +366,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				if (isVerificationUnavailable(error)) {
 					return refuseVerificationUnavailable(res, error, logger, "federation_logout");
 				}
-				// The verifier's reason alone, never the token: this path can be
-				// attacker-driven, and the verifier's message quotes what the token
-				// carries (the `typ` header, read before the signature is checked,
-				// and claims). The verifier has already logged its own
-				// `jwt_verify_rejected`. `verifyJwt` throws nothing but its verdict;
-				// anything else would be logged as its projection.
+				// Log the verifier's reason only, never the token: this path can be
+				// attacker-driven and the message quotes token content. The
+				// verifier already logged `jwt_verify_rejected`.
 				const verdict = error instanceof JwtVerificationError ? error.reason : undefined;
 				logger.warn(
 					verdict === undefined
@@ -483,10 +395,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// held to (Step 7b).
 			const azp = typeof payload.azp === "string" ? payload.azp : null;
 
-			// Step 4: Check family revocation. Fail-closed: a throw → 503, the
-			// outage it is — as the session store's below — never `401
-			// invalid_token` (RFC 6750 §3.1 describes the token, and nobody
-			// could judge it).
+			// Step 4: family revocation, fail-closed. A throw is `503`, never
+			// `401 invalid_token` (RFC 6750 §3.1 describes a token nobody judged).
 			if (familyId !== null) {
 				let revoked: boolean;
 				try {
@@ -555,8 +465,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 			}
 
-			// Step 7: Verify the named federation is linked to this session.
-			// A4 §6.2 Step 1: read federation index once for membership check.
+			// Step 7: the named federation must be linked to this session.
 			let federations: ReadonlyArray<string>;
 			try {
 				federations = await opts.sessionFederationIndex.listFederations(sid);
@@ -634,15 +543,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 			}
 
-			// Step 11: Attempt IdP end-session redirect (best-effort).
-			// getFederationProviders() is called at request time (lazy) so module init order
-			// does not affect resolution — the closure captures `context` by reference.
+			// Step 11: IdP end-session redirect, best effort. Providers are looked
+			// up per request so module init order does not matter.
 			const provider = opts.getFederationProviders()?.get(name);
-			// `supportsLogout` is core's, and so is the capability it narrows to.
-			// This route carried a structural copy of both while the contract lived
-			// in `@o3co/auth-provider-session`, which depends on core (#626 P1). It
-			// answers `false` for a missing provider, so the `get` result goes
-			// straight in.
 			if (supportsLogout(provider)) {
 				try {
 					const endSessionResult = await provider.endSession({
@@ -715,19 +618,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		let payload: Record<string, unknown>;
 		try {
-			// SF-1: pin alg / iss / typ (=JWT; the pre-#394 `id+jwt` spelling
-			// was accepted through the #394 window, which #402 closed) +
-			// signature. Audience is
-			// derived from the id_token's aud claim post-verification (the
-			// id_token was issued for a specific client); we can't pin aud
-			// before knowing the client, so the verifier records the gap.
+			// alg / iss / typ (JWT) and signature pinned. Audience cannot be pinned
+			// before the client is known, so the verifier records the gap.
 			const verified = await verifyJwt(idTokenHint, opts.keyStore, {
 				type: "id_token",
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
-				// #367: deliberate. An id_token_hint names WHO is logging out
-				// (OIDC RP-Initiated Logout 1.0); it is not presented as a
-				// credential, and the jti denylist tracks access tokens anyway.
+				// Deliberately no revocation check: the hint names who is logging
+				// out (OIDC RP-Initiated Logout 1.0); it is not a credential.
 				revocation: "none",
 				logger: opts.logger,
 			});
@@ -740,12 +638,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			if (isVerificationUnavailable(err)) {
 				return refuseVerificationUnavailable(res, err, opts.logger ?? console, "logout");
 			}
-			// Invalid signature / iss / typ. The POST verifier uses identical
-			// options, so a hint that fails GET verification will deterministically
-			// fail POST verification too — rendering a confirmation page with
-			// the same hint passed through hidden inputs would just produce a
-			// "Sign out" button that returns 400 invalid_token. Reject directly
-			// for GET as well as POST.
+			// A hint that fails verification fails the confirmed POST too, so a
+			// confirmation page would be a dead button: reject GET as well.
 			return res.status(400).json({
 				error: "invalid_token",
 				error_description: "id_token_hint verification failed",
@@ -768,13 +662,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			});
 		}
 
-		// The post_logout_redirect_uri this logout may use, held to the initiating
-		// client's registered list once, here — before the confirmation page
-		// echoes it, before any RP or upstream hears of the logout, and before
-		// the cascade — and the only value every later step reads: the upstream
-		// end-session call (Step 5), the front-channel page (7a) and the redirect
-		// (7c). Unregistered, missing, or unknowable because the client
-		// repository cannot answer, it is `undefined`, and the logout goes on.
+		// Held to the initiating client's registered list once, here — before the
+		// confirmation page echoes it, before any RP or upstream hears of the
+		// logout, and before the cascade — and the only value later steps read.
+		// Unregistered or unknowable, it is `undefined` and the logout goes on.
 		const validatedPostLogoutRedirectUri = await registeredPostLogoutRedirectUri(
 			postLogoutRedirectUri,
 			hintClient,
@@ -810,21 +701,15 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		}
 
 		if (!session) {
-			// R1a: the store entry is already gone — expired, or deleted out of
-			// band — which is exactly the state a browser gets stuck in. There
-			// is no cascade to run, but the cookie still has to end.
+			// The store entry is already gone (expired, or deleted out of band):
+			// no cascade to run, but the cookie still has to end.
 			await endBrowserSession(req, sid, opts.logger ?? console);
 			return res.status(200).json({ logged_out: true });
 		}
 
-		// A4 §6.2 Step 1 (route-level read for pre-cascade ops):
-		//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
-		//   - federations: needed for IdP endSession redirect (route handler step 5)
-		// familyIds is read internally by cascadeLogout per §6.2 Step 1.
-		// Both read together, and one line for the outage: `store` names the
-		// relying-party registry when it failed, else the federation index.
-		// When both failed, the federation index's failure rides on the same
-		// line as `alsoUnavailable` — one outage, one line, nothing dropped.
+		// Read the RP registry (for back-channel broadcast) and the federation
+		// index (for the IdP redirect) together, before the cascade; one log
+		// line for the outage, with a second failure as `alsoUnavailable`.
 		const [rpsRead, federationsRead] = await Promise.allSettled([
 			opts.sessionRPRegistry.listRPs(sid),
 			opts.sessionFederationIndex.listFederations(sid),
@@ -874,8 +759,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			});
 		}
 
-		// Step 5: Resolve IdP end-session URI for the FIRST federation (spec Open Issue #2).
-		// getFederationProviders() is called at request time so module init order does not matter.
+		// Step 5: resolve the IdP end-session URI for the first federation only.
+		// Providers are looked up per request.
 		let endSessionUri: string | undefined;
 		const firstFederation = federations[0];
 		if (firstFederation) {
@@ -959,20 +844,15 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			});
 		}
 
-		// R1a: the cascade emptied the stores; now end the browser's own
-		// session so the cookie stops satisfying `/authorize`. Placed here —
-		// after the cascade, ahead of response selection — so every success
-		// branch (front-channel HTML / IdP redirect / post-logout redirect /
-		// JSON) gets it exactly once, and the 503 above deliberately does not:
-		// a retry needs the cookie to still name the session.
+		// End the browser's own session so the cookie stops satisfying
+		// `/authorize`: after the cascade and before response selection, so
+		// every success branch gets it once and the 503 above does not (a retry
+		// needs the cookie).
 		await endBrowserSession(req, sid, opts.logger ?? console);
 
 		// Step 7: Select response.
 
-		// Emit logout.success before all terminal success response paths.
-		// Placed here (after cascade, before response selection) so every
-		// success branch (HTML / IdP redirect / post-logout redirect / JSON)
-		// emits exactly once without duplicating the call.
+		// Emitted once, for every success branch.
 		emitAuditEvent(opts.auditSink, {
 			timestamp: new Date(),
 			type: "logout.success",
