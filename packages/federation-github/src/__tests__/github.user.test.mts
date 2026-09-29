@@ -16,14 +16,10 @@
 
 /**
  * The user behind a GitHub login is read from `GET /user`, and the profile's
- * `sub` comes from it.
- *
- * `/user` is GitHub's REST API, not an OpenID Connect UserInfo endpoint: it
- * answers a numeric `id` and no `sub`. openid-client's `fetchUserInfo` refuses
- * such a body before it looks at `skipSubjectCheck`, so reading `/user` through
- * it failed every real login, while a unit test that mocked `fetchUserInfo`
- * passed. These cases run the real library against a fake GitHub, so what is
- * asserted is what a login does.
+ * `sub` comes from it. `/user` is GitHub's REST API, not OpenID Connect
+ * UserInfo: it answers a numeric `id` and no `sub`, a body openid-client's
+ * `fetchUserInfo` refuses before it looks at `skipSubjectCheck`. These cases
+ * run the real library against a fake GitHub, so a mock cannot hide that.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

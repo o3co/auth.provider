@@ -15,23 +15,13 @@
  */
 
 /**
- * End-to-end boot integration test for `githubFederationModule` (Cl-M2).
- *
- * Boots the const-Module through `createApp` together with a small
- * bootstrap module that supplies `githubFederationConfig`, and asserts the
- * pairing invariant materialises both contributions in `handle.components`:
- *
- * - `federationProviders.get("github")` — the upstream OAuth/OIDC protocol
- *   provider (FederationProvider).
- * - `federationRedirectPolicyResolver.get("github")` — the consumer
- *   redirect-URL policy (FederationRedirectPolicy).
- *
- * Earlier shape tests in `github-module.test.mts` only assert the const
- * Module's static surface; this test exercises the actual planner pipeline
- * (validate-manifests pairing check + applyContributions synthetic
- * projection) end-to-end.
- *
- * Per A5 §10.1 + Cl-M2.
+ * Boots `githubFederationModule` through `createApp` beside a module supplying
+ * `githubFederationConfig`, and asserts the planner (the validate-manifests
+ * pairing check and applyContributions' synthetic projection) materialises
+ * both contributions in `handle.components`: `federationProviders.get("github")`
+ * (the upstream OAuth/OIDC provider) and
+ * `federationRedirectPolicyResolver.get("github")` (the consumer redirect-URL
+ * policy). `github-module.test.mts` covers only the module's static surface.
  */
 import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
