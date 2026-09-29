@@ -15,16 +15,13 @@
  */
 
 /**
- * A DPoP proof whose `iat` — or an `exp` / `nbf` it carries — is not a date
- * is a malformed proof: `invalid_dpop_proof`, reason `malformed_proof`.
+ * A DPoP proof whose `iat`, or an `exp` / `nbf` it carries, is not a date is
+ * a malformed proof: `invalid_dpop_proof`, reason `malformed_proof`. JSON's
+ * `1e400` parses to Infinity, and jose checks only that the claim is a number.
  *
- * JSON's `1e400` parses to Infinity, and jose checks only that the claim is
- * a number. The iat window happened to refuse an infinite `iat`, as
- * `iat_out_of_window` with a `drift` of Infinity — an audit record that
- * describes a finite clock difference — and a proof carrying `exp: 1e400`
- * was accepted. Driven through the real mechanism and the real memory
- * seen-set; the proofs are signed over raw claim JSON, because jose refuses
- * to produce a non-finite claim.
+ * Driven through the real mechanism and the real memory seen-set; the proofs
+ * are signed over raw claim JSON, because jose refuses to produce a
+ * non-finite claim.
  */
 
 import { createMemoryReplaySeenSet } from "@o3co/auth-provider-core";

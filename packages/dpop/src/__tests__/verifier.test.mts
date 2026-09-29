@@ -33,9 +33,9 @@ import { createDPoPMechanism } from "#/verifier.mjs";
 // ---------------------------------------------------------------------------
 
 /**
- * The deployment's canonical issuer. Since #292 this — not `req.protocol` and
- * the `Host` header — is what the expected `htu` is built from, so every
- * mechanism under test has to be told what deployment it belongs to.
+ * The deployment's canonical issuer. The expected `htu` is built from it, not
+ * from `req.protocol` and the `Host` header, so every mechanism under test has
+ * to be told what deployment it belongs to.
  */
 const ISSUER = "https://as.example";
 
@@ -129,7 +129,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 1: DPoP header absent → null (not throw)
+	// DPoP header absent → null (not throw)
 	// -------------------------------------------------------------------------
 
 	it("returns null when DPoP header is absent (step 1)", async () => {
@@ -139,7 +139,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 2: Multiple DPoP headers → throw
+	// Multiple DPoP headers → throw
 	// -------------------------------------------------------------------------
 
 	it("throws when DPoP header contains a comma (multiple values, step 2)", async () => {
@@ -151,7 +151,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 5: alg whitelist
+	// alg whitelist
 	// -------------------------------------------------------------------------
 
 	it("accepts a proof with alg=ES256 (in default whitelist, step 5)", async () => {
@@ -163,10 +163,6 @@ describe("createDPoPMechanism", () => {
 	});
 
 	it("rejects a proof with alg not in whitelist (step 5)", async () => {
-		// HS256 requires a symmetric key; not in the allowlist.
-		// We use RS256 mechanism but override alg in header — parseProof will
-		// accept it structurally, but the verifier's whitelist check rejects it.
-		// Simplest approach: use custom mechanism with restricted whitelist.
 		const restrictedMechanism = createDPoPMechanism({
 			issuer: ISSUER,
 			replaySeenSet: createMemoryReplaySeenSet(),
@@ -185,7 +181,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 8: Signature verification
+	// Signature verification
 	// -------------------------------------------------------------------------
 
 	it("accepts a validly signed proof (step 8)", async () => {
@@ -207,7 +203,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 10: htm match
+	// htm match
 	// -------------------------------------------------------------------------
 
 	it("accepts when htm matches request method (step 10)", async () => {
@@ -236,7 +232,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 11: htu match (including normalization)
+	// htu match (including normalization)
 	// -------------------------------------------------------------------------
 
 	it("accepts when htu matches request URL (step 11)", async () => {
@@ -273,16 +269,14 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 11, continued: the origin comes from config, not from the request
-	// (#292)
+	// htu: the origin comes from config, not from the request
 	// -------------------------------------------------------------------------
 
 	it("builds the expected htu from the configured issuer origin, not from Host and req.protocol", async () => {
-		// The forwarded values say `http://attacker.example`. Before #292 the
-		// expected htu was reconstructed from exactly those, so a client able to
-		// set `X-Forwarded-Host` / `X-Forwarded-Proto` through a `trust proxy`
-		// deployment chose what its own proof had to match — a binding it
-		// controlled both sides of.
+		// The forwarded values say `http://attacker.example`. Built from them,
+		// the expected htu would let a client able to set `X-Forwarded-Host` /
+		// `X-Forwarded-Proto` through a `trust proxy` deployment choose what its
+		// own proof has to match: a binding it controls both sides of.
 		const { proof } = await mintProof({ htu: "https://as.example/token" });
 		const req = makeReq(proof, "POST", "/token", "attacker.example", "http");
 		const result = await mechanism.extract(req as Request);
@@ -290,8 +284,8 @@ describe("createDPoPMechanism", () => {
 	});
 
 	it("refuses an htu carrying a userinfo in fixed words, keeping what the client wrote out of the message", async () => {
-		// The userinfo is the client's own text. It used to reach the refusal's
-		// message through normalizeHtu's, and from there a protected resource's log.
+		// The userinfo is the client's own text, and the refusal's message can
+		// reach a protected resource's log.
 		const { proof } = await mintProof({ htu: "https://s3cret-user:pw@as.example/token" });
 		const refusal: unknown = await mechanism
 			.extract(makeReq(proof) as Request)
@@ -354,7 +348,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 12: iat window
+	// iat window
 	// -------------------------------------------------------------------------
 
 	it("accepts a proof with iat within the window (step 12)", async () => {
@@ -394,7 +388,7 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Step 14: replay protection
+	// Replay protection
 	// -------------------------------------------------------------------------
 
 	it("first use of a (jti, jkt) pair returns a binding (step 14)", async () => {
@@ -452,14 +446,12 @@ describe("createDPoPMechanism", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Coverage gap follow-ups from /multi-agent-review (Sub-PR 2b round 1)
+	// alg case, a private JWK, userinfo in htu
 	// -------------------------------------------------------------------------
 
-	// I-4: pin whitelist case-sensitivity. RFC 9449 §4.3 + JOSE treat `alg`
-	// as case-sensitive. An operator misconfiguring HOCON with lowercase
-	// (`alg-whitelist = ["es256"]`) would otherwise silently reject every
-	// valid ES256 proof — or worse, a lowercased entry might be assumed
-	// equivalent to an uppercased proof when it is not.
+	// RFC 9449 §4.3 and JOSE treat `alg` as case-sensitive: a lowercase
+	// whitelist entry (`alg-whitelist = ["es256"]`) is not equivalent to an
+	// `ES256` proof.
 	it("whitelist comparison is case-sensitive — lowercase whitelist entry does not match uppercase alg", async () => {
 		const { proof } = await mintProof({ alg: "ES256" });
 		const lowerCaseMechanism = createDPoPMechanism({
@@ -472,10 +464,8 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 
-	// I-5: pin that parseProof's private_jwk screen (Sub-PR 2a step 7)
-	// propagates through the verifier intact. Without this regression
-	// test, a refactor of the verifier's parseProof call site could
-	// accidentally swallow the parser-layer error.
+	// parseProof's private_jwk screen propagates through the verifier intact,
+	// not swallowed at the verifier's parseProof call site.
 	it("propagates private_jwk error from parseProof (step 7 / Sub-PR 2a)", async () => {
 		const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
 		const pubJwk = await exportJWK(publicKey);
@@ -503,12 +493,10 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 
-	// I-(round-2): pin that an `htu` containing userinfo is rejected as
-	// `malformed_proof` rather than being silently normalized away (RFC 9449
-	// §4 — userinfo has no meaning at the token endpoint). Without this
-	// guard, a proof for `https://attacker:pwn@as.example/...` would
-	// equality-match the server-built `https://as.example/...` after the
-	// canonical reconstruction drops the credentials.
+	// An `htu` containing userinfo is `malformed_proof`, not normalized away
+	// (RFC 9449 §4: userinfo has no meaning at the token endpoint); otherwise
+	// `https://attacker:pwn@as.example/...` would match the server-built
+	// `https://as.example/...` once canonicalization drops the credentials.
 	it("rejects htu containing userinfo as malformed_proof (RFC 9449 §4)", async () => {
 		const { proof } = await mintProof({ htu: "https://attacker:pwn@as.example/token" });
 		await expect(mechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
@@ -584,15 +572,12 @@ describe("createDPoPMechanism", () => {
 		}
 	});
 
-	// A seen-set that answers with its own contract error — `expired-at-issue`
+	// A seen-set that answers with its own contract error (`expired-at-issue`
 	// for a record computed from a positive TTL, or RangeError for a
-	// non-finite expiry, both ruled out at construction — is broken, and that
-	// is the server's fault, not the proof's. It used to be rethrown, which
-	// core's dispatcher answered `400 invalid_dpop_proof` and logged only as a
-	// failed proof: the client was told its proof was bad, and the operator
-	// saw nothing that named the fault. It takes the outage path's wire
-	// answer (503, fail closed) under an audit reason and a log event of its
-	// own, so triage is not sent to Redis health.
+	// non-finite expiry, both ruled out at construction) is broken: the
+	// server's fault, not the proof's, so never `400 invalid_dpop_proof`. It
+	// takes the outage path's wire answer (503, fail closed) under an audit
+	// reason and a log event of its own, so triage is not sent to Redis health.
 	it.each([
 		["a ChallengeStorageError", () => new ChallengeStorageError({ reason: "expired-at-issue" })],
 		["a RangeError", () => new RangeError("markSeen: expiresAtMs must be a finite number")],
@@ -638,13 +623,13 @@ describe("createDPoPMechanism", () => {
 		},
 	);
 
-	// I-2: pin that seen-set transport faults surface as the dedicated
-	// `replay_store_unavailable` audit signal — not a raw Error that would
-	// otherwise propagate up to `tokenBindingMw` and lose operator triage.
-	// Fail closed: the proof is refused, never accepted unchecked. The refusal
-	// is an outage, not a verdict on the proof: it carries
-	// `temporarily_unavailable` and the `unavailable` description core's
-	// dispatchers answer 503 with, never `invalid_dpop_proof`.
+	// A seen-set transport fault surfaces as the dedicated
+	// `replay_store_unavailable` audit signal, not a raw Error that would reach
+	// `tokenBindingMw` and lose operator triage. Fail closed: the proof is
+	// refused, never accepted unchecked. The refusal is an outage, not a
+	// verdict on the proof: it carries `temporarily_unavailable` and the
+	// `unavailable` description core's dispatchers answer 503 with, never
+	// `invalid_dpop_proof`.
 	it("wraps seen-set transport errors as replay_store_unavailable, stated as an outage rather than a bad proof", async () => {
 		const errors: { obj: unknown; msg?: string }[] = [];
 		const failing = {
@@ -682,25 +667,17 @@ describe("createDPoPMechanism", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Replay TTL vs iat window (#199 M1)
+// Replay TTL vs iat window
 // ---------------------------------------------------------------------------
 
 describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 	/**
-	 * The `iat` check is `Math.abs(floor(now) - iat) > W`, so a proof with
-	 * `iat = T` keeps being accepted until real time `T + W + 1` (exclusive)
-	 * — the second-truncation buys it very nearly an extra second past
-	 * `T + W`.
-	 *
-	 * Its replay entry is written only after the window check passes, so the
-	 * earliest it exists is `T - W`, and it expires half-open at
-	 * `firstSeen + TTL` (the memory store keeps an entry only while
-	 * `expiry > now`). Covering the whole accepted interval therefore needs
-	 * `T - W + TTL >= T + W + 1`, i.e. `TTL >= 2W + 1`.
-	 *
-	 * `2W` is NOT sufficient: the entry dies at `T + W` while the proof stays
-	 * acceptable for up to another second. The boundary cases below pin that,
-	 * because an off-by-one here is exactly a replay window.
+	 * With an iat window of `W`, the replay entry outlives the proof's whole
+	 * acceptance interval only when `TTL >= 2W + 1` (derivation at
+	 * `DPoPMechanismOptions.replayTtlSeconds` in `src/verifier.mts`). At
+	 * exactly `2W` the proof stays acceptable for up to a second after its
+	 * entry expires, so the boundary cases below pin it: an off-by-one here is
+	 * a replay window.
 	 */
 	const capturingLogger = (warns: { obj: unknown; msg?: string }[]) =>
 		({
@@ -723,8 +700,8 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 			issuer: ISSUER,
 			replaySeenSet: createMemoryReplaySeenSet(),
 			iatWindowSeconds: 180,
-			// Satisfies the old "at least iatWindowSeconds" advice and is still
-			// short of the 361 the window actually needs.
+			// At least iatWindowSeconds, and still short of the 361 the window
+			// actually needs.
 			replayTtlSeconds: 300,
 			logger: capturingLogger(warns),
 		});
@@ -797,7 +774,7 @@ describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.
 	// The protected resources this middleware guards are the AS's own —
 	// `/oauth/userinfo`, `/oauth/logout`, the federation token endpoint (see
 	// `core/src/boot/assemble-app.mts`) — so they sit at the issuer's origin,
-	// which since #292 is where the expected `htu` comes from.
+	// which is where the expected `htu` comes from.
 	const RESOURCE_REQ = ["GET", "/userinfo", "as.example"] as const;
 	const makeResourceReq = (proof: string) =>
 		makeReq(proof, RESOURCE_REQ[0], RESOURCE_REQ[1], RESOURCE_REQ[2]);
@@ -868,8 +845,7 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 	});
 
 	it("throws when the issuer is a bare host — the shape a Host header supplies", () => {
-		// Deriving an origin from it is exactly the reconstruction this change
-		// exists to stop doing. Refuse loudly instead.
+		// An origin is never derived from one; refuse loudly instead.
 		expect(() =>
 			createDPoPMechanism({
 				issuer: "as.example:3000",
@@ -895,7 +871,7 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 });
 
 // ---------------------------------------------------------------------------
-// #530: server-provided nonce (RFC 9449 §8 / §9)
+// Server-provided nonce (RFC 9449 §8 / §9)
 // ---------------------------------------------------------------------------
 
 describe("createDPoPMechanism — server-provided nonce (#530)", () => {

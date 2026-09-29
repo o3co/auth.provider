@@ -18,13 +18,9 @@
  * A DPoP proof's `typ` and `alg` are the client's to write, and a refusal of
  * them must not carry them: through core's real token-binding dispatcher,
  * whose verdict line projects the whole refusal, neither the refusal's
- * message nor any log line holds the value the client sent.
- *
- * The messages used to quote it (`expected typ=dpop+jwt, got <typ>`,
- * `alg <alg> is not in the allowlist`), and `dpop_alg_not_allowed` logged the
- * alg as sent. The alg is logged only when it is a registered JWS algorithm
- * name — a closed vocabulary that says which algorithm was refused — and as
- * `unregistered` otherwise.
+ * message nor any log line holds the value the client sent. The alg is logged
+ * only when it is a registered JWS algorithm name (a closed vocabulary that
+ * says which algorithm was refused), and as `unregistered` otherwise.
  */
 
 import { createMemoryReplaySeenSet, type Logger, tokenBindingMw } from "@o3co/auth-provider-core";
