@@ -26,17 +26,19 @@
  * cookie — and `session.maxAge`, the cookie's `Max-Age` and a session
  * record's lifetime. The signing secret is not among them.
  *
- * It refuses exactly what the session store refuses of the cookie
+ * It refuses what would break core's contract (`sessionCookiePolicyContract`),
+ * so no section yields a policy a reader cannot trust. First what the session
+ * store refuses of the cookie, with the store's message
  * ({@link assertHostPrefixKept}, which the store runs too): a `__Host-` name
  * that is not secure, or that names a domain — the store compares it with
- * `null`, so an empty one is refused as well. Core's contract holds a policy
- * to more — a `__Secure-` name and a `SameSite=None` cookie only secure, a
- * lifetime within the one-year ceiling — which the store does not refuse
- * (core's schema refuses the second and the third at validation); those
- * become this policy's refusals with the store's own, not before.
+ * `null`, so an empty one is refused as well. Then what the store does not
+ * refuse yet: a name that is not an RFC 6265 token, a `__Secure-` name or a
+ * `SameSite=None` cookie that is not secure — each a cookie a browser drops —
+ * and a lifetime outside 1 to `MAX_DURATION_MS` milliseconds (core's schema
+ * refuses the last two at validation, before either is built).
  */
 
-import type { SessionCookiePolicy } from "@o3co/auth-provider-core";
+import { MAX_DURATION_MS, type SessionCookiePolicy } from "@o3co/auth-provider-core";
 
 /** The `session.*` keys the policy is read from. */
 export interface SessionCookieConfigSlice {
@@ -62,10 +64,33 @@ export function assertHostPrefixKept(
 	}
 }
 
-/** The session cookie's attributes from `session`, frozen; throws where the session store does ({@link assertHostPrefixKept}). */
+/** RFC 6265 §4.1.1: a cookie name is an RFC 2616 token — visible ASCII but separators. */
+const COOKIE_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * The session cookie's attributes from `session`, frozen. Throws where the
+ * session store does ({@link assertHostPrefixKept}), and where the policy
+ * would break core's contract.
+ */
 export function sessionCookiePolicyFrom(session: SessionCookieConfigSlice): SessionCookiePolicy {
 	assertHostPrefixKept(session);
 	const { name, secure, sameSite, maxAge } = session;
+	if (!COOKIE_NAME.test(name)) {
+		throw new Error(
+			`session.name ${JSON.stringify(name)} is not a cookie name (an RFC 6265 token)`,
+		);
+	}
+	if (name.startsWith("__Secure-") && secure !== true) {
+		throw new Error("session.name with __Secure- prefix requires session.secure=true");
+	}
+	if (sameSite === "none" && secure !== true) {
+		throw new Error('session.sameSite = "none" requires session.secure = true');
+	}
+	if (!Number.isInteger(maxAge) || maxAge < 1 || maxAge > MAX_DURATION_MS) {
+		throw new Error(
+			`session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
+		);
+	}
 	// As express-session is given it: `null` or empty is a host-only cookie.
 	const domain = session.domain || undefined;
 	return Object.freeze({ name, secure, sameSite, domain, maxAgeMs: maxAge });
