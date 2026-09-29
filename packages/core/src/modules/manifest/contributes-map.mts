@@ -142,11 +142,16 @@ export interface FederationInstance<E> {
  * packages claiming one type are `duplicate-contribute` — and parses no entry
  * and calls no factory until the federations section moves under core.
  *
- * `E` is the entry's type. Declared on its own, the schema and the factory's
- * entry are held to it; written inline in a module, `E` is `unknown` and the
- * factory types its entry by annotating the instance
- * (`(deps, { name, entry }: FederationInstance<MyEntry>) => …`) — the factory
- * is a method, so a declaration for any `E` is one the kind accepts.
+ * `E` is the entry's type. Author a declaration with `defineFederationType`
+ * (`define-federation-type.mts`), which infers `E` from `entrySchema` and
+ * types the factory's entry with it, so a schema and a factory that disagree
+ * do not compile. Written inline in a module without it, `E` is `unknown` —
+ * the kind's record cannot carry a type per key, and the factory is a method,
+ * bivariant in its entry — so nothing ties an annotated entry to the schema.
+ *
+ * Boot reads a declaration's schema and factory once, at stage 1; what it
+ * registers closes over those, so changing the declaration afterwards changes
+ * neither.
  */
 export interface FederationTypeContribution<Deps, E = unknown> {
 	/**
@@ -306,7 +311,7 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 		readonly [name: string]: SessionRequirementFactory<Deps>;
 	};
 	/**
-	 * Rate-limit budgets (#728), name-keyed by the prefix a limiter key
+	 * Rate-limit budgets (#728), a record name-keyed by the prefix a limiter key
 	 * carries before its first `:` (`login` for `login:ip:<ip>`): each module
 	 * contributes the budgets of the prefixes it owns, and core composes them
 	 * into one view, the synthetic key `rateLimitBudgetResolver`, which a

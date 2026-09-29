@@ -79,22 +79,46 @@ export interface ValidateManifestsInput {
 // ---------------------------------------------------------------------------
 
 /**
+ * What each `federationTypes` declaration was read as, once, at stage 1 — its
+ * `entrySchema` and `factory` — keyed by the registration factory
+ * `nameKeyedFactory` answered for it. The shape check reads these, and the
+ * registration closes over the same values, so what is checked is what
+ * registers, and a declaration changed afterwards changes neither.
+ */
+const federationTypeSnapshots = new WeakMap<
+	object,
+	{ readonly entrySchema: unknown; readonly factory: unknown }
+>();
+
+/**
  * The factory a name-keyed entry registers through. A `federationTypes`
  * entry is a declaration, `{ entrySchema, factory }` (#728), not a factory of
- * the value it registers: what registers is the declaration with its factory
- * bound to the module's deps (`RegisteredFederationType`), which the stage-4
- * pass builds from the deps it hands every factory. The declaration's shape is
- * held at stage 1 (`checkContributionShapes`). Every other value is its own
- * factory.
+ * the value it registers: its schema and factory are read once, here, and
+ * what registers is `RegisteredFederationType` — that schema, and `create`,
+ * that factory bound to the module's deps, which the stage-4 pass builds from
+ * the deps it hands every factory. The snapshot's shape is held at stage 1
+ * (`checkContributionShapes`). A declaration that is not an object is left as
+ * it is, for that check to refuse. Every other value is its own factory.
  */
 function nameKeyedFactory(kind: string, value: unknown): unknown {
-	if (kind !== "federationTypes") return value;
-	const declaration = value as FederationTypeContribution<Record<string, unknown>>;
-	return (deps: Record<string, unknown>): RegisteredFederationType =>
+	if (kind !== "federationTypes" || typeof value !== "object" || value === null) return value;
+	const { entrySchema, factory } = value as {
+		readonly entrySchema?: unknown;
+		readonly factory?: unknown;
+	};
+	const register = (deps: Record<string, unknown>): RegisteredFederationType =>
 		Object.freeze({
-			entrySchema: declaration.entrySchema,
-			create: (instance: FederationInstance<unknown>) => declaration.factory(deps, instance),
+			entrySchema: entrySchema as z.ZodType,
+			// Called as the method it was declared as, on the declaration.
+			create: (instance: FederationInstance<unknown>) =>
+				(factory as FederationTypeContribution<Record<string, unknown>>["factory"]).call(
+					value,
+					deps,
+					instance,
+				),
 		});
+	federationTypeSnapshots.set(register, { entrySchema, factory });
+	return register;
 }
 
 /**
@@ -607,36 +631,74 @@ export function refuseGuardedHostKinds(host: ContributionKindMap | undefined): v
 	}
 }
 
+/** What a container that is not a record is called in a refusal. */
+const containerShape = (container: unknown): string =>
+	container === null ? "null" : Array.isArray(container) ? "an array" : `a ${typeof container}`;
+
 /**
- * What a `rateLimitBudgets` key or a `federationTypes` value must be, read off
+ * What a `rateLimitBudgets` or `federationTypes` contribution must be, read off
  * the manifest before any factory runs (#728), for contributions and
- * overrides alike: a prefix a limiter key can carry before its first `:` —
- * not empty, holding no `:` — whatever the budget's factory will answer, a
- * `null` included; and a declaration that is an object with a Zod
- * `entrySchema` and a `factory` function, so one written in JavaScript is
- * refused as itself rather than as a `TypeError` at registration.
- * Throws `contribution-malformed`.
+ * overrides alike:
+ *
+ * - the kind's container, a record keyed by prefix or by type — not an array,
+ *   which normalisation would read as list-shaped and file under Symbol keys,
+ *   not a function nor `null`, which it would pass over;
+ * - a prefix a limiter key can carry before its first `:` — not empty,
+ *   holding no `:` — whatever the budget's factory will answer, a `null`
+ *   included;
+ * - a declaration that is an object with a Zod `entrySchema` and a `factory`
+ *   function, as normalisation read it once (`federationTypeSnapshots`), so
+ *   one written in JavaScript is refused as itself rather than as a
+ *   `TypeError` at registration.
+ *
+ * Throws `contribution-malformed`; `name` is absent for a container.
  * @internal
  */
-function checkContributionShapes(rawModules: readonly Module[]): void {
+function checkContributionShapes(
+	rawModules: readonly Module[],
+	modules: readonly NormalisedModule[],
+): void {
 	const refuse = (
 		m: Module,
 		kind: "rateLimitBudgets" | "federationTypes",
-		name: string,
+		name: string | undefined,
 		channel: "contributes" | "overrides",
 		problem: string,
 	): never => {
 		throw new BootError({
-			message: `Module "${m.name}" ${channel} ${kind} "${name}": ${problem}.`,
+			message: `Module "${m.name}" ${channel} ${kind}${name === undefined ? "" : ` "${name}"`}: ${problem}.`,
 			reason: "contribution-malformed",
 			stage: "validateManifests",
-			details: { reason: "contribution-malformed", module: m.name, kind, name, channel, problem },
+			details: {
+				reason: "contribution-malformed",
+				module: m.name,
+				kind,
+				...(name === undefined ? {} : { name }),
+				channel,
+				problem,
+			},
 		});
 	};
-	for (const m of rawModules) {
+	rawModules.forEach((m, index) => {
 		for (const channel of ["contributes", "overrides"] as const) {
-			const map = m[channel];
-			for (const prefix of Object.keys(map?.rateLimitBudgets ?? {})) {
+			const map = m[channel] as Readonly<Record<string, unknown>> | undefined;
+			for (const [kind, keyedBy] of [
+				["rateLimitBudgets", "prefix"],
+				["federationTypes", "type"],
+			] as const) {
+				const container = map?.[kind];
+				if (container === undefined) continue;
+				if (typeof container !== "object" || container === null || Array.isArray(container)) {
+					refuse(
+						m,
+						kind,
+						undefined,
+						channel,
+						`the kind takes a record keyed by ${keyedBy}, not ${containerShape(container)}`,
+					);
+				}
+			}
+			for (const prefix of Object.keys(m[channel]?.rateLimitBudgets ?? {})) {
 				if (prefix.length === 0 || prefix.includes(":")) {
 					refuse(
 						m,
@@ -647,30 +709,34 @@ function checkContributionShapes(rawModules: readonly Module[]): void {
 					);
 				}
 			}
-			for (const [type, value] of Object.entries(map?.federationTypes ?? {})) {
-				const declaration: unknown = value;
-				if (typeof declaration !== "object" || declaration === null) {
+			const normalised = modules[index];
+			const entries =
+				channel === "contributes" ? normalised?.contributesEntries : normalised?.overridesEntries;
+			for (const entry of entries ?? []) {
+				if (entry.kind !== "federationTypes" || typeof entry.key !== "string") continue;
+				const snapshot = federationTypeSnapshots.get(entry.factory as object);
+				if (snapshot === undefined) {
 					refuse(
 						m,
 						"federationTypes",
-						type,
+						entry.key,
 						channel,
 						"a declaration is an object with an entrySchema and a factory",
 					);
 				}
-				const { entrySchema, factory } = declaration as {
-					entrySchema?: unknown;
-					factory?: unknown;
+				const { entrySchema, factory } = snapshot as {
+					readonly entrySchema: unknown;
+					readonly factory: unknown;
 				};
 				if (typeof (entrySchema as { safeParse?: unknown } | null)?.safeParse !== "function") {
-					refuse(m, "federationTypes", type, channel, "its entrySchema is not a Zod schema");
+					refuse(m, "federationTypes", entry.key, channel, "its entrySchema is not a Zod schema");
 				}
 				if (typeof factory !== "function") {
-					refuse(m, "federationTypes", type, channel, "its factory is not a function");
+					refuse(m, "federationTypes", entry.key, channel, "its factory is not a function");
 				}
 			}
 		}
-	}
+	});
 }
 
 /**
@@ -2014,7 +2080,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	{
 		id: "contribution-shapes",
 		spec: "issue #728 (a rate-limit prefix; a federation type's declaration)",
-		run: (ctx) => checkContributionShapes(ctx.rawModules),
+		run: (ctx) => checkContributionShapes(ctx.rawModules, ctx.modules),
 	},
 	{
 		id: "per-kind-contribute-duplicates",

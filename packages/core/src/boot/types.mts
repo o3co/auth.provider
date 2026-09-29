@@ -1164,8 +1164,10 @@ export interface ContributionKindGuardedDetails {
 }
 
 /**
- * A contribution whose key or value its kind cannot take, found on the
- * manifest at stage 1, before any factory runs (#728): a `rateLimitBudgets`
+ * A contribution whose container, key or value its kind cannot take, found on
+ * the manifest at stage 1, before any factory runs (#728): a
+ * `rateLimitBudgets` or `federationTypes` container that is not a record
+ * (an array, a function, `null`) — `name` then absent — a `rateLimitBudgets`
  * prefix that is empty or holds `:` — no limiter key carries it — or a
  * `federationTypes` declaration that is not an object with a Zod
  * `entrySchema` and a `factory`. `problem` says which.
@@ -1174,7 +1176,8 @@ export interface ContributionMalformedDetails {
 	readonly reason: "contribution-malformed";
 	readonly module: string;
 	readonly kind: "rateLimitBudgets" | "federationTypes";
-	readonly name: string;
+	/** The prefix or type; absent when the container itself is refused. */
+	readonly name?: string;
 	readonly channel: "contributes" | "overrides";
 	readonly problem: string;
 }

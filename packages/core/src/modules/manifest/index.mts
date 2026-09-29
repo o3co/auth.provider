@@ -48,6 +48,10 @@ export type {
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 } from "./contributes-map.mjs";
+export {
+	defineFederationType,
+	type FederationTypeDeclaration,
+} from "./define-federation-type.mjs";
 export { defineModule } from "./define-module.mjs";
 export type { ModuleSection, SectionDeps, SectionSchema } from "./module-section.mjs";
 export type {

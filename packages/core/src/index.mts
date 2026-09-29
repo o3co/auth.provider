@@ -656,7 +656,10 @@ export type {
 	TokenExchangeValidatorResolver,
 } from "./modules/index.mjs";
 export {
+	// #728: the way to author a federationTypes declaration, its entry tied to its schema.
+	defineFederationType,
 	defineModule,
+	type FederationTypeDeclaration,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
 // The single loopback-hostname vocabulary (#364) — the predicate behind every

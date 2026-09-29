@@ -267,8 +267,8 @@ describe("#728: rate-limit budgets and declared federation contributions", () =>
 			factory: (_deps, { entry }) => ({ ...provider, name: entry.tenant }),
 		});
 		defineFederationType<unknown>()({
+			// @ts-expect-error — the entry is annotated as another type, so this schema does not pair with it
 			entrySchema: z.object({ issuer: z.string() }),
-			// @ts-expect-error — an entry annotated as another type does not pair with this schema
 			factory: (_deps, { entry }: FederationInstance<{ tenant: string }>) => ({
 				...provider,
 				name: entry.tenant,

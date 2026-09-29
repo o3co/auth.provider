@@ -458,7 +458,7 @@ const issuerOf = (config: unknown): string | undefined => {
  * - a `rateLimitBudgets` budget no limiter can apply as written
  *   (`isUsableRateLimitSpec`) — a string, `undefined` and fractions included
  *   (#728). What registers is a frozen copy of the budget's `limit` and
- *   `windowSeconds`, read once here; `null` (switched off by its module's
+ *   `windowSeconds`, each read once here — the copy that was validated; `null` (switched off by its module's
  *   settings) passes, and stays claimed. The prefix was held at stage 1.
  * @internal
  */
@@ -502,16 +502,22 @@ function checkNameKeyedValue(kind: string, name: string, value: unknown, config:
 	if (kind === "rateLimitBudgets") {
 		// The prefix itself was held at stage 1 (`contribution-shapes`).
 		if (value === null) return value;
-		if (!isUsableRateLimitSpec(value)) {
-			const { limit, windowSeconds } =
-				typeof value === "object" && value !== null
-					? (value as { limit?: unknown; windowSeconds?: unknown })
-					: { limit: undefined, windowSeconds: undefined };
+		// Each field read once, into the one object that is validated, frozen
+		// and registered: a getter or a proxy answering differently on a second
+		// read cannot pass the check with one budget and register another.
+		const read =
+			typeof value === "object"
+				? {
+						limit: (value as { readonly limit?: unknown }).limit,
+						windowSeconds: (value as { readonly windowSeconds?: unknown }).windowSeconds,
+					}
+				: { limit: undefined, windowSeconds: undefined };
+		if (typeof value !== "object" || !isUsableRateLimitSpec(read)) {
 			throw new RangeError(
-				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds that ends within the Date range (got limit ${shownConfigValue(limit)}, windowSeconds ${shownConfigValue(windowSeconds)})`,
+				`rateLimitBudgets "${name}": a budget is { limit, windowSeconds }, a positive whole limit and a positive whole number of seconds that ends within the Date range (got limit ${shownConfigValue(read.limit)}, windowSeconds ${shownConfigValue(read.windowSeconds)})`,
 			);
 		}
-		return Object.freeze({ limit: value.limit, windowSeconds: value.windowSeconds });
+		return Object.freeze(read);
 	}
 	if (kind === "sessionRequirements") {
 		if (value === null || value === undefined) {
