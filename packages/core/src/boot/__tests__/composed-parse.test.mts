@@ -190,6 +190,43 @@ describe("one composed parse over the transitional base", () => {
 		).toEqual(["logging.level"]);
 	});
 
+	describe("two modules' configSchemas that make different values of one key", () => {
+		const coercing = defineModule({
+			name: "coercing-reader",
+			configSchema: z.object({ widget: z.object({ size: z.coerce.number() }) }),
+		});
+		const verbatim = defineModule({
+			name: "verbatim-reader",
+			configSchema: z.object({ widget: z.object({ size: z.string() }) }),
+		});
+
+		it.each([
+			["coercing first", [coercing, verbatim]],
+			["verbatim first", [verbatim, coercing]],
+		])(
+			"refuse boot, naming the key and both modules, whatever their order (%s)",
+			async (_label, modules) => {
+				const err = await bootRefused(modules, resolved({ widget: { size: "3" } }));
+				expect(err.reason).toBe("config-validation-failed");
+				expect(err.message).toMatch(/widget\.size: /);
+				expect(err.message).toMatch(/"coercing-reader"/);
+				expect(err.message).toMatch(/"verbatim-reader"/);
+			},
+		);
+
+		it("boot when they make the same value of it", async () => {
+			const alsoCoercing = defineModule({
+				name: "also-coercing-reader",
+				configSchema: z.object({ widget: z.object({ size: z.coerce.number() }) }),
+			});
+			const config = await bootAndRead(
+				[coercing, alsoCoercing],
+				resolved({ widget: { size: "3" } }),
+			);
+			expect(config.widget).toEqual({ size: 3 });
+		});
+	});
+
 	it("keeps what a module's configSchema does not declare under the keys it does", async () => {
 		const reader = defineModule({
 			name: "partial-reader",
