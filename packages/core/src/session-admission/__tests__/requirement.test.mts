@@ -37,6 +37,7 @@ import {
 	issuedRemediationActions,
 	registeredRequirement,
 	sealRegisteredReach,
+	stepUpPageUrl,
 } from "#/session-admission/requirement.mjs";
 import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { RecordedAuthentication } from "#/user-sessions/authentication.mjs";
@@ -160,6 +161,50 @@ describe("checkStepUpPage — the deployment's page for a step-up (D2, D3)", () 
 			"https://other.test/mfa",
 		);
 		expect(() => checkStepUpPage({ url: "mfa", params: {} })).toThrow(RangeError);
+	});
+});
+
+describe("stepUpPageUrl — the step-up page as a browser is sent to it (D2, D8)", () => {
+	it("resolves a path on the issuer and sets each param on the query: one absolute URL string", () => {
+		expect(
+			stepUpPageUrl(
+				checkStepUpPage({ url: "/mfa/step-up", params: { flow: "device", ui: "compact" } }),
+				ISSUER,
+			),
+		).toBe(`${ISSUER}/mfa/step-up?flow=device&ui=compact`);
+	});
+
+	it("keeps an absolute page's own query and sets the params beside it, a param of the same name replacing it", () => {
+		expect(
+			stepUpPageUrl(
+				checkStepUpPage({ url: `${ISSUER}/mfa?x=1&keep=a`, params: { flow: "link", x: "2" } }),
+				ISSUER,
+			),
+		).toBe(`${ISSUER}/mfa?x=2&keep=a&flow=link`);
+	});
+
+	it("resolves a path against the issuer's origin, as a browser resolves a Location — an issuer with a path included", () => {
+		expect(stepUpPageUrl({ url: "/mfa", params: {} }, "https://auth.test/tenant/a")).toBe(
+			"https://auth.test/mfa",
+		);
+	});
+
+	it("encodes each param as a query value, never concatenated", () => {
+		const url = stepUpPageUrl(
+			{ url: "/mfa", params: { note: "a b&c=d#e", "k y": "é" } },
+			ISSUER,
+		);
+		expect(url).toBe(`${ISSUER}/mfa?note=a+b%26c%3Dd%23e&k+y=%C3%A9`);
+		const read = new URL(url);
+		expect(read.searchParams.get("note")).toBe("a b&c=d#e");
+		expect(read.searchParams.get("k y")).toBe("é");
+		expect(read.hash).toBe("");
+	});
+
+	it("adds no return parameter: redirect_to is the consumer's, set on its own trip", () => {
+		const url = new URL(stepUpPageUrl({ url: "/mfa", params: { flow: "x" } }, ISSUER));
+		expect(url.searchParams.has("redirect_to")).toBe(false);
+		expect([...url.searchParams.keys()]).toEqual(["flow"]);
 	});
 });
 

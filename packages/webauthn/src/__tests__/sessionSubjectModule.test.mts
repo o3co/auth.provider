@@ -50,6 +50,8 @@ import { webauthnSessionSubjectModule } from "#/sessionSubject.mjs";
 const SUBJECT = "u-1";
 const SID = "s-1";
 const T0 = Date.now();
+/** `oauth.jwt.issuer`, which the planner hands the module in `config`: what a step-up page is resolved on. */
+const ISSUER = "https://as.example.test";
 
 const live = (over: Partial<UserSession> = {}): UserSession => ({
 	sid: SID,
@@ -164,6 +166,7 @@ function setup(options: Setup = {}) {
 	} as unknown as UserSessionStore;
 	const subjectFor = vi.fn(options.subjectFor ?? bySubject);
 	const contribution = routeFactory(subjectFor)({
+		config: { oauth: { jwt: { issuer: ISSUER } } },
 		sessionRequirementResolver: resolverForTests(options.requirement ? [options.requirement] : []),
 		...(options.noStore ? {} : { userSessionStore }),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
@@ -389,7 +392,7 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 		},
 	);
 
-	it("answers a requirement's step-up with 403 step_up_required, the requirement and its page, and never reaches the route", async () => {
+	it("answers a requirement's step-up with 403 step_up_required, the requirement and its page as one absolute URL on the issuer, and never reaches the route", async () => {
 		const { app, subjectFor } = setup({
 			requirement: fixtureRequirement({ outcome: "step_up", whenStillUnmet: "reauthenticate" })
 				.requirement,
@@ -400,7 +403,11 @@ describe("webauthnSessionSubjectModule — admission's answer, per outcome (weba
 			error: "step_up_required",
 			error_description: "Registering a passkey requires a step-up first",
 			requirement: "fixture",
-			page: { url: "/fixture/step-up", params: { requirement: "fixture" } },
+			// The shape every consumer answers (the session-admission ADR's D8, as
+			// amended): the registered page resolved on the issuer, its params on
+			// the query, no return parameter — the account page knows where it
+			// comes back to.
+			page: `${ISSUER}/fixture/step-up?requirement=fixture`,
 		});
 		expect(subjectFor).not.toHaveBeenCalled();
 	});

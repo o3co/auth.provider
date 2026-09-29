@@ -68,6 +68,9 @@ export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookie
 	HARNESS_SESSION_COOKIE_NAME,
 );
 
+/** `oauth.jwt.issuer` in the config the harness hands the router: what a step-up page is resolved on. */
+export const HARNESS_ISSUER = "https://as.example.com";
+
 /**
  * Records held by the shim's express-session `Store`, keyed exactly as the
  * route keys them. The federation transaction records land here (#494).
@@ -299,7 +302,7 @@ export function buildFederationApp({
 
 	app.use(
 		createRouter(express, {
-			config: {} as never,
+			config: { oauth: { jwt: { issuer: HARNESS_ISSUER } } } as never,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: new Map(
 				[...providers.keys()].map((name) => [name, makePermissivePolicy()]),

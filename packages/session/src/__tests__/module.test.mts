@@ -435,7 +435,13 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			],
 		});
 		expect(res.status).toBe(403);
-		expect(res.body).toMatchObject({ error: "step_up_required", requirement: "fixture" });
+		expect(res.body).toMatchObject({
+			error: "step_up_required",
+			requirement: "fixture",
+			// Resolved on the issuer the module reads, oauth.jwt.issuer — the
+			// valid config's.
+			page: "https://auth.test/fixture/step-up",
+		});
 	});
 });
 

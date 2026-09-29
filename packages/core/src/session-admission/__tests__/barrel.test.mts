@@ -34,6 +34,13 @@ describe("the barrel's session-admission surface", () => {
 		).toThrow(RangeError);
 	});
 
+	it("exports stepUpPageUrl, so every consumer answers a step-up's page as one absolute URL", () => {
+		expect(typeof core.stepUpPageUrl).toBe("function");
+		expect(core.stepUpPageUrl({ url: "/mfa", params: { flow: "x" } }, "https://auth.test")).toBe(
+			"https://auth.test/mfa?flow=x",
+		);
+	});
+
 	it("does not export boot's internals: registration, the seal and the continuation builders", () => {
 		for (const internal of [
 			"registeredRequirement",
