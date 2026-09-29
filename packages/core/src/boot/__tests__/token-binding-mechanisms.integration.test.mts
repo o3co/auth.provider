@@ -231,6 +231,31 @@ describe("tokenBindingMechanisms — core synthesis", () => {
 		await handle.dispose();
 	});
 
+	it("refuses an oauthTokenSettings with no dispatch policy, naming the member, rather than reading the configuration's", async () => {
+		// A host that fills the slot itself fills it whole. One without
+		// `tokenBinding` failed on a property read of undefined; one whose
+		// policy is neither of the two would have been handed to the
+		// middleware as if it were one.
+		for (const tokenBinding of [undefined, { bindConfidentialClientRefreshTokens: false }, { dispatchPolicy: "mutual" }]) {
+			const booting = createApp({
+				modules: [contributingModule("dpop", () => dpopMech), makeObserverModule({})],
+				bootstrapComponents: {
+					...makeBoot("intent-explicit"),
+					oauthTokenSettings: { ...createTestOAuthTokenSettings(), tokenBinding },
+				} as unknown as BootstrapMap,
+			});
+			const caught = await booting.then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
+				},
+				(err: unknown) => err,
+			);
+			expect(caught, JSON.stringify(tokenBinding)).toBeInstanceOf(RangeError);
+			expect((caught as Error).message).toMatch(/oauthTokenSettings\.tokenBinding\.dispatchPolicy/);
+		}
+	});
+
 	it("factory returning null is filtered — surrounding mechanisms still mount", async () => {
 		const received: { binding?: unknown } = {};
 		const handle = await createApp({

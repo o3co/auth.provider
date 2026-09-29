@@ -42,6 +42,7 @@ import {
 	memoryAccessTokenDenylistModule,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	resolveTokenBindingDispatchPolicy,
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
@@ -116,6 +117,22 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 			resourceIndicatorEnabled: true,
 			requireEmailVerified: true,
 		});
+	});
+
+	it("reads the dispatch policy through core's resolveTokenBindingDispatchPolicy, which boot reads without this module", () => {
+		const base = fixture();
+		for (const policy of ["strict-mutual-exclusion", "intent-explicit", "mutual", undefined]) {
+			const config = {
+				...base,
+				oauth: {
+					...base.oauth,
+					tokenBinding: { ...base.oauth.tokenBinding, "dispatch-policy": policy },
+				},
+			} as unknown as AppConfig;
+			expect(oauthTokenSettingsFrom(config).tokenBinding.dispatchPolicy, String(policy)).toBe(
+				resolveTokenBindingDispatchPolicy(config),
+			);
+		}
 	});
 
 	it("refuses an issuer that is not canonical, naming the key", () => {

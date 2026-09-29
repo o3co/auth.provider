@@ -215,4 +215,8 @@ describe("core barrel — the trusted-proxy address vocabulary (#292)", () => {
 	it("re-exports the hop ceiling http.trustProxy is held to, which the httpSettings contract reads (#728)", () => {
 		expect(core.MAX_TRUST_PROXY_HOPS).toBe(255);
 	});
+
+	it("re-exports the one reading of the dispatch policy, which the oauth module resolves its settings through (#728)", () => {
+		expect(typeof core.resolveTokenBindingDispatchPolicy).toBe("function");
+	});
 });

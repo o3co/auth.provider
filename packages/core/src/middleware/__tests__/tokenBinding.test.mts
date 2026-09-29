@@ -12,7 +12,11 @@ import { readFileSync } from "node:fs";
 import type { Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import type { TokenBinding } from "#/grants/tokenBinding.mjs";
-import { type TokenBindingMechanism, tokenBindingMw } from "#/middleware/tokenBinding.mjs";
+import {
+	resolveTokenBindingDispatchPolicy,
+	type TokenBindingMechanism,
+	tokenBindingMw,
+} from "#/middleware/tokenBinding.mjs";
 
 const fakeReq = () => ({}) as Request;
 const fakeRes = () => {
@@ -572,6 +576,35 @@ describe("tokenBindingMw — response headers a mechanism asks for (#530)", () =
 			expect(next).toHaveBeenCalledOnce();
 			expect(req.tokenBinding).toBe(binding);
 			expect(res.setHeader).toHaveBeenCalledWith("DPoP-Nonce", "n2");
+		}
+	});
+});
+
+describe("resolveTokenBindingDispatchPolicy (#728)", () => {
+	// The one reading of `oauth.tokenBinding.dispatch-policy`: the oauth module
+	// resolves its oauthTokenSettings through it, and boot reads it through
+	// this in a composition without that module.
+	it("reads strict-mutual-exclusion when the configuration says so", () => {
+		expect(
+			resolveTokenBindingDispatchPolicy({
+				oauth: { tokenBinding: { "dispatch-policy": "strict-mutual-exclusion" } },
+			}),
+		).toBe("strict-mutual-exclusion");
+	});
+
+	it("reads intent-explicit otherwise: when it says so, says something else, or says nothing", () => {
+		for (const config of [
+			{ oauth: { tokenBinding: { "dispatch-policy": "intent-explicit" } } },
+			{ oauth: { tokenBinding: { "dispatch-policy": "STRICT-MUTUAL-EXCLUSION" } } },
+			{ oauth: { tokenBinding: {} } },
+			{ oauth: {} },
+			{},
+			undefined,
+			null,
+		]) {
+			expect(resolveTokenBindingDispatchPolicy(config), JSON.stringify(config)).toBe(
+				"intent-explicit",
+			);
 		}
 	});
 });
