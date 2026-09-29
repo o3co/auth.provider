@@ -16,18 +16,22 @@
 
 /**
  * The template's posture on session admission (the session-admission ADR's
- * D7): `sessionRequirements.expected` is derived in TypeScript from the
- * PARSED `mfa.mode` — `[]` under `off`, `["mfa"]` otherwise — never from the
- * raw `MFA_MODE`, so a variable the schema refused cannot boot with a
- * posture the config does not carry. `buildModules` installs no module
- * registering `mfa`, so a mode other than `off` is refused at boot by
- * `session-requirement-missing`.
+ * D7): its `config/application.conf` expects no session requirement
+ * (`sessionRequirements.expected = []`), because `buildModules` installs no
+ * module that registers one. A deployment that adds such a module names its
+ * requirement there. `mfa.mode` changes nothing the template boots: no module
+ * it installs reads the key.
  */
 
 import { BootError } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it } from "vitest";
-import { withSessionRequirements } from "../buildModules.mjs";
-import { type Composition, compose, SINGLE_ENV } from "./all-modules-composition.fixture.mjs";
+import { readOwnLayers, resolveLayers } from "../configPath.mjs";
+import {
+	type Composition,
+	compose,
+	ownFiles,
+	SINGLE_ENV,
+} from "./all-modules-composition.fixture.mjs";
 
 let current: Composition | undefined;
 
@@ -36,35 +40,45 @@ afterEach(async () => {
 	current = undefined;
 });
 
-describe("sessionRequirements.expected, derived from the parsed mfa.mode", () => {
-	it("declares nothing under the shipped default, off, and boots", async () => {
+/** The boot's refusal, or `undefined` when it booted (kept for disposal). */
+const refusal = (composing: Promise<Composition>): Promise<unknown> =>
+	composing.then(
+		(composition) => {
+			current = composition;
+			return undefined;
+		},
+		(caught: unknown) => caught,
+	);
+
+describe("the template's sessionRequirements.expected", () => {
+	it("is [] in the shipped configuration, and the composition boots with it", async () => {
+		const own = readOwnLayers(ownFiles(), { env: SINGLE_ENV });
+		expect(resolveLayers(own, []).sessionRequirements).toEqual({ expected: [] });
 		current = await compose();
 		expect(current.config.sessionRequirements).toEqual({ expected: [] });
+		expect([...(current.handle.components.sessionRequirementResolver?.entries() ?? [])]).toEqual(
+			[],
+		);
 	});
 
 	it.each(["optional", "required"] as const)(
-		"declares mfa under %s, and is refused at boot while no MFA module registers the requirement: session-requirement-missing",
+		"boots under MFA_MODE=%s, expecting no requirement: no module the template installs reads mfa.mode",
 		async (mode) => {
-			const err = await compose({ env: { ...SINGLE_ENV, MFA_MODE: mode } }).then(
-				(composition) => {
-					current = composition;
-					return undefined;
-				},
-				(caught: unknown) => caught,
-			);
-			expect(err).toBeInstanceOf(BootError);
-			expect((err as BootError).reason).toBe("session-requirement-missing");
-			expect((err as BootError).details).toMatchObject({ mode, requirement: "mfa" });
+			current = await compose({ env: { ...SINGLE_ENV, MFA_MODE: mode } });
+			expect(current.config.mfa.mode).toBe(mode);
+			expect(current.config.sessionRequirements).toEqual({ expected: [] });
 		},
 	);
 
-	it("withSessionRequirements reads the parsed mode alone: a configuration that says off declares nothing whatever the variable said", () => {
-		const off = withSessionRequirements({ mfa: { mode: "off" } } as never);
-		expect(off.sessionRequirements).toEqual({ expected: [] });
-		const required = withSessionRequirements({ mfa: { mode: "required" } } as never);
-		expect(required.sessionRequirements).toEqual({ expected: ["mfa"] });
-		// A mode that is none of the three is the schema's to refuse; here it
-		// is a RangeError naming the key, never read as off.
-		expect(() => withSessionRequirements({ mfa: { mode: "on" } } as never)).toThrow(/mfa\.mode/);
+	it("refuses the boot when the configuration expects mfa and no installed module registers it: session-requirement-missing, naming the key and the name", async () => {
+		const err = await refusal(
+			compose({ config: (config) => ({ ...config, sessionRequirements: { expected: ["mfa"] } }) }),
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("session-requirement-missing");
+		expect((err as BootError).details).toMatchObject({
+			configKey: "sessionRequirements.expected",
+			missing: ["mfa"],
+		});
 	});
 });

@@ -526,6 +526,14 @@ describe("the shipped config boots with every documented override supplied as a 
 		}
 	});
 
+	it("parses each MFA_MODE at boot, and the shipped configuration expects no session requirement under any of them", async () => {
+		for (const mode of ["off", "optional", "required"] as const) {
+			const parsed = await bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: mode });
+			expect(parsed.mfa.mode, mode).toBe(mode);
+			expect(parsed.sessionRequirements, mode).toEqual({ expected: [] });
+		}
+	});
+
 	describe("boolean overrides accept the spellings an operator writes", () => {
 		const cases: ReadonlyArray<[string, boolean]> = [
 			["true", true],
@@ -649,25 +657,9 @@ describe("the shipped config boots with every documented override supplied as a 
 			});
 		}
 
-		it("parses each MFA_MODE, and derives sessionRequirements.expected from the parsed mode, never from the variable", () => {
-			// Phase one: the mode is a switch, read before boot, and the posture
-			// is derived from what it parsed.
-			for (const [mode, expected] of [
-				["off", []],
-				["optional", ["mfa"]],
-				["required", ["mfa"]],
-			] as const) {
-				const switches = readSwitches(
-					readOwnLayers(ownFiles("production"), { env: { ...DOCUMENTED_ENV, MFA_MODE: mode } }),
-				);
-				expect(switches.mfa?.mode, mode).toBe(mode);
-				// The key has no default: nothing in the shipped HOCON writes it.
-				expect(switches.sessionRequirements, mode).toBeUndefined();
-				expect(withSessionRequirements(switches).sessionRequirements, mode).toEqual({
-					expected: [...expected],
-				});
-			}
-			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).toThrow(/mfa\.mode/);
+		it("reads no MFA_MODE before boot: a mode that is none of the three is refused by boot's parse, naming mfa.mode", async () => {
+			expect(() => readShippedSwitches({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).not.toThrow();
+			await expect(bootParsed({ ...DOCUMENTED_ENV, MFA_MODE: "on" })).rejects.toThrow(/mfa\.mode/);
 		});
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS", async () => {
