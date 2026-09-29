@@ -202,21 +202,10 @@ describe("subjectRevocationServiceModule", () => {
 	});
 
 	describe("what it refuses when grants are on", () => {
-		it("is the service of a deployment without grants when no grant store is wired, whatever federationGrants.enabled says (#728)", () => {
-			// Whether grants exist is whether the composition holds a store for
-			// them — the federation-grants module refuses to enable them without
-			// one — not a key of another module's section.
-			expect(() => build({ config: enabled(), subjectRevocation: olderAdapter() })).not.toThrow();
-		});
-
-		it("holds a composition with a grant store to the grants boundary, whatever federationGrants.enabled says (#728)", () => {
-			expect(() =>
-				build({
-					config: config(),
-					federationGrantStore: createMemoryFederationGrantStore(),
-					subjectRevocation: olderAdapter(),
-				}),
-			).toThrow(/grantsRevokedBefore/);
+		it("refuses a deployment with nowhere to read the grants from", () => {
+			expect(() => build({ config: enabled() })).toThrow(
+				/federationGrants\.enabled = true requires a federationGrantStore/,
+			);
 		});
 
 		it("refuses an adapter that cannot carry the grants boundary", () => {
@@ -243,6 +232,18 @@ describe("subjectRevocationServiceModule", () => {
 			// The module a session deployment installs must keep working with
 			// the adapter it already has.
 			expect(() => build({ subjectRevocation: olderAdapter() })).not.toThrow();
+		});
+
+		it("decides by federationGrants.enabled: a grant store wired with the feature off is not read", () => {
+			// Whether grants are on is the flag's to say; a store alone does not
+			// turn the grants' checks on.
+			expect(() =>
+				build({
+					config: config({ federationGrants: { enabled: false } }),
+					federationGrantStore: createMemoryFederationGrantStore(),
+					subjectRevocation: olderAdapter(),
+				}),
+			).not.toThrow();
 		});
 	});
 
@@ -343,6 +344,30 @@ describe("subjectRevocationServiceModule", () => {
 					}),
 				),
 			]);
+		});
+
+		it("sizes it from the access-token maximum of the oauthTokenSettings the composition holds, not its default", async () => {
+			// The access maximum (30 days) outlives the refresh token (a day) and
+			// the session (a day), and differs from the default (a minute).
+			const { kept, revocation } = recording();
+			await build({
+				subjectRevocation: revocation,
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
+					refreshTokenExpiresIn: 86_400,
+				}),
+			}).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(
+					config({
+						oauth: {
+							accessToken: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
+							refreshToken: { expiresIn: 86_400 },
+						},
+					}),
+				),
+			]);
+			expect(kept[0]).toBeGreaterThan(30 * 86_400_000);
 		});
 
 		it("lists both slots as optional", () => {
