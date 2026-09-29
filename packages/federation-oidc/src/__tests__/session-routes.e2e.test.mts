@@ -142,7 +142,7 @@ afterEach(async () => {
 	handleRef = undefined;
 });
 
-describe("OIDC federation through the session routes (#524)", () => {
+describe("OIDC federation through the session routes", () => {
 	it("refuses an identity the Store does not know with 401, keyed <name>:<sub>", async () => {
 		const idpA = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a", sub: "sub-a-1" });
 		const idpB = await createFakeIdp({ issuer: ISSUER_B, clientId: "client-b", sub: "sub-b-1" });
@@ -203,7 +203,7 @@ describe("OIDC federation through the session routes (#524)", () => {
 		expect(repo.authenticateByToken).toHaveBeenLastCalledWith("idp-a:sub-b-1");
 	});
 
-	it("#595: the callback's iss reaches the adapter — the right issuer logs in, another issuer's is refused", async () => {
+	it("the callback's iss reaches the adapter — the right issuer logs in, another issuer's is refused", async () => {
 		const idpA = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a", sub: "sub-a-1" });
 		const idpB = await createFakeIdp({ issuer: ISSUER_B, clientId: "client-b", sub: "sub-b-1" });
 		// Discovery runs at boot, so the flag goes on the document first.

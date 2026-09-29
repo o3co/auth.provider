@@ -31,7 +31,7 @@ const okta = {
 	callbackURL: "https://auth.test/session/oauth/federation/okta/callback",
 };
 
-describe("oidcFederationModule(name) (#524)", () => {
+describe("oidcFederationModule(name)", () => {
 	it("is one module per instance, named after the federation", () => {
 		const mod = oidcFederationModule("okta");
 		expect(mod.name).toBe("federation-oidc-okta");
@@ -69,7 +69,7 @@ describe("oidcFederationModule(name) (#524)", () => {
 	});
 });
 
-describe("readOidcFederationConfigs (#524)", () => {
+describe("readOidcFederationConfigs", () => {
 	it("reads every enabled section of type oidc, flat or nested, and ignores the rest", () => {
 		const out = readOidcFederationConfigs({
 			okta: { enabled: true, type: "oidc", ...okta },
@@ -231,7 +231,7 @@ describe("readOidcFederationConfigs (#524)", () => {
 	});
 });
 
-describe("readOidcFederationConfigs — the accumulator (#524 review)", () => {
+describe("readOidcFederationConfigs — the accumulator", () => {
 	it("refuses a section named __proto__ by name, rather than assigning through the prototype setter", () => {
 		// JSON.parse (like a config parser) creates an own "__proto__" key; an
 		// object literal here would set the prototype instead.

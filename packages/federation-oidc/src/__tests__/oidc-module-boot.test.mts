@@ -55,7 +55,7 @@ const activatorModule = defineModule({
 	},
 });
 
-describe("oidcFederationModule boot integration (#524)", () => {
+describe("oidcFederationModule boot integration", () => {
 	it("boots two instances against two issuers, each under its own name", async () => {
 		const idpA = await createFakeIdp({ issuer: "https://idp-a.test", clientId: "client-a" });
 		const idpB = await createFakeIdp({
