@@ -25,17 +25,18 @@
  *   cookie, a cookie scoped to a domain, and one sent cross-site.
  * - It is the cookie express-session is given: the same attributes, and a
  *   `null` domain read as a host-only cookie.
- * - It refuses exactly what the session store refuses of the cookie — a
- *   `__Host-` name that is not secure, or that names a domain, an empty one
- *   included — and nothing more: it is the store's cookie, read as it is.
- *   A `__Secure-` name or a `SameSite=None` cookie that is not secure, which
- *   core's contract holds a policy to, the store does not refuse, and neither
- *   does this (core's schema refuses the second).
+ * - No session section yields a policy that breaks core's contract: what
+ *   would break it is refused. That is everything the session store refuses
+ *   of the cookie, with the store's message — a `__Host-` name that is not
+ *   secure, or that names a domain, an empty one included — and more the
+ *   store does not refuse yet: a name that is not a cookie name, a
+ *   `__Secure-` name or a `SameSite=None` cookie that is not secure, a
+ *   lifetime out of range (core's schema refuses the last two first).
  * - The session store module provides it.
  */
 
 import type { AppConfig, SessionCookiePolicy } from "@o3co/auth-provider-core";
-import { defineModule } from "@o3co/auth-provider-core";
+import { defineModule, MAX_DURATION_MS } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
 	makeValidAppConfig,
@@ -88,45 +89,71 @@ describe("sessionCookiePolicyFrom", () => {
 		).toBe("example.com");
 	});
 
-	/** Session sections, each with whether the session store boots with it. */
-	const CASES: ReadonlyArray<readonly [string, Partial<SessionSlice>, boolean]> = [
-		["a __Host- name that is secure and host-only", {}, true],
-		["a __Host- name that is not secure", { secure: false }, false],
-		["a __Host- name with a domain", { domain: "example.com" }, false],
-		["a __Host- name with an empty domain", { domain: "" }, false],
-		["a __Secure- name that is not secure", { name: "__Secure-auth.session", secure: false }, true],
-		["a cookie with no prefix and an empty domain", { name: "auth.session", domain: "" }, true],
+	const HOST_PREFIX =
+		"session.name with __Host- prefix requires session.secure=true and session.domain=null";
+
+	/**
+	 * Session sections, each with whether the session store boots with it and
+	 * what the policy refuses it with (`undefined`: the policy is built).
+	 */
+	const CASES: ReadonlyArray<
+		readonly [string, Partial<SessionSlice>, boolean, string | undefined]
+	> = [
+		["a __Host- name that is secure and host-only", {}, true, undefined],
+		["a __Host- name that is not secure", { secure: false }, false, HOST_PREFIX],
+		["a __Host- name with a domain", { domain: "example.com" }, false, HOST_PREFIX],
+		["a __Host- name with an empty domain", { domain: "" }, false, HOST_PREFIX],
+		[
+			"a __Secure- name that is not secure",
+			{ name: "__Secure-auth.session", secure: false },
+			true,
+			"session.name with __Secure- prefix requires session.secure=true",
+		],
+		[
+			"a name that is not a cookie name",
+			{ name: "auth session" },
+			true,
+			'session.name "auth session" is not a cookie name (an RFC 6265 token)',
+		],
+		[
+			"a cookie with no prefix and an empty domain",
+			{ name: "auth.session", domain: "" },
+			true,
+			undefined,
+		],
 	];
 
 	it.each(CASES)(
-		"%s: refused exactly when the session store refuses it",
-		(_what, change, boots) => {
+		"%s: the policy refuses it as the column says",
+		(_what, change, _boots, refusal) => {
 			const session = { ...fixture(), ...change } as SessionSlice;
-			if (boots) {
+			if (refusal === undefined) {
 				expect(() => sessionCookiePolicyFrom(session)).not.toThrow();
 			} else {
-				expect(() => sessionCookiePolicyFrom(session)).toThrow(
-					"session.name with __Host- prefix requires session.secure=true and session.domain=null",
-				);
+				expect(() => sessionCookiePolicyFrom(session)).toThrow(refusal);
 			}
 		},
 	);
 
-	it.each(CASES)("%s: the session store agrees", async (_what, change, boots) => {
-		const base = makeValidAppConfig() as AppConfig;
-		const config = { ...base, session: { ...base.session, ...change } } as AppConfig;
-		const booting = createTestApp({
-			modules: [sessionStoreModuleFor(config)],
-			bootstrapComponents: { config, pathResolver: (s: string) => s },
-		});
-		if (boots) {
-			handles.push(await booting);
-		} else {
-			await expect(booting).rejects.toThrow(/__Host- prefix requires session\.secure=true/);
-		}
-	});
+	it.each(CASES)(
+		"%s: the session store boots with it as the column says, and what it refuses the policy refuses with its message",
+		async (_what, change, boots, refusal) => {
+			const base = makeValidAppConfig() as AppConfig;
+			const config = { ...base, session: { ...base.session, ...change } } as AppConfig;
+			const booting = createTestApp({
+				modules: [sessionStoreModuleFor(config)],
+				bootstrapComponents: { config, pathResolver: (s: string) => s },
+			});
+			if (boots) {
+				handles.push(await booting);
+			} else {
+				expect(refusal).toBe(HOST_PREFIX);
+				await expect(booting).rejects.toThrow(/__Host- prefix requires session\.secure=true/);
+			}
+		},
+	);
 
-	it("does not refuse a cross-site cookie that is not secure: the store does not, and core's schema does, before either is built", () => {
+	it("refuses a cross-site cookie that is not secure, which core's schema refuses before it is built", () => {
 		expect(() =>
 			sessionCookiePolicyFrom({
 				...fixture(),
@@ -134,7 +161,64 @@ describe("sessionCookiePolicyFrom", () => {
 				sameSite: "none",
 				secure: false,
 			}),
-		).not.toThrow();
+		).toThrow('session.sameSite = "none" requires session.secure = true');
+	});
+
+	it.each([0, -1, 1.5, MAX_DURATION_MS + 1, Number.NaN])(
+		"refuses a lifetime of %s, which core's schema refuses before it is built",
+		(maxAge) => {
+			expect(() => sessionCookiePolicyFrom({ ...fixture(), maxAge })).toThrow(
+				`session.maxAge must be a whole number of milliseconds from 1 to ${MAX_DURATION_MS}`,
+			);
+		},
+	);
+
+	it("builds a lifetime of 1 and of the ceiling", () => {
+		expect(sessionCookiePolicyFrom({ ...fixture(), maxAge: 1 }).maxAgeMs).toBe(1);
+		expect(sessionCookiePolicyFrom({ ...fixture(), maxAge: MAX_DURATION_MS }).maxAgeMs).toBe(
+			MAX_DURATION_MS,
+		);
+	});
+
+	it("yields no policy that breaks core's contract, over every combination of the cookie's attributes", async () => {
+		const names = [
+			"__Host-auth.session",
+			"__Secure-auth.session",
+			"auth.session",
+			"auth session",
+			"auth;session",
+			"",
+		];
+		const broken: string[] = [];
+		for (const name of names) {
+			for (const secure of [true, false]) {
+				for (const sameSite of ["lax", "strict", "none"] as const) {
+					for (const domain of [null, "", "example.com"]) {
+						for (const maxAge of [3_600_000, 0, 1.5, MAX_DURATION_MS + 1]) {
+							const session = { ...fixture(), name, secure, sameSite, domain, maxAge };
+							let policy: SessionCookiePolicy;
+							try {
+								policy = sessionCookiePolicyFrom(session);
+							} catch {
+								continue;
+							}
+							for (const { name: rule, run } of sessionCookiePolicyContract({
+								build: () => policy,
+							})) {
+								try {
+									await run();
+								} catch {
+									broken.push(
+										`${JSON.stringify({ name, secure, sameSite, domain, maxAge })}: ${rule}`,
+									);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		expect(broken).toEqual([]);
 	});
 
 	it("reads an empty domain as a host-only cookie, as express-session is given it", () => {
