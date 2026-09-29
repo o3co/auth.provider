@@ -15,10 +15,10 @@
  */
 
 /**
- * What every composition that enables federation grants now brings (#593
- * slice 6): a consent page, a callback per connection on the provider's own
- * origin, somewhere to lodge an intent, and the identity lookup D7 check 5
- * asks. The tests that exercise spending a grant need all of it present and
+ * What every composition that enables federation grants brings: a consent
+ * page, a callback per connection on the provider's own origin, somewhere to
+ * lodge an intent, and the identity lookup (the federation-grants ADR, D7
+ * check 5). The tests that exercise spending a grant need all of it present and
  * none of it to be what they are about — so it lives here once.
  */
 
@@ -34,7 +34,7 @@ export const ACQUISITION_GRANT_SETTINGS = { consent: { url: "/consent/grants" } 
 export const ACQUISITION_LOGIN_PAGE = "/login";
 
 /**
- * The `loginEntry` slot (#728) for {@link ACQUISITION_LOGIN_PAGE}: the session
+ * The `loginEntry` slot for {@link ACQUISITION_LOGIN_PAGE}: the session
  * module provides it in a real composition; core's double stands in for it.
  */
 export const acquisitionLoginEntry = () => createTestLoginEntry(ACQUISITION_LOGIN_PAGE);
@@ -47,7 +47,7 @@ export const callbackUrlFor = (connection: string): string =>
  * Merged into `bootstrapComponents`, with the login entry. The Store covers every registration and
  * establishes "linked to nobody" — a test composition's answer, not a
  * production one: a real Store says `unlinked` only after it has looked
- * everywhere a link could be (#611).
+ * everywhere a link could be.
  */
 export const acquisitionComponents = () => ({
 	federationGrantIntentStore: createMemoryFederationGrantIntentStore(),

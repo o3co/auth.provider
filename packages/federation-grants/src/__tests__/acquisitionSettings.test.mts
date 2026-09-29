@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-// What a deployment must have configured before it may create grants (#593
-// slice 6, D6–D8), resolved once at boot. Each refusal here is one a user
-// would otherwise meet at the end of a consent, which is the worst place to
-// find out that the deployment was never set up to finish it.
+// What a deployment must have configured before it may create grants (the
+// federation-grants ADR, D6–D8), resolved once at boot. Each refusal here is
+// one a user would otherwise meet at the end of a consent, which is the worst
+// place to find out that the deployment was never set up to finish it.
 
 import {
 	type FederatedIdentityRegistration,
@@ -118,7 +118,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			"consent",
 			`${ISSUER}/consent#fragment`,
 			"/consent#fragment",
-			// A path that normalises to another host (the adversarial review).
+			// A path that normalises to another host.
 			"/.//evil.example/consent",
 		]) {
 			expect(() => resolve({ consent: { url } }), url).toThrow(/consent\.url/);
@@ -126,7 +126,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 	});
 
 	it("refuses a deployment with no login page: connect sends a browser that is not signed in there", () => {
-		// The page is the `loginEntry` slot (#728), which the session module
+		// The page is the `loginEntry` slot, which the session module
 		// provides from `endpoints.login.url`.
 		expect(resolve({ consent: { url: "/c" } }).login.urlFor("/back")).toBe(
 			"/login?redirect_to=%2Fback",
@@ -283,7 +283,8 @@ describe("requireFederationGrantIdentityLookup", () => {
 	});
 
 	it("refuses the one registration the Store does not cover, by connection and registration, with both remedies", () => {
-		// D19's case: the login registration is covered, the grants one is not.
+		// The case of the federation-grants ADR's D19: the login registration
+		// is covered, the grants one is not.
 		const store = new Covering((registration) => registration.clientId !== "grants-client");
 		let error: unknown;
 		try {

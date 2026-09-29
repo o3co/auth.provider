@@ -15,8 +15,8 @@
  */
 
 /**
- * The browser half of acquisition (#593, D7, D8, slice 6): `GET /connect` and
- * the consent the deployment's page reads and answers.
+ * The browser half of acquisition (the federation-grants ADR, D7 and D8):
+ * `GET /connect` and the consent the deployment's page reads and answers.
  *
  * Mounted for real, behind a stand-in for express-session, over the real
  * lodging function and the real in-memory stores. What is faked is the world
@@ -91,8 +91,8 @@ interface Browser {
 
 /**
  * The Store the callback asks by default, written as a class: its lookup reads
- * its own fields, so a call detached from the instance fails every flow — the
- * slice 6 bug every arrow-function stub hid. It covers every registration and
+ * its own fields, so a call detached from the instance fails every flow — a
+ * bug an arrow-function stub would hide. It covers every registration and
  * answers what `owners` says for a subject, `unlinked` otherwise; a value there
  * need not be a valid answer, so that a malformed one can be tested.
  */
@@ -132,7 +132,7 @@ interface WorldOptions {
 	readonly requirements?: readonly SessionRequirement[];
 	/** The router's `issuer`; {@link ISSUER} by default. */
 	readonly issuer?: string;
-	/** The `loginEntry` slot (#728): core's double for `/login` by default. */
+	/** The `loginEntry` slot: core's double for `/login` by default. */
 	readonly login?: LoginEntry;
 }
 
@@ -461,9 +461,9 @@ describe("GET /session/federation-grants/connect — the start a client sends th
 	});
 
 	it("sends a login page with a fragment its redirect_to in the page's query, before the fragment (#728)", async () => {
-		// The connect flow used to append `?redirect_to=…` after the page's
-		// fragment, where the page never read it. Through the entry it follows
-		// core's login-page rule, as `/authorize` does.
+		// `?redirect_to=…` goes before the page's fragment: after it, the page
+		// would never read it. Through the entry the connect flow follows core's
+		// login-page rule, as `/authorize` does.
 		const w = world({ login: createTestLoginEntry("/login?tenant=a#pane") });
 		const { handle } = await w.lodge();
 		const response = await w.connect(handle);
@@ -781,7 +781,7 @@ describe("POST /session/federation-grants/consent — the answer", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The callback (D7): eight checks, then the activation.
+// The callback (the federation-grants ADR, D7): eight checks, then the activation.
 // ---------------------------------------------------------------------------
 
 type World = ReturnType<typeof world>;
@@ -1113,7 +1113,7 @@ describe("the callback for a renewal", () => {
 		expect(w.events.some((e) => e.type === "federation.grant.reauthorized")).toBe(true);
 	});
 
-	/** A renewal approved, on a grant left both starved of scope and asked for by the upstream (#616). */
+	/** A renewal approved, on a grant left both starved of scope and asked for by the upstream. */
 	const renewalOfAStarvedGrant = async (w: World) => {
 		const { grantId, state } = await renewal(w);
 		const grant = await w.grants.find(grantId, w.state.now);
@@ -1151,7 +1151,7 @@ describe("the callback for a renewal", () => {
 		returned(await callback(w, { state, code: "c2" }, "b-2"));
 		const after = await w.grants.find(grantId, w.state.now);
 		expect(after?.status).toBe("active");
-		// Cleared: named, and `undefined` (#626).
+		// Cleared: named, and `undefined`.
 		expect(after).toHaveProperty("ineligible", undefined);
 		expect(after).toHaveProperty("refreshFailure", undefined);
 	});
@@ -1437,7 +1437,7 @@ describe("what the adversarial review found", () => {
 
 	it("hands the identity lookup the registration the identity was issued under, and the verified subject", async () => {
 		// The registration — name, issuer, client — is what a Store needs to
-		// place a pairwise `sub` (#611). All three are the connection's
+		// place a pairwise `sub`. All three are the connection's
 		// configuration; nothing the upstream said stands in for them.
 		const w = world();
 		const a = await approved(w, "b-1");
@@ -1559,9 +1559,8 @@ describe("what the adversarial review found", () => {
 });
 
 // ---------------------------------------------------------------------------
-// What the coverage report on #610 showed no test reached: mostly the outage
-// branches, each of which promises to fail closed, and the races a real store
-// can lose. Every one is a promise; none was held to it.
+// The outage branches, each of which promises to fail closed, and the races a
+// real store can lose: every one a promise, each held to it here.
 // ---------------------------------------------------------------------------
 
 const noPending = {
@@ -2060,7 +2059,7 @@ describe('identityLookup = "unsupported" skips the lookup and nothing else', () 
 	// The opt-out is a recorded decision about ONE test. The issuer and the
 	// renewal's account binding are not the Store's to answer, and an early
 	// return placed above them would let a renewal swap the upstream account
-	// on an existing grant (#611 review).
+	// on an existing grant.
 	it("still refuses another issuer's identity", async () => {
 		const w = world({ identityLookup: "unsupported", userRepository: {} });
 		const a = await approved(w);
@@ -2091,7 +2090,7 @@ describe('identityLookup = "unsupported" skips the lookup and nothing else', () 
  * A Store with its own directory, keyed by what does not change across
  * registrations: Entra's tenant and object id, provisioned from the IdP. The
  * only kind of Store that can cover a registration whose `sub` is pairwise —
- * a login told it `<provider>:<sub>`, and that is a different `sub` (#611).
+ * a login told it `<provider>:<sub>`, and that is a different `sub`.
  */
 class TenantDirectory {
 	readonly asked: FederatedIdentityLookup[] = [];
@@ -2248,7 +2247,7 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		const { w } = entraWorld(new Map());
 		// What the router hands `activate`, not what the memory store keeps: both
 		// bundled stores re-project the upstream, and a custom one that stored
-		// the authorization whole would keep whatever it was handed (#611 review).
+		// the authorization whole would keep whatever it was handed.
 		const activations: unknown[] = [];
 		const activate = w.grants.activate.bind(w.grants);
 		(w.grants as { activate: typeof activate }).activate = async (input) => {
@@ -2297,11 +2296,11 @@ describe("#611: an answer that establishes no ownership refuses the delegation",
 	}
 
 	it("refuses, with the bundled repository, a dedicated registration whose pairwise sub it cannot place", async () => {
-		// D19's recommended setup: Bob signed in through the LOGIN registration,
-		// whose pairwise `sub` for him is `login-pairwise-B`; the grant's own
-		// registration gives the same person `grant-pairwise-B`. Before #611 the
-		// lookup found no link under the grant's name and let Alice take Bob's
-		// upstream account. The bundled repository cannot see across the two, so
+		// The federation-grants ADR's D19 recommended setup: Bob signed in
+		// through the LOGIN registration, whose pairwise `sub` for him is
+		// `login-pairwise-B`; the grant's own registration gives the same person
+		// `grant-pairwise-B`. A lookup that found no link under the grant's name
+		// would let Alice take Bob's upstream account. The bundled repository cannot see across the two, so
 		// it says so, and that refuses.
 		const w = world({
 			userRepository: new InMemoryUserRepository(
@@ -2335,8 +2334,8 @@ describe("#611: an answer that establishes no ownership refuses the delegation",
 	});
 
 	it("reads an answer that is not one of the port's as an outage, and reports it", async () => {
-		// Positively recognised or refused: the slice 6 contract answered a
-		// string or null, and neither may now fall through to success.
+		// Positively recognised or refused: neither a string nor null may fall
+		// through to success.
 		const malformed: unknown[] = [
 			null,
 			"bob",
@@ -2443,9 +2442,9 @@ describe("an audit sink that drops everything", () => {
 
 describe("a callback that carries a parameter twice (Copilot on #610)", () => {
 	it("refuses it as a malformed response rather than dropping the copies, and exchanges nothing", async () => {
-		// A repeated `iss` used to be dropped from what the adapter was handed —
-		// so whether RFC 9207's check ran depended on the issuer's metadata, not
-		// on what the response said. RFC 6749 §3.1: a response parameter MUST
+		// Dropping a repeated `iss` from what the adapter is handed would make
+		// whether RFC 9207's check runs depend on the issuer's metadata, not on
+		// what the response said. RFC 6749 §3.1: a response parameter MUST
 		// NOT be included more than once.
 		const w = world();
 		const a = await approved(w, "b-1");

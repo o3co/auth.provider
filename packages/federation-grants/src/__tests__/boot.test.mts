@@ -15,7 +15,7 @@
  */
 
 /**
- * What `enabled = true` costs a composition (#593, §5).
+ * What `enabled = true` costs a composition.
  *
  * Every one of these is a boot refusal rather than a per-request failure, and
  * the reason is the same each time: a grant is a user's standing consent, made
@@ -89,14 +89,14 @@ const durableStoreModule = defineModule({
 	} as never,
 });
 
-/** The single-boundary surface #296 shipped, with no grants boundary on it. */
+/** A single-boundary adapter: `revokeBefore` and `revokedBefore`, with no grants boundary on it. */
 const olderRevocation = {
 	kind: "redis",
 	revokeBefore: async () => undefined,
 	revokedBefore: async () => null,
 };
 
-/** An adapter with all three delegated methods: the capability as slice 6 completed it. */
+/** An adapter with all three delegated methods: the whole capability (the federation-grants ADR, D17). */
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	exchangeDelegatedCode: async () => ({
@@ -106,7 +106,7 @@ const delegated = {
 	refreshDelegatedToken: async () => ({}),
 } as unknown as FederationProvider;
 
-/** The pair slice 2 shipped, without the code exchange slice 6 added: what a custom adapter written before it has. */
+/** Two of the three delegated methods, without the code exchange. */
 const slice2Pair = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	refreshDelegatedToken: async () => ({}),
@@ -165,22 +165,23 @@ interface Setup {
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
-	/** Slice 6: somewhere to lodge an intent. */
+	/** Somewhere to lodge an intent. */
 	readonly withIntentStore?: boolean;
 	/**
-	 * Slice 6: the repository D7 check 5 asks. `without-lookup` has no lookup;
-	 * `bundled` is `InMemoryUserRepository`, which covers no registration (#611).
+	 * The repository the identity check asks (the federation-grants ADR, D7
+	 * check 5). `without-lookup` has no lookup; `bundled` is
+	 * `InMemoryUserRepository`, which covers no registration.
 	 */
 	readonly userRepository?: "with-lookup" | "without-lookup" | "bundled";
-	/** Slice 6: the durable sessions the connect flow re-reads. */
+	/** The durable sessions the connect flow re-reads. */
 	readonly withUserSessionStore?: boolean;
 	/**
-	 * Slice 6: where connect sends a browser that is not signed in — the
-	 * `loginEntry` slot (#728); `"unconfigured"`, the entry the session module
+	 * Where connect sends a browser that is not signed in — the `loginEntry`
+	 * slot; `"unconfigured"`, the entry the session module
 	 * provides when `endpoints.login.url` names no page.
 	 */
 	readonly withLoginEntry?: boolean | "unconfigured";
-	/** The oauthTokenSettings the composition holds (#728); none by default. */
+	/** The oauthTokenSettings the composition holds; none by default. */
 	readonly tokenSettingsIssuer?: string;
 }
 
@@ -266,9 +267,10 @@ const boot = (setup: Setup) => {
 			// here is the grant refusals, and nothing in this file logs anyone in.
 			...SESSION_FEDERATION_STORES,
 			...(setup.withUserSessionStore === false ? { userSessionStore: undefined } : {}),
-			// The boundary a grant is compared against on every disclosure
-			// (D13). Bundled here because every composition that enables the
-			// feature needs one, which is the point of the refusals below.
+			// The boundary a grant is compared against on every disclosure (the
+			// federation-grants ADR, D13). Bundled here because every composition
+			// that enables the feature needs one, which is the point of the
+			// refusals below.
 			...(setup.revocation === "absent"
 				? {}
 				: {
@@ -310,8 +312,8 @@ describe("enabling the feature", () => {
 	it("refuses to boot with nothing that can end a grant", async () => {
 		// The backstop, not a nicety: a grant outlives the session it was
 		// agreed through, so the boundary is what reaches one on a replica that
-		// never saw the withdrawal. Slice 4 answered 503 per request; a
-		// composition error belongs here.
+		// never saw the withdrawal. A composition error belongs here, not in a
+		// 503 per request.
 		await expect(boot({ revocation: "absent" })).rejects.toThrow(/subjectRevocation component/);
 	});
 
@@ -335,7 +337,7 @@ describe("enabling the feature", () => {
 
 	it("refuses a retrieval limit the promises cannot be kept under", async () => {
 		// A lock that cannot outlive a refresh and its persistence lets two
-		// replicas present the same refresh token (D12).
+		// replicas present the same refresh token (the federation-grants ADR, D12).
 		await expect(boot({ grants: { refreshLockTtlMs: 1_000 } })).rejects.toThrow();
 		await expect(boot({ grants: { maxExpiresIn: 31_536_001 } })).rejects.toThrow(/maxExpiresIn/);
 	});
@@ -382,8 +384,9 @@ describe("enabling the feature", () => {
 		// provider may act for a user who is not present, which is the entire
 		// question offline delegation asks.
 		await expect(boot({ provider: sessionOnly })).rejects.toThrow(/delegated/);
-		// And the earlier pair, by name: the callback would otherwise be the
-		// first place it failed, with a user standing in front of it.
+		// And the pair without the code exchange, by name: the callback would
+		// otherwise be the first place it failed, with a user standing in front
+		// of it.
 		await expect(boot({ provider: slice2Pair })).rejects.toThrow(/exchangeDelegatedCode/);
 		// And one whose callback would arrive without the session cookie.
 		await expect(boot({ provider: formPost })).rejects.toThrow(/form_post/);
@@ -401,7 +404,7 @@ describe("enabling the feature", () => {
 
 describe("leaving the feature off", () => {
 	it('reads the spellings an environment variable arrives in, so "true" enables', async () => {
-		// #288: HOCON substitutes `${?FEDERATION_GRANTS_ENABLED}` as a string,
+		// HOCON substitutes `${?FEDERATION_GRANTS_ENABLED}` as a string,
 		// always. A bare `z.boolean()` would leave an operator who exported the
 		// documented variable with the feature silently off — the one failure
 		// mode a secure default must not have, because it looks like a working
@@ -473,10 +476,9 @@ describe("what creating a grant needs (slice 6)", () => {
 
 	it("refuses a deployment with no login page to send a browser that is not signed in to", async () => {
 		// Core's schema takes an empty page and only oauthModule requires one;
-		// this composition has no oauthModule, which is what used to boot and
-		// then answer every such browser with a 500. The page is the session
-		// module's `loginEntry` (#728), which is built without one and fails
-		// where it is read: here, at boot.
+		// this composition has no oauthModule. The page is the session
+		// module's `loginEntry`, which is built without one and fails where it
+		// is read: here, at boot, rather than as a 500 for every such browser.
 		await expect(boot({ withLoginEntry: "unconfigured" })).rejects.toThrow(
 			/endpoints\.login\.url must be configured/,
 		);
@@ -484,7 +486,7 @@ describe("what creating a grant needs (slice 6)", () => {
 
 	it("refuses a deployment with no loginEntry, naming the component", async () => {
 		// Connect sends a browser that is not signed in to the login page
-		// through the `loginEntry` slot the session module provides (#728);
+		// through the `loginEntry` slot the session module provides;
 		// enabled without it, the flow's first page would answer a 500.
 		await expect(boot({ withLoginEntry: false })).rejects.toThrow(
 			/federation grants are enabled and no loginEntry is installed/,

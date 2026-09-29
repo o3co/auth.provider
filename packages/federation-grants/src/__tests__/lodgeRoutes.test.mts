@@ -16,7 +16,8 @@
 
 /**
  * `POST /oauth/federation-grants` and `POST /oauth/federation-grants/:grantId/reauthorize`
- * (#593, D6, slice 6) — a confidential client lodging an intent.
+ * — a confidential client lodging an intent (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D6).
  *
  * Run against the real lodging function and the real in-memory stores: what is
  * tested is that the route adds transport, authentication, serialization and

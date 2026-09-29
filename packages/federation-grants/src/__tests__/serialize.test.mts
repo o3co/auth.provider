@@ -15,7 +15,8 @@
  */
 
 /**
- * Core's result union rendered as HTTP (#593, D11).
+ * Core's result union rendered as HTTP (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D11).
  *
  * Every row of D11's table, in one place and as an exhaustive switch, so that
  * a code added to the union is a compile error here rather than a 500 in

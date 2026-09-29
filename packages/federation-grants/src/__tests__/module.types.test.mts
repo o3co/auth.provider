@@ -18,8 +18,8 @@ import type { FederationGrantStore, ProviderDeps, RateLimiter } from "@o3co/auth
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { type FederationGrantsModuleDeps, federationGrantsModule } from "#/module.mjs";
 
-// #626 P2 (D4): the manifest's contribution callbacks read only the slots it
-// declares, and an optional slot is used only behind a presence check.
+// The manifest's contribution callbacks read only the slots it declares, and
+// an optional slot is used only behind a presence check.
 // Compile-time facts: they fire under vitest's typecheck mode only.
 
 const REQUIRES = [
@@ -40,9 +40,9 @@ const OPTIONAL = [
 	"federationGrantIntentStore",
 	"userRepository",
 	"userSessionStore",
-	// The login page connect sends a browser that is not signed in to (#728).
+	// The login page connect sends a browser that is not signed in to.
 	"loginEntry",
-	// The issuer the routes and the acquisition settings are built on (#728).
+	// The issuer the routes and the acquisition settings are built on.
 	"oauthTokenSettings",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;

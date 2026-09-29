@@ -59,7 +59,10 @@ export const MIN = 60_000;
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
 
-/** Grepped for in every response, audit event and captured log line (D18). */
+/**
+ * Grepped for in every response, audit event and captured log line (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D18).
+ */
 export const SECRET = "SENTINEL-refresh-token";
 
 export const SUBJECT = "local-subject";
@@ -96,7 +99,7 @@ const confidentialClient = {
 export interface Harness {
 	readonly app: express.Express;
 	readonly store: MemoryFederationGrantStore;
-	/** Slice 6: where an intent is lodged. */
+	/** Where an intent is lodged. */
 	readonly intents: MemoryFederationGrantIntentStore;
 	readonly background: FederationGrantBackground;
 	readonly refresh: ReturnType<typeof vi.fn<FederationGrantRefresher["refreshDelegatedToken"]>>;
@@ -109,7 +112,10 @@ export interface Harness {
 		connections: Map<string, FederationGrantConnection>;
 		boundary: Date | null | Error;
 		allowedConnections: readonly string[] | undefined;
-		/** Read live, so a test can lower the maximum between two requests (D3). */
+		/**
+		 * Read live, so a test can lower the maximum between two requests (ADR
+		 * 2026-09-17-federation-grants-offline-delegation, D3).
+		 */
 		maxExpiresInMs: number;
 		/**
 		 * What `inspect` reports about the credential. The memory store keeps
@@ -121,7 +127,7 @@ export interface Harness {
 		/** What the client repository throws, when it is down. */
 		clientRepositoryDown: Error | undefined;
 		now: Date;
-		/** Slice 6: the lifetimes lodging offers. */
+		/** The lifetimes lodging offers. */
 		lifetimes: { defaultLifetimeMs: number; maxLifetimeMs: number };
 	};
 	seed(over?: {
