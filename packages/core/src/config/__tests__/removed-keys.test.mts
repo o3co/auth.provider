@@ -26,7 +26,13 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { type RemovedKey, withRemovedKeys } from "#/config/removed-keys.mjs";
+import { environmentVariableFor } from "#/config/environment-variable.mjs";
+import {
+	findRelocatedKeys,
+	type RemovedKey,
+	relocatedKeyMessage,
+	withRemovedKeys,
+} from "#/config/removed-keys.mjs";
 
 const REMOVED: readonly RemovedKey[] = [
 	{
@@ -76,5 +82,106 @@ describe("withRemovedKeys", () => {
 		// reports the type mismatch as it always did.
 		expect(schema.safeParse("nonsense").success).toBe(false);
 		expect(schema.safeParse([1, 2]).success).toBe(false);
+	});
+});
+
+describe("findRelocatedKeys — a key that moved (#728)", () => {
+	const dpopMoved = { from: ["oauth", "dpop"], to: ["dpop"] } as const;
+	const iatRenamed = {
+		from: ["oauth", "dpop", "iat-window-seconds"],
+		to: ["dpop", "iatWindowSeconds"],
+	} as const;
+
+	it("finds a leaf set at the old path, with its new path and the variable that binds it", () => {
+		const found = findRelocatedKeys({ endpoints: { login: { url: "https://login" } } }, [
+			{ from: ["endpoints", "login", "url"], to: ["session", "loginPage", "url"] },
+		]);
+		expect(found.map(({ relocation: _, ...key }) => key)).toEqual([
+			{
+				from: "endpoints.login.url",
+				to: "session.loginPage.url",
+				environmentVariable: "SESSION_LOGIN_PAGE_URL",
+			},
+		]);
+	});
+
+	it("finds every leaf of a subtree set at the old path, each at the same place under the new one", () => {
+		const found = findRelocatedKeys(
+			{ oauth: { dpop: { "iat-window-seconds": 30, nonce: { lifetime: 5 } }, jwt: {} } },
+			[dpopMoved],
+		);
+		expect(
+			found.map(({ from, to, environmentVariable }) => [from, to, environmentVariable]),
+		).toEqual([
+			["oauth.dpop.iat-window-seconds", "dpop.iat-window-seconds", "DPOP_IAT_WINDOW_SECONDS"],
+			["oauth.dpop.nonce.lifetime", "dpop.nonce.lifetime", "DPOP_NONCE_LIFETIME"],
+		]);
+	});
+
+	it("maps a key by the most specific relocation that covers it: a renamed key inside a moved subtree", () => {
+		const found = findRelocatedKeys(
+			{ oauth: { dpop: { "iat-window-seconds": 30, nonce: { lifetime: 5 } } } },
+			[dpopMoved, iatRenamed],
+		);
+		expect(found.map(({ from, to }) => [from, to])).toEqual([
+			["oauth.dpop.iat-window-seconds", "dpop.iatWindowSeconds"],
+			["oauth.dpop.nonce.lifetime", "dpop.nonce.lifetime"],
+		]);
+		// Each key once, whatever order the relocations come in.
+		expect(
+			findRelocatedKeys({ oauth: { dpop: { "iat-window-seconds": 30 } } }, [
+				iatRenamed,
+				dpopMoved,
+			]).map(({ to }) => to),
+		).toEqual(["dpop.iatWindowSeconds"]);
+	});
+
+	it("reads a list as one value, and an empty subtree as the path itself", () => {
+		expect(
+			findRelocatedKeys({ old: { list: [1, 2] } }, [{ from: ["old"], to: ["new"] }]).map(
+				({ from, to, environmentVariable }) => [from, to, environmentVariable],
+			),
+		).toEqual([["old.list", "new.list", "NEW_LIST"]]);
+		expect(
+			findRelocatedKeys({ old: {} }, [{ from: ["old"], to: ["new"] }]).map(
+				({ from, to, environmentVariable }) => [from, to, environmentVariable],
+			),
+		).toEqual([["old", "new", undefined]]);
+	});
+
+	it("finds nothing where the configuration sets nothing, and reads own keys only", () => {
+		expect(findRelocatedKeys({ oauth: {} }, [dpopMoved])).toEqual([]);
+		expect(findRelocatedKeys({}, [{ from: ["constructor"], to: ["x"] }])).toEqual([]);
+		expect(findRelocatedKeys(undefined, [dpopMoved])).toEqual([]);
+	});
+
+	it("says what moved where in the words a removed key is refused in", () => {
+		expect(
+			relocatedKeyMessage({
+				from: "oauth.dpop.iat-window-seconds",
+				to: "dpop.iatWindowSeconds",
+				environmentVariable: "DPOP_IAT_WINDOW_SECONDS",
+			}),
+		).toBe(
+			"oauth.dpop.iat-window-seconds has moved to dpop.iatWindowSeconds; see CHANGELOG. " +
+				"Write it there (environment variable DPOP_IAT_WINDOW_SECONDS) and remove this field from your config.",
+		);
+		expect(relocatedKeyMessage({ from: "old", to: "new" })).toBe(
+			"old has moved to new; see CHANGELOG. Write it there and remove this field from your config.",
+		);
+	});
+});
+
+describe("environmentVariableFor — the variable a path is bound to (#728 B9)", () => {
+	it.each([
+		[["device-grant", "codeLifetimeSeconds"], "DEVICE_GRANT_CODE_LIFETIME_SECONDS"],
+		[["redis-consent-store", "keyPrefix"], "REDIS_CONSENT_STORE_KEY_PREFIX"],
+		[["mfa", "encryptionKeys", "0", "key"], "MFA_ENCRYPTION_KEYS_0_KEY"],
+		[["key-store", "local", "privateKeyPath"], "KEY_STORE_LOCAL_PRIVATE_KEY_PATH"],
+		[["jwks", "cacheMaxAge"], "JWKS_CACHE_MAX_AGE"],
+		[["http", "cors", "allowedOrigins"], "HTTP_CORS_ALLOWED_ORIGINS"],
+		[["oauth", "jwksURLPath"], "OAUTH_JWKS_URL_PATH"],
+	])("%j → %s", (path, name) => {
+		expect(environmentVariableFor(path)).toBe(name);
 	});
 });

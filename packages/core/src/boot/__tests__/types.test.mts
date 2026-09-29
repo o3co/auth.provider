@@ -66,7 +66,7 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 33 literals (Phase 9 added "grant-policy-without-
+// BootErrorReason — exactly 34 literals (Phase 9 added "grant-policy-without-
 // issuer" for the CP-20 invariant restoration; issue #101 added
 // "federation-stores-incomplete", and "mfa-partial-wiring", which the MFA ADR's
 // D3 removed with the surface it guarded; the OIDC discovery aggregator added
@@ -77,12 +77,13 @@ describe("BootStage", () => {
 // D3 and D7 added "session-requirement-kind-guarded",
 // "session-requirements-undeclared" and "session-requirement-missing"; #728's
 // module sections added "reserved-component-key" and
-// "module-section-path-invalid", and its contribution kinds
-// "contribution-kind-guarded" and "contribution-malformed" — 33)
+// "module-section-path-invalid", its contribution kinds
+// "contribution-kind-guarded" and "contribution-malformed", and its relocated
+// paths "config-path-relocated" — 34)
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 33 reason literals", () => {
+	it("contains exactly the 34 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -117,6 +118,7 @@ describe("BootErrorReason", () => {
 			| "module-section-path-invalid"
 			| "contribution-kind-guarded"
 			| "contribution-malformed"
+			| "config-path-relocated"
 		>();
 	});
 });

@@ -68,6 +68,7 @@ describe("stage-1 check registries (#368)", () => {
 			"list-shaped-overrides",
 			"lifecycle-closure",
 			"module-section-paths",
+			"relocated-config-paths",
 		]);
 		expect(STAGE_ONE_POST_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"grant-policy-issuer",
