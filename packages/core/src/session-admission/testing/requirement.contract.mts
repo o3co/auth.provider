@@ -39,7 +39,6 @@ import { readAcrTable } from "../acr.mjs";
 import { admitPrimary, admitSession, cookieClaim } from "../admit.mjs";
 import {
 	ADMISSION_ACTIONS,
-	checkStepUpPage,
 	isHintKey,
 	issuedRemediationActions,
 	MFA_REQUIREMENT_NAME,
@@ -162,16 +161,10 @@ export function sessionRequirementContract(
 			},
 		},
 		{
-			name: "reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
-			run: async () => {
-				const registered = registeredRequirement(build(), issuer);
-				sealRegisteredReach(registered);
-				if (registered.stepUpPage !== undefined) checkStepUpPage(registered.stepUpPage, issuer);
-			},
-		},
-		{
-			name: "reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
-			// The rule's one home is the seal boot runs; this case names it.
+			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
+			// Registration validates the page (`checkStepUpPage`, on the issuer
+			// when one is given); the seal boot runs holds the reach to its
+			// rules — their one home.
 			run: async () => {
 				sealRegisteredReach(registeredRequirement(build(), issuer));
 			},
