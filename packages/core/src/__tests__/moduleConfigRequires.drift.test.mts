@@ -18,22 +18,38 @@
  * moduleConfigRequires.drift.test.mts — no manifest outside core requires
  * `config` (#728). A module reads its own section (`deps.section`) and what
  * another module owns through a slot whose contract is core's; the whole
- * configuration is core's to parse. The manifests that require `config` today
- * are listed below, and the list may only shrink: a manifest that requires it
+ * configuration is core's to parse. The manifests that list `config` today
+ * are listed below, and the list may only shrink: a manifest that lists it
  * and is not listed fails, and so does a listed one that no longer does.
  *
- * What it reads, with TypeScript's parser, in the product code of every
- * workspace but core — a source under `src/` outside `__tests__/` that is not
- * a `*.test.*` or `*.spec.*` file: every object literal carrying both a `name`
- * and a `requires` property, the shape of a manifest handed to `defineModule`.
- * `requires` is read as an array literal, through `as const` and through a
- * `const` of the same file; `name` as a string literal or a `const` of the
- * same file. A manifest whose `requires` cannot be read that way fails, and so
- * does one requiring `config` whose `name` cannot: the list is keyed by it.
+ * What it reads, with TypeScript's parser and binder, in the product code of
+ * every workspace but core — a source under `src/` outside `__tests__/` that
+ * is not a `*.test.*` or `*.spec.*` file: every `defineModule(…)` call, as
+ * the module-name scan anchors on it, and every other object literal with a
+ * `name` and a `requires` or an `optional`. A manifest lists `config` when
+ * its `requires` or its `optional` does — a factory is handed it either way.
  *
- * What it does not follow is left to review: a manifest assembled at run time
- * (spread from another object, or built by a function whose argument is the
- * array), and a `requires` imported from another file.
+ * The manifest is the call's argument, an object literal or a `const` bound
+ * to one. A key is read as it is spelled — `requires`, `"requires"`,
+ * `["requires"]` — and the last one written wins, as in JavaScript; a
+ * shorthand `{ name, requires }` is read through the binding it names. Each
+ * list is an array literal of string literals, through `as const` and
+ * through a `const` — the one in scope where it is used, not another of that
+ * name elsewhere in the file. `name` is a string literal, or a `const` bound
+ * to one, likewise.
+ *
+ * Anything else is reported rather than passed over, and fails: a manifest
+ * that is not an object literal; a list that is a `let`, a parameter, an
+ * import, a call or a spread; a list a spread may supply (`{ ...base }`
+ * with no `requires` or `optional` written after it — a spread of object
+ * literals that write neither, `...(x ? {} : { x })`, supplies none) or a
+ * computed key may name; and a manifest listing `config` whose `name`
+ * cannot be read, since the list is keyed by it.
+ *
+ * What it cannot see is `config` a module's code captures without listing
+ * it: a manifest built by a factory that takes the configuration as a
+ * parameter — `oauthModule({ config })` — reads it through the closure, and
+ * nothing in the manifest says so. Those factories are left to review.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -145,70 +161,226 @@ function productSourcesUnder(dir: string): string[] {
 	return files;
 }
 
-/** One manifest found: where, its name (`undefined` when it cannot be read), and what it requires. */
+/** One manifest found: where, its name (`undefined` when it cannot be read), and what it lists. */
 interface Manifest {
 	readonly line: number;
 	readonly name: string | undefined;
-	/** `undefined` when the `requires` cannot be read as an array of string literals. */
+	/** `[]` when absent; `undefined` when it cannot be read as an array of string literals. */
 	readonly requires: readonly string[] | undefined;
+	/** `[]` when absent; `undefined` when it cannot be read as an array of string literals. */
+	readonly optional: readonly string[] | undefined;
+}
+
+/** Whether a manifest lists `config`, in its `requires` or its `optional`. */
+const readsConfig = (manifest: Manifest): boolean =>
+	manifest.requires?.includes("config") === true || manifest.optional?.includes("config") === true;
+
+/**
+ * What a key of an object literal holds, as JavaScript would settle it: the
+ * last write wins. `absent` when nothing writes it; `unknown` when a spread
+ * or a computed key after the last write may.
+ */
+type Slot =
+	| { readonly kind: "absent" }
+	| { readonly kind: "unknown" }
+	| { readonly kind: "written"; readonly property: ts.ObjectLiteralElementLike };
+
+/** A program over `source` alone, for its binder: which declaration an identifier names. */
+function checkerFor(source: ts.SourceFile): ts.TypeChecker {
+	const host: ts.CompilerHost = {
+		getSourceFile: (fileName) => (fileName === source.fileName ? source : undefined),
+		writeFile: () => {},
+		getDefaultLibFileName: () => "lib.d.ts",
+		useCaseSensitiveFileNames: () => true,
+		getCanonicalFileName: (fileName) => fileName,
+		getCurrentDirectory: () => "",
+		getNewLine: () => "\n",
+		fileExists: (fileName) => fileName === source.fileName,
+		readFile: () => undefined,
+	};
+	return ts
+		.createProgram({
+			rootNames: [source.fileName],
+			options: { noLib: true, noResolve: true, allowJs: true, types: [] },
+			host,
+		})
+		.getTypeChecker();
 }
 
 /** The manifests in `text`, a source named `fileName`. */
 function manifestsIn(fileName: string, text: string): Manifest[] {
+	// A source that names neither holds no manifest, and is spared a program.
+	if (!text.includes("defineModule") && !/\b(requires|optional)\b/.test(text)) return [];
 	const source = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true);
-	const constants = new Map<string, ts.Expression>();
-	const collect = (node: ts.Node): void => {
-		if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
-			constants.set(node.name.text, node.initializer);
+	const checker = checkerFor(source);
+
+	/** The initializer of the `const` a symbol is, or `undefined` for any other binding. */
+	const constInitializer = (symbol: ts.Symbol | undefined): ts.Expression | undefined => {
+		const declaration = symbol?.valueDeclaration;
+		if (
+			declaration === undefined ||
+			!ts.isVariableDeclaration(declaration) ||
+			!ts.isIdentifier(declaration.name) ||
+			declaration.initializer === undefined ||
+			!ts.isVariableDeclarationList(declaration.parent) ||
+			(declaration.parent.flags & ts.NodeFlags.Const) === 0
+		) {
+			return undefined;
 		}
-		ts.forEachChild(node, collect);
+		return declaration.initializer;
 	};
-	collect(source);
-	/** The expression under `as`, `satisfies` and parentheses, and behind a `const` of the file. */
-	const unwrap = (expression: ts.Expression, seen = new Set<string>()): ts.Expression => {
+
+	/** The expression under `as`, `satisfies`, `!` and parentheses, and behind the `const` in scope. */
+	const unwrap = (
+		expression: ts.Expression,
+		seen: ReadonlySet<ts.Node> = new Set(),
+	): ts.Expression => {
 		let current = expression;
 		while (
 			ts.isAsExpression(current) ||
 			ts.isSatisfiesExpression(current) ||
+			ts.isNonNullExpression(current) ||
 			ts.isParenthesizedExpression(current)
 		) {
 			current = current.expression;
 		}
-		if (ts.isIdentifier(current) && !seen.has(current.text)) {
-			const bound = constants.get(current.text);
-			if (bound !== undefined) return unwrap(bound, new Set([...seen, current.text]));
+		if (ts.isIdentifier(current)) {
+			const bound = constInitializer(checker.getSymbolAtLocation(current));
+			if (bound !== undefined && !seen.has(bound)) return unwrap(bound, new Set([...seen, bound]));
 		}
 		return current;
 	};
-	const found: Manifest[] = [];
-	const visit = (node: ts.Node): void => {
-		if (ts.isObjectLiteralExpression(node)) {
-			const property = (key: string) =>
-				node.properties.find(
-					(p): p is ts.PropertyAssignment =>
-						ts.isPropertyAssignment(p) && p.name.getText(source) === key,
-				);
-			const nameProperty = property("name");
-			const requiresProperty = property("requires");
-			if (nameProperty !== undefined && requiresProperty !== undefined) {
-				const name = unwrap(nameProperty.initializer);
-				const requires = unwrap(requiresProperty.initializer);
-				const elements =
-					ts.isArrayLiteralExpression(requires) &&
-					requires.elements.every((element) => ts.isStringLiteralLike(element))
-						? requires.elements.map((element) => (element as ts.StringLiteralLike).text)
-						: undefined;
+
+	/** The key a property is written under, or `undefined` when it is computed from anything but a literal. */
+	const keyOf = (property: ts.ObjectLiteralElementLike): string | undefined => {
+		const name = property.name;
+		if (name === undefined) return undefined;
+		if (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name)) {
+			return name.text;
+		}
+		if (ts.isComputedPropertyName(name)) {
+			const expression = unwrap(name.expression);
+			return ts.isStringLiteralLike(expression) ? expression.text : undefined;
+		}
+		return undefined;
+	};
+
+	/**
+	 * Whether a spread may write `key`: not when it is an object literal that
+	 * does not — or a conditional whose branches are such literals, as in
+	 * `...(x === undefined ? {} : { x })` — and otherwise, it may.
+	 */
+	const spreadMayWrite = (expression: ts.Expression, key: string): boolean => {
+		const spread = unwrap(expression);
+		if (ts.isObjectLiteralExpression(spread)) return slotOf(spread, key).kind !== "absent";
+		if (ts.isConditionalExpression(spread)) {
+			return spreadMayWrite(spread.whenTrue, key) || spreadMayWrite(spread.whenFalse, key);
+		}
+		return true;
+	};
+
+	/** What `key` holds in `object` once every property is applied, in order. */
+	const slotOf = (object: ts.ObjectLiteralExpression, key: string): Slot => {
+		let slot: Slot = { kind: "absent" };
+		for (const property of object.properties) {
+			if (ts.isSpreadAssignment(property)) {
+				if (spreadMayWrite(property.expression, key)) slot = { kind: "unknown" };
+				continue;
+			}
+			const written = keyOf(property);
+			if (written === undefined) slot = { kind: "unknown" };
+			else if (written === key) slot = { kind: "written", property };
+		}
+		return slot;
+	};
+
+	/** The value a written property holds: its initializer, or what a shorthand names. */
+	const writtenValue = (property: ts.ObjectLiteralElementLike): ts.Expression | undefined => {
+		if (ts.isPropertyAssignment(property)) return unwrap(property.initializer);
+		if (ts.isShorthandPropertyAssignment(property)) {
+			const bound = constInitializer(checker.getShorthandAssignmentValueSymbol(property));
+			return bound === undefined ? undefined : unwrap(bound);
+		}
+		return undefined;
+	};
+
+	/** A list of keys: `[]` when absent, `undefined` when it cannot be read. */
+	const listOf = (
+		object: ts.ObjectLiteralExpression,
+		key: string,
+	): readonly string[] | undefined => {
+		const slot = slotOf(object, key);
+		if (slot.kind === "absent") return [];
+		if (slot.kind === "unknown") return undefined;
+		const value = writtenValue(slot.property);
+		if (value === undefined || !ts.isArrayLiteralExpression(value)) return undefined;
+		const keys: string[] = [];
+		for (const element of value.elements) {
+			if (!ts.isStringLiteralLike(element)) return undefined;
+			keys.push(element.text);
+		}
+		return keys;
+	};
+
+	/** The name: a string literal, or a `const` bound to one; `undefined` otherwise. */
+	const nameOf = (object: ts.ObjectLiteralExpression): string | undefined => {
+		const slot = slotOf(object, "name");
+		if (slot.kind !== "written") return undefined;
+		const value = writtenValue(slot.property);
+		return value !== undefined && ts.isStringLiteralLike(value) ? value.text : undefined;
+	};
+
+	const lineOf = (node: ts.Node): number =>
+		source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+
+	const isDefineModuleCall = (node: ts.Node): node is ts.CallExpression =>
+		ts.isCallExpression(node) &&
+		((ts.isIdentifier(node.expression) && node.expression.text === "defineModule") ||
+			(ts.isPropertyAccessExpression(node.expression) &&
+				node.expression.name.text === "defineModule"));
+
+	const read = (line: number, object: ts.ObjectLiteralExpression): Manifest => ({
+		line,
+		name: nameOf(object),
+		requires: listOf(object, "requires"),
+		optional: listOf(object, "optional"),
+	});
+
+	// Each defineModule call's manifest, then any other object literal shaped
+	// like one. A literal read as a call's manifest is not read again.
+	const found: { readonly position: number; readonly manifest: Manifest }[] = [];
+	const consumed = new Set<ts.Node>();
+	const calls = (node: ts.Node): void => {
+		if (isDefineModuleCall(node)) {
+			const argument = node.arguments[0];
+			const manifest = argument === undefined ? undefined : unwrap(argument);
+			const line = lineOf(node);
+			if (manifest !== undefined && ts.isObjectLiteralExpression(manifest)) {
+				consumed.add(manifest);
+				found.push({ position: node.getStart(source), manifest: read(line, manifest) });
+			} else {
 				found.push({
-					line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
-					name: ts.isStringLiteralLike(name) ? name.text : undefined,
-					requires: elements,
+					position: node.getStart(source),
+					manifest: { line, name: undefined, requires: undefined, optional: undefined },
 				});
 			}
 		}
-		ts.forEachChild(node, visit);
+		ts.forEachChild(node, calls);
 	};
-	visit(source);
-	return found;
+	calls(source);
+	const literals = (node: ts.Node): void => {
+		if (
+			ts.isObjectLiteralExpression(node) &&
+			!consumed.has(node) &&
+			slotOf(node, "name").kind === "written" &&
+			(slotOf(node, "requires").kind === "written" || slotOf(node, "optional").kind === "written")
+		) {
+			found.push({ position: node.getStart(source), manifest: read(lineOf(node), node) });
+		}
+		ts.forEachChild(node, literals);
+	};
+	literals(source);
+	return found.sort((x, y) => x.position - y.position).map(({ manifest }) => manifest);
 }
 
 /** Every manifest in the product code of every workspace but core, with its workspace and file. */
@@ -352,6 +524,8 @@ describe("the manifest scan", () => {
 				"defineModule(spec);",
 				'defineModule({ ...base, name: "spread" });',
 				'defineModule({ ...base, name: "spread-then-lists", requires: [], optional: [] });',
+				'defineModule({ name: "spread-of-other-keys", requires: ["config"], ...(x ? {} : { x }) });',
+				'defineModule({ name: "spread-of-a-list", requires: [], ...(x ? {} : { requires: [] }) });',
 				'core.defineModule<R, O>({ name: "namespaced", requires: ["config"] });',
 			].join("\n"),
 		);
@@ -360,6 +534,8 @@ describe("the manifest scan", () => {
 			[undefined, undefined, undefined],
 			["spread", undefined, undefined],
 			["spread-then-lists", [], []],
+			["spread-of-other-keys", ["config"], []],
+			["spread-of-a-list", undefined, []],
 			["namespaced", ["config"], []],
 		]);
 	});
@@ -383,24 +559,24 @@ describe("the manifest scan", () => {
 });
 
 describe("no manifest outside core requires config (#728)", () => {
-	it("reads every manifest's requires", () => {
+	it("reads every manifest's requires and optional", () => {
 		expect(
-			FOUND.filter((manifest) => manifest.requires === undefined).map(
+			FOUND.filter(
+				(manifest) => manifest.requires === undefined || manifest.optional === undefined,
+			).map((manifest) => `${manifest.file}:${manifest.line}`),
+		).toEqual([]);
+	});
+
+	it("names every manifest that lists config", () => {
+		expect(
+			FOUND.filter((manifest) => manifest.name === undefined && readsConfig(manifest)).map(
 				(manifest) => `${manifest.file}:${manifest.line}`,
 			),
 		).toEqual([]);
 	});
 
-	it("names every manifest that requires config", () => {
-		expect(
-			FOUND.filter(
-				(manifest) => manifest.name === undefined && manifest.requires?.includes("config"),
-			).map((manifest) => `${manifest.file}:${manifest.line}`),
-		).toEqual([]);
-	});
-
-	it("finds no manifest requiring config beyond the list", () => {
-		const requirers = FOUND.filter((manifest) => manifest.requires?.includes("config")).map(
+	it("finds no manifest listing config beyond the list", () => {
+		const requirers = FOUND.filter(readsConfig).map(
 			(manifest) => `${manifest.workspace} -> ${manifest.name}`,
 		);
 		expect(
@@ -409,11 +585,9 @@ describe("no manifest outside core requires config (#728)", () => {
 		).toEqual([]);
 	});
 
-	it("keeps no entry whose manifest no longer requires config: the list only shrinks", () => {
+	it("keeps no entry whose manifest no longer lists config: the list only shrinks", () => {
 		const requirers = new Set(
-			FOUND.filter((manifest) => manifest.requires?.includes("config")).map(
-				(manifest) => `${manifest.workspace} -> ${manifest.name}`,
-			),
+			FOUND.filter(readsConfig).map((manifest) => `${manifest.workspace} -> ${manifest.name}`),
 		);
 		expect(
 			CONFIG_REQUIRERS.filter((key) => !requirers.has(key)),
