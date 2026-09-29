@@ -118,8 +118,9 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	/**
 	 * The paths this section moved from (#728 B10), so that a setting still
 	 * written at an old path refuses boot naming the new one, rather than be
-	 * ignored. Either form, each old path a dot-separated path of non-empty
-	 * keys:
+	 * ignored. Either form — a list, every index present, or a plain map, its
+	 * prototype `Object.prototype` or `null` — each old path a dot-separated
+	 * path of non-empty keys:
 	 *
 	 * - a list of old paths, each moved whole as the section:
 	 *   `["oauth.dpop"]` — `oauth.dpop.nonce.lifetime` is now
@@ -144,10 +145,11 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 * nothing binds yet — or, for a key mapped to `null`, that it was removed.
 	 * An empty object at an old path sets nothing. An old path may not be, or
 	 * hold, a loaded module's section — its own or another's — no new path may
-	 * lie at or under its own old path, and no two loaded modules may claim
-	 * overlapping old paths (the same one, or one under the other's), a key
-	 * set there then having two new paths; each is refused at stage 1
-	 * (`module-section-path-invalid`). One module may cover its own old path
+	 * lie at, under or over an old path — its own, another of its own, or
+	 * another loaded module's — a key moved there then being refused in turn,
+	 * and no two loaded modules may claim overlapping old paths (the same one,
+	 * or one under the other's), a key set there then having two new paths;
+	 * each is refused at stage 1 (`module-section-path-invalid`). One module may cover its own old path
 	 * with a more specific one. A module that reads its settings through a
 	 * `configSchema` alone declares no section path, so an old path holding
 	 * its settings is not caught.
