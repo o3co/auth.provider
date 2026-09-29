@@ -174,6 +174,14 @@ export interface NormalisedModule {
 export interface ValidatedModule {
 	readonly manifest: Module;
 	readonly normalised: NormalisedModule;
+	/**
+	 * The module's own configuration section, parsed by its manifest's
+	 * `section.schema` at stage 1 (#728). Present exactly when the manifest
+	 * declares a section — `value` is what the schema answered, which may be
+	 * `undefined` for a schema that accepts an absent section — and handed to
+	 * every factory of the module as `deps.section`.
+	 */
+	readonly section?: { readonly value: unknown };
 }
 
 /**
@@ -876,12 +884,25 @@ export interface InvalidRouteAdvertisementPathDetails {
 	readonly identityKind: "missing-leading-slash";
 }
 
-/** Per A2-β §6.1. */
+/**
+ * Per A2-β §6.1. Thrown by either of stage 1's two parses: the composed
+ * schema over the whole configuration, or — once that passed — the modules'
+ * own sections (#728), each parsed by its manifest's `section.schema`.
+ */
 export interface ConfigValidationFailedDetails {
 	readonly reason: "config-validation-failed";
-	/** Verbatim Zod issues from the failed parse. */
+	/**
+	 * The Zod issues from the failed parse. A section's issues are the
+	 * schema's own with the section's path in front, so each `path` is the
+	 * path in the configuration the operator wrote.
+	 */
 	readonly issues: readonly z.ZodIssue[];
-	/** Modules whose configSchema participated in the composed schema. */
+	/**
+	 * The composed parse: the modules whose configSchema participated, with
+	 * no `schemaPath`. A section's parse: the modules whose section was
+	 * refused, each with `schemaPath`, the dot-separated path its section is
+	 * read at.
+	 */
 	readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
 }
 

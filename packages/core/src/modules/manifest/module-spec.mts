@@ -18,6 +18,7 @@ import type { z } from "zod";
 import type { AbsencePolicy } from "./absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "./component-map.mjs";
 import type { ContributesMap } from "./contributes-map.mjs";
+import type { ModuleSection, SectionSchema } from "./module-section.mjs";
 import type { Provider, ProviderDeps } from "./provider.mjs";
 
 /**
@@ -27,6 +28,11 @@ import type { Provider, ProviderDeps } from "./provider.mjs";
  * step 13).
  *
  * Per A2-α §2.1.
+ *
+ * @deprecated A module declares its own section instead —
+ * {@link ModuleSection}, the manifest's `section` field — and receives it
+ * parsed as `deps.section` (#728). A `configSchema` still composes with
+ * core's schema as before.
  */
 export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
 
@@ -90,15 +96,36 @@ export interface ReplicaSafetyDeclaration {
  * Parameterised manifest type. The R / O generics are inferred at the
  * call site of `defineModule(...)` and carry the literal key sets
  * declared in `requires` / `optional` so providers and contribution
- * factories receive a typed deps object.
+ * factories receive a typed deps object. `S` is inferred from
+ * `section.schema` and types the deps' `section`; it stays `never` for a
+ * module that declares no section.
  *
  * Per A2-α §2.1, §3.1.
  */
-export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentKey = never> {
+export interface ModuleSpec<
+	R extends ComponentKey = never,
+	O extends ComponentKey = never,
+	S extends SectionSchema = never,
+> {
 	/** Module identity — unique across all modules in a single createApp call. */
 	readonly name: string;
 
-	/** Optional Zod schema declaring this module's config slice. */
+	/**
+	 * The module's own configuration section (#728): its schema, where it
+	 * sits, and the `reference.conf` holding its defaults. Boot parses it at
+	 * stage 1 and every factory in `provides`, `contributes` and `overrides`
+	 * receives it as `deps.section`, typed as the schema's output. See
+	 * {@link ModuleSection}.
+	 */
+	readonly section?: ModuleSection<S>;
+
+	/**
+	 * Optional Zod schema declaring this module's config slice.
+	 *
+	 * @deprecated Declare the module's own `section` instead, and read it
+	 * from `deps.section` (#728). A `configSchema` still composes with core's
+	 * schema and parses the whole configuration, as before.
+	 */
 	readonly configSchema?: ConfigSchema;
 
 	/**
@@ -145,21 +172,21 @@ export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentK
 	 * value is `(deps) => ComponentMap[K] | Promise<ComponentMap[K]>`.
 	 */
 	readonly provides?: {
-		readonly [K in ComponentKey]?: Provider<K, ProviderDeps<R, O>>;
+		readonly [K in ComponentKey]?: Provider<K, ProviderDeps<R, O, S>>;
 	};
 
 	/**
 	 * Protocol-level features this module adds (grants, routes, federations,
 	 * etc.). Per A2-α §4.
 	 */
-	readonly contributes?: ContributesMap<ProviderDeps<R, O>>;
+	readonly contributes?: ContributesMap<ProviderDeps<R, O, S>>;
 
 	/**
 	 * Protocol-level features this module REPLACES on an already-registered
 	 * key. Mirrors `contributes` shape. Missing target key throws at boot.
 	 * Per A2-α §5.
 	 */
-	readonly overrides?: ContributesMap<ProviderDeps<R, O>>;
+	readonly overrides?: ContributesMap<ProviderDeps<R, O, S>>;
 
 	/**
 	 * Per-component lifecycle hooks. Each key `K` in this map MUST also
@@ -199,5 +226,10 @@ export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentK
  * does not extend `readonly never[]`. Phase 1 builds compile either
  * way because `ComponentKey = never` in the empty baseline; the
  * widening is the structurally-correct erasure for all later phases.
+ *
+ * `S = SectionSchema`, the widest section schema, erases the section the
+ * same way (#728): `section.schema` is covariant in it, and in the deps the
+ * widest schema is read as `section: never` (`SectionDeps`), which every
+ * sectioned factory accepts — as a module without a section's factories do.
  */
-export type Module = ModuleSpec<ComponentKey, ComponentKey>;
+export type Module = ModuleSpec<ComponentKey, ComponentKey, SectionSchema>;

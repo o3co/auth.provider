@@ -15,10 +15,11 @@
  */
 
 import type { ComponentKey, ComponentMap } from "./component-map.mjs";
+import type { SectionDeps, SectionSchema } from "./module-section.mjs";
 
 /**
  * Typed dependency object derived from a module's `requires` and `optional`
- * key sets.
+ * key sets, and from its section's schema.
  *
  * - Keys in `R` (required) appear as `readonly` non-optional fields whose
  *   value type is `NonNullable<ComponentMap[K]>`. The `NonNullable` strips
@@ -30,14 +31,23 @@ import type { ComponentKey, ComponentMap } from "./component-map.mjs";
  *   never undefined inside a `provides` callback.
  * - Keys in `O` (optional) appear as `readonly` optional fields with type
  *   `ComponentMap[K] | undefined`.
+ * - `S`, the schema of the module's own configuration section (#728), adds
+ *   `readonly section` typed as the schema's output; left at `never` — a
+ *   module that declares no section — it adds nothing (`SectionDeps` in
+ *   `module-section.mts`). `section` is not a slot: boot parses it at
+ *   stage 1 and sets it on the deps object beside the slots.
  *
  * Per A2-α §3.1.
  */
-export type ProviderDeps<R extends ComponentKey = never, O extends ComponentKey = never> = {
+export type ProviderDeps<
+	R extends ComponentKey = never,
+	O extends ComponentKey = never,
+	S extends SectionSchema = never,
+> = {
 	readonly [K in R]: NonNullable<ComponentMap[K]>;
 } & {
 	readonly [K in O]?: ComponentMap[K];
-};
+} & SectionDeps<S>;
 
 /**
  * A provider materialises a single ComponentMap slot from the module's

@@ -87,6 +87,9 @@ import { BootError } from "./types.mjs";
  * symmetric defence-in-depth at the contribution-factory boundary.
  *
  * `optional` keys may be absent; they are included as `undefined`.
+ * `section`, the module's own configuration section parsed at stage 1
+ * (#728), is set as `deps.section` when the module declares one, and the key
+ * is absent otherwise.
  *
  * Per A2-β §5.4 step 2 (deps materialisation from ComponentWorld).
  * @internal
@@ -95,6 +98,7 @@ function buildDeps(
 	components: Record<string, unknown>,
 	requires: readonly ComponentKey[],
 	optional: readonly ComponentKey[],
+	section: { readonly value: unknown } | undefined,
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 	for (const key of requires) {
@@ -107,6 +111,9 @@ function buildDeps(
 	}
 	for (const key of optional) {
 		deps[key as string] = components[key as string];
+	}
+	if (section !== undefined) {
+		deps.section = section.value;
 	}
 	return deps;
 }
@@ -851,7 +858,12 @@ export async function applyContributions(
 		if (!validatedModule) continue;
 
 		const blueprint = material.plan.depsBlueprint.get(moduleName);
-		const deps = buildDeps(components, blueprint?.requires ?? [], blueprint?.optional ?? []);
+		const deps = buildDeps(
+			components,
+			blueprint?.requires ?? [],
+			blueprint?.optional ?? [],
+			validatedModule.section,
+		);
 
 		// Collect name-keyed contributes + overrides entries for this module.
 		// Routing uses collector.kind === "name-keyed" so that consumer-defined
@@ -1000,7 +1012,12 @@ export async function applyContributions(
 	for (const validatedModule of material.plan.validated.modules) {
 		const moduleName = validatedModule.normalised.name;
 		const blueprint = material.plan.depsBlueprint.get(moduleName);
-		const deps = buildDeps(components, blueprint?.requires ?? [], blueprint?.optional ?? []);
+		const deps = buildDeps(
+			components,
+			blueprint?.requires ?? [],
+			blueprint?.optional ?? [],
+			validatedModule.section,
+		);
 
 		// List-shaped and list-routes pass: dispatch on collector.kind.
 		// Handles built-in list kinds (auditHooks, grantPolicyHooks) AND any

@@ -622,6 +622,8 @@ export type {
 	MfaFactorFactory,
 	MfaFactorResolver,
 	Module,
+	// #728: a module's own configuration section, and what it adds to deps.
+	ModuleSection,
 	ModuleSpec,
 	OidcDiscoveryContributionFactory,
 	PathResolver,
@@ -634,6 +636,8 @@ export type {
 	RouteContributionEntry,
 	RouteContributionFactory,
 	RouteHandler,
+	SectionDeps,
+	SectionSchema,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,

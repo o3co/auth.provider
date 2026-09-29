@@ -1482,6 +1482,85 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 }
 
 // ---------------------------------------------------------------------------
+// Step 13, second half — each module's own configuration section (#728)
+// ---------------------------------------------------------------------------
+
+/**
+ * The dot-separated path a module's section is read at: its manifest's
+ * `section.at`, or else the module's name, whole — a module's name is the
+ * section's key as the manifest writes it, and is not split on dots.
+ */
+function sectionPathOf(m: Module): string {
+	return m.section?.at ?? m.name;
+}
+
+/** The keys of a dot-separated section path; a module's own name is one key. */
+function sectionSegmentsOf(m: Module): readonly string[] {
+	return m.section?.at === undefined ? [m.name] : m.section.at.split(".");
+}
+
+/** A Zod issue path as the operator writes it: its keys joined with dots. */
+function operatorPath(path: readonly PropertyKey[]): string {
+	return path.map(String).join(".");
+}
+
+/**
+ * Parse every declared section: for each module whose manifest has a
+ * `section`, read the value at its path out of the parsed configuration —
+ * the one the `config` slot holds, so a section reads what the module read
+ * from `config` before it declared one — and parse it with the section's
+ * schema, synchronously.
+ *
+ * Returns each sectioned module's parsed value by name. When a schema
+ * refuses its value, every section is still parsed, and one
+ * `config-validation-failed` names every refused one: each issue's path is
+ * prefixed with its section's, so the message and `details.issues` name the
+ * path the operator wrote (`legacy.fixture.retries`), and `details.modules`
+ * lists each refused module with the path its section is read at.
+ *
+ * The configuration itself is left as it was: a section's parse transforms
+ * only what the module is handed as `deps.section`, never the `config` slot.
+ * @internal
+ */
+function parseModuleSections(
+	modules: readonly Module[],
+	parsedConfig: unknown,
+): ReadonlyMap<string, { readonly value: unknown }> {
+	const sections = new Map<string, { readonly value: unknown }>();
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+
+	for (const m of modules) {
+		if (m.section === undefined) continue;
+		const segments = sectionSegmentsOf(m);
+		const result = m.section.schema.safeParse(readConfigPath(parsedConfig, segments));
+		if (result.success) {
+			sections.set(m.name, { value: result.data });
+			continue;
+		}
+		for (const issue of result.error.issues) {
+			issues.push({ ...issue, path: [...segments, ...issue.path] } as z.ZodIssue);
+		}
+		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+	}
+
+	if (issues.length > 0) {
+		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: {
+				reason: "config-validation-failed",
+				issues,
+				modules: refused,
+			},
+		});
+	}
+	return sections;
+}
+
+// ---------------------------------------------------------------------------
 // Step 14 — Route-order edge sanity
 // Per A2-β §5.1 step 14.
 // ---------------------------------------------------------------------------
@@ -1824,6 +1903,10 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
+	// Each module's own section (#728), parsed out of that configuration by
+	// the module's schema — before any post-config row, which may assume the
+	// configuration is valid.
+	const sections = parseModuleSections(modules, parsedConfig);
 
 	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
 	for (const check of STAGE_ONE_POST_CONFIG_CHECKS) {
@@ -1831,10 +1914,14 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	}
 
 	// Build output indices
-	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => ({
-		manifest: modules[i],
-		normalised,
-	}));
+	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => {
+		const section = sections.get(normalised.name);
+		return {
+			manifest: modules[i],
+			normalised,
+			...(section === undefined ? {} : { section }),
+		};
+	});
 
 	const byName = new Map<string, ValidatedModule>();
 	const providers = new Map<ComponentKey, ValidatedModule>();
