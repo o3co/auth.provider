@@ -22,7 +22,7 @@ import {
 export type { FakeIdp };
 
 /**
- * The fake OpenID Provider these tests run the real library against (#524):
+ * The fake OpenID Provider these tests run the real library against:
  * core's shared one (`@o3co/auth-provider-core/testing`), set up as an issuer
  * a generic OIDC client discovers — the discovery document served at
  * `<issuer>/.well-known/openid-configuration`, every endpoint a path under

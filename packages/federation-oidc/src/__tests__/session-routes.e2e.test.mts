@@ -35,10 +35,10 @@ import { oidcFederationModule, readOidcFederationConfigs } from "#/module.mjs";
 import { createFakeIdp, type FakeIdp } from "./helpers.mjs";
 
 /**
- * #524 acceptance, through the real session routes: two OIDC instances
- * against two issuers in one deployment, each with its own callback; the
- * identity handed to the Store is `<name>:<sub>`; an identity the Store
- * does not know is refused with 401 — no just-in-time provisioning.
+ * Through the real session routes: two OIDC instances against two issuers
+ * in one deployment, each with its own callback; the identity handed to the
+ * Store is `<name>:<sub>`; an identity the Store does not know is refused
+ * with 401 — no just-in-time provisioning.
  */
 const ISSUER_A = "https://idp-a.test";
 const ISSUER_B = "https://idp-b.test/realms/b";
