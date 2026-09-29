@@ -287,6 +287,14 @@ describe("/authorize — unauthenticated session", () => {
 		expect(res.status).toBe(302);
 		const location = res.headers.location as string;
 		expect(location.startsWith("/login?tenant=x&redirect_to=")).toBe(true);
+		// One redirect_to, naming the request to come back to; the page's own
+		// query kept as it was.
+		const query = new URL(location, "https://login.invalid").searchParams;
+		expect(query.getAll("tenant")).toEqual(["x"]);
+		expect(query.getAll("redirect_to")).toHaveLength(1);
+		expect(query.get("redirect_to")?.startsWith("https://issuer.example/oauth/authorize?")).toBe(
+			true,
+		);
 	});
 
 	it("builds redirect_to from the configured origin, not the Host header (#356)", async () => {
