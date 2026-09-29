@@ -37,6 +37,7 @@ import type { ComponentKey, ComponentMap } from "../modules/manifest/component-m
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
 	BootstrapMap,
@@ -1036,11 +1037,17 @@ export function checkFederationStoresWiring(
 // Per issue #363; #375 folded #277's access-token check onto it.
 // ---------------------------------------------------------------------------
 
-/** Read a dotted path off the parsed config without asserting its shape. */
+/**
+ * Read a dotted path off the parsed config without asserting its shape. Each
+ * key is read as an own property: one an object inherits (`constructor`,
+ * `toString`) is not configuration anyone wrote, and reads as absent.
+ */
 function readConfigPath(config: unknown, path: readonly string[]): unknown {
 	let value: unknown = config;
 	for (const segment of path) {
-		if (value === null || typeof value !== "object") return undefined;
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, segment)) {
+			return undefined;
+		}
 		value = (value as Record<string, unknown>)[segment];
 	}
 	return value;
@@ -1482,6 +1489,151 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 }
 
 // ---------------------------------------------------------------------------
+// Step 13, second half — each module's own configuration section (#728)
+// ---------------------------------------------------------------------------
+
+/**
+ * The dot-separated path a module's section is read at: its manifest's
+ * `section.at`, or else the module's name, whole — a module's name is the
+ * section's key as the manifest writes it, and is not split on dots.
+ */
+function sectionPathOf(m: Module): string {
+	return m.section?.at ?? m.name;
+}
+
+/** The keys of a dot-separated section path; a module's own name is one key. */
+function sectionSegmentsOf(m: Module): readonly string[] {
+	return m.section?.at === undefined ? [m.name] : m.section.at.split(".");
+}
+
+/** A Zod issue path as the operator writes it: its keys joined with dots. */
+function operatorPath(path: readonly PropertyKey[]): string {
+	return path.map(String).join(".");
+}
+
+/**
+ * A parsed section as every factory of its module receives it: plain data —
+ * arrays, and objects whose prototype is `Object.prototype` or `null` —
+ * copied and frozen all the way down, so no factory can change what another
+ * reads, and a subtree the schema passed through (`z.unknown()`) is not the
+ * `config` slot's own object. Anything else — a `URL`, a `Buffer`, a class
+ * instance a transform built — is handed over as the schema made it: freezing
+ * a typed array throws, and copying an instance would lose what it is.
+ */
+function frozenSection(value: unknown, copies = new Map<object, unknown>()): unknown {
+	if (value === null || typeof value !== "object") return value;
+	const known = copies.get(value);
+	if (known !== undefined) return known;
+	if (Array.isArray(value)) {
+		const copy: unknown[] = [];
+		copies.set(value, copy);
+		for (const item of value) copy.push(frozenSection(item, copies));
+		return Object.freeze(copy);
+	}
+	const prototype: unknown = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) return value;
+	// The same prototype as the original: `Object.prototype`, or none.
+	const copy: object = prototype === null ? Object.setPrototypeOf({}, null) : {};
+	copies.set(value, copy);
+	for (const key of Reflect.ownKeys(value)) {
+		if (!Object.prototype.propertyIsEnumerable.call(value, key)) continue;
+		// Defined, not assigned: a key named `__proto__` stays a key.
+		Object.defineProperty(copy, key, {
+			value: frozenSection((value as Record<PropertyKey, unknown>)[key], copies),
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+	}
+	return Object.freeze(copy);
+}
+
+/**
+ * Parse one section with its schema. A schema that throws instead of
+ * answering — an async refinement (Zod cannot finish it synchronously), or a
+ * transform that throws — is one more issue at the section's own path, so it
+ * refuses boot the way a refused value does, naming the path, rather than
+ * escaping stage 1 as a bare error.
+ */
+function parseSection(
+	schema: z.ZodType,
+	value: unknown,
+): { readonly data: unknown } | { readonly issues: readonly z.ZodIssue[] } {
+	try {
+		const result = schema.safeParse(value);
+		return result.success ? { data: result.data } : { issues: result.error.issues };
+	} catch (thrown) {
+		return {
+			issues: [
+				{
+					code: "custom",
+					path: [],
+					message: `the section's schema threw instead of answering, so it could not be parsed synchronously: ${failureSummary(thrown)}`,
+				} as z.ZodIssue,
+			],
+		};
+	}
+}
+
+/**
+ * Parse every declared section: for each module whose manifest has a
+ * `section`, read the value at its path out of the parsed configuration —
+ * the one the `config` slot holds, so a section reads what the module read
+ * from `config` before it declared one — and parse it with the section's
+ * schema, synchronously.
+ *
+ * Returns each sectioned module's parsed value by name. When a schema
+ * refuses its value, every section is still parsed, and one
+ * `config-validation-failed` names every refused one: each issue's path is
+ * prefixed with its section's, so the message and `details.issues` name the
+ * path the operator wrote (`legacy.fixture.retries`), and `details.modules`
+ * lists each refused module with the path its section is read at.
+ *
+ * The configuration itself is left as it was: a section's parse transforms
+ * only what the module is handed as `deps.section` — a deeply frozen copy
+ * (`frozenSection`) — never the `config` slot. Every module in `modules` is
+ * parsed, whether or not a factory of it will run.
+ * @internal
+ */
+function parseModuleSections(
+	modules: readonly Module[],
+	parsedConfig: unknown,
+): ReadonlyMap<string, { readonly value: unknown }> {
+	const sections = new Map<string, { readonly value: unknown }>();
+	const issues: z.ZodIssue[] = [];
+	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
+
+	for (const m of modules) {
+		if (m.section === undefined) continue;
+		const segments = sectionSegmentsOf(m);
+		const result = parseSection(m.section.schema, readConfigPath(parsedConfig, segments));
+		if ("data" in result) {
+			sections.set(m.name, { value: frozenSection(result.data) });
+			continue;
+		}
+		for (const issue of result.issues) {
+			issues.push({ ...issue, path: [...segments, ...issue.path] } as z.ZodIssue);
+		}
+		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
+	}
+
+	if (issues.length > 0) {
+		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: {
+				reason: "config-validation-failed",
+				issues,
+				modules: refused,
+			},
+		});
+	}
+	return sections;
+}
+
+// ---------------------------------------------------------------------------
 // Step 14 — Route-order edge sanity
 // Per A2-β §5.1 step 14.
 // ---------------------------------------------------------------------------
@@ -1576,6 +1728,77 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// #728 — the module section's manifest rules
+// ---------------------------------------------------------------------------
+
+/**
+ * The key a module's own configuration section is set under on its deps
+ * object, beside its slots.
+ */
+const SECTION_DEPS_KEY = "section";
+
+/**
+ * A module that declares a section may not also require or optionally read a
+ * component named `section`: its deps would carry both under one name, the
+ * section shadowing the slot. Only that module is refused. A component named
+ * `section` is otherwise an ordinary slot — provided, read by a module that
+ * declares no section, bootstrapped or overridden — so a composition that
+ * had one before sections existed boots as it did.
+ * Throws `reserved-component-key`.
+ * @internal
+ */
+function checkReservedComponentKeys(
+	rawModules: readonly Module[],
+	modules: readonly NormalisedModule[],
+): void {
+	modules.forEach((m, index) => {
+		if (rawModules[index]?.section === undefined) return;
+		const sources = [
+			["module-requires", m.requires, "requires"],
+			["module-optional", m.optional, "optionally reads"],
+		] as const;
+		for (const [source, keys, verb] of sources) {
+			if (!(keys as readonly string[]).includes(SECTION_DEPS_KEY)) continue;
+			throw new BootError({
+				message: `Module "${m.name}" declares its own section and ${verb} a component named "${SECTION_DEPS_KEY}": its deps carry the section under that name. Name the component otherwise.`,
+				reason: "reserved-component-key",
+				stage: "validateManifests",
+				details: {
+					reason: "reserved-component-key",
+					componentKey: SECTION_DEPS_KEY,
+					source,
+					module: m.name,
+				},
+			});
+		}
+	});
+}
+
+/**
+ * Every `section.at` is a dot-separated path of non-empty keys. `""`,
+ * `"a..b"`, `".a"` and `"a."` — or a value that is not a string — name no
+ * section anyone wrote. Throws `module-section-path-invalid`: a string is
+ * quoted in the message, anything else named by its type — rendering it could
+ * throw (a bigint, a cyclic object) before the refusal exists — and the value
+ * itself is in `details.at`.
+ * @internal
+ */
+function checkModuleSectionPaths(rawModules: readonly Module[]): void {
+	for (const m of rawModules) {
+		const at: unknown = m.section?.at;
+		if (at === undefined) continue;
+		if (typeof at === "string" && at.split(".").every((key) => key.length > 0)) continue;
+		const shown = typeof at === "string" ? JSON.stringify(at) : `a ${typeof at}`;
+		throw new BootError({
+			message: `Module "${m.name}" declares its section at ${shown}, which is not a dot-separated path of non-empty keys.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: { reason: "module-section-path-invalid", module: m.name, at },
+		});
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The stage-1 check registries (#368)
 // ---------------------------------------------------------------------------
 
@@ -1657,6 +1880,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 			),
 	},
 	{
+		id: "reserved-component-keys",
+		spec: "issue #728 (the module section's deps key)",
+		run: (ctx) => checkReservedComponentKeys(ctx.rawModules, ctx.modules),
+	},
+	{
 		id: "session-requirement-kind-guard",
 		spec: "A2-β §5.1 (after step 3): the session-admission ADR's D3",
 		run: (ctx) => checkSessionRequirementKindGuard(ctx.modules),
@@ -1711,6 +1939,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		id: "lifecycle-closure",
 		spec: "A2-β §5.1 step 12",
 		run: (ctx) => checkLifecycleClosure(ctx.modules),
+	},
+	{
+		id: "module-section-paths",
+		spec: "issue #728 (a section's transitional path)",
+		run: (ctx) => checkModuleSectionPaths(ctx.rawModules),
 	},
 ]);
 
@@ -1824,6 +2057,10 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
+	// Each module's own section (#728), parsed out of that configuration by
+	// the module's schema — before any post-config row, which may assume the
+	// configuration is valid.
+	const sections = parseModuleSections(modules, parsedConfig);
 
 	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
 	for (const check of STAGE_ONE_POST_CONFIG_CHECKS) {
@@ -1831,10 +2068,14 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	}
 
 	// Build output indices
-	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => ({
-		manifest: modules[i],
-		normalised,
-	}));
+	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => {
+		const section = sections.get(normalised.name);
+		return {
+			manifest: modules[i],
+			normalised,
+			...(section === undefined ? {} : { section }),
+		};
+	});
 
 	const byName = new Map<string, ValidatedModule>();
 	const providers = new Map<ComponentKey, ValidatedModule>();

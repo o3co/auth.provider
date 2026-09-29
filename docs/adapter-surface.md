@@ -112,7 +112,7 @@ Not adapters. These are the boot machinery every composition has.
 
 | Slot | Type | Wiring | Declared in | Purpose |
 | --- | --- | --- | --- | --- |
-| `config` | `AppConfig` | required | `core/boot/types.mts` | The parsed application config. Every module that reads a knob requires it. |
+| `config` | `AppConfig` | required | `core/boot/types.mts` | The parsed application config. Every module that reads a knob requires it, until it declares its own section in its manifest (`section`, #728): boot parses that section out of this config and hands it to the module as `deps.section`, which is not a slot. |
 | `lifecycleRegistrar` | `LifecycleRegistrar` | required | `core/boot/types.mts` | Where a component registers its shutdown work, so `dispose()` drains in reverse-topological order. |
 | `logger` | `Logger` | optional | `core/logging/Logger.mts` | Structured logger. Optional to wire; bundled modules fall back to a console logger rather than going silent. |
 | `pathResolver` | `PathResolver` | required | `core/boot/types.mts` | Resolves a package-relative path (normally `import.meta.resolve`), so `reference.conf` is found without assuming a layout. |

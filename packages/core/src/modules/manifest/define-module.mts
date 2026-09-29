@@ -15,6 +15,7 @@
  */
 
 import type { ComponentKey } from "./component-map.mjs";
+import type { SectionSchema } from "./module-section.mjs";
 import type { Module, ModuleSpec } from "./module-spec.mjs";
 
 /**
@@ -22,6 +23,12 @@ import type { Module, ModuleSpec } from "./module-spec.mjs";
  * parameters R and O capture the literal `requires` / `optional` arrays
  * at the call site without the author writing `as const`, so providers
  * and contribution factories receive a precisely-typed deps object.
+ * `S` is inferred from `section.schema`, so the same deps object carries
+ * the module's own section, typed as the schema's output (#728).
+ *
+ * A call that writes its type arguments (`defineModule<Requires,
+ * Optional>(…)`) infers none of them: a sectioned module that does names
+ * its schema's type as the third (`typeof MySection`).
  *
  * Per A2-α §3.1 (TypeScript 5.0+ `const` modifier on generic parameters).
  *
@@ -29,9 +36,10 @@ import type { Module, ModuleSpec } from "./module-spec.mjs";
  * ```typescript
  * export const myModule = defineModule({
  *   name: "my-module",
- *   requires: ["config"],         // inferred as readonly ["config"]
+ *   requires: ["logger"],         // inferred as readonly ["logger"]
+ *   section: { schema: z.object({ retries: z.number() }) },
  *   provides: {
- *     auditSink: ({ config }) => createAuditSink(config),
+ *     auditSink: ({ logger, section }) => createAuditSink(logger, section.retries),
  *   },
  * });
  * ```
@@ -39,7 +47,8 @@ import type { Module, ModuleSpec } from "./module-spec.mjs";
 export function defineModule<
 	const R extends ComponentKey = never,
 	const O extends ComponentKey = never,
->(spec: ModuleSpec<R, O>): Module {
+	S extends SectionSchema = never,
+>(spec: ModuleSpec<R, O, S>): Module {
 	// Pure pass-through. The boot planner (Phase 4) consumes the erased
 	// Module type; the type-level R/O information is captured at the
 	// defineModule call site for inference but not used at runtime.
