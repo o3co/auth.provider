@@ -147,6 +147,11 @@ function normaliseModule(m: Module): NormalisedModule {
 	const requires = (m.requires ?? []) as readonly ComponentKey[];
 	const optional = (m.optional ?? []) as readonly ComponentKey[];
 	const providesKeys = Object.keys(m.provides ?? {}) as ComponentKey[];
+	// Read once: the closure check refuses and describes what was read here.
+	const authoritativeDeclared: unknown = m.authoritative;
+	const authoritativeKeys: readonly ComponentKey[] = Array.isArray(authoritativeDeclared)
+		? [...(authoritativeDeclared as readonly ComponentKey[])]
+		: [];
 
 	const contributesEntries: ContributionEntry[] = [];
 	for (const [kind, kindMap] of Object.entries(m.contributes ?? {})) {
@@ -203,6 +208,8 @@ function normaliseModule(m: Module): NormalisedModule {
 		requires,
 		optional,
 		providesKeys,
+		authoritativeDeclared,
+		authoritativeKeys,
 		contributesEntries,
 		overridesEntries,
 		lifecycleKeys,
@@ -320,6 +327,138 @@ function checkProvidesClosure(modules: readonly NormalisedModule[]): void {
 				});
 			}
 			providers.set(key, m.name);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Authoritative keys (#728) — a module's settings slots have one source
+// ---------------------------------------------------------------------------
+
+/**
+ * What `value` is, for a refusal, never rendered — a null-prototype object
+ * has no `toString`, and a getter or a proxy trap may throw: `the string
+ * "…"`, `the number 5`, `null`, `a Set`, `an Object`, or `an object` when its
+ * prototype names no constructor.
+ */
+const describeValue = (value: unknown): string => {
+	if (value === null || value === undefined) return String(value);
+	if (typeof value === "string") return `the string ${JSON.stringify(value)}`;
+	if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+		return `the ${typeof value} ${String(value)}`;
+	}
+	if (typeof value !== "object") return `a ${typeof value}`;
+	let name: unknown;
+	try {
+		const prototype: unknown = Object.getPrototypeOf(value);
+		name =
+			prototype === null
+				? undefined
+				: (prototype as { constructor?: { name?: unknown } }).constructor?.name;
+	} catch {
+		name = undefined;
+	}
+	if (typeof name !== "string" || name === "") return "an object";
+	return `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name}`;
+};
+
+/**
+ * `authoritative` names keys of the module's own `provides`, as a list: a key
+ * it does not provide — named as written, or described when it is not a
+ * string — or a value that is not a list, described in `declared`, refuses
+ * boot (`authoritative-without-provides`), as a lifecycle for an unprovided
+ * key does. Reads what normalisation read, once.
+ * @internal
+ */
+function checkAuthoritativeClosure(modules: readonly NormalisedModule[]): void {
+	for (const m of modules) {
+		if (m.authoritativeDeclared === undefined) continue;
+		if (!Array.isArray(m.authoritativeDeclared)) {
+			const declared = describeValue(m.authoritativeDeclared);
+			throw new BootError({
+				message: `Module "${m.name}" declares authoritative as ${declared}, not a list of the keys it provides.`,
+				reason: "authoritative-without-provides",
+				stage: "validateManifests",
+				details: { reason: "authoritative-without-provides", module: m.name, declared },
+			});
+		}
+		for (const key of m.authoritativeKeys as readonly unknown[]) {
+			if (typeof key === "string" && (m.providesKeys as readonly string[]).includes(key)) continue;
+			const componentKey = typeof key === "string" ? key : describeValue(key);
+			const named = typeof key === "string" ? JSON.stringify(key) : componentKey;
+			throw new BootError({
+				message: `Module "${m.name}" names ${named} authoritative but does not provide it: only a key of the module's own provides can be.`,
+				reason: "authoritative-without-provides",
+				stage: "validateManifests",
+				details: { reason: "authoritative-without-provides", module: m.name, componentKey },
+			});
+		}
+	}
+}
+
+/**
+ * A host map that carries `__proto__` as its own key — written as a computed
+ * key, or parsed from JSON — refuses boot (`reserved-component-key`): set on
+ * the component map, it would replace the map's prototype rather than name a
+ * component, so every key of its value would read as one, no module's
+ * provider would run for them, and no check that reads the map's own keys —
+ * the authoritative one, the collision one — would see them. Runs before any
+ * row reads the host maps.
+ * @internal
+ */
+function checkReservedHostKeys(
+	bootstrap: BootstrapMap,
+	override: Partial<ComponentMap> | undefined,
+): void {
+	const maps = [
+		["bootstrapComponents", bootstrap],
+		["overrideComponents", override],
+	] as const;
+	for (const [source, map] of maps) {
+		if (map === undefined || !Object.hasOwn(map, "__proto__")) continue;
+		throw new BootError({
+			message:
+				`${source} carries "__proto__" as a key of its own: it names no component — set on the ` +
+				"component map it would replace the map's prototype, and every key of its value would " +
+				"read as a component no module provided. Remove the entry.",
+			reason: "reserved-component-key",
+			stage: "validateManifests",
+			details: { reason: "reserved-component-key", componentKey: "__proto__", source },
+		});
+	}
+}
+
+/**
+ * An `overrideComponents` entry for a key a loaded module provides as
+ * authoritative refuses boot (`authoritative-component-overridden`): the
+ * module derives it from its own section and its own code reads that
+ * section, so a second source would split what its readers see from what the
+ * module does. A key no loaded module names authoritative may be overridden,
+ * as before — and so may this one when its module is not loaded.
+ * @internal
+ */
+function checkAuthoritativeOverrides(
+	modules: readonly NormalisedModule[],
+	override: Partial<ComponentMap> | undefined,
+): void {
+	const overrideKeys = new Set<string>(Object.keys(override ?? {}));
+	for (const m of modules) {
+		for (const key of m.authoritativeKeys) {
+			if (!overrideKeys.has(key)) continue;
+			throw new BootError({
+				message:
+					`overrideComponents contains "${key}", which module "${m.name}" provides as authoritative: ` +
+					"the module derives it from its own section and its own code reads that section, so a " +
+					"second source would split what its readers see from what the module does. Change the " +
+					`module's configuration instead, or leave the module out and fill "${key}" yourself.`,
+				reason: "authoritative-component-overridden",
+				stage: "validateManifests",
+				details: {
+					reason: "authoritative-component-overridden",
+					module: m.name,
+					componentKey: key,
+				},
+			});
 		}
 	}
 }
@@ -2522,6 +2661,16 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		run: (ctx) => checkProvidesClosure(ctx.modules),
 	},
 	{
+		id: "authoritative-closure",
+		spec: "issue #728 (a module's authoritative keys are keys it provides)",
+		run: (ctx) => checkAuthoritativeClosure(ctx.modules),
+	},
+	{
+		id: "reserved-host-keys",
+		spec: "issue #728 (a host map's own __proto__ names no component)",
+		run: (ctx) => checkReservedHostKeys(ctx.bootstrapComponents, ctx.overrideComponents),
+	},
+	{
 		id: "bootstrap-synthetic-disjointness",
 		spec: "A2-β §5.1 step 3",
 		run: (ctx) =>
@@ -2530,6 +2679,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 				ctx.bootstrapComponents,
 				ctx.overrideComponents,
 			),
+	},
+	{
+		id: "authoritative-overrides",
+		spec: "issue #728 (a loaded module's authoritative keys have one source)",
+		run: (ctx) => checkAuthoritativeOverrides(ctx.modules, ctx.overrideComponents),
 	},
 	{
 		id: "reserved-component-keys",

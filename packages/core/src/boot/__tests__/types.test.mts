@@ -78,12 +78,14 @@ describe("BootStage", () => {
 // "session-requirements-undeclared" and "session-requirement-missing"; #728's
 // module sections added "reserved-component-key" and
 // "module-section-path-invalid", its contribution kinds
-// "contribution-kind-guarded" and "contribution-malformed", and its relocated
-// paths "config-path-relocated" — 34)
+// "contribution-kind-guarded" and "contribution-malformed", its relocated
+// paths "config-path-relocated", and its authoritative keys
+// "authoritative-without-provides" and "authoritative-component-overridden"
+// — 36)
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 34 reason literals", () => {
+	it("contains exactly the 36 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "module-factory-not-called"
 			| "duplicate-module-name"
@@ -119,6 +121,8 @@ describe("BootErrorReason", () => {
 			| "contribution-kind-guarded"
 			| "contribution-malformed"
 			| "config-path-relocated"
+			| "authoritative-without-provides"
+			| "authoritative-component-overridden"
 		>();
 	});
 });

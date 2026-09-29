@@ -1,5 +1,6 @@
 import { expectTypeOf, test } from "vitest";
 import { z } from "zod";
+import { createTestOAuthTokenSettings } from "../../../testing/slots/oauthTokenSettings.mjs";
 import type { ComponentKey } from "../component-map.mjs";
 import { defineModule } from "../define-module.mjs";
 import type { ModuleSection, SectionSchema } from "../module-section.mjs";
@@ -262,6 +263,74 @@ test("relocatedFrom is a list of old paths moved whole, or a map from each old p
 			// @ts-expect-error — a new path is a string of keys
 			relocatedFrom: { "oauth.retrying": 1 },
 		},
+	});
+});
+
+// ---------------------------------------------------------------------------
+// `authoritative` (#728): the provided keys no composition may substitute
+// while the module is loaded. Only a key of the module's own `provides`
+// compiles; `config` and `oauthTokenSettings` are real slots in this program.
+// ---------------------------------------------------------------------------
+
+test("authoritative names keys of the module's own provides", () => {
+	defineModule({
+		name: "owner",
+		requires: ["config"],
+		provides: { oauthTokenSettings: () => undefined as never },
+		authoritative: ["oauthTokenSettings"],
+	});
+});
+
+test("authoritative refuses a key the module does not provide", () => {
+	defineModule({
+		name: "owner",
+		provides: { oauthTokenSettings: () => undefined as never },
+		// @ts-expect-error — `config` is not among this module's provides
+		authoritative: ["config"],
+	});
+	defineModule({
+		name: "provides-nothing",
+		// @ts-expect-error — a module that provides nothing has no key to name
+		authoritative: ["oauthTokenSettings"],
+	});
+});
+
+test("authoritative compiles beside a section and a provider that reads its deps", () => {
+	const TokenSection = z.object({ issuer: z.string().url() });
+	const owner = defineModule({
+		name: "owner-with-section",
+		requires: ["config"],
+		section: { schema: TokenSection },
+		provides: {
+			oauthTokenSettings: (deps) => {
+				expectTypeOf(deps.section).toEqualTypeOf<z.output<typeof TokenSection>>();
+				expectTypeOf(deps).toHaveProperty("config");
+				return createTestOAuthTokenSettings({ issuer: deps.section.issuer });
+			},
+		},
+		authoritative: ["oauthTokenSettings"],
+	});
+	expectTypeOf(owner).toExtend<Module>();
+	// P is still inferred from provides with the factory contextually typed:
+	// a key the module does not provide is refused in the same setting.
+	defineModule({
+		name: "owner-with-section-naming-another",
+		requires: ["config"],
+		section: { schema: TokenSection },
+		provides: {
+			oauthTokenSettings: (deps) => createTestOAuthTokenSettings({ issuer: deps.section.issuer }),
+		},
+		// @ts-expect-error — `config` is required here, not provided
+		authoritative: ["config"],
+	});
+});
+
+test("a call that writes P is not held to its provides: the stage-1 row catches what the type cannot", () => {
+	// Only an inferred call checks that an authoritative key is provided:
+	// written as the fourth type argument, P is taken as given.
+	defineModule<never, never, never, "oauthTokenSettings">({
+		name: "explicit-p-provides-nothing",
+		authoritative: ["oauthTokenSettings"],
 	});
 });
 
