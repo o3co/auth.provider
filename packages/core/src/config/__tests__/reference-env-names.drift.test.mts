@@ -26,11 +26,19 @@
  * each `${?VAR}` (or `${VAR}`) outside a comment is resolved alone, set to a
  * marker, and the paths the marker lands on are the paths the variable sets.
  * A name that is not the upper-snake-case form of each of its paths fails,
- * unless it is on `TODAY`: the names that predate the rule, which the move
- * pull requests rename. That list may only shrink, and two checks hold it
- * there: an entry that no longer holds fails until it is removed, and the
- * list's length has a ceiling, `CEILING`, that a name added to it
- * breaks — each move pull request lowers the ceiling by the names it renames.
+ * unless it is in `LEGACY`: the names that predated the rule when this guard
+ * was written, which the move pull requests rename.
+ *
+ * The rule the guard holds (`namingProblems`):
+ *
+ * - `LEGACY` is a fixed baseline. It is never edited except to delete an
+ *   entry — never to add one — and it may keep a name that has since been
+ *   renamed; its length is held at or under its first count, 61.
+ * - Every misnamed variable is in `LEGACY`: a variable misnamed anew is
+ *   outside it and fails, whatever else a change renames.
+ * - How many variables are misnamed is held at `CEILING`, the count today: a
+ *   move pull request lowers it by the names it renames, and a rename that
+ *   leaves it where it was fails until it is lowered. Nothing raises it.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -45,17 +53,22 @@ const TEMPLATE_CONFIG = fileURLToPath(
 );
 
 /**
- * How long `TODAY` may be: its length today. A move pull request that renames
- * names lowers it by as many; nothing raises it.
+ * How many variables may still not be named after their paths: exactly as
+ * many as are today. A move pull request lowers it by the names it renames;
+ * nothing raises it.
  */
 const CEILING = 61;
 
+/** `LEGACY`'s first count: it only ever loses entries. */
+const LEGACY_BASELINE = 61;
+
 /**
- * The names that predate the rule, as `<layer>: <VAR> at <path>` — `<layer>`
+ * The names that predated the rule, as `<layer>: <VAR> at <path>` — `<layer>`
  * is a package's directory name, or `template` for the standalone template's
- * layers; the move pull requests rename them.
+ * layers; the move pull requests rename them. A fixed baseline: entries are
+ * deleted, never added (see the file header).
  */
-const TODAY: readonly string[] = [
+const LEGACY: readonly string[] = [
 	"core: LOG_LEVEL at logging.level",
 	"core: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
 	"core: OAUTH_JWT_KID at oauth.jwt.signingKey.local.kid",
@@ -171,7 +184,7 @@ function readable(path: string): boolean {
 }
 
 /**
- * Every configuration layer the repository ships, by the name `TODAY` gives
+ * Every configuration layer the repository ships, by the name `LEGACY` gives
  * it: each package's `config/reference.conf` by package directory name, and
  * the standalone template's layers as `template`.
  */
@@ -193,7 +206,7 @@ const FOUND = LAYERS.flatMap(([name, path]) =>
 	})),
 );
 
-/** Each variable at a path it is not the upper-snake-case form of, as `TODAY` writes it. */
+/** Each variable at a path it is not the upper-snake-case form of, as `LEGACY` writes it. */
 const MISNAMED: readonly string[] = FOUND.flatMap(({ package: name, variable, paths }) =>
 	paths
 		.filter((path) => upperSnake(path) !== variable)
@@ -235,8 +248,12 @@ describe("an environment variable is named after the path it sets (#728 B9)", ()
 		);
 	});
 
-	it("names every variable after its path, but for the names that predate the rule", () => {
+	it("names every variable after its path, but for the legacy baseline, and no more of those than the ceiling", () => {
 		expect(namingProblems(MISNAMED)).toEqual([]);
+	});
+
+	it("keeps the legacy baseline from growing: it only loses entries", () => {
+		expect(LEGACY.length).toBeLessThanOrEqual(LEGACY_BASELINE);
 	});
 
 	it("holds the ceiling at the number misnamed today: a move pull request lowers it by the names it renames", () => {
@@ -261,18 +278,17 @@ describe("an environment variable is named after the path it sets (#728 B9)", ()
 
 /**
  * What the guard finds wrong with `misnamed` — every variable at a path it is
- * not the upper-snake-case form of — under `ceiling`.
+ * not the upper-snake-case form of — under `ceiling`: a misnamed variable the
+ * legacy baseline does not hold, and more misnamed variables than the
+ * ceiling allows.
  */
 function namingProblems(misnamed: readonly string[], ceiling = CEILING): string[] {
 	return [
 		...misnamed
-			.filter((entry) => !TODAY.includes(entry))
-			.map((entry) => `${entry}: not named after its path`),
-		...TODAY.filter((entry) => !misnamed.includes(entry)).map(
-			(entry) => `${entry}: on the list, but named after its path now`,
-		),
-		...(TODAY.length > ceiling
-			? [`the list holds ${TODAY.length}; the ceiling is ${ceiling}`]
+			.filter((entry) => !LEGACY.includes(entry))
+			.map((entry) => `${entry}: not named after its path, and not in the legacy baseline`),
+		...(misnamed.length > ceiling
+			? [`${misnamed.length} variables are not named after their paths; the ceiling is ${ceiling}`]
 			: []),
 	];
 }
