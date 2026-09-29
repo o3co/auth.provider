@@ -191,8 +191,9 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 				app,
 				await signSelfIssuedAccessToken({ scope: "read write", aud: "billing" }),
 			);
+			// RFC 8693 §2.2.2: a subject token the server will not accept.
 			expect(res.status).toBe(400);
-			expect(res.body.error).toBe("invalid_grant");
+			expect(res.body.error).toBe("invalid_request");
 		});
 
 		it("accepts a subject token with no typ when the slot's legacyTypAccept is on", async () => {
