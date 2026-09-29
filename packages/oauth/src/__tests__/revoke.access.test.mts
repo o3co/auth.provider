@@ -211,7 +211,7 @@ describe("POST /oauth/revoke — access token path", () => {
 		expect(res.body.error).toBe("unsupported_token_type");
 	});
 
-	it("fail-closed: AT with no client_id/azp/aud claim is NOT denylisted (Copilot review #2)", async () => {
+	it("fail-closed: AT with no client_id/azp/aud claim is NOT denylisted", async () => {
 		// SECURITY: when ownership cannot be resolved from any of client_id /
 		// azp / aud claims, the previous logic let the denylist.add proceed
 		// (any authenticated client could revoke any AT). Fail-closed: treat
@@ -256,7 +256,7 @@ async function mintRefreshTokenForCrossType(opts: {
 		.sign(createSecretKey(Buffer.from("test-secret-at-least-32-chars!!")));
 }
 
-describe("POST /oauth/revoke — C1: cross-type fallback (hint=access_token + RT-shaped token)", () => {
+describe("POST /oauth/revoke — cross-type fallback (hint=access_token + RT-shaped token)", () => {
 	let revocations: string[];
 	let crossTypeRevocation: RefreshTokenFamilyRevocation;
 	let crossTypeDenylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
@@ -435,7 +435,7 @@ const publicClientRepository: ClientRepository = {
 	},
 };
 
-describe("POST /oauth/revoke — C2: public client support", () => {
+describe("POST /oauth/revoke — public client support", () => {
 	let pubDenylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
 	let pubRevocation: RefreshTokenFamilyRevocation;
 	let pubRevocations: string[];
@@ -463,7 +463,7 @@ describe("POST /oauth/revoke — C2: public client support", () => {
 		pubApp.use("/oauth", router);
 	});
 
-	it("C2: public client can revoke its own AT — denylist updated, 200", async () => {
+	it("public client can revoke its own AT — denylist updated, 200", async () => {
 		const at = await mintAccessToken({ jti: "pub-j-1", clientId: publicClientId });
 		const res = await request(pubApp)
 			.post("/oauth/revoke")
@@ -474,7 +474,7 @@ describe("POST /oauth/revoke — C2: public client support", () => {
 		expect(await pubDenylist.has("pub-j-1")).toBe(true);
 	});
 
-	it("C2: public client can revoke its own RT — family revoked, 200", async () => {
+	it("public client can revoke its own RT — family revoked, 200", async () => {
 		const rt = await mintRefreshTokenForCrossType({
 			familyId: "pub-fam-1",
 			clientId: publicClientId,
@@ -488,7 +488,7 @@ describe("POST /oauth/revoke — C2: public client support", () => {
 		expect(pubRevocations).toContain("pub-fam-1");
 	});
 
-	it("C2: public client revoking another client's token — silent 200, no revocation", async () => {
+	it("public client revoking another client's token — silent 200, no revocation", async () => {
 		// Mint an AT owned by the confidential client (CLIENT_ID), but public client tries to revoke it
 		const at = await mintAccessToken({ jti: "pub-j-cross", clientId: CLIENT_ID });
 		const res = await request(pubApp)

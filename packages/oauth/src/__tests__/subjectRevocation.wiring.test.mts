@@ -120,7 +120,7 @@ const session: UserSession = {
 	authentication: undefined,
 };
 
-describe("#296 — the subject watermark reaches /oauth/introspect", () => {
+describe("the subject watermark reaches /oauth/introspect", () => {
 	const buildApp = async (
 		subjectRevocation?: ReturnType<typeof createInMemorySubjectRevocation>,
 	) => {
@@ -195,7 +195,7 @@ describe("#296 — the subject watermark reaches /oauth/introspect", () => {
 	});
 });
 
-describe("#296 — the subject watermark reaches /oauth/userinfo", () => {
+describe("the subject watermark reaches /oauth/userinfo", () => {
 	const buildApp = (subjectRevocation?: ReturnType<typeof createInMemorySubjectRevocation>) => {
 		const app = express();
 		app.use(express.json());

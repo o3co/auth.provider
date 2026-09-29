@@ -170,7 +170,7 @@ const refused = async (
 	return result as GrantError & { readonly step_up?: unknown };
 };
 
-describe("the refresh grant on admission — no requirement registered: as before (D9)", () => {
+describe("the refresh grant on admission — no requirement registered", () => {
 	it("refreshes a token whose sid names a live session, reading it once", async () => {
 		const store = storeWith(record());
 		const { handler } = makeGrant({ userSessionStore: store });
@@ -239,7 +239,7 @@ describe("the refresh grant on admission — no requirement registered: as befor
 	});
 });
 
-describe("the refresh grant on admission — a requirement's verdicts (D9)", () => {
+describe("the refresh grant on admission — a requirement's verdicts", () => {
 	it("is asked about the token's own amr, with the token carrier, even without a store", async () => {
 		const requirement = fixture(() => ({ outcome: "met" }));
 		const { handler } = makeGrant({ requirements: [requirement] });
@@ -315,7 +315,7 @@ describe("the refresh grant on admission — a requirement's verdicts (D9)", () 
 	});
 });
 
-describe("the refresh grant on admission — no requirement registered: D2's reading of the record", () => {
+describe("the refresh grant on admission — no requirement registered: the record is read, not only found", () => {
 	// With no requirement registered, admission still reads the record the
 	// token's `sid` names as it reads every record, not only whether one
 	// exists. The bundled stores do not answer an expired record, so they see

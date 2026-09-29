@@ -118,7 +118,7 @@ const refused = (outcome: unknown) => {
 	return outcome as { status: number; error: string; description?: string };
 };
 
-describe("createClientAssertionVerifier (#484)", () => {
+describe("createClientAssertionVerifier", () => {
 	describe("presence and shape", () => {
 		it("reports an absent assertion, leaving the other methods to the middleware", async () => {
 			expect(await build().verify({}, findClient())).toEqual({ kind: "absent" });

@@ -366,8 +366,8 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
-	describe("#394 dual-accept window, closed (#402)", () => {
-		it("refuses a pre-#394 id_token_hint carrying typ id+jwt", async () => {
+	describe("id_token_hint typ — only the standard spelling is accepted", () => {
+		it("refuses an id_token_hint carrying typ id+jwt", async () => {
 			// Logout is where an already-issued id_token would lose its hint
 			// value once the spelling is refused; none carrying `id+jwt` exist.
 			const sessionStore = makeSessionStore();
@@ -1720,7 +1720,7 @@ describe("GET /oauth/logout", () => {
 	// schemes, so a native app can be sent back to itself after logout. The
 	// allowlist stays an EXACT match, and the value is never rendered into
 	// HTML unescaped.
-	describe("custom-scheme post_logout_redirect_uri (#498)", () => {
+	describe("custom-scheme post_logout_redirect_uri", () => {
 		const NATIVE_URI = "com.example.app:/signout";
 
 		const nativeClientRepo = () =>
@@ -2735,7 +2735,7 @@ describe("audit events", () => {
  * that OWNS the session being logged out, and to no other. An RP-initiated
  * logout arriving on some third party's cookie must leave that cookie alone.
  */
-describe("POST /oauth/logout — browser session (R1a)", () => {
+describe("POST /oauth/logout — browser session", () => {
 	it("destroys the express-session whose sid is the one being logged out", async () => {
 		const browserSession = makeBrowserSession({ sid: "sid-1" });
 		const sessionStore = makeSessionStore();

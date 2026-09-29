@@ -204,7 +204,7 @@ const atConsentPage = (res: request.Response, consentPath = "/consent"): string 
 	return challenge as string;
 };
 
-describe("the page is told which host a URL-shaped client_id names (v0.13.0 audit)", () => {
+describe("the page is told which host a URL-shaped client_id names", () => {
 	// A Client ID Metadata Document is written by whoever controls its host,
 	// so its `client_name` and `client_uri` are that party's claims about
 	// itself — "Google Drive" costs nothing to type. The draft asks the AS to
@@ -292,8 +292,8 @@ const collectingSink = (): { sink: AuditSink; events: AuditEvent[] } => {
 	};
 };
 
-describe("/authorize for a client that is not first-party (#527)", () => {
-	it("refuses it when no consent store is wired — the #267 rule, unchanged", async () => {
+describe("/authorize for a client that is not first-party", () => {
+	it("refuses it when no consent store is wired", async () => {
 		const { app, pending } = await makeApp({});
 		const params = atClient(await authorize(app));
 		expect(params.get("error")).toBe("unauthorized_client");
@@ -397,7 +397,7 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 	});
 
-	it("never asks a session that names no subject: such a cookie is not admitted, and the browser is sent to log in (the session-admission ADR's D8, change 3)", async () => {
+	it("never asks a session that names no subject: such a cookie is not admitted, and the browser is sent to log in", async () => {
 		// It used to be refused at the consent step (`access_denied`); admission
 		// refuses the cookie before any step, with a login the remedy.
 		const { app, session, createCode } = await makeApp({
@@ -413,7 +413,7 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 	});
 });
 
-describe("GET /oauth/consent (#527)", () => {
+describe("GET /oauth/consent", () => {
 	it("tells the page what is being asked, uncacheably", async () => {
 		const store = createMemoryConsentStore();
 		await granted(store, ["read"]);
@@ -469,7 +469,7 @@ describe("GET /oauth/consent (#527)", () => {
 	});
 });
 
-describe("POST /oauth/consent (#527)", () => {
+describe("POST /oauth/consent", () => {
 	it("accept records the consent, sends the browser back to the parked request, and the request then mints", async () => {
 		const store = createMemoryConsentStore();
 		const { sink, events } = collectingSink();
@@ -576,7 +576,7 @@ describe("POST /oauth/consent (#527)", () => {
 	});
 });
 
-describe("the parked request resumes as the request that was made (#527 review)", () => {
+describe("the parked request resumes as the request that was made", () => {
 	it("drops prompt=consent from the URL it returns to, so an accepted request does not park again", async () => {
 		// Carried back, `prompt=consent` parks the request a second time, and a
 		// third: every forced-consent request would loop forever.
@@ -616,7 +616,7 @@ describe("the parked request resumes as the request that was made (#527 review)"
 	});
 });
 
-describe("the consent endpoints answer only for a live session (#527 review)", () => {
+describe("the consent endpoints answer only for a live session", () => {
 	/** A store that knows `sid` only while `alive` says so. */
 	const storeFor = (alive: () => boolean): UserSessionStore =>
 		({
@@ -683,7 +683,7 @@ describe("the consent endpoints answer only for a live session (#527 review)", (
 	});
 });
 
-describe("the consent page and its answer, on the edges (#527 review)", () => {
+describe("the consent page and its answer, on the edges", () => {
 	const parkedWith = async (extra: Parameters<typeof makeApp>[0] = {}) => {
 		const consentStore = createMemoryConsentStore();
 		const harness = await makeApp({ consentStore, ...extra });
@@ -737,7 +737,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		expect(harness.pending.size).toBe(0);
 	});
 
-	it("refuses an answer from a session that names no subject: 401 login_required, the cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
+	it("refuses an answer from a session that names no subject: 401 login_required, the cookie is not admitted", async () => {
 		const { app, challenge, session } = await parkedWith({});
 		session.user = {};
 		const res = await request(app)
@@ -853,7 +853,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 	});
 });
 
-describe("one challenge, one answer (#552)", () => {
+describe("one challenge, one answer", () => {
 	/** A user-session store whose reads wait until the test lets them through. */
 	const gatedSessionStore = () => {
 		let release: () => void = () => {};
@@ -988,7 +988,7 @@ describe("one challenge, one answer (#552)", () => {
 	});
 });
 
-describe("the parked request and its store, on the edges (#552 review)", () => {
+describe("the parked request and its store, on the edges", () => {
 	/** A pending-consent store whose operations fail on demand. */
 	const flakyPending = () => {
 		const inner = createMemoryPendingConsentStore();
@@ -1116,7 +1116,7 @@ describe("the parked request and its store, on the edges (#552 review)", () => {
 	});
 });
 
-describe("the challenge's bindings, on the edges (#552 review)", () => {
+describe("the challenge's bindings, on the edges", () => {
 	it("refuses an answer from a request that reports no session id, keeping the request parked", async () => {
 		let sessionId: string | undefined = "sess-1";
 		const { app, pending } = await makeApp({
@@ -1144,8 +1144,8 @@ describe("the challenge's bindings, on the edges (#552 review)", () => {
 	});
 });
 
-describe("the page and the answer refuse the same requests (#527 audit)", () => {
-	it("does not show the page to a session that names no subject: 401 login_required (the session-admission ADR's D8, change 3)", async () => {
+describe("the page and the answer refuse the same requests", () => {
+	it("does not show the page to a session that names no subject: 401 login_required", async () => {
 		// A session can keep `isAuthenticated` while its user is cleared; the
 		// POST already refused it, so the GET must not hand it the parked
 		// client, scopes and redirect_uri either.

@@ -62,7 +62,7 @@ const OPTIONAL = [
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("oauthAuthorizationModule's deps are the slots it declares (#626 P2)", () => {
+describe("oauthAuthorizationModule's deps are the slots it declares", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		// `.branded` because ProviderDeps is an intersection of two mapped types.
 		expectTypeOf<OAuthAuthorizationModuleDeps>().branded.toEqualTypeOf<Declared>();
@@ -98,7 +98,7 @@ describe("oauthAuthorizationModule's deps are the slots it declares (#626 P2)", 
 	});
 });
 
-describe("the grant factories declare the slots they read (#626 P2)", () => {
+describe("the grant factories declare the slots they read", () => {
 	type AuthorizationDeps = Parameters<typeof createAuthorizationGrant>[0];
 	type RefreshDeps = Parameters<typeof createRefreshTokenGrant>[0];
 	type JwtBearerDeps = Parameters<typeof createJwtBearerGrant>[0];

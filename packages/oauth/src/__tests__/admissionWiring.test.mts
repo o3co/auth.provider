@@ -80,7 +80,7 @@ const codeRepository: CodeRepository = {
 /** The grant factories' shared slots, without `requirements`. */
 const grantDeps = { config, keyStore } as unknown as GrantDependencies;
 
-describe("the consumers' factories refuse to build without the requirements resolver (D1)", () => {
+describe("the consumers' factories refuse to build without the requirements resolver", () => {
 	it("createOAuthRouter throws, naming the option", async () => {
 		await expect(
 			createOAuthRouter(express, {
@@ -168,7 +168,7 @@ describe("the consumers' factories refuse to build without the requirements reso
 	});
 });
 
-describe("the grant manifests declare what admission reads (D1, D8, D10)", () => {
+describe("the grant manifests declare what admission reads", () => {
 	it("oauthSessionModule requires sessionRequirementResolver and lists the slots admission reads", () => {
 		const module = oauthSessionModule({ config });
 		expect(module.requires).toContain("sessionRequirementResolver");

@@ -321,7 +321,7 @@ describe("DPoP refresh-token binding matrix — §9.2 (5 rows)", () => {
 // ---------------------------------------------------------------------------
 
 describe("DPoP refresh-token mechanism boundary", () => {
-	it("non-DPoP mechanism emitting cnf.jkt cannot satisfy a DPoP-bound RT (Codex Important #2)", async () => {
+	it("non-DPoP mechanism emitting cnf.jkt cannot satisfy a DPoP-bound RT", async () => {
 		// The Confirmation union is mechanism-extensible — a custom mechanism
 		// (e.g. a FIDO attestation binding) could emit `{ jkt: "..." }`
 		// without being DPoP. The matrix's proof extraction MUST gate on
@@ -417,7 +417,7 @@ describe("DPoP refresh-token mechanism boundary", () => {
  * (`(bindingIsDpop || bindingIsMtls) && isPublicClient`) is, and
  * `oauth.tokenBinding` is where cross-mechanism policy lives.
  */
-describe("confidential-client RT binding — opt-in (#275)", () => {
+describe("confidential-client RT binding — opt-in", () => {
 	it("is off by default: a confidential client's new RT stays plain", async () => {
 		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
 		const { result } = await createRefreshTokenGrant(mockDeps).handle(
@@ -481,7 +481,7 @@ describe("confidential-client RT binding — opt-in (#275)", () => {
 		expect(result.error).toBe("invalid_grant");
 	});
 
-	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's (#728)", async () => {
+	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's", async () => {
 		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
 		for (const tokenBinding of [
 			undefined,

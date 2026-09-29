@@ -170,7 +170,7 @@ const redeem = (app: express.Express, body: Record<string, unknown>) =>
 			...body,
 		});
 
-describe("#273 /authorize — PKCE is mandatory for CONFIDENTIAL clients too", () => {
+describe("/authorize — PKCE is mandatory for CONFIDENTIAL clients too", () => {
 	it("refuses a confidential-client request that omits code_challenge", async () => {
 		const { app } = await makeApp();
 		const params = redirectParams(await authorize(app, baseQuery));
@@ -222,7 +222,7 @@ describe("#273 /authorize — PKCE is mandatory for CONFIDENTIAL clients too", (
 	});
 });
 
-describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () => {
+describe("/authorize — S256 only, plain behind a per-client opt-in", () => {
 	it("refuses code_challenge_method=plain for a client with no opt-in", async () => {
 		const { app } = await makeApp();
 		const params = redirectParams(
@@ -305,7 +305,7 @@ describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () =
 	});
 });
 
-describe("#273 /authorize — repeated parameters cannot downgrade the method", () => {
+describe("/authorize — repeated parameters cannot downgrade the method", () => {
 	// RFC 6749 §3.1: request parameters MUST NOT be included more than once.
 	// Express + `qs` surfaces a repeated `?p=a&p=b` as an ARRAY, and every read
 	// in the handler narrows a non-string to `undefined`, the shape absence
@@ -384,7 +384,7 @@ describe("#273 /authorize — repeated parameters cannot downgrade the method", 
 	});
 });
 
-describe("#273 /token — the same policy object decides redemption", () => {
+describe("/token — the same policy object decides redemption", () => {
 	it("refuses a code that carries no code_challenge_method", async () => {
 		const { app } = await makeApp({
 			storedCode: { client_id: CLIENT_ID, redirect_uri: REDIRECT_URI },
@@ -466,7 +466,7 @@ describe("#273 /token — the same policy object decides redemption", () => {
 	});
 });
 
-describe("#273 — operator signal for the now-inert pkce knobs", () => {
+describe("operator signal for the inert pkce knobs", () => {
 	it("warns exactly once for a boot, not once per resolution", async () => {
 		// `makeApp` resolves the SAME config twice, exactly as a real boot does:
 		// once in `createAuthorizationGrant` for the token endpoint and once in

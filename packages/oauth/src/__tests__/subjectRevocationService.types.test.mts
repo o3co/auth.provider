@@ -52,7 +52,7 @@ const OPTIONAL = [
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("subjectRevocationServiceModule's deps are the slots it declares (#626 P2)", () => {
+describe("subjectRevocationServiceModule's deps are the slots it declares", () => {
 	it("types the provider as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<SubjectRevocationServiceModuleDeps>().branded.toEqualTypeOf<Declared>();
 		expect([...(subjectRevocationServiceModule.requires ?? [])].sort()).toEqual(

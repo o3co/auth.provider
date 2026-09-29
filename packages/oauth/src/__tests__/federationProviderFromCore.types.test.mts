@@ -24,7 +24,7 @@
 import type { ComponentMap, FederationProvider } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-describe("#626 P1: the federation contract reaches this package from core alone", () => {
+describe("the federation contract reaches this package from core alone", () => {
 	it("is not `unknown` here", () => {
 		expectTypeOf<FederationProvider>().not.toEqualTypeOf<unknown>();
 		expect(true).toBe(true);

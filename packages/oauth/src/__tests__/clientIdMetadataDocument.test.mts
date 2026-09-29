@@ -87,7 +87,7 @@ const resolver = (
 	return { resolve: (id = CLIENT_URL) => r.resolve(id), calls, warn };
 };
 
-describe("isClientIdMetadataDocumentUrl (draft §3.1, #529)", () => {
+describe("isClientIdMetadataDocumentUrl (draft §3.1)", () => {
 	it("accepts an https URL with a path, in canonical form", () => {
 		expect(isClientIdMetadataDocumentUrl(CLIENT_URL)).toBe(true);
 		expect(isClientIdMetadataDocumentUrl("https://client.example:8443/meta")).toBe(true);
@@ -125,7 +125,7 @@ describe("isClientIdMetadataDocumentUrl (draft §3.1, #529)", () => {
 	});
 });
 
-describe("createClientIdMetadataDocumentResolver — what a document becomes (#529)", () => {
+describe("createClientIdMetadataDocumentResolver — what a document becomes", () => {
 	it("turns a valid document into a public, non-first-party registration under the operator's ceilings", async () => {
 		const { resolve, calls } = resolver();
 		const client = await resolve();
@@ -176,7 +176,7 @@ describe("createClientIdMetadataDocumentResolver — what a document becomes (#5
 	});
 });
 
-describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host policy (#529)", () => {
+describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host policy", () => {
 	it("refuses a host that resolves to a special-use address, before any fetch", async () => {
 		for (const address of [
 			"127.0.0.1",
@@ -326,7 +326,7 @@ describe("createClientIdMetadataDocumentResolver — what a refusal logs of the 
 	});
 });
 
-describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
+describe("createClientIdMetadataDocumentResolver — the fetch", () => {
 	it("refuses a redirect, a non-200, and a non-JSON body", async () => {
 		// Each of these is the client's own registration being wrong or absent,
 		// so each is logged as a rejection — the log an operator reads to tell
@@ -451,7 +451,7 @@ describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 	});
 });
 
-describe("createClientIdMetadataDocumentResolver — the document (#529)", () => {
+describe("createClientIdMetadataDocumentResolver — the document", () => {
 	const refuses = async (name: string, over: Record<string, unknown>, reason: RegExp) => {
 		const { resolve, warn } = resolver({}, [() => json(document(over))]);
 		expect(await resolve(), name).toBeNull();
@@ -482,7 +482,7 @@ describe("createClientIdMetadataDocumentResolver — the document (#529)", () =>
 		);
 	});
 
-	it("refuses a shared-secret method, a client_secret, and private_key_jwt until #484", async () => {
+	it("refuses a shared-secret method, a client_secret, and private_key_jwt", async () => {
 		await refuses("basic", { token_endpoint_auth_method: "client_secret_basic" }, /not allowed/);
 		await refuses("secret", { client_secret: "s" }, /client_secret/);
 		await refuses(
@@ -515,7 +515,7 @@ describe("createClientIdMetadataDocumentResolver — the document (#529)", () =>
 	});
 });
 
-describe("createClientIdMetadataDocumentResolver — caching (#529)", () => {
+describe("createClientIdMetadataDocumentResolver — caching", () => {
 	it("serves a valid document from cache for max-age, bounded by cacheMaxAgeMs, and revalidates by ETag", async () => {
 		let t = 1_000_000;
 		const { resolve, calls } = resolver({ now: () => t, cacheMaxAgeMs: 60_000 }, [
@@ -585,7 +585,7 @@ describe("createClientIdMetadataDocumentResolver — caching (#529)", () => {
 	});
 });
 
-describe("withClientIdMetadataDocuments (#529)", () => {
+describe("withClientIdMetadataDocuments", () => {
 	const inner: ClientRepository = {
 		findById: async (id) =>
 			id === "registered" || id === CLIENT_URL
@@ -629,7 +629,7 @@ describe("withClientIdMetadataDocuments (#529)", () => {
 	});
 });
 
-describe("the document cache is bounded (#529 review)", () => {
+describe("the document cache is bounded", () => {
 	it("evicts the oldest entry rather than growing without limit", async () => {
 		// An unauthenticated caller chooses the keys: every URL that serves a
 		// valid document is a `client_id`, so the map cannot be unbounded.
@@ -666,7 +666,7 @@ describe("the document cache is bounded (#529 review)", () => {
 	});
 });
 
-describe("the host policy holds whichever way the name is spelled (#529 audit)", () => {
+describe("the host policy holds whichever way the name is spelled", () => {
 	it("does not let a trailing dot walk past deniedHosts", async () => {
 		// `allowedHosts` fails closed on the dotted form — it matches nothing —
 		// but `deniedHosts` failed open: neither "client.example" nor
@@ -690,7 +690,7 @@ describe("the host policy holds whichever way the name is spelled (#529 audit)",
 	});
 });
 
-describe("the cache tells the truth about an outage (#529 audit)", () => {
+describe("the cache tells the truth about an outage", () => {
 	it("serves a cached registration through a failed revalidation rather than breaking the client", async () => {
 		// Deleting the entry and answering `null` for every error — a DNS
 		// blip, a 5xx, a timeout — would have `/authorize` answer
@@ -850,7 +850,7 @@ describe("the cache tells the truth about an outage (#529 audit)", () => {
 	});
 });
 
-describe("the refusal memo and the stale window are bounded (#529 audit)", () => {
+describe("the refusal memo and the stale window are bounded", () => {
 	it("bounds the refusal memo the same way it bounds the documents", async () => {
 		// The keys here are the caller's too: an id that refuses is an id the
 		// caller invented, so remembering every one of them would hand the

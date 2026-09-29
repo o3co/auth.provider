@@ -128,7 +128,7 @@ const errorOf = (res: request.Response): string | null => {
 	return typeof res.body?.error === "string" ? res.body.error : null;
 };
 
-describe("/authorize email-verified gate (#297)", () => {
+describe("/authorize email-verified gate", () => {
 	it("refuses when the gate is on and the Store published no verification", async () => {
 		const app = await makeApp({ requireEmailVerified: true, user: { id: "u1" } });
 		expect(errorOf(await authorize(app))).toBe("access_denied");

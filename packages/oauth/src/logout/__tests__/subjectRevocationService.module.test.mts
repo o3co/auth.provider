@@ -97,7 +97,7 @@ describe("subjectRevocationServiceModule", () => {
 		);
 	});
 
-	it("does not require the two slots #406 lets a deployment declare absent", () => {
+	it("does not require subjectSessionIndex or subjectRevocation, the two slots a deployment may declare absent", () => {
 		// A module that REQUIRED them could not be installed at all in a
 		// deployment that declared the capability absent — a harder demand
 		// than the operation it wraps, which reports the absence instead.
@@ -293,7 +293,7 @@ describe("subjectRevocationServiceModule", () => {
 		});
 	});
 
-	describe("the horizon: what the boundary must outlive (#728)", () => {
+	describe("the horizon: what the boundary must outlive", () => {
 		/** A boundary that records how long each stamp is kept, in milliseconds. */
 		const recording = () => {
 			const kept: number[] = [];

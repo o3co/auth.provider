@@ -34,7 +34,7 @@ const makeLogger = () => ({
 	child: vi.fn(),
 });
 
-describe("resolvePkceOptions (#273)", () => {
+describe("resolvePkceOptions", () => {
 	it("resolves to required + S256-only when no pkce block is configured", () => {
 		expect(resolvePkceOptions(undefined)).toEqual({ required: true, supportedMethods: ["S256"] });
 	});
@@ -168,7 +168,7 @@ describe("resolvePkceOptions (#273)", () => {
 	});
 });
 
-describe("pkceMethodsForClient (#273)", () => {
+describe("pkceMethodsForClient", () => {
 	// The policy both endpoints hand in — resolved from config, identical on
 	// each side. Taking it as a parameter (rather than closing over the
 	// constant) is what makes "/authorize and /token read the same object"
@@ -221,7 +221,7 @@ describe("PKCE_METHOD_ABSENT_DEFAULT", () => {
 // fixed input, and `vi.spyOn` cannot intercept the call, since the consumer
 // holds its own immutable ESM binding of the import from
 // `@o3co/auth-provider-core`.
-describe("SF-3 + MIN-4: authorization.mts uses constantTimeStringEqual (regression guard)", () => {
+describe("authorization.mts uses constantTimeStringEqual", () => {
 	const authorizationSource = readFileSync(
 		resolve(dirname(fileURLToPath(import.meta.url)), "../authorization.mts"),
 		"utf8",

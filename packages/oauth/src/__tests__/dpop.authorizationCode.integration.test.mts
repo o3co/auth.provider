@@ -343,7 +343,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
  * `dpop.refreshToken.integration.test.mts` for why neither RFC forbids this
  * and why it is off by default.
  */
-describe("confidential-client RT binding — opt-in, authorization_code (#275)", () => {
+describe("confidential-client RT binding — opt-in, authorization_code", () => {
 	const withBinding = (bind?: boolean) =>
 		createAuthorizationGrant(
 			makeDeps(
@@ -397,7 +397,7 @@ describe("confidential-client RT binding — opt-in, authorization_code (#275)",
 		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
 	});
 
-	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's (#728)", async () => {
+	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's", async () => {
 		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
 		for (const tokenBinding of [
 			undefined,

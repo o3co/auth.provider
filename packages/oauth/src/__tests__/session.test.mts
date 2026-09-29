@@ -394,7 +394,7 @@ describe("createSessionGrant", () => {
 		// `client_id` in the Authorization header, never in the body, so a
 		// grant reading `body.client_id` would skip its allowlist entirely.
 		// -------------------------------------------------------------------
-		describe("#260 — authorization binds to ctx.authenticatedClient", () => {
+		describe("authorization binds to ctx.authenticatedClient", () => {
 			const basicAuthClient = {
 				clientId: "first-party-app",
 				tokenEndpointAuthMethod: "client_secret_basic" as const,
@@ -498,7 +498,7 @@ describe("createSessionGrant", () => {
 // The email-verified gate on the session grant
 // ---------------------------------------------------------------------------
 
-describe("createSessionGrant — email-verified gate (#297)", () => {
+describe("createSessionGrant — email-verified gate", () => {
 	const gatedConfig = {
 		...(mockConfig as unknown as Record<string, unknown>),
 		oauth: {
@@ -553,7 +553,7 @@ describe("createSessionGrant — email-verified gate (#297)", () => {
  * after logout for the whole access-token lifetime, in exactly the BFF /
  * proxy topology this grant exists to serve.
  */
-describe("createSessionGrant — sid binds the token to the browser session (R3)", () => {
+describe("createSessionGrant — sid binds the token to the browser session", () => {
 	const runWith = async (session: Record<string, unknown>) => {
 		const handler = createSessionGrant(makeDeps());
 		const { result } = await handler.handle({
@@ -615,7 +615,7 @@ describe("createSessionGrant — sid binds the token to the browser session (R3)
 });
 
 describe("createSessionGrant — a session store that cannot answer is logged, not only answered 503", () => {
-	it("logs no client id at all: admission's line names the store and the action (the session-admission ADR's D10)", async () => {
+	it("logs no client id at all", async () => {
 		const error = vi.fn();
 		const longId = "c".repeat(256);
 		const handler = createSessionGrant({

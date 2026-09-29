@@ -253,7 +253,7 @@ describe("createOAuthRouter", () => {
 	// end-to-end via supertest + a real express app. The mocked-router tests
 	// above only verify wiring; these tests cover the success-path token
 	// response, audit emit, and the 401 → `WWW-Authenticate: Bearer` branch.
-	describe("D-6 /oauth/token integration", () => {
+	describe("/oauth/token integration", () => {
 		async function buildApp(opts: {
 			grantHandler: GrantHandler;
 			grantType: string;
@@ -314,7 +314,7 @@ describe("createOAuthRouter", () => {
 			expect(issuedEvent?.clientId).toBe(TEST_CLIENT_ID);
 		});
 
-		it("error path with errorDescription + 401 does NOT inject WWW-Authenticate (Copilot review)", async () => {
+		it("error path with errorDescription + 401 does NOT inject WWW-Authenticate", async () => {
 			// A grant handler returning status 401 (e.g. ctx.authenticatedClient
 			// missing in a custom wiring) does NOT cause a `WWW-Authenticate:
 			// Bearer` challenge to be set on the token endpoint — RFC 6750 §3
@@ -647,7 +647,7 @@ describe("createOAuthRouter", () => {
 		});
 	});
 
-	describe("D-6 /oauth/introspect non-Bearer fallback", () => {
+	describe("/oauth/introspect non-Bearer fallback", () => {
 		// When /introspect is called WITHOUT a `Bearer` Authorization header, the
 		// route hands off to `introspectClientAuthMw` (RFC 7662 §2.1) — the same
 		// confidential-client auth used for /token. This exercises the fallback

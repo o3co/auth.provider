@@ -155,7 +155,7 @@ async function buildApp(overrides: {
 	return app;
 }
 
-describe("oauth routes — TODO-C hooks (Phase 1)", () => {
+describe("oauth routes — hooks", () => {
 	describe("rateLimiter hook", () => {
 		it("returns 429 rate_limited when rateLimiter denies /oauth/token", async () => {
 			const app = await buildApp({
@@ -199,7 +199,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
 		});
 
-		it("emits RateLimit-* headers like /session/login does (#325)", async () => {
+		it("emits RateLimit-* headers on a 429 from /oauth/token", async () => {
 			// The shared guard emits them here as on the session route. No
 			// per-endpoint spec is configured for the OAuth endpoints, so the guard
 			// advertises exactly what the adapter reported.
@@ -243,7 +243,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.body).not.toHaveProperty("reason");
 		});
 
-		it("fails open when rateLimiter.check throws and emits rate_limit.unavailable audit (CP-6)", async () => {
+		it("fails open when rateLimiter.check throws and emits rate_limit.unavailable audit", async () => {
 			const { sink, events } = createSpyAuditSink();
 			const app = await buildApp({
 				rateLimiter: {
@@ -276,7 +276,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		// see a limiter outage regardless of audit sink status — a Redis-backed
 		// audit sink drops during the same outage; `failMode = "closed"` adds
 		// 503 enforcement on top.
-		describe("OR-5: failMode policy + logger emission", () => {
+		describe("failMode policy + logger emission", () => {
 			const makeMockLogger = (): Logger & { error: ReturnType<typeof vi.fn> } => ({
 				debug: vi.fn(),
 				info: vi.fn(),
@@ -410,7 +410,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.body.error).toBe("unsupported_grant_type");
 		});
 
-		it("normalized ip passed into check ctx matches key derivation (CP-10)", async () => {
+		it("normalized ip passed into check ctx matches key derivation", async () => {
 			let observedKey: string | undefined;
 			let observedCtxIp: string | undefined;
 			const rateLimiter: RateLimiter = {
@@ -459,7 +459,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.status).toBe(400);
 		});
 
-		it("authorize.granted audit event carries subject from session.user.id (I-2)", async () => {
+		it("authorize.granted audit event carries subject from session.user.id", async () => {
 			const { sink, events } = createSpyAuditSink();
 			const app = express();
 			app.set("trust proxy", 1);
@@ -523,7 +523,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		});
 	});
 
-	describe("grantPolicy hook (C-2)", () => {
+	describe("grantPolicy hook", () => {
 		function buildAuthorizeApp(opts: {
 			grantPolicy?: GrantPolicyHook;
 			captureCode?: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
@@ -765,7 +765,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(captured?.grantedAudience).toBeUndefined();
 		});
 
-		it("redirects server_error when grantPolicy returns scopes outside client allowance (CP-13, #520)", async () => {
+		it("redirects server_error when grantPolicy returns scopes outside client allowance", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
 				allowedScopes: ["read"],
 				// What an omitted `scope` parameter grants.
@@ -807,7 +807,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.headers.location).toContain("admin");
 		});
 
-		it("redirects temporarily_unavailable when grantPolicy throws at /authorize (CP-18)", async () => {
+		it("redirects temporarily_unavailable when grantPolicy throws at /authorize", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
 			const logger = {
 				trace: vi.fn(),
@@ -861,7 +861,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			);
 		});
 
-		it("persists undefined grantedScope on Code when policy narrows to empty (CP-14)", async () => {
+		it("persists undefined grantedScope on Code when policy narrows to empty", async () => {
 			let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
 				captureCode: (p) => {
@@ -957,7 +957,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(decoded.scope).toBe("read");
 		});
 
-		it("passes trusted config.oauth.jwt.issuer (not Host header) to grantPolicy (CP-11)", async () => {
+		it("passes trusted config.oauth.jwt.issuer (not Host header) to grantPolicy", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
 			let observedIssuer: string | undefined;
 			const grantPolicy: GrantPolicyHook = {
@@ -996,7 +996,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 	});
 });
 
-describe("oauth routes — /oauth/revoke is rate limited too (#529 audit)", () => {
+describe("oauth routes — /oauth/revoke is rate limited too", () => {
 	it("returns 429 rate_limited when rateLimiter denies /oauth/revoke", async () => {
 		// `/token`, `/introspect` and `/authorize` all sit behind the shared
 		// guard; `/revoke` did not, though it reaches the client repository on

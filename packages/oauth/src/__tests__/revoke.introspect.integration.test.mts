@@ -112,7 +112,7 @@ async function mintAccessToken(jti: string, clientId = CLIENT_ID): Promise<strin
 		.sign(secretKey);
 }
 
-describe("revoke → introspect end-to-end (C3 + C4 denylist wiring)", () => {
+describe("revoke → introspect end-to-end, with the access-token denylist wired", () => {
 	let denylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
 	let app: express.Express;
 

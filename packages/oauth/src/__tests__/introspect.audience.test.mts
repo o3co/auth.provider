@@ -143,7 +143,7 @@ async function buildApp(logger?: ReturnType<typeof createMockLogger>) {
 const introspectAs = (app: express.Express, basic: string, token: string) =>
 	request(app).post("/oauth/introspect").set("Authorization", basic).type("form").send({ token });
 
-describe("/oauth/introspect — audience pin (R4)", () => {
+describe("/oauth/introspect — audience pin", () => {
 	it("a resource server can introspect a token issued for its resource URI", async () => {
 		const app = await buildApp();
 		const token = await mintAccessToken({ audience: RESOURCE });

@@ -143,7 +143,7 @@ const authorize = (app: express.Express, extra: Record<string, string> = {}) =>
 			...extra,
 		});
 
-describe("/authorize with a Client ID Metadata Document client (#529)", () => {
+describe("/authorize with a Client ID Metadata Document client", () => {
 	it("resolves the client from its document and routes it through consent, which shows what the document said", async () => {
 		const { app, fetchImpl } = await makeApp({ enabled: true });
 		const res = await authorize(app);
@@ -192,7 +192,7 @@ describe("/authorize with a Client ID Metadata Document client (#529)", () => {
 	});
 });
 
-describe("/authorize does not fetch a document it could never honour (#529 audit)", () => {
+describe("/authorize does not fetch a document it could never honour", () => {
 	it("makes no outbound request when the feature is on but no consent store is wired", async () => {
 		// Every document client is by definition not first-party, so
 		// `/authorize` refuses it without a consent store — and the discovery
@@ -220,7 +220,7 @@ describe("/authorize does not fetch a document it could never honour (#529 audit
 	});
 });
 
-describe("/authorize honours the document cache knobs the operator set (#529 audit)", () => {
+describe("/authorize honours the refusal window the operator set for the document cache", () => {
 	it("does not re-fetch a document it already refused, within the window the operator set", async () => {
 		// `negativeCacheMs` is wired through `createOAuthRouter`, so a refused
 		// client_id costs one outbound fetch rather than one per request.

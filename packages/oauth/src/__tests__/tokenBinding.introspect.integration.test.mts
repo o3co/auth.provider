@@ -173,7 +173,7 @@ async function issueAndIntrospect(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Phase 4 T4.1 — end-to-end issuance + introspection cnf propagation", () => {
+describe("end-to-end issuance + introspection cnf propagation", () => {
 	it("DPoP-bound AT: /introspect echoes cnf.jkt and token_type DPoP", async () => {
 		const app = await buildApp([makeDpopMechanism("E2E-DPOP-JKT")]);
 
@@ -245,7 +245,7 @@ async function forgeCompoundCnfToken(genuineAccessToken: string): Promise<string
 		.sign(createSecretKey(Buffer.from(SECRET)));
 }
 
-describe("#199 I3 — compound cnf on introspection", () => {
+describe("compound cnf on introspection", () => {
 	it("reports active:false for an AT carrying both cnf.jkt and cnf.x5t#S256", async () => {
 		// Fail closed, as the refresh path does (see ADR
 		// 2026-05-20-token-binding-first-class-abstraction, "Compound cnf across

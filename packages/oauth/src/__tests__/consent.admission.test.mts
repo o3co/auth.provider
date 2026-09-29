@@ -201,7 +201,7 @@ const expectLoginRequired = (res: request.Response): void => {
 	expect(res.body.error).toBe("login_required");
 };
 
-describe("/oauth/consent on admission — the pinned changes (D8)", () => {
+describe("/oauth/consent on admission", () => {
 	it("a cookie whose isAuthenticated is not exactly true is refused before anything is read, as every reader reads the flag", async () => {
 		const store = storeWith(record());
 		const { app } = await makeApp({

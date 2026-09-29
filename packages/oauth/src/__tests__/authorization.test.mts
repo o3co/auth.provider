@@ -376,7 +376,7 @@ describe("createAuthorizationGrant", () => {
 			expect((decoded.exp as number) - (decoded.iat as number)).toBe(600);
 		});
 
-		it("registers initial rt+jwt via refreshTokenFamilyRotation.register (CP-2)", async () => {
+		it("registers initial rt+jwt via refreshTokenFamilyRotation.register", async () => {
 			const registerSpy = vi.fn(async () => {});
 			const refreshTokenFamilyRotation: RefreshTokenFamilyRotation = {
 				register: registerSpy,
@@ -423,7 +423,7 @@ describe("createAuthorizationGrant", () => {
 			expect(expiresAtMs).toBeGreaterThan(Date.now());
 		});
 
-		it("returns 503 temporarily_unavailable when refreshTokenFamilyRotation.register throws (CP-16)", async () => {
+		it("returns 503 temporarily_unavailable when refreshTokenFamilyRotation.register throws", async () => {
 			const throwingRotation: RefreshTokenFamilyRotation = {
 				register: async () => {
 					throw new Error("store down");
@@ -459,7 +459,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("skips initial-register when no refreshTokenFamilyRotation is configured (CP-2 graceful)", async () => {
+		it("returns 200 when no refreshTokenFamilyRotation is configured", async () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
 			);
@@ -484,7 +484,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.status).toBe(200);
 		});
 
-		it("issues an initial rt+jwt carrying a new family_id (C-3)", async () => {
+		it("issues an initial rt+jwt carrying a new family_id", async () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
 			);
@@ -521,7 +521,7 @@ describe("createAuthorizationGrant", () => {
 			);
 		});
 
-		it("omits scope from token response when granted scopes is empty (CP-12)", async () => {
+		it("answers no empty-string scope, and mints no scope claim, when granted scopes is empty", async () => {
 			// Code has neither grantedScope nor session.granted_scopes.
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
@@ -555,7 +555,7 @@ describe("createAuthorizationGrant", () => {
 			expect(decoded.scope).toBeUndefined();
 		});
 
-		it("echoes the code's granted scope in the token response (#396, RFC 6749 §3.3)", async () => {
+		it("echoes the code's granted scope in the token response (RFC 6749 §3.3)", async () => {
 			// The honesty half of keeping silent narrowing at /authorize: the
 			// grant the client actually received is visible on the wire. The
 			// narrowing half (request "read bogus" → code carries ["read"]) is
@@ -588,7 +588,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.tokens.scope).toBe("read");
 		});
 
-		it("omits scope when Code.grantedScope is explicitly empty (CP-12)", async () => {
+		it("mints no scope claim when Code.grantedScope is explicitly empty", async () => {
 			// Even if persisted as [], code exchange must not emit `scope: ""`.
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
@@ -792,7 +792,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.status).toBe(200);
 		});
 
-		it("returns 400 for the same plain code when the client has no opt-in (#273)", async () => {
+		it("returns 400 for the same plain code when the client has no opt-in", async () => {
 			const verifier = "b".repeat(43);
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
@@ -821,7 +821,7 @@ describe("createAuthorizationGrant", () => {
 
 		// A config still setting the legacy `pkce.requireS256` changes nothing in
 		// either direction: S256 is mandatory whatever it says.
-		describe("legacy pkce.requireS256 is inert (#273)", () => {
+		describe("legacy pkce.requireS256 is inert", () => {
 			const legacyConfig = (requireS256: boolean) =>
 				({
 					oauth: {
@@ -920,7 +920,7 @@ describe("createAuthorizationGrant", () => {
 		// redirect_uri is a required field on CodeData and the binding check is
 		// unconditional: no pass when none is stored, and no fallback to
 		// session.code_redirect_uri.
-		describe("A-2: redirect_uri binding", () => {
+		describe("redirect_uri binding", () => {
 			it("returns invalid_grant when stored redirect_uri does not match body redirect_uri", async () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
@@ -1019,7 +1019,7 @@ describe("createAuthorizationGrant", () => {
 				expect(result.status).toBe(200);
 			});
 
-			it("#483: the loopback port carve-out does NOT reach here — this equality stays exact", async () => {
+			it("returns invalid_grant for a loopback redirect_uri on another port than the stored one — the equality stays exact", async () => {
 				// /authorize may admit a presented `redirect_uri` whose loopback
 				// port differs from the registration (RFC 8252 §7.3), and it
 				// binds the URI it actually used to the code record. RFC 6749
@@ -1057,7 +1057,7 @@ describe("createAuthorizationGrant", () => {
 				expect("error" in result && result.error).toBe("invalid_grant");
 			});
 
-			it("D-1 / IH-4: rejects when codeData has no redirect_uri (was: vacuous-pass returns 200)", async () => {
+			it("rejects when codeData has no redirect_uri", async () => {
 				// codeData.redirect_uri is required and the binding check is
 				// unconditional, so a record without one is refused.
 				const deps = makeDeps(
@@ -1093,7 +1093,7 @@ describe("createAuthorizationGrant", () => {
 		// (covered in `clientAuth.test.mts` and `routes.test.mts`). The grant trusts
 		// `ctx.authenticatedClient` and verifies only the binding
 		// `codeData.client_id === authenticatedClient.clientId`, pinned here.
-		describe("D-6 binding gate: codeData.client_id vs ctx.authenticatedClient.clientId", () => {
+		describe("binding gate: codeData.client_id vs ctx.authenticatedClient.clientId", () => {
 			it("returns 401 invalid_client when ctx.authenticatedClient is null", async () => {
 				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
 				const handler = createAuthorizationGrant(deps);
@@ -1153,7 +1153,7 @@ describe("createAuthorizationGrant", () => {
 		// PKCE is one fixed policy plus a per-client `plain` opt-in. No server-wide
 		// config (the legacy `supportedMethods` / `defaultMethod` / `required`
 		// keys) can widen it.
-		describe("#273: PKCE policy is fixed, not configurable", () => {
+		describe("PKCE policy is fixed, not configurable", () => {
 			function makePkceConfig(pkce: Record<string, unknown>) {
 				return {
 					oauth: {
@@ -1270,7 +1270,7 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		describe("TODO-F-4: id_token issuance on openid scope", () => {
+		describe("id_token issuance on openid scope", () => {
 			// id_token issuance reads config.oauth.jwt.issuer directly (not
 			// ctx.issuer), so the request-derived host fallback never becomes an OIDC
 			// iss claim. Tests must supply a configured issuer.
@@ -1334,7 +1334,7 @@ describe("createAuthorizationGrant", () => {
 				};
 			}
 
-			it("includes id_token in response when scope contains 'openid' and userSessionStore is wired (F-4-1)", async () => {
+			it("includes id_token in response when scope contains 'openid' and userSessionStore is wired", async () => {
 				const authTime = new Date("2026-04-21T00:00:00Z");
 				const userSessionStore = makeUserSessionStore({
 					sid: "sid-1",
@@ -1390,7 +1390,7 @@ describe("createAuthorizationGrant", () => {
 				expect(idPayload.name).toBeUndefined();
 			});
 
-			it("carries amr from the session and acr from the code record, and mirrors both into the access token (#481)", async () => {
+			it("carries amr from the session and acr from the code record, and mirrors both into the access and refresh tokens", async () => {
 				const authTime = new Date("2026-04-21T00:00:00Z");
 				const userSessionStore = makeUserSessionStore({
 					sid: "sid-1",
@@ -1467,7 +1467,7 @@ describe("createAuthorizationGrant", () => {
 					["fed"],
 				],
 			] as const)(
-				"stamps what the session vouches for (the MFA ADR's D9, D13) — %s",
+				"stamps what the session vouches for — %s",
 				async (_label, amr, authentication, stamped) => {
 					// `/token` reads `amr` through `vouchedAmr`, never off the record: a
 					// value an untrusted IdP asserted is on no token.
@@ -1612,7 +1612,7 @@ describe("createAuthorizationGrant", () => {
 				expect(result.tokens.id_token).toBeUndefined();
 			});
 
-			it("does NOT include id_token when scope lacks openid (F-4-2)", async () => {
+			it("does NOT include id_token when scope lacks openid", async () => {
 				const authTime = new Date("2026-04-21T00:00:00Z");
 				const userSessionStore = makeUserSessionStore({
 					sid: "sid-2",
@@ -1656,7 +1656,7 @@ describe("createAuthorizationGrant", () => {
 				expect(result.tokens.id_token).toBeUndefined();
 			});
 
-			it("does NOT include id_token when userSessionStore is not wired (backward compat, F-4-3)", async () => {
+			it("does NOT include id_token when userSessionStore is not wired", async () => {
 				// No userSessionStore — cannot resolve claims, so id_token is skipped.
 				const deps = makeDepsWithIssuer(
 					vi.fn().mockResolvedValue({
@@ -1694,8 +1694,8 @@ describe("createAuthorizationGrant", () => {
 		// consumeByCode (atomic getDel on a single Redis node) is the sole
 		// authenticity gate, and client_id and redirect_uri are verified against
 		// codeData fields populated at /authorize time.
-		describe("D-1: identity gates derive from codeData not session", () => {
-			it("IH-4: rejects when both body.redirect_uri AND codeData.redirect_uri are missing (vacuous-pass closure)", async () => {
+		describe("identity gates derive from codeData, not session", () => {
+			it("rejects when body.redirect_uri is missing, though the session matches the body", async () => {
 				// session.code / session.code_client_id match the body, so a
 				// session-based gate would let this through; only the redirect_uri
 				// check can refuse it.
@@ -1728,7 +1728,7 @@ describe("createAuthorizationGrant", () => {
 				expect("error" in result && result.error).toBe("invalid_grant");
 			});
 
-			it("IH-4: rejects when body.redirect_uri is supplied but codeData.redirect_uri is missing", async () => {
+			it("rejects a body.redirect_uri that differs from codeData.redirect_uri, though the session matches the body", async () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
@@ -1758,7 +1758,7 @@ describe("createAuthorizationGrant", () => {
 				expect("error" in result && result.error).toBe("invalid_grant");
 			});
 
-			it("IH-2: client_id check derives from codeData.client_id, not session.code_client_id", async () => {
+			it("rejects when codeData.client_id differs from the body's, though session.code_client_id matches it", async () => {
 				// session.code_client_id MATCHES the body, so a session-based gate
 				// (`client_id !== session.code_client_id`) would let the request through.
 				// The gate must reject because codeData.client_id differs from the body's.
@@ -1797,8 +1797,8 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		describe("TODO-F-3: family_id + sid claims, RP registration", () => {
-			it("happy path: access_token and refresh_token both carry family_id and sid claims (F-3-1)", async () => {
+		describe("family_id + sid claims, RP registration", () => {
+			it("happy path: access_token and refresh_token both carry family_id and sid claims", async () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode }),
 				);
@@ -1838,7 +1838,7 @@ describe("createAuthorizationGrant", () => {
 				expect(decodedRt.sid).toBe("session-abc");
 			});
 
-			it("returns 400 invalid_grant when code record has no sid and userSessionStore IS wired (F-3-2)", async () => {
+			it("returns 400 invalid_grant when code record has no sid and userSessionStore IS wired", async () => {
 				// A code record without sid. When the store is wired, sid is required so
 				// the store can link/register.
 				const userSessionStore = {
@@ -1877,7 +1877,7 @@ describe("createAuthorizationGrant", () => {
 				expect((result as { errorDescription?: string }).errorDescription).toMatch(/sid/);
 			});
 
-			it("backward compat — no userSessionStore + no sid → grant succeeds without sid claim (F-3-2-compat)", async () => {
+			it("no userSessionStore + no sid → grant succeeds without sid claim", async () => {
 				// Deployments that have not wired userSessionStore do not write sid at login
 				// time and must continue to work. No store → sid not required.
 				const deps = makeDeps(
@@ -1910,7 +1910,7 @@ describe("createAuthorizationGrant", () => {
 				expect(Object.hasOwn(decoded, "sid")).toBe(false);
 			});
 
-			it("calls addFamilyId and registerRP on sibling stores when userSessionStore is wired (F-3-3)", async () => {
+			it("calls addFamilyId and registerRP on sibling stores when userSessionStore is wired", async () => {
 				const sessionExpiresAt = new Date(Date.now() + 3600_000);
 				const addFamilyIdSpy = vi.fn(async (_sid: string, _fam: string, _exp: Date) => {});
 				const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
@@ -1991,7 +1991,7 @@ describe("createAuthorizationGrant", () => {
 				["sid wanted on the back-channel only", true, false],
 				["sid wanted on the front-channel only", false, true],
 			])(
-				"registers the RP with every logout field the client record carries — %s (#626)",
+				"registers the RP with every logout field the client record carries — %s",
 				async (_label, backchannelSessionRequired, frontchannelSessionRequired) => {
 					// Each of the four fields is asserted with its own value: the types catch
 					// a field forgotten, not two same-typed fields swapped.
@@ -2064,7 +2064,7 @@ describe("createAuthorizationGrant", () => {
 				},
 			);
 
-			it("backward compat: issues tokens without userSessionStore (F-3-4)", async () => {
+			it("issues tokens carrying family_id and sid without userSessionStore", async () => {
 				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode }),
@@ -2096,7 +2096,7 @@ describe("createAuthorizationGrant", () => {
 				expect(decoded.sid).toBe("session-abc");
 			});
 
-			it("returns 400 invalid_grant session_invalid when session was deleted between /authorize and /token (F-3-I1)", async () => {
+			it("returns 400 invalid_grant naming the session when session was deleted between /authorize and /token", async () => {
 				// Session deleted after /authorize was issued — get(sid) returns null.
 				const userSessionStore = {
 					kind: "spy",
@@ -2137,7 +2137,7 @@ describe("createAuthorizationGrant", () => {
 				expect((result as { errorDescription?: string }).errorDescription).toMatch(/session/i);
 			});
 
-			it("returns 503 temporarily_unavailable when userSessionStore.get throws (F-3-I1-503)", async () => {
+			it("returns 503 temporarily_unavailable when userSessionStore.get throws", async () => {
 				// Store is wired but unavailable when get() is called.
 				const userSessionStore = {
 					kind: "broken",
@@ -2175,7 +2175,7 @@ describe("createAuthorizationGrant", () => {
 				expect(result.error).toBe("temporarily_unavailable");
 			});
 
-			it("returns 503 temporarily_unavailable when clientRepository.findById throws (F-3-I2)", async () => {
+			it("returns 503 temporarily_unavailable when clientRepository.findById throws", async () => {
 				// findById is inside the try/catch: a throw must produce a controlled 503.
 				const throwingClientRepo: ClientRepository = {
 					findById: vi.fn().mockRejectedValue(new Error("db down")),
@@ -2246,7 +2246,7 @@ describe("createAuthorizationGrant", () => {
 // not eliminate it.
 // ---------------------------------------------------------------------------
 
-describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
+describe("TOCTOU re-check of the session before returning tokens", () => {
 	it("returns 400 invalid_grant / session_invalidated when session is deleted between findById and addFamilyId", async () => {
 		// First get returns the session (the initial check), second returns null
 		// (the re-check immediately before addFamilyId).
@@ -2406,7 +2406,7 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 // left as the fallback only for deployments that wire no session store.
 // ---------------------------------------------------------------------------
 
-describe("#259 — AT/RT subject derives from the code-bound UserSession", () => {
+describe("AT/RT subject derives from the code-bound UserSession", () => {
 	const ISSUER = "https://auth.example.com";
 	const configWithIssuer = {
 		oauth: {
@@ -2642,8 +2642,8 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 // Corrupt code records and PKCE error branches. Each test pins both status
 // code AND errorDescription so a refactor that shifts an error to a different
 // branch is caught.
-describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", () => {
-	it("returns 400 invalid_grant when code record has code_challenge without code_challenge_method (SF-3 corrupt code A)", async () => {
+describe("corrupt code records + PKCE branches", () => {
+	it("returns 400 invalid_grant when code record has code_challenge without code_challenge_method", async () => {
 		const deps = makeDeps(
 			vi.fn().mockResolvedValue({
 				code: "abc",
@@ -2677,7 +2677,7 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		expect((result as { errorDescription?: string }).errorDescription).toBe("invalid code");
 	});
 
-	it("returns 400 invalid_request when code_challenge_method is set but code_challenge is non-string (SF-3 corrupt code B)", async () => {
+	it("returns 400 invalid_request when code_challenge_method is set but code_challenge is non-string", async () => {
 		const deps = makeDeps(
 			vi.fn().mockResolvedValue({
 				code: "abc",
@@ -2744,7 +2744,7 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		);
 	});
 
-	it("returns 400 invalid_grant when plain method code_verifier does not match challenge (SF-3 + MIN-4 timing-safe)", async () => {
+	it("returns 400 invalid_grant when plain method code_verifier does not match challenge", async () => {
 		// Both verifier and challenge are valid 43-char RFC 7636 strings, but
 		// they differ. constantTimeStringEqual compares them on both S256 and
 		// plain branches, so a short-circuit `!==`'s per-byte timing cannot leak
@@ -2873,7 +2873,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 	});
 
-	it("the session read before any token is signed: admission's line, the grant's own is not written (the session-admission ADR's D10)", async () => {
+	it("the session read before any token is signed: admission's line, the grant's own is not written", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
 			sessionRequirementResolver: resolverForTests([]),
@@ -2941,7 +2941,7 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 	});
 
-	it("the session re-read before the family is linked: admission's line (the session-admission ADR's D10)", async () => {
+	it("the session re-read before the family is linked: admission's line", async () => {
 		const logger = createMockLogger();
 		let reads = 0;
 		const handler = createAuthorizationGrant({

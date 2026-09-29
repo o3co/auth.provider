@@ -155,7 +155,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(400);
 		});
 
-		it("D-6: returns 400 invalid_grant when authenticatedClient does not match RT azp/aud", async () => {
+		it("returns 400 invalid_grant when authenticatedClient does not match RT azp/aud", async () => {
 			// Token is bound to "client1" via aud; authenticatedClient is a
 			// different client. The binding gate must reject: accepting it
 			// would let any authenticated client redeem any RT.
@@ -185,7 +185,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toBe("refresh_token was not issued to this client");
 		});
 
-		it("D-6: returns 401 invalid_client when ctx.authenticatedClient is null", async () => {
+		it("returns 401 invalid_client when ctx.authenticatedClient is null", async () => {
 			// Direct grant invocation with no client auth — must be refused
 			// regardless of the RT contents.
 			const token = await makeRefreshToken();
@@ -203,7 +203,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.error).toBe("invalid_client");
 		});
 
-		it("D-6 R-legacy-azp: legacy RT (aud only, no azp) + matching authenticatedClient → 200, new RT emits azp", async () => {
+		it("RT with aud only, no azp + matching authenticatedClient → 200, new RT emits azp", async () => {
 			// For a token carrying only `aud`, the binding gate falls back to
 			// `aud === authenticatedClient.clientId`. The newly minted RT must
 			// emit `azp = authenticatedClient.clientId` so later rotations do
@@ -501,7 +501,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		describe("refresh-token strict gate (header.typ === rt+jwt required)", () => {
-			it("RT-1: rejects payload.type=refresh as a typ substitute", async () => {
+			it("rejects payload.type=refresh as a typ substitute", async () => {
 				const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
 					.setProtectedHeader({ alg: "HS256", kid: "v0" })
 					.setIssuer("localhost")
@@ -524,7 +524,7 @@ describe("createRefreshTokenGrant", () => {
 				expect(result.errorDescription).toBe("invalid refresh_token");
 			});
 
-			it("RT-2: accepts header.typ rt+jwt with standard claims", async () => {
+			it("accepts header.typ rt+jwt with standard claims", async () => {
 				const modernToken = await makeRefreshToken({ sub: "u1", azp: DEFAULT_CLIENT_ID });
 				const handler = createRefreshTokenGrant(mockDeps);
 
@@ -540,7 +540,7 @@ describe("createRefreshTokenGrant", () => {
 				expect("tokens" in result).toBe(true);
 			});
 
-			it("RT-3: ignores claims.user.id fallback for sub", async () => {
+			it("ignores claims.user.id fallback for sub", async () => {
 				const legacyClaimsToken = await new SignJWT({
 					type: "refresh",
 					user: { id: "u1" },
@@ -706,7 +706,7 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("returns 503 temporarily_unavailable when refreshTokenFamilyRotation.rotate throws (CP-17)", async () => {
+		it("returns 503 temporarily_unavailable when refreshTokenFamilyRotation.rotate throws", async () => {
 			const throwingRotation: RefreshTokenFamilyRotation = {
 				async register() {},
 				async rotate() {
@@ -845,7 +845,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("F6 PR3 — PB-1 RT reuse → family revoke", () => {
+	describe("RT reuse → family revoke", () => {
 		// Stub rotation that always reports "replayed" (jti mismatch).
 		const replayedRotation: RefreshTokenFamilyRotation = {
 			async register() {},
@@ -875,7 +875,7 @@ describe("createRefreshTokenGrant", () => {
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
 		};
 
-		it("revokes the RT family with the exact family_id when replay is detected (RED 1)", async () => {
+		it("revokes the RT family with the exact family_id when replay is detected", async () => {
 			const revokeFamily = vi.fn().mockResolvedValue(undefined);
 			const revocation = {
 				revokeFamily,
@@ -921,7 +921,7 @@ describe("createRefreshTokenGrant", () => {
 			},
 		};
 
-		it("does not revoke again when the rotation already revoked the family atomically (#274)", async () => {
+		it("does not revoke again when the rotation already revoked the family atomically", async () => {
 			const revokeFamily = vi.fn().mockResolvedValue(undefined);
 			const revocation = {
 				revokeFamily,
@@ -950,7 +950,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(revokeFamily).not.toHaveBeenCalled();
 		});
 
-		it("still audits the revocation when the rotation revoked atomically (#274)", async () => {
+		it("still audits the revocation when the rotation revoked atomically", async () => {
 			// The audit signal belongs to the replay, not to which component
 			// performed the write. A SIEM watching for this event must not go
 			// quiet because the revocation happened in the store.
@@ -977,7 +977,7 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("rejects with 400, not 503, when the rotation revoked atomically and no revocation dep is wired (#274)", async () => {
+		it("rejects with 400, not 503, when the rotation revoked atomically and no revocation dep is wired", async () => {
 			// The 503 exists to avoid answering "just this request is refused"
 			// while sibling RTs stay live. Once the family is already revoked
 			// there is nothing left to fail closed about, and returning 503
@@ -999,7 +999,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toBe("replay_detected");
 		});
 
-		it("returns 503 when revocation dep is missing (PB-1 Codex Delta 1, fail-closed)", async () => {
+		it("returns 503 when revocation dep is missing (fail-closed)", async () => {
 			// Rotation wired but no revocation dep: fail closed, since a silent
 			// skip would break the RFC 6819 §5.2.2 guarantee.
 			const deps: RefreshTokenGrantDeps = {
@@ -1018,7 +1018,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("returns 503 when revokeFamily throws during replay handling (RED 5)", async () => {
+		it("returns 503 when revokeFamily throws during replay handling", async () => {
 			const revocation = {
 				async revokeFamily() {
 					throw new Error("Redis down");
@@ -1044,7 +1044,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("emits rt_reuse_detected_family_revoked audit log on replay (RED 3)", async () => {
+		it("emits rt_reuse_detected_family_revoked audit log on replay", async () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
 			const revocation = {
@@ -1072,7 +1072,7 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("concurrent replay calls revoke twice idempotently (PB-1 Codex Delta 2)", async () => {
+		it("concurrent replay calls revoke twice idempotently", async () => {
 			const revokeFamily = vi.fn().mockResolvedValue(undefined);
 			const revocation = {
 				revokeFamily,
@@ -1099,7 +1099,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(revokeFamily).toHaveBeenCalledWith("fam-race");
 		});
 
-		it("a fresh family after revocation is independent (RED 4 — orthogonality smoke)", async () => {
+		it("issues tokens and revokes nothing when the rotation reports 'rotated'", async () => {
 			// "rotated" outcome on a different family — issuance succeeds, no
 			// revocation invoked. Demonstrates the replay branch is targeted
 			// only at the matching family_id.
@@ -1139,7 +1139,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("F6 PR3 — CC-2 unknown_family policy", () => {
+	describe("unknown_family policy", () => {
 		const unknownFamilyRotation: RefreshTokenFamilyRotation = {
 			async register() {},
 			async rotate() {
@@ -1178,7 +1178,7 @@ describe("createRefreshTokenGrant", () => {
 			} as unknown as GrantDependencies["config"];
 		}
 
-		it("returns 400 invalid_grant for unknown_family with default policy (RED 1)", async () => {
+		it("returns 400 invalid_grant for unknown_family with default policy", async () => {
 			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: unknownFamilyRotation,
@@ -1196,7 +1196,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toBe("unknown_family");
 		});
 
-		it("issues tokens with unknownFamilyPolicy=accept (RED 2 — legacy mode)", async () => {
+		it("issues tokens with unknownFamilyPolicy=accept, and warns that it did", async () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
 			const deps: RefreshTokenGrantDeps = {
@@ -1220,7 +1220,7 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("returns 400 with explicit unknownFamilyPolicy=reject (RED 3)", async () => {
+		it("returns 400 with explicit unknownFamilyPolicy=reject", async () => {
 			const warn = vi.fn();
 			const logger = makeStubLogger(warn);
 			const deps: RefreshTokenGrantDeps = {
@@ -1246,7 +1246,7 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("still handles replayed outcome correctly (RED 4 — orthogonality)", async () => {
+		it("still answers replay_detected, not unknown_family, for a replayed outcome", async () => {
 			const replayedRotation: RefreshTokenFamilyRotation = {
 				async register() {},
 				async rotate() {
@@ -1278,7 +1278,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("F6 PR3 — SF-6 RT without jti/family_id rejection", () => {
+	describe("RT without jti/family_id rejection", () => {
 		const rotatedRotation: RefreshTokenFamilyRotation = {
 			async register() {},
 			async rotate() {
@@ -1294,7 +1294,7 @@ describe("createRefreshTokenGrant", () => {
 			authenticatedClient: DEFAULT_AUTH_CLIENT,
 		};
 
-		it("returns 400 invalid_grant for RT without jti when rotation is wired (RED 1)", async () => {
+		it("returns 400 invalid_grant for RT without jti when rotation is wired", async () => {
 			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotatedRotation,
@@ -1318,7 +1318,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toBe("missing_jti_or_family_id");
 		});
 
-		it("returns 400 invalid_grant for RT without family_id when rotation is wired (RED 2)", async () => {
+		it("returns 400 missing_jti_or_family_id for RT without family_id when rotation is wired", async () => {
 			const deps: RefreshTokenGrantDeps = {
 				...mockDeps,
 				refreshTokenFamilyRotation: rotatedRotation,
@@ -1342,7 +1342,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toBe("missing_jti_or_family_id");
 		});
 
-		it("proceeds with normal rotation when RT has both jti and family_id (RED 4)", async () => {
+		it("proceeds with normal rotation when RT has both jti and family_id", async () => {
 			const rotateSpy = vi.fn().mockResolvedValue({ outcome: "rotated" });
 			const rotation: RefreshTokenFamilyRotation = {
 				async register() {},
@@ -1459,7 +1459,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.tokens.scope ?? null).toBeNull();
 		});
 
-		it("refuses a policy that returns a non-array grantedScope (#521)", async () => {
+		it("refuses a policy that returns a non-array grantedScope", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const policy = createStubPolicy(
 				async () =>
@@ -1502,7 +1502,7 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("forwards ctx.ip and ctx.userAgent to grantPolicy.evaluate (CP-1)", async () => {
+		it("forwards ctx.ip and ctx.userAgent to grantPolicy.evaluate", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			let observedIp: string | undefined;
 			let observedUa: string | undefined;
@@ -1557,7 +1557,7 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("answers 500 server_error when policy grantedScope exceeds the original grant (CP-15 RFC 6749 §6, #520)", async () => {
+		it("answers 500 server_error when policy grantedScope exceeds the original grant (RFC 6749 §6)", async () => {
 			const token = await makeRefreshToken({ scope: "read" });
 			const policy = createStubPolicy(async () => ({
 				outcome: "allow",
@@ -1581,7 +1581,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toContain("admin");
 		});
 
-		it("returns 503 temporarily_unavailable when grantPolicy.evaluate throws (CP-18)", async () => {
+		it("returns 503 temporarily_unavailable when grantPolicy.evaluate throws", async () => {
 			const token = await makeRefreshToken({ scope: "read" });
 			const policy = createStubPolicy(async () => {
 				throw new Error("policy backend 502");
@@ -1603,7 +1603,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toContain("policy");
 		});
 
-		it("omits scope from token response when policy narrows to empty array (CP-15)", async () => {
+		it("omits scope from token response when policy narrows to empty array", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const policy = createStubPolicy(async () => ({
 				outcome: "allow",
@@ -1627,7 +1627,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("refresh_token grant — grantPolicy audience validation (Codex Round 4 P2)", () => {
+	describe("refresh_token grant — grantPolicy audience validation", () => {
 		function createStubPolicy(evaluate: GrantPolicyHook["evaluate"]): GrantPolicyHook {
 			return { kind: "stub", evaluate };
 		}
@@ -1646,7 +1646,7 @@ describe("createRefreshTokenGrant", () => {
 			};
 		}
 
-		it("answers 500 server_error when policy grantedAudience is outside client.allowedAudiences (Test A, #520)", async () => {
+		it("answers 500 server_error when policy grantedAudience is outside client.allowedAudiences", async () => {
 			// Policy returns an audience not in client.allowedAudiences → fail-closed.
 			const token = await makeRefreshToken({ scope: "read" });
 			const deps = depsWithAudiencePolicy(async () => ({
@@ -1702,7 +1702,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("sid claim propagation and userSessionStore integration (TODO-F-3 task 4)", () => {
+	describe("sid claim propagation and userSessionStore integration", () => {
 		function decodeTokenPayload(token: string): Record<string, unknown> {
 			const parts = token.split(".");
 			return JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf-8")) as Record<
@@ -1722,7 +1722,7 @@ describe("createRefreshTokenGrant", () => {
 			};
 		}
 
-		it("preserves family_id and sid on both minted tokens (F-3-4-1)", async () => {
+		it("preserves family_id and sid on both minted tokens", async () => {
 			const token = await makeRefreshToken({ family_id: "fam-1", sid: "sid-1" });
 			const store = createStubUserSessionStore(async (_sid) => ({
 				sid: "sid-1",
@@ -1757,7 +1757,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(rtPayload.sid).toBe("sid-1");
 		});
 
-		it("returns 400 invalid_grant when userSessionStore.get returns null (F-3-4-2)", async () => {
+		it("returns 400 invalid_grant when userSessionStore.get returns null", async () => {
 			const token = await makeRefreshToken({ sid: "sid-dead" });
 			const store = createStubUserSessionStore(async (_sid) => null);
 			const deps: RefreshTokenGrantDeps = { ...mockDeps, userSessionStore: store };
@@ -1777,7 +1777,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toMatch(/session/i);
 		});
 
-		it("returns 503 temporarily_unavailable when userSessionStore.get throws (F-3-4-3)", async () => {
+		it("returns 503 temporarily_unavailable when userSessionStore.get throws", async () => {
 			const token = await makeRefreshToken({ sid: "sid-boom" });
 			const store = createStubUserSessionStore(async (_sid) => {
 				throw new Error("redis down");
@@ -1798,7 +1798,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("succeeds without sid on minted tokens when legacy token has no sid claim (F-3-4-4)", async () => {
+		it("succeeds without sid on minted tokens when the presented token has no sid claim", async () => {
 			// A token with only family_id, no sid
 			const token = await makeRefreshToken({ family_id: "fam-legacy" });
 			const handler = createRefreshTokenGrant(mockDeps);
@@ -1828,7 +1828,7 @@ describe("createRefreshTokenGrant", () => {
 	// not in the `RefreshTokenFamilyRotationOutcome` union. It exists so an
 	// outcome added without updating the switch is rejected with a stable
 	// error rather than silently falling through to token issuance.
-	describe("F6 PR3 patch coverage — exhaustive switch defense-in-depth", () => {
+	describe("exhaustive rotation-outcome switch (defense-in-depth)", () => {
 		it("throws 'unhandled rotation outcome' when rotation returns an unknown outcome variant", async () => {
 			const rotation = {
 				async register() {},
@@ -1872,7 +1872,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("subject-revocation watermark backstop (#376)", () => {
+	describe("subject-revocation watermark backstop", () => {
 		const makeSubjectRevocation = (revokedSubject: string) => ({
 			kind: "stub",
 			revokeBefore: async () => {},
@@ -1935,7 +1935,7 @@ describe("createRefreshTokenGrant", () => {
 	 * token on `invalid_grant`, so a transient outage would log out every
 	 * user who refreshed during it.
 	 */
-	describe("subject-revocation store outage (#408)", () => {
+	describe("subject-revocation store outage", () => {
 		const outageStore = {
 			kind: "outage",
 			revokeBefore: async () => {},
@@ -2011,7 +2011,7 @@ describe("createRefreshTokenGrant", () => {
 	});
 });
 
-describe("refresh rotation reserves before it signs (#449)", () => {
+describe("refresh rotation reserves before it signs", () => {
 	/** The key store, with every signature counted. */
 	const countingKeyStore = () => {
 		const signed: unknown[] = [];
@@ -2127,7 +2127,7 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		expect(claims.exp as number).toBe(Math.floor((cappedAt - 1_000) / 1000));
 	});
 
-	it("keeps a margin for the forward drift, which flooring alone does not (v0.13.0 audit)", async () => {
+	it("keeps a margin for the forward drift, which flooring alone does not", async () => {
 		// The contract (`RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`)
 		// says the reported ceiling drifts FORWARD and asks for a subtracted
 		// margin. Flooring truncates: a true ceiling at …10.998 s reported as
@@ -2149,7 +2149,7 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		expect(exp * 1000).toBeLessThanOrEqual(reported - 1_000);
 	});
 
-	it("refuses rather than issue a refresh token the family ceiling leaves no lifetime for (v0.13.0 audit)", async () => {
+	it("refuses rather than issue a refresh token the family ceiling leaves no lifetime for", async () => {
 		// An exhausted family must not become `expiresIn: 0`, a 200 carrying
 		// an already-expired refresh token after the presented one was spent.
 		// The family reached its lifetime; say so.
@@ -2271,7 +2271,7 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 	});
 });
 
-describe("a signing failure after the rotation commits (#449 audit)", () => {
+describe("a signing failure after the rotation commits", () => {
 	const presented = async () =>
 		new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
@@ -2381,7 +2381,7 @@ describe("a signing failure after the rotation commits (#449 audit)", () => {
 	});
 });
 
-describe("refresh carries how the user authenticated (#481 audit)", () => {
+describe("refresh carries how the user authenticated", () => {
 	// `amr` and `acr` describe the authentication event, which a refresh does
 	// not repeat. The access token mirrors them so auth.policy-verifier or a
 	// resource server can gate on them without an id_token (README); a

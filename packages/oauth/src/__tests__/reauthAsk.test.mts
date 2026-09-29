@@ -60,7 +60,7 @@ const loginAsk = (at: number): ReauthAskRecord => ({
 	stepUpAskedAt: {},
 });
 
-describe("createReauthAskStore — minting and spending an ask (#481)", () => {
+describe("createReauthAskStore — minting and spending an ask", () => {
 	it("records the ask under a prefix of its own, with the expiry the store reaps on", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
@@ -250,7 +250,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	});
 });
 
-describe("reauthAskStoreFor — the store the session middleware mounted (#481)", () => {
+describe("reauthAskStoreFor — the store the session middleware mounted", () => {
 	it("takes it off the request when it is store-shaped", () => {
 		expect(reauthAskStoreFor({ sessionStore: memoryStore() })).toBeDefined();
 	});

@@ -103,7 +103,7 @@ async function buildApp(config: AppConfig): Promise<express.Express> {
 	return app;
 }
 
-describe("/oauth/token — issuer is never derived from the request (#266)", () => {
+describe("/oauth/token — issuer is never derived from the request", () => {
 	it("stamps the configured issuer even when Host says otherwise", async () => {
 		const app = await buildApp(configWith({ issuer: ISSUER }));
 		const res = await request(app)

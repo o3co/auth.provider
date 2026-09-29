@@ -28,7 +28,7 @@ import type { createOAuthRouter } from "#/routes.mjs";
 type RouterOptions = Parameters<typeof createOAuthRouter>[1];
 type RouterResult = Awaited<ReturnType<typeof createOAuthRouter>>;
 
-describe("createOAuthRouter's registry contract is what it reads (#626)", () => {
+describe("createOAuthRouter's registry contract is what it reads", () => {
 	it("asks for `get` only", () => {
 		expectTypeOf<RouterOptions["registry"]>().toEqualTypeOf<Pick<GrantHandlerResolver, "get">>();
 		expectTypeOf<RouterOptions["registry"]>().not.toHaveProperty("entries");

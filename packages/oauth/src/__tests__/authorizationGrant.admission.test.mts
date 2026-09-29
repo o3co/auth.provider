@@ -208,7 +208,7 @@ const refused = async (
 	return result as GrantError & { readonly step_up?: unknown };
 };
 
-describe("the authorization_code grant on admission — the first read (D8)", () => {
+describe("the authorization_code grant on admission — the first read", () => {
 	it("(4) the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant session_invalid, nothing signed", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
@@ -322,7 +322,7 @@ describe("the authorization_code grant on admission — the first read (D8)", ()
 	});
 });
 
-describe("the authorization_code grant on admission — the revalidation (D8)", () => {
+describe("the authorization_code grant on admission — the revalidation", () => {
 	it("a subject changed between the two reads is 400 session_invalidated, audited by admission and warned by the grant", async () => {
 		const logger = createMockLogger();
 		const auditEvents: AuditEvent[] = [];

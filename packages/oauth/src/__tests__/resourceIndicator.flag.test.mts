@@ -362,7 +362,7 @@ describe("RFC 8707 resource indicator — flag on", () => {
 		expect(capturedResource).toEqual(["https://r1", "https://r2"]);
 	});
 
-	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is string (Wave 2 deferred)", async () => {
+	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is string", async () => {
 		// Scope is already locked at /authorize, where the policy is evaluated
 		// once; resource-aware narrowing here would break that.
 		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
@@ -375,7 +375,7 @@ describe("RFC 8707 resource indicator — flag on", () => {
 		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
-	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is array (Wave 2 deferred)", async () => {
+	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is array", async () => {
 		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const policy = makeStubPolicy(seenPolicy);
 		const deps = makeAuthzDeps({ grantPolicy: policy }, true);
@@ -414,7 +414,7 @@ describe("RFC 8707 resource indicator — flag on", () => {
 		expect(capturedResource).toEqual(["https://r1", "https://r2"]);
 	});
 
-	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body has no resource (Wave 2 deferred)", async () => {
+	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body has no resource", async () => {
 		// authorization_code NEVER invokes grantPolicy.evaluate at the token
 		// endpoint, whatever the flag or body.resource.
 		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
@@ -446,7 +446,7 @@ describe("RFC 8707 resource indicator — flag on", () => {
 // across every flag state and body.resource shape.
 // ---------------------------------------------------------------------------
 
-describe("RFC 8707 authorization_code — token-endpoint policy invariant (Wave 2 deferred)", () => {
+describe("RFC 8707 authorization_code — token-endpoint policy invariant", () => {
 	const flagStates: Array<{ label: string; enabled: boolean | undefined }> = [
 		{ label: "flag absent", enabled: undefined },
 		{ label: "flag explicit false", enabled: false },

@@ -1064,7 +1064,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("preserves refresh_token when IdP doesn't rotate it", () => {
-		it("answers 500 and keeps a rotated refresh token when the provider returns no access token (#626 P1)", async () => {
+		it("answers 500 and keeps a rotated refresh token when the provider returns no access token", async () => {
 			// `RefreshedTokens.accessToken` is optional. A refresh without one is a
 			// failed refresh — but a refresh token the upstream rotated is now the
 			// only usable one (RFC 6749 §6), so it is stored before the refusal.
@@ -1100,7 +1100,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
-		it("derives the new token's expiry from expiresIn when the provider names no expiresAt (#626 P1)", async () => {
+		it("derives the new token's expiry from expiresIn when the provider names no expiresAt", async () => {
 			// The stored expiry belongs to the token just replaced — expired, which
 			// is why this ran — so it is not carried forward.
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
@@ -1131,7 +1131,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect((stored.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
 		});
 
-		it("stores no expiry and omits expires_in when the provider names neither (#626 P1)", async () => {
+		it("stores no expiry and omits expires_in when the provider names neither", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string }>;
@@ -1166,7 +1166,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		// pins it there. These pin it here.
 		// -------------------------------------------------------------------------
 
-		describe("refuses to believe an unusable reading from the adapter (#626 P1 review)", () => {
+		describe("refuses to believe an unusable reading from the adapter", () => {
 			const refreshingApp = (
 				answer: unknown,
 				stored: Partial<FederationTokens> = baseFedTokens,
@@ -1622,7 +1622,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			},
 		);
 
-		it("reads a refresh that names no scope as the grant, not as the last narrowing (#647)", async () => {
+		it("reads a refresh that names no scope as the grant, not as the last narrowing", async () => {
 			// `refreshToken(refreshToken)` sends no `scope` upstream, so RFC 6749
 			// section 6 makes the request one for the original grant, and section
 			// 5.1 makes the answer's scope optional ONLY when it matches the
@@ -1654,7 +1654,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid email");
 		});
 
-		it("falls through to the current scope when the stored ceiling names nothing (#647)", async () => {
+		it("falls through to the current scope when the stored ceiling names nothing", async () => {
 			// A ceiling has to satisfy the same rule as an answer. Whitespace names
 			// no scope, and standing as an empty bound would refuse every answer
 			// forever.
@@ -1725,7 +1725,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid");
 		});
 
-		it("reads scopes separated by a tab as separate scopes (#647)", async () => {
+		it("reads scopes separated by a tab as separate scopes", async () => {
 			const narrowed = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
@@ -1752,7 +1752,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid email");
 		});
 
-		it("stores a repeated entry once (#647)", async () => {
+		it("answers a repeated scope entry once", async () => {
 			const narrowed = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
@@ -1782,7 +1782,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid email");
 		});
 
-		it("accepts a refresh back up to the granted scope after an earlier narrowing (#647)", async () => {
+		it("accepts a refresh back up to the granted scope after an earlier narrowing", async () => {
 			// RFC 6749 section 6 bounds a refresh by the ORIGINAL grant, not by the
 			// scope of the token it replaces. An upstream that narrowed once and
 			// then answers with the full grant again is within its rights, and
@@ -1821,7 +1821,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
-		it("still refuses a refresh beyond the granted scope, not merely beyond the current one (#647)", async () => {
+		it("still refuses a refresh beyond the granted scope, not merely beyond the current one", async () => {
 			const narrowed = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
@@ -1851,7 +1851,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid");
 		});
 
-		it("falls back to the current scope as the ceiling for a record written before #647", async () => {
+		it("refreshes a record that stores no granted scope, taking a narrower answer", async () => {
 			// A record with no `grantedScope`: the current scope is the only
 			// ceiling available, which is conservative rather than wrong.
 			const legacy = {
@@ -2189,7 +2189,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// Post-lock re-read: currentTokens.refreshToken is used
 	// ---------------------------------------------------------------------------
 
-	describe("post-lock refresh uses currentTokens.refreshToken (Codex P2 regression)", () => {
+	describe("post-lock refresh uses currentTokens.refreshToken", () => {
 		it("calls refreshToken with the FRESH refresh_token read after lock, not the pre-lock stale one", async () => {
 			const staleRefreshToken = "stale-rt-pre-lock";
 			const freshRefreshToken = "fresh-rt-post-lock";
@@ -2259,7 +2259,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// Preserve the stored id_token when the IdP omits it on refresh
 	// ---------------------------------------------------------------------------
 
-	describe("preserves stored id_token when IdP omits it on refresh (Claude I1)", () => {
+	describe("preserves stored id_token when IdP omits it on refresh", () => {
 		it("stores original idToken when provider.refreshToken returns no idToken", async () => {
 			const storedIdToken = "stored-id-token-for-logout-hint";
 			const expiredTokens = {
@@ -2713,7 +2713,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// error rather than a probe that quietly matches nothing.
 	// ---------------------------------------------------------------------------
 
-	describe("D-8 regression: route detects provider.refreshToken (published interface name)", () => {
+	describe("route detects provider.refreshToken (published interface name)", () => {
 		it("succeeds with 200 when provider exposes refreshToken (real-provider shape)", async () => {
 			const expiredTokens = {
 				...baseFedTokens,
@@ -2761,7 +2761,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// Post-lock refresh-token guard
 	// ---------------------------------------------------------------------------
 
-	describe("SF-12: post-lock refresh-token guard", () => {
+	describe("post-lock refresh-token guard", () => {
 		// Guards against dropping `currentTokens` for `freshTokens.refreshToken ?? ""`.
 		// The next two tests pin the guard itself.
 		it('passes the real refresh_token to provider.refreshToken (no ?? "" fallback)', async () => {
@@ -2867,7 +2867,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// Structured error classification
 	// ---------------------------------------------------------------------------
 
-	describe("SF-13: structured error classification", () => {
+	describe("structured error classification", () => {
 		// Helper: build a refresh-failure path with a custom error object the helper must classify.
 		function buildRefreshFailure(error: unknown, opts: { auditSink?: AuditSink } = {}) {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
@@ -3231,7 +3231,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// What the upstream said its token is, and whether it may be handed on
 	// ---------------------------------------------------------------------------
 
-	describe("token_type: the upstream's, and only one kind of it (#645)", () => {
+	describe("token_type: the upstream's, and only one kind of it", () => {
 		/** A record that is still valid, with whatever `tokenType` the case names. */
 		const storedApp = (stored: Record<string, unknown>) => {
 			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };

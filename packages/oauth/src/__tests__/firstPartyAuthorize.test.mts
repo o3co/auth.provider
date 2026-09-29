@@ -159,7 +159,7 @@ const errorOf = (res: request.Response): string | null => {
 	return typeof res.body?.error === "string" ? res.body.error : null;
 };
 
-describe("/authorize first-party invariant (#267)", () => {
+describe("/authorize first-party invariant", () => {
 	it("refuses a client that is not marked first-party", async () => {
 		const app = await makeApp({ firstParty: undefined });
 		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
@@ -189,7 +189,7 @@ describe("/authorize first-party invariant (#267)", () => {
 	});
 });
 
-describe("/authorize first-party invariant — the migration flag is removed (#330)", () => {
+describe("/authorize first-party invariant — the removed migration flag has no effect", () => {
 	it("refuses an unmarked client even when a config still carries the removed flag", async () => {
 		// A schema-validated config cannot reach here with the key (the schema
 		// rejects it at boot); a hand-built config can, and it must be inert.
@@ -232,7 +232,7 @@ describe("/authorize first-party invariant — the migration flag is removed (#3
  * `entrySchemaConformance.test.mts` in core catches that class mechanically;
  * this exercises the file-backed shape end to end.
  */
-describe("/authorize first-party invariant, through a file-backed registry (#343)", () => {
+describe("/authorize first-party invariant, through a file-backed registry", () => {
 	let tmpDir: string;
 
 	beforeEach(() => {
