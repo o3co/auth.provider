@@ -36,24 +36,18 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
 	/**
-	 * #367: a subject_token is an access token presented as a credential —
-	 * the exchange mints a NEW token from it, so accepting a revoked one is
-	 * a laundering path: revoke an AT, exchange it, keep an equivalent. The
-	 * jti denylist and the subject watermark are consulted exactly as the
-	 * other token-accepting surfaces (userinfo, introspection,
-	 * federation-token) do. Optional because whether each store exists is
-	 * the composition's decision (#363); `tokenExchangeModule` forwards
-	 * both slots.
+	 * A subject_token is presented as a credential for a NEW token, so accepting a
+	 * revoked one would launder it. The jti denylist and the subject watermark are
+	 * consulted as on the other token-accepting surfaces (userinfo, introspection).
+	 * Optional: whether each store exists is the composition's decision;
+	 * `tokenExchangeModule` forwards both slots.
 	 */
 	accessTokenDenylist?: AccessTokenDenylist;
 	subjectRevocation?: SubjectRevocation;
 	issuer: string;
 	/**
-	 * SF-1 / Phase G / S2: when true, the central JWT verifier
-	 * accepts tokens whose `typ` header is absent and emits a
-	 * `jwt_verify_legacy_typ` deprecation warning. the default is
-	 * `false` (typ-less tokens rejected); `true` is an explicit
-	 * legacy-acceptance opt-in. The v0.5.x default was `true`.
+	 * When true, the central JWT verifier accepts tokens without a `typ` header and
+	 * warns `jwt_verify_legacy_typ`. Default `false`: typ-less tokens are rejected.
 	 */
 	legacyTypAccept?: boolean;
 	logger?: Logger;
@@ -67,47 +61,28 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 }
 
 /**
- * Built-in validator for RFC 8693 subject_token_type=access_token when the
- * token was issued by this auth.provider instance. Verifies:
- *   - JWT signature (via KeyStore)
- *   - `typ: "at+jwt"` header (rejects id_tokens and logout_tokens even
- *     when signed by the same KeyStore — prevents token-type-confusion)
- *   - Standard claims (exp via jose)
- *   - Issuer match (always — `issuer` is a required option)
- *   - The access-token denylist and the subject watermark, when wired (#367)
+ * Built-in validator for RFC 8693 `subject_token_type` access_token when the
+ * token was issued by this provider. Verifies the signature (via `KeyStore`), the
+ * `typ: "at+jwt"` header (so an id_token or logout_token signed by the same keys
+ * is refused), `exp`, the issuer, and, when wired, the access-token denylist and
+ * the subject watermark.
  *
- * It does NOT check the refresh-token family or the session. It projects
- * the token's session — its `sid`, or the `liveness_sid` an exchanged token
- * carries (core's `livenessSidOf`) — as `sid`, which `createTokenExchangeGrant`
- * checks against the user-session store and carries onto the issued token as
- * `liveness_sid`, and `family_id` as
- * `familyId`, which `createTokenExchangeGrant` checks against
- * `refreshTokenFamilyRevocation` for the subject_token and the actor_token
- * alike — refusing a revoked family with `family_revoked`, and a
- * family-bearing token outright when the slot is not wired. A family check
- * here would answer first with an opaque `null` and hide that answer, which is
- * what `tokenExchangeModule` did while it handed the slot to both. A caller
- * that uses this validator outside `createTokenExchangeGrant` must check
- * `familyId` itself, and refuse the token when it has no family store.
+ * It does not check the refresh-token family or the session. It projects
+ * `family_id` as `familyId` and the session (`sid`, or an exchanged token's
+ * `liveness_sid`, via core's `livenessSidOf`) as `sid`, and
+ * `createTokenExchangeGrant` checks both for subject and actor, so a revoked
+ * family gets its own `family_revoked` answer instead of an opaque `null`. A
+ * caller using this validator elsewhere must check `familyId` itself and refuse
+ * the token when it has no family store. Passing `refreshTokenFamilyRevocation`
+ * throws at construction, so a caller expecting the check finds out.
  *
- * Passing `refreshTokenFamilyRevocation` anyway throws at construction, even
- * with no value: a caller that still expects the validator to check the
- * family must find out, not lose the check silently.
+ * `issuer` is required (a non-empty string, else the constructor throws): without
+ * it an at+jwt from the same `KeyStore` with another `iss` could be accepted.
  *
- * `issuer` is required; the constructor throws synchronously when it is
- * missing or an empty string. Without an issuer to compare against, an
- * at+jwt signed by the same KeyStore but with a different (or absent) `iss`
- * claim could be accepted — exactly the token-type-confusion gap Copilot
- * flagged on PR #100.
- *
- * `validate` follows core's ExchangeTokenValidator contract. It returns
- * null when the token is not acceptable — bad signature, wrong typ,
- * missing/empty sub, expired, issuer mismatch, a denylisted or watermarked
- * token — and the grant answers `invalid_request` / `subject_token validation
- * failed` (`actor_token …` for the actor). It throws when the answer is
- * not knowable: a keystore or a revocation store the central verifier could
- * not consult (`isVerificationUnavailable`), which the grant answers with
- * `503 temporarily_unavailable`. The token is refused either way.
+ * `validate` returns `null` for an unacceptable token (bad signature, wrong
+ * `typ`, missing `sub`, expired, issuer mismatch, denylisted or watermarked) and
+ * throws when the answer is unknowable (`isVerificationUnavailable`: a keystore
+ * or revocation store unreachable), which the grant answers with a 503.
  */
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
@@ -130,33 +105,26 @@ export function createSelfIssuedAccessTokenValidator(
 			token: string,
 			_context: ExchangeTokenValidationContext,
 		): Promise<ValidatedToken | null> {
-			// SF-1: alg / iss / typ (=at+jwt) + signature pinned by the central
-			// verifier. Token-type-confusion (id_tokens / logout_tokens minted by
-			// the same KeyStore) is closed by the typ pin. Audience is NOT
-			// pinned here: ExchangeTokenValidationContext intentionally does not
-			// carry the calling-client identity (the grant handler authenticated
-			// it upstream and applies may_act / policy gates downstream), so the
-			// expected aud is unknown at this layer. The verifier records the
-			// gap via `jwt_verify_aud_skipped`.
+			// The central verifier pins alg, iss, typ (at+jwt) and the signature; the typ pin
+			// closes token-type confusion. Audience is not pinned: the validation context
+			// deliberately carries no client identity (the grant authenticates the client
+			// and applies `may_act` and policy), so the verifier logs `jwt_verify_aud_skipped`.
 			let payload: Record<string, unknown>;
 			try {
 				const verified = await verifyJwt(token, keyStore, {
 					type: "access_token",
 					expectedIssuer: issuer,
 					legacyTypAccept: legacyTypAccept ?? false,
-					// #367: token-accepting surface — a revoked subject_token must
-					// not be exchangeable for a fresh token. See the options JSDoc.
+					// A revoked subject_token must not be exchangeable for a fresh token.
 					revocation: { denylist: accessTokenDenylist, subjectRevocation },
 					logger,
 				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch (err) {
-				// An unreachable keystore, denylist or subject watermark is an
-				// outage, not a finding about the token: rethrown, so the grant
-				// answers 503 rather than a refusal that tells the client to
-				// discard a credential that may be perfectly good. The refresh
-				// grant makes the same split. Every other verification failure —
-				// a kid nobody holds included — is the token's.
+				// An unreachable keystore, denylist or watermark is an outage, not a finding
+				// about the token: rethrown so the grant answers 503 instead of telling the
+				// client to discard a possibly good credential. Every other failure, an unknown
+				// kid included, is the token's.
 				if (isVerificationUnavailable(err)) throw err;
 				return null;
 			}
