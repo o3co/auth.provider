@@ -64,6 +64,7 @@ import {
 } from "../net/trusted-proxy.mjs";
 import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
+import { environmentCoercer } from "./schema-path.mjs";
 
 /**
  * The one coercion every env-overridable boolean in this file goes through
@@ -125,19 +126,21 @@ import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
  * there is a second vocabulary to drift from this one, and the feature it
  * would drift on is one whose default is off.
  */
-export const coerceBooleanFromEnv = z.preprocess(
-	(val) => {
-		if (typeof val === "boolean") return val;
-		if (typeof val === "string") {
-			const normalized = val.trim().toLowerCase();
-			if (normalized === "true" || normalized === "1") return true;
-			if (normalized === "false" || normalized === "0" || normalized === "") return false;
-		}
-		return val; // rejected below, with a message naming the accepted spellings
-	},
-	z.boolean({
-		error: 'must be one of "true", "false", "1" or "0" (an empty value reads as false)',
-	}),
+export const coerceBooleanFromEnv = environmentCoercer(
+	z.preprocess(
+		(val) => {
+			if (typeof val === "boolean") return val;
+			if (typeof val === "string") {
+				const normalized = val.trim().toLowerCase();
+				if (normalized === "true" || normalized === "1") return true;
+				if (normalized === "false" || normalized === "0" || normalized === "") return false;
+			}
+			return val; // rejected below, with a message naming the accepted spellings
+		},
+		z.boolean({
+			error: 'must be one of "true", "false", "1" or "0" (an empty value reads as false)',
+		}),
+	),
 );
 
 const rateLimitSchema = z.object({
@@ -327,13 +330,15 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
  * written as a duration, and fails boot naming the key.
  */
 const durationFromEnv = (bounds: z.ZodNumber) =>
-	z.preprocess((value) => {
-		if (typeof value === "number") return value;
-		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
-		// Handed through unchanged, and refused by `bounds` with a message that
-		// names what is acceptable.
-		return value;
-	}, bounds);
+	environmentCoercer(
+		z.preprocess((value) => {
+			if (typeof value === "number") return value;
+			if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+			// Handed through unchanged, and refused by `bounds` with a message that
+			// names what is acceptable.
+			return value;
+		}, bounds),
+	);
 
 const jwtSchemaBase = z.object({
 	// The issuer is a property of the deployment, not of a request. It is

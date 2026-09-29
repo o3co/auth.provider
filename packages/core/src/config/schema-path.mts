@@ -101,19 +101,45 @@ export function schemasAtPath(schema: z.ZodType, path: readonly string[]): z.Zod
 	});
 }
 
+/** The schemas `environmentCoercer` names: core's own readers of an environment string. */
+const ENVIRONMENT_COERCERS = new WeakSet<object>();
+
+/**
+ * Names `schema` as one of core's environment coercers (#728) —
+ * `coerceBooleanFromEnv`, and each `durationFromEnv` — whose preprocess
+ * reads the string a `${?VAR}` carries into the type its schema takes, so
+ * `readsEnvironmentString` trusts it. Tagged rather than probed: a probe
+ * ("false", "1") would run the schema's own bounds and refinements, and
+ * report a leaf that refuses `"1"` as too small as one that cannot read a
+ * string; the tag is the evidence, given where the coercer is written. Any
+ * other preprocess is judged by the schema it hands on. Answers `schema`.
+ * @internal
+ */
+export function environmentCoercer<T extends z.ZodType>(schema: T): T {
+	ENVIRONMENT_COERCERS.add(schema);
+	return schema;
+}
+
 /**
  * Whether `schema` reads the string an environment variable arrives as, for
- * a value it would otherwise refuse as a string: `false` only for a bare
- * `z.boolean()` or a `z.number()` that does not coerce — seen through its
- * wrappers, and for a union only when none of its members reads a string. A
- * `z.preprocess` reads it (its function sees the string first), as does a
- * `z.coerce.number()`, a string, an enum or anything else.
+ * a value it would otherwise refuse as a string: `false` for a bare
+ * `z.boolean()`, a `z.number()` that does not coerce, or a non-string literal
+ * — seen through its wrappers, and for a union only when none of its members
+ * reads a string. A `z.preprocess` counts only as far as there is evidence:
+ * one of core's environment coercers (`environmentCoercer`) reads it, and any
+ * other is judged by the schema it hands on — its function sees the string
+ * first, but may do nothing with it (`z.preprocess((v) => v, z.boolean())`
+ * refuses `"false"`). A `z.coerce.number()`, a string, an enum or anything
+ * else reads it.
  */
 export function readsEnvironmentString(schema: z.ZodType): boolean {
+	if (ENVIRONMENT_COERCERS.has(schema)) return true;
 	const def = defOf(schema);
 	if (WRAPPERS.has(def.type) && def.innerType) return readsEnvironmentString(def.innerType);
-	if (def.type === "pipe" && def.in) {
-		return defOf(def.in).type === "transform" || readsEnvironmentString(def.in);
+	if (def.type === "pipe" && def.in && def.out) {
+		// A preprocess (its input a function) by what it hands on; a
+		// `.transform` (its output a function) by the schema that reads first.
+		return readsEnvironmentString(defOf(def.in).type === "transform" ? def.out : def.in);
 	}
 	if (def.type === "union" && def.options) return def.options.some(readsEnvironmentString);
 	if (def.type === "boolean") return false;
