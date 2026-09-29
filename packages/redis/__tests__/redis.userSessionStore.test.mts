@@ -61,7 +61,7 @@ runUserSessionStoreContract(freshStore, { expiry });
 // The step-up capability, which the Redis store claims (the MFA ADR's D9).
 runSecondFactorUpdateContract(freshStore, { expiry });
 
-describe("a session Redis holds from before the MFA ADR's D9", () => {
+describe("a session Redis holds from before sessions carried authentication", () => {
 	// Envelopes as the release before `authentication` wrote them, captured
 	// from its writer (`support/preUpgradeEnvelopes.mts`). A live one survives
 	// the upgrade and must read no more trusted than it was: a federated
@@ -109,7 +109,7 @@ describe("a session Redis holds from before the MFA ADR's D9", () => {
 	});
 });
 
-describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
+describe("recordSecondFactor on Redis", () => {
 	const store = (prefix: string) =>
 		createRedisUserSessionStore({
 			client: makeIoredisClients(raw).userSessionStoreClient,
@@ -161,7 +161,7 @@ describe("recordSecondFactor on Redis (the MFA ADR's D9)", () => {
 		expect(await raw.pttl(key)).toBeGreaterThan(0);
 		// What a release before `authentication` reads: every field it knows,
 		// as it wrote them, and the split `amr` — `authentication` beside it is
-		// a key it ignores (the ADR's "Rolling back").
+		// a key it ignores (the MFA ADR's "Rolling back").
 		const stored = JSON.parse((await raw.get(key)) as string);
 		expect(stored).toMatchObject({ ...envelope, amr: ["fed", "otp", "mfa"] });
 		expect(stored.authentication).toEqual({

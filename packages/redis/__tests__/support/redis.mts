@@ -67,11 +67,9 @@ export const serverClock = (connection: () => Redis) => async (): Promise<number
 //
 // A fixed sleep after a short expiry is right only when the sleep and the
 // expiry run on one clock and nothing else is running. Neither holds here: a
-// Redis key expires on the server's clock, a relative `PX` starts when the
-// command reaches the server rather than when the test sent it, and a loaded
-// run reaches its next line late. So a sleep either read an entry the store had
-// already dropped, or checked one it had not dropped yet. What these helpers
-// wait for is the expiry itself — on the clock the store judges it by — and
+// key expires on the server's clock, a relative `PX` starts when the command
+// reaches the server, and a loaded run reaches its next line late. These
+// helpers wait for the expiry itself, on the clock the store judges it by, and
 // each gives up, loudly, at a deadline a correct store is well inside.
 
 /** How long past an expiry a store may take to show it before a test calls it a defect. */
@@ -163,10 +161,7 @@ export const aheadOfServer = (connection: () => Redis) => {
 
 /**
  * Runs `write`, and answers the latest server instant the key it wrote with a
- * relative `PX` can live to.
- *
- * That life starts when the command reaches the server, which the test cannot
- * see; it ends no later than the server's clock read after `write` returns
+ * relative `PX` can live to: the server's clock read after `write` returns,
  * plus the longest `PX` the write can have sent. `lifeMs` is handed the host's
  * clock read before `write` started, so an adapter that sends
  * `expiresAtMs - Date.now()` is bounded by `(before) => expiresAtMs - before`.

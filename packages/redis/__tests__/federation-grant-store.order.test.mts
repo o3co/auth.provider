@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-// The order the store sends its calls in (#593, D16).
+// The order the store sends its calls in (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16).
 //
 // Against a stub, because the rule is about *ordering* and a real Redis shows
 // it only in a window a test cannot open reliably: the index member is
@@ -123,15 +124,13 @@ const storeOver = (client: FederationGrantStoreClient) =>
 		encryption: { mode: "required", keys: [{ id: "k-1", key: Buffer.alloc(32, 1) }] },
 	});
 
-describe("how many commands a read is (#593, D16)", () => {
+describe("how many commands a read is", () => {
 	it("reads the record and its credential as ONE command", async () => {
 		// The property a race cannot prove: between a `HGETALL` and a `GET`, an
 		// activation can replace both, and the caller would evaluate one
 		// authorization against the other's credential. A client batches the two
 		// closely enough that the window almost never opens, so the test is at
-		// the seam — what went over the wire — and not at the outcome (the
-		// reviewer found the race version of this test proving nothing, over
-		// 2,400 concurrent attempts).
+		// the seam — what went over the wire — and not at the outcome.
 		const sent: string[] = [];
 		const connection = {
 			async evalsha(_sha: string, numkeys: number, ...args: (string | number)[]) {
@@ -158,7 +157,7 @@ describe("how many commands a read is (#593, D16)", () => {
 	});
 });
 
-describe("the order a write goes out in (#593, D16)", () => {
+describe("the order a write goes out in", () => {
 	it("reserves the index member, and waits for it, before the record is created", async () => {
 		const { calls, client, letReserveFinish } = recording();
 		const writing = storeOver(client).createPending({

@@ -143,7 +143,7 @@ const mtlsBinding = (thumbprint: string): TokenBinding => ({
 // 5-row matrix tests
 // ---------------------------------------------------------------------------
 
-describe("mTLS refresh-token binding matrix — §9.2 (5 rows)", () => {
+describe("mTLS refresh-token binding matrix (5 rows)", () => {
 	it("row 1: RT plain + no cert → unbound AT, Bearer", async () => {
 		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);

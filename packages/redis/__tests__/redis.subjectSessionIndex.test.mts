@@ -15,7 +15,7 @@
  */
 
 /**
- * Redis {@link SubjectSessionIndex} (#321) — the adapter that makes
+ * Redis {@link SubjectSessionIndex}: the adapter that makes
  * `revokeAllForSubject` work on a multi-replica deployment. Without it
  * `redisSessionStoresModule` fills neither subject slot and a password reset
  * revokes nothing.
@@ -57,7 +57,7 @@ runSubjectSessionIndexContract(async () => {
 const aheadOfBoth = aheadOfServer(() => raw);
 const serverPassed = (at: Date): Promise<void> => serverPasses(() => raw)(at.getTime());
 
-describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
+describe("SubjectSessionIndex — Redis-specific behaviour", () => {
 	const index = (prefix: string) =>
 		createRedisSubjectSessionIndex({
 			client: makeIoredisClients(raw).subjectSessionIndexClient,
@@ -67,10 +67,9 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 	it("ages a member out on the server's clock, not the caller's", async () => {
 		// The property fake timers cannot test: the score is compared against
 		// Redis time, and a member whose expiry passes while the index holds it
-		// stops being listed. Dated from, and waited out on, that clock: a
-		// 60 ms expiry and a 150 ms sleep on the host had the server prune the
-		// member before the first read on a loaded run, or keep it past the
-		// second when its clock lagged the host's.
+		// stops being listed. Dated from, and waited out on, that clock, so
+		// neither a loaded run nor a server clock behind the host's moves a
+		// read across the expiry.
 		const idx = index("t321i:age:");
 		const expiresAt = await aheadOfBoth();
 		await idx.addSid("u1", "short", expiresAt);
@@ -93,7 +92,7 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 
 	it("bounds an abandoned subject key with a TTL", async () => {
 		// Nothing revisits a subject that never logs in again, so the key needs
-		// its own expiry as a backstop — the shape #269 paid for. Read back as
+		// its own expiry as a backstop. Read back as
 		// the absolute deadline (`PEXPIRETIME`), which no clock moves: the key
 		// expires exactly when its only member does.
 		const idx = index("t321i:ttl:");
@@ -138,7 +137,7 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 	});
 });
 
-describe("SubjectSessionIndex — the read boundary is the store's clock (#321)", () => {
+describe("SubjectSessionIndex — the read boundary is the store's clock", () => {
 	it("hands the read no timestamp of its own", async () => {
 		// Structural, not incidental: `pruneExpiredAndList` takes a key and
 		// nothing else, so the adapter *cannot* pass a caller-side `Date.now()`

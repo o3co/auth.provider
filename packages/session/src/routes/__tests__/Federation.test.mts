@@ -3248,7 +3248,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		);
 	});
 
-	it("the cookie session's regeneration: 503 — no longer 500 — and one error line", async () => {
+	it("the cookie session's regeneration: 503 and one error line", async () => {
 		const logger = spyLogger();
 		const uss = makeUserSessionStore();
 		const { app } = buildCallbackApp({
@@ -3268,7 +3268,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		expect(uss.delete).toHaveBeenCalledOnce();
 	});
 
-	it("the token attach after regeneration: 503 — no longer 500 — and one error line", async () => {
+	it("the token attach after regeneration: 503 and one error line", async () => {
 		const logger = spyLogger();
 		const fts = makeFederationTokenStore();
 		fts.attach.mockRejectedValueOnce(new Error("token store down"));
@@ -3287,7 +3287,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		});
 	});
 
-	it("the regenerated session's persist: 503 — no longer 500 — and one error line", async () => {
+	it("the regenerated session's persist: 503 and one error line", async () => {
 		const logger = spyLogger();
 		const { app } = buildCallbackApp({
 			providers: new Map([["test", makeFakeProvider()]]),
@@ -3304,7 +3304,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		});
 	});
 
-	it("the envelope's retirement: 503 — no longer 500 — one error line, and no code exchanged", async () => {
+	it("the envelope's retirement: 503, one error line, and no code exchanged", async () => {
 		const logger = spyLogger();
 		const provider = makeFakeProvider();
 		const { app } = buildCallbackApp({
@@ -3323,7 +3323,7 @@ describe("the federation login callback answers a store that cannot answer as an
 		expect(provider.exchangeCode).not.toHaveBeenCalled();
 	});
 
-	it("a start whose session cannot be saved: 503 — no longer 500 — and one error line", async () => {
+	it("a start whose session cannot be saved: 503 and one error line", async () => {
 		const logger = spyLogger();
 		const store: SessionStore = new Map();
 		const app = makeSessionApp(store);

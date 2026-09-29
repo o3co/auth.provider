@@ -84,9 +84,8 @@ describe("parseDerToCertificate", () => {
 	});
 
 	it("throws on malformed DER bytes", () => {
-		// `new X509Certificate(der)` will throw on garbage input — the call site
-		// wraps this into MtlsError("cert_decode_failed") but parseDerToCertificate
-		// itself propagates the raw error per spec §6.3.
+		// `new X509Certificate(der)` throws on garbage input, and
+		// parseDerToCertificate lets that error propagate unmodified.
 		const garbage = new Uint8Array([0x00, 0x01, 0x02]);
 		expect(() => parseDerToCertificate(garbage)).toThrow();
 	});

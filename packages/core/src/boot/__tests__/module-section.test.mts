@@ -310,7 +310,7 @@ describe("a module's section — a value its schema refuses refuses boot", () =>
 });
 
 describe("a module without a section", () => {
-	it("is booted as before: its deps carry no section key", async () => {
+	it("boots with deps that carry no section key", async () => {
 		let keys: readonly string[] | undefined;
 		const plain = defineModule({
 			name: "fixture-plain",

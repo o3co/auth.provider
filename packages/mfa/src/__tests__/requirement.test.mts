@@ -561,7 +561,7 @@ describe("admit — a step-up only where the session store can record one", () =
 		);
 	});
 
-	it("changes nothing else: met stays met, unmet stays unmet, a token is judged as before", async () => {
+	it("changes nothing else: met stays met and unmet stays unmet, for a token too", async () => {
 		const { requirement } = build("required", { stepUpRecordable: false });
 		expect(await requirement.admit(about(password(["pwd", "otp", "mfa"], minutesAgo(1))))).toEqual(
 			MET,
@@ -581,7 +581,7 @@ describe("admit — a step-up only where the session store can record one", () =
 // ---------------------------------------------------------------------------
 
 describe("admitPrimary — after a password login", () => {
-	it("establishes under optional when the subject holds no factor record: the login is as it was", async () => {
+	it("establishes under optional when the subject holds no factor record", async () => {
 		const { requirement } = build("optional");
 		expect(await requirement.admitPrimary?.(primaryOf("u-alice"))).toBe("establish");
 	});

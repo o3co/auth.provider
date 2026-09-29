@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 
-// How the Redis federation grant store compares an intent handle where the
-// comparison is not in a script (#631): `isCurrentIntent` reads the record and
-// compares in this process. The handle is a capability the browser carries,
-// and the port has every adapter compare it in constant time — the memory
-// adapter and the scripts' `fg_same` do. A timing property is not one the
-// contract suite can observe, so this pins the helper the comparison goes
-// through, which is the invariant: core's `constantTimeStringEqual`, and no
-// `===`.
+// How the Redis federation grant store compares an intent handle outside a
+// script: `isCurrentIntent` reads the record and compares in this process. The
+// handle is a capability the browser carries, and the port has every adapter
+// compare it in constant time, as the memory adapter and the scripts'
+// `fg_same` do. The contract suite cannot observe timing, so this pins the
+// helper the comparison goes through: core's `constantTimeStringEqual`, and
+// no `===`.
 
 import { constantTimeStringEqual } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
@@ -57,7 +56,7 @@ beforeEach(() => {
 	compare.mockClear();
 });
 
-describe("isCurrentIntent compares the handle in constant time (#631)", () => {
+describe("isCurrentIntent compares the handle in constant time", () => {
 	it("goes through core's constantTimeStringEqual, with the stored handle and the one asked about", async () => {
 		const store = createRedisFederationGrantStore({
 			client: makeIoredisFederationGrantStoreClient(redis),

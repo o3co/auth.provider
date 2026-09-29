@@ -15,9 +15,11 @@
  */
 
 /**
- * Where both routes live: `POST <mount>/:grantId/token` and
- * `POST <mount>/:grantId/status` (ADR
- * 2026-09-17-federation-grants-offline-delegation, D9).
+ * Where the routes live: `POST <mount>` (lodge) and
+ * `POST <mount>/:grantId/reauthorize`, `/token`, `/status` and `/revoke` (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D9). The router mounts the
+ * two lodging routes only when given `acquisition`, which the module always
+ * passes.
  *
  * Exported because a deployment that fronts the provider has to say the same
  * thing in its proxy rules and its network policy, and a path restated by hand

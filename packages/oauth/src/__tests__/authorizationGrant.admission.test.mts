@@ -21,8 +21,8 @@
  * is signed, with `codeClaimFirstRead(code)` (a code carries no subject); the
  * second, before the family is linked, with `codeClaimRevalidation(code, sub)`
  * on the first read's `sub`, so a subject changed in between is refused as
- * `session_invalidated`. Tests prefixed (4) and (5) pin the ADR's changes of
- * those numbers, on both reads.
+ * `session_invalidated`. D8's changes for this grant, the subject-revocation
+ * boundary and a record past its `expiresAt`, are each pinned on both reads.
  */
 
 import crypto from "node:crypto";
@@ -209,7 +209,7 @@ const refused = async (
 };
 
 describe("the authorization_code grant on admission — the first read", () => {
-	it("(4) the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant session_invalid, nothing signed", async () => {
+	it("the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant session_invalid, nothing signed", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
 		const { handler, signed } = makeGrant({
@@ -224,7 +224,7 @@ describe("the authorization_code grant on admission — the first read", () => {
 		expect(signed).not.toHaveBeenCalled();
 	});
 
-	it("(5) a record past its expiresAt is 400 invalid_grant session_invalid, nothing signed", async () => {
+	it("a record past its expiresAt is 400 session_invalid, nothing signed", async () => {
 		const { handler, signed } = makeGrant({
 			userSessionStore: storeAnswering(record({ expiresAt: minutesAgo(1) })),
 		});
@@ -315,7 +315,7 @@ describe("the authorization_code grant on admission — the first read", () => {
 		}
 	});
 
-	it("without a store, mints for the token request's cookie subject as before", async () => {
+	it("without a store, answers 200 to a token request whose cookie names a subject", async () => {
 		const { handler } = makeGrant({});
 		const { result } = await handler.handle(ctx({ user: { id: "cookie-user" } }));
 		expect(result.status).toBe(200);
@@ -358,7 +358,7 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 		);
 	});
 
-	it("(5) a session that expired between the two reads is 400 session_invalidated", async () => {
+	it("a session that expired between the two reads is 400 session_invalidated", async () => {
 		const { handler } = makeGrant({
 			userSessionStore: storeAnswering(record(), record({ expiresAt: minutesAgo(1) })),
 		});
@@ -368,7 +368,7 @@ describe("the authorization_code grant on admission — the revalidation", () =>
 		});
 	});
 
-	it("(4) a boundary stamped between the two reads is 400 session_invalidated", async () => {
+	it("a boundary stamped between the two reads is 400 session_invalidated", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		const { handler, sessionFamilyIndex } = makeGrant({
 			userSessionStore: storeAnswering(record(), record()),

@@ -14,13 +14,11 @@
  * limitations under the License.
  */
 
-// #291 — the sid-keyed ZSET is read in rank pages, not `ZRANGE key 0 -1`.
-//
-// `list` used to ask for the whole sorted set in one command; the reply size
-// grew with how many refresh-token families or federations a session had
-// accumulated, and logout reads both. These tests pin the paging and the
-// ordering it must not disturb. Round-trip behaviour against a real Redis is
-// covered in `internalSidSortedSet.test.mts`.
+// The sid-keyed ZSET is read in rank pages, not `ZRANGE key 0 -1`: one reply
+// for the whole set grows with how many refresh-token families or federations
+// a session has accumulated, and logout reads both. These tests pin the
+// paging and the ordering it must not disturb; the round trip against a real
+// Redis is in `internalSidSortedSet.test.mts`.
 
 import { describe, expect, it, vi } from "vitest";
 import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
@@ -46,7 +44,7 @@ function createClient(members: string[]) {
 	} satisfies SessionSidSortedSetClient;
 }
 
-describe("#291 — createRedisSidSortedSet.list pages by rank", () => {
+describe("createRedisSidSortedSet.list pages by rank", () => {
 	it("never asks for the whole set in one command", async () => {
 		const client = createClient(["a", "b", "c"]);
 		const zset = createRedisSidSortedSet({ client, keyPrefix: "t:" });
@@ -77,7 +75,7 @@ describe("#291 — createRedisSidSortedSet.list pages by rank", () => {
 		expect(client.zRange).toHaveBeenCalledTimes(2);
 	});
 
-	it("preserves insertion order across page boundaries (load-bearing for A4 §5.4)", async () => {
+	it("preserves insertion order across page boundaries", async () => {
 		// `SessionFederationIndex.listFederations` order decides which IdP
 		// `routes/logout.mts` redirects to. Paging must not reorder it.
 		const members = Array.from({ length: 150 }, (_, i) => `idp-${i}`);
@@ -98,7 +96,7 @@ describe("#291 — createRedisSidSortedSet.list pages by rank", () => {
 	});
 });
 
-describe("#291 — createRedisSidSortedSet.removeBySid uses UNLINK", () => {
+describe("createRedisSidSortedSet.removeBySid uses UNLINK", () => {
 	it("unlinks the sid's key", async () => {
 		const client = createClient([]);
 		const zset = createRedisSidSortedSet({ client, keyPrefix: "t:" });
@@ -107,12 +105,11 @@ describe("#291 — createRedisSidSortedSet.removeBySid uses UNLINK", () => {
 	});
 });
 
-// Copilot review on PR #352. `list` advances by `pageSize`; a value that does
-// not advance turns the read into an infinite loop — on the logout path, which
-// is worse than the keyspace scan this PR removes. `0` is the sharpest case:
+// `list` advances by `pageSize`; a value that does not advance turns the read
+// into an infinite loop, on the logout path. `0` is the sharpest case:
 // `ZRANGE key 0 -1` returns the whole set, the short-page test never fires, and
-// the same command repeats forever. Reject at construction instead.
-describe("#291 — createRedisSidSortedSet validates pageSize at construction", () => {
+// the same command repeats forever. Rejected at construction instead.
+describe("createRedisSidSortedSet validates pageSize at construction", () => {
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (pageSize) => {
 		expect(() =>
 			createRedisSidSortedSet({ client: createClient([]), keyPrefix: "t:", pageSize }),

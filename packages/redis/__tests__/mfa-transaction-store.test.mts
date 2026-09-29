@@ -16,18 +16,14 @@
 
 /**
  * The Redis `MfaTransactionStore` (the MFA ADR's D8, D21, D25) against core's
- * contract, on a real Redis, and what is Redis-specific below it: the key
- * layout — a hash per transaction expiring at its `expiresAtMs` on the
- * server's clock, a hash per subject for D21's state beside the weekly window
- * as a sorted set of failure times, the email-proof requirement in a key of
- * its own with no TTL — what reclaims the subject state, and what a stored
- * value it cannot read is answered with.
+ * contract on a real Redis, and below it: the key layout (a hash per
+ * transaction expiring at its `expiresAtMs` on the server's clock; a hash per
+ * subject for the lockout state beside the weekly window, a sorted set of
+ * failure times; the email-proof requirement in a key with no TTL), what
+ * reclaims the subject state, and the answer to a value it cannot read.
  *
- * Two connections, and the contract's store alternates between them, so the
- * races the suite sets up — N reservations, N consumes, N takes in flight —
- * are races across sockets rather than calls queued on one client. A
- * transaction expires on the server's clock, which is the clock the suite's
- * expiry waits on.
+ * The contract's store alternates between two connections, so its races are
+ * across sockets rather than queued on one client.
  */
 
 import {
@@ -165,7 +161,7 @@ const storeAt = (keyPrefix: string, connection: Redis = first()): MfaTransaction
 const deadlineOf = async (key: string): Promise<number> =>
 	Number(await first().call("PEXPIRETIME", key));
 
-describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)", () => {
+describe("createRedisMfaTransactionStore — the transaction", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
 	});
@@ -333,8 +329,8 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 	});
 
 	it("answers a record written before the binding, or bound by a kind it does not know, as absent: no reading of it as a session's", async () => {
-		// No migration and no back-compat read (#742): a `record` holding the
-		// old `sessionId`, or a binding of another kind, is unreadable, and a
+		// No migration and no back-compat read: a `record` holding a
+		// `sessionId`, or a binding of another kind, is unreadable, and a
 		// transaction it cannot read fails closed.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
@@ -368,7 +364,7 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 	});
 });
 
-describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D21)", () => {
+describe("createRedisMfaTransactionStore — the subject state", () => {
 	/** A whole-millisecond instant near both clocks, so the deadlines below are exact. */
 	const start = () => Math.floor(Date.now() / 1000) * 1000;
 
@@ -429,10 +425,10 @@ describe("createRedisMfaTransactionStore — the subject state (the MFA ADR's D2
 	});
 
 	it("writes nothing on a refused attempt that forgot nothing: a held subject hammered is no write load", async () => {
-		// Each refusal used to re-set both keys' deadlines — a write to the AOF
-		// and every replica per attempt an attacker sends at a held subject.
 		// The deadlines are set as the state changes; a refusal that changed
-		// nothing leaves them where they are. A sentinel deadline shows it.
+		// nothing leaves them where they are: no write to the AOF and every
+		// replica per attempt an attacker sends at a held subject. A sentinel
+		// deadline shows it.
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);
 		const t = start();
@@ -574,8 +570,8 @@ const seeded = (seed: number): (() => number) => {
 	};
 };
 
-describe("createRedisMfaTransactionStore — the same answers as core's in-process store (the MFA ADR's D21)", () => {
-	// The contract samples D21's schedule; this walks it. Each seed drives the
+describe("createRedisMfaTransactionStore — the same answers as core's in-process store", () => {
+	// The contract samples the lockout schedule; this walks it. Each seed drives the
 	// same random sequence of reservations, settlements, exempt successes and
 	// clears through core's in-process store and this one, and every answer
 	// must agree — a hold, its kind and its retry to the millisecond. A small
@@ -613,7 +609,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 	const OUTCOMES = ["failure", "failure", "success", "void"] as const;
 
 	it.each(Array.from({ length: 16 }, (_, i) => i + 1))(
-		"over a random sequence of D21's operations (seed %i)",
+		"over a random sequence of the subject state's operations (seed %i)",
 		async (seed) => {
 			const random = seeded(seed);
 			const choose = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)] as T;
@@ -746,7 +742,7 @@ describe("createRedisMfaTransactionStore — the same answers as core's in-proce
 	});
 });
 
-describe("createRedisMfaTransactionStore — the email proof at the next first binding (the MFA ADR's D25)", () => {
+describe("createRedisMfaTransactionStore — the email proof at the next first binding", () => {
 	it("keeps it in a key of its own with no TTL, which clearSubjectState leaves and a consume removes", async () => {
 		const prefix = freshPrefix();
 		const store = storeAt(prefix);

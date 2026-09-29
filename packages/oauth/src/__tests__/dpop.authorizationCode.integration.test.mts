@@ -177,7 +177,7 @@ const baseCtxPublic: Omit<GrantContext, "tokenBinding"> = {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () => {
+describe("DPoP cnf-claim propagation — authorization_code grant", () => {
 	describe("AT cnf propagation", () => {
 		it("unbound AT + unbound RT when ctx.tokenBinding is undefined (Bearer baseline)", async () => {
 			// No binding → both AT and RT are plain Bearer tokens with no cnf

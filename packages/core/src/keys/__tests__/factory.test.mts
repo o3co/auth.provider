@@ -78,7 +78,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 		expect(keyStore.getSigningKidFallback()).toBe("v1");
 	});
 
-	it("HS256 stays selectable — it is no longer the default, but it still builds", async () => {
+	it("HS256 is selectable: it builds when configured", async () => {
 		// The shipped default is EdDSA. HS256 remains a supported choice for
 		// deployments that verify in-process and publish no JWKS; this test
 		// pins that it still builds.
@@ -93,7 +93,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 		expect(keyStore.algorithm).toBe("HS256");
 	});
 
-	it("no longer silently defaults to HS256 when algorithm is absent", async () => {
+	it("refuses to build when algorithm is absent, rather than defaulting to HS256", async () => {
 		// A fallback to HS256 would give a deployment that configured nothing
 		// at all symmetric signing by accident. The builder refuses rather
 		// than choose for the operator.

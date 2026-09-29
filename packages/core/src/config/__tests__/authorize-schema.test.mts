@@ -20,7 +20,7 @@ import { CoreConfigSchema } from "../application.schema.mjs";
 const authorizeSchema = CoreConfigSchema.shape.oauth.shape.authorize;
 
 describe("oauth.authorize schema — removed-field preprocess", () => {
-	it("accepts an absent authorize section (the key is no longer required)", () => {
+	it("accepts an absent authorize section (the key is optional)", () => {
 		const result = authorizeSchema.safeParse(undefined);
 		expect(result.success).toBe(true);
 	});

@@ -446,7 +446,7 @@ describe("leaving the feature off", () => {
 	});
 });
 
-describe("what creating a grant needs (slice 6)", () => {
+describe("what creating a grant needs", () => {
 	it("refuses a deployment with no consent page, before a user could reach one that is not there", async () => {
 		await expect(boot({ grants: { consent: {} } })).rejects.toThrow(
 			/federationGrants\.consent\.url/,

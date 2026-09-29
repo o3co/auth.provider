@@ -16,34 +16,28 @@
 
 /**
  * The two MFA store modules (the MFA ADR's D7, D8, D10, D12, D19) and the one
- * durability check both run at boot.
+ * durability check both run at boot. Why the records must survive: the MFA
+ * ADR's D12, as amended.
  *
- * "Only zero records open a first binding" (F3) is only as strong as the
- * store that holds the records, and the email-proof requirement an operator
- * reset records is only as strong as the transaction store (D12's step-3
- * amendment). So each module reads the server's `maxmemory-policy` and
- * persistence before it provides its store: an `allkeys-*` policy, which may
- * evict any key, refuses the boot; RDB snapshots without AOF, and no
- * persistence at all, are each one warning; a server that refuses `CONFIG`
- * is one warning that the check could not run. The transaction store also
- * warns on a `volatile-*` policy: its lock and week keys carry a TTL once no
- * run is counted, and an evicted one lifts a D21 hold early. The factor
- * store's keys carry none, so a `volatile-*` policy never picks them.
+ * Before providing its store, each module reads the server's
+ * `maxmemory-policy` and persistence: an `allkeys-*` policy refuses the boot;
+ * RDB snapshots without AOF, and no persistence at all, are each one warning;
+ * a server that refuses `CONFIG` is one warning that the check could not run.
+ * The transaction store also warns on a `volatile-*` policy: its lock and
+ * week keys carry a TTL once no run is counted, and an evicted one lifts a
+ * hold early. The factor store's keys carry none.
  *
- * The policy is read from `INFO memory` — `CONFIG GET maxmemory-policy` only
- * where INFO does not say — so a managed server that blocks `CONFIG` is still
- * held to the refusal; AOF from `INFO persistence`; `CONFIG GET save` only to
- * tell RDB snapshots from no persistence. A part that could not be read is
- * named in the one warning that the check could not run. Only a reply that
- * refuses the question — an unknown or renamed command, `NOPERM`, a disabled
- * command — is read so; any other reply error, and any failure to reach the
- * server, fails the boot.
+ * The policy is read from `INFO memory`, and from `CONFIG GET
+ * maxmemory-policy` only where INFO does not say, so a server that blocks
+ * `CONFIG` is still held to the refusal; AOF from `INFO persistence`;
+ * `CONFIG GET save` only to tell RDB snapshots from no persistence. A part
+ * that could not be read is named in the could-not-run warning. Only a reply
+ * that refuses the question (an unknown or renamed command, `NOPERM`, a
+ * disabled command) is read so; any other reply error, and any failure to
+ * reach the server, fails the boot.
  *
- * The check's verdicts are pinned against a stub client; the client's reading
- * against fakes and a real server, users the server refuses `CONFIG` or `INFO`
- * or both, and `allkeys-lru` set on the server, against the shared container. Every real-server case that
- * reads or sets the eviction policy is in this file alone, so no other file
- * sees the policy this one sets for a moment.
+ * Every real-server case that reads or sets the eviction policy is in this
+ * file alone, so no other file sees the policy this one sets for a moment.
  */
 
 import {
@@ -202,7 +196,7 @@ describe.each(CASES)("$module.name", (c) => {
 		).toStrictEqual({ [c.configKey]: { keyPrefix: "tenant-a:" } });
 	});
 
-	it("declares nothing the replica-safety guard refuses (D10), where the memory module does", () => {
+	it("declares nothing the replica-safety guard refuses, where the memory module does", () => {
 		expect(replicaUnsafeReason(c.module)).toBeUndefined();
 		expect(replicaUnsafeReason(c.memoryModule)).toBeDefined();
 	});
@@ -219,7 +213,7 @@ describe.each(CASES)("$module.name", (c) => {
 	});
 
 	it.each(["allkeys-lru", "allkeys-lfu", "allkeys-random"])(
-		"refuses %s at boot: a policy that may evict any key, naming the policy (D12)",
+		"refuses %s at boot: a policy that may evict any key, naming the policy",
 		async (policy) => {
 			const { logger, calls } = recordingLogger();
 			const refused = boot({ ...DURABLE, maxmemoryPolicy: policy }, logger);
@@ -239,7 +233,7 @@ describe.each(CASES)("$module.name", (c) => {
 	});
 
 	it.each(["volatile-lru", "volatile-lfu", "volatile-random", "volatile-ttl"])(
-		"boots on %s with AOF, and warns once only where an evicted key would lift a D21 hold",
+		"boots on %s with AOF, and warns once only where an evicted key would lift a subject's hold",
 		async (policy) => {
 			// The factor store's keys carry no TTL, so a volatile-* policy never
 			// picks them. The transaction store's lock and week keys carry one

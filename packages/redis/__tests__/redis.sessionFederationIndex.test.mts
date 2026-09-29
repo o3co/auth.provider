@@ -101,7 +101,7 @@ describe("SessionFederationIndex concurrency", () => {
 		expect(list.length === 0 || (list.length === 1 && list[0] === "fed-x")).toBe(true);
 	});
 
-	it("insertion-order preserved across serial adds (load-bearing per A4 §5.4)", async () => {
+	it("insertion-order preserved across serial adds", async () => {
 		// The internal helper uses a module-level monotonic counter as score
 		// (see redisSidSortedSet.mts), so no inter-add sleep is needed to
 		// guarantee strict insertion order even within the same millisecond.

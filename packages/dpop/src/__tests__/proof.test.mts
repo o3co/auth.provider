@@ -36,7 +36,7 @@ beforeAll(async () => {
 });
 
 describe("parseProof — structural validation only (no signature check)", () => {
-	it("parses a well-formed DPoP proof and returns DPoPProof (flat layout per spec §5.3)", async () => {
+	it("parses a well-formed DPoP proof and returns DPoPProof: alg, jwk, jkt, claims and raw", async () => {
 		const proof = await parseProof(validProof);
 		expect(proof.alg).toBe("ES256");
 		expect(proof.jwk).toMatchObject({ kty: "EC", crv: "P-256" });

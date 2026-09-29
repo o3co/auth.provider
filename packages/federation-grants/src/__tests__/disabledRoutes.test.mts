@@ -88,7 +88,7 @@ describe("the routes a disabled deployment mounts", () => {
 		await handle.dispose();
 	});
 
-	it("answers the lodging routes and the browser half the same way (slice 6)", async () => {
+	it("answers 404 on the lodging route, and a plain-text 404 with no redirect on the browser half", async () => {
 		const { handle, app } = await boot();
 		const lodged = await request(app)
 			.post("/oauth/federation-grants")

@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-// How a federation grant's credential is sealed (#593, D16): in core's `v2`
-// key-ring envelope (`sealing/`), whose own contract is tested there, bound
-// to this store's purpose `o3co:redis:v2`. What is redis's own, and tested
-// here, is that binding — the names the store calls the envelope by and the
-// header every grant at rest was sealed under — and that the store's two
-// formats, this one and the session-bound token store's `v1`, never read
-// each other. The fixture of envelopes sealed before the envelope moved is
-// in `crypto-v2.sealed-before-the-move.test.mts`.
+// How a federation grant's credential is sealed (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16): in core's `v2`
+// key-ring envelope (`sealing/`, whose contract is tested there), bound to
+// this store's purpose `o3co:redis:v2`. Tested here: that binding (the names
+// the store calls the envelope by, and the header every grant at rest was
+// sealed under), and that the store's two formats, this one and the
+// session-bound token store's `v1`, never read each other. Envelopes sealed
+// before the move to core are in `crypto-v2.sealed-before-the-move.test.mts`.
 
 import { createCipheriv } from "node:crypto";
 import { openWithKeyRing, type SealingKeyRing, sealWithKeyRing } from "@o3co/auth-provider-core";
@@ -64,8 +64,8 @@ describe("a federation grant credential is core's v2 envelope under the purpose 
 
 	it("opens a vector sealed by hand under the header every grant at rest was sealed with", () => {
 		// `o3co:redis:v2` NUL, then the key ID and the record, each after a
-		// 32-bit big-endian length: the header the store wrote before the
-		// envelope moved to core, and so the one it must keep reading.
+		// 32-bit big-endian length: the header every grant at rest was sealed
+		// under, and so the one the store must keep reading.
 		const material = key(4);
 		const iv = Buffer.alloc(12, 5);
 		const kid = Buffer.from("k-hand", "utf8");
@@ -99,7 +99,7 @@ describe("the grant store's v2 and the token store's v1 pass each other by", () 
 		expect(openSealedCredential(v1, RING, RECORD)).toStrictEqual({ state: "unreadable" });
 	});
 
-	it("is not read by the v1 reader, which keeps working as it did", () => {
+	it("is not read by the v1 reader, which still opens a v1 envelope", () => {
 		const sealed = sealCredential("rt-1", RING, RECORD);
 		expect(() => decryptTokenField(sealed, key(2), RECORD)).toThrow(/envelope/);
 		// The session-bound store's records were sealed with v1.

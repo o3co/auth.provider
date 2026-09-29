@@ -227,7 +227,7 @@ describe("mode = full-pki — boot invariants", () => {
 		await handle.dispose();
 	});
 
-	it("leaves the narrow mode's tls-layer refusal exactly as it was", async () => {
+	it("refuses tls-layer in the narrow pki mode", async () => {
 		await expect(boot({ mode: "pki", source: "tls-layer" })).rejects.toThrow(/tls-layer/);
 	});
 });

@@ -201,7 +201,7 @@ describe("the refresh grant on admission — no requirement registered", () => {
 		expect((await makeGrant({}).handler.handle(ctx(await refreshToken()))).result.status).toBe(200);
 	});
 
-	it("an outage is 503, logged once by admission — no longer as refresh_token_store_unavailable", async () => {
+	it("an outage is 503, logged once by admission as session_admission_unavailable", async () => {
 		const logger = createMockLogger();
 		const { handler, rotation } = makeGrant({
 			logger,

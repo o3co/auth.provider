@@ -36,7 +36,7 @@ them.
 | Phases 1–9 → v0.5.x | Module-system redesign: `defineModule` manifests, boot planner; Phase 9 = A2-γ caller migration, `LegacyModule` removal | CHANGELOG "Phase 1-9" (incl. the `LegacyModule` deletion); #100 (Phase 9) |
 | Phase 10 | Redis adapter relocation → `@o3co/auth-provider-redis` | CHANGELOG |
 | Wave 5d | Redis adapter switches + external-ioredis migration (OR-9/OR-4/IH-14; pairs with D-2 v2) | `application.schema.mts` redis keys |
-| Wave 5g | "ts-safety-batch" type-safety hardening (TS-6) | redis/*, foundation |
+| Wave 5g | "ts-safety-batch" type-safety hardening | redis/*, foundation |
 | Phase F → v0.5.2/0.5.3 (2026-05-09) | Security-audit remediation batches F1–F13: D-* closures, error-envelope unification, TOCTOU re-checks, limiter hardening, OIDC compliance | CHANGELOG "Phase F —" headings |
 | Phase G → v0.6.0 (2026-05-12) | Migration-flag removals M1–M6 + S2 `legacyTypAccept` default flip | CHANGELOG |
 | Wave 1 → v0.7.0 (2026-05-15) | Roadmap wave 1: RFC 7009 revoke + denylist, `client_credentials`, webauthn first slice, RFC 8707 stage 1 | CHANGELOG `[0.7.0]` |
@@ -149,7 +149,7 @@ IH-2 code record persists sid/nonce/redirect_uri/grantedScope/audience (was sile
 
 ### OR-* — operational readiness
 
-OR-1 standalone wires the Redis RT-family store (in-memory broke multi-replica refresh) · OR-2 RedisCodeRepository lifecycle on `ctx.lifecycle` · OR-4 `buildModules` switches the four user-session stores per config · OR-5 rate-limiter `failMode` outage policy · OR-8 Redis sid sorted-set insertion counter stays monotonic across restarts · OR-9 (Wave 5d) Redis code-repository adapter switch; external ioredis, consumer-owned lifecycle · OR-12 production guard refusing plaintext federation-token encryption · OR-13 advisory-lock release race → atomic Lua compare-and-delete (=SF-4/CR-1/D-9) — all [verified]
+OR-1 standalone wires the Redis RT-family store (in-memory broke multi-replica refresh) · OR-2 RedisCodeRepository lifecycle on `ctx.lifecycle` · OR-4 `buildModules` switches the four user-session stores per config · OR-5 rate-limiter `failMode` outage policy · OR-9 (Wave 5d) Redis code-repository adapter switch; external ioredis, consumer-owned lifecycle · OR-12 production guard refusing plaintext federation-token encryption · OR-13 advisory-lock release race → atomic Lua compare-and-delete (=SF-4/CR-1/D-9) — all [verified]
 
 ### SF-* — security findings
 
@@ -171,7 +171,7 @@ AS-1/AS-2 unified RFC 6749 §5.2 error envelope (+429 body migration) · AS-3 `r
 
 - **CR (concurrency/race)**: CR-1 lock-release race (=OR-13) · CR-2 binding identity persisted onto the code record · CR-3 Redis pipeline TTL truncation under concurrent writes (→ D-10) · CR-4 second-store re-check before `addFamilyId` — all [verified]
 - **CC (config correctness)**: CC-2 `unknownFamilyPolicy` key · CC-3 production misconfiguration hard-fails (warn-only in dev; residual closed by OR-12) · CC-4 compiled test artifacts must not ship (CI guard) · CC-5 readonly public DTOs — all [verified]
-- **TS (type safety, Wave 5g)**: TS-1 code-record payload persistence (=IH-2) · TS-3 corrupt Redis envelope validation replaces `JSON.parse as` · TS-4 `resolvePkceSupportedMethods` per-element narrowing · TS-6 refresh-family builder structural client guard — all [verified]
+- **TS (type safety, Wave 5g)**: TS-1 code-record payload persistence (=IH-2) · TS-4 `resolvePkceSupportedMethods` per-element narrowing — all [verified]
 - **SC (supply chain)**: SC-4 pnpm version pinned in both package.json · SC-5 dependency pin alignment · SC-6 dependency major bump for Express 5 · SC-7 `pnpm audit --prod` CI gate — all [verified]
 - **TD (test debt)**: TD-1 code-persistence tests · TD-2 unknown-family tests · TD-4 TTL/extended-field round-trips · TD-5/TD-10 residual OAuth-route + introspection-cascade tests · TD-7 SF-6 rejection tests — all [verified]
 

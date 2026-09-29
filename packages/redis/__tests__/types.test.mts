@@ -33,7 +33,7 @@ import type { makeIoredisClients } from "../src/ioredis.mjs";
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;
 
 describe("makeIoredisClients return shape", () => {
-	it("exposes the per-purpose client slots, the device-code store's included (#433)", () => {
+	it("exposes the challenge, replay, refresh-token, session, federation-token, rate-limiter and device-code client slots", () => {
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("challengeStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("deviceCodeStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("replaySeenSetClient");
@@ -94,7 +94,7 @@ describe("makeIoredisClients return shape", () => {
 		>().toMatchTypeOf<FederationTokenStoreClient>();
 	});
 
-	// D-9: FederationTokenStoreClient declares atomic compare-and-delete used
+	// FederationTokenStoreClient declares atomic compare-and-delete used
 	// by the federation-tokens advisory lock release path. Custom client
 	// implementations must add this method.
 	it("FederationTokenStoreClient declares compareAndDelete: (key, expected) => Promise<boolean>", () => {
@@ -107,7 +107,7 @@ describe("makeIoredisClients return shape", () => {
 		expectTypeOf<IoredisClientsReturn["rateLimiterClient"]>().toMatchTypeOf<RateLimiterClient>();
 	});
 
-	// #433: the device-code store's client is semantic (create / findPending /
+	// The device-code store's client is semantic (create / findPending /
 	// decide / poll / remove), not a raw `eval` — the Lua stays behind the
 	// interface so a custom client can satisfy it with any atomic primitive.
 	it("deviceCodeStoreClient satisfies DeviceCodeStoreClient", () => {
@@ -116,7 +116,7 @@ describe("makeIoredisClients return shape", () => {
 		>().toMatchTypeOf<DeviceCodeStoreClient>();
 	});
 
-	// #561: the consent stores' clients are semantic too — the union and the
+	// The consent stores' clients are semantic too — the union and the
 	// one-step consume live behind the interface, not in the caller.
 	it("consentStoreClient and pendingConsentStoreClient satisfy their interfaces", () => {
 		expectTypeOf<IoredisClientsReturn["consentStoreClient"]>().toMatchTypeOf<ConsentStoreClient>();
@@ -191,13 +191,13 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 		>();
 	});
 
-	it("deviceCodeStoreClient slot is optional and of DeviceCodeStoreClient type (#433)", () => {
+	it("deviceCodeStoreClient slot is optional and of DeviceCodeStoreClient type", () => {
 		expectTypeOf<ComponentMap["deviceCodeStoreClient"]>().toEqualTypeOf<
 			DeviceCodeStoreClient | undefined
 		>();
 	});
 
-	it("the consent client slots are optional and of their client types (#561)", () => {
+	it("the consent client slots are optional and of their client types", () => {
 		expectTypeOf<ComponentMap["consentStoreClient"]>().toEqualTypeOf<
 			ConsentStoreClient | undefined
 		>();
@@ -206,7 +206,7 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 		>();
 	});
 
-	it("the MFA store client slots are optional and of their client types (the MFA ADR's D7, D8)", () => {
+	it("the MFA store client slots are optional and of their client types", () => {
 		expectTypeOf<ComponentMap["mfaFactorStoreClient"]>().toEqualTypeOf<
 			MfaFactorStoreClient | undefined
 		>();
@@ -250,7 +250,7 @@ describe("Per-purpose multi-client interfaces", () => {
 /** `true` when `K` must be present on `T` — not merely declared. */
 type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, K> ? false : true;
 
-describe("the consent client's expiry, as a required key (#626)", () => {
+describe("the consent client's expiry, as a required key", () => {
 	// `undefined` here means until revoked — the value that widens what a
 	// consent grants — so neither side of the client may arrive at it by
 	// leaving the field out: not the store's write, not a client's read.

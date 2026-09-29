@@ -17,10 +17,10 @@
 // Construction-time validation for the sid-keyed SET helper. Round-trip
 // behaviour against a real Redis lives in `internalSidSet.test.mts`.
 //
-// Copilot review on PR #352: swept from the `pageSize` hole in
-// `createRedisSidSortedSet`. `scanCount` is an `SSCAN COUNT` hint rather than a
-// loop step, so it cannot hang — but Redis refuses a non-positive COUNT, and
-// discovering that on the logout path is no better. Same guard, same message.
+// `scanCount` is an `SSCAN COUNT` hint rather than a loop step, so it cannot
+// hang — but Redis refuses a non-positive COUNT, and discovering that on the
+// logout path is no better. Same guard, same message as `pageSize` in
+// `createRedisSidSortedSet`.
 
 import { describe, expect, it, vi } from "vitest";
 import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";

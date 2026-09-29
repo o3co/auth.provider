@@ -15,7 +15,7 @@
  */
 
 /**
- * Redis {@link SubjectRevocation} (#321).
+ * Redis {@link SubjectRevocation}.
  *
  * The watermark is monotonic, and on a shared store that has to hold under
  * concurrent writers — which is what makes a plain `SET key value PX ttl` the
@@ -56,8 +56,9 @@ runSubjectRevocationContract(
 	{ expiry: serverDeadlines(() => raw) },
 );
 
-// #593, D13: the bundled adapter claims the capability, so it owes its
-// contract — on a real Redis, where the expiry cases run on the server's clock
+// The bundled adapter claims the sessions-only capability
+// (ADR 2026-09-17-federation-grants-offline-delegation, D13), so it owes its
+// contract, on a real Redis, where the expiry cases run on the server's clock
 // rather than a fake timer's.
 runSessionsOnlyRevocationContract(
 	async () => {
@@ -70,7 +71,7 @@ runSessionsOnlyRevocationContract(
 	{ expiry: serverDeadlines(() => raw) },
 );
 
-describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
+describe("SubjectRevocation — Redis-specific behaviour", () => {
 	const store = (prefix: string) =>
 		createRedisSubjectRevocation({
 			client: makeIoredisClients(raw).subjectRevocationClient,
@@ -78,9 +79,8 @@ describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
 		});
 
 	it("expires the watermark on the server's clock", async () => {
-		// Dated from, and waited out on, that clock (a `PXAT` deadline), not a
-		// 60 ms expiry and a 150 ms host sleep: on a loaded run the first read
-		// landed after the expiry.
+		// Dated from, and waited out on, that clock (a `PXAT` deadline), so a
+		// loaded run cannot land the first read after the expiry.
 		const s = store("t321r:exp:");
 		const at = await aheadOfServer(() => raw)();
 		await s.revokeBefore("u1", new Date(1_000), at);
@@ -126,7 +126,7 @@ describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
 	});
 });
 
-describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () => {
+describe("SubjectRevocation — the two boundaries on one key", () => {
 	const store = (prefix: string) =>
 		createRedisSubjectRevocation({
 			client: makeIoredisClients(raw).subjectRevocationClient,
@@ -134,10 +134,9 @@ describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () =
 		});
 
 	it("writes a bare decimal while the boundaries are equal, so a rollback is safe", async () => {
-		// The whole compatibility argument in one assertion. A previous release
-		// reads this form and only this form, and `revokeBefore` — every caller
-		// written before #593, and the whole "revoke" path — only ever writes
-		// it. A deployment that never makes a sessions-only stamp can roll back.
+		// An older release reads this form and only this form, and
+		// `revokeBefore` (the whole "revoke" path) only ever writes it, so a
+		// deployment that never makes a sessions-only stamp can roll back.
 		const prefix = "t593e:1:";
 		const before = new Date();
 		await store(prefix).revokeBefore("u", before, new Date(Date.now() + 600_000));
@@ -196,7 +195,7 @@ describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () =
 			"v1:abc:1",
 			"v2:1:2",
 			"v1:1",
-			// Found by review: all digits, and `Number` reads it as Infinity.
+			// All digits, and `Number` reads it as Infinity.
 			// `new Date(Infinity)` is an Invalid Date, every comparison against
 			// it is false, and a boundary that compares false against
 			// everything reads as "nothing was revoked for this subject" —
@@ -242,8 +241,8 @@ describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () =
 	});
 
 	it("refuses a driver that cannot express a sessions-only stamp", async () => {
-		// A driver that kept the old single-boundary primitive would answer
-		// every sessions-only stamp by revoking the subject's grants.
+		// A driver with only the single-boundary primitive would answer every
+		// sessions-only stamp by revoking the subject's grants.
 		expect(() =>
 			createRedisSubjectRevocation({
 				client: { get: async () => null } as never,

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-09-29
+最終更新: 2026-09-30
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -671,9 +671,22 @@ probe は接続を開いた builder が登録するため、リストはこの�
 2. **新規接続は即座に停止**し、idle な keep-alive ソケットは解放される — これらは背後にリクエストの無いままサーバーを開いたままにするため、解放しなければ、閑散としたサーバーが deadline 全体を無駄に待つことになる。
 3. **in-flight リクエストには `drainTimeoutMs`**（デフォルト **10 秒**）が与えられ、その間に完了する。
 4. **deadline を過ぎると残りの接続は切断され、プロセスは非ゼロで終了する。** 常に `0` しか見ない orchestrator には、正常な drain と時間切れになった drain を区別できない。
-5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）で `shutdown_cleanup_failed`（または `shutdown_cleanup_timed_out`）としてログに出力され、終了コードにも反映される。各段階はそれぞれ 1 つのイベントである — `shutdown_draining`、`shutdown_drain_deadline_exceeded`、`shutdown_server_close_failed`、`shutdown_complete`。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーをまとめた AggregateError で reject し、その行はそれぞれをコードとともに名前で示し（`aggregateErrors`、先頭 5 つ）、それが持つものは何も出さない — その中には失敗したストアへの書き込みが、書き込もうとしていた内容ごと含まれうる。
+5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）で `shutdown_cleanup_failed`（または `shutdown_cleanup_timed_out`）としてログに出力され、終了コードにも反映される。各段階はそれぞれ 1 つのイベントである（下の表を参照）。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーをまとめた AggregateError で reject し、その行はそれぞれをコードとともに名前で示し（`aggregateErrors`、先頭 5 つ）、それが持つものは何も出さない — その中には失敗したストアへの書き込みが、書き込もうとしていた内容ごと含まれうる。
 
 6. **フェデレーショングラントが有効なら、`cleanup` には最長の refresh の尻尾に余裕を加えた時間が与えられる**（`src/shutdown.mts` の `cleanupAllowanceFor`）: `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒で、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — これは drain の 10 秒を継承するのではない。dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、cleanup の予算は drain のものと同じままである。
+
+各段階はそれぞれ 1 行をログに出す:
+
+| イベント | レベル | フィールド |
+|---|---|---|
+| `shutdown_draining` | info | `drainTimeoutMs` |
+| `shutdown_drain_deadline_exceeded` | error | `drainTimeoutMs` |
+| `shutdown_server_close_failed` | error | `err` |
+| `shutdown_cleanup_timed_out` | error | `cleanupTimeoutMs` |
+| `shutdown_cleanup_failed` | error | `err` |
+| `shutdown_complete` | info | `reason`、`drain`、`exitCode` |
+
+`err` は `loggableError` による射影である。`drain` は drain がどう終わったか — `drained`、`drain-timeout`、`close-failed` のいずれか（閉じられなかったリスナーは正常な drain とはみなされず、非ゼロで終了する）。`reason` は `exitCode` を決めたもの — drain の結果、またはその後の cleanup が時間切れになったか throw したときの `cleanup-timeout` / `cleanup-failed` — なので、`reason: "drained"` が非ゼロのコードと並ぶことはない。
 
 **`drainTimeoutMs` と `cleanupTimeoutMs` の合計が orchestrator の kill grace period を下回るようにすること。** Kubernetes の `terminationGracePeriodSeconds` はデフォルトで 30 秒、compose の `stop_grace_period` は 10 秒である。フェデレーショングラントが有効な場合の最悪値は drain（10 秒）+ cleanup（45 秒）= 55 秒なので、**grace は 60 秒以上に設定すること** — 同梱の compose ファイルはそうしてあり、Kubernetes のデプロイは自分で `terminationGracePeriodSeconds: 60` を設定しなければならない。さもないと、ローリング再起動のたびに、cleanup が完了させるためにある書き込みの途中でプロセスが SIGKILL される。目的は、他人の都合で `SIGKILL` が届く前に、自分の都合で閉じることである。
 

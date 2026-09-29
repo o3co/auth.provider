@@ -1678,7 +1678,7 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 ];
 
 describeOutages(
-	"a store outage behind an added module answers 503 and is logged once, at error (#685)",
+	"a store outage behind an added module answers 503 and is logged once, at error",
 	OUTAGES,
 	(outage) => composeFullSet({ outage }),
 );

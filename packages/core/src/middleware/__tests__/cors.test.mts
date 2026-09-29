@@ -411,10 +411,8 @@ describe("assembleApp mounts the CORS middleware from config", () => {
 	});
 
 	// The environment variable is the documented way to configure this, and it
-	// can only carry a list as a comma-separated string. `assembleApp` reads
-	// `components.config`, which has NOT necessarily been through
-	// `AppConfigSchema`, so a mount that tested for an array would silently
-	// mount nothing.
+	// can only carry a list as a comma-separated string, which boot's composed
+	// parse reads into a list before `assembleApp` mounts from it.
 	it("mounts from a comma-separated string, the shape an env var carries", async () => {
 		const { app, handle } = await bootWith(`${ALLOWED}, ${OTHER_ALLOWED}`);
 		for (const origin of [ALLOWED, OTHER_ALLOWED]) {

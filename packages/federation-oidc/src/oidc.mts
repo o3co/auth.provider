@@ -468,12 +468,9 @@ export async function createOidcProvider(
 			...(rotated !== undefined ? { refreshToken: rotated } : {}),
 			expiresIn: lifetime.seconds,
 			expiresAt: lifetime.seconds !== null ? new Date(obtainedAt + lifetime.seconds * 1000) : null,
-			// Presence, not usefulness — `optionalString` would drop an explicit
+			// Presence, not usefulness: `optionalString` would drop an explicit
 			// `scope: ""` and make it indistinguishable from a field that was never
-			// sent. The session route reads absence as "as requested" (RFC 6749
-			// §3.3) and would then record every requested scope as the consent for a
-			// response that granted none; the refresh route reads it as silence and
-			// would widen back to the grant.
+			// sent, so the caller decides what an empty answer means.
 			...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 			tokenType: tokens.token_type,
 		};
@@ -549,11 +546,10 @@ export async function createOidcProvider(
 				expiresIn: lifetime.seconds,
 				expiresAt:
 					lifetime.seconds !== null ? new Date(obtainedAt + lifetime.seconds * 1000) : null,
-				// Kept when empty, unlike the refresh's: on a refresh an absent and
-				// an empty scope both mean "what the grant already has", but here an
-				// empty one dropped would read as omitted — "as requested" — and the
-				// callback would grant every consented scope on an answer that named
-				// none. Present and empty is the callback's to refuse.
+				// Kept when empty, as the refresh keeps it: dropped, an empty one
+				// would read as omitted — "as requested" — and the callback would
+				// grant every consented scope on an answer that named none. Present
+				// and empty is the callback's to refuse.
 				...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 				tokenType: tokens.token_type,
 			},

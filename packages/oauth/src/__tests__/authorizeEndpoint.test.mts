@@ -1123,7 +1123,7 @@ describe("/authorize — prompt=none", () => {
 		expect(params.get("error_description")).toContain("single string");
 	});
 
-	it("treats an absent prompt exactly as before", async () => {
+	it("issues a code when prompt is absent", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, baseQuery);
 		expect(new URL(res.headers.location as string).searchParams.get("code")).not.toBeNull();
@@ -2172,7 +2172,7 @@ describe("/authorize — the claims parameter", () => {
 		);
 	});
 
-	it("ignores every other use of claims, as before", async () => {
+	it("ignores other uses of claims and issues the code", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, {
 			...baseQuery,

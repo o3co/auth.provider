@@ -83,11 +83,10 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 	});
 
 	it("rejects array-shaped JSON payloads via the !Array.isArray envelope guard", async () => {
-		// Regression: previously isRecord accepted arrays (typeof [] === "object"
-		// && [] !== null). Without an explicit array guard, a payload like
-		// `["client-1", ...]` would only fail by accident when subsequent field
-		// accesses returned undefined — fail-closed at the shape-check layer
-		// instead, matching the userSessionStore envelope guard pattern.
+		// `typeof [] === "object"`, so without an explicit array guard a payload
+		// like `["client-1", ...]` would fail only by accident on later field
+		// reads. It fails closed at the shape check, as the userSessionStore
+		// envelope guard does.
 		const logger = createMockLogger();
 		const registry = createRedisSessionRPRegistry({
 			client: createMockClient([JSON.stringify(["client-array", 12345])]),
@@ -112,7 +111,7 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 		["frontchannelLogoutSessionRequired as a number", { frontchannelLogoutSessionRequired: 0 }],
 		["backchannelLogoutUri as a number", { backchannelLogoutUri: 42 }],
 		["frontchannelLogoutUri as null", { frontchannelLogoutUri: null }],
-	])("treats a logout field of the wrong type as corrupt — %s (#626)", async (_label, bad) => {
+	])("treats a logout field of the wrong type as corrupt — %s", async (_label, bad) => {
 		// Every field is checked, not only `clientId` and `registeredAtMs`. A
 		// `"false"` read back under the boolean type would be truthy, and the
 		// logout cascade would send `sid` to an RP that asked not to receive it.
@@ -171,9 +170,8 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 			{ sid: "sid-corrupt", reason: "shape_invalid" },
 			"session_rp_registry_corrupt_envelope",
 		);
-		// The raw payload snippet must NOT appear in any warn invocation —
-		// previously the implementation logged `{ json: json.slice(0, 100) }`
-		// which risked leaking sensitive data.
+		// No snippet of the raw payload appears in any warn call: it may hold
+		// sensitive data.
 		const allWarnCalls = (logger.warn as ReturnType<typeof vi.fn>).mock.calls;
 		for (const [payload] of allWarnCalls) {
 			expect(payload).not.toHaveProperty("json");

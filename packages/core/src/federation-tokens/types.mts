@@ -99,7 +99,7 @@ export interface FederationTokenStore {
 	 * `encryption.mode = "allow-plaintext"` (with a startup warning), and the
 	 * built-in in-memory adapter is plaintext by design because the process
 	 * boundary already contains it. Both opt-outs are intended for
-	 * development / testing use only. See spec Section 5.
+	 * development / testing use only.
 	 */
 	attach(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
 

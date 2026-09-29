@@ -19,7 +19,7 @@ import {
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
-	// #291: the per-session key index lives in a SET, kept separate from the
+	// The per-session key index lives in a SET, kept separate from the
 	// string-valued envelopes so assertions on `data` still see only envelopes.
 	const sets = new Map<string, Set<string>>();
 	const ttls = new Map<string, number>();
@@ -132,7 +132,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
 
-	it("round-trips grantedScope, and a record written without one (#647)", async () => {
+	it("round-trips grantedScope, and a record written without one", async () => {
 		// The ceiling a refresh is bounded by has to survive the store, and a
 		// record written before the field existed has to keep opening.
 		const store = createRedisFederationTokenStore({
@@ -172,10 +172,9 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 	});
 
 	it("names itself when it refuses plaintext: the guard is shared, the message is not", () => {
-		// The guard moved to `internal/encryption-mode.mts` and the federation
-		// grant store (#593) uses it too, with its own label. An operator reading
-		// a boot failure has to be told which store refused, and nothing here
-		// said so before (the reviewer).
+		// The guard lives in `internal/encryption-mode.mts` and the federation
+		// grant store uses it too, with its own label. An operator reading
+		// a boot failure has to be told which store refused.
 		const previous = process.env.NODE_ENV;
 		process.env.NODE_ENV = "production";
 		try {
@@ -265,7 +264,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
 
-	it("get() self-heals corrupt JSON by deleting the key (Copilot round 3 #5)", async () => {
+	it("get() self-heals corrupt JSON by deleting the key", async () => {
 		const store = createRedisFederationTokenStore({
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -276,11 +275,11 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 
-	it("get() self-heals an empty-string value like corrupt JSON — key deleted, index member dropped (#473)", async () => {
-		// `""` is a value Redis can hold and `JSON.parse` cannot read. It used
-		// to be answered as `null` before `open()` ran, so the key stayed and
-		// so did its index member: a record that is never served and never
-		// reclaimed until the TTL, and a `removeBySid` that keeps naming it.
+	it("get() self-heals an empty-string value like corrupt JSON — key deleted, index member dropped", async () => {
+		// `""` is a value Redis can hold and `JSON.parse` cannot read. Answered
+		// as `null` before `open()` ran, it would keep the key and its index
+		// member: a record that is never served and never reclaimed until the
+		// TTL, and a `removeBySid` that keeps naming it.
 		const store = createRedisFederationTokenStore({
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -420,11 +419,10 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 	});
 
 	it("expiresAt=null round-trips as null (GitHub OAuth Apps classic)", async () => {
-		// Regression: FederationTokens.expiresAt is `Date | null` (required).
-		// `null` MUST persist as `null` in the envelope and deserialize back to `null`,
-		// so F-6 refresh logic can reliably detect "no finite expiry" without falling
-		// through to a Date-instanceof check that would silently convert to
-		// `new Date(null)` === epoch.
+		// FederationTokens.expiresAt is `Date | null` (required). `null` MUST
+		// persist as `null` in the envelope and read back as `null`, so refresh
+		// logic can detect "no finite expiry" rather than get `new Date(null)`,
+		// the epoch.
 		const store = createRedisFederationTokenStore({
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
@@ -436,10 +434,10 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 });
 
 // ---------------------------------------------------------------------------
-// OR-12 — federation-tokens production guard for `allow-plaintext` mode
+// The federation-tokens production guard for `allow-plaintext` mode
 // ---------------------------------------------------------------------------
 
-describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard", () => {
+describe("redisFederationTokenStoreBuilder env-based encryption guard", () => {
 	let origEnv: string | undefined;
 	let origInsecure: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -537,11 +535,10 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
-	// I-1 (multi-agent-review M2): the lower-level public factory
-	// `createRedisFederationTokenStore` MUST run the same OR-12 production
-	// guard as the builder. Pre-fix the guard only ran in the builder, so a
-	// consumer calling the factory directly with `mode: "allow-plaintext"` in
-	// production shipped unencrypted refresh tokens.
+	// The lower-level public factory `createRedisFederationTokenStore` MUST
+	// run the same production guard as the builder: otherwise a consumer
+	// calling the factory directly with `mode: "allow-plaintext"` in
+	// production ships unencrypted refresh tokens.
 	it("createRedisFederationTokenStore (lower-level export) ALSO throws in production+allow-plaintext", () => {
 		process.env.NODE_ENV = "production";
 		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
@@ -556,14 +553,16 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 });
 
 // ---------------------------------------------------------------------------
-// #473 — the guard keyed off NODE_ENV alone. The standalone selects its config
-// by `CONFIG_ENV || NODE_ENV`, so `CONFIG_ENV=production NODE_ENV=test` ran
-// production.conf with the development guard; and `deployment.mode = "multi"`
-// — a deployment that has said it runs more than one replica — could store
-// upstream refresh tokens in clear because NODE_ENV happened to be unset.
+// The guard reads the selected environment and `deployment.mode`, not
+// NODE_ENV alone. The standalone selects its config by
+// `CONFIG_ENV || NODE_ENV`, so `CONFIG_ENV=production NODE_ENV=test` runs
+// production.conf and must get the production guard; and under
+// `deployment.mode = "multi"`, a deployment that has said it runs more than one
+// replica, plaintext is refused regardless of environment unless
+// FEDERATION_TOKENS_ALLOW_INSECURE=1 overrides it.
 // ---------------------------------------------------------------------------
 
-describe("#473 — the plaintext guard reads the selected environment and deployment.mode", () => {
+describe("the plaintext guard reads the selected environment and deployment.mode", () => {
 	let origEnv: string | undefined;
 	let origInsecure: string | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -711,10 +710,10 @@ describe("#473 — the plaintext guard reads the selected environment and deploy
 });
 
 // ---------------------------------------------------------------------------
-// I-2 (multi-agent-review convergent — Claude + Codex P2): builder structural
-// validator must reject clients missing `compareAndDelete`. Pre-fix a custom
-// client missing this method passed the builder shape check then failed at
-// first lock release with an obscure runtime TypeError.
+// The builder's structural validator must reject clients missing
+// `compareAndDelete`. Otherwise a custom client missing this method passes the
+// builder shape check, then fails at the first lock release with an obscure
+// runtime TypeError.
 // ---------------------------------------------------------------------------
 
 describe("redisFederationTokenStoreBuilder structural validator", () => {
@@ -740,15 +739,11 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #293 — the whole envelope is encrypted, not just the token fields.
-//
-// Before this, `accessToken` / `refreshToken` / `idToken` were AES-256-GCM
-// ciphertext and everything around them — `tokenType`, `scope`, `expiresAtMs`
-// and the since-removed `rawParams` — sat in Redis as plaintext JSON beside
-// them. These pin the record shape that
-// replaces it (`{ v: 2, c: <ciphertext of the JSON envelope> }`), the
-// drop-on-read of the legacy per-field shape, and the AAD binding of a
-// ciphertext to the key it was written under.
+// The whole envelope is encrypted, not just the token fields: `tokenType`,
+// `scope` and `expiresAtMs` do not sit in Redis as plaintext beside the
+// tokens. These pin the record shape (`{ v: 2, c: <ciphertext of the JSON
+// envelope> }`), the drop-on-read of the legacy per-field shape, and the AAD
+// binding of a ciphertext to the key it was written under.
 // ---------------------------------------------------------------------------
 
 // Every field FederationTokens can carry.
@@ -759,17 +754,14 @@ const fullTokens: FederationTokens = {
 	expiresAt: new Date(1_900_000_000_000),
 	tokenType: "Bearer",
 	scope: "openid email",
-	// #647 — and the round-trip pins it, which it did not while this fixture
-	// claimed to be every field and left it out.
 	grantedScope: "openid email profile",
 };
 
-// Values that used to reach Redis in clear (or, for the tokens, that must
-// still not). Each is long enough that a chance match inside base64url
-// ciphertext is not a realistic flake.
+// Values that must not reach Redis in clear. Each is long enough that a
+// chance match inside base64url ciphertext is not a realistic flake.
 const plaintextMarkers = ["at-secret", "rt-secret", "it-secret", "openid email"];
 
-describe("#293 — mode=required stores one ciphertext over the whole envelope", () => {
+describe("mode=required stores one ciphertext over the whole envelope", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
 	beforeEach(() => {
 		redis = createFakeRedis();
@@ -819,8 +811,8 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 
 	it("drops a legacy per-field envelope on read: key gone, index member gone, null returned", async () => {
 		const store = requiredStore();
-		// Exactly what v0.11 and earlier wrote: token fields encrypted under the
-		// SAME key, the envelope around them in clear. Same key on purpose — it
+		// The legacy per-field shape: token fields encrypted under the SAME key,
+		// the envelope around them in clear. Same key on purpose — it
 		// proves the record is dropped for its shape, not because it happens to
 		// be undecryptable.
 		redis.data.set(
@@ -888,7 +880,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 	});
 });
 
-describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (development only)", () => {
+describe("mode=allow-plaintext keeps the envelope as plain JSON (development only)", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
 	beforeEach(() => {
 		redis = createFakeRedis();
@@ -937,18 +929,16 @@ describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (develo
 });
 
 // ---------------------------------------------------------------------------
-// #293 (PR #450 review) — the inner envelope is validated, not just the wrapper.
-//
-// `open()` checked only `{ v: 2, c | p }`. A v2 record whose inner envelope
-// was malformed — an array, no `accessToken`, `expiresAtMs: "soon"` — got past
-// it, and `fromEnvelope()` then returned `{ accessToken: undefined,
-// expiresAt: Invalid Date }` instead of throwing, so the self-heal in `get()`
-// never ran and the corrupt record stayed in Redis, returned on every read.
-// Every malformed shape below must take the same path as corrupt JSON: key
-// gone, index member gone, `null` returned — in both modes.
+// The inner envelope is validated, not just the wrapper. A check of
+// `{ v: 2, c | p }` alone would pass a malformed inner envelope (an array, no
+// `accessToken`, `expiresAtMs: "soon"`), `fromEnvelope()` would return
+// `{ accessToken: undefined, expiresAt: Invalid Date }` instead of throwing,
+// and the self-heal in `get()` would never run. Every malformed shape below
+// takes the same path as corrupt JSON: key gone, index member gone, `null`
+// returned, in both modes.
 // ---------------------------------------------------------------------------
 
-describe("#293 — a v2 record with a malformed inner envelope self-heals like corrupt JSON", () => {
+describe("a v2 record with a malformed inner envelope self-heals like corrupt JSON", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
 	beforeEach(() => {
 		redis = createFakeRedis();
@@ -1008,7 +998,7 @@ describe("#293 — a v2 record with a malformed inner envelope self-heals like c
 			it("still reads the minimal valid envelope — optional fields may be absent", async () => {
 				const store = storeFor(mode);
 				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":null}');
-				// Absent from the envelope, but named on the record it reads to (#626).
+				// Absent from the envelope, but named on the record it reads to.
 				expect(await store.get("sid-1", "google")).toStrictEqual({
 					accessToken: "at",
 					expiresAt: null,
@@ -1026,12 +1016,11 @@ describe("#293 — a v2 record with a malformed inner envelope self-heals like c
 				["an array", "[]"],
 				["null", "null"],
 			])(
-				"still reads an envelope that carries the removed rawParams (%s), and drops it (#645 follow-up)",
+				"still reads an envelope that carries rawParams, which is not a field (%s), and drops it",
 				async (_label, rawParams) => {
-					// `rawParams` is no longer a field. An envelope written while it was
-					// — by anything that filled it — must not become unreadable, which
-					// would lose the connection's tokens; the field is ignored, and the
-					// next write does not carry it.
+					// `rawParams` is not a field. An envelope that carries it must not
+					// become unreadable, which would lose the connection's tokens; the
+					// field is ignored, and the next write does not carry it.
 					const store = storeFor(mode);
 					writeV2(
 						mode,

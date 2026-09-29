@@ -157,7 +157,7 @@ function makeMtlsMechanism(thumbprint: string): TokenBindingMechanism {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("DPoP cnf-claim propagation — client_credentials grant (§9.1)", () => {
+describe("DPoP cnf-claim propagation — client_credentials grant", () => {
 	describe("AT cnf propagation", () => {
 		it("issues unbound AT when no DPoP mechanism is mounted", async () => {
 			// No tokenBindingMw → ctx.tokenBinding is undefined → plain Bearer token

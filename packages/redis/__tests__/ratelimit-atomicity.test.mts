@@ -4,14 +4,10 @@
  */
 
 /**
- * Issue #269 — the limiter ran `INCR` then a separate `EXPIRE`, and only when
- * the count came back as 1. A process death or an `EXPIRE` error in between
- * left the key with no TTL, and because the *check* still succeeded the
- * `failMode` policy never engaged: that key's client was 429'd forever.
- *
- * These tests describe the contract that removes the gap — one atomic
- * operation that increments, establishes or repairs the TTL, and returns the
- * count — and the repair path that unsticks a key already in that state.
+ * The limiter's one atomic operation increments, establishes or repairs the
+ * TTL, and returns the count. A counter left with no TTL would keep its
+ * client at 429 for ever, and `failMode` would never engage, since the check
+ * still succeeds. Also pinned: the repair of a key already in that state.
  */
 
 import { describe, expect, it } from "vitest";
@@ -40,7 +36,7 @@ const fakeRedis = () => {
 	};
 };
 
-describe("createRedisRateLimiter — atomicity (#269)", () => {
+describe("createRedisRateLimiter — atomicity", () => {
 	it("counts and limits across a window", async () => {
 		const redis = fakeRedis();
 		const limiter = createRedisRateLimiter({
@@ -94,9 +90,9 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 	const UNUSABLE = [0, Number.NaN, 1.5, -1];
 
 	it("refuses a spec whose window or limit is not a positive whole number when it is built — never its default in its place", () => {
-		// It used to drop the spec and serve its default (60 per 60 s): a
-		// budget of 5 silently became 60, where the in-process limiter kept
-		// what was written. Refused, the composition fails instead.
+		// Serving the default (60 per 60 s) in its place would turn a budget
+		// of 5 into 60, where the in-process limiter keeps what was written.
+		// Refused, the composition fails instead.
 		const redis = fakeRedis();
 		for (const bad of UNUSABLE) {
 			for (const spec of [
@@ -140,8 +136,8 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 
 	it("holds the specs it was built with: changing the caller's objects afterwards changes nothing", async () => {
 		// What construction checked is what every check applies, as the
-		// in-process limiter holds it. `defaultLimit` was kept by reference, so
-		// a later change reached the budget unchecked — a NaN window included.
+		// in-process limiter holds it: a later change to the caller's objects,
+		// a NaN window included, never reaches the budget unchecked.
 		const redis = fakeRedis();
 		const limits: Record<string, { limit: number; windowSeconds: number }> = {
 			"login.ip": { limit: 1, windowSeconds: 60 },
@@ -172,12 +168,11 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 });
 
 /**
- * #458 — behind Redis the guard's 429 carried no `Retry-After`, because this
- * adapter reported no `resetAt` while the memory adapter did. The Lua script
- * now hands back the counter key's PTTL with the count, and the limiter turns
- * it into the moment the window ends.
+ * The limiter reports `resetAt`, which the guard's 429 needs for
+ * `Retry-After`: the Lua script hands back the counter key's PTTL with the
+ * count, and the limiter turns it into the moment the window ends.
  */
-describe("createRedisRateLimiter — resetAt (#458)", () => {
+describe("createRedisRateLimiter — resetAt", () => {
 	/**
 	 * A client on the two-method contract, whose window started
 	 * `windowAgeMs` ago — so the PTTL it reports is the window minus that.
@@ -222,8 +217,8 @@ describe("createRedisRateLimiter — resetAt (#458)", () => {
 	});
 
 	it("reports no resetAt for a client on the one-method contract", async () => {
-		// A custom client written against the original `incrementWithTtl`-only
-		// contract keeps working; it just cannot say when the window ends.
+		// A custom client with `incrementWithTtl` alone keeps working; it just
+		// cannot say when the window ends.
 		const limiter = createRedisRateLimiter({ client: fakeRedis(), limits });
 		await limiter.check(key, { ip: "1.2.3.4" });
 		const denied = await limiter.check(key, { ip: "1.2.3.4" });

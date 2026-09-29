@@ -20,8 +20,9 @@
  * `admitSession` after the client and the parameters are validated; freshness
  * (`max_age`, `prompt=login`) decided on the session the verdict carries
  * before the verdict is acted on; each outcome mapped to the protocol's
- * answer. Tests prefixed (1)–(7) pin the ADR's changes of those numbers. The
- * step-up trip is driven with a fixture requirement through `resolverForTests`.
+ * answer. Every change D8 makes to `/authorize` has a session-read test named
+ * for it. The step-up trip is driven with a fixture requirement through
+ * `resolverForTests`.
  */
 
 import crypto from "node:crypto";
@@ -299,7 +300,7 @@ const recordingSink = () => {
 };
 
 describe("/authorize on admission — the session read", () => {
-	it("(1) a cookie with isAuthenticated but no sid, while a store is wired, is not_live: the login redirect, no code", async () => {
+	it("a cookie with isAuthenticated but no sid, while a store is wired, is not_live: the login redirect, no code", async () => {
 		const store = storeWith(record());
 		const harness = await makeApp({
 			userSessionStore: store,
@@ -312,7 +313,7 @@ describe("/authorize on admission — the session read", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("(2) a store outage is temporarily_unavailable on the validated redirect URI, not the login page, logged as admission's line", async () => {
+	it("a store outage is temporarily_unavailable on the validated redirect URI, not the login page, logged as admission's line", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeAnswering(async () => {
 				throw new Error("redis down");
@@ -335,7 +336,7 @@ describe("/authorize on admission — the session read", () => {
 		);
 	});
 
-	it("(3) a cookie without user.id is not_live: the login redirect, with no store read", async () => {
+	it("a cookie without user.id is not_live: the login redirect, with no store read", async () => {
 		const store = storeWith(record());
 		const harness = await makeApp({
 			userSessionStore: store,
@@ -350,7 +351,7 @@ describe("/authorize on admission — the session read", () => {
 		);
 	});
 
-	it("(3) a record whose sub differs from the cookie's user.id is not_live: the login redirect, audited", async () => {
+	it("a record whose sub differs from the cookie's user.id is not_live: the login redirect, audited", async () => {
 		const { sink, events } = recordingSink();
 		const harness = await makeApp({
 			userSessionStore: storeWith(record({ sub: "someone-else" })),
@@ -367,7 +368,7 @@ describe("/authorize on admission — the session read", () => {
 		});
 	});
 
-	it("(4) the subject-revocation boundary applies when subjectRevocation is wired: a session established before it is refused", async () => {
+	it("the subject-revocation boundary applies when subjectRevocation is wired: a session established before it is refused", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
 		const harness = await makeApp({
@@ -378,7 +379,7 @@ describe("/authorize on admission — the session read", () => {
 		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 
-	it("(4) a session established after the boundary is admitted", async () => {
+	it("a session established after the boundary is admitted", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, minutesAgo(10), new Date(Date.now() + 3_600_000));
 		const harness = await makeApp({
@@ -388,7 +389,7 @@ describe("/authorize on admission — the session read", () => {
 		expect(codeOf(await authorize(harness.app, baseQuery))).toBe("code-x");
 	});
 
-	it("(4) a boundary that cannot be read is temporarily_unavailable on the redirect URI, named for the revocation store, logged as admission's line", async () => {
+	it("a boundary that cannot be read is temporarily_unavailable on the redirect URI, named for the revocation store, logged as admission's line", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record()),
 			subjectRevocation: {
@@ -416,7 +417,7 @@ describe("/authorize on admission — the session read", () => {
 		);
 	});
 
-	it("(5) a record past its expiresAt is not_live: the login redirect", async () => {
+	it("a record past its expiresAt is not_live: the login redirect", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record({ expiresAt: minutesAgo(1) })),
 		});
@@ -424,7 +425,7 @@ describe("/authorize on admission — the session read", () => {
 		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 
-	it("(6) the cookie session is regenerated before the login redirect, so the flag does not survive the refusal", async () => {
+	it("the cookie session is regenerated before the login redirect, so the flag does not survive the refusal", async () => {
 		const harness = await makeApp({ userSessionStore: storeWith(null) });
 		loginRedirectTo(await authorize(harness.app, baseQuery));
 		expect(harness.regenerated).toBe(1);
@@ -432,7 +433,7 @@ describe("/authorize on admission — the session read", () => {
 		expect(harness.session).not.toHaveProperty("sid");
 	});
 
-	it("(6) a regeneration that fails is temporarily_unavailable on the redirect URI, logged as a cookie-session outage", async () => {
+	it("a regeneration that fails is temporarily_unavailable on the redirect URI, logged as a cookie-session outage", async () => {
 		const harness = await makeApp({ userSessionStore: storeWith(null), regenerateFails: true });
 		const params = redirectParams(await authorize(harness.app, baseQuery));
 		expect(params.get("error")).toBe("temporarily_unavailable");
@@ -447,7 +448,7 @@ describe("/authorize on admission — the session read", () => {
 		);
 	});
 
-	it("(6) a cookie session that cannot regenerate at all — not express-session's — fails as a regeneration does, and is abandoned", async () => {
+	it("a cookie session that cannot regenerate at all — not express-session's — fails as a regeneration does, and is abandoned", async () => {
 		const harness = await makeApp({ userSessionStore: storeWith(null), cannotRegenerate: true });
 		const params = redirectParams(await authorize(harness.app, baseQuery));
 		// Never the login page: nothing here could drop the refused session's
@@ -466,7 +467,7 @@ describe("/authorize on admission — the session read", () => {
 		expect(harness.sessionAfterResponse()).toBeUndefined();
 	});
 
-	it("(7) a dead session sent with an invalid client is the client's 400 after the lookup, not the login redirect", async () => {
+	it("a dead session sent with an invalid client is the client's 400 after the lookup, not the login redirect", async () => {
 		const store = storeWith(null);
 		const harness = await makeApp({ userSessionStore: store, clientNotFound: true });
 		const res = await authorize(harness.app, baseQuery);
@@ -535,7 +536,7 @@ describe("/authorize on admission — a requirement's verdicts", () => {
 		expect(harness.createCode).not.toHaveBeenCalled();
 	});
 
-	it("unmet acr: unmet_authentication_requirements, as today", async () => {
+	it("unmet acr: unmet_authentication_requirements naming it, on the redirect URI", async () => {
 		const harness = await makeApp({
 			userSessionStore: storeWith(record()),
 			oauth: { authorize: { acrValues: { "urn:example:mfa": ["pwd", "mfa"] } } },

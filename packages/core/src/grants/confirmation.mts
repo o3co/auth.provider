@@ -14,7 +14,7 @@
 
 /**
  * RFC 7800 confirmation claim, narrowed to the binding methods this
- * library ships. Adding a future variant (e.g. RFC 9421 `jwk`) is a core
+ * library ships. Adding a future variant (e.g. RFC 7800 §3.2 `jwk`) is a core
  * semver-minor extension of this union — see ADR
  * 2026-05-20-token-binding-first-class-abstraction.
  */

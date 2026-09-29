@@ -5,10 +5,10 @@
 
 /**
  * The Redis rate limiter against the `RateLimiter` port's contract suite,
- * published on core's testing entry (#728): over a stand-in for the atomic
+ * published on core's testing entry: over a stand-in for the atomic
  * `incrementWithTtl` script, one that answers and one whose connection is
- * down. Declares no `failMode` of its own yet — the guard still takes the
- * policy from `rateLimit.failMode`.
+ * down. Declares no `failMode` of its own: the guard takes the policy from
+ * `rateLimit.failMode`.
  */
 
 import { rateLimiterContract } from "@o3co/auth-provider-core/testing";

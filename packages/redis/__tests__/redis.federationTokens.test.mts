@@ -14,12 +14,10 @@
  * limitations under the License.
  */
 
-// #291 — the redis FederationTokenStore against a real Redis, end to end.
-//
-// The unit tests pin the store's logic against a fake; this file pins that the
-// chain actually works over the wire: the index write, the SSCAN-paged read,
-// the batched UNLINK, and the migration fallback that reaches records written
-// before the index existed.
+// The Redis FederationTokenStore against a real Redis. The unit tests pin its
+// logic against a fake; this file pins the chain over the wire: the index
+// write, the SSCAN-paged read, the batched UNLINK, and the migration fallback
+// that reaches records written before the index existed.
 
 import type { FederationTokens } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
@@ -120,7 +118,7 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 
 	it("scanFallback reaches envelopes written before the index existed", async () => {
 		const { keyPrefix, store } = makeStore(true);
-		// Exactly what the previous release wrote: an envelope, no index member.
+		// An envelope with no index member, as written before the index existed.
 		await raw.set(
 			`${keyPrefix}legacy:google`,
 			JSON.stringify({ accessToken: "at", expiresAtMs: null }),
@@ -148,12 +146,12 @@ describe("redis FederationTokenStore.removeBySid over a real Redis", () => {
 	});
 });
 
-// #293 — the whole envelope is one AES-256-GCM ciphertext bound to its key.
+// The whole envelope is one AES-256-GCM ciphertext bound to its key.
 // The unit tests pin this against a fake; this block pins that the bytes
 // which actually land in Redis carry no plaintext, that a legacy per-field
 // record is dropped on first read, and that a ciphertext moved to another
 // key is refused — all over the wire.
-describe("#293 — mode=required over a real Redis", () => {
+describe("mode=required over a real Redis", () => {
 	const encryptionKey = Buffer.alloc(32, 7);
 	const fullTokens: FederationTokens = {
 		accessToken: "at-secret",
@@ -162,8 +160,7 @@ describe("#293 — mode=required over a real Redis", () => {
 		expiresAt: new Date(1_900_000_000_000),
 		tokenType: "Bearer",
 		scope: "openid email",
-		// #647 — and the round-trip pins it, which it did not while this fixture
-		// claimed to be every field and left it out.
+		// Included, so the round-trip pins this field too.
 		grantedScope: "openid email profile",
 	};
 	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
@@ -191,7 +188,7 @@ describe("#293 — mode=required over a real Redis", () => {
 
 	it("drops a legacy per-field record on read — key and index member gone, null returned", async () => {
 		const { keyPrefix, store } = makeEncrypted();
-		// What v0.11 and earlier wrote, under the same key this store holds.
+		// A legacy per-field record, under the same key this store holds.
 		await raw.set(
 			`${keyPrefix}sid-1:google`,
 			JSON.stringify({

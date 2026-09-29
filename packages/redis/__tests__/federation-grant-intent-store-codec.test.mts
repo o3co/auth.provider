@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
-// How acquisition's records are written down (#593, D16, slice 6). Found by the
-// mutation pass: the contract suite writes every record from one fixture
-// object, so nothing in it could notice an encoding that depended on the order
-// a caller built that object in, or a binding compared without its lengths.
+// How acquisition's records are written down (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16). The contract suite
+// writes every record from one fixture object, so nothing in it could notice
+// an encoding that depended on the order a caller built that object in, or a
+// binding compared without its lengths; this file pins both.
 
 import type { FederationGrantIntent } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
@@ -62,26 +63,25 @@ describe("the intent codec", () => {
 		);
 	});
 
-	it("writes an intent with neither resource nor upstreamSubject to the text it always has (#626)", () => {
+	it("writes an intent with neither resource nor upstreamSubject to the text it always has", () => {
 		// Pinned byte for byte: the admission script answers a retry `unchanged`
 		// only when the stored text is equal, so a change here would turn the
 		// retry of an intent written by the previous release into a collision.
-		// Both fields were `null` in this text before #626 made them required
-		// keys, and still are.
+		// Both absent fields are written as `null`.
 		expect(encodeFederationGrantIntent(intent({ access_type: "offline" }))).toMatchInlineSnapshot(
 			`"{"handle":"h-1","kind":"initial","grantId":"g-1","clientId":"agent","subject":"u-1","connection":"okta-calendar","federation":"okta","identityRevision":"identity-1","authorizationRevision":"authorization-1","callbackUri":"https://provider.test/cb/okta-calendar","scopes":["openid","offline_access"],"resource":null,"authorizationParams":{"access_type":"offline"},"redirectUri":"https://client.test/connected","clientState":"state-1","upstreamSubject":null,"lifetimeMs":86400000,"createdAt":1000,"expiresAt":601000,"correlationId":"corr-1"}"`,
 		);
 	});
 
-	it("takes an empty parameter value, as the connection resolver does (Codex on slice 6)", () => {
+	it("takes an empty parameter value, as the connection resolver does", () => {
 		// `login_hint: ""` is a configuration the resolver accepts and the memory
-		// store keeps; refusing it here made every lodging on that connection a
-		// storage failure under Redis alone.
+		// store keeps; refusing it here would make every lodging on that
+		// connection a storage failure under Redis alone.
 		const written = intent({ login_hint: "" });
 		expect(decodeFederationGrantIntent(encodeFederationGrantIntent(written))).toEqual(written);
 	});
 
-	it("keeps every parameter it is handed as its own key, as the memory store does (Copilot)", () => {
+	it("keeps every parameter it is handed as its own key, __proto__ included", () => {
 		// Assigning a decoded `__proto__` into `{}` invokes the prototype setter
 		// and drops it; the memory store's spread keeps it. The resolver refuses
 		// the name at boot, and the codec does not rely on that.

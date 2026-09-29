@@ -29,7 +29,7 @@ beforeAll(async () => {
 	raw = new Redis(at);
 	// The shipped wrapper, not a hand-rolled one: its `exec()` is where the
 	// MULTI/EXEC per-command error check lives, and a local copy would let the
-	// two drift apart exactly where that matters (Copilot review on PR #352).
+	// two drift apart exactly where that matters.
 	client = makeIoredisClients(raw).sessionRPRegistryClient;
 });
 
@@ -71,8 +71,7 @@ describe("createRedisSidHash", () => {
 
 	it("PEXPIREAT applied: key disappears after expiresAt", async () => {
 		// Dated from, and waited out on, the server's clock — the one a
-		// PEXPIREAT deadline is judged by — not a 200 ms expiry and a 250 ms
-		// host sleep, which a loaded run or a lagging server clock defeats.
+		// PEXPIREAT deadline is judged by — not the host's.
 		const h = createRedisSidHash({ client, keyPrefix: prefix("ttl") });
 		const soon = await aheadOfServer(() => raw)();
 		await h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), soon);
@@ -81,10 +80,10 @@ describe("createRedisSidHash", () => {
 		expect(await h.listValues("sid-1")).toEqual([]);
 	});
 
-	// D-10 / CR-3: a stale-`expiresAt` race with a shorter TTL must NOT truncate
-	// the key's existing TTL. The `pExpireGT` (NX + GT pair) prevents the
-	// write from clobbering a longer existing TTL with a shorter incoming one.
-	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write (CR-3)", async () => {
+	// A stale-`expiresAt` race with a shorter TTL must NOT truncate the key's
+	// existing TTL. The `pExpireGT` (NX + GT pair) prevents the write from
+	// clobbering a longer existing TTL with a shorter incoming one.
+	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("ttl-trunc") });
 		const longExpiry = FUTURE(); // first writer
 		const stale = await aheadOfServer(() => raw)(); // a second out — stale view
@@ -101,16 +100,16 @@ describe("createRedisSidHash", () => {
 		expect(await h.listValues("sid-1")).toHaveLength(2);
 	});
 
-	// D-10 bootstrap test: the very first write must set the TTL even though
-	// the key has no prior TTL. A bare `PEXPIREAT … GT` would silently no-op
-	// here (Redis treats no-TTL as infinite TTL for the GT flag), leaving the
-	// key persistent. The NX clause in `pExpireGT` covers this bootstrap gap.
+	// The very first write must set the TTL even though the key has no prior
+	// TTL. A bare `PEXPIREAT … GT` would silently no-op here (Redis treats
+	// no-TTL as infinite TTL for the GT flag), leaving the key persistent. The
+	// NX clause in `pExpireGT` covers this bootstrap gap.
 	it("first write to a fresh sid sets a TTL (no infinite-TTL bootstrap leak)", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("ttl-boot") });
 		await h.setField("sid-fresh", "id-a", JSON.stringify({ x: 1 }), FUTURE());
 		const pttl = await raw.pttl(`${prefix("ttl-boot")}sid-fresh`);
-		// PTTL returns -1 for a key with no TTL (the bug case) and -2 if the
-		// key is missing. A positive value means the TTL is set as expected.
+		// PTTL returns -1 for a key with no TTL and -2 if the key is missing.
+		// A positive value means the TTL is set.
 		expect(pttl).toBeGreaterThan(0);
 	});
 
@@ -147,10 +146,10 @@ describe("createRedisSidHash", () => {
 		expect(out).toHaveLength(1);
 	});
 
-	// Copilot review on PR #352. `setField` awaited `pipeline.exec()` and threw
-	// the reply away; ioredis reports a failed queued command inside that reply
-	// rather than rejecting, so an HSET or PEXPIREAT that Redis refused was
-	// reported to the caller as a successful registration.
+	// ioredis reports a failed queued command inside the `pipeline.exec()`
+	// reply rather than rejecting, so a `setField` that ignored the reply would
+	// report an HSET or PEXPIREAT that Redis refused as a successful
+	// registration.
 	it("setField surfaces a queued command's failure instead of reporting success", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("wrongtype") });
 		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-hash");
@@ -163,7 +162,7 @@ describe("createRedisSidHash", () => {
 		});
 	});
 
-	// #291: `listValues` walks HSCAN cursors instead of issuing one HVALS.
+	// `listValues` walks HSCAN cursors instead of issuing one HVALS.
 	// 500 fields is well past `hash-max-listpack-entries` (128 by default), so
 	// Redis stores this as a real hashtable and the read genuinely spans
 	// several cursors — including, potentially, one that repeats a field.

@@ -405,7 +405,7 @@ describe("full-pki, on-unavailable = reject: what stays a verdict", () => {
 		]);
 	});
 
-	it("a distribution point outside the allowlist: the certificate's own shape, 400 as before", async () => {
+	it("a distribution point outside the allowlist: the certificate's own shape, 400 invalid_certificate, nothing at error", async () => {
 		const { root, int, leaf } = await pki("clean", "localhost");
 		const { app, calls } = appWith(root, "reject");
 

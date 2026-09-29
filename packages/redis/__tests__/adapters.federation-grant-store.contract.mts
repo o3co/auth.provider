@@ -188,10 +188,9 @@ const HELD = { ttlMs: 120_000, waitForMs: 0 };
 
 /**
  * The behaviour every {@link FederationGrantStore} adapter shares (ADR
- * 2026-09-17-federation-grants-offline-delegation, D2 and D16; bare D-numbers
- * below refer to it). The memory adapter runs this in-tree and the Redis
- * adapter against a real Redis, so the two cannot disagree about what a grant
- * is or which write wins.
+ * 2026-09-17-federation-grants-offline-delegation, D2 and D16). The memory
+ * adapter runs this in-tree and the Redis adapter against a real Redis, so the
+ * two cannot disagree about what a grant is or which write wins.
  *
  * Time is passed in, never faked: the port takes it from its caller. The
  * lock's tests, and the one case that waits for the store's own clock to

@@ -132,7 +132,7 @@ describe("createDPoPMechanism", () => {
 	// DPoP header absent → null (not throw)
 	// -------------------------------------------------------------------------
 
-	it("returns null when DPoP header is absent (step 1)", async () => {
+	it("returns null when DPoP header is absent", async () => {
 		const req = makeReq(undefined);
 		const result = await mechanism.extract(req as Request);
 		expect(result).toBeNull();
@@ -142,7 +142,7 @@ describe("createDPoPMechanism", () => {
 	// Multiple DPoP headers → throw
 	// -------------------------------------------------------------------------
 
-	it("throws when DPoP header contains a comma (multiple values, step 2)", async () => {
+	it("throws when DPoP header contains a comma (multiple values)", async () => {
 		const req = makeReq("token1,token2");
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(mechanism.extract(req as Request)).rejects.toMatchObject({
@@ -154,7 +154,7 @@ describe("createDPoPMechanism", () => {
 	// alg whitelist
 	// -------------------------------------------------------------------------
 
-	it("accepts a proof with alg=ES256 (in default whitelist, step 5)", async () => {
+	it("accepts a proof with alg=ES256, which the whitelist names", async () => {
 		const { proof } = await mintProof({ alg: "ES256" });
 		const req = makeReq(proof);
 		const result = await mechanism.extract(req as Request);
@@ -162,7 +162,7 @@ describe("createDPoPMechanism", () => {
 		expect(result?.kind).toBe("dpop");
 	});
 
-	it("rejects a proof with alg not in whitelist (step 5)", async () => {
+	it("rejects a proof with alg not in whitelist", async () => {
 		const restrictedMechanism = createDPoPMechanism({
 			issuer: ISSUER,
 			replaySeenSet: createMemoryReplaySeenSet(),
@@ -184,14 +184,14 @@ describe("createDPoPMechanism", () => {
 	// Signature verification
 	// -------------------------------------------------------------------------
 
-	it("accepts a validly signed proof (step 8)", async () => {
+	it("accepts a validly signed proof", async () => {
 		const { proof } = await mintProof();
 		const req = makeReq(proof);
 		const result = await mechanism.extract(req as Request);
 		expect(result).not.toBeNull();
 	});
 
-	it("rejects a tampered proof signature (step 8)", async () => {
+	it("rejects a tampered proof signature", async () => {
 		const { proof } = await mintProof({ tamperSignature: true });
 		const req = makeReq(proof);
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
@@ -206,14 +206,14 @@ describe("createDPoPMechanism", () => {
 	// htm match
 	// -------------------------------------------------------------------------
 
-	it("accepts when htm matches request method (step 10)", async () => {
+	it("accepts when htm matches request method", async () => {
 		const { proof } = await mintProof({ htm: "GET", htu: "https://as.example/token" });
 		const req = makeReq(proof, "GET", "/token");
 		const result = await mechanism.extract(req as Request);
 		expect(result).not.toBeNull();
 	});
 
-	it("rejects when htm does not match request method (step 10)", async () => {
+	it("rejects when htm does not match request method", async () => {
 		const { proof } = await mintProof({ htm: "GET" });
 		const req = makeReq(proof, "POST"); // proof says GET, request is POST
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
@@ -224,7 +224,7 @@ describe("createDPoPMechanism", () => {
 		).rejects.toMatchObject({ reason: "htm_mismatch" });
 	});
 
-	it("accepts htm case-insensitively (step 10)", async () => {
+	it("accepts htm case-insensitively", async () => {
 		const { proof } = await mintProof({ htm: "post" });
 		const req = makeReq(proof, "POST");
 		const result = await mechanism.extract(req as Request);
@@ -235,14 +235,14 @@ describe("createDPoPMechanism", () => {
 	// htu match (including normalization)
 	// -------------------------------------------------------------------------
 
-	it("accepts when htu matches request URL (step 11)", async () => {
+	it("accepts when htu matches request URL", async () => {
 		const { proof } = await mintProof({ htu: "https://as.example/token" });
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
 		const result = await mechanism.extract(req as Request);
 		expect(result).not.toBeNull();
 	});
 
-	it("rejects when htu does not match request URL (step 11)", async () => {
+	it("rejects when htu does not match request URL", async () => {
 		const { proof } = await mintProof({ htu: "https://other.example/token" });
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
@@ -253,7 +253,7 @@ describe("createDPoPMechanism", () => {
 		).rejects.toMatchObject({ reason: "htu_mismatch" });
 	});
 
-	it("accepts when htu matches after normalization (trailing slash difference, step 11)", async () => {
+	it("accepts when htu matches after normalization (scheme and host case)", async () => {
 		// Proof says /token (no slash); request URL would also normalize the same.
 		const { proof } = await mintProof({ htu: "HTTPS://AS.EXAMPLE/token" });
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
@@ -261,7 +261,7 @@ describe("createDPoPMechanism", () => {
 		expect(result).not.toBeNull();
 	});
 
-	it("accepts when htu has default port removed (step 11)", async () => {
+	it("accepts an htu that names the default port", async () => {
 		const { proof } = await mintProof({ htu: "https://as.example:443/token" });
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
 		const result = await mechanism.extract(req as Request);
@@ -351,7 +351,7 @@ describe("createDPoPMechanism", () => {
 	// iat window
 	// -------------------------------------------------------------------------
 
-	it("accepts a proof with iat within the window (step 12)", async () => {
+	it("accepts a proof with iat within the window", async () => {
 		const iat = Math.floor(Date.now() / 1000) - 30; // 30s ago, window = 60s
 		const { proof } = await mintProof({ iat });
 		const req = makeReq(proof);
@@ -359,7 +359,7 @@ describe("createDPoPMechanism", () => {
 		expect(result).not.toBeNull();
 	});
 
-	it("rejects a proof with iat outside the window — too old (step 12)", async () => {
+	it("rejects a proof with iat outside the window — too old", async () => {
 		const iat = Math.floor(Date.now() / 1000) - 120; // 120s ago, window = 60s
 		const { proof } = await mintProof({ iat });
 		const req = makeReq(proof);
@@ -373,7 +373,7 @@ describe("createDPoPMechanism", () => {
 		).rejects.toMatchObject({ reason: "iat_out_of_window" });
 	});
 
-	it("rejects a proof with iat in the future beyond window (step 12)", async () => {
+	it("rejects a proof with iat in the future beyond window", async () => {
 		const iat = Math.floor(Date.now() / 1000) + 120; // 120s in future, window = 60s
 		const { proof } = await mintProof({ iat });
 		const req = makeReq(proof);
@@ -391,7 +391,7 @@ describe("createDPoPMechanism", () => {
 	// Replay protection
 	// -------------------------------------------------------------------------
 
-	it("first use of a (jti, jkt) pair returns a binding (step 14)", async () => {
+	it("first use of a (jti, jkt) pair returns a binding", async () => {
 		const { proof, jkt } = await mintProof();
 		const req = makeReq(proof);
 		const result = await mechanism.extract(req as Request);
@@ -399,7 +399,7 @@ describe("createDPoPMechanism", () => {
 		expect(result?.confirmation).toMatchObject({ jkt });
 	});
 
-	it("second use of the same (jti, jkt) pair throws replay_detected (step 14)", async () => {
+	it("second use of the same (jti, jkt) pair throws replay_detected", async () => {
 		const { proof } = await mintProof();
 		const req = makeReq(proof);
 		// First call succeeds.
@@ -466,7 +466,7 @@ describe("createDPoPMechanism", () => {
 
 	// parseProof's private_jwk screen propagates through the verifier intact,
 	// not swallowed at the verifier's parseProof call site.
-	it("propagates private_jwk error from parseProof (step 7 / Sub-PR 2a)", async () => {
+	it("propagates private_jwk error from parseProof", async () => {
 		const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
 		const pubJwk = await exportJWK(publicKey);
 		const legitProof = await new SignJWT({

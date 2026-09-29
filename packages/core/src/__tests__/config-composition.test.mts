@@ -246,7 +246,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 	});
 });
 
-describe("AppConfigSchema backward compatibility", () => {
+describe("AppConfigSchema", () => {
 	it("still validates full config with all sections", () => {
 		const fullConfig = {
 			http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },

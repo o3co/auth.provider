@@ -48,10 +48,10 @@ describe("encryptTokenField / decryptTokenField", () => {
 	});
 });
 
-// #293: the federation-token store binds each envelope ciphertext to the Redis
-// key it lives under, so a value copied to another session's key is refused.
+// The federation-token store binds each envelope ciphertext to the Redis key
+// it lives under, so a value copied to another session's key is refused.
 // These pin the primitive that binding rests on.
-describe("encryptTokenField / decryptTokenField with additional authenticated data (#293)", () => {
+describe("encryptTokenField / decryptTokenField with additional authenticated data", () => {
 	const aad = "ft:sid-1:google";
 
 	it("roundtrips when the same AAD is presented on decrypt", () => {
@@ -60,7 +60,7 @@ describe("encryptTokenField / decryptTokenField with additional authenticated da
 		expect(decryptTokenField(ct, key, aad)).toBe(plaintext);
 	});
 
-	it("does not store the AAD in the envelope — the format is unchanged", () => {
+	it("does not store the AAD in the envelope, which keeps its four parts", () => {
 		const ct = encryptTokenField(plaintext, key, aad);
 		expect(ct.split(".")).toHaveLength(4);
 		expect(ct).not.toContain(Buffer.from(aad).toString("base64url"));
@@ -83,8 +83,8 @@ describe("encryptTokenField / decryptTokenField with additional authenticated da
 });
 
 // Node before 26 accepts a GCM tag of 4 to 16 bytes on decrypt unless told
-// the length, so a v1 envelope whose tag was cut short decrypted. Every v1
-// envelope ever written has a 12-byte IV and a 16-byte tag.
+// the length, so a v1 envelope whose tag was cut short would decrypt. Every
+// v1 envelope ever written has a 12-byte IV and a 16-byte tag.
 describe("decryptTokenField reads only a 16-byte tag and a 12-byte IV", () => {
 	const aad = "ft:sid-1:google";
 

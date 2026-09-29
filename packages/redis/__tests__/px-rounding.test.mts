@@ -4,26 +4,20 @@
  */
 
 /**
- * What every adapter hands Redis as a key's life: a whole number of
- * milliseconds, rounded up, and never one made from an expiry that is not a
- * number.
+ * What every adapter hands Redis as a key's life: whole milliseconds,
+ * rounded up, and never one made from an expiry that is not a number.
  *
- * `PX` and `PEXPIREAT` take whole milliseconds, so a fractional expiry has to
- * be rounded, and only one direction is safe: up. A record whose life is
- * rounded down dies before the instant its caller asked for — a replay record
- * before the proof stops being acceptable, a revocation before the token
- * expires, a session before its own `expiresAt`. Sent unrounded, it is worse:
- * Redis refuses a fractional `PX` outright, and a script that has already
- * written its record when its `PEXPIREAT` is refused leaves that record with no
- * TTL at all. The contract suites cannot tell `Math.ceil` from `Math.round`
- * against a real Redis (the difference is under a millisecond), so a recording
- * client pins it: the life each adapter sends is a whole number no smaller
- * than the life it was asked for, on a clock frozen so that life is exact.
+ * Only up is safe: rounded down, a replay record dies before the proof stops
+ * being acceptable, a revocation before the token expires, a session before
+ * its `expiresAt`. Unrounded, Redis refuses a fractional `PX`, and a script
+ * whose `PEXPIREAT` is refused after it wrote its record leaves that record
+ * with no TTL. The contract suites cannot tell `Math.ceil` from `Math.round`
+ * (under a millisecond apart), so a recording client on a frozen clock pins
+ * it.
  *
- * An expiry that is not a finite number — NaN, from an Invalid Date or an
- * unset setting, or ±Infinity — is a caller fault, refused before the client
- * is asked: `PX NaN` is a Redis error at best, and at worst the one command of
- * a pair that fails, after the other has written.
+ * An expiry that is not a finite number is a caller fault, refused before the
+ * client is asked: `PX NaN` is a Redis error at best, and at worst the one
+ * command of a pair that fails after the other has written.
  */
 import type {
 	CreateCodeInput,
@@ -280,8 +274,8 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 	});
 
 	it("RefreshTokenFamilyStore.registerFamily", async () => {
-		// Sent unrounded, Redis refused the SET, and the refresh token the
-		// family was registered for could never be redeemed.
+		// Unrounded, Redis refuses the SET, and the refresh token the family
+		// is registered for can never be redeemed.
 		const recording = familyRecorder();
 		const store = createRedisRefreshTokenFamilyStore({
 			client: recording.client,
@@ -311,8 +305,8 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 
 	it("RefreshTokenFamilyStore stores the expiry it rounded to, which its own reader accepts", async () => {
 		// The stored JSON's `expiresAtMs` is read back through a schema that
-		// takes whole epoch milliseconds only, so a fractional one written
-		// there turned the family into `corrupt-data` on its first read.
+		// takes whole epoch milliseconds only: a fractional one would read as
+		// `corrupt-data`.
 		let stored = "";
 		const recording = familyRecorder();
 		const store = createRedisRefreshTokenFamilyStore({
@@ -337,8 +331,8 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 	});
 
 	it("CodeRepository.createCode, for a lifetime given in fractional seconds", async () => {
-		// `expiresIn` is seconds, so a per-call lifetime of 1.2345 s asked
-		// Redis for `PX 1234.5` — refused, and /authorize answered server_error.
+		// `expiresIn` is seconds: unrounded, 1.2345 s is `PX 1234.5`, which
+		// Redis refuses, and /authorize answers server_error.
 		const client = recorder();
 		const repo = new RedisCodeRepository(codeClient(client.set));
 		const lifetimes = [1.2344, 1.2345, 0.0002, 59.999999];
@@ -381,9 +375,9 @@ describe("the PX an adapter sends is its record's life, rounded up to a whole mi
 describe("the PEXPIREAT deadline DeviceCodeStore.create hands its client is a whole millisecond, rounded up", () => {
 	it("rounds the keys' deadline up and keeps the record's own expiry exact", async () => {
 		// The script writes the record and its index, then sets their deadline:
-		// a fractional one was refused by `PEXPIREAT` after both were written,
-		// leaving two keys with no TTL — and the endpoint, reading the error as
-		// a code collision, drew again and left another pair.
+		// a fractional one is refused by `PEXPIREAT` after both are written,
+		// leaving two keys with no TTL, and the endpoint, reading the error as
+		// a code collision, draws again and leaves another pair.
 		const recording = deviceCodeRecorder();
 		const store = createRedisDeviceCodeStore({ client: recording.client, keyPrefix: "devauth:" });
 		for (const [i, life] of FRACTIONAL_LIVES.entries()) {
@@ -469,7 +463,7 @@ describe("an expiry that is not a finite number is refused before Redis is asked
 
 	it("UserSessionStore.create: an Invalid Date", async () => {
 		// `getTime()` of an Invalid Date is NaN, and `NaN <= 0` is false, so
-		// the past-expiry check let it through to `PX NaN`.
+		// a past-expiry check alone lets it through to `PX NaN`.
 		const client = recorder();
 		const store = createRedisUserSessionStore({
 			client: {

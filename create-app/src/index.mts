@@ -119,6 +119,7 @@ export const scaffold = (
 	// `"private": true` is deliberately kept: the scaffold is an identity
 	// provider (keys, config, policy), so an accidental `npm publish` must fail
 	// by default. An operator who means to publish removes the field.
+	// o3co/auth.policy-verifier's scaffolder does the same; change the two together.
 
 	// Replace all workspace:* references with per-package published versions
 	const versions = getPackageVersions();

@@ -14,14 +14,12 @@
  * limitations under the License.
  */
 
-// #291 — the sid-keyed HASH is read with a cursor, not in one reply.
-//
-// `listValues` used to be `HVALS`: one command returning every RP registered
-// against the session, whose reply size is bounded by nothing. A session
-// linked to a large number of relying parties made that a single blocking
-// command on the connection every other adapter shares. These tests pin the
-// cursor-based read and the duplicate handling it requires; the round-trip
-// behaviour against a real Redis is covered in `internalSidHash.test.mts`.
+// The sid-keyed HASH is read with a cursor, not in one reply. One `HVALS`
+// returns every RP registered against the session, a reply bounded by
+// nothing: a single blocking command on the connection every other adapter
+// shares. These tests pin the cursor-based read and the duplicate handling it
+// requires; the round trip against a real Redis is in
+// `internalSidHash.test.mts`.
 
 import { describe, expect, it, vi } from "vitest";
 import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";
@@ -52,7 +50,7 @@ function createClient(pages: Pair[][]) {
 	} satisfies SessionRPRegistryClient;
 }
 
-describe("#291 — createRedisSidHash.listValues is cursor-based", () => {
+describe("createRedisSidHash.listValues is cursor-based", () => {
 	it("reads through hScanIterator rather than one unbounded reply", async () => {
 		const client = createClient([[["c1", '{"a":1}']]]);
 		const hash = createRedisSidHash({ client, keyPrefix: "t:" });
@@ -103,7 +101,7 @@ describe("#291 — createRedisSidHash.listValues is cursor-based", () => {
 	});
 });
 
-describe("#291 — createRedisSidHash.removeBySid uses UNLINK", () => {
+describe("createRedisSidHash.removeBySid uses UNLINK", () => {
 	it("unlinks the sid's key", async () => {
 		const client = createClient([]);
 		const hash = createRedisSidHash({ client, keyPrefix: "t:" });
@@ -112,11 +110,11 @@ describe("#291 — createRedisSidHash.removeBySid uses UNLINK", () => {
 	});
 });
 
-// Copilot review on PR #352, swept from the `pageSize` hole in the sorted-set
-// helper. `scanCount` cannot loop forever here — it is an `HSCAN COUNT` hint,
-// and Redis rejects a non-positive one — but a command the server refuses on
-// the logout path is no better than a hang. Same construction-time guard.
-describe("#291 — createRedisSidHash validates scanCount at construction", () => {
+// `scanCount` cannot loop forever here — it is an `HSCAN COUNT` hint, and Redis
+// rejects a non-positive one — but a command the server refuses on the logout
+// path is no better than a hang. Same construction-time guard as the sorted-set
+// helper's `pageSize`.
+describe("createRedisSidHash validates scanCount at construction", () => {
 	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (scanCount) => {
 		expect(() =>
 			createRedisSidHash({ client: createClient([]), keyPrefix: "t:", scanCount }),

@@ -16,16 +16,13 @@
 
 /**
  * A revoked family's Redis key lives until the last access token the family
- * could have minted stops being accepted — not until the family's own expiry.
- *
- * The key's TTL is `PX` = the family's `expiresAtMs` − now, and revocation
- * used to keep `expiresAtMs`: Redis dropped a revoked family when its refresh
- * tokens expired, and an access token minted late in the family's life passed
- * the family check again for the rest of its life. A family whose key had
- * already expired recorded no revocation at all. Composed the way the
- * standalone does — the Redis store module under core's default rotation and
- * revocation, whose horizon comes from `oauth.accessToken.maxExpiresIn` —
- * against a real Redis.
+ * could have minted stops being accepted, not until the family's own expiry.
+ * The key's TTL is `PX` = `expiresAtMs` − now, so a revoked family dropped at
+ * its refresh tokens' expiry would let an access token minted late in its
+ * life pass the family check again. A family revoked after its key expired is
+ * still recorded. Composed as the standalone does (the Redis store module
+ * under core's default rotation and revocation, the horizon from
+ * `oauth.accessToken.maxExpiresIn`), against a real Redis.
  */
 
 import {

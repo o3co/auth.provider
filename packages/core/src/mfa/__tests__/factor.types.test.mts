@@ -17,11 +17,11 @@
 /**
  * What the `MfaFactor` contract lets a factor do without holding a key, a
  * store or a transaction. The rules are in the MFA ADR, D7's amendment "what
- * the contract hands a factor"; the D and F labels below refer to that ADR.
- * In short: the coordinator digests under the key ring for the factor, which
- * never sees the ring; a factor may refuse a sign count that did not increase,
- * opt in to a challenge that stays across attempts, and say a user cannot
- * enroll it without throwing (a throw reads as an outage).
+ * the contract hands a factor". In short: the coordinator digests under the
+ * key ring for the factor, which never sees the ring; a factor may refuse a
+ * sign count that did not increase, opt in to a challenge that stays across
+ * attempts, and say a user cannot enroll it without throwing (a throw reads
+ * as an outage).
  *
  * These are type assertions: the file is in core's typecheck list.
  */

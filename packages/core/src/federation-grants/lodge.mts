@@ -334,7 +334,7 @@ function checkRequest(
 	// Registered, and still held to what registration would have refused: a
 	// repository that validates nothing could hand back a URI that does not
 	// parse, and the flow would fail only at its end — after activating the
-	// grant — when the browser has to be sent there (the adversarial review).
+	// grant — when the browser has to be sent there.
 	if (checkRedirectUri(request.redirectUri) !== null) {
 		return { ok: false, reason: "redirect_uri_invalid" };
 	}

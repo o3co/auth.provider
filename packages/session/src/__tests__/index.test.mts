@@ -18,9 +18,9 @@ import { describe, expect, it } from "vitest";
 
 describe("package public surface (@o3co/auth-provider-session)", () => {
 	it("does not re-export the federation adapter port, which core owns", async () => {
-		// The hard break: the contract a federation is registered with is the one
-		// `oauth` and `federation-grants` read, and it is reachable by one path.
-		// A second export here is what made the contribution type `unknown`.
+		// The port a federation is registered with is core's, the one `oauth`
+		// and `federation-grants` read, reachable by that one path so a
+		// contribution is typed against the port its readers use.
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		for (const name of [
 			"supportsDelegatedAuthorization",
@@ -98,10 +98,9 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 
 	it("does NOT export the standalone validateRedirect helper", async () => {
 		const mod = await import("#/index.mjs");
-		// It derived its answer from `sessionDomain` alone and accepted every
-		// http(s) URL when that was unset — an open redirect for any consumer
-		// wiring it directly. Redirect validation now exists only as a policy
-		// built from an allowlist, so there is no permissive shape left to reach.
+		// Redirect validation exists only as a policy built from an allowlist
+		// (`createFederationRedirectPolicy`), which with no allowlist refuses
+		// every `redirect_to`, so no permissive shape is exported.
 		expect((mod as Record<string, unknown>).validateRedirect).toBeUndefined();
 	});
 

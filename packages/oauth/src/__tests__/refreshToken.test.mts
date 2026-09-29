@@ -567,12 +567,9 @@ describe("createRefreshTokenGrant", () => {
 				expect(result.errorDescription).toBe("refresh token has no subject");
 			});
 
-			it("RT-OC: typ-less JWT is rejected even when legacyTypAccept=true (AT-as-RT defended)", async () => {
-				// legacyTypAccept=true lets a typ-less JWT through the central
-				// verifier. This grant-level gate must STILL reject it because
-				// the token declares no refresh marker (header.typ is the only
-				// accepted one). Without it, any AT or non-refresh JWT signed
-				// with the same key could pass as a refresh token.
+			it("rejects a typ-less JWT as invalid_grant, with legacyTypAccept off", async () => {
+				// With `legacyTypAccept` off (the default), the verifier refuses
+				// the typ-less token; the grant's own `rt+jwt` gate is not reached.
 				const typLessUnmarkedToken = await new SignJWT({
 					sub: "u1",
 					azp: DEFAULT_CLIENT_ID,
@@ -1672,7 +1669,7 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.errorDescription).toContain("https://other.example");
 		});
 
-		it("uses policy grantedAudience when within client.allowedAudiences (Test B)", async () => {
+		it("uses policy grantedAudience when within client.allowedAudiences", async () => {
 			// Policy narrows to ["https://api.example"] ∈ allowedAudiences → 200, token aud is https://api.example.
 			const token = await makeRefreshToken({ scope: "read" });
 			const deps = depsWithAudiencePolicy(async () => ({
@@ -2194,7 +2191,7 @@ describe("refresh rotation reserves before it signs", () => {
 		);
 	});
 
-	it("does not shorten a rotation the family did not cap (review)", async () => {
+	it("does not shorten a rotation the family did not cap", async () => {
 		// The store reports the committed ceiling on every rotation; when the
 		// family is younger than the requested lifetime that is exactly the
 		// expiry asked for. The drift margin is for a cap that fired; applied
@@ -2217,7 +2214,7 @@ describe("refresh rotation reserves before it signs", () => {
 		);
 	});
 
-	it("refuses when the store took longer than the capped lifetime it left (review)", async () => {
+	it("refuses when the store took longer than the capped lifetime it left", async () => {
 		// `issuedAt` is reserved before the rotation; a slow store can use up
 		// what the cap left, and the token would be signed already expired.
 		vi.useFakeTimers({ toFake: ["Date"] });

@@ -14,17 +14,13 @@
  * limitations under the License.
  */
 
-// The two copies of the `UserSessionStore` contract suite are the same suite
-// (#626).
-//
+// The two copies of the `UserSessionStore` contract suite are the same suite.
 // A contract file cannot be imported across a package boundary, so the Redis
-// package runs a copy. This one had drifted: core's gained the #481 `amr`
-// round-trip and the copy never did, so the Redis store could lose `amr` on
-// its way back and every Redis test passed. The federation grant suites are
-// held the same way, by `federation-grant-contract-parity.test.mts`.
-//
-// So the only difference allowed is the import block. When the core suite
-// changes, copy it again and re-run.
+// package runs a copy, and a copy that drifts lets the Redis store pass
+// without the checks core's suite has gained. The only difference allowed is
+// the import block; when the core suite changes, copy it again and re-run.
+// The federation grant suites are held the same way, by
+// `federation-grant-contract-parity.test.mts`.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -79,7 +75,7 @@ describe("the UserSessionStore contract suite, in both copies", () => {
 		// A declaration there — a shadowed `it`, a rebound `expect` — would change
 		// what the suite runs while the bodies still compare equal.
 		// Read as a syntax tree, so a declaration sharing a line with an import
-		// is still a declaration (#626).
+		// is still a declaration.
 		for (const path of [CORE, COPY]) {
 			const from = readFileSync(path, "utf8").indexOf(FIRST_EXPORT);
 			expect(from, `${path}: the suite's first export`).toBeGreaterThan(0);

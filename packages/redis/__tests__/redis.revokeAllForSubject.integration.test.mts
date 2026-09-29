@@ -15,16 +15,9 @@
  */
 
 /**
- * #321's acceptance criterion, end to end: a deployment on Redis-backed
- * session stores calls `revokeAllForSubject` after a credential change and
- * gets `unavailable: []`, with every session cascaded and the watermark in
- * force across replicas.
- *
- * Before this, the two subject slots had in-memory adapters only. A
- * multi-replica deployment filled neither, so the call answered
- * `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked
- * nothing — visible rather than silent, deliberately, but nothing revoked all
- * the same.
+ * End to end: a deployment on Redis-backed session stores calls
+ * `revokeAllForSubject` after a credential change and gets `unavailable: []`,
+ * with every session cascaded and the watermark in force across replicas.
  */
 
 import { revokeAllForSubject } from "@o3co/auth-provider-core";
@@ -78,7 +71,7 @@ const replica = (n: string) => {
 	};
 };
 
-describe("revokeAllForSubject on Redis-backed stores (#321)", () => {
+describe("revokeAllForSubject on Redis-backed stores", () => {
 	it("reports nothing unavailable and cascades every session", async () => {
 		const r = replica("cascade");
 		await r.userSessionStore.create(session("s1"));
@@ -86,8 +79,8 @@ describe("revokeAllForSubject on Redis-backed stores (#321)", () => {
 		await r.subjectSessionIndex.addSid("u1", "s1", FUTURE());
 		await r.subjectSessionIndex.addSid("u1", "s2", FUTURE());
 
-		// The composition supplies the cascade; what #321 changes is that the
-		// two stores it enumerates and stamps are now shared across replicas.
+		// The composition supplies the cascade; the two stores it enumerates
+		// and stamps are shared across replicas.
 		const cascaded: string[] = [];
 		const result = await revokeAllForSubject({
 			subject: "u1",
@@ -101,7 +94,6 @@ describe("revokeAllForSubject on Redis-backed stores (#321)", () => {
 			watermarkTtlMs: 600_000,
 		});
 
-		// The acceptance criterion.
 		expect(result.unavailable).toEqual([]);
 		expect(result.complete).toBe(true);
 		expect(result.tokensRevoked).toBe(true);
@@ -114,8 +106,8 @@ describe("revokeAllForSubject on Redis-backed stores (#321)", () => {
 	});
 
 	it("puts the watermark in force for a replica that never saw the reset", async () => {
-		// The point of moving these stores to Redis: the replica that handles the
-		// next request is not the one that handled the password change.
+		// The replica that handles the next request is not the one that
+		// handled the password change.
 		const writer = replica("shared");
 		const reader = replica("shared");
 
@@ -135,8 +127,8 @@ describe("revokeAllForSubject on Redis-backed stores (#321)", () => {
 	});
 
 	it("still reports what is missing when a slot is left unwired", async () => {
-		// The structured result #296 shipped keeps its meaning: a composition that
-		// wires only one of the pair is told which one it left out.
+		// A composition that wires only one of the pair is told which one it
+		// left out.
 		const r = replica("partial");
 		const result = await revokeAllForSubject({
 			subject: "u3",

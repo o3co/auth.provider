@@ -481,7 +481,7 @@ describe("assembleApp — 12. AppHandle itself is Object.frozen", () => {
 // 13. Factory-produced route validation (duplicate mountPath)
 // ---------------------------------------------------------------------------
 
-describe("assembleApp — 13. MUST-FIX 2: factory-produced route validation", () => {
+describe("assembleApp — 13. factory-produced route validation", () => {
 	it("two factory-produced routes with the same mountPath throw duplicate-contribute(mountPath)", () => {
 		const handlerA = vi.fn();
 		const handlerB = vi.fn();
@@ -586,8 +586,8 @@ describe("assembleApp — 13. MUST-FIX 2: factory-produced route validation", ()
 // 14. Symbol.asyncDispose NOT called on override/bootstrap values
 // ---------------------------------------------------------------------------
 
-describe("assembleApp — 14. MUST-FIX 3: no asyncDispose on external (override/bootstrap) values", () => {
-	it("does NOT call Symbol.asyncDispose on override values (spec §5.3 — consumer-owned)", async () => {
+describe("assembleApp — 14. no asyncDispose on external (override/bootstrap) values", () => {
+	it("does NOT call Symbol.asyncDispose on override values, which the consumer owns", async () => {
 		const asyncDisposeSpy = vi.fn(async () => {});
 		const overrideValue = {
 			[Symbol.asyncDispose]: asyncDisposeSpy,

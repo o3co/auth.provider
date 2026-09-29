@@ -16,15 +16,12 @@
 
 /**
  * `UserSession` envelopes as a release before `authentication` wrote them
- * (the MFA ADR's D9), byte for byte — what a live Redis holds at the upgrade.
- *
- * Captured, not hand-built: `createRedisUserSessionStore` at 3673d4325 (the
- * last commit before the key) was run against a client that recorded what
- * `create` sent, for a federated login as that release recorded it (the
- * upstream IdP's `hwk` beside `fed`, #481) and for a password login. A
- * hand-built envelope can only ever agree with what its author believed the
- * old writer wrote; these are what it wrote, key order and all. The expiry is
- * 2099, so a read lands inside it whenever the test runs.
+ * (the MFA ADR's D9), byte for byte: what a live Redis holds at the upgrade.
+ * Captured, not hand-built, so they are what the old writer wrote, key order
+ * and all: `createRedisUserSessionStore` at 3673d4325 (the last commit before
+ * the key), run against a client that recorded what `create` sent, for a
+ * federated login (the upstream IdP's `hwk` beside `fed`) and a password
+ * login. The expiry is 2099, so a read lands inside it whenever the test runs.
  */
 
 /** A federated login: `amr` `["hwk", "fed"]`, no `authentication` key. */

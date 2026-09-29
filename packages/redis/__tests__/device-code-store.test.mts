@@ -4,15 +4,14 @@
  */
 
 /**
- * Redis-backed `DeviceCodeStore` (#433) against the shared conformance suite,
- * on a real Redis.
+ * Redis-backed `DeviceCodeStore` against the shared conformance suite, on a
+ * real Redis.
  *
- * The suite's "two polls racing for the same approval" case is the one that
- * needs the real server: it is the difference between atomicity that comes
- * from a Lua script and atomicity that comes from a round trip, and a fake
- * that answers from a `Map` cannot tell the two apart. The cases below the
- * suite pin what is Redis-specific — the key layout the Cluster argument
- * rests on, the TTL, and that `expired` is answered from the timestamp.
+ * The suite's "two polls racing for the same approval" case needs the real
+ * server: a fake answering from a `Map` cannot tell a Lua script's atomicity
+ * from a round trip's. The cases below pin what is Redis-specific: the key
+ * layout Cluster relies on, the TTL, and that `expired` is answered from the
+ * timestamp.
  */
 
 import { Redis } from "ioredis";
@@ -61,7 +60,7 @@ const seed = {
 	intervalSeconds: 5,
 };
 
-describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
+describe("createRedisDeviceCodeStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(storeAt(freshPrefix()).kind).toBe("redis");
 	});
@@ -85,8 +84,8 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 
 	it("refuses a finite expiry past the Date range before the script writes anything", async () => {
 		// `1e20` is sent as a decimal PEXPIREAT Redis cannot take, and `1e21` as
-		// `1e+21`: either way the script had already written the record and its
-		// index, and both were left with no TTL at all.
+		// `1e+21`: either fails only after the script has written the record and
+		// its index, which would leave both with no TTL at all.
 		for (const expiresAtMs of [8_640_000_000_000_001, 1e20, 1e21]) {
 			const prefix = freshPrefix();
 			await expect(storeAt(prefix).create({ ...seed, expiresAtMs })).rejects.toThrow(RangeError);
@@ -144,7 +143,7 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 	it("round-trips a record with no requestedScope and grants nothing on approval", async () => {
 		// The memory adapter's semantics for a request with no scope: it reads
 		// back as `requestedScope: undefined` — the key named, as every field of
-		// the record is (#626) — and an approval of a scopeless request grants
+		// the record is — and an approval of a scopeless request grants
 		// the empty set rather than failing or inventing one.
 		const store = storeAt(freshPrefix());
 		await store.create({ ...seed, requestedScope: undefined });
@@ -181,11 +180,11 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 });
 
 /**
- * What this adapter does with an untyped caller's falsy `requestedScope`: the
- * scopeless request it was before #626 made the field a required key, which
- * both bundled stores keep by testing it for truthiness. It is outside the
- * port's types, so it is this adapter's behaviour and not the contract's — a
- * third-party store owes nothing for it (#626).
+ * What this adapter does with an untyped caller's falsy `requestedScope`: it
+ * reads as a scopeless request, as in both bundled stores, which test the
+ * field for truthiness. It is outside the port's types, so it is this
+ * adapter's behaviour and not the contract's; a third-party store owes
+ * nothing for it.
  */
 describe("redis DeviceCodeStore — an untyped caller's falsy requestedScope", () => {
 	it.each([

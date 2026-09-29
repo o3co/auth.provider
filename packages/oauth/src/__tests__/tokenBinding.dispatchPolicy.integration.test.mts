@@ -147,7 +147,7 @@ async function buildApp(dispatchPolicy: DispatchPolicy): Promise<express.Express
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("Cross-mechanism dispatch policy (§12.3) — grant-visible behavior", () => {
+describe("Cross-mechanism dispatch policy — grant-visible behavior", () => {
 	it("intent-explicit: DPoP + mTLS both succeed → DPoP wins; AT carries jkt only", async () => {
 		const app = await buildApp("intent-explicit");
 

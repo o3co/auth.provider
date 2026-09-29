@@ -5,14 +5,12 @@
 
 /**
  * What a `MULTI`/`EXEC` whose queued command Redis refused throws, against a
- * real Redis: ioredis resolves `exec()` with the refusal inside the reply, and
- * the wrapper turns it into an error.
- *
- * That error says which operation failed in fixed words and carries the reply
- * error as `cause`. The reply's text is Redis's, about the command it
- * refused — and a refusal can quote the command's arguments — so it is never
- * copied into the message: the message goes wherever the store's caller puts
- * it, and `loggableError` projects the cause, cutting the quoted arguments.
+ * real Redis: ioredis resolves `exec()` with the refusal in the reply, and the
+ * wrapper turns it into an error that names the failed operation in fixed
+ * words and carries the reply error as `cause`. A refusal can quote the
+ * command's arguments, so its text never enters the message, which goes
+ * wherever the caller puts it; `loggableError` cuts the quoted arguments from
+ * the cause.
  */
 
 import { randomUUID } from "node:crypto";

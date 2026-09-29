@@ -49,7 +49,7 @@ const without = (key: keyof typeof VALID) => {
 	return rest;
 };
 
-describe("webauthnConfigSchema (spec §2.4.1)", () => {
+describe("webauthnConfigSchema", () => {
 	it("accepts minimum valid config with all required fields", () => {
 		const parsed = webauthnConfigSchema.parse(VALID);
 		expect(parsed.attestationPreference).toBe("none"); // reference.conf's value

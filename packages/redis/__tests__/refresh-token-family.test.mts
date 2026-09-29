@@ -16,11 +16,10 @@ let keyCounter = 0;
 
 /**
  * The client a deployment runs: `makeIoredisClients`'s, not one written for
- * this file. The hand-rolled adapter this replaced resolved `exec()` with
- * ioredis's per-command error tuples, so a `SET` Redis refused inside the
- * `MULTI` — a fractional or NaN `PX` — read as a committed rotation while the
- * family stayed as it was. `RefreshTokenFamilyMultiClient.exec` forbids that,
- * and the shipped client keeps it.
+ * this file. `RefreshTokenFamilyMultiClient.exec` must not resolve with
+ * ioredis's per-command error tuples, or a `SET` Redis refused inside the
+ * `MULTI` (a fractional or NaN `PX`) would read as a committed rotation; the
+ * shipped client keeps that.
  */
 const real = (raw: Redis): RefreshTokenFamilyClient =>
 	makeIoredisClients(raw).refreshTokenFamilyClient;
@@ -52,7 +51,7 @@ runRefreshTokenFamilyStoreContract(
 	},
 );
 
-// T4 hardening (Claude review I1): RefreshTokenFamilyClient.duplicate() NORMATIVE contract
-// suite, against the shipped client, so a refactor of `makeIoredisClients`
-// keeps the WATCH-isolation guarantee A3 updateFamily depends on.
+// RefreshTokenFamilyClient.duplicate() NORMATIVE contract suite, against the
+// shipped client, so a refactor of `makeIoredisClients`
+// keeps the WATCH-isolation guarantee updateFamily depends on.
 runRefreshTokenFamilyClientDuplicateContract(() => real(client), `rtfam-contract-${++keyCounter}:`);

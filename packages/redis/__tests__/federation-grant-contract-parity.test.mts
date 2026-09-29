@@ -15,17 +15,12 @@
  */
 
 // The two copies of the `FederationGrantStore` contract suite are the same
-// suite (#593, D16).
-//
-// A contract file cannot be imported across a package boundary, so the Redis
-// package runs a copy — and D16's whole claim is that the two adapters cannot
-// disagree about what a grant is or which write wins. A copy of 2,500 lines
-// drifts the week after it lands unless something checks it, and a copy that
-// has drifted is worse than none: it reads as the same contract while
-// asserting something else.
-//
-// So the only difference allowed is the import block, and this test is what
-// says so. When the core suite changes, copy it again and re-run.
+// suite. The Redis package runs a copy, since a contract file cannot be
+// imported across a package boundary, and the two adapters must not disagree
+// about what a grant is or which write wins (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16). A copy nothing checks
+// drifts, and then reads as the same contract while asserting something else.
+// Only the import block may differ; when the core suite changes, copy it again.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -86,13 +81,13 @@ describe("the FederationGrantStore contract suite, in both copies", () => {
 	});
 
 	it("has nothing but comments and imports above that line, in either copy", () => {
-		// Comparing the bodies leaves the prologue out, and the reviewer showed
-		// what fits there: `import { it as rawIt } from "vitest"; const it =
-		// rawIt.skip;` leaves the parity test green and skips all 123 cases. A
+		// Comparing the bodies leaves the prologue out, and a lot fits there:
+		// `import { it as rawIt } from "vitest"; const it =
+		// rawIt.skip;` leaves the parity test green and skips every case. A
 		// shadowed `expect`, a rebound `describe` or a stale constant do the
 		// same. So the prologue may declare nothing at all.
 		// Read as a syntax tree, so a declaration sharing a line with an import
-		// is still a declaration (#626).
+		// is still a declaration.
 		for (const path of [CORE, COPY]) {
 			const from = readFileSync(path, "utf8").indexOf(
 				"export interface FederationGrantStoreContractFactory",

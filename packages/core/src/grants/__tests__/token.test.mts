@@ -345,7 +345,7 @@ describe("generateTokenResponse with id_token", () => {
 		expect(resp.id_token).toBe("it");
 	});
 
-	it("omits id_token when not provided (backward compat)", () => {
+	it("omits id_token when not provided", () => {
 		const resp = generateTokenResponse({ accessToken: { token: "at", expiresIn: 3600 } });
 		expect(resp.id_token).toBeUndefined();
 	});

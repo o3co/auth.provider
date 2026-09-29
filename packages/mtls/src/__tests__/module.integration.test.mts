@@ -321,7 +321,7 @@ describe("mtlsModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("boot fails when mode='pki' and trusted-cas is empty (§11.2 check 1)", async () => {
+	it("boot fails when mode='pki' and trusted-cas is empty", async () => {
 		const boot = makeBoot({
 			enabled: true,
 			mode: "pki",
@@ -336,7 +336,7 @@ describe("mtlsModule — integration via createApp", () => {
 		).rejects.toThrow(/trusted-cas/);
 	});
 
-	it("boot fails when mode='pki' and source='tls-layer' (§11.2 check 2)", async () => {
+	it("boot fails when mode='pki' and source='tls-layer'", async () => {
 		const boot = makeBoot({
 			enabled: true,
 			source: "tls-layer",

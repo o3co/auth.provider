@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-// The Redis `FederationGrantIntentStore` against the shared contract (#593,
-// D16, slice 6), on a real Redis.
+// The Redis `FederationGrantIntentStore` against the shared contract (ADR
+// 2026-09-17-federation-grants-offline-delegation, D16), on a real Redis.
 //
 // Two connections, and the contract alternates between two store instances
 // over them: the races the suite sets up are then races across sockets, which
@@ -173,8 +173,7 @@ describe("the Redis intent store's layout", () => {
 });
 
 // ---------------------------------------------------------------------------
-// What only Redis can get wrong. Found by the mutation pass: each of these
-// survived the shared contract, because the contract cannot reach a server
+// What only Redis can get wrong: the shared contract cannot reach a server
 // clock, a key TTL, a race between an adapter's read and its script, or an
 // eviction policy.
 // ---------------------------------------------------------------------------
@@ -285,7 +284,7 @@ describe("the Redis intent store, where the contract cannot look", () => {
 		await sweep();
 	});
 
-	it("will not re-park a flow whose parked consent was dropped (Codex on slice 6)", async () => {
+	it("will not re-park a flow whose parked consent was dropped", async () => {
 		// The intent's pointer says a challenge was issued; the key it names is
 		// gone. Parking a fresh one would bind the flow to whichever browser
 		// asked next, which the memory adapter refuses and so must this.
@@ -332,7 +331,7 @@ describe("a reservation allowance whose deadline no clock reaches (the Date rang
 	it("is refused when the store is built, so no admission leaves the reservation index without a TTL", async () => {
 		// The admission's script reserves the place and sets the index's
 		// deadline last; 1e21 ms is sent as `1e+21`, which Redis refuses, and
-		// the reservation it had just written was left with no TTL.
+		// that would leave the reservation it had just written with no TTL.
 		run += 1;
 		prefix = `fgd${run}:`;
 		let refusal: unknown;

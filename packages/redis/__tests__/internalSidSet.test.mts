@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-// #291 — the sid-keyed SET backing the federation token store's per-session
-// key index, against a real Redis. Sibling of `internalSidHash.test.mts` and
+// The sid-keyed SET backing the federation token store's per-session key
+// index, against a real Redis. Sibling of `internalSidHash.test.mts` and
 // `internalSidSortedSet.test.mts`.
 //
 // The expiry semantics (`PEXPIRE … NX` + `PEXPIRE … GT` inside one MULTI) and
@@ -71,7 +71,7 @@ describe("createRedisSidSet", () => {
 		expect(await collect(s.members("nobody"))).toEqual([]);
 	});
 
-	// The bootstrap half of the D-10 pair: a bare `PEXPIRE … GT` would silently
+	// The bootstrap half of the NX + GT pair: a bare `PEXPIRE … GT` would silently
 	// no-op on a key with no TTL, leaving the index persistent — a key that
 	// outlives every session it ever described.
 	it("first write sets a TTL (no infinite-TTL bootstrap leak)", async () => {
@@ -100,8 +100,7 @@ describe("createRedisSidSet", () => {
 	it("the key expires on its own once the TTL elapses", async () => {
 		// A relative PX runs from when the command reached the server, so the
 		// wait is to the latest instant the key can live to on the server's
-		// clock — not a 300 ms host sleep after a 200 ms TTL, which a command
-		// queued behind a loaded run outlasts.
+		// clock, not a sleep on the host's.
 		const s = createRedisSidSet({ client, keyPrefix: prefix("ttl-expire") });
 		const end = await relativeDeadline(
 			() => raw,
@@ -144,7 +143,7 @@ describe("createRedisSidSet", () => {
 		expect(await collect(s.members("sid-paged"))).toEqual([...expected].sort());
 	});
 
-	// Copilot review on PR #352. The unit tests assert this against a fake, so
+	// The unit tests assert this against a fake, so
 	// they only prove we handle the reply shape we assumed. This proves the
 	// assumption: a real Redis answers EXEC successfully while reporting
 	// WRONGTYPE for the queued SADD, and ioredis resolves rather than rejects.

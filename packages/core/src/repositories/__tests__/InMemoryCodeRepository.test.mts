@@ -368,7 +368,7 @@ describe("InMemoryCodeRepository", () => {
 			}
 		});
 
-		it("createCode without nonce/sid leaves them undefined (backward compat)", async () => {
+		it("createCode without nonce/sid leaves them undefined", async () => {
 			repo = new InMemoryCodeRepository();
 			const { code } = await repo.createCode(minimalParams);
 			const r = await repo.findByCode(code);

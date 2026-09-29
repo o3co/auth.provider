@@ -289,7 +289,7 @@ describe("BootError", () => {
 		expect(err.cause).toBeUndefined();
 	});
 
-	it("does NOT define an own `cause` property when omitted (spec §6.1)", () => {
+	it("does NOT define an own `cause` property when omitted", () => {
 		// Calling super(msg, { cause: undefined }) materialises an own property;
 		// the constructor must omit the second arg entirely when args.cause is
 		// undefined so the contract "cause is populated only for *-factory-failed
@@ -369,7 +369,7 @@ describe("AppHandle", () => {
 // ---------------------------------------------------------------------------
 
 describe("DefaultBootstrapMap", () => {
-	it("declares the closed { config: AppConfig; pathResolver: PathResolver } shape per spec §6.2", () => {
+	it("declares the closed { config: AppConfig; pathResolver: PathResolver } shape", () => {
 		expectTypeOf<DefaultBootstrapMap>().toEqualTypeOf<{
 			readonly config: AppConfig;
 			readonly pathResolver: PathResolver;

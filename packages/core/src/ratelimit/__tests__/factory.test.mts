@@ -97,7 +97,7 @@ describe("memory rate limiter — a spec it cannot apply as written", () => {
 		}
 	});
 
-	it("refuses them through the factory too, which used to drop a spec or put its own default in", async () => {
+	it("refuses them through the factory too, in limits and as the default", async () => {
 		const factory = createRateLimiterFactory();
 		registerBuiltinRateLimiters(factory);
 		for (const spec of [...specs, { limit: "5", windowSeconds: "60" }]) {

@@ -207,7 +207,7 @@ describe("verifyJwt — subject revocation store outage", () => {
  * *just before* the credential change would survive it.
  *
  * The allowance is its own small value, not `clockSkewMs`: that defaults to
- * five minutes (RFC 8725 §3.10, for `exp`/`nbf`), and here it would refuse
+ * five minutes (RFC 7519 §4.1.4, for `exp`/`nbf`), and here it would refuse
  * every token minted in the five minutes after a reset, including the one
  * from the re-login the reset sends the user to.
  */

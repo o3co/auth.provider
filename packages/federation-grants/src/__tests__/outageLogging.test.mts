@@ -284,7 +284,7 @@ describe("the status route", () => {
 		});
 	});
 
-	it("logs a key missing from the ring, which it used to answer in silence", async () => {
+	it("logs a key missing from the ring once, answering key_unavailable", async () => {
 		const h = harness();
 		await h.seed();
 		h.world.credentials = "key_unavailable";

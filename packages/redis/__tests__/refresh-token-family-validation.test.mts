@@ -55,7 +55,7 @@ const makeMockClient = (
 	return self;
 };
 
-describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", () => {
+describe("RedisRefreshTokenFamilyStore.findFamily — corrupt-data validation", () => {
 	const keyPrefix = "rtfam:";
 
 	it("throws RefreshTokenStorageError({reason:'corrupt-data'}) for truncated JSON in Redis", async () => {
@@ -132,14 +132,10 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 		expect((err as RefreshTokenStorageError).reason).toBe("corrupt-data");
 	});
 
-	// Per Copilot review on PR #123: `expiresAtMs` is now
-	// `z.number().int().positive().finite()` rather than the looser
-	// `z.number()`. Each of these previously-accepted bad values must now
-	// surface as `corrupt-data`. Note: `Infinity` / `NaN` cannot survive
-	// `JSON.stringify` (they serialize to `null`); operator-injected raw
-	// JSON containing those tokens is invalid JSON and would already trip
-	// the parse-failure branch. The cases below cover values that DO
-	// JSON-roundtrip but were silently accepted by the looser schema.
+	// `expiresAtMs` is `z.number().int().positive().finite()`, so each of
+	// these values surfaces as `corrupt-data`. `Infinity` / `NaN` serialize to
+	// `null`, and raw JSON holding them fails the parse instead, so only values
+	// that survive a JSON round trip are here.
 	it.each([
 		["expiresAtMs zero", 0],
 		["expiresAtMs negative", -1],
@@ -170,7 +166,7 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 		},
 	);
 
-	it("returns the family normally for a valid envelope (regression guard)", async () => {
+	it("returns the family for a valid envelope", async () => {
 		const expiresAtMs = Date.now() + 60_000;
 		const store = new Map<string, string>([
 			[
@@ -197,7 +193,7 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 	});
 });
 
-describe("TS-6: redisRefreshTokenFamilyStoreBuilder — client guard", () => {
+describe("redisRefreshTokenFamilyStoreBuilder — client guard", () => {
 	it("throws when 'client' option is missing (config = {})", () => {
 		expect(() =>
 			redisRefreshTokenFamilyStoreBuilder({} as never, { lifecycle: undefined } as never),

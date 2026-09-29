@@ -103,7 +103,7 @@ beforeEach(() => {
 // verifyWebAuthnAttestation
 // ---------------------------------------------------------------------------
 
-describe("verifyWebAuthnAttestation (spec §2.5)", () => {
+describe("verifyWebAuthnAttestation", () => {
 	it("returns origin_mismatch when SimpleWebAuthn throws an origin error", async () => {
 		mockVerifyRegistration.mockRejectedValueOnce(
 			new Error(
@@ -246,7 +246,7 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 // verifyWebAuthnAssertion (incl. the sign-count rule)
 // ---------------------------------------------------------------------------
 
-describe("verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)", () => {
+describe("verifyWebAuthnAssertion", () => {
 	it("returns origin_mismatch when SimpleWebAuthn throws an origin error", async () => {
 		mockVerifyAuthentication.mockRejectedValueOnce(
 			new Error(
@@ -298,7 +298,7 @@ describe("verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)", () => {
 		expect(result).toEqual({ ok: false, reason: "sign_count_regression" });
 	});
 
-	it("§2.4 corner case: stored=0 and new=0 → ok=true (authenticator always reports 0)", async () => {
+	it("sign-count corner case: stored=0 and new=0 → ok=true (an authenticator that always reports 0)", async () => {
 		// SimpleWebAuthn does NOT throw when both counters are 0:
 		//   (0 > 0 || 0 > 0) === false → no counter throw
 		// We still need verified=true from signature check.

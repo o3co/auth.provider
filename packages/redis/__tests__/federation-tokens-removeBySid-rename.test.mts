@@ -92,7 +92,7 @@ const tokens: FederationTokens = {
 	grantedScope: undefined,
 };
 
-describe("AS-3: redis FederationTokenStore.deleteBySession → removeBySid (BREAKING rename)", () => {
+describe("redis FederationTokenStore.removeBySid, and no deleteBySession", () => {
 	it("redis store exposes removeBySid", () => {
 		const store = createRedisFederationTokenStore({
 			client: createFakeRedis(),
@@ -101,7 +101,7 @@ describe("AS-3: redis FederationTokenStore.deleteBySession → removeBySid (BREA
 		expect("removeBySid" in store).toBe(true);
 	});
 
-	it("redis store no longer exposes deleteBySession", () => {
+	it("redis store does not expose deleteBySession", () => {
 		const store = createRedisFederationTokenStore({
 			client: createFakeRedis(),
 			encryption: { mode: "required", key: encryptionKey },
@@ -109,7 +109,7 @@ describe("AS-3: redis FederationTokenStore.deleteBySession → removeBySid (BREA
 		expect("deleteBySession" in store).toBe(false);
 	});
 
-	it("removeBySid removes all federation entries for sid (functional parity)", async () => {
+	it("removeBySid removes all federation entries for sid", async () => {
 		const redis = createFakeRedis();
 		const store = createRedisFederationTokenStore({
 			client: redis,

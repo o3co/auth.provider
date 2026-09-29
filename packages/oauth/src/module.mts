@@ -81,16 +81,15 @@ const oauthConfigSchema = z.object({
  * userinfo, the logout cascade and federation-token.
  */
 export const oauthModule = (_params: { config: AppConfig }): Module => {
-	// Inline route factories so `defineModule` infers the typed `deps`
-	// shape from `requires` / `optional`; a typed const array would have to
-	// restate R / O. The factory bridges `deps` to `createOAuthRouter`'s
-	// explicit options (`registry: Pick<GrantHandlerResolver, "get">`,
+	// Inline route factories, so their `deps` is typed from `defineModule`'s
+	// R / O; a typed const array would have to restate them. The factory
+	// bridges `deps` to `createOAuthRouter`'s explicit options
+	// (`registry: Pick<GrantHandlerResolver, "get">`,
 	// `getFederationProviders: () => ...`).
 	//
-	// Explicit `defineModule<R, O>` generics, so contextual typing reaches
-	// the factories (TS does not propagate the contributes element type
-	// through `...(cond ? [fn] : [])`). Written out, they infer nothing, so
-	// the section schema (none: `never`) and the provided keys
+	// The type arguments are written out, though inference from `requires`,
+	// `optional` and `provides` would give the same. Written, they infer
+	// nothing, so the section schema (none: `never`) and the provided keys
 	// `authoritative` is typed against are written too.
 	return defineModule<
 		| "config"

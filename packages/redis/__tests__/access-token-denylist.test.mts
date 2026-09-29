@@ -4,14 +4,9 @@
  */
 
 /**
- * Redis-backed AccessTokenDenylist (#277).
- *
- * The bundled memory denylist forks per replica, which makes it useless for the
- * thing a denylist is for: a revocation performed on one replica has to be
- * visible on the others. `deployment.mode = "multi"` already refuses it (see
- * core's replica-safety guard), which left multi-replica deployments with no
- * denylist at all — and therefore, before #277, with a `/oauth/revoke` that
- * answered 200 and did nothing.
+ * Redis-backed AccessTokenDenylist. A revocation on one replica must be
+ * visible on the others; the memory denylist forks per replica, so
+ * `deployment.mode = "multi"` refuses it (core's replica-safety guard).
  */
 import type { AccessTokenDenylist } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
@@ -66,8 +61,7 @@ describe("createRedisAccessTokenDenylist", () => {
 		//
 		// Waited out to the latest instant the key can live to on the server's
 		// clock (`relativeDeadline`): its PX runs from when the SET reached the
-		// server, so a 250 ms host sleep after a 150 ms life was outlasted by a
-		// command queued behind a loaded run.
+		// server, not from the host's call.
 		const store = freshStore();
 		const exp = Date.now() + 1_000;
 		const end = await relativeDeadline(

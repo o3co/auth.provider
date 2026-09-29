@@ -205,7 +205,8 @@ export interface JwtVerifyOptions {
 	readonly expectedNonce?: string;
 	/**
 	 * Clock skew tolerance in milliseconds applied to `exp`/`nbf`/`iat`
-	 * checks. Default: 300_000 (5 min) per RFC 8725 §3.10 guidance.
+	 * checks. Default: 300_000 (5 min); RFC 7519 §4.1.4 puts a leeway at
+	 * "usually no more than a few minutes".
 	 *
 	 * An access-token denylist entry (`/oauth/revoke`) is kept until `exp` plus
 	 * the default only. A larger value here would accept a revoked token for
@@ -579,9 +580,8 @@ export async function verifyJwt(
 		}
 	}
 
-	// iat in future beyond skew — jose does not enforce this; RFC 8725 §3.10
-	// recommends rejecting because a future iat indicates clock tampering or
-	// token replay from a forged time source.
+	// iat in the future beyond skew: jose refuses one only when given
+	// `maxTokenAge`, which is not passed.
 	if (typeof payload.iat === "number") {
 		const nowSeconds = Math.floor(Date.now() / 1000);
 		if (payload.iat > nowSeconds + clockSkewSeconds) {

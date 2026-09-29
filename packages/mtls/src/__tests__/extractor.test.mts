@@ -85,7 +85,7 @@ describe("createMtlsMechanism — header source", () => {
 	});
 
 	it("kind === 'mtls' and intentExplicit === false (ambient transport-layer signal)", () => {
-		// Per spec §3.2: mTLS is the ambient mechanism — even when sourced from
+		// mTLS is the ambient mechanism — even when sourced from
 		// a forwarded header, the underlying signal is transport-layer cert
 		// presentation. Dispatch policy ("intent-explicit") relies on this flag.
 		const mech = createMtlsMechanism({
@@ -155,7 +155,7 @@ describe("createMtlsMechanism — header source", () => {
 	});
 
 	it("uses 'x-forwarded-client-cert' as the default header name", async () => {
-		// certHeader is optional; default per spec §10.1 + §10.2 schema default.
+		// certHeader is optional; it defaults to the config schema's `cert-header` default.
 		const mech = createMtlsMechanism({
 			source: "header",
 			trustedProxies: [TRUSTED_PEER],
@@ -558,7 +558,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		).not.toThrow();
 	});
 
-	it("resolves `file:<path>` trustedCas entries from disk at boot (spec §7.1)", async () => {
+	it("resolves `file:<path>` trustedCas entries from disk, and validates a chain against them", async () => {
 		// Operator-friendly form documented in reference.conf — file paths are
 		// read synchronously at module construction. Use the committed root.pem
 		// fixture as the source.

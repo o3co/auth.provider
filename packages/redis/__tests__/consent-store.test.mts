@@ -4,16 +4,15 @@
  */
 
 /**
- * Redis-backed `ConsentStore` and `PendingConsentStore` (#561) against the
- * shared conformance suites, on a real Redis.
+ * Redis-backed `ConsentStore` and `PendingConsentStore` against the shared
+ * conformance suites, on a real Redis.
  *
  * The suites move time with `vi.setSystemTime`, which cannot move the Redis
- * server's clock — so they pass only because the adapters judge expiry by the
+ * server's clock: they pass only because the adapters judge expiry by the
  * record's timestamp against the caller's `Date.now()`, never by the key's
- * TTL. The cases below the suites pin what is Redis-specific: the key layout
- * the Cluster argument rests on, the TTL that is only a safety net, the
- * per-session index the bound is enforced through, and atomicity across two
- * connections rather than one pipelined socket.
+ * TTL. The cases below pin what is Redis-specific: the key layout Cluster
+ * relies on, the TTL as only a safety net, the per-session index that
+ * enforces the bound, and atomicity across two connections.
  */
 
 import type { PendingConsentRecord } from "@o3co/auth-provider-core";
@@ -66,8 +65,8 @@ runPendingConsentStoreContract("redis", { create: async () => pendingStoreAt(fre
 
 describe("consent stores on Redis — an expiry past the Date range", () => {
 	// The scripts write the record before they set its TTL, and Redis refuses a
-	// TTL it cannot hold (`1e21` arrives as `1e+21`) — after the write. The
-	// record was left with no TTL; a consent that should lapse never did.
+	// TTL it cannot hold (`1e21` arrives as `1e+21`) only after the write,
+	// which would leave a consent that never lapses.
 	it("is refused by grant before the script writes anything", async () => {
 		for (const expiresAt of [8_640_000_000_000_001, 1e20, 1e21]) {
 			const prefix = freshPrefix();
@@ -108,7 +107,7 @@ const parked = (overrides: Partial<PendingConsentRecord> = {}): PendingConsentRe
 	...overrides,
 });
 
-describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
+describe("createRedisConsentStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(consentStoreAt(freshPrefix()).kind).toBe("redis");
 	});
@@ -218,7 +217,7 @@ describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
 	});
 });
 
-describe("createRedisPendingConsentStore — what is Redis-specific (#561)", () => {
+describe("createRedisPendingConsentStore — what is Redis-specific", () => {
 	it('declares kind "redis"', () => {
 		expect(pendingStoreAt(freshPrefix()).kind).toBe("redis");
 	});
@@ -325,7 +324,7 @@ describe("createRedisPendingConsentStore — what is Redis-specific (#561)", () 
 	});
 });
 
-describe("corrupt records read as absent, never as a throw or a half-typed record (#561 review)", () => {
+describe("corrupt records read as absent, never as a throw or a half-typed record", () => {
 	// Nothing this package writes is corrupt; a value edited by hand, restored
 	// from a mismatched backup or written by another version is. A record that
 	// is not the shape the port promises must not reach the consent route —

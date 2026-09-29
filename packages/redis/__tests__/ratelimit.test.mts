@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { redisRateLimiterBuilder } from "../src/ratelimit.mjs";
 
 // `createRedisRateLimiter`'s own behaviour lives in ratelimit-atomicity.test.mts,
-// which exercises it against the atomic `incrementWithTtl` contract (#269).
+// which exercises it against the atomic `incrementWithTtl` contract.
 
 describe("redisRateLimiterBuilder", () => {
 	it("rejects missing client", () => {

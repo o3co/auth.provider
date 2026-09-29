@@ -280,7 +280,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		});
 	});
 
-	it("mints a token for the minimal happy-path input (was Task 6 stub guard)", async () => {
+	it("answers 200 for the minimal happy-path input", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(

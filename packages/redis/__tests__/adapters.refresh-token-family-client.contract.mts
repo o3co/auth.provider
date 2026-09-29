@@ -17,19 +17,12 @@ import { describe, expect, it } from "vitest";
 import type { RefreshTokenFamilyClient } from "../src/clients.mjs";
 
 /**
- * Factory for the contract suite. Returns a freshly-built RefreshTokenFamilyClient
- * that targets a live Redis instance. The contract suite exercises the
- * `duplicate()` NORMATIVE MUSTs (T4 hardening per Claude review I1):
+ * Builds a RefreshTokenFamilyClient on a live Redis for the `duplicate()`
+ * contract: each duplicate is a distinct instance, is bound to a fresh socket
+ * (observed through WATCH isolation), and disposal closes that socket.
  *
- *   1. Each duplicate is a distinct instance.
- *   2. Each duplicate is bound to a fresh underlying socket — observed
- *      behaviourally via WATCH isolation.
- *   3. Disposal closes the underlying socket.
- *
- * Wrapper authors integrating a new Redis library MUST run this suite
- * against their wrapper before shipping. A passing in-memory stub is
- * NOT sufficient evidence of WATCH isolation; this suite requires a
- * live Redis to detect socket sharing.
+ * A wrapper for a new Redis library MUST pass this suite. It needs a live
+ * Redis: an in-memory stub cannot show WATCH isolation.
  */
 export type RefreshTokenFamilyClientFactory = () => RefreshTokenFamilyClient;
 
@@ -56,7 +49,7 @@ export function runRefreshTokenFamilyClientDuplicateContract(
 			const client = factory();
 			const keyA = `${keyPrefix}watch-isolation-a-${Date.now()}`;
 			const keyB = `${keyPrefix}watch-isolation-b-${Date.now()}`;
-			// Ensure keys are absent before the test (fresh prefix eliminates risk).
+			// The timestamp suffix keeps both keys absent at the start of each run.
 
 			await using dup1 = client.duplicate();
 			await using dup2 = client.duplicate();

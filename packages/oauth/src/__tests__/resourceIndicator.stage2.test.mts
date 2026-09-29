@@ -280,7 +280,7 @@ describe("RFC 8707 resource → audience binding — client_credentials", () => 
 		expect(out.result.error).toBe("invalid_target");
 	});
 
-	it("flag off: no enforcement, pre-Stage-2 behaviour preserved", async () => {
+	it("flag off: a request naming an allowed resource succeeds", async () => {
 		const grant = createClientCredentialsGrant(makeCCDeps({}, false));
 		const out = await grant.handle(makeCCCtx({ resource: OTHER }));
 
@@ -344,7 +344,7 @@ describe("RFC 8707 resource → audience binding — refresh_token", () => {
 		expect(out.result.error).toBe("invalid_target");
 	});
 
-	it("flag off: no enforcement, pre-Stage-2 behaviour preserved", async () => {
+	it("flag off: a request naming an allowed resource succeeds", async () => {
 		const grant = createRefreshTokenGrant(makeRefreshDeps({}, false));
 		const out = await grant.handle(makeRefreshCtx(await makeRefreshToken(), { resource: API }));
 

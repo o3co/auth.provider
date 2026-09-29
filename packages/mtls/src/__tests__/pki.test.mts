@@ -56,7 +56,7 @@ const extLeafCaTrue = loadCert("ext-leaf-ca-true.pem");
 
 const EXT_NOW = new Date();
 
-describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
+describe("validateCertChain — narrow PKI mode", () => {
 	it("accepts a well-formed chain: leaf → intermediate → root (trusted)", () => {
 		const result = validateCertChain(leaf, [intermediate], [root], NOW);
 		expect(result.ok).toBe(true);

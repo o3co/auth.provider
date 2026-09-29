@@ -115,7 +115,7 @@ async function seededCredentialStore() {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("POST /oauth/webauthn/authentication/options (spec §2.4)", () => {
+describe("POST /oauth/webauthn/authentication/options", () => {
 	it("no userId in body → discoverable flow: empty/absent allowCredentials, challenge stored under webauthn:authentication", async () => {
 		const challengeStore = createMemoryChallengeStore();
 		const issueSpy = vi.spyOn(challengeStore, "issue");
@@ -285,7 +285,7 @@ describe("POST /oauth/webauthn/authentication/options — userId bounds", () => 
 		expect(listSpy).not.toHaveBeenCalled();
 	});
 
-	it("rejects a 100kb userId with 400 (the DoS shape the endpoint used to accept)", async () => {
+	it("rejects a 100kb userId with 400, minting no challenge", async () => {
 		const challengeStore = createMemoryChallengeStore();
 		const issueSpy = vi.spyOn(challengeStore, "issue");
 		const { app } = buildApp(challengeStore);

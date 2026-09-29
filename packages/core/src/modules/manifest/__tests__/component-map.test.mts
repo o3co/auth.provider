@@ -1,7 +1,7 @@
 import { expectTypeOf, test } from "vitest";
 import type { ComponentKey, ComponentMap } from "../component-map.mjs";
 
-test("ComponentMap accumulates declaration-merged slots from each phase", () => {
+test("ComponentMap declares the two bootstrap slots, config and pathResolver", () => {
 	// ComponentMap is a declaration-mergeable interface. This asserts only the
 	// two bootstrap slots, `config` and `pathResolver`: modules keep adding
 	// slots, and a `toEqualTypeOf` on the full union would need an edit for
