@@ -168,7 +168,7 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("hands back every field with its own value, through each read (#626)", async () => {
+		it("hands back every field with its own value, through each read", async () => {
 			// The types make a store name every field; they cannot see two of the
 			// same type swapped — `requestedScope` and `grantedScope` are both
 			// scope lists. Granted is narrowed below requested here, so a swap
@@ -210,7 +210,7 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("names every key of a scopeless request, and of a denial (#626)", async () => {
+		it("names every key of a scopeless request, and of a denial", async () => {
 			// The fields that hold `undefined` here are the ones a store might
 			// leave out rather than name; `toStrictEqual` fails on a missing key
 			// where `toEqual` would pass.
@@ -235,7 +235,7 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("names every key of a scopeless approval, which grants the empty set (#626)", async () => {
+		it("names every key of a scopeless approval, which grants the empty set", async () => {
 			// `grantedScope` is `undefined` only before approval. A request that
 			// asked for no scope, approved without one, grants the empty set —
 			// adapters intersect with `requestedScope` — and every other key is

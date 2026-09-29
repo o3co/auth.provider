@@ -131,7 +131,7 @@ describe("protectedResourceBindingMw — pass-through", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The bug in #264 — a bound token replayed as a plain Bearer
+// A bound token replayed as a plain Bearer
 // ---------------------------------------------------------------------------
 
 describe("protectedResourceBindingMw — enforcement", () => {
@@ -563,7 +563,7 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 	});
 });
 
-describe("protectedResourceBindingMw — the nonce challenge (#530, RFC 9449 §9)", () => {
+describe("protectedResourceBindingMw — the nonce challenge (RFC 9449 §9)", () => {
 	it("answers 401 use_dpop_nonce with the challenge naming it and the DPoP-Nonce header", async () => {
 		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
 		const err = Object.assign(new Error("no nonce"), {
@@ -583,7 +583,7 @@ describe("protectedResourceBindingMw — the nonce challenge (#530, RFC 9449 §9
 		expect(res.headers["DPoP-Nonce"]).toBe("n1");
 	});
 
-	it("challenges with whatever code a retry instruction carries, and treats a bare code as a failed proof (v0.13.0 audit)", async () => {
+	it("challenges with whatever code a retry instruction carries, and not with a bare code", async () => {
 		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
 		const retry = Object.assign(new Error("nonce"), {
 			code: "use_fresh_nonce",

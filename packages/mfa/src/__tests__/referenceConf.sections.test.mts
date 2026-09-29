@@ -15,7 +15,7 @@
  */
 
 /**
- * The package's `config/reference.conf` (#728): the modules that read it
+ * The package's `config/reference.conf`: the modules that read it
  * declare it as their section's reference, and it holds only their
  * sections, which their section schemas parse without losing a path —
  * core's `packageReferenceProblems`, the check every package with defaults
@@ -31,7 +31,7 @@ import { mfaTotpFactorModule } from "#/totp/module.mjs";
 /** The package's defaults, as a composition root finds them. */
 const REFERENCE = new URL("../../config/reference.conf", import.meta.url);
 
-describe("the package's config/reference.conf (#728)", () => {
+describe("the package's config/reference.conf", () => {
 	const modules = [mfaModule(), mfaTotpFactorModule];
 
 	it("is read at the sections its modules declare", () => {

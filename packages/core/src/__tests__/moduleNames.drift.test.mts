@@ -213,7 +213,7 @@ describe("the module-name scan", () => {
 	});
 });
 
-describe("every module the repository ships is named in kebab-case (#728)", () => {
+describe("every module the repository ships is named in kebab-case", () => {
 	it("names each one in kebab-case, in a form the scan can read", () => {
 		const offenders = NAMES.filter(
 			(found) => found.name === undefined || !KEBAB_CASE.test(found.name),

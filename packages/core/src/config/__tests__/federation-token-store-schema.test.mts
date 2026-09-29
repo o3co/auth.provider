@@ -27,7 +27,7 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
  * declared. Presence-only, like the other `redis*` sections: the defaults stay
  * in `reference.conf` and in `redisFederationTokenStoreModule.configSchema`.
  */
-describe("federationTokenStore / redisFederationTokenStore survive AppConfigSchema (#456)", () => {
+describe("federationTokenStore / redisFederationTokenStore survive AppConfigSchema", () => {
 	it("keeps the adapter switch", () => {
 		const parsed = AppConfigSchema.parse({
 			...makeValidAppConfig(),

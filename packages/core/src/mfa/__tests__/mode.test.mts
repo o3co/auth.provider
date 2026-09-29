@@ -17,7 +17,7 @@
 /**
  * `mfa.mode` as a consumer reads it (the MFA ADR's D19): the boot check that
  * refuses `mfa.mode` without a requirement named `mfa` (the session-admission
- * ADR's D7), and the MFA package once it exists.
+ * ADR's D7), and the MFA package.
  */
 
 import { describe, expect, it } from "vitest";
@@ -47,7 +47,7 @@ describe("readMfaMode — `mfa.mode` as a consumer reads it", () => {
 		"refuses %s with a RangeError naming mfa.mode: a given but unusable mode is never read as off",
 		(_label, config) => {
 			// Read as absent, a typo would default to "off" and switch MFA off —
-			// failing open once a consumer enforces the mode.
+			// failing open wherever the mode is enforced.
 			expect(() => readMfaMode(config)).toThrow(RangeError);
 			expect(() => readMfaMode(config)).toThrow(/mfa\.mode/);
 		},

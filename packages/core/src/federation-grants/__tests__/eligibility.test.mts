@@ -28,7 +28,7 @@ import type { FederationGrantRefreshFailure } from "#/federation-grants/types.mj
 
 const CONSENTED = ["openid", "offline_access", "calendar.read"];
 
-describe("upstream token eligibility (#593, D5)", () => {
+describe("upstream token eligibility", () => {
 	describe("judgeUpstreamAccessToken", () => {
 		// No default parameter: passing `undefined` has to reach the rule.
 		const judge = (
@@ -93,7 +93,8 @@ describe("upstream token eligibility (#593, D5)", () => {
 			// A hand-built config that omits the key hands `undefined` through a
 			// cast, and `lifetime > undefined` is false: a 30-day token would pass.
 			// Infinity is no maximum either: every finite lifetime is within it,
-			// and residual access would be a number nobody chose (D15).
+			// and residual access would be a number nobody chose (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D15).
 			for (const bad of [
 				Number.NaN,
 				undefined as unknown as number,
@@ -265,7 +266,7 @@ describe("upstream token eligibility (#593, D5)", () => {
 		});
 	});
 
-	describe("the stamp of a failed refresh (D12)", () => {
+	describe("the stamp of a failed refresh", () => {
 		const at = new Date("2026-09-18T00:00:00.000Z");
 		const later = (ms: number) => new Date(at.getTime() + ms);
 		const limits = { allowanceMs: 30_000, backoffMs: 30_000, ceilingMs: 300_000 };
@@ -373,7 +374,7 @@ describe("upstream token eligibility (#593, D5)", () => {
 	});
 });
 
-describe("the scopes of an intent (#593, D6)", () => {
+describe("the scopes of an intent", () => {
 	const connection = { scopes: CONSENTED };
 	const resolve = resolveFederationGrantIntentScopes;
 

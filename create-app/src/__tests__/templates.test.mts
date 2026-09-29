@@ -132,7 +132,7 @@ describe("copyTemplates", () => {
 		expect(existsSync(join(dest, "alpha", "dist"))).toBe(false);
 	});
 
-	it("stages each .gitignore under a name npm publishes (#407)", () => {
+	it("stages each .gitignore under a name npm publishes", () => {
 		copyTemplates(src, dest);
 		expect(existsSync(join(dest, "alpha", ".gitignore"))).toBe(false);
 		expect(readFileSync(join(dest, "alpha", "gitignore"), "utf-8")).toBe(".env\n");

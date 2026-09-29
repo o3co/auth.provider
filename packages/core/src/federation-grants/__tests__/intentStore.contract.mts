@@ -198,7 +198,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				expect(await store.getIntent(record.handle, at(MIN))).toStrictEqual(intent());
 			});
 
-			it("hands back every field with its own value, and so does the transaction's snapshot (#626)", async () => {
+			it("hands back every field with its own value, and so does the transaction's snapshot", async () => {
 				// The fields a copy is likeliest to drop are the two a default
 				// fixture leaves unset; both widen the flow when lost — the upstream
 				// asked without the connection's audience, or the callback linking
@@ -288,7 +288,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				["resource", { resource: "https://api.example/other" }],
 				["upstreamSubject", { upstreamSubject: "00u-other" }],
 			] as const)(
-				"refuses a record under a resident handle that differs only in its %s (#626)",
+				"refuses a record under a resident handle that differs only in its %s",
 				async (_field, over) => {
 					// The two fields a default fixture leaves unset: a retry that
 					// differs in one of them is a different record, not the same one.

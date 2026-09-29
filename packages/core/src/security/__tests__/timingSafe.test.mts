@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { constantTimeStringEqual } from "../timingSafe.mjs";
 
-describe("constantTimeStringEqual (SF-3 + MIN-4)", () => {
+describe("constantTimeStringEqual", () => {
 	it("returns true for two equal strings", () => {
 		expect(constantTimeStringEqual("abc", "abc")).toBe(true);
 	});
@@ -39,7 +39,7 @@ describe("constantTimeStringEqual (SF-3 + MIN-4)", () => {
 	it("returns false for strings of different length without throwing", () => {
 		// `crypto.timingSafeEqual` throws when buffer lengths differ; the
 		// helper must short-circuit on the byte-length comparison first
-		// (Codex Delta 3: encode-then-length, not length-then-encode).
+		// (encode-then-length, not length-then-encode).
 		expect(() => constantTimeStringEqual("abc", "ab")).not.toThrow();
 		expect(constantTimeStringEqual("abc", "ab")).toBe(false);
 	});
@@ -54,10 +54,10 @@ describe("constantTimeStringEqual (SF-3 + MIN-4)", () => {
 	});
 
 	it("uses byte-length (UTF-8) for the length comparison, not JS string length", () => {
-		// Codex Delta 3: a multi-byte character (e.g. emoji) has JS string
-		// length 2 but UTF-8 byte length 4. The helper encodes first and
-		// compares byte-lengths so `timingSafeEqual` (which requires equal
-		// buffer lengths) never throws on Unicode input.
+		// A multi-byte character (e.g. emoji) has JS string length 2 but UTF-8
+		// byte length 4. The helper encodes first and compares byte-lengths so
+		// `timingSafeEqual` (which requires equal buffer lengths) never throws
+		// on Unicode input.
 		const emoji = "😀"; // JS length 2, UTF-8 length 4
 		const ascii = "ab"; // JS length 2, UTF-8 length 2
 		expect(() => constantTimeStringEqual(emoji, ascii)).not.toThrow();

@@ -463,7 +463,7 @@ describe("Session routes — POST /session/login", () => {
 	 * the page (`MfaTransaction.redirectTo`), so an embedder must be handed a
 	 * validated value.
 	 */
-	describe("redirect_to validation (#405)", () => {
+	describe("redirect_to validation", () => {
 		const reasonOf = (description: unknown): string | undefined =>
 			typeof description === "string" ? /\(reason: ([a-z-]+)\)/.exec(description)?.[1] : undefined;
 
@@ -629,7 +629,7 @@ describe("Session routes — POST /session/login", () => {
 	});
 
 	// The RFC 6749 §5.2 envelope, `{error, error_description}`, with no `message`.
-	describe("AS-1: RFC 6749 §5.2 error envelope", () => {
+	describe("RFC 6749 §5.2 error envelope", () => {
 		it("CSRF origin mismatch returns 403 access_denied with error_description (no `message`)", async () => {
 			const { app } = buildApp({
 				config: {
@@ -694,7 +694,7 @@ describe("Session routes — POST /session/login", () => {
 	 * session-riding, but login CSRF (forcing a victim's browser to
 	 * authenticate as the attacker) needs no cookie of the victim's at all.
 	 */
-	describe("#272: CSRF acceptance rule", () => {
+	describe("CSRF acceptance rule", () => {
 		it("rejects a login carrying neither an origin signal nor a token", async () => {
 			const { app } = buildApp();
 
@@ -868,7 +868,7 @@ function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): Subje
 	};
 }
 
-describe("Session routes — subject session index (#296)", () => {
+describe("Session routes — subject session index", () => {
 	it("records the sid against the subject on a successful login", async () => {
 		const index = makeSubjectSessionIndex();
 		const { app } = buildApp({

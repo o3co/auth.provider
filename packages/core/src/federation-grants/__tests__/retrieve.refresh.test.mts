@@ -65,7 +65,7 @@ function deferred<T>(): Deferred<T> {
 	return { promise, resolve, reject };
 }
 
-describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", () => {
+describe("retrieveFederationGrantToken — the refresh", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -145,7 +145,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			expect(lock.acquired).toBe(true);
 		});
 
-		it("sends the grant's resource: an upstream that needed it at authorization needs it at refresh too (D17)", async () => {
+		it("sends the grant's resource: an upstream that needed it at authorization needs it at refresh too", async () => {
 			h.world.connections.set(connection.name, {
 				...connection,
 				resource: "https://calendar.example/",
@@ -189,7 +189,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		it("records the scopes and the token type the response names, and the grant's scopes and Bearer when it names none", async () => {
 			await h.seed();
 			setNow(DUE);
-			// As the upstream spelled it: a bearer token in any case is one (D5).
+			// As the upstream spelled it: a bearer token in any case is one (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D5).
 			h.refresh.mockResolvedValue(
 				refreshed("1", DUE, { scope: "openid  calendar.read", tokenType: "BEARER" }),
 			);
@@ -295,7 +296,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("a fresh token that may not be disclosed (D5)", () => {
+	describe("a fresh token that may not be disclosed", () => {
 		const cases: Array<[string, Partial<DelegatedTokens>, string]> = [
 			[
 				"a lifetime over the maximum",
@@ -340,9 +341,10 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		}
 
-		it("a wider consent on the same connection does not widen the narrower grant (row 7: G1, G2)", async () => {
+		it("a wider consent on the same connection does not widen the narrower grant", async () => {
 			// G1 consented for the narrow set; G2, later, for the whole
-			// connection. An IdP that accumulates consent (D19) answers G1's
+			// connection. An IdP that accumulates consent (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D19) answers G1's
 			// refresh with G2's scopes. G1 is starved — the token is never
 			// written, the rotated refresh token is kept for the
 			// reauthorization — and G2, whose consent covers the answer, is
@@ -427,7 +429,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("an upstream that refuses (D11, D12)", () => {
+	describe("an upstream that refuses", () => {
 		it("requires reauthorization for a STRUCTURED invalid_grant, and deletes the credentials", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -474,7 +476,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		});
 
-		describe("an upstream that asked for the user (#616, D11, D12)", () => {
+		describe("an upstream that asked for the user", () => {
 			// The four codes an IdP answers with when it wants the user and not a
 			// new token. Nothing said the refresh token is bad, so both tokens are
 			// kept; nothing is mended by waiting, so no wait is told; and the
@@ -546,8 +548,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			it("but not beside a 5xx: an outage is never a verdict, whatever code its body names", async () => {
 				// A 503 whose body says login_required is the IdP down, not the user
 				// gone: answering it as the user's absence would send the user to
-				// connect again because the IdP had an outage (review of #690). A
-				// 429 is no outage, and stays the user (above).
+				// connect again because the IdP had an outage. A 429 is no outage,
+				// and stays the user (above).
 				await h.seed();
 				setNow(DUE);
 				h.refresh.mockRejectedValue(asksFor("login_required", { status: 503 }));
@@ -823,7 +825,9 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			[
 				"an error code this provider knows",
 				Object.assign(new Error("x"), { error: "invalid_client", status: 401 }),
-				// A refusal is remembered at once (D12): the wait is what the stamp says.
+				// A refusal is remembered at once (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D12): the wait
+				// is what the stamp says.
 				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
 			],
 			// An upstream that echoes what it was sent, in the one field that gets
@@ -868,7 +872,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
 				// Nothing but the failure stamp: the credentials whole, and the grant
-				// whole apart from it — key for key (#626).
+				// whole apart from it — key for key.
 				expect(after?.credentials).toStrictEqual(before?.credentials);
 				const { refreshFailure: _after, ...afterRest } = after?.grant ?? {};
 				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
@@ -880,7 +884,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		);
 	});
 
-	describe("a writer that loses never returns the token it fetched (D2, D10)", () => {
+	describe("a writer that loses never returns the token it fetched", () => {
 		it("the grant is revoked while the upstream is being asked", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -1030,7 +1034,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				return written;
 			});
 			// A call refreshes once. What it wrote was replaced before its last look
-			// (D11): that is what it says, and not that the upstream failed it.
+			// (ADR 2026-09-17-federation-grants-offline-delegation, D11): that is
+			// what it says, and not that the upstream failed it.
 			expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
 				ok: false,
 				code: "temporarily_unavailable",
@@ -1087,7 +1092,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("the lock (D12)", () => {
+	describe("the lock", () => {
 		it("makes a second caller wait, look again, and answer with what the first one stored: the upstream is asked once", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -1173,7 +1178,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("a slow upstream must not cost users their grants (D12)", () => {
+	describe("a slow upstream must not cost users their grants", () => {
 		it("answers the caller at the soft deadline, and persists the late result all the same", async () => {
 			await h.seed();
 			setNow(GONE);
@@ -1261,7 +1266,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("a replacement that cannot be persisted (D12)", () => {
+	describe("a replacement that cannot be persisted", () => {
 		it("is retried inside the lock, within a budget, and then answered as a storage outage", async () => {
 			const grant = await h.seed();
 			setNow(GONE);
@@ -1338,7 +1343,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("what is presented to the upstream, and asked of the store (D12)", () => {
+	describe("what is presented to the upstream, and asked of the store", () => {
 		it("presents the refresh token read UNDER the lock, not the one read before waiting for it", async () => {
 			// Another replica rotated the refresh token while this call waited. What
 			// this call read before the wait is the old one, and presenting it is
@@ -1600,7 +1605,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	});
 });
 
-describe("assertFederationGrantRetrievalLimits (#593, D12)", () => {
+describe("assertFederationGrantRetrievalLimits", () => {
 	it("accepts the defaults: 25 s + 3 s leave two of the lock's 30", () => {
 		expect(() => assertFederationGrantRetrievalLimits(limits)).not.toThrow();
 	});

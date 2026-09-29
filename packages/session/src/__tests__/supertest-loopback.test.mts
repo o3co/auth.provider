@@ -50,7 +50,7 @@ function boundAddress(server: net.Server): Promise<AddressInfo> {
 	});
 }
 
-describe("supertest's own server listens on the loopback address it dials (#556)", () => {
+describe("supertest's own server listens on the loopback address it dials", () => {
 	it("binds 127.0.0.1, not the dual-stack wildcard, for request(server)", async () => {
 		const server = http.createServer(helloApp());
 		const bound = boundAddress(server);

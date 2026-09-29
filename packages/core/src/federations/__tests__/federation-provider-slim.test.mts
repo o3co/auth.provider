@@ -29,12 +29,12 @@ test("FederationProvider has name and scope", () => {
 	expectTypeOf<FederationProvider>().toHaveProperty("scope");
 });
 
-test("FederationProvider does NOT have validateRedirect (removed in A5)", () => {
+test("FederationProvider does NOT have validateRedirect", () => {
 	type HasValidateRedirect = "validateRedirect" extends keyof FederationProvider ? true : false;
 	expectTypeOf<HasValidateRedirect>().toEqualTypeOf<false>();
 });
 
-test("FederationProvider does NOT have resolveCallbackRedirect (removed in A5)", () => {
+test("FederationProvider does NOT have resolveCallbackRedirect", () => {
 	type HasResolve = "resolveCallbackRedirect" extends keyof FederationProvider ? true : false;
 	expectTypeOf<HasResolve>().toEqualTypeOf<false>();
 });

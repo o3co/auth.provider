@@ -260,7 +260,7 @@ describe("InMemoryCodeRepository", () => {
 	// directive whether or not the field under test were required. The
 	// directives sit on typed-variable declarations, not runtime calls, so the
 	// typecheck pass validates the contract without storing invalid records.
-	describe("D-1 / TS-1: createCode requires client_id and redirect_uri at compile time", () => {
+	describe("createCode requires client_id and redirect_uri at compile time", () => {
 		it("compile-time guard: omitting client_id is a type error", () => {
 			const { client_id: _omitted, ...withoutClientId } = minimalParams;
 			// @ts-expect-error client_id is required on CodeData (D-1)
@@ -287,7 +287,7 @@ describe("InMemoryCodeRepository", () => {
 		});
 	});
 
-	describe("TODO-F-3 extended fields (nonce / sid)", () => {
+	describe("extended fields (nonce / sid)", () => {
 		it("roundtrips nonce + sid + grantedScope via createCode → findByCode", async () => {
 			repo = new InMemoryCodeRepository();
 			const { code } = await repo.createCode({
@@ -319,7 +319,7 @@ describe("InMemoryCodeRepository", () => {
 			expect(second).toBeNull();
 		});
 
-		it("round-trips every field with its own value, through both reads (#626)", async () => {
+		it("round-trips every field with its own value, through both reads", async () => {
 			// The types catch a field forgotten by a copy, not two fields of the
 			// same type swapped: `nonce`, `sid`, `acr` and the challenge are all
 			// strings. Every value is distinct here, and the whole record is
@@ -344,7 +344,7 @@ describe("InMemoryCodeRepository", () => {
 			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
 		});
 
-		it("names every field it has no value for as undefined, rather than leaving it out (#626)", async () => {
+		it("names every field it has no value for as undefined, rather than leaving it out", async () => {
 			repo = new InMemoryCodeRepository();
 			const created = await repo.createCode(minimalParams);
 			const found = await repo.findByCode(created.code);

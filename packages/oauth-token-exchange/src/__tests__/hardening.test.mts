@@ -286,7 +286,7 @@ describe("token exchange — may_act on the impersonation path", () => {
 // (c) deny-by-absence of allowedGrantTypes
 // ---------------------------------------------------------------------------
 
-describe("token exchange — deny-by-absence of allowedGrantTypes (#326)", () => {
+describe("token exchange — deny-by-absence of allowedGrantTypes", () => {
 	it("declares requiresExplicitGrantAllowlist: true on the handler contract", () => {
 		expect(buildGrant().requiresExplicitGrantAllowlist).toBe(true);
 	});

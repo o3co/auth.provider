@@ -478,7 +478,7 @@ describe("dpopModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("holds a proof's htu to the issuer of the oauthTokenSettings a module provides, over the configuration's (#728)", async () => {
+	it("holds a proof's htu to the issuer of the oauthTokenSettings a module provides, over the configuration's", async () => {
 		// The oauth module owns `oauth {}` and provides what others read of it;
 		// a composition without it reads the configuration's issuer (above).
 		const SLOT_ORIGIN = "https://slot.test";
@@ -525,7 +525,7 @@ describe("dpopModule — integration via createApp", () => {
 		}
 	});
 
-	it("builds the mechanism on the slot's issuer when the configuration names none (#728)", () => {
+	it("builds the mechanism when the slot names an issuer and the configuration names none", () => {
 		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
 		const oauth = (boot.config as { oauth: Record<string, unknown> }).oauth;
 		delete oauth.jwt;
@@ -539,7 +539,7 @@ describe("dpopModule — integration via createApp", () => {
 		).not.toThrow();
 	});
 
-	it("refuses to build a mechanism when no canonical issuer is configured (#292)", () => {
+	it("refuses to build a mechanism when no canonical issuer is configured", () => {
 		// The origin every proof's `htu` is checked against is the deployment's
 		// own. Without one the AS would have to rebuild it from the request's
 		// forwarded headers, a binding the caller controls both sides of, so it
@@ -554,7 +554,7 @@ describe("dpopModule — integration via createApp", () => {
 		expect(() => buildMechanism(boot.config)).toThrow(/oauth\.jwt\.issuer/);
 	});
 
-	it("refuses to build a mechanism when the issuer is a bare host rather than a URL (#292)", () => {
+	it("refuses to build a mechanism when the issuer is a bare host rather than a URL", () => {
 		// The shape a `Host` header supplies; an origin is never derived from one.
 		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
 		(boot.config as { oauth: { jwt: unknown } }).oauth.jwt = { issuer: "as.example:3000" };
@@ -563,7 +563,7 @@ describe("dpopModule — integration via createApp", () => {
 	});
 });
 
-describe("dpopModule — server-provided nonce from config (#530)", () => {
+describe("dpopModule — server-provided nonce from config", () => {
 	const withNonce = (secret: string | undefined, required: "as" | "as+rs" = "as"): BootstrapMap => {
 		const boot = makeBoot(true);
 		const config = boot.config as { oauth: { dpop: Record<string, unknown> } };
@@ -586,7 +586,7 @@ describe("dpopModule — server-provided nonce from config (#530)", () => {
 		expect(() => buildMechanism(withNonce(undefined).config)).toThrow(/oauth\.dpop\.nonce\.secret/);
 	});
 
-	it("measures the secret on its decoded length, as every other operator secret is (v0.13.0 audit)", () => {
+	it("measures the secret on its decoded length, and names its key and env var when it falls short", () => {
 		// `openssl rand -hex 16` is 32 characters and 16 bytes of randomness:
 		// counting characters would pass a key with half the strength the floor
 		// exists to guarantee. Measured decoded, as `session.secret` and the

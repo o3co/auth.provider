@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-// #529: Client ID Metadata Documents — a client whose client_id is the https
+// Client ID Metadata Documents — a client whose client_id is the https
 // URL of its own registration (draft-ietf-oauth-client-id-metadata-document).
 export {
 	type ClientIdMetadataDocumentOptions,
@@ -39,10 +39,11 @@ export {
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,
 } from "./logout/renderFrontchannel.mjs";
-// #593 slice 5 (D13): the subject revocation service, installed explicitly —
-// it needs the whole session cascade, which `oauthModule` does not.
+// The subject revocation service, installed explicitly — it needs the whole
+// session cascade, which `oauthModule` does not (ADR
+// 2026-09-17-federation-grants-offline-delegation, D13).
 export { subjectRevocationServiceModule } from "./logout/subjectRevocationService.mjs";
-// #484: private_key_jwt client authentication (RFC 7523 §2.2).
+// private_key_jwt client authentication (RFC 7523 §2.2).
 export type {
 	ClientAssertionOutcome,
 	ClientAssertionVerifier,
@@ -60,7 +61,7 @@ export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
-// #728 — the oauthTokenSettings slot's value, which oauthModule provides;
+// The oauthTokenSettings slot's value, which oauthModule provides;
 // exported so a composition that provides the slot without the module
 // resolves it the same way.
 export { oauthTokenSettingsFrom } from "./tokenSettings.mjs";

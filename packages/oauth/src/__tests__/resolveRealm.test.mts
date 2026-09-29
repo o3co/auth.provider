@@ -16,8 +16,8 @@
 
 /**
  * `resolveRealm` is the single filter every `WWW-Authenticate: Basic` emission
- * site routes through. Since #266 the routers always hand it a configured
- * canonical issuer, so its degrade-to-"oauth" branch is no longer reachable
+ * site routes through. The routers always hand it a configured
+ * canonical issuer, so its degrade-to-"oauth" branch is not reachable
  * from a route — it is pinned here directly, because the helper is exported and
  * a library consumer can still pass an unusable value.
  */

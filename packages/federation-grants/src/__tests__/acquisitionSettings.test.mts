@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-// What a deployment must have configured before it may create grants (#593
-// slice 6, D6–D8), resolved once at boot. Each refusal here is one a user
-// would otherwise meet at the end of a consent, which is the worst place to
-// find out that the deployment was never set up to finish it.
+// What a deployment must have configured before it may create grants (the
+// federation-grants ADR, D6–D8), resolved once at boot. Each refusal here is
+// one a user would otherwise meet at the end of a consent, which is the worst
+// place to find out that the deployment was never set up to finish it.
 
 import {
 	type FederatedIdentityRegistration,
@@ -99,7 +99,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 		);
 	});
 
-	it("refuses a deployment with no consent page: consent is the provider's own and is never skipped (D8)", () => {
+	it("refuses a deployment with no consent page: consent is the provider's own and is never skipped", () => {
 		expect(() => resolve({})).toThrow(/federationGrants\.consent\.url/);
 		expect(() => resolve({ consent: {} })).toThrow(/federationGrants\.consent\.url/);
 		expect(() => resolve({ consent: { url: "" } })).toThrow(/federationGrants\.consent\.url/);
@@ -118,7 +118,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			"consent",
 			`${ISSUER}/consent#fragment`,
 			"/consent#fragment",
-			// A path that normalises to another host (the adversarial review).
+			// A path that normalises to another host.
 			"/.//evil.example/consent",
 		]) {
 			expect(() => resolve({ consent: { url } }), url).toThrow(/consent\.url/);
@@ -126,7 +126,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 	});
 
 	it("refuses a deployment with no login page: connect sends a browser that is not signed in there", () => {
-		// The page is the `loginEntry` slot (#728), which the session module
+		// The page is the `loginEntry` slot, which the session module
 		// provides from `endpoints.login.url`.
 		expect(resolve({ consent: { url: "/c" } }).login.urlFor("/back")).toBe(
 			"/login?redirect_to=%2Fback",
@@ -254,7 +254,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		}
 	});
 
-	it("refuses a lookup that cannot say which registrations it covers (#611)", () => {
+	it("refuses a lookup that cannot say which registrations it covers", () => {
 		expect(() =>
 			requireFederationGrantIdentityLookup(
 				"required",
@@ -283,7 +283,8 @@ describe("requireFederationGrantIdentityLookup", () => {
 	});
 
 	it("refuses the one registration the Store does not cover, by connection and registration, with both remedies", () => {
-		// D19's case: the login registration is covered, the grants one is not.
+		// The case of the federation-grants ADR's D19: the login registration
+		// is covered, the grants one is not.
 		const store = new Covering((registration) => registration.clientId !== "grants-client");
 		let error: unknown;
 		try {
@@ -342,7 +343,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		expect(message).not.toContain("directory offline");
 	});
 
-	it("tells the Store which claims each connection will hand it, connection by connection, even on one registration (#611)", () => {
+	it("tells the Store which claims each connection will hand it, connection by connection, even on one registration", () => {
 		// A directory keyed by tenant and object id covers a registration only
 		// when both are named; the same registration configured without them
 		// on another connection is refused, not covered by its neighbour.
@@ -359,7 +360,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		expect(store.claimsAsked).toEqual([["oid", "tid"], []]);
 	});
 
-	it("refuses a probe written as async that rejects, and leaves no unhandled rejection behind (Copilot, #612)", async () => {
+	it("refuses a probe written as async that rejects, and leaves no unhandled rejection behind", async () => {
 		// The probe is synchronous; one declared `async` answers a promise, which
 		// is not `true` and is refused. If that promise rejects, nothing else
 		// would ever observe it, and the host would see an unhandled rejection
@@ -389,7 +390,7 @@ describe("requireFederationGrantIdentityLookup", () => {
 		).toThrow(/connections\.calendar[\s\S]*identityLookup = "unsupported"/);
 	});
 
-	it("requires nothing with no connection configured, not even the methods: no callback can ask (Copilot, #612)", () => {
+	it("requires nothing with no connection configured, not even the methods: no callback can ask", () => {
 		// Removing the last connection must stay operable for a deployment whose
 		// repository has no lookup at all: nothing can reach check 5.
 		for (const repository of [

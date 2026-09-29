@@ -53,7 +53,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 	});
 
 	it("returns null for an expired token", async () => {
-		// SF-1: the central verifier defaults clockSkewMs to 300_000 (5 min)
+		// The central verifier defaults clockSkewMs to 300_000 (5 min)
 		// per RFC 8725 §3.10, so a "-1s" past exp falls inside skew. Use a
 		// past exp well beyond the default skew so the rejection is robust.
 		const token = await signSelfIssuedAccessToken({}, { expiresIn: "-10m" });
@@ -206,7 +206,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(await validator().validate(logoutToken, { role: "subject" })).toBeNull();
 	});
 
-	it("returns null for a subject_token whose jti is on the denylist (#367)", async () => {
+	it("returns null for a subject_token whose jti is on the denylist", async () => {
 		// The laundering path: revoke an AT, exchange it, keep an equivalent.
 		// A revoked subject_token must not mint a fresh token.
 		const token = await signSelfIssuedAccessToken({ jti: "at-revoked" });
@@ -223,7 +223,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(await v.validate(live, { role: "subject" })).not.toBeNull();
 	});
 
-	it("returns null for a subject_token issued before the subject watermark (#367)", async () => {
+	it("returns null for a subject_token issued before the subject watermark", async () => {
 		const token = await signSelfIssuedAccessToken({ sub: "u-reset" });
 		const subjectRevocation = {
 			kind: "stub",

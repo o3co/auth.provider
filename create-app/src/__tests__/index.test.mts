@@ -61,10 +61,10 @@ describe.each(platforms)("shouldCopyTemplateEntry on $name", ({ sep, installRoot
 	});
 
 	it("includes a file directly under the template root even when ancestor path contains 'node_modules'", () => {
-		// Regression for v0.5.0 npx install bug: when the package is installed
-		// at .../node_modules/@o3co/create-auth-provider/..., the previous filter
-		// checked every segment of the absolute source path and excluded
-		// everything, so cpSync copied no files.
+		// Installed at .../node_modules/@o3co/create-auth-provider/..., the
+		// package's own path contains `node_modules`: a filter that checked every
+		// segment of the absolute source path would exclude everything, and
+		// cpSync would copy no files.
 		expect(
 			shouldCopyTemplateEntry(joinSegments(installRoot, "package.json"), installRoot, sep),
 		).toBe(true);
@@ -476,9 +476,9 @@ describe("main (argv parsing and directory derivation)", () => {
 			} catch (e) {
 				// Only the `process.exit` stand-in above is an outcome. Anything else
 				// `main()` throws is a failure of the scaffold itself and must reach
-				// the test report under its own name: #556 saw it folded into
-				// `exitCode: null`, which surfaced as "expected null to be +0" and
-				// hid the ENOENT that explained it.
+				// the test report under its own name: folded into `exitCode: null`,
+				// it would surface as "expected null to be +0" and hide the error
+				// that explains it.
 				const m = e instanceof Error ? /^__exit__:(\d+)$/.exec(e.message) : null;
 				if (!m) throw e;
 				exitCode = Number(m[1]);
@@ -533,7 +533,7 @@ describe("main (argv parsing and directory derivation)", () => {
 		expect(pkg.name).toBe("my-auth");
 	});
 
-	// #289: the scaffold resolves the new project's lockfile by default…
+	// The scaffold resolves the new project's lockfile by default…
 	it("generates a lockfile in the scaffolded project by default", () => {
 		const r = runMain(["my-auth"]);
 		expect(r.exitCode).toBe(0);

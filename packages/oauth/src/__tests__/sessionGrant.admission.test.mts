@@ -156,8 +156,8 @@ const refused = async (
 	return result as GrantError & { readonly step_up?: unknown };
 };
 
-describe("the session grant on admission — the pinned changes (D8)", () => {
-	it("(4) the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant", async () => {
+describe("the session grant on admission — what the session and its record decide", () => {
+	it("the subject-revocation boundary applies when subjectRevocation is wired: 400 invalid_grant", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, new Date(), new Date(Date.now() + 3_600_000));
 		const result = await refused(
@@ -170,7 +170,7 @@ describe("the session grant on admission — the pinned changes (D8)", () => {
 		});
 	});
 
-	it("(4) a session established after the boundary still mints", async () => {
+	it("a session established after the boundary still mints", async () => {
 		const revocation = createInMemorySubjectRevocation();
 		await revocation.revokeBefore(SUBJECT, minutesAgo(10), new Date(Date.now() + 3_600_000));
 		const { result } = await grant({
@@ -180,7 +180,7 @@ describe("the session grant on admission — the pinned changes (D8)", () => {
 		expect(result.status).toBe(200);
 	});
 
-	it("(5) a record past its expiresAt is 400 invalid_grant session_invalid", async () => {
+	it("a record past its expiresAt is 400 invalid_grant session_invalid", async () => {
 		const result = await refused(
 			grant({ userSessionStore: storeWith(record({ expiresAt: minutesAgo(1) })) }),
 		);

@@ -51,7 +51,7 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		// #273: fixed policy, not a knob — the same object whatever the config.
+		// Fixed policy, not a knob — the same object whatever the config.
 		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(256);
 		expect(options.resourceIndicatorEnabled).toBe(false);
@@ -64,7 +64,7 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		// #273: fixed policy, not a knob — the same object whatever the config.
+		// Fixed policy, not a knob — the same object whatever the config.
 		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(256);
 		expect(options.resourceIndicatorEnabled).toBe(false);
@@ -72,7 +72,7 @@ describe("resolveOAuthOptions", () => {
 
 	it("treats the boolean opt-ins strictly — only literal `true` enables", () => {
 		// A hand-built config can carry an uncoerced env-var string. The strict
-		// `=== true` reads (matching the pre-#328 inline casts) must not widen.
+		// `=== true` reads must not widen.
 		const options = resolveOAuthOptions({
 			oauth: {
 				requireEmailVerified: "true",
@@ -84,7 +84,7 @@ describe("resolveOAuthOptions", () => {
 		expect(options.resourceIndicatorEnabled).toBe(false);
 	});
 
-	it("does not resolve the removed oauth.authorize.allowUnmarkedClients (#330)", () => {
+	it("does not resolve the removed oauth.authorize.allowUnmarkedClients", () => {
 		// A hand-built config bypasses the schema tombstone, so the resolver
 		// must not carry the stale key onto the options object — the /authorize
 		// handler has nothing to read even if an embedder still sets it.
@@ -102,7 +102,7 @@ describe("resolveOAuthOptions", () => {
 		expect(resolveOAuthOptions({ oauth: { jwt: { issuer: "" } } }).issuer).toBe("");
 	});
 
-	it("ignores every legacy pkce knob and warns through the given logger (#273)", () => {
+	it("ignores the legacy pkce knobs requireS256 and supportedMethods and warns through the given logger", () => {
 		const logger = createMockLogger();
 		const options = resolveOAuthOptions(
 			{
@@ -125,7 +125,7 @@ describe("resolveOAuthOptions", () => {
 	});
 });
 
-describe("resolveOAuthOptions — Client ID Metadata Documents (#529)", () => {
+describe("resolveOAuthOptions — Client ID Metadata Documents", () => {
 	const cimd = (config: Record<string, unknown>) =>
 		resolveOAuthOptions({ oauth: { clientIdMetadataDocuments: config } } as never)
 			.clientIdMetadataDocuments;

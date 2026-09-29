@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// v0.5.0 manifest exports — `Module` here is the v0.5.0 erased manifest type.
+// Manifest exports — `Module` here is the erased manifest type.
 export * from "./manifest/index.mjs";
 
-// PathResolver remains — it is the type for `bootstrapComponents.pathResolver`.
+// PathResolver is the type for `bootstrapComponents.pathResolver`.
 export type { PathResolver } from "./types.mjs";

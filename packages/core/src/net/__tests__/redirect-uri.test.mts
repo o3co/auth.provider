@@ -34,7 +34,7 @@ import {
 
 const reason = (raw: string) => checkRedirectUri(raw)?.reason;
 
-describe("checkRedirectUri (#395)", () => {
+describe("checkRedirectUri", () => {
 	it("accepts https anywhere, and http on loopback only", () => {
 		expect(checkRedirectUri("https://app.example/cb")).toBeNull();
 		expect(checkRedirectUri("https://app.example:8443/cb?x=1")).toBeNull();
@@ -103,7 +103,7 @@ describe("checkRedirectUri (#395)", () => {
 	});
 });
 
-describe("matchesRegisteredRedirectUri (#483)", () => {
+describe("matchesRegisteredRedirectUri", () => {
 	it("ignores the port when both sides are http on a loopback IP literal (RFC 8252 §7.3)", () => {
 		// The native-app case: the client bound an ephemeral port at run time,
 		// so the registration cannot name it.

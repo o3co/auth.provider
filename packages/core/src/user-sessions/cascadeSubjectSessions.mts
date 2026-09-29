@@ -15,9 +15,9 @@
  */
 
 /**
- * Every session one subject holds, torn down one at a time (#296, #593).
+ * Every session one subject holds, torn down one at a time.
  *
- * It is its own function because two callers now need exactly this loop and
+ * It is its own function because two callers need exactly this loop and
  * its bookkeeping: `revokeAllForSubject`, and the subject revocation service's
  * `"keep"` path, which stamps a different boundary first and then cascades the
  * same sessions. A second copy would be the one that forgets why a failed

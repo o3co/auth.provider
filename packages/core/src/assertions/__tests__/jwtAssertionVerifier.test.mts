@@ -63,7 +63,7 @@ const verifier = (overrides: Record<string, unknown> = {}) =>
 		...overrides,
 	} as never);
 
-describe("createJwtAssertionVerifier — what it accepts (#301)", () => {
+describe("createJwtAssertionVerifier — what it accepts", () => {
 	it("returns the sub as the handle for a well-formed assertion", async () => {
 		const result = await verifier().verify(await mint({ sub: "device:abc" }));
 		expect(result?.subjectHandle).toBe("device:abc");
@@ -90,7 +90,7 @@ describe("createJwtAssertionVerifier — what it accepts (#301)", () => {
 	});
 });
 
-describe("createJwtAssertionVerifier — what it refuses (#301)", () => {
+describe("createJwtAssertionVerifier — what it refuses", () => {
 	it("refuses an assertion signed by another authority", async () => {
 		const result = await verifier().verify(
 			await mint({ sub: "device:abc" }, { key: otherAuthority.privateKey }),
@@ -182,7 +182,7 @@ describe("createJwtAssertionVerifier — what it refuses (#301)", () => {
 	});
 });
 
-describe("createJwtAssertionVerifier — construction (#301)", () => {
+describe("createJwtAssertionVerifier — construction", () => {
 	it("refuses to build without a pinned issuer or audience", async () => {
 		// Both are what make the assertion this deployment's to accept. A
 		// verifier missing either is a replay window, so it fails at boot.
@@ -200,7 +200,7 @@ describe("createJwtAssertionVerifier — construction (#301)", () => {
 		expect(verifier().kind).toBe("jwt");
 	});
 
-	it("is a one-entry registry since #525: reports the issuer, takes the context, terms unchanged", async () => {
+	it("takes a client context, and reports the issuer and the expiry beside the handle", async () => {
 		// The static-key configuration keeps working: its result also names the
 		// issuer, and it accepts any presenting client.
 		const exp = Math.floor(Date.now() / 1000) + 300;

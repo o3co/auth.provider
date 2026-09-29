@@ -95,7 +95,7 @@ const baseOptions: JwtVerifyOptions = {
 	expectedAudience: TEST_AUDIENCE,
 };
 
-describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
+describe("verifyJwt — the id_token typ", () => {
 	const keyStore = makeKeyStore();
 	it('accepts typ "JWT" as the id_token default', async () => {
 		const jwt = await signValidAccessToken({ typ: "JWT" }, keyStore);
@@ -103,16 +103,11 @@ describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
 		expect(verified.header.typ).toBe("JWT");
 	});
 
-	it('refuses the pre-#394 "id+jwt" on id_token — the #394 window is closed (#402)', async () => {
-		// #394 flipped the id_token `typ` to the standard `JWT` and accepted
-		// both spellings for a migration window, so id_tokens already in the
-		// wild kept their logout-hint value. Closing that window is #402's job
-		// and its own conditions gate it: one refresh-token lifetime after the
-		// release that shipped the flip, and the legacy-acceptance log line
-		// gone quiet. Neither applies to a provider with no deployment behind
-		// it — there is no population of `id+jwt` tokens to protect — so the
-		// window is closed rather than left open on a schedule nobody is
-		// waiting out.
+	it('refuses typ "id+jwt" on id_token', async () => {
+		// The id_token `typ` is the standard `JWT`, and `id+jwt` is refused
+		// rather than accepted for a migration window: with no deployment
+		// behind this provider there is no population of `id+jwt` tokens to
+		// protect.
 		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
 		await expect(verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token" })).rejects.toThrow(
 			/typ/,
@@ -120,8 +115,8 @@ describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
 	});
 
 	it("reports the refusal as a typ mismatch, not as a special legacy case", async () => {
-		// `id+jwt` is now one more wrong spelling. A caller catching on
-		// `reason` must not have to know it was ever special.
+		// `id+jwt` is one more wrong spelling. A caller catching on `reason`
+		// must not have to know it is a legacy value.
 		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
 		await expect(
 			verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token" }),
@@ -271,10 +266,10 @@ describe("verifyJwt", () => {
 	});
 
 	it("Test 7b — rejects typ-less token with contradicting legacy payload.type even when legacyTypAccept=true (reason=typ)", async () => {
-		// Multi-agent review (Copilot Important): legacyTypAccept=true was
-		// silently accepting cross-type tokens whose v0.3-era `payload.type`
-		// disagreed with the expected JwtType. Example: a typ-less RT
-		// (payload.type=refresh) accepted as an access token at /userinfo.
+		// legacyTypAccept=true must not accept a cross-type token whose legacy
+		// `payload.type` disagrees with the expected JwtType. Example: a
+		// typ-less RT (payload.type=refresh) presented as an access token at
+		// /userinfo.
 		const keyStore = makeKeyStore();
 		const secretKey = createSecretKey(Buffer.from(TEST_SECRET));
 		const jwt = await new SignJWT({

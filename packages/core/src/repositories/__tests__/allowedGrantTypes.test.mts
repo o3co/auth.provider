@@ -43,7 +43,7 @@ describe("isGrantTypeAllowed", () => {
 	 * has said it audits its registrations, and an implied set would be a
 	 * silent decision made for it.
 	 */
-	describe("requireAllowlist (#311)", () => {
+	describe("requireAllowlist", () => {
 		it("denies a grant when the client declares no allowlist", () => {
 			expect(isGrantTypeAllowed(undefined, "authorization_code", { requireAllowlist: true })).toBe(
 				false,

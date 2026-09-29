@@ -62,7 +62,7 @@ const outageStore = (): SubjectRevocation => ({
 	},
 });
 
-describe("verifyJwt — subject revocation watermark (#296)", () => {
+describe("verifyJwt — subject revocation watermark", () => {
 	it("accepts a token when the subject has no watermark", async () => {
 		const token = await mint({ sub: "u1" });
 		await expect(verify(token, createInMemorySubjectRevocation())).resolves.toBeDefined();
@@ -140,7 +140,7 @@ describe("verifyJwt — the watermark needs both `sub` and `iat` to mean anythin
 		await expect(verify(token, store)).resolves.toBeDefined();
 	});
 
-	it("rejects a token with no iat while a watermark is in force (#376, fail-closed)", async () => {
+	it("rejects a token with no iat while a watermark is in force", async () => {
 		// A token that cannot prove it postdates the watermark must not survive
 		// it: every token this provider mints carries iat, so an iat-less token
 		// is exactly the legacy/foreign shape a credential change must not
@@ -168,7 +168,7 @@ describe("verifyJwt — the watermark needs both `sub` and `iat` to mean anythin
  * user who refreshed during it. A distinct reason lets a caller answer `503`
  * instead.
  */
-describe("verifyJwt — subject revocation store outage (#408)", () => {
+describe("verifyJwt — subject revocation store outage", () => {
 	it("reports a consult failure as revocation_unavailable, not revoked", async () => {
 		const token = await mint({ sub: "u1" });
 		await expect(verify(token, outageStore())).rejects.toMatchObject({
@@ -211,7 +211,7 @@ describe("verifyJwt — subject revocation store outage (#408)", () => {
  * every token minted in the five minutes after a reset, including the one
  * from the re-login the reset sends the user to.
  */
-describe("verifyJwt — watermark clock skew (#408)", () => {
+describe("verifyJwt — watermark clock skew", () => {
 	const withWatermark = async (watermarkSec: number) => {
 		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date(watermarkSec * 1000), new Date(Date.now() + 300_000));
@@ -297,7 +297,7 @@ describe("verifyJwt — watermark clock skew (#408)", () => {
  * tells a client to discard its refresh token — and a wrong answer is
  * invisible in a happy-path test.
  */
-describe("isVerificationUnavailable (#408)", () => {
+describe("isVerificationUnavailable", () => {
 	it("is true for the reason it names", () => {
 		expect(
 			isVerificationUnavailable(new JwtVerificationError("revocation_unavailable", "store down")),

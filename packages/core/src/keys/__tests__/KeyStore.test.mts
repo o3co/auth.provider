@@ -85,7 +85,7 @@ describe("SymmetricKeyStore", () => {
 	});
 });
 
-describe("SymmetricKeyStore — multi-key rotation (IH-9)", () => {
+describe("SymmetricKeyStore — multi-key rotation", () => {
 	it("getVerificationKeys returns only current key when previousSecrets is empty", async () => {
 		const ks = createSymmetricKeyStore("current-secret", "v1", []);
 		const keys = await ks.getVerificationKeys();

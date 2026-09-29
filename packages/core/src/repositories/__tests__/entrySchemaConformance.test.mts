@@ -88,7 +88,7 @@ const REGISTRABLE_VARIANTS: ReadonlyArray<Record<string, unknown>> = [
 	{ ...common, tokenEndpointAuthMethod: "private_key_jwt", jwksUri },
 ];
 
-describe("ClientEntrySchema conformance with Client (#343)", () => {
+describe("ClientEntrySchema conformance with Client", () => {
 	it("registers every field of the fixture across the variants", () => {
 		const covered = new Set(REGISTRABLE_VARIANTS.flatMap((v) => Object.keys(v)));
 		expect([...covered].sort()).toEqual(Object.keys(FULLY_POPULATED_CLIENT).sort());
@@ -123,7 +123,7 @@ describe("ClientEntrySchema conformance with Client (#343)", () => {
 		);
 	});
 
-	it("carries firstParty specifically — the #342 regression", () => {
+	it("carries firstParty specifically", () => {
 		// Pinned on its own: without it `/authorize` answers
 		// `unauthorized_client` for every file-backed registration.
 		const parsed = ClientEntrySchema.parse(REGISTRABLE_VARIANTS[0]) as { firstParty?: boolean };
@@ -153,7 +153,7 @@ const FULLY_POPULATED_USER = {
 	mfaEnrolled: true,
 } satisfies Required<User>;
 
-describe("UserEntrySchema conformance with User (#343)", () => {
+describe("UserEntrySchema conformance with User", () => {
 	it("round-trips every declared field", () => {
 		const parsed = UserEntrySchema.parse({
 			...FULLY_POPULATED_USER,

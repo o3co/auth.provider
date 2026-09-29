@@ -26,12 +26,12 @@ import type { WebAuthnConfig } from "#/config.mjs";
 import type { WebAuthnGrantDeps } from "#/grant.mjs";
 import { webauthnModule } from "#/module.mjs";
 
-// #626 P2 (D4), as the oauth grants apply it: a grant factory names the slots
-// it reads, so a slot it reads without its module declaring it is a compile
-// error rather than an `undefined` at runtime, and a slot it never reads is
-// not in its signature. These assertions only fire under vitest's typecheck
-// mode; a passing `vitest run` alone proves nothing about them. The
-// `if (false as boolean)` block keeps the negative assertion from executing.
+// A grant factory names the slots it reads, as the oauth grants do, so a slot
+// it reads without its module declaring it is a compile error rather than an
+// `undefined` at runtime, and a slot it never reads is not in its signature.
+// These assertions only fire under vitest's typecheck mode; a passing
+// `vitest run` alone proves nothing about them. The `if (false as boolean)`
+// block keeps the negative assertion from executing.
 
 const REQUIRES = [
 	"webauthnConfig",
@@ -47,12 +47,12 @@ const OPTIONAL = [
 	"auditSink",
 	"logger",
 	"refreshTokenFamilyRotation",
-	// What the grant reads of `oauth {}` (#728).
+	// What the grant reads of `oauth {}`.
 	"oauthTokenSettings",
 ] as const;
 type ModuleDeps = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
-describe("the webauthn grant declares the slots it reads (#626 P2)", () => {
+describe("the webauthn grant declares the slots it reads", () => {
 	it("pins the module's declared slots, so the key-set check below cannot drift from them", () => {
 		expect([...(webauthnModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
 		expect([...(webauthnModule.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
@@ -91,7 +91,7 @@ describe("the webauthn grant declares the slots it reads (#626 P2)", () => {
 		// The module's `satisfies` checks slots, not the fields inside one: a
 		// field added to the grant's `webauthnConfig` type that WebAuthnConfig
 		// lacks would compile (an optional one is satisfied by absence) and be
-		// `undefined` forever — the #554 `topOrigin` class, one level down.
+		// `undefined` forever.
 		expectTypeOf<keyof WebAuthnGrantDeps["webauthnConfig"]>().toMatchTypeOf<keyof WebAuthnConfig>();
 		expect(true).toBe(true);
 	});

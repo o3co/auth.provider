@@ -35,7 +35,7 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a network-path reference", "//host/p"],
 		["an IPv6 literal host", "https://[::1]/x"],
 		["an IPvFuture literal host", "https://[v1.fe]/"],
-		// RFC 5234 §2.3: an ABNF quoted literal is case-insensitive (#649 review).
+		// RFC 5234 §2.3: an ABNF quoted literal is case-insensitive.
 		["an IPvFuture literal with an uppercase version marker", "https://[V1.fe]/"],
 		["userinfo and a port", "https://u:p@h:8080/p"],
 		["one the registry does not hold", "mac"],
@@ -52,17 +52,17 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a trailing space", "Bearer "],
 		// JavaScript's `$` without the `m` flag is end of input, not "before a
 		// final newline" as in PCRE or Python — pinned so a flag or a port to
-		// another engine cannot quietly start admitting these (#649 review).
+		// another engine cannot quietly start admitting these.
 		["a trailing newline", "Bearer\n"],
 		["a trailing CRLF", "Bearer\r\n"],
 		["a trailing carriage return", "Bearer\r"],
 		["a trailing line separator", "Bearer\u2028"],
 		["a double quote, which no URI may contain", '"'],
 		["a backslash, which no URI may contain", "\\"],
-		// Printable ASCII the old NQCHAR bound admitted and §A.13 does not:
+		// Printable ASCII that an NQCHAR bound admits and §A.13 does not:
 		// neither a `name-char` nor a character RFC 3986 permits in a URI.
-		// Reading these as names sent an adapter's garbage down the refusal
-		// meant for a real type the upstream issued (#649 review).
+		// Read as names, these would send an adapter's garbage down the
+		// refusal meant for a real type the upstream issued.
 		["a caret", "Bearer^"],
 		["braces", "a{b}"],
 		["a pipe", "a|b"],
@@ -72,7 +72,7 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a truncated pct-encoding", "a%2"],
 		["a non-ASCII letter", "é"],
 		// Every character is one a URI may contain, and the reference is still
-		// malformed. A lexical check read these as type names (#649 review).
+		// malformed. A lexical check would read these as type names.
 		["an IP-literal that never closes", "https://["],
 		["an IP-literal that is not an IP address", "https://[zz]/"],
 		["a bracket outside an IP-literal", "a[b"],

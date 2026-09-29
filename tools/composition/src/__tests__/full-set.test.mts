@@ -321,7 +321,7 @@ function valueAt(tree: unknown, path: string): unknown {
 	return cursor;
 }
 
-describe("the configuration createApp is handed reaches every loaded module whole (#728)", () => {
+describe("the configuration createApp is handed reaches every loaded module whole", () => {
 	it("layers each added package's reference.conf, because its modules declare it", async () => {
 		const { resolved } = await boot();
 		// A default each package ships and no layer above it sets.
@@ -343,7 +343,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		expect(paths.filter((path) => valueAt(config, path) === undefined)).toEqual([]);
 	});
 
-	it("keeps each added package's switch as the deployment wrote it (#472, #496)", async () => {
+	it("keeps each added package's switch as the deployment wrote it", async () => {
 		const { config } = await boot();
 		const on = config as unknown as Record<string, unknown>;
 		expect(valueAt(on, "oauth.deviceAuthorization.enabled")).toBe(true);
@@ -353,7 +353,7 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		expect(valueAt(on, "webauthn.rpId")).toBe("auth.test");
 	});
 
-	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers (#472)", () => {
+	it("reads the device grant's switch in phase one as the operator wrote it, so the grant registers", () => {
 		// A deployment that adds the device grant to the template's modules
 		// reads its switch before boot too: `deviceGrantModule({ config })`
 		// decides from it whether the grant exists.
@@ -499,7 +499,7 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 	});
 });
 
-describe("a password login both requirements interrupt, resumed through each (the session-admission ADR's D5, acceptance criterion 2)", () => {
+describe("a password login both requirements interrupt, resumed through each", () => {
 	it("is interrupted by the first, resumed into the second with the first's completion done, and established once — as a password login, through the exported establishSession", async () => {
 		const ceremonies: FixtureCeremony[] = [];
 		const { app, handle, config } = await boot({ interruptLogins: [ALICE.sub], ceremonies });
@@ -601,7 +601,7 @@ describe("a password login both requirements interrupt, resumed through each (th
 	});
 });
 
-describe("a password login the mfa requirement interrupts (the MFA ADR's F1 step 2, through the template's boot)", () => {
+describe("a password login the mfa requirement interrupts, through the template's boot", () => {
 	it("answers a subject who holds a factor 403 mfa_required with the closed body, a transaction bound to the regenerated session, and no UserSession written", async () => {
 		const { app, handle, config } = await boot();
 		const { mfaFactorStore, mfaTransactionStore, userSessionStore } =
@@ -711,7 +711,7 @@ function softwarePasskey(rpId: string, origin: string) {
 	};
 }
 
-describe("a passkey sign-in under mfa.mode = required (the MFA ADR's O3; the session-admission ADR's D6 token rows)", () => {
+describe("a passkey sign-in under mfa.mode = required", () => {
 	it("is kept by its refresh token: the WebAuthn grant's hwk is a second-factor value, so the refresh is met without a sid or a primary's marker", async () => {
 		const { app, handle } = await boot({
 			adjust: (config) => ({ ...config, mfa: { ...config.mfa, mode: "required" } }),
@@ -1225,7 +1225,7 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 const linkStart = (agent: ReturnType<typeof request.agent>) =>
 	agent.get("/session/oauth/federation/google?link=1").set("Sec-Fetch-Site", "same-origin");
 
-describe("session admission at the link start and WebAuthn registration (the session-admission ADR's acceptance criterion 2)", () => {
+describe("session admission at the link start and WebAuthn registration", () => {
 	/** Stamps the subject-revocation boundary for alice now, as a credential change does. */
 	const revokeAlice = async ({ handle }: FullSet): Promise<void> => {
 		const revocation = handle.components.subjectRevocation;

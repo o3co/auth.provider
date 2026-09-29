@@ -45,7 +45,7 @@ const buildPublicClient = (c: FakeClient): PublicClient => ({
 
 /**
  * Test repository that supports both confidential (basic / post) and public
- * (`"none"`) clients. After D-6, `clientAuthMw` calls `findById` to obtain the
+ * (`"none"`) clients. `clientAuthMw` calls `findById` to obtain the
  * configured `tokenEndpointAuthMethod`, then `authenticate` for confidential
  * clients only — so tests must populate both methods consistently.
  */
@@ -83,9 +83,9 @@ const publicClient = (clientId: string): FakeClient => ({
 	tokenEndpointAuthMethod: "none",
 });
 
-describe("createClientAuthMiddleware (D-6 PB-2)", () => {
-	describe("group B-1..B-9 — confidential + public client paths", () => {
-		it("B-1: no credentials at all → 401 invalid_client + WWW-Authenticate", async () => {
+describe("createClientAuthMiddleware", () => {
+	describe("confidential + public client paths", () => {
+		it("no credentials at all → 401 invalid_client + WWW-Authenticate", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
 			const res = await request(app).post("/test").type("form").send({});
@@ -95,7 +95,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toBe("Client authentication is required");
 		});
 
-		it("B-2: valid Basic for a client_secret_basic client → next() with req.oauthClient set", async () => {
+		it("valid Basic for a client_secret_basic client → next() with req.oauthClient set", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -114,7 +114,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.method).toBe("client_secret_basic");
 		});
 
-		it("B-3: wrong secret in Basic → 401 invalid_client + WWW-Authenticate", async () => {
+		it("wrong secret in Basic → 401 invalid_client + WWW-Authenticate", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -129,7 +129,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toBe("Invalid client credentials");
 		});
 
-		it("B-4: malformed Basic (no colon) → 401 invalid_client + WWW-Authenticate", async () => {
+		it("malformed Basic (no colon) → 401 invalid_client", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -143,7 +143,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toBe("Malformed client credentials");
 		});
 
-		it("B-5: form-encoded credentials for client_secret_post client → next()", async () => {
+		it("form-encoded credentials for client_secret_post client → next()", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -158,10 +158,11 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.client).toBe("alice");
 		});
 
-		it("B-6: public client supplies only client_id in body → next() with public method (when allowPublicClients=true)", async () => {
+		it("public client supplies only client_id in body → next() with public method (when allowPublicClients=true)", async () => {
 			// `/oauth/token` admits public clients (PKCE/S256 enforces authenticity
 			// at `/oauth/authorize`). Other routes leave `allowPublicClients` at
-			// the default `false` and would reject — see the dedicated P1 group.
+			// the default `false` and would reject — see the dedicated
+			// `allowPublicClients` group.
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -179,7 +180,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.method).toBe("none");
 		});
 
-		it("B-7: confidential client called with body client_id only (no secret) → 401, no WWW-Authenticate (body attempt)", async () => {
+		it("confidential client called with body client_id only (no secret) → 401, no WWW-Authenticate (body attempt)", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -193,7 +194,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.headers["www-authenticate"]).toBeUndefined();
 		});
 
-		it("B-8: unknown client → 401 invalid_client", async () => {
+		it("unknown client → 401 invalid_client", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
 			const res = await request(app).post("/test").type("form").send({ client_id: "ghost" });
@@ -202,7 +203,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toBe("Unknown client");
 		});
 
-		it("B-9: Basic auth + body matching client_id (no body secret) → next() with Basic credentials used", async () => {
+		it("Basic auth + body matching client_id (no body secret) → next() with Basic credentials used", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -220,8 +221,8 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		});
 	});
 
-	describe("Codex M4 — Basic+body conflict detection (B-10)", () => {
-		it("B-10a: Basic alice + body eve → 401 client_id mismatch", async () => {
+	describe("Basic+body conflict detection", () => {
+		it("Basic alice + body eve → 401 client_id mismatch", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -241,7 +242,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toBe("client_id mismatch between Basic header and body");
 		});
 
-		it("B-10b: Basic alice:s3cret + body alice:wrong → 401 client_secret mismatch", async () => {
+		it("Basic alice:s3cret + body alice:wrong → 401 client_secret mismatch", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -262,8 +263,8 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		});
 	});
 
-	describe("Codex M1 — per-method enforcement (B-method-1, B-method-2)", () => {
-		it("B-method-1: client configured 'client_secret_basic' rejects body credentials", async () => {
+	describe("per-method enforcement", () => {
+		it("client configured 'client_secret_basic' rejects body credentials", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -279,7 +280,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toMatch(/tokenEndpointAuthMethod mismatch/);
 		});
 
-		it("B-method-2: client configured 'client_secret_post' rejects HTTP Basic credentials", async () => {
+		it("client configured 'client_secret_post' rejects HTTP Basic credentials", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -294,7 +295,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.headers["www-authenticate"]).toMatch(/^Basic realm=/);
 		});
 
-		it("B-method-3: confidential client called as if public (no secret) → mismatch", async () => {
+		it("confidential client called as if public (no secret) → 401, client authentication required", async () => {
 			const app = express().use(express.urlencoded({ extended: false }));
 			app.post(
 				"/test",
@@ -524,7 +525,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		});
 	});
 
-	describe("P1 (Codex post-review): allowPublicClients gates the public-client path", () => {
+	describe("allowPublicClients gates the public-client path", () => {
 		it("default (allowPublicClients omitted) rejects public clients with 401 invalid_client", async () => {
 			// /oauth/introspect (RFC 7662 §2.1) and any non-/token route MUST
 			// reject public clients — knowledge of a client_id is not a credential.
@@ -582,7 +583,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
 		});
 
-		it("Copilot review: rejects unsafe realm characters and falls back to 'oauth'", async () => {
+		it("rejects unsafe realm characters and falls back to 'oauth'", async () => {
 			// `WWW-Authenticate: Basic realm="..."` is a quoted-string (RFC 7235
 			// §2.2 + RFC 7230). An issuer containing `"`, `\`, CR, LF, or other
 			// control bytes either produces a malformed header or opens a
@@ -601,8 +602,8 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		});
 
 		it("backward-compat: accepts a Logger argument directly", async () => {
-			// F1 D-4 callers passed `Logger` as the second argument; the new signature
-			// takes an options object but keeps the legacy form working.
+			// A caller may pass `Logger` as the second argument; the signature takes
+			// an options object but keeps that legacy form working.
 			const calls: { ctx: unknown; msg?: string }[] = [];
 			const logger = {
 				trace: () => {},
@@ -631,7 +632,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 		});
 	});
 
-	describe("private_key_jwt (#484)", () => {
+	describe("private_key_jwt", () => {
 		const ISSUER = "https://auth.test";
 		let privateKey: CryptoKey;
 		let publicJwk: JWK;

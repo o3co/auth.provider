@@ -83,7 +83,7 @@ describe("extractResourceParam", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stage 2 — resource → audience representation (#173)
+// Resource → audience representation
 // ---------------------------------------------------------------------------
 
 describe("unrepresentedResources", () => {
@@ -144,7 +144,7 @@ describe("extractResourceParam — empty entries in the array shape", () => {
 	it("drops empty-string entries so both shapes agree on what 'absent' means", () => {
 		// `?resource=&resource=https://api.example` reaches Express as
 		// ["", "https://api.example"]. The single-string branch already treats
-		// "" as absent; letting it through here would reach Stage 2 enforcement
+		// "" as absent; letting it through here would reach the audience check
 		// and produce `requested_resources_not_in_audience: ` naming an empty
 		// token.
 		expect(extractResourceParam({ resource: ["", "https://api.example"] })).toEqual([

@@ -21,13 +21,13 @@ export type {
 	AuditHookFactory,
 	// The answer every contribution factory may give: the value, or a promise
 	// of it. Named here because a package declaring a contribution kind of its
-	// own needs it to say the same thing (#626 P1).
+	// own needs it to say the same thing.
 	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,
-	// #728: one configured federation as its type's factory receives it, and
+	// One configured federation as its type's factory receives it, and
 	// what a federation package declares it handles, keyed by type.
 	FederationInstance,
 	FederationProvider,
@@ -35,15 +35,14 @@ export type {
 	GrantFactory,
 	GrantHandler,
 	GrantMiddlewareFactory,
-	// AS-7 collision resolution (v0.5.1): renamed from `GrantPolicyHook`. The
-	// canonical `GrantPolicyHook` interface lives in `../policy/types.mts`
-	// and is exported from the package root.
+	// Not named `GrantPolicyHook`: the canonical `GrantPolicyHook` interface
+	// lives in `../../policy/types.mts` and is exported from the package root.
 	GrantPolicyHookContribution,
 	GrantPolicyHookFactory,
 	MfaFactor,
 	MfaFactorFactory,
 	OidcDiscoveryContributionFactory,
-	// #728: a module's budget for a rate-limit prefix it owns.
+	// A module's budget for a rate-limit prefix it owns.
 	RateLimitBudgetFactory,
 	SessionRequirementFactory,
 	TokenBindingMechanismFactory,

@@ -35,7 +35,7 @@ const base = {
 const repository = (over: Record<string, unknown> = {}) =>
 	new InMemoryClientRepository(new Map([["worker", { ...base, ...over } as never]]));
 
-describe("a client's federation grant fields (#593, D9)", () => {
+describe("a client's federation grant fields", () => {
 	it("are absent by default, and absent means no connection and no return destination", async () => {
 		const found = await repository().findById("worker");
 		expect(found?.allowedFederationGrantConnections).toBeUndefined();
@@ -100,7 +100,7 @@ describe("a client's federation grant fields (#593, D9)", () => {
 		expect(found?.allowedRedirectUris).toStrictEqual(["https://app.example.test/cb"]);
 	});
 
-	it("refuses, at registration, a return destination that already carries a result parameter (#593 slice 6)", () => {
+	it("refuses, at registration, a return destination that already carries a result parameter", () => {
 		// The end of a flow appends grant_id, state and error. A registered URI
 		// carrying one would hand the client two of it, and which it reads is its
 		// framework's choice. Refused here, where a configured deployment hears it

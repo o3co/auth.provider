@@ -119,7 +119,7 @@ const authorizeUrl = (params: Record<string, string | string[]>) => {
 
 const locationOf = (res: { headers: Record<string, string> }) => new URL(res.headers.location);
 
-describe("Stage 2 — /authorize forwards `resource` to the policy hook", () => {
+describe("/authorize forwards `resource` to the policy hook", () => {
 	it("passes the requested resource so the policy can narrow the audience", async () => {
 		const evaluate = vi.fn(async () => ({
 			outcome: "allow" as const,
@@ -171,7 +171,7 @@ describe("Stage 2 — /authorize forwards `resource` to the policy hook", () => 
 	});
 });
 
-describe("Stage 2 — /authorize rejects an unsatisfiable resource request", () => {
+describe("/authorize rejects an unsatisfiable resource request", () => {
 	it("redirects invalid_target when the narrowed audience cannot represent it", async () => {
 		const app = await buildApp({
 			enabled: true,

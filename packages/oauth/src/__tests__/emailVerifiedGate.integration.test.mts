@@ -15,7 +15,7 @@
  */
 
 /**
- * Issue #297 — `oauth.requireEmailVerified` gates token issuance for an
+ * `oauth.requireEmailVerified` gates token issuance for an
  * end-user subject on the verification state the Store published.
  *
  * Two enforcement points, because they are the two that hold the user's
@@ -128,7 +128,7 @@ const errorOf = (res: request.Response): string | null => {
 	return typeof res.body?.error === "string" ? res.body.error : null;
 };
 
-describe("/authorize email-verified gate (#297)", () => {
+describe("/authorize email-verified gate", () => {
 	it("refuses when the gate is on and the Store published no verification", async () => {
 		const app = await makeApp({ requireEmailVerified: true, user: { id: "u1" } });
 		expect(errorOf(await authorize(app))).toBe("access_denied");

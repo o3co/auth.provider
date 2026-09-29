@@ -142,7 +142,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 		expect(read).toBe(false);
 	});
 
-	it("does not read the contributions when no issuer is configured (#650)", () => {
+	it("does not read the contributions when no issuer is configured", () => {
 		// The collector is host-supplied. Reading it before an issuer is found
 		// would run host code on a deployment that serves no document, and
 		// could throw there.
@@ -172,7 +172,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 });
 
 describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", () => {
-	it("returns a document that did not validate, rather than throwing it (#650)", () => {
+	it("returns a document that did not validate, rather than throwing it", () => {
 		// A provider root with no key store in the slot: the document cannot
 		// claim an algorithm it does not have. It comes back as a VALUE, so the
 		// caller can convert exactly this into its own taxonomy and never
@@ -183,7 +183,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 		expect((planning as { error: unknown }).error).toBeInstanceOf(DiscoveryDocumentError);
 	});
 
-	it("returns the builder's own error, not a boot one (#626 F4)", () => {
+	it("returns the builder's own error, not a boot one", () => {
 		// The step names no boot type. `assembleApp` converts this into a
 		// `BootError` with `reason: "discovery-document-invalid"`, which is
 		// pinned where that conversion lives.
@@ -214,7 +214,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 				],
 			}),
 		],
-	])("throws what %s throws as it is, even a DiscoveryDocumentError (#650)", (_label, input) => {
+	])("throws what %s throws as it is, even a DiscoveryDocumentError", (_label, input) => {
 		// Host-supplied code the planner runs OUTSIDE the builder. An error that
 		// merely has the document's type is still not a document that failed
 		// to validate, so it is thrown, not returned — the caller never sees it
@@ -224,7 +224,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 		expect(() => planDocument(input(failure))).toThrow(failure);
 	});
 
-	it("treats what raises while the builder reads a contribution as the builder's (#650)", () => {
+	it("treats what raises while the builder reads a contribution as the builder's", () => {
 		// The line is the builder: a contribution getter the builder reads
 		// falls on the builder's side. Moving it (by snapshotting the
 		// contributions first) would change behaviour, so that is a decision

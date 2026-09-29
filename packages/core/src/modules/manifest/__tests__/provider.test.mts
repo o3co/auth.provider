@@ -73,7 +73,7 @@ test("Provider<K, Deps> is a function from Deps to ComponentMap[K] | Promise", (
 	>();
 });
 
-test("ProviderDeps' third argument adds the module's section, typed as its schema's output (#728)", () => {
+test("ProviderDeps' third argument adds the module's section, typed as its schema's output", () => {
 	const Section = z.object({ retries: z.coerce.number(), label: z.string().optional() });
 	expectTypeOf<ProviderDeps<never, never, typeof Section>>().branded.toEqualTypeOf<{
 		readonly section: { retries: number; label?: string | undefined };

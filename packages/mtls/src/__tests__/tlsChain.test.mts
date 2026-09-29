@@ -15,7 +15,7 @@
  */
 
 /**
- * Reading the peer chain out of a TLS session (#341).
+ * Reading the peer chain out of a TLS session.
  *
  * The linked list `getPeerCertificate(true)` returns is circular at the root
  * and supplied by the peer, so the two things worth pinning are that the walk

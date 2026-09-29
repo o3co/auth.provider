@@ -111,7 +111,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 		});
 	});
 
-	it("carries no token-binding setting, whatever the configuration says: they are core's (#728)", () => {
+	it("carries no token-binding setting, whatever the configuration says: they are core's", () => {
 		// The strict policy and the confidential-client binding are configured,
 		// and nothing of either is provided.
 		const settings = oauthTokenSettingsFrom(everySwitchOn()) as unknown as Record<string, unknown>;
@@ -204,7 +204,7 @@ describe("the oauth module provides oauthTokenSettings", () => {
 	});
 });
 
-describe("the oauth module names oauthTokenSettings authoritative (#728)", () => {
+describe("the oauth module names oauthTokenSettings authoritative", () => {
 	/** Settings that differ from the configuration's, as a second source would. */
 	const SECOND = createTestOAuthTokenSettings({ issuer: "https://second.test" });
 

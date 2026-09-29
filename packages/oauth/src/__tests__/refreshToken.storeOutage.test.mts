@@ -150,7 +150,7 @@ describe("refresh grant — a store outage is logged, not only answered", () => 
 		expectLogged(logger, { store: "refresh_token_family", step: "revoke", familyId: "fam-1" });
 	});
 
-	it("logs a session store that cannot be read — admission's line, once (the session-admission ADR's D10)", async () => {
+	it("logs a session store that cannot be read — admission's line, once", async () => {
 		const logger = createMockLogger();
 		const userSessionStore = {
 			kind: "failing",

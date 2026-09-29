@@ -66,7 +66,7 @@ const FEDERATED: SessionAuthentication = {
 	mfaAt: undefined,
 };
 
-describe("sessionAuthentication — a session that says how it was established (D9)", () => {
+describe("sessionAuthentication — a session that says how it was established", () => {
 	it("is what the session recorded, whatever its amr says", () => {
 		// The record is the answer: an `amr` holding `pwd` does not make a
 		// federated session a password one, and `mfa` in it sets no `mfaAt`.
@@ -95,7 +95,7 @@ describe("sessionAuthentication — a session that says how it was established (
 	});
 });
 
-describe("sessionAuthentication — a session written before the design, split as it is read (D9)", () => {
+describe("sessionAuthentication — a session with no authentication recorded, split from its amr as it is read", () => {
 	it("reads a password login as primary pwd, with no second factor on record", () => {
 		expect(sessionAuthentication(session(["pwd"]))).toStrictEqual({
 			primary: "pwd",
@@ -140,7 +140,7 @@ describe("sessionAuthentication — a session written before the design, split a
 	});
 });
 
-describe("vouchedAmr — the amr this provider vouches for (D9, D13)", () => {
+describe("vouchedAmr — the amr this provider vouches for", () => {
 	it("is a recorded session's amr, copied: the federation callback already split it", () => {
 		const federated = recorded(["hwk", "fed"], { ...FEDERATED, upstreamAmr: undefined });
 		const vouched = vouchedAmr(federated);
@@ -168,7 +168,7 @@ describe("vouchedAmr — the amr this provider vouches for (D9, D13)", () => {
 	});
 });
 
-describe("requirementSession — the requirement rule's input, built only through the D9 reading", () => {
+describe("requirementSession — the requirement rule's input, built from sessionAuthentication and vouchedAmr", () => {
 	it("is sessionAuthentication and vouchedAmr of the session", () => {
 		for (const s of [
 			session(["pwd", "otp"]),
@@ -202,7 +202,7 @@ describe("requirementSession — the requirement rule's input, built only throug
 	});
 });
 
-describe("requirementSessionFromAmr — what a requirement is asked about a token with no live session (the session-admission ADR's D9)", () => {
+describe("requirementSessionFromAmr — what a requirement is asked about a token with no live session", () => {
 	it("reads the primary from the token's amr — fed first, else pwd — with no second factor on record, and the amr as vouched", () => {
 		expect(requirementSessionFromAmr(["pwd", "otp", "mfa"])).toEqual({
 			authentication: {
@@ -238,7 +238,7 @@ describe("requirementSessionFromAmr — what a requirement is asked about a toke
 	});
 });
 
-describe("passwordSessionAuthentication — what POST /session/login records (D9)", () => {
+describe("passwordSessionAuthentication — what POST /session/login records", () => {
 	it("is amr pwd, primary pwd, every other field named and empty", () => {
 		expect(passwordSessionAuthentication()).toStrictEqual({
 			amr: ["pwd"],
@@ -252,7 +252,7 @@ describe("passwordSessionAuthentication — what POST /session/login records (D9
 	});
 });
 
-describe("federatedSessionAuthentication — what a federation callback records (D9, D13)", () => {
+describe("federatedSessionAuthentication — what a federation callback records", () => {
 	it("keeps an untrusted IdP's amr apart: amr is fed alone, and its values are kept for the record", () => {
 		expect(
 			federatedSessionAuthentication({
@@ -317,7 +317,7 @@ describe("federatedSessionAuthentication — what a federation callback records 
 	});
 });
 
-describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (D13)", () => {
+describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts", () => {
 	const config = (entry: unknown) => ({ federations: { google: entry } });
 
 	it("is false by default: an upstream IdP's word is not this provider's", () => {
@@ -432,7 +432,7 @@ describe("federationTrustsUpstreamAmr — whether an upstream IdP's amr counts (
 	});
 });
 
-describe("checkSecondFactorEvent — what a verified second factor may add, and when (D9, D14)", () => {
+describe("checkSecondFactorEvent — what a verified second factor may add, and when", () => {
 	const NOW = Date.parse("2026-09-28T12:00:00Z");
 
 	it("accepts a factor's values, and a time up to the clock skew tolerated between hosts ahead of the store's clock", () => {
@@ -460,7 +460,7 @@ describe("checkSecondFactorEvent — what a verified second factor may add, and 
 	});
 });
 
-describe("recordableSessionAuthentication — what a session may record as authentication (D9)", () => {
+describe("recordableSessionAuthentication — what a session may record as authentication", () => {
 	const NOW = Date.parse("2026-09-28T12:00:00Z");
 	const PASSWORD = {
 		primary: "pwd",
@@ -522,7 +522,7 @@ describe("recordableSessionAuthentication — what a session may record as authe
 	);
 });
 
-describe("never a verification time ahead of the store's clock (D9)", () => {
+describe("never a verification time ahead of the store's clock", () => {
 	const NOW = Date.parse("2026-09-28T12:00:00Z");
 	const PASSWORD = {
 		primary: "pwd",

@@ -84,7 +84,7 @@ export function runSessionRPRegistryContract(
 			["both channels, sid wanted on both", true, true],
 			["both channels, sid wanted on back-channel only", true, false],
 			["both channels, sid wanted on front-channel only", false, true],
-		])("round-trips every logout field with its own value — %s (#626)", async (_label, bc, fc) => {
+		])("round-trips every logout field with its own value — %s", async (_label, bc, fc) => {
 			// The types catch a field forgotten on the way through a registry, not
 			// two fields of the same type swapped: the back- and front-channel
 			// pairs are both string/boolean. Every value is distinct here, and

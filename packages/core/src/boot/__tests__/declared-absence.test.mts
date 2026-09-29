@@ -79,7 +79,7 @@ function boot(configOverrides: Record<string, unknown> = {}) {
 	} as never;
 }
 
-describe("checkDeclaredAbsence (#363)", () => {
+describe("checkDeclaredAbsence", () => {
 	it("fails boot when the slot is unfilled and its absence is undeclared", async () => {
 		await expect(
 			createApp({ modules: [auditConsumerModule], bootstrapComponents: boot() }),

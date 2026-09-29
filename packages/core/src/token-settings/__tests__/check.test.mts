@@ -61,7 +61,7 @@ const settingsWith = (change: (draft: Record<string, unknown>) => void): unknown
 	return draft;
 };
 
-describe("checkOAuthTokenSettings (#728)", () => {
+describe("checkOAuthTokenSettings", () => {
 	it("answers settings that keep the contract, as they are", () => {
 		const settings = createTestOAuthTokenSettings({
 			issuer: "https://auth.example.com/tenant-a",

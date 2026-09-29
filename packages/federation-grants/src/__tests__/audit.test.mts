@@ -91,7 +91,7 @@ describe("createFederationGrantAuditBridge", () => {
 		});
 	});
 
-	it("carries the upstream identity as issuer and subject only, whatever else the event's object holds (#611)", () => {
+	it("carries the upstream identity as issuer and subject only, whatever else the event's object holds", () => {
 		// Verified claims travel beside the subject into the identity check (the
 		// federation-grants ADR, D7 check 5) and nowhere else. The bridge is its
 		// own boundary: it does not trust every caller to have projected them

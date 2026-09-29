@@ -15,12 +15,8 @@
  */
 
 /**
- * #527 — the consent step for clients that are not first-party.
- *
- * Before this, `/authorize` refused every client not marked `firstParty` —
- * and the only way to serve a third-party client was to mark it first-party,
- * after which a code was minted with no consent step at all. Now the user is
- * asked, on the deployment's own page, and what they answered is recorded.
+ * The consent step for clients that are not first-party: the user is asked,
+ * on the deployment's own page, and what they answered is recorded.
  */
 
 import crypto from "node:crypto";
@@ -76,18 +72,18 @@ const makeApp = async (opts: {
 	client?: Record<string, unknown>;
 	consentStore?: ConsentStore;
 	/**
-	 * #552: where a parked request waits for its answer. Defaults to the
+	 * Where a parked request waits for its answer. Defaults to the
 	 * memory store; `null` wires none, for the composition check.
 	 */
 	pendingConsentStore?: PendingConsentStore | null;
-	/** #552: the express-session id the middleware reports, per request. */
+	/** The express-session id the middleware reports, per request. */
 	sessionId?: () => string | undefined;
 	session?: Session;
 	consentUrl?: string;
 	auditSink?: AuditSink;
-	/** #527 review: the durable session behind the cookie, when a test needs one. */
+	/** The durable session behind the cookie, when a test needs one. */
 	userSessionStore?: UserSessionStore;
-	/** #527 review: a registry that fails, or forgets the client, mid-flow. */
+	/** A registry that fails, or forgets the client, mid-flow. */
 	clientRepository?: ClientRepository;
 }) => {
 	const record = {
@@ -154,7 +150,7 @@ const makeApp = async (opts: {
 	});
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Session }).session = session;
-		// What express-session would report as this session's id (#552).
+		// What express-session would report as this session's id.
 		(req as unknown as { sessionID?: string }).sessionID = opts.sessionId
 			? opts.sessionId()
 			: "sess-1";
@@ -208,7 +204,7 @@ const atConsentPage = (res: request.Response, consentPath = "/consent"): string 
 	return challenge as string;
 };
 
-describe("the page is told which host a URL-shaped client_id names (v0.13.0 audit)", () => {
+describe("the page is told which host a URL-shaped client_id names", () => {
 	// A Client ID Metadata Document is written by whoever controls its host,
 	// so its `client_name` and `client_uri` are that party's claims about
 	// itself — "Google Drive" costs nothing to type. The draft asks the AS to
@@ -296,8 +292,8 @@ const collectingSink = (): { sink: AuditSink; events: AuditEvent[] } => {
 	};
 };
 
-describe("/authorize for a client that is not first-party (#527)", () => {
-	it("refuses it when no consent store is wired — the #267 rule, unchanged", async () => {
+describe("/authorize for a client that is not first-party", () => {
+	it("refuses it when no consent store is wired", async () => {
 		const { app, pending } = await makeApp({});
 		const params = atClient(await authorize(app));
 		expect(params.get("error")).toBe("unauthorized_client");
@@ -313,7 +309,7 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 		const parked = await pending.get(challenge);
 		// Bound to the session that parked it and the subject it was asked
-		// of, so only they can answer (#552).
+		// of, so only they can answer.
 		expect(parked).toMatchObject({
 			challenge,
 			sessionId: "sess-1",
@@ -401,7 +397,7 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 		expect(createCode).not.toHaveBeenCalled();
 	});
 
-	it("never asks a session that names no subject: such a cookie is not admitted, and the browser is sent to log in (the session-admission ADR's D8, change 3)", async () => {
+	it("never asks a session that names no subject: such a cookie is not admitted, and the browser is sent to log in", async () => {
 		// It used to be refused at the consent step (`access_denied`); admission
 		// refuses the cookie before any step, with a login the remedy.
 		const { app, session, createCode } = await makeApp({
@@ -417,7 +413,7 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 	});
 });
 
-describe("GET /oauth/consent (#527)", () => {
+describe("GET /oauth/consent", () => {
 	it("tells the page what is being asked, uncacheably", async () => {
 		const store = createMemoryConsentStore();
 		await granted(store, ["read"]);
@@ -473,7 +469,7 @@ describe("GET /oauth/consent (#527)", () => {
 	});
 });
 
-describe("POST /oauth/consent (#527)", () => {
+describe("POST /oauth/consent", () => {
 	it("accept records the consent, sends the browser back to the parked request, and the request then mints", async () => {
 		const store = createMemoryConsentStore();
 		const { sink, events } = collectingSink();
@@ -580,7 +576,7 @@ describe("POST /oauth/consent (#527)", () => {
 	});
 });
 
-describe("the parked request resumes as the request that was made (#527 review)", () => {
+describe("the parked request resumes as the request that was made", () => {
 	it("drops prompt=consent from the URL it returns to, so an accepted request does not park again", async () => {
 		// Carried back, `prompt=consent` parks the request a second time, and a
 		// third: every forced-consent request would loop forever.
@@ -592,7 +588,7 @@ describe("the parked request resumes as the request that was made (#527 review)"
 	});
 
 	it("does not reach the consent step while a re-authentication is outstanding", async () => {
-		// `prompt=login consent` is answered by #481's re-authentication first —
+		// `prompt=login consent` is answered by the re-authentication first —
 		// here by `invalid_request`, because this composition wires no user
 		// session store — so nothing is parked and the one-shot `consent` is
 		// still to be spent on the way back.
@@ -620,7 +616,7 @@ describe("the parked request resumes as the request that was made (#527 review)"
 	});
 });
 
-describe("the consent endpoints answer only for a live session (#527 review)", () => {
+describe("the consent endpoints answer only for a live session", () => {
 	/** A store that knows `sid` only while `alive` says so. */
 	const storeFor = (alive: () => boolean): UserSessionStore =>
 		({
@@ -687,7 +683,7 @@ describe("the consent endpoints answer only for a live session (#527 review)", (
 	});
 });
 
-describe("the consent page and its answer, on the edges (#527 review)", () => {
+describe("the consent page and its answer, on the edges", () => {
 	const parkedWith = async (extra: Parameters<typeof makeApp>[0] = {}) => {
 		const consentStore = createMemoryConsentStore();
 		const harness = await makeApp({ consentStore, ...extra });
@@ -741,7 +737,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		expect(harness.pending.size).toBe(0);
 	});
 
-	it("refuses an answer from a session that names no subject: 401 login_required, the cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
+	it("refuses an answer from a session that names no subject: 401 login_required, the cookie is not admitted", async () => {
 		const { app, challenge, session } = await parkedWith({});
 		session.user = {};
 		const res = await request(app)
@@ -788,7 +784,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 	/**
 	 * The outage's one line, admission's (the session-admission ADR's D10):
 	 * error level, the store, the action and the projection — never the sid,
-	 * never a warn. The consent step's own line is gone.
+	 * never a warn. The consent step logs no line of its own.
 	 */
 	const expectLivenessOutageLogged = (logger: ReturnType<typeof createMockLogger>) => {
 		const lines = logger.error.mock.calls.filter(
@@ -857,7 +853,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 	});
 });
 
-describe("one challenge, one answer (#552)", () => {
+describe("one challenge, one answer", () => {
 	/** A user-session store whose reads wait until the test lets them through. */
 	const gatedSessionStore = () => {
 		let release: () => void = () => {};
@@ -992,7 +988,7 @@ describe("one challenge, one answer (#552)", () => {
 	});
 });
 
-describe("the parked request and its store, on the edges (#552 review)", () => {
+describe("the parked request and its store, on the edges", () => {
 	/** A pending-consent store whose operations fail on demand. */
 	const flakyPending = () => {
 		const inner = createMemoryPendingConsentStore();
@@ -1120,7 +1116,7 @@ describe("the parked request and its store, on the edges (#552 review)", () => {
 	});
 });
 
-describe("the challenge's bindings, on the edges (#552 review)", () => {
+describe("the challenge's bindings, on the edges", () => {
 	it("refuses an answer from a request that reports no session id, keeping the request parked", async () => {
 		let sessionId: string | undefined = "sess-1";
 		const { app, pending } = await makeApp({
@@ -1148,8 +1144,8 @@ describe("the challenge's bindings, on the edges (#552 review)", () => {
 	});
 });
 
-describe("the page and the answer refuse the same requests (#527 audit)", () => {
-	it("does not show the page to a session that names no subject: 401 login_required (the session-admission ADR's D8, change 3)", async () => {
+describe("the page and the answer refuse the same requests", () => {
+	it("does not show the page to a session that names no subject: 401 login_required", async () => {
 		// A session can keep `isAuthenticated` while its user is cleared; the
 		// POST already refused it, so the GET must not hand it the parked
 		// client, scopes and redirect_uri either.

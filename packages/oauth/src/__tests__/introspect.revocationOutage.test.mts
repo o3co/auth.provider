@@ -141,7 +141,7 @@ const spyLogger = (): Logger => {
 	return logger as unknown as Logger;
 };
 
-describe("#459 — a denylist outage at /oauth/introspect", () => {
+describe("a denylist outage at /oauth/introspect", () => {
 	const buildApp = async (opts: {
 		denylist?: AccessTokenDenylist;
 		subjectRevocation?: SubjectRevocation;
@@ -229,7 +229,7 @@ describe("#459 — a denylist outage at /oauth/introspect", () => {
 		);
 	});
 
-	it("answers exactly what a watermark outage answers — one event class, one answer (#408 parity)", async () => {
+	it("answers exactly what a watermark outage answers: the same status and body", async () => {
 		const viaDenylist = await introspectAsClient(
 			await buildApp({ denylist: outageDenylist() }),
 			await mintAT("j-5"),
@@ -263,7 +263,7 @@ describe("#459 — a denylist outage at /oauth/introspect", () => {
 	});
 });
 
-describe("#459 — a denylist outage at /oauth/userinfo", () => {
+describe("a denylist outage at /oauth/userinfo", () => {
 	// No session store: a verified token answers `{ sub }`, so the only thing
 	// between the token and a 200 is the denylist consult.
 	const buildApp = (denylist: AccessTokenDenylist, logger?: Logger) => {

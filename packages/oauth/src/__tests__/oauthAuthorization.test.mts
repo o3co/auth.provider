@@ -267,7 +267,7 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		expect(module.contributes?.grants?.client_credentials).toBeUndefined();
 	});
 
-	it("registers exactly the expected grant types (R8 snapshot)", () => {
+	it("registers exactly the expected grant types", () => {
 		// Drift guard: an accidental addition or removal of a built-in grant
 		// surfaces here before it ships in a release. client_credentials is not
 		// in the factory default (standalone template) — only authorization_code
@@ -827,7 +827,7 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 // drive the /authorize route directly, not the module manifest.
 // ---------------------------------------------------------------------------
 
-describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", () => {
+describe("authorize persists OIDC round-trip state on code record", () => {
 	it("captures nonce + sid on createCode when both are present", async () => {
 		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
 
@@ -880,7 +880,7 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 	});
 });
 
-describe("IH-6: /authorize openid scope gate", () => {
+describe("/authorize openid scope gate", () => {
 	it("rejects missing openid in oidc-required mode when issuer is configured", async () => {
 		const captureCode = vi.fn();
 		const logger = createMockLogger();
@@ -1169,7 +1169,7 @@ describe("IH-6: /authorize openid scope gate", () => {
 // defaults to 256 chars (`oauth.nonce.maxLength`), and non-printable ASCII
 // is refused. Both go via `redirectError`: the redirect_uri is already
 // client-allowlisted at this point, so RFC 6749 §4.1.2.1 applies.
-describe("IH-16: /authorize nonce length + character-set validation", () => {
+describe("/authorize nonce length + character-set validation", () => {
 	it("accepts a normal-sized printable nonce (32 chars)", async () => {
 		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
 		const app = await buildAuthorizeApp({
@@ -1323,7 +1323,7 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 // share a session, and the losing request's code is then refused at /token.
 // Pinned both structurally (no session writes) and functionally (createCode
 // receives client_id + redirect_uri).
-describe("D-1 / CR-2: /authorize binds identity to code record, not Express session", () => {
+describe("/authorize binds identity to code record, not Express session", () => {
 	it("does NOT write code, code_client_id, code_redirect_uri, granted_scopes to req.session", async () => {
 		let capturedCode: Parameters<CodeRepository["createCode"]>[0] | undefined;
 		let capturedSession: Record<string, unknown> | undefined;
@@ -1416,7 +1416,7 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 // client auth is not available, so accepting `plain` or no code_challenge would
 // allow anyone with the code to redeem it. The route must enforce these even
 // when operator config sets `pkce.required = false`.
-describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory", () => {
+describe("/authorize public-client PKCE/S256 mandatory (RFC 9700 §2.1.1)", () => {
 	// Canonical RFC 7636 example pair — a 43-char base64url-encoded SHA-256
 	// digest of `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`. Using a
 	// spec-valid challenge here means a future PKCE syntax check (e.g.,
@@ -1578,7 +1578,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
  * boot with the watermark unfilled and undeclared, `verifyJwt` skipping the
  * check and the refresh-redemption gate inert, with nothing saying so.
  */
-describe("oauthAuthorizationModule — declared absence for subjectRevocation (#406)", () => {
+describe("oauthAuthorizationModule — declared absence for subjectRevocation", () => {
 	const withoutDeclaration = () => {
 		const base = makeValidAppConfig() as Record<string, unknown> & {
 			oauth: Record<string, unknown>;

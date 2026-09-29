@@ -56,7 +56,7 @@ const exchange = (provider: AppleProvider) =>
 		nonce: "nonce-1",
 	});
 
-describe("Apple id_token signature verification (#542)", () => {
+describe("Apple id_token signature verification", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 	});

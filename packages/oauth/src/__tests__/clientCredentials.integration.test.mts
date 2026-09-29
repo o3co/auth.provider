@@ -148,7 +148,7 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		}
 	});
 
-	it("returns 400 invalid_request when grant_type is missing (RFC 6749 §5.2, #293 item 10)", async () => {
+	it("returns 400 invalid_request when grant_type is missing (RFC 6749 §5.2)", async () => {
 		// A missing required parameter is `invalid_request`; the server answers
 		// `unsupported_grant_type` only for a VALUE it does not support.
 		const app = await buildApp(clientRepoWith({ allowedGrantTypes: ["client_credentials"] }));
@@ -194,7 +194,7 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		);
 	});
 
-	it("denies a public client with no allowlist through the allowlist rule (#326 precedence)", async () => {
+	it("denies a public client with no allowlist through the allowlist rule, ahead of the confidential-client rule", async () => {
 		// Deliberate precedence: dispatch-level deny-by-absence runs before any
 		// handler code, so this doubly-ineligible request (public client AND
 		// absent allowlist) is denied by the allowlist rule (`unauthorized_client`),
@@ -262,7 +262,7 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 	});
 });
 
-describe("client_credentials — private_key_jwt client authentication at /oauth/token (#484)", () => {
+describe("client_credentials — private_key_jwt client authentication at /oauth/token", () => {
 	const RP = "rp-jwt";
 	let privateKey: CryptoKey;
 	let publicJwk: JWK;

@@ -31,7 +31,7 @@ async function generateTestKeyPair(alg: string) {
 }
 
 /**
- * HS256 test secrets must clear the 256-bit entropy floor (#282). The '.'
+ * HS256 test secrets must clear the 256-bit entropy floor. The '.'
  * characters keep these outside the base64/base64url alphabets, so the
  * UTF-8 reading is the one that counts.
  */
@@ -79,9 +79,9 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 	});
 
 	it("HS256 stays selectable — it is no longer the default, but it still builds", async () => {
-		// #282 flipped the shipped default to EdDSA. HS256 remains a supported
-		// choice for deployments that verify in-process and publish no JWKS;
-		// this test pins that it was demoted, not removed.
+		// The shipped default is EdDSA. HS256 remains a supported choice for
+		// deployments that verify in-process and publish no JWKS; this test
+		// pins that it still builds.
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
 		const keyStore = await factory.create({
@@ -94,9 +94,9 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 	});
 
 	it("no longer silently defaults to HS256 when algorithm is absent", async () => {
-		// Pre-#282 an absent `algorithm` fell back to HS256, so a deployment
-		// that configured nothing at all got symmetric signing by accident.
-		// The builder must now refuse rather than choose for the operator.
+		// A fallback to HS256 would give a deployment that configured nothing
+		// at all symmetric signing by accident. The builder refuses rather
+		// than choose for the operator.
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
 		await expect(factory.create({ type: "local", kid: "v1" })).rejects.toThrow(
@@ -127,7 +127,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 	});
 });
 
-describe("registerBuiltinKeyStores - HS256 secret entropy floor (#282)", () => {
+describe("registerBuiltinKeyStores - HS256 secret entropy floor", () => {
 	function build(secret: string) {
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
@@ -141,7 +141,6 @@ describe("registerBuiltinKeyStores - HS256 secret entropy floor (#282)", () => {
 	}
 
 	it("rejects a one-character secret", async () => {
-		// Pre-#282 this built a working keystore: the only check was length > 0.
 		await expect(build("x")).rejects.toThrow(/at least 32 bytes/i);
 	});
 
@@ -189,7 +188,7 @@ describe("registerBuiltinKeyStores - HS256 secret entropy floor (#282)", () => {
 	});
 });
 
-describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
+describe("registerBuiltinKeyStores - HS256 multi-key rotation", () => {
 	it("factory passes previousSecrets through to createSymmetricKeyStore so an old token verifies via the new keystore", async () => {
 		// Old keystore signs a token with kid "v0".
 		const oldKs = createSymmetricKeyStore(STRONG_SECRET_PREVIOUS, "v0");
@@ -214,7 +213,7 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 
 		const header = decodeProtectedHeader(oldToken);
 		expect(header.kid).toBe("v0");
-		// Pre-fix: factory drops previousSecrets, getVerificationKey("v0") throws.
+		// A factory that dropped previousSecrets would make getVerificationKey("v0") throw.
 		const key = await newKs.getVerificationKey(header.kid as string);
 		const { payload } = await jwtVerify(oldToken, key);
 		expect(payload.sub).toBe("user1");
@@ -243,8 +242,8 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 	it("rejects HS256 config that includes asymmetric-shaped previousKeys (defense-in-depth at factory level)", async () => {
 		// Schema-level strict union already rejects this, but `factory.create()`
 		// accepts `Record<string, unknown>` and bypasses the schema. The factory
-		// must catch the misconfig directly so programmatic callers cannot
-		// reproduce the IH-9 silent-ignore bug.
+		// must catch the misconfig directly so a programmatic caller's
+		// `previousKeys` is never silently ignored.
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
 		await expect(
@@ -266,9 +265,9 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 
 	it("rejects asymmetric config that includes HS256-shaped previousSecrets (mirror of the above)", async () => {
 		// The asymmetric schema branch is `.passthrough()`, so a stale
-		// `previousSecrets` block survives config validation. Before #282 the
-		// builder silently ignored it, which is the same silent-rotation-loss
-		// bug IH-9 fixed in the other direction.
+		// `previousSecrets` block survives config validation. The builder must
+		// refuse it: ignoring it silently would drop the rotation keys without
+		// a word, as in the case above.
 		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("EdDSA");
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
@@ -525,7 +524,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		).rejects.toThrow(/Invalid expiresAt for previous key "v1"/i);
 	});
 
-	it("throws when nothing at all is configured, naming the exact keys to set (#282)", async () => {
+	it("throws when nothing at all is configured, naming the exact keys to set", async () => {
 		// The critical operator-facing case: reference.conf now defaults to
 		// EdDSA, so a deployment that configures no key material reaches this
 		// path. It must fail at boot with instructions, never fall back to a
@@ -546,7 +545,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		expect(message).toMatch(/openssl genpkey -algorithm ed25519/i);
 	});
 
-	it("points an operator who set only OAUTH_JWT_SECRET at the HS256 opt-in (#282)", async () => {
+	it("points an operator who set only OAUTH_JWT_SECRET at the HS256 opt-in", async () => {
 		// Upgrade path: a 0.x deployment carrying only OAUTH_JWT_SECRET now
 		// lands on the EdDSA default. The error must connect the two.
 		const factory = createKeyStoreFactory();

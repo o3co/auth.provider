@@ -39,7 +39,7 @@ import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const mockConfig = {
-	// `oauth.jwt.issuer` is required by createOAuthRouter (#266) — the router
+	// `oauth.jwt.issuer` is required by createOAuthRouter — the router
 	// stamps it on every minted token and never derives one from the request.
 	oauth: { jwt: { issuer: "https://issuer.example" } },
 	endpoints: {
@@ -249,11 +249,11 @@ describe("createOAuthRouter", () => {
 		expect(calls.post.some((args) => args[0] === "/logout")).toBe(true);
 	});
 
-	// D-6 (v0.5.1) integration coverage: exercise the full /oauth/token pipeline
+	// Integration coverage: exercise the full /oauth/token pipeline
 	// end-to-end via supertest + a real express app. The mocked-router tests
 	// above only verify wiring; these tests cover the success-path token
 	// response, audit emit, and the 401 → `WWW-Authenticate: Bearer` branch.
-	describe("D-6 /oauth/token integration", () => {
+	describe("/oauth/token integration", () => {
 		async function buildApp(opts: {
 			grantHandler: GrantHandler;
 			grantType: string;
@@ -314,7 +314,7 @@ describe("createOAuthRouter", () => {
 			expect(issuedEvent?.clientId).toBe(TEST_CLIENT_ID);
 		});
 
-		it("error path with errorDescription + 401 does NOT inject WWW-Authenticate (Copilot review)", async () => {
+		it("error path with errorDescription + 401 does NOT inject WWW-Authenticate", async () => {
 			// A grant handler returning status 401 (e.g. ctx.authenticatedClient
 			// missing in a custom wiring) does NOT cause a `WWW-Authenticate:
 			// Bearer` challenge to be set on the token endpoint — RFC 6750 §3
@@ -558,7 +558,7 @@ describe("createOAuthRouter", () => {
 			});
 		});
 
-		// #293 item 10: a missing required parameter is `invalid_request`
+		// A missing required parameter is `invalid_request`
 		// (RFC 6749 §5.2); `unsupported_grant_type` is for a value the server
 		// does not support.
 		it("missing grant_type: returns 400 invalid_request + audit failure", async () => {
@@ -647,7 +647,7 @@ describe("createOAuthRouter", () => {
 		});
 	});
 
-	describe("D-6 /oauth/introspect non-Bearer fallback", () => {
+	describe("/oauth/introspect non-Bearer fallback", () => {
 		// When /introspect is called WITHOUT a `Bearer` Authorization header, the
 		// route hands off to `introspectClientAuthMw` (RFC 7662 §2.1) — the same
 		// confidential-client auth used for /token. This exercises the fallback

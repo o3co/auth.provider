@@ -58,7 +58,7 @@ const exchange = (provider: GoogleProvider) =>
 		callbackParams: { iss: GOOGLE.issuer },
 	});
 
-describe("Google id_token signature verification (#542)", () => {
+describe("Google id_token signature verification", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 	});

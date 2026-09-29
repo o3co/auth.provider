@@ -25,7 +25,7 @@ afterEach(() => {
  * subject stores key by subject); this one is keyed by jti, so nothing bounds
  * it but time, and it sweeps on its own.
  */
-describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () => {
+describe("createMemoryAccessTokenDenylist — bounded growth", () => {
 	/** Fill the denylist with `count` entries expiring `ttlMs` from now. */
 	const fill = async (
 		denylist: ReturnType<typeof createMemoryAccessTokenDenylist>,

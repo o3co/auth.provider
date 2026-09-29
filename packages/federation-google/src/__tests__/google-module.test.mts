@@ -36,10 +36,10 @@ describe("googleFederationModule const Module", () => {
 	});
 
 	it("produces provider.name == 'google' (single-tenant invariant)", () => {
-		// v0.5.0 single-tenant: provider.name is fixed at "google", matching
-		// the contribution key. The route layer keys session state / callback
+		// Single-tenant: provider.name is fixed at "google", matching the
+		// contribution key. The route layer keys session state / callback
 		// URL / redirect-policy lookup by provider.name; no consumer-supplied
-		// name can divert it. Multi-tenant support is deferred post-publish.
+		// name can divert it. There is no multi-tenant mode.
 		const factory = googleFederationModule.contributes?.federations?.google;
 		if (typeof factory !== "function") throw new Error("factory missing");
 		const provider = factory({
@@ -49,8 +49,8 @@ describe("googleFederationModule const Module", () => {
 				callbackURL: "https://example.com/cb",
 			},
 		} as never);
-		// #626 P1: the contribution type is still `unknown` (core's contributes-map.mts);
-		// the cast goes when it is not.
+		// The factory's type allows a promise (`Contributed<FederationProvider>`);
+		// this one answers synchronously, hence the cast.
 		expect((provider as { name: string }).name).toBe("google");
 	});
 });

@@ -26,7 +26,7 @@ const durableStore = {
 	kind: "redis",
 } as FederationGrantStore;
 
-/** The single-boundary surface #296 shipped, and nothing more. */
+/** The older single-boundary surface, and nothing more. */
 const olderAdapter = (): SubjectRevocation => ({
 	kind: "redis",
 	revokeBefore: async () => undefined,

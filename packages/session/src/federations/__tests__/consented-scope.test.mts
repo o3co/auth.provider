@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { consentedScope } from "../consented-scope.mjs";
 
-describe("consentedScope (#647)", () => {
+describe("consentedScope", () => {
 	it("takes what the upstream answered when it names a scope", () => {
 		// RFC 6749 section 5.1 makes the field REQUIRED when the granted scope
 		// differs from the requested one, so a named scope is what was granted.
@@ -92,8 +92,8 @@ describe("consentedScope (#647)", () => {
 
 	it("ignores an entry the requested list should not contain", () => {
 		// The list is typed `readonly string[]`, but a provider is a third-party
-		// extension point and the type is not a runtime guarantee — which is what
-		// D5 is about. Both branches have to survive what the type forbids.
+		// extension point and the type is not a runtime guarantee. Both branches
+		// have to survive what the type forbids.
 		expect(consentedScope(undefined, ["openid", "", "email"])).toBe("openid email");
 		expect(consentedScope(undefined, ["openid", 42, null, {}] as unknown as string[])).toBe(
 			"openid",

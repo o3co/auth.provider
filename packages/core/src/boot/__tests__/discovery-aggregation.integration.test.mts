@@ -167,7 +167,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("advertises the algorithm the key store in the slot actually uses, not HS256 (#626 F4)", async () => {
+	it("advertises the algorithm the key store in the slot actually uses, not HS256", async () => {
 		// `assembleApp` derives `signingAlgs` from `keyStore.algorithm` and hands
 		// it to the planner. The planner's unit test covers the parameter; this
 		// covers the derivation.
@@ -189,7 +189,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("also serves the RFC 8414 path with a byte-identical document (#528)", async () => {
+	it("also serves the RFC 8414 path with a byte-identical document", async () => {
 		// Some clients probe /.well-known/oauth-authorization-server first and
 		// fall back to OIDC discovery; some never fall back. One handler serves
 		// both, so bodies and headers cannot differ.
@@ -216,7 +216,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("a path-bearing issuer: RFC 8414 inserts the well-known string, OIDC appends it (#528)", async () => {
+	it("a path-bearing issuer: RFC 8414 inserts the well-known string, OIDC appends it", async () => {
 		const handle = await createTestApp({
 			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
 			bootstrapComponents: {
@@ -239,7 +239,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("serves the document on the issuer of the oauthTokenSettings the composition holds, and lets CORS read it there (#728)", async () => {
+	it("serves the document on the issuer of the oauthTokenSettings the composition holds, and lets CORS read it there", async () => {
 		// The configuration names the issuer without a path; the slot the oauth
 		// module provides names it under one, and the slot is what is read.
 		const config = {
@@ -272,7 +272,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("refuses an oauthTokenSettings without an issuer, naming the member, rather than serving on the configuration's (#728)", async () => {
+	it("refuses an oauthTokenSettings without an issuer, naming the member, rather than serving on the configuration's", async () => {
 		// A slot the composition holds is read whole: a member it lacks is not
 		// taken from the configuration beside it.
 		const { issuer: _dropped, ...withoutIssuer } = createTestOAuthTokenSettings();
@@ -287,7 +287,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await expect(booting).rejects.toThrow(/oauthTokenSettings\.issuer/);
 	});
 
-	it("an issuer path is a literal, not a route pattern: metacharacters boot and serve (#528 review)", async () => {
+	it("an issuer path is a literal, not a route pattern: metacharacters boot and serve", async () => {
 		// Express 5 parses a route string with path-to-regexp, where `+`, `*`,
 		// `(`, `)`, `:` and `{}` are syntax. An issuer is a URL, and those
 		// characters are legal in its path: passing it verbatim to
@@ -312,7 +312,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		}
 	});
 
-	it("matches the advertised path and nothing else — no pattern, no neighbour (#528 review)", async () => {
+	it("matches the advertised path as a literal, not a pattern, and still with a trailing slash", async () => {
 		const handle = await createTestApp({
 			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
 			bootstrapComponents: {
@@ -337,7 +337,7 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("answers GET and HEAD, and leaves every other method to the rest of the app (#528 review)", async () => {
+	it("answers HEAD, and passes a POST on to the rest of the app", async () => {
 		const handle = await createTestApp({
 			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
 			bootstrapComponents: {

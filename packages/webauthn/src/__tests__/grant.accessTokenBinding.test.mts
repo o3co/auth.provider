@@ -206,7 +206,7 @@ beforeEach(() => {
 // The confirmation reaches the access token
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — access-token confirmation (#489)", () => {
+describe("createWebAuthnGrant — access-token confirmation", () => {
 	it("puts the presenting key's cnf.jkt on the access token and answers token_type DPoP", async () => {
 		const tokens = await issue(
 			await makeDeps(),
@@ -260,7 +260,7 @@ describe("createWebAuthnGrant — access-token confirmation (#489)", () => {
 		expect(tokens.token_type).toBe("DPoP");
 	});
 
-	it("binds both tokens for a public client, leaving #480's refresh-token gate intact", async () => {
+	it("binds both tokens for a public client", async () => {
 		const tokens = await issue(
 			await makeDeps(),
 			makeCtx(makeClient({ tokenEndpointAuthMethod: "none" }), { tokenBinding: dpopBinding }),
@@ -275,8 +275,8 @@ describe("createWebAuthnGrant — access-token confirmation (#489)", () => {
 // The unbound request is untouched
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — unbound requests are unchanged (#489)", () => {
-	it("emits no cnf and the same response keys as before, for a client that demands nothing", async () => {
+describe("createWebAuthnGrant — unbound requests", () => {
+	it("emits no cnf and only access_token, expires_in and token_type, for a client that demands nothing", async () => {
 		const tokens = await issue(
 			await makeDeps(),
 			makeCtx(makeClient({ allowedGrantTypes: [WEBAUTHN_GRANT_TYPE] })),

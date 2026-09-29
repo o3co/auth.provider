@@ -19,8 +19,9 @@
  * D7): `sessionRequirements.expected` is derived in TypeScript from the
  * PARSED `mfa.mode` — `[]` under `off`, `["mfa"]` otherwise — never from the
  * raw `MFA_MODE`, so a variable the schema refused cannot boot with a
- * posture the config does not carry. No MFA module exists yet, so a mode
- * other than `off` is refused at boot by `session-requirement-missing`.
+ * posture the config does not carry. `buildModules` installs no module
+ * registering `mfa`, so a mode other than `off` is refused at boot by
+ * `session-requirement-missing`.
  */
 
 import { BootError } from "@o3co/auth-provider-core";
@@ -35,7 +36,7 @@ afterEach(async () => {
 	current = undefined;
 });
 
-describe("sessionRequirements.expected, derived from the parsed mfa.mode (D7)", () => {
+describe("sessionRequirements.expected, derived from the parsed mfa.mode", () => {
 	it("declares nothing under the shipped default, off, and boots", async () => {
 		current = await compose();
 		expect(current.config.sessionRequirements).toEqual({ expected: [] });

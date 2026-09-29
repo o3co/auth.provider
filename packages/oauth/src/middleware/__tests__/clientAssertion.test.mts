@@ -32,7 +32,7 @@ import {
 } from "#/middleware/clientAssertion.mjs";
 
 /**
- * #484 — `private_key_jwt` client authentication (RFC 7523 §2.2, OIDC Core §9).
+ * `private_key_jwt` client authentication (RFC 7523 §2.2, OIDC Core §9).
  *
  * The verifier is the whole of the trust decision: which client the assertion
  * names, whose keys it must verify under, what the claims must say, and that
@@ -118,7 +118,7 @@ const refused = (outcome: unknown) => {
 	return outcome as { status: number; error: string; description?: string };
 };
 
-describe("createClientAssertionVerifier (#484)", () => {
+describe("createClientAssertionVerifier", () => {
 	describe("presence and shape", () => {
 		it("reports an absent assertion, leaving the other methods to the middleware", async () => {
 			expect(await build().verify({}, findClient())).toEqual({ kind: "absent" });

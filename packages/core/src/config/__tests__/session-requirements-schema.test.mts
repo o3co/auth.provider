@@ -40,7 +40,7 @@ const ENV = {
 const issuesAt = (result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
 	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
 
-describe("sessionRequirements.expected (D7)", () => {
+describe("sessionRequirements.expected", () => {
 	it("has no default: reference.conf carries none, and a configuration without the section parses to none", () => {
 		const fromReference = validate(parseFile(REFERENCE_CONF, { env: ENV }), AppConfigSchema);
 		expect(fromReference.sessionRequirements).toBeUndefined();

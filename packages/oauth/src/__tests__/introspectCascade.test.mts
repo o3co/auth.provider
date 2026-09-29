@@ -117,7 +117,7 @@ async function introspect(app: ReturnType<typeof express>, token: string) {
 		.send({ token });
 }
 
-describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
+describe("/introspect — family revoke cascade", () => {
 	it("returns active:true when family_id present and isFamilyRevoked returns false", async () => {
 		const familyId = "fam-abc";
 		const token = await makeAccessToken({ family_id: familyId });
@@ -306,7 +306,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 // verifier's `typ` pin answers RT and id_token JWTs `{ active: false }`.
 // ---------------------------------------------------------------------------
 
-describe("/introspect — SF-8: token_type + access-only enforcement", () => {
+describe("/introspect — token_type + access-only enforcement", () => {
 	async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
 		return new SignJWT({ sub: "u1", scope: "read", ...overrides })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
@@ -323,7 +323,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 			.sign(secretKey);
 	}
 
-	it("RED-1: returns active=true with token_type=Bearer + jti for a valid access token (NOT 'at+jwt')", async () => {
+	it("returns active=true with token_type=Bearer + jti for a valid access token (NOT 'at+jwt')", async () => {
 		// RFC 6750 §6.1.1 — `Bearer` is the OAuth Token Type; the JOSE `typ`
 		// ("at+jwt") is the wrong namespace per RFC 7662 §2.2, which also lists
 		// `jti` as a registered response field.
@@ -338,7 +338,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 		expect(res.body.jti).toBe("jti-sf8-red1");
 	});
 
-	it("RED-2: returns active=false for a refresh token (no leak of RT validity)", async () => {
+	it("returns active=false for a refresh token (no leak of RT validity)", async () => {
 		// RFC 7662 §2.1 + OAuth Security Topics §5.1: introspection is for
 		// access tokens only. A valid RT MUST return active:false to prevent
 		// a resource server from probing RT validity via the introspect
@@ -352,7 +352,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 		expect(res.body.token_type).toBeUndefined();
 	});
 
-	it("RED-3: returns active=false for an id_token", async () => {
+	it("returns active=false for an id_token", async () => {
 		// Same RFC 7662 §2.1 reasoning as RT: id_tokens are not introspectable
 		// access tokens; treating them as active leaks information.
 		const token = await makeIdToken();
@@ -363,7 +363,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 		expect(res.body.active).toBe(false);
 	});
 
-	it("RED-4: response carries client_id (RFC 7662 §2.2 RECOMMENDED) — sourced from client_id when present, falls back to azp for v0.5.1 compat", async () => {
+	it("response carries client_id (RFC 7662 §2.2 RECOMMENDED), taken from azp when the token has no client_id claim", async () => {
 		// A token may carry `azp` (RFC 9068 §2.2) rather than `client_id`, and
 		// RFC 7662 §2.2 lists `client_id` as RECOMMENDED in the response, so
 		// introspection answers `client_id: payload.client_id ?? azp`: resource
@@ -378,7 +378,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 		expect(res.body.client_id).toBe("client1");
 	});
 
-	it("TD-5: active access-token response carries RFC 7662 fields without leaking family_id", async () => {
+	it("active access-token response carries RFC 7662 fields without leaking family_id", async () => {
 		const token = await makeAccessToken({
 			sub: "user-td5",
 			aud: "https://resource.example",
@@ -421,7 +421,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 // family-revoke cascade must fire.
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via createTestApp", () => {
+describe("oauthModule — refreshTokenFamilyRevocation composition via createTestApp", () => {
 	it("threads refreshTokenFamilyRevocation through to /introspect so family revocation returns active:false", async () => {
 		const familyId = "fam-module-revoked";
 		const token = await makeAccessToken({ family_id: familyId });
@@ -513,7 +513,7 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
  * session-store outage into an introspection outage, on a hot path resource
  * servers call per request.
  */
-describe("/introspect carries token metadata only (#318)", () => {
+describe("/introspect carries token metadata only", () => {
 	/**
 	 * Exactly what this AS answers with, as a closed list — an RFC 7662 §2.2
 	 * **subset plus two extensions**, not the §2.2 set:
@@ -554,7 +554,7 @@ describe("/introspect carries token metadata only (#318)", () => {
 		expect(unexpected).toEqual([]);
 	});
 
-	it("does not carry email_verified — the claim #318 asked about", async () => {
+	it("does not carry email_verified or email", async () => {
 		const token = await makeAccessToken({ client_id: "client1" });
 		const app = await buildApp();
 		const res = await introspect(app, token);

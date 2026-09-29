@@ -55,7 +55,7 @@ const activateCeremonyModule = defineModule({
 	},
 });
 
-describe("A1 wiring — happy path with all-memory composition", () => {
+describe("challenge wiring — happy path with all-memory composition", () => {
 	it("createApp({ memory store + memory set + default ceremony }) yields a working ceremony", async () => {
 		const handle = await createApp({
 			modules: [
@@ -82,7 +82,7 @@ describe("A1 wiring — happy path with all-memory composition", () => {
 	});
 });
 
-describe("A1 wiring — override path", () => {
+describe("challenge wiring — override path", () => {
 	it("custom challengeCeremony module REPLACES the default (no duplicate-provides error)", async () => {
 		const customCeremonyModule = defineModule({
 			name: "test-custom-ceremony",
@@ -142,7 +142,7 @@ describe("A1 wiring — override path", () => {
 	});
 });
 
-describe("A1 wiring — direct adapter constructors (without modules)", () => {
+describe("challenge wiring — direct adapter constructors (without modules)", () => {
 	it("createMemoryChallengeStore() + createMemoryReplaySeenSet() compose without going through createApp", () => {
 		const store = createMemoryChallengeStore();
 		const set = createMemoryReplaySeenSet();

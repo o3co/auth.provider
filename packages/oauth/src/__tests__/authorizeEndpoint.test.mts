@@ -288,7 +288,7 @@ const recordingLoginEntry = (): { readonly asked: string[]; readonly entry: Logi
 };
 
 describe("/authorize — unauthenticated session", () => {
-	it("sends the login trip through the loginEntry a module provides, to come back to the same request (#728)", async () => {
+	it("sends the login trip through the loginEntry a module provides, to come back to the same request", async () => {
 		const { asked, entry } = recordingLoginEntry();
 		const { app } = await makeApp({ session: { isAuthenticated: false }, loginEntry: entry });
 		const res = await authorize(app, baseQuery);
@@ -366,7 +366,7 @@ describe("/authorize — unauthenticated session", () => {
 		},
 	);
 
-	it("builds redirect_to from the configured origin, not the Host header (#356)", async () => {
+	it("builds redirect_to from the configured origin, not the Host header", async () => {
 		const { app } = await makeApp({ session: { isAuthenticated: false } });
 		const res = await request(app)
 			.get("/oauth/authorize")
@@ -379,7 +379,7 @@ describe("/authorize — unauthenticated session", () => {
 		expect(new URL(redirectTo).origin).toBe("https://issuer.example");
 	});
 
-	it("ignores forwarded proto/host even under `trust proxy` (#356)", async () => {
+	it("ignores forwarded proto/host even under `trust proxy`", async () => {
 		const { app } = await makeApp({ session: { isAuthenticated: false } });
 		// The deployment shape the attack needs: Express trusting its proxy
 		// hop, so `req.protocol` / `req.get("host")` follow whatever forwarded
@@ -398,7 +398,7 @@ describe("/authorize — unauthenticated session", () => {
 	});
 });
 
-describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
+describe("/authorize — pre-redirect validation (400/500 JSON)", () => {
 	it("rejects a request without client_id", async () => {
 		const { app } = await makeApp({});
 		const { client_id: _omitted, ...query } = baseQuery;
@@ -449,7 +449,7 @@ describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
 	});
 });
 
-describe("/authorize — redirect_uri matching (#483, RFC 8252 §7.3)", () => {
+describe("/authorize — redirect_uri matching (RFC 8252 §7.3)", () => {
 	// A native app receives the authorization response on a loopback listener
 	// whose port the OS assigns at run time, so the registration cannot name
 	// it. The port — and only the port — is therefore ignored when BOTH sides
@@ -514,7 +514,7 @@ describe("/authorize — redirect_uri matching (#483, RFC 8252 §7.3)", () => {
 	});
 });
 
-describe("/authorize — scope semantics (#396)", () => {
+describe("/authorize — scope semantics", () => {
 	it("narrows an over-asking request and persists only the allowlisted scopes", async () => {
 		// The narrowing half of the §3.3 contract; the echo half (the token
 		// response naming what WAS granted) is pinned in authorization.test.mts.
@@ -582,7 +582,7 @@ describe("/authorize — response_type validation", () => {
 		expect(params.get("code")).toBeNull();
 	});
 
-	it("answers 400 invalid_client JSON when the client cannot be validated — the client refusal outranks response_type (A-1)", async () => {
+	it("answers 400 invalid_client JSON when the client cannot be validated — the client refusal outranks response_type", async () => {
 		const { app } = await makeApp({ clientNotFound: true });
 		const res = await authorize(app, { ...baseQuery, response_type: "token" });
 		// No validated redirect target exists, so nothing redirects — the
@@ -626,7 +626,7 @@ describe("/authorize — response_type validation", () => {
 	});
 });
 
-describe("/authorize — PKCE required (#273)", () => {
+describe("/authorize — PKCE required", () => {
 	it("rejects a confidential-client request without code_challenge", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, withoutPkce());
@@ -654,7 +654,7 @@ describe("/authorize — PKCE required (#273)", () => {
 	});
 });
 
-describe("/authorize — nonce validation (IH-16)", () => {
+describe("/authorize — nonce validation", () => {
 	it("rejects a repeated nonce (array) as invalid_request at the boundary", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, { ...baseQuery, nonce: ["a", "b"] });
@@ -664,7 +664,7 @@ describe("/authorize — nonce validation (IH-16)", () => {
 	});
 });
 
-describe("/authorize — code_challenge_method resolution (#273)", () => {
+describe("/authorize — code_challenge_method resolution", () => {
 	it("rejects an omitted method — RFC 7636 §4.3 reads absence as `plain`", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, withoutPkce({ code_challenge: S256_CHALLENGE }));
@@ -709,8 +709,8 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 	});
 });
 
-describe("/authorize — policy evaluation edges (C-2)", () => {
-	it("never consults the policy for a session whose user has no id: such a cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
+describe("/authorize — policy evaluation edges", () => {
+	it("never consults the policy for a session whose user has no id: such a cookie is not admitted, and the browser is sent to log in", async () => {
 		// A cookie that says authenticated without a user is not a session this
 		// provider wrote: admission refuses it before any read, and the browser
 		// is sent to log in.
@@ -812,7 +812,7 @@ describe("/authorize — policy evaluation edges (C-2)", () => {
 		},
 	);
 
-	it("refuses a policy that returns a non-array grantedScope or grantedAudience (#521)", async () => {
+	it("refuses a policy that returns a non-array grantedScope or grantedAudience", async () => {
 		// A JavaScript policy can return a string where the type says array.
 		// `.filter` would throw on one, and an audience string persisted on the
 		// code is read back as its first character at /token.
@@ -916,7 +916,7 @@ describe("/authorize — code issuance failure", () => {
 });
 
 describe("/authorize — success audit subject (authorize.granted)", () => {
-	it("emits no authorize.granted for a session whose user has no string id: such a cookie is not admitted (the session-admission ADR's D8, change 3)", async () => {
+	it("emits no authorize.granted for a session whose user has no id: such a cookie is not admitted, and the browser is sent to log in", async () => {
 		const record = vi.fn(async () => {});
 		const { app, createCode } = await makeApp({
 			auditSink: { record },
@@ -942,7 +942,7 @@ describe("/authorize — success audit subject (authorize.granted)", () => {
 	});
 });
 
-describe("/authorize — rejection audit vocabulary (authorize.rejected, #329)", () => {
+describe("/authorize — rejection audit vocabulary (authorize.rejected)", () => {
 	it("emits authorize.rejected when the client is not registered for the code grant", async () => {
 		// /authorize rejections carry their own name, not the token endpoint's
 		// `token.issued.failure`, so the success/failure pair names one operation.
@@ -979,7 +979,7 @@ const authorizePost = (app: express.Express, body: Query) =>
 		.type("form")
 		.send(body as Record<string, string>);
 
-describe("/authorize — request objects are refused, not ignored (#284)", () => {
+describe("/authorize — request objects are refused, not ignored", () => {
 	it("answers request_not_supported for a request parameter", async () => {
 		const { app } = await makeApp({});
 		const params = redirectParams(await authorize(app, { ...baseQuery, request: "ey.J.x" }));
@@ -1012,7 +1012,7 @@ describe("/authorize — request objects are refused, not ignored (#284)", () =>
 	});
 });
 
-describe("/authorize — prompt=none (#284)", () => {
+describe("/authorize — prompt=none", () => {
 	it("answers login_required by redirect when there is no session", async () => {
 		// The point: a hidden iframe cannot act on a login page. This has to
 		// reach the RP's own redirect_uri, which is why the request is allowed
@@ -1093,7 +1093,7 @@ describe("/authorize — prompt=none (#284)", () => {
 		);
 	});
 
-	it("honours prompt=consent since #527 — a no-op for a first-party client, which has nothing to consent to", async () => {
+	it("honours prompt=consent — a no-op for a first-party client, which has nothing to consent to", async () => {
 		const { app } = await makeApp({});
 		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "consent" }));
 		expect(params.get("error")).toBeNull();
@@ -1130,7 +1130,7 @@ describe("/authorize — prompt=none (#284)", () => {
 	});
 });
 
-describe("/authorize — POST is supported (#284)", () => {
+describe("/authorize — POST is supported", () => {
 	it("accepts the same request as a form POST", async () => {
 		// OIDC Core §3.1.2.1 makes this a MUST, and it is how an RP sends a
 		// request too large for a URL.
@@ -1165,7 +1165,7 @@ describe("/authorize — POST is supported (#284)", () => {
  * performs the same read `/token` does, where the answer can still be "log in
  * again".
  */
-describe("/authorize — dead sid is unauthenticated (R1b)", () => {
+describe("/authorize — dead sid is unauthenticated", () => {
 	const liveSid = "sid-live";
 	const deadSid = "sid-dead";
 
@@ -1260,7 +1260,7 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(store.get).not.toHaveBeenCalled();
 	});
 
-	it("sends a session that records no sid through the loginEntry a module provides (#728)", async () => {
+	it("sends a session that records no sid through the loginEntry a module provides", async () => {
 		const { asked, entry } = recordingLoginEntry();
 		const { app } = await makeApp({
 			userSessionStore: liveStore(),
@@ -1310,8 +1310,9 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(params.get("error")).toBe("temporarily_unavailable");
 		expect(params.get("error_description")).toBe("session store unavailable");
 		expect(createCode).not.toHaveBeenCalled();
-		// The outage is logged once, at error level, by admission (D10): the
-		// store and the action, the projection — never the sid, not a warn.
+		// The outage is logged once, at error level, by admission (the
+		// session-admission ADR's D10): the store and the action, the
+		// projection — never the sid, not a warn.
 		expect(logger.warn).not.toHaveBeenCalled();
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
@@ -1371,7 +1372,7 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 	});
 });
 
-describe("/authorize — step-up and re-authentication (#481)", () => {
+describe("/authorize — step-up and re-authentication", () => {
 	const SID = "sid-1";
 	const session = { isAuthenticated: true, sid: SID, user: { id: "user-1" } };
 	// A `Date`, or a thunk when a test needs the authentication to change
@@ -1403,7 +1404,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			}),
 			delete: vi.fn(async () => {}),
 		}) as unknown as UserSessionStore;
-	/** A federated session recorded since D9 for a federation that trusts its IdP's `amr`. */
+	/** A federated session as the MFA ADR's D9 records it, for a federation that trusts its IdP's `amr`. */
 	const TRUSTED_FEDERATION: SessionAuthentication = {
 		primary: "fed",
 		federation: "google",
@@ -1459,7 +1460,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(harness.session).not.toHaveProperty("reauthAskedAt");
 		});
 
-		it("sends a session older than max_age through the loginEntry a module provides, naming the ask (#728)", async () => {
+		it("sends a session older than max_age through the loginEntry a module provides, naming the ask", async () => {
 			const { asked, entry } = recordingLoginEntry();
 			const harness = await makeApp({
 				session,
@@ -1636,7 +1637,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
-		it("does not count an authentication earlier in the same second as the ask (v0.13.0 audit)", async () => {
+		it("does not count an authentication earlier in the same second as the ask", async () => {
 			// Compared in whole seconds with `>=`, a session authenticated at
 			// …:00.200 would satisfy an ask made at …:00.800 — `prompt=login`
 			// honoured without re-authenticating, within one wall-clock second.
@@ -1979,7 +1980,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 	});
 });
 
-describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
+describe("/authorize — the acr table at boot", () => {
 	const EVENT = "acr_value_unsatisfiable";
 	const acrValues = {
 		"urn:example:pwd": ["pwd"],
@@ -2130,7 +2131,7 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 	});
 });
 
-describe("/authorize — the claims parameter (the MFA ADR's D15, #284)", () => {
+describe("/authorize — the claims parameter", () => {
 	const REFUSAL = "request acr through acr_values";
 	const claims = (value: unknown) => JSON.stringify(value);
 

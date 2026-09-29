@@ -34,11 +34,12 @@ import {
 /**
  * A refresh is an attempt to improve on the stored token, never a condition
  * for answering one that is good. Whatever the attempt came to, the call ends
- * in the ordinary last look (D10): a stored token that serves the request is
+ * in the ordinary last look: a stored token that serves the request is
  * answered with the life it has, and the attempt's failure only where nothing
  * stored serves it. The look's own verdicts — expired, revoked — come first.
+ * See ADR 2026-09-17-federation-grants-offline-delegation, D10.
  */
-describe("retrieveFederationGrantToken — what a failed refresh leaves the caller with (#593, D10, D12)", () => {
+describe("retrieveFederationGrantToken — what a failed refresh leaves the caller with", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -64,7 +65,7 @@ describe("retrieveFederationGrantToken — what a failed refresh leaves the call
 			setNow(HALF_SPENT);
 			h.refresh.mockRejectedValue(outage());
 			// Twenty minutes are left and fifty asked: a refresh is wanted, and
-			// fails. The caller decides what twenty minutes are worth (D10).
+			// fails. The caller decides what twenty minutes are worth.
 			expect(await retrieve({ minTtlSeconds: 3000 })).toMatchObject({
 				ok: true,
 				accessToken: "at-0",
@@ -179,8 +180,9 @@ describe("retrieveFederationGrantToken — what a failed refresh leaves the call
 
 	describe("the look's own verdict comes before the attempt's", () => {
 		it("reports an expiry that landed during the upstream call, even when the upstream answered invalid_grant and the record was marked", async () => {
-			// `requireReauthorization` marks an expired record on purpose (D1); the
-			// answer must not send the caller to a renewal that has to be refused.
+			// `requireReauthorization` marks an expired record on purpose (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D1); the answer
+			// must not send the caller to a renewal that has to be refused.
 			await h.seed({ expiresAt: at(HOUR) });
 			setNow(at(HOUR - 15_000));
 			let reject!: (error: unknown) => void;

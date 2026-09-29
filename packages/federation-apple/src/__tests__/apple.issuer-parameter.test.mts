@@ -15,13 +15,13 @@
  */
 
 /**
- * #597 — an RFC 9207 `iss` in Apple's posted callback reaches the library's
+ * An RFC 9207 `iss` in Apple's posted callback reaches the library's
  * issuer check.
  *
  * Apple's discovery document does not advertise
  * `authorization_response_iss_parameter_supported`, so the parameter is not
  * required here. One that is sent is compared with Apple's issuer. These cases
- * run the real library against a fake Apple, as the #542 cases do.
+ * run the real library against a fake Apple, as apple.signature.test.mts does.
  */
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";
@@ -64,7 +64,7 @@ const refusedBecause = (reason: RegExp) => ({
 	cause: { message: expect.stringMatching(reason) },
 });
 
-describe("Apple authorization response issuer (RFC 9207, #597)", () => {
+describe("Apple authorization response issuer (RFC 9207)", () => {
 	it("refuses another issuer's iss before any token request", async () => {
 		const { idp, provider } = await build();
 		await expect(exchangeWith(provider, { iss: "https://impostor.test" })).rejects.toMatchObject(

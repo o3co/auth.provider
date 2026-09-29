@@ -15,7 +15,7 @@
  */
 
 /**
- * The `httpSettings` slot (#728): what every module's HTTP behaviour
+ * The `httpSettings` slot: what every module's HTTP behaviour
  * depends on of the `http` module's settings — which forwarding hops
  * `req.ip` trusts, and the origins core's CORS middleware lets read. Its
  * contract suite and the test double: the double keeps every case, and

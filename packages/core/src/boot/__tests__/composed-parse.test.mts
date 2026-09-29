@@ -15,7 +15,7 @@
  */
 
 /**
- * Boot's one composed parse (#728). A composition root hands `createApp` the
+ * Boot's one composed parse. A composition root hands `createApp` the
  * configuration it resolved — never parsed first — and boot parses it once:
  * with the transitional base (core's sections and every section core still
  * mirrors for a package, each optional), laid over what was written so
@@ -507,7 +507,7 @@ describe("a section nested in another module's", () => {
 	});
 });
 
-describe("config_sections_ignored — a top-level section nobody owns (#728 B8)", () => {
+describe("config_sections_ignored — a top-level section nobody owns", () => {
 	it("is kept, and named once in the log with every other one", async () => {
 		const logger = recordingLogger();
 		const reader = defineModule({

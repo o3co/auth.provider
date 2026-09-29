@@ -66,7 +66,7 @@ const makeApp = (store: KeyStore) => {
 
 const PATH = "/.well-known/jwks.json";
 
-describe("JWKS route — ETag + one serialization per key set (#293 item 4)", () => {
+describe("JWKS route — one ETag and one body per key set", () => {
 	it("serves a stable strong ETag for a stable key set and 304s on If-None-Match", async () => {
 		const { store } = await makeStore();
 		const app = makeApp(store);

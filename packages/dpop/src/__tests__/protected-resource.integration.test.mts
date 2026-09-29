@@ -76,7 +76,7 @@ const mintProof = async (
 		.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: key.jwk })
 		.sign(key.privateKey);
 
-describe("DPoP at a protected resource (#264)", () => {
+describe("DPoP at a protected resource", () => {
 	let server: Server;
 	let key: ClientKey;
 	let accessToken: string;
@@ -161,7 +161,7 @@ describe("DPoP at a protected resource (#264)", () => {
 	});
 });
 
-describe("DPoP at a protected resource — server-provided nonce (#530)", () => {
+describe("DPoP at a protected resource — server-provided nonce", () => {
 	let server: Server;
 	let key: ClientKey;
 	let accessToken: string;

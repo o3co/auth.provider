@@ -456,7 +456,7 @@ describe("createApp — 6. stage 6 error: route-order-cycle → stage: assembleA
 // 7. Boot-failure LifecycleRegistrar drain
 // ---------------------------------------------------------------------------
 
-describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {
+describe("createApp — 7. boot-failure LifecycleRegistrar drain", () => {
 	it("registered cleanups run when a later stage fails", async () => {
 		let cleanupRan = false;
 
@@ -716,7 +716,7 @@ describe("createApp — 8. ReadinessRegistrar seeding", () => {
 	});
 });
 
-describe("the sessionRequirements collector (the session-admission ADR's D3)", () => {
+describe("the sessionRequirements collector", () => {
 	it("refuses replace outright, known name or not: a requirement is switched off by not installing it", () => {
 		const collector = mergeWithBuiltins(undefined).sessionRequirements;
 		expect(collector).toBeDefined();

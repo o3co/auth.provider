@@ -83,8 +83,8 @@ function makeSessionFederationIndex(
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("cascadeLogout (A4 §6.2)", () => {
-	it("executes in §6.2 order: listFamilyIds → revokeFamily (each) → federationTokenStore.removeBySid → sessionStores.removeBySid (×3) → delete → post-step-4 sessionFamilyIndex.removeBySid (CR-4)", async () => {
+describe("cascadeLogout", () => {
+	it("runs every step on the sid and reports done: listFamilyIds, revokeFamily for each family, federationTokenStore.removeBySid, sessionStores.removeBySid (×3), delete", async () => {
 		const sessionFamilyIndex = makeSessionFamilyIndex({
 			listFamilyIds: vi.fn(async () => ["fam-1", "fam-2"]),
 		});
@@ -448,7 +448,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	// MUST be: Step 3 removeBySid → Step 4 delete → post-step-4 removeBySid.
 	// -------------------------------------------------------------------------
 
-	it("CR-4: runs sessionFamilyIndex.removeBySid AFTER userSessionStore.delete (post-step-4 cleanup)", async () => {
+	it("runs sessionFamilyIndex.removeBySid AFTER userSessionStore.delete (post-step-4 cleanup)", async () => {
 		const sessionFamilyIndex = makeSessionFamilyIndex({
 			listFamilyIds: vi.fn(async () => []),
 		});
@@ -480,7 +480,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		expect(deleteOrder).toBeLessThan(removeOrders[1]);
 	});
 
-	it("CR-4: post-step-4 removeBySid failure does NOT change cascade outcome (best-effort)", async () => {
+	it("post-step-4 removeBySid failure does NOT change cascade outcome (best-effort)", async () => {
 		// First removeBySid (Step 3) succeeds, second (post-step-4) throws — must be
 		// swallowed and logged so the cascade still reports done.
 		let calls = 0;

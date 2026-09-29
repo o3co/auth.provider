@@ -9,7 +9,7 @@
  */
 
 /**
- * Issue #297 — the optional gate. A deployment may require a verified email
+ * An optional gate: a deployment may require a verified email
  * before tokens are issued for an end-user subject. The Store still owns the
  * verification flow; this only reads the result it published.
  */

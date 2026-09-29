@@ -62,11 +62,11 @@ describe("InMemoryClientRepository", () => {
 			expect(client).toBeNull();
 		});
 
-		// D-6 (v0.5.1): findById exposes the configured authentication method on
-		// every PublicClient projection so downstream middleware (`clientAuthMw`)
-		// and grant handlers (`refreshToken`, `authorization`) can branch on it
+		// findById exposes the configured authentication method on every
+		// PublicClient projection so downstream middleware (`clientAuthMw`) and
+		// grant handlers (`refreshToken`, `authorization`) can branch on it
 		// without re-fetching the client record.
-		it("D-6: returns tokenEndpointAuthMethod from findById", async () => {
+		it("returns tokenEndpointAuthMethod from findById", async () => {
 			const repo = new InMemoryClientRepository(
 				new Map([
 					[
@@ -179,7 +179,7 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	describe("federation-token opt-in field round-trip (F-6)", () => {
+	describe("federation-token opt-in field round-trip", () => {
 		it("preserves allowedAzpForFederationToken when set to true", async () => {
 			const repo = new InMemoryClientRepository(
 				new Map([
@@ -250,7 +250,7 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	describe("ClientEntrySchema URL scheme allowlist (F-5 XSS hardening)", () => {
+	describe("ClientEntrySchema URL scheme allowlist", () => {
 		const baseEntry = {
 			tokenEndpointAuthMethod: "client_secret_basic" as const,
 			clientSecret: "secret",
@@ -293,14 +293,13 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	// #498 — `postLogoutRedirectUris` was on the http/https-only
-	// `httpUrlSchema` while `allowedRedirectUris` on the same record already
-	// used the richer `checkRedirectUri` grammar. A native app whose only
-	// redirect target is a reverse-DNS custom scheme could register where it
-	// receives the authorization response and NOT where it is sent after
-	// logout, so RP-initiated logout ended in a JSON body instead of back in
-	// the app.
-	describe("postLogoutRedirectUris uses the registered-redirect-URI grammar (#498)", () => {
+	// `postLogoutRedirectUris` takes the `checkRedirectUri` grammar that
+	// `allowedRedirectUris` on the same record takes, not the http/https-only
+	// `httpUrlSchema`: a native app whose only redirect target is a reverse-DNS
+	// custom scheme registers where it is sent after logout as well as where it
+	// receives the authorization response, so RP-initiated logout ends back in
+	// the app rather than in a JSON body.
+	describe("postLogoutRedirectUris uses the registered-redirect-URI grammar", () => {
 		const baseEntry = {
 			tokenEndpointAuthMethod: "client_secret_basic" as const,
 			clientSecret: "secret",
@@ -316,8 +315,8 @@ describe("InMemoryClientRepository", () => {
 		});
 
 		it("accepts the same grammar allowedRedirectUris accepts", () => {
-			// The point of the change: one record, one vocabulary. Every shape
-			// that is a legal redirect target is a legal post-logout target.
+			// One record, one vocabulary: every shape that is a legal redirect
+			// target is a legal post-logout target.
 			const uris = [
 				"https://rp.example/logged-out",
 				"http://127.0.0.1:8080/logged-out",
@@ -427,7 +426,7 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	describe("allowedGrantTypes field round-trip (Wave 1 §3.4.1)", () => {
+	describe("allowedGrantTypes field round-trip", () => {
 		it("findById omits allowedGrantTypes when the entry has none", async () => {
 			// Preserve the undefined-vs-empty distinction: when the operator did
 			// not configure the field, the resolved PublicClient must surface
@@ -607,14 +606,13 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	// D-6 (v0.5.1): tokenEndpointAuthMethod discriminator + ClientEntrySchema
-	// superRefine. The schema is now the single source of truth for whether a
-	// client is confidential (basic/post — secret required) or public (none —
-	// secret forbidden). Historically these tests would have been split between
-	// ClientEntrySchema and InMemoryClientRepository, but the schema is invoked
-	// from the constructor so both surfaces share the same RED tests.
-	describe("D-6 tokenEndpointAuthMethod discriminator (RED Group A)", () => {
-		it("A-1: client_secret_basic without clientSecret throws at construction", () => {
+	// tokenEndpointAuthMethod discriminator + ClientEntrySchema superRefine.
+	// The schema is the single source of truth for whether a client is
+	// confidential (basic/post — secret required) or public (none — secret
+	// forbidden). The constructor parses each entry with the schema, so these
+	// tests cover ClientEntrySchema and InMemoryClientRepository alike.
+	describe("tokenEndpointAuthMethod discriminator", () => {
+		it("client_secret_basic without clientSecret throws at construction", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
@@ -632,7 +630,7 @@ describe("InMemoryClientRepository", () => {
 			).toThrow(/clientSecret is required/);
 		});
 
-		it("A-1b: client_secret_post without clientSecret throws at construction", () => {
+		it("client_secret_post without clientSecret throws at construction", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
@@ -650,7 +648,7 @@ describe("InMemoryClientRepository", () => {
 			).toThrow(/clientSecret is required/);
 		});
 
-		it("A-2: tokenEndpointAuthMethod=none with clientSecret throws", () => {
+		it("tokenEndpointAuthMethod=none with clientSecret throws", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
@@ -669,7 +667,7 @@ describe("InMemoryClientRepository", () => {
 			).toThrow(/clientSecret must not be set/);
 		});
 
-		it("A-3: tokenEndpointAuthMethod=none without clientSecret succeeds", () => {
+		it("tokenEndpointAuthMethod=none without clientSecret succeeds", () => {
 			const repo = new InMemoryClientRepository(
 				new Map([
 					[
@@ -685,7 +683,7 @@ describe("InMemoryClientRepository", () => {
 			expect(repo).toBeDefined();
 		});
 
-		it("A-4: authenticate() on a public client returns null (does not throw)", async () => {
+		it("authenticate() on a public client returns null (does not throw)", async () => {
 			const repo = new InMemoryClientRepository(
 				new Map([
 					[
@@ -705,7 +703,7 @@ describe("InMemoryClientRepository", () => {
 			expect(result).toBeNull();
 		});
 
-		it("A-5: findById() returns tokenEndpointAuthMethod on the PublicClient projection", async () => {
+		it("findById() returns tokenEndpointAuthMethod on the PublicClient projection", async () => {
 			const repo = new InMemoryClientRepository(
 				new Map([
 					[
@@ -743,7 +741,7 @@ describe("InMemoryClientRepository", () => {
 			expect((await repo.findById("public-rp"))?.tokenEndpointAuthMethod).toBe("none");
 		});
 
-		it("A-6: omitted tokenEndpointAuthMethod throws at construction (no silent default)", () => {
+		it("omitted tokenEndpointAuthMethod throws at construction (no silent default)", () => {
 			expect(
 				() =>
 					new InMemoryClientRepository(
@@ -762,7 +760,7 @@ describe("InMemoryClientRepository", () => {
 			).toThrow();
 		});
 	});
-	describe("#316/#330: firstParty projection", () => {
+	describe("firstParty projection", () => {
 		const entry = {
 			tokenEndpointAuthMethod: "client_secret_basic",
 			clientSecret: "secret",
@@ -794,7 +792,7 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
-	describe("#273: allowPlainPkce projection", () => {
+	describe("allowPlainPkce projection", () => {
 		const entry = {
 			tokenEndpointAuthMethod: "client_secret_basic",
 			clientSecret: "secret",

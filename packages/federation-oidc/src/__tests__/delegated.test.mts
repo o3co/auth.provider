@@ -51,7 +51,7 @@ const authorize = (
 		...over,
 	});
 
-describe("the generic OIDC adapter's delegated authorization (#593, D17)", () => {
+describe("the generic OIDC adapter's delegated authorization", () => {
 	describe("the authorization request", () => {
 		it("carries the intent's scopes, the grant's callback, PKCE S256, state and nonce — and consent, since offline_access is asked for (OIDC Core §11)", async () => {
 			const { idp, provider } = await build();
@@ -139,7 +139,7 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 		});
 	});
 
-	describe("the delegated code exchange (#593, D17 — the capability's third method)", () => {
+	describe("the delegated code exchange", () => {
 		const exchange = (
 			provider: Awaited<ReturnType<typeof build>>["provider"],
 			over: Partial<Parameters<typeof provider.exchangeDelegatedCode>[0]> = {},
@@ -187,7 +187,7 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(idp.lastTokenRequest()?.body?.has("resource")).toBe(false);
 		});
 
-		it("carries the claims asked for from the verified id_token, and nothing else (#611)", async () => {
+		it("carries the claims asked for from the verified id_token, and nothing else", async () => {
 			// What a Store with its own directory matches a person on across
 			// registrations — Entra's tenant and object id — where the `sub` is
 			// pairwise. Copied from the id_token the library verified, never
@@ -211,7 +211,7 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(body).not.toContain("tid");
 		});
 
-		it("never takes a claim from the token response: only the signed id_token carries identity (#611 review)", async () => {
+		it("never takes a claim from the token response: only the signed id_token carries identity", async () => {
 			// The token endpoint's JSON is not signed, and a field there named like
 			// a claim is not one. Absent from the id_token, it is absent.
 			const { idp, provider } = await build();
@@ -314,7 +314,7 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(unbounded.tokens.accessToken).toBe(idp.accessToken);
 		});
 
-		it("keeps a scope the upstream answered as empty, so the callback can refuse it (Codex on slice 6)", async () => {
+		it("keeps a scope the upstream answered as empty", async () => {
 			// Dropped, an empty scope reads as omitted — "as requested" — and the
 			// callback would grant every consented scope on an answer that named none.
 			const { idp, provider } = await build();
@@ -484,7 +484,7 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			}
 		});
 
-		it("keeps the rotated refresh token out of an answer the library refuses to parse: what D5 persists is never lost to a parser", async () => {
+		it("keeps the rotated refresh token out of an answer the library refuses to parse", async () => {
 			const { idp, provider } = await build();
 			// A scope that is not a string: oauth4webapi throws before returning
 			// the body, and the body carries the only valid credential.
@@ -504,7 +504,7 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(tokens).toStrictEqual({ refreshToken: "rt-rotated" });
 		});
 
-		it("keeps the rotated refresh token when the metadata's host carries a trailing DNS dot (Copilot on #605)", async () => {
+		it("keeps the rotated refresh token when the metadata's host carries a trailing DNS dot", async () => {
 			// `URL.href` canonicalizes a default port but keeps a trailing dot, so
 			// the two spellings of one host must be brought together by hand.
 			const { idp, provider } = await build({

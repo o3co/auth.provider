@@ -44,7 +44,7 @@ function makeClient(overrides: Partial<AuthenticatedClient> = {}): Authenticated
 		clientId: CLIENT_ID,
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedScopes: ["read:foo", "write:foo"],
-		// #396: the old implicit omitted-scope grant, now declared.
+		// What an omitted scope is granted, declared rather than implied.
 		defaultScopes: ["read:foo", "write:foo"],
 		allowedAudiences: ["https://rs"],
 		allowedGrantTypes: ["client_credentials"],
@@ -107,7 +107,7 @@ describe("createClientCredentialsGrant — gates", () => {
 		expect("errorDescription" in result && result.errorDescription).toContain("confidential");
 	});
 
-	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
+	it("declares requiresExplicitGrantAllowlist: true on the handler contract", () => {
 		// The allowedGrantTypes gate (deny-by-absence included) moved out of
 		// this handler and onto the shared `/token` dispatch: the handler
 		// declares strictness, `routes.mts` enforces it together with the base
@@ -163,8 +163,8 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
 	});
 
-	// #396: an omitted scope draws on the client's DECLARED default — never on
-	// the whole allowlist, which made "forgot to send scope" the maximum grant.
+	// An omitted scope draws on the client's DECLARED default — never on the
+	// whole allowlist, which would make "forgot to send scope" the maximum grant.
 	it("grants defaultScopes when scope is omitted and the client declares them", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);
 		const client = makeClient({ allowedScopes: ["s1", "s2"], defaultScopes: ["s1"] });
@@ -258,7 +258,7 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		}
 	});
 
-	it("returns 400 invalid_request when scope is a non-string value (Codex review #1)", async () => {
+	it("returns 400 invalid_request when scope is a non-string value", async () => {
 		// Express urlencoded body-parser materializes repeated `scope=a&scope=b`
 		// form parameters into arrays. RFC 6749 §3.3 requires a single space-
 		// delimited string. Silently defaulting to the client's full allowedScopes
@@ -302,7 +302,7 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect(payload.aud).toBe("https://test.example");
 	});
 
-	it("omits iss and aud claims when ctx.issuer is undefined (Claude review C1)", async () => {
+	it("omits iss and aud claims when ctx.issuer is undefined and the client has no allowedAudiences", async () => {
 		// Coercing ctx.issuer to "" (the pre-fix behavior) would emit a malformed
 		// `iss: ""` claim — generateToken treats empty string as present because
 		// the guard is `issuer != null` (not falsy). Sibling grants
@@ -329,7 +329,7 @@ describe("createClientCredentialsGrant — token issuance", () => {
 	});
 });
 
-describe("createClientCredentialsGrant — grantPolicy scope validation (CP-18 fail-closed)", () => {
+describe("createClientCredentialsGrant — grantPolicy scope validation, fail-closed", () => {
 	const depsWithPolicy = (
 		evaluate: (input: Record<string, unknown>) => Promise<{
 			outcome: "allow" | "deny";
@@ -366,7 +366,7 @@ describe("createClientCredentialsGrant — grantPolicy scope validation (CP-18 f
 		expect(payload.scope).toBe("read:foo");
 	});
 
-	it("answers 500 server_error when policy grantedScope exceeds allowedScopes (CP-18, #520)", async () => {
+	it("answers 500 server_error when policy grantedScope exceeds allowedScopes", async () => {
 		// Policy returns 'admin' which is NOT in client.allowedScopes → fail-closed.
 		const client = makeClient({ allowedScopes: ["read:foo"] });
 		const handler = createClientCredentialsGrant(
@@ -384,7 +384,7 @@ describe("createClientCredentialsGrant — grantPolicy scope validation (CP-18 f
 	});
 });
 
-describe("createClientCredentialsGrant — grantPolicy audience validation (Codex P2-3)", () => {
+describe("createClientCredentialsGrant — grantPolicy audience validation", () => {
 	const depsWithAudiencePolicy = (
 		evaluate: (input: Record<string, unknown>) => Promise<{
 			outcome: "allow" | "deny";
@@ -427,7 +427,7 @@ describe("createClientCredentialsGrant — grantPolicy audience validation (Code
 		expect(payload.aud).toBe("https://rs2");
 	});
 
-	it("answers 500 server_error when policy grantedAudience is outside allowedAudiences (#520)", async () => {
+	it("answers 500 server_error when policy grantedAudience is outside allowedAudiences", async () => {
 		// Policy returns an audience not in client.allowedAudiences → fail-closed.
 		const client = makeClient({ allowedAudiences: ["https://rs1"] });
 		const handler = createClientCredentialsGrant(
@@ -463,7 +463,7 @@ describe("createClientCredentialsGrant — grantPolicy audience validation (Code
 	});
 });
 
-describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Round 2 P1)", () => {
+describe("createClientCredentialsGrant — grantPolicy scope ceiling", () => {
 	const depsWithPolicy = (
 		evaluate: (input: Record<string, unknown>) => Promise<{
 			outcome: "allow" | "deny";
@@ -485,7 +485,7 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 		} as unknown as GrantDependencies["grantPolicy"],
 	});
 
-	it("answers 500 server_error when policy grantedScope is outside the requested (effectiveScopes) set even if within allowedScopes (Codex Round 2 P1-1, #520)", async () => {
+	it("answers 500 server_error when policy grantedScope is outside the requested (effectiveScopes) set even if within allowedScopes", async () => {
 		// Client allowedScopes: ["read", "write"]. Request narrows to scope=read.
 		// effectiveScopes becomes ["read"]. Policy returns grantedScope: ["write"].
 		// write ∈ allowedScopes but NOT ∈ effectiveScopes (the requested set).
@@ -499,11 +499,10 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 			})),
 		);
 
-		// No `resource` here: this case is about the scope ceiling. Under
-		// Stage 1 the parameter was inert, so carrying it was harmless; under
-		// Stage 2 (#173) it is enforced against the issued audience, which
-		// would couple a scope test to audience configuration and could make it
-		// pass for the wrong reason if the two checks were ever reordered.
+		// No `resource` here: this case is about the scope ceiling. `resource`
+		// is enforced against the issued audience, which would couple a scope
+		// test to audience configuration and could make it pass for the wrong
+		// reason if the two checks were ever reordered.
 		// RFC 8707 forwarding has its own coverage in
 		// `resourceIndicator.flag.test.mts`.
 		const { result } = await handler.handle(
@@ -515,7 +514,7 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 		expect("errorDescription" in result && result.errorDescription).toContain("write");
 	});
 
-	it("honors empty grantedScope: [] from policy as 'strip all scopes' (Codex Round 2 P1-2)", async () => {
+	it("honors empty grantedScope: [] from policy as 'strip all scopes'", async () => {
 		// Policy explicitly returns grantedScope: [] — intent is "allow the grant
 		// but issue no scopes". The empty array must be applied (effectiveScopes = [])
 		// so the token has no scope claim, not the pre-policy effectiveScopes.
@@ -529,10 +528,10 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 		);
 
 		// See the sibling case above: `resource` is dropped because this test is
-		// about scope stripping. With Stage 2 (#173) enforcing it, the policy
-		// here returns `grantedAudience: undefined`, so the audience falls back
-		// to allowedAudiences[0] and a request for `https://rs1` would now
-		// correctly reject with `invalid_target` — a true result, but not the
+		// about scope stripping. `resource` is enforced, and the policy here
+		// returns `grantedAudience: undefined`, so the audience falls back to
+		// allowedAudiences[0] and a request for `https://rs1` would correctly
+		// reject with `invalid_target` — a true result, but not the
 		// one this case exists to assert.
 		const { result } = await handler.handle(
 			makeCtx(client, { grant_type: "client_credentials", scope: "read" }),

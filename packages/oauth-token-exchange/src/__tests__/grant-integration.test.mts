@@ -46,7 +46,7 @@ const client: PublicClient = {
 	allowedRedirectUris: [],
 	allowedScopes: ["read", "write"],
 	allowedAudiences: ["billing"],
-	// #326: the exchange grant denies by absence of `allowedGrantTypes`.
+	// The exchange grant denies by absence of `allowedGrantTypes`.
 	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
 	backchannelLogoutSessionRequired: true,
 	frontchannelLogoutSessionRequired: true,
@@ -176,9 +176,9 @@ describe("token_exchange — integration", () => {
 
 	it("registers token_exchange grant + access_token validator via createTestApp boot", async () => {
 		// Guard against drift between the defineModule manifest and the grant
-		// handler. Per A2-γ §3.3: tokenExchangeModule is a static defineModule
-		// value; addModule is replaced by createTestApp boot. The built-in
-		// validator contribution flows through the planner's
+		// handler. tokenExchangeModule is a static defineModule value, booted
+		// here through createTestApp. The built-in validator contribution
+		// flows through the planner's
 		// tokenExchangeValidators collector and is read back via deps.
 		const { defineModule } = await import("@o3co/auth-provider-core");
 		const { createTestApp, makeValidAppConfig } = await import("@o3co/auth-provider-core/testing");
@@ -199,11 +199,10 @@ describe("token_exchange — integration", () => {
 			oauth: {
 				...base.oauth,
 				jwt: { ...base.oauth.jwt, issuer: ISSUER },
-				// #367 enrolled this module in the #277 boot guard by declaring
-				// `accessTokenDenylist` in its optional keys, and #406 did the
-				// same for `subjectRevocation`. This composition wires neither
-				// and is not about revocation, so it declares both capabilities
-				// absent — loudly, which is the point.
+				// Declaring `accessTokenDenylist` and `subjectRevocation` in its
+				// optional keys enrols this module in the revocation boot guard.
+				// This composition wires neither and is not about revocation, so it
+				// declares both capabilities absent — loudly, which is the point.
 				revocation: { accessToken: "unsupported" as const, subject: "unsupported" as const },
 			},
 		};
@@ -238,8 +237,8 @@ describe("token_exchange — integration", () => {
 			provides: { keyStore: () => keyStore },
 		});
 
-		// The fixture carries an issuer (required since auth.provider#266), so strip
-		// it here to reach the state this test is about.
+		// The fixture carries an issuer, which is required, so strip it here to
+		// reach the state this test is about.
 		const config = makeValidAppConfig();
 		delete (config.oauth.jwt as { issuer?: unknown }).issuer;
 		await expect(
@@ -265,13 +264,13 @@ describe("token_exchange — integration", () => {
 	});
 
 	// Symmetric to the refreshTokenFamilyRevocation guard above. The token-exchange grant
-	// reads `deps.grantPolicy` in grant.mts to enforce CP-18 fail-
-	// closed policy decisions on exchange requests. Other OAuth grants
+	// reads `deps.grantPolicy` in grant.mts to enforce fail-closed
+	// policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
 	// in oauthAuthorizationModule.optional; without declaring it here as well,
 	// token-exchange would silently sit outside the policy gate while sibling
-	// grants are enforced — a structural inconsistency in CP-18 coverage.
-	it("declares grantPolicy in optional so CP-18 enforcement reaches token-exchange", async () => {
+	// grants are enforced — a structural inconsistency in the gate's coverage.
+	it("declares grantPolicy in optional so the grant-policy gate reaches token-exchange", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("grantPolicy");
 	});
@@ -311,7 +310,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	};
 
 	// `revocation` declares which of the denylist and the subject watermark a
-	// test leaves unwired (the #277 / #406 boot guard); by default both.
+	// test leaves unwired (the revocation boot guard); by default both.
 	async function boot(
 		modules: readonly Module[],
 		revocation: RevocationDeclaration = { accessToken: "unsupported", subject: "unsupported" },
@@ -1489,7 +1488,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	});
 });
 
-describe("absence policy (#375)", () => {
+describe("absence policy", () => {
 	it("carries the shared ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY constant, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
 		// policies for one key disagree; sharing oauthModule's constant makes
@@ -1502,7 +1501,7 @@ describe("absence policy (#375)", () => {
 	});
 });
 
-describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration (#728)", () => {
+describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration", () => {
 	// Beside oauthModule the slot is derived from the same `oauth {}` the
 	// configuration carries, and nothing substitutes it, so the two cannot
 	// disagree there. Which one a contribution reads shows only here, where

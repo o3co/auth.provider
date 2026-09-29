@@ -233,7 +233,7 @@ async function loadFromStore(
 	});
 }
 
-describe("the application session cookie survives a form_post federation start (#494)", () => {
+describe("the application session cookie survives a form_post federation start", () => {
 	it("leaves the stored session's cookie attributes exactly as the deployment configured them", async () => {
 		const { app, store } = buildRealApp();
 

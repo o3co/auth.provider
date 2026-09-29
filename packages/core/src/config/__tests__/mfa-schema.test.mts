@@ -50,7 +50,7 @@ const fromReference = (env: Record<string, string> = {}) =>
 const issuesAt = (result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
 	result.success ? [] : (result.error?.issues ?? []).map((issue) => issue.path.join("."));
 
-describe("the MFA configuration core owns (D19)", () => {
+describe("the MFA configuration core owns", () => {
 	it("resolves from reference.conf: mode off, the step-up page at /mfa, both stores in memory", () => {
 		const config = fromReference();
 		expect(config.mfa?.mode).toBe("off");
@@ -72,7 +72,7 @@ describe("the MFA configuration core owns (D19)", () => {
 		expect(config.mfaTransactionStore?.adapter).toBe("redis");
 	});
 
-	it("admits off, optional and required (D7 lifted the step-3 lock)", () => {
+	it("admits off, optional and required", () => {
 		for (const mode of ["off", "optional", "required"]) {
 			expect(fromReference({ MFA_MODE: mode }).mfa?.mode, mode).toBe(mode);
 			expect(

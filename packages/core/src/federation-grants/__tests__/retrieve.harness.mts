@@ -59,7 +59,10 @@ export const setNow = (date: Date): void => {
 	vi.setSystemTime(new Date(date.getTime() - CLOCK_AHEAD_MS));
 };
 
-/** Grepped for in every denial and every audit event: no long-lived secret may appear in either (D18). */
+/**
+ * Grepped for in every denial and every audit event: no long-lived secret may
+ * appear in either (ADR 2026-09-17-federation-grants-offline-delegation, D18).
+ */
 export const SECRET = "SENTINEL-refresh-token";
 
 /** What the upstream GRANTED at authorization, and what a refresh asks for again. */

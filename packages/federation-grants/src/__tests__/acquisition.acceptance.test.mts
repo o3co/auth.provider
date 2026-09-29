@@ -419,7 +419,7 @@ describe("a grant created end to end, and spent", () => {
 		});
 	};
 
-	it("asks the Store, through the composed deployment, and refuses an upstream account it places with another user (#611)", async () => {
+	it("asks the Store, through the composed deployment, and refuses an upstream account it places with another user", async () => {
 		// The composition, not the router's options in a unit test, decides
 		// whether the identity check (the federation-grants ADR, D7 check 5)
 		// runs: a module that handed the router "unsupported" would boot, probe
@@ -475,7 +475,7 @@ describe("a grant created end to end, and spent", () => {
 		}
 	});
 
-	it("builds connect_uri, and the login trip back to it, on the issuer of the oauthTokenSettings the composition holds (#728)", async () => {
+	it("builds connect_uri, and the login trip back to it, on the issuer of the oauthTokenSettings the composition holds", async () => {
 		// The oauth module provides the slot from the same configuration; a slot
 		// naming the issuer under a path prefix shows which one the routes read.
 		tokenSettings = createTestOAuthTokenSettings({ issuer: `${ISSUER}/tenant` });
@@ -566,7 +566,7 @@ describe("a grant created end to end, and spent", () => {
 // `HttpUserRepository` keeps `identityLookup = "required"` with a connection
 // configured, given a Store that answers, and the callback reads the Store's
 // answer as the port's.
-describe("#613: the identity lookup over HTTP, composed", () => {
+describe("the identity lookup over HTTP, composed", () => {
 	const STORE = "http://localhost:18081";
 	const LOOKUP = `${STORE}/identity/lookup`;
 	const server = setupServer();
@@ -880,7 +880,7 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 	});
 });
 
-describe("#593 AC1: a consented grant survives the initiating session's end and a restart", () => {
+describe("a consented grant survives the initiating session's end and a restart", () => {
 	/** The whole connect flow for alice, in the browser named, down to the grant it created. */
 	const acquire = async (app: express.Express, browser: string): Promise<string> => {
 		const lodged = await request(app)
@@ -972,7 +972,7 @@ describe("#593 AC1: a consented grant survives the initiating session's end and 
 	});
 });
 
-describe("#616: a grant the upstream asked the user for, and one starved of scope, recover on the same grant id", () => {
+describe("a grant the upstream asked the user for, and one starved of scope, recover on the same grant id", () => {
 	const codes = [
 		"interaction_required",
 		"login_required",

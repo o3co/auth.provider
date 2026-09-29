@@ -28,10 +28,8 @@ import type {
 } from "#/policy/types.mjs";
 
 /**
- * #520 — the one answer every minting path gives a policy that throws,
- * denies, or exceeds its ceiling. Grants used to carry their own copies of
- * these rules, and the copies disagreed (WebAuthn let a policy originate an
- * audience with no client; four grants called a policy fault a client error).
+ * The one answer every minting path gives a policy that throws, denies, or
+ * exceeds its ceiling.
  */
 
 const hook = (decide: () => Promise<GrantPolicyDecision>): GrantPolicyHook => ({
@@ -152,7 +150,7 @@ describe("evaluateGrantPolicy", () => {
 		});
 	});
 
-	it("bounds the grant against a ceiling wider than the default when the grant has one (v0.13.0 audit)", async () => {
+	it("bounds the grant against a ceiling wider than the default when the grant has one", async () => {
 		// `refresh_token`'s ceiling is the original grant (RFC 6749 §6), and its
 		// default the narrower scope the refresh asked for. The home took one
 		// list for both, so the refresh grant carried its own copy of this whole
@@ -206,7 +204,7 @@ describe("evaluateGrantPolicy", () => {
 		expect(outcome.ok && outcome.decision.grantedAudience).toEqual(["https://api.example"]);
 	});
 
-	it("refuses a non-array grantedScope as 500 server_error instead of throwing (#521)", async () => {
+	it("refuses a non-array grantedScope as 500 server_error instead of throwing", async () => {
 		// A JS policy returning a string passes a truthiness check, and
 		// `.filter` then throws a TypeError that /token dispatch does not
 		// catch — fail-closed, but ungraceful.
@@ -284,7 +282,7 @@ describe("boundPolicyAudience", () => {
 		).toEqual({ ok: true, audience: "https://other.example" });
 	});
 
-	it("refuses a non-array grantedAudience as 500 server_error instead of throwing (#521)", () => {
+	it("refuses a non-array grantedAudience as 500 server_error instead of throwing", () => {
 		const outcome = boundPolicyAudience(
 			{
 				outcome: "allow",

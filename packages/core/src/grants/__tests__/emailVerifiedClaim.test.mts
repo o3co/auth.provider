@@ -41,7 +41,7 @@ const idTokenClaims = async (
 	return decodeJwt(token) as Record<string, unknown>;
 };
 
-describe("email_verified reaches the id_token (#297)", () => {
+describe("email_verified reaches the id_token", () => {
 	it("carries a verified address under the email scope", async () => {
 		const claims = await idTokenClaims({ email: "a@example.test", emailVerified: true }, [
 			"openid",

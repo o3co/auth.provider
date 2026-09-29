@@ -24,7 +24,7 @@ import { webauthnConfigSchema } from "../config.mjs";
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // packages/webauthn/config/reference.conf (not in Zod .default() calls).
 // Tests must supply all required fields explicitly — the minimum-valid test
-// verifies the schema shape and S11-mandated field values.
+// verifies the schema shape and the baseline field values.
 /**
  * Every field the schema requires, minus the one under test. Spelled out
  * rather than derived so a new required field forces this file to be updated
@@ -34,7 +34,7 @@ const VALID = {
 	rpId: "example.com",
 	rpName: "Example App",
 	origin: ["https://example.com"],
-	// S11: attestationPreference = "none" is the dogfood-friendly baseline.
+	// attestationPreference = "none" is the dogfood-friendly baseline.
 	// In production this comes from reference.conf; tests supply it explicitly
 	// per ADR 2026-04-30 (no schema-side defaults).
 	attestationPreference: "none",
@@ -52,7 +52,7 @@ const without = (key: keyof typeof VALID) => {
 describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	it("accepts minimum valid config with all required fields", () => {
 		const parsed = webauthnConfigSchema.parse(VALID);
-		expect(parsed.attestationPreference).toBe("none"); // S11 default value
+		expect(parsed.attestationPreference).toBe("none"); // reference.conf's value
 		expect(parsed.userVerification).toBe("preferred");
 		expect(parsed.challengeTtlMs).toBe(120_000); // mobile-network safe baseline
 	});
@@ -71,8 +71,8 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 		).toBe(false);
 	});
 
-	// #281 — the enumeration escape hatch and the endpoint's own throttle.
-	describe("authentication/options security knobs (#281)", () => {
+	// The enumeration escape hatch and the endpoint's own throttle.
+	describe("authentication/options security knobs", () => {
 		it("allowCredentialsForKnownUser is required — there is no implicit fallback", () => {
 			expect(webauthnConfigSchema.safeParse(without("allowCredentialsForKnownUser")).success).toBe(
 				false,
@@ -140,8 +140,9 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 
 	// HOCON substitutes `${?VAR}` as a string, always, so an operator who sets
 	// one of these variables hands the schema a string. Core's schema coerces
-	// every leaf an env var can reach (#288); these two were bare `z.number()` /
-	// `z.boolean()` and refused the string their own reference.conf delivers.
+	// every leaf an env var can reach, and so must these two: a bare
+	// `z.number()` / `z.boolean()` refuses the string their own reference.conf
+	// delivers.
 	describe("env-reachable leaves take the string an env substitution delivers", () => {
 		const referenceConf = readFileSync(
 			fileURLToPath(new URL("../../config/reference.conf", import.meta.url)),
@@ -184,9 +185,8 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 		});
 	});
 
-	// Wave 1 post-merge audit M-1 + follow-up review I2:
-	// URL-parse-based origin gate must reject textual-prefix bypasses.
-	describe("origin secure-context gate (M-1 / I2)", () => {
+	// The URL-parse-based origin gate must reject textual-prefix bypasses.
+	describe("origin secure-context gate", () => {
 		const { origin: _origin, ...okBase } = VALID;
 		const accepts = [
 			"https://example.com",
@@ -293,13 +293,13 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 		});
 	});
 
-	// #497: Android Credential Manager presents `android:apk-key-hash:<base64url>`
+	// Android Credential Manager presents `android:apk-key-hash:<base64url>`
 	// as the ceremony origin, and SimpleWebAuthn — which this package delegates
-	// verification to — matches it by exact string like any other origin. The
-	// secure-context gate above knew only about `https:` and loopback `http:`,
-	// so the "one RP shared by the web origin and the Android app" deployment
-	// the README describes could not be expressed in configuration at all.
-	describe("Android apk-key-hash origins (#497)", () => {
+	// verification to — matches it by exact string like any other origin. With
+	// only `https:` and loopback `http:` through the secure-context gate above,
+	// the "one RP shared by the web origin and the Android app" deployment the
+	// README describes could not be expressed in configuration at all.
+	describe("Android apk-key-hash origins", () => {
 		const { origin: _origin, ...okBase } = VALID;
 		// A real Credential Manager origin is the SHA-256 of the app's signing
 		// certificate, base64url-encoded — 43 characters, unpadded.
@@ -379,7 +379,7 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	});
 });
 
-describe("topOrigin — the origins this RP may be framed by (#554 audit)", () => {
+describe("topOrigin — the origins this RP may be framed by", () => {
 	const base = VALID;
 
 	it("is optional, and absent means this RP expects not to be framed", () => {
@@ -545,7 +545,7 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 // A composition root parses its HOCON with core's `AppConfigSchema` before
 // this package sees it, and `AppConfigSchema` is a strip-mode object: a key
 // its `webauthn` section does not name is gone by the time a bootstrap module
-// hands `config.webauthn` to `webauthnConfigSchema` (#496). Core cannot
+// hands `config.webauthn` to `webauthnConfigSchema`. Core cannot
 // import this package, so the parity is checked from this side, over the
 // whole key tree.
 describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads", () => {

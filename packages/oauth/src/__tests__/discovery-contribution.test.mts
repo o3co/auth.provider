@@ -320,7 +320,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 });
 
-describe("acr_values_supported (#481)", () => {
+describe("acr_values_supported", () => {
 	const withAcr = (acrValues: Record<string, unknown> | undefined): AppConfig => {
 		const base = configWithRevocation();
 		return {
@@ -353,7 +353,7 @@ describe("acr_values_supported (#481)", () => {
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
-	it("withholds an entry nothing installed can satisfy (the MFA ADR's D15)", async () => {
+	it("withholds an entry nothing installed can satisfy", async () => {
 		// No login this composition can perform records `mfa` or `hwk`: an RP
 		// told it may ask for them would be answered unmet every time.
 		const meta = await discoveryContribution(
@@ -367,7 +367,7 @@ describe("acr_values_supported (#481)", () => {
 		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd"]);
 	});
 
-	it("advertises an entry a registered requirement's reach can meet (the session-admission ADR's D6)", async () => {
+	it("advertises an entry a registered requirement's reach can meet", async () => {
 		// The union of every requirement's reach is what a step-up can add;
 		// `otp` and `mfa` through the requirement named mfa, so its entry is
 		// advertised, while `phr` still needs a key nothing reaches.
@@ -401,7 +401,7 @@ describe("acr_values_supported (#481)", () => {
 		expect(meta.metadata).not.toHaveProperty("acr_values_supported");
 	});
 
-	it("keeps claims_parameter_supported absent: only its acr use is refused, the rest ignored (the MFA ADR's D15)", async () => {
+	it("keeps claims_parameter_supported absent: only its acr use is refused, the rest ignored", async () => {
 		// OIDC Discovery defaults it to false, which is the truth: `/authorize`
 		// honours no `claims` request.
 		expect((await discoveryContribution()).metadata).not.toHaveProperty(
@@ -409,7 +409,7 @@ describe("acr_values_supported (#481)", () => {
 		);
 	});
 
-	it("withholds an entry only an upstream IdP could meet while no installed federation trusts its amr (the MFA ADR's D13)", async () => {
+	it("withholds an entry only an upstream IdP could meet while no installed federation trusts its amr", async () => {
 		// An untrusted IdP's `amr` is kept apart from the session's and counts
 		// for no `acr`, so only `fed` itself is what a federation adds.
 		const meta = await discoveryContribution(
@@ -475,7 +475,7 @@ describe("acr_values_supported (#481)", () => {
 	});
 });
 
-describe("oauthModule — client_id_metadata_document_supported (#529)", () => {
+describe("oauthModule — client_id_metadata_document_supported", () => {
 	const enabled = (): AppConfig => {
 		const base = configWithRevocation();
 		return {
@@ -495,7 +495,7 @@ describe("oauthModule — client_id_metadata_document_supported (#529)", () => {
 		expect(on.metadata?.token_endpoint_auth_methods_supported).toContain("none");
 	});
 
-	it("says nothing without a consent store — a document client could not finish the flow (#529 review)", async () => {
+	it("says nothing without a consent store — a document client could not finish the flow", async () => {
 		// Every document client is non-first-party, and `/authorize` refuses
 		// those without a consent store. Advertising CIMD there sends an MCP
 		// client down a flow this deployment cannot complete.
@@ -504,7 +504,7 @@ describe("oauthModule — client_id_metadata_document_supported (#529)", () => {
 	});
 });
 
-describe("oauthModule — private_key_jwt is advertised only where it can be honoured (#484)", () => {
+describe("oauthModule — private_key_jwt is advertised only where it can be honoured", () => {
 	it("says nothing about private_key_jwt when no replay seen-set is wired", async () => {
 		// A client assertion's `jti` is single-use, and the verifier answers
 		// `500 server_error` when it has nowhere to record one rather than

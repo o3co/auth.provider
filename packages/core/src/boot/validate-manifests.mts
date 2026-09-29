@@ -2515,7 +2515,7 @@ function checkHostTokenSettingsLifetimes(
 /** One stage-1 check: an id for humans, a spec pointer, and the run. */
 export interface StageOneCheck {
 	readonly id: string;
-	/** Where the check's contract lives (A2-β section, or the issue). */
+	/** Where the check's contract lives: a spec section, or an issue. */
 	readonly spec: string;
 	readonly run: (ctx: StageOneContext) => void;
 }

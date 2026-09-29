@@ -15,7 +15,7 @@
  */
 
 /**
- * The `csrfGuard` slot (#728; #710's one browser-origin / CSRF policy):
+ * The `csrfGuard` slot, the one browser-origin / CSRF policy:
  * whether a browser's request may change state, and whether a navigation
  * may start a flow that will, decided once for every package's routes. Its
  * contract suite and the test double: the double keeps every case, and each
@@ -357,7 +357,7 @@ describe("csrfGuardContract — each way a guard can break it", () => {
 		).toContain(RULES.navigation);
 	});
 
-	it("a request with no origin signal waved through — the pre-#272 guard", async () => {
+	it("a request with no origin signal waved through", async () => {
 		expect(
 			await failing(
 				withPolicy((req, original) =>

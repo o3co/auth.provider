@@ -35,7 +35,7 @@
  *   whose value is one of the four carriers;
  * - a call of `recordSecondFactor(`, `establishWithoutAsking(`,
  *   `resumePrimary(` or `continuationOf(`, each kept to the files listed
- *   below (D3, D5, D10).
+ *   below (that ADR's D3, D5, D10).
  *
  * A guarded function is found under an import alias (`import { selectAcr as
  * pick }`), as a string element access (`store["get"]`), and as a reference
@@ -43,9 +43,10 @@
  * value passed on).
  *
  * Every site outside the home is pinned to its file and count with a reason
- * ({@link ALLOWED}): the token-side reads of D9, outside admission in this
- * release, and `jwt/verify.mts`'s permanent boundary read. A site not listed,
- * a second one in a listed file, or an entry whose site went away fails.
+ * ({@link ALLOWED}): the token-side reads of that ADR's D9, outside
+ * admission in this release, and `jwt/verify.mts`'s permanent boundary read.
+ * A site not listed, a second one in a listed file, or an entry whose site
+ * went away fails.
  *
  * Left to review: a receiver reached under a name declared in another file; a
  * namespace import (`core.selectAcr`) or a computed key (`store[key]`); a
@@ -370,7 +371,8 @@ const TOKEN_SIDE =
  * not counted here: their callers are held to files by prefix below.
  */
 const ALLOWED: ReadonlyArray<AllowedSites> = [
-	// The token side of D9: not through admission in this release.
+	// The token side of the session-admission ADR's D9: not through admission
+	// in this release.
 	{
 		file: "packages/oauth/src/routes.mts",
 		sites: { get: 1 },
@@ -409,19 +411,19 @@ const ALLOWED: ReadonlyArray<AllowedSites> = [
 	},
 ];
 
-/** The files whose prefixes may call `recordSecondFactor(`: the two bundled stores, and the MFA package (D3, D10). */
+/** The files whose prefixes may call `recordSecondFactor(`: the two bundled stores, and the MFA package (the session-admission ADR's D3, D10). */
 const RECORD_SECOND_FACTOR_CALLERS: readonly string[] = [
 	"packages/core/src/user-sessions/memory/userSessionStore.mts",
 	"packages/redis/src/userSessionStore.mts",
 	"packages/mfa/src/",
 ];
 
-/** The one file that may call `establishWithoutAsking(`: the federation callback (D5). */
+/** The one file that may call `establishWithoutAsking(`: the federation callback (the session-admission ADR's D5). */
 const ESTABLISH_WITHOUT_ASKING_CALLERS: readonly string[] = [
 	"packages/session/src/routes/Federation.mts",
 ];
 
-/** The files whose prefixes may call `resumePrimary(` or build a continuation: the MFA package (D5); the full-set fixture under `tools/` is not scanned. */
+/** The files whose prefixes may call `resumePrimary(` or build a continuation: the MFA package (the session-admission ADR's D5); the full-set fixture under `tools/` is not scanned. */
 const RESUME_PRIMARY_CALLERS: readonly string[] = ["packages/mfa/src/"];
 
 /** `sites`, counted by kind. */
@@ -431,7 +433,7 @@ const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
 	return counts;
 };
 
-describe("session-admission callers (the session-admission ADR's D10)", () => {
+describe("session-admission callers", () => {
 	it("finds a store read whatever the receiver is called: a property, an alias, a destructured name, a typed parameter", () => {
 		for (const source of [
 			"await deps.userSessionStore.get(sid);",
@@ -583,7 +585,7 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		expect(offenders("continuationOf", RESUME_PRIMARY_CALLERS)).toEqual([]);
 	});
 
-	it("has the federation callback build its login's establishment through establishWithoutAsking, once — the password login asks, through admitPrimary (D5)", () => {
+	it("has the federation callback call establishWithoutAsking exactly once", () => {
 		const [callback] = ESTABLISH_WITHOUT_ASKING_CALLERS;
 		const found = (sites.get(callback) ?? []).filter((s) => s.what === "establishWithoutAsking");
 		expect(found, `${callback} — the callback's login path`).toHaveLength(1);

@@ -15,9 +15,9 @@
  */
 
 /**
- * #529 — a Client ID Metadata Document client at `/oauth/authorize`: resolved
+ * A Client ID Metadata Document client at `/oauth/authorize`: resolved
  * through the router's own repository, never first-party, so it lands on the
- * consent step (#527) with what the document says about it.
+ * consent step with what the document says about it.
  */
 
 import crypto from "node:crypto";
@@ -53,9 +53,9 @@ const document = {
 const makeApp = async (opts: {
 	enabled: boolean;
 	document?: unknown;
-	/** #529 audit: wire the consent step a document client needs. Default: yes. */
+	/** Wire the consent step a document client needs. Default: yes. */
 	consent?: boolean;
-	/** #529 audit: set the cache and fetch-budget knobs in config. */
+	/** Set the cache and fetch-budget knobs in config. */
 	knobs?: boolean;
 }) => {
 	const config = {
@@ -67,7 +67,7 @@ const makeApp = async (opts: {
 				enabled: opts.enabled,
 				allowedScopes: ["read"],
 				allowedAudiences: ["https://mcp.example"],
-				// #529 audit: the cache and fetch-budget knobs travel from config
+				// The cache and fetch-budget knobs travel from config
 				// through `createOAuthRouter`. Opt-in, so the composition that
 				// sets none of them — every other case here — is exercised too.
 				...(opts.knobs
@@ -121,7 +121,7 @@ const makeApp = async (opts: {
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Record<string, unknown> }).session = session;
-		// #552: the consent step binds its challenge to the express-session id.
+		// The consent step binds its challenge to the express-session id.
 		(req as unknown as { sessionID?: string }).sessionID = "sess-1";
 		next();
 	});
@@ -143,7 +143,7 @@ const authorize = (app: express.Express, extra: Record<string, string> = {}) =>
 			...extra,
 		});
 
-describe("/authorize with a Client ID Metadata Document client (#529)", () => {
+describe("/authorize with a Client ID Metadata Document client", () => {
 	it("resolves the client from its document and routes it through consent, which shows what the document said", async () => {
 		const { app, fetchImpl } = await makeApp({ enabled: true });
 		const res = await authorize(app);
@@ -192,7 +192,7 @@ describe("/authorize with a Client ID Metadata Document client (#529)", () => {
 	});
 });
 
-describe("/authorize does not fetch a document it could never honour (#529 audit)", () => {
+describe("/authorize does not fetch a document it could never honour", () => {
 	it("makes no outbound request when the feature is on but no consent store is wired", async () => {
 		// Every document client is by definition not first-party, so
 		// `/authorize` refuses it without a consent store — and the discovery
@@ -220,7 +220,7 @@ describe("/authorize does not fetch a document it could never honour (#529 audit
 	});
 });
 
-describe("/authorize honours the document cache knobs the operator set (#529 audit)", () => {
+describe("/authorize honours the refusal window the operator set for the document cache", () => {
 	it("does not re-fetch a document it already refused, within the window the operator set", async () => {
 		// `negativeCacheMs` is wired through `createOAuthRouter`, so a refused
 		// client_id costs one outbound fetch rather than one per request.

@@ -64,11 +64,11 @@ describe("published-package install context (e2e)", () => {
 		const [packed] = JSON.parse(stdout) as readonly NpmPackResult[];
 		tarballPath = join(workspace, packed.filename);
 
-		// Regression for v0.5.0 npx bug: simulate the actual install layout
+		// Simulate the actual `npx` install layout
 		// (~/.npm/_npx/<hash>/node_modules/@o3co/create-auth-provider/) so the
 		// cpSync filter sees an absolute source path whose ancestors include
-		// 'node_modules'. Before the fix, the filter excluded every file and
-		// `cpSync` left the target directory empty.
+		// 'node_modules'. A filter that checked those ancestors would exclude
+		// every file and leave the target directory empty.
 		installRoot = join(workspace, "node_modules", "@o3co", "create-auth-provider");
 		mkdirSync(installRoot, { recursive: true });
 		execFileSync("tar", ["-xzf", tarballPath, "--strip-components=1", "-C", installRoot]);
@@ -122,14 +122,14 @@ describe("published-package install context (e2e)", () => {
 			expect(existsSync(join(targetDir, "package.json"))).toBe(true);
 			expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
 			expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
-			// #556: the scaffold's vitest.config.mts loads this setup file, and vitest
+			// The scaffold's vitest.config.mts loads this setup file, and vitest
 			// refuses to start without it — so the tarball has to carry it.
 			expect(existsSync(join(targetDir, "vitest.supertest-loopback.mts"))).toBe(true);
 			expect(readFileSync(join(targetDir, "vitest.config.mts"), "utf-8")).toContain(
 				'setupFiles: ["./vitest.supertest-loopback.mts"]',
 			);
 
-			// #407: the scaffold must arrive with a .gitignore, or the first
+			// The scaffold must arrive with a .gitignore, or the first
 			// `git add .` commits the `.env` and the signing key the README's own
 			// setup steps tell the operator to create right there. Asserted from
 			// the PACKED tarball rather than the working tree, because npm has a
@@ -144,7 +144,7 @@ describe("published-package install context (e2e)", () => {
 			// `.env.example` is the documentation and must survive the `.env.*` rule.
 			expect(gitignore).toMatch(/^!\.env\.example$/m);
 
-			// #705: what `.gitignore` keeps out of git, `.dockerignore` keeps out of
+			// What `.gitignore` keeps out of git, `.dockerignore` keeps out of
 			// the image — the client registry above all, which may hold client
 			// secrets. npm does not drop this name, but a `files` list or an
 			// `.npmignore` could, and the scaffold would then bake the registry

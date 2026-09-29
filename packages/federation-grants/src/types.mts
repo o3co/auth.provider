@@ -16,7 +16,8 @@
 
 /**
  * Where both routes live: `POST <mount>/:grantId/token` and
- * `POST <mount>/:grantId/status` (#593, D9).
+ * `POST <mount>/:grantId/status` (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D9).
  *
  * Exported because a deployment that fronts the provider has to say the same
  * thing in its proxy rules and its network policy, and a path restated by hand

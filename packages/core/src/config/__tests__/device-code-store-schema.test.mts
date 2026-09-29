@@ -31,7 +31,7 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
  * The enum-shaped keys keep their vocabulary so a typo fails here, by name,
  * rather than as a silently-absent declaration downstream.
  */
-describe("redisDeviceCodeStore survives AppConfigSchema (#472)", () => {
+describe("redisDeviceCodeStore survives AppConfigSchema", () => {
 	it("keeps the Redis module's key namespace", () => {
 		const parsed = AppConfigSchema.parse({
 			...makeValidAppConfig(),
@@ -45,7 +45,7 @@ describe("redisDeviceCodeStore survives AppConfigSchema (#472)", () => {
 	});
 });
 
-describe("oauth.deviceAuthorization survives AppConfigSchema (#472)", () => {
+describe("oauth.deviceAuthorization survives AppConfigSchema", () => {
 	const base = makeValidAppConfig();
 
 	it("keeps every key the device-grant module reads", () => {
@@ -89,7 +89,7 @@ describe("oauth.deviceAuthorization survives AppConfigSchema (#472)", () => {
 		}
 	});
 
-	it("keeps the declared-absence spelling for the store slot (#363)", () => {
+	it("keeps the declared-absence spelling for the store slot", () => {
 		const parsed = AppConfigSchema.parse({
 			...base,
 			oauth: { ...base.oauth, deviceAuthorization: { store: "unsupported" } },
@@ -97,7 +97,7 @@ describe("oauth.deviceAuthorization survives AppConfigSchema (#472)", () => {
 		expect(parsed.oauth.deviceAuthorization?.store).toBe("unsupported");
 	});
 
-	it("coerces the env-var spelling of the booleans, like every other env-overridable boolean (#288)", () => {
+	it("coerces the env-var spelling of the booleans", () => {
 		const parsed = AppConfigSchema.parse({
 			...base,
 			oauth: {

@@ -196,7 +196,7 @@ const refreshToken = (): Promise<string> =>
 		.setExpirationTime("24h")
 		.sign(createSecretKey(Buffer.from(SECRET)));
 
-describe("one fixture requirement across oauth's consumers (A3's acceptance)", () => {
+describe("one fixture requirement across oauth's consumers", () => {
 	it("/authorize steps up to the page with redirect_to, then admits once the fixture answers met", async () => {
 		const { requirement, state } = fixtureRequirement();
 		const { app, createCode } = await buildApp(requirement);

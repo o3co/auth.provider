@@ -20,7 +20,7 @@ import { CoreConfigSchema } from "../application.schema.mjs";
  */
 const resourceIndicatorSchema = CoreConfigSchema.shape.oauth.shape.resourceIndicator;
 
-describe("oauth.resourceIndicator schema — Wave 1 §5.3 / RFC 8707 opt-in foundation", () => {
+describe("oauth.resourceIndicator schema — the RFC 8707 opt-in", () => {
 	it("is absent when omitted (optional field — default lives in reference.conf)", () => {
 		// The full oauth block still needs its required fields; we test
 		// resourceIndicator in isolation via the sub-schema.

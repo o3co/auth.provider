@@ -69,7 +69,7 @@ const activate = (store: MemoryFederationGrantStore, id: string) =>
 		now: at(2 * MIN),
 	});
 
-describe("createMemoryFederationGrantStore (#593, D16)", () => {
+describe("createMemoryFederationGrantStore", () => {
 	// The adapter's own clock is what it reclaims on. Only `Date` is faked: the
 	// lock in the contract suite above waits on real timers.
 	beforeEach(() => {
@@ -172,7 +172,7 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 
 		const still = await store.find("g-1", at(DAY));
 		expect(still).toMatchObject({ status: "active", version: 2 });
-		// Named, and never set (#626).
+		// Named, and never set.
 		expect(still).toHaveProperty("lastUsedAt", undefined);
 		expect(await store.isCurrentIntent("g-1", "h-re", at(DAY))).toBe(true);
 	});
@@ -241,7 +241,7 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 		expect((await lodge(store, "g-1", at(10 * MIN))).ok).toBe(true);
 	});
 
-	it("refuses a refresh once its own clock has reclaimed the credential, whatever the caller's clock says (#631)", async () => {
+	it("refuses a refresh once its own clock has reclaimed the credential, whatever the caller's clock says", async () => {
 		// What a store with key TTLs does: the credential's key is gone on the
 		// server's clock, and a refresh that arrives with an earlier `now` finds
 		// nothing to replace. The contract pins the same in real time; here the
@@ -264,7 +264,7 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 		expect(await store.find("g-1", at(DAY))).toMatchObject({ status: "active", version: 2 });
 	});
 
-	it("measures the lock's wait on a clock the system's cannot move: a Date step during the wait is not a wait (#631)", async () => {
+	it("measures the lock's wait on a clock the system's cannot move: a Date step during the wait is not a wait", async () => {
 		// `Date.now()` steps when the host's clock is set; the wait would then be
 		// reported as negative, or as hours, and core would refuse the lease of a
 		// lock that was in fact taken at once. The same case pins the Redis lock
@@ -304,7 +304,7 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 	});
 });
 
-describe("the FederationGrantStore factory (#593)", () => {
+describe("the FederationGrantStore factory", () => {
 	it("builds the memory adapter by name, and says what it is good for", async () => {
 		const warn = vi.fn();
 		const logger: Logger = {
@@ -326,7 +326,7 @@ describe("the FederationGrantStore factory (#593)", () => {
 	});
 });
 
-describe("memoryFederationGrantStoreModule (#593)", () => {
+describe("memoryFederationGrantStoreModule", () => {
 	it("provides the slot and declares why it forks per replica", () => {
 		expect(memoryFederationGrantStoreModule.name).toBe("core-federation-grant-store-memory");
 		expect(Object.keys(memoryFederationGrantStoreModule.provides ?? {})).toEqual([

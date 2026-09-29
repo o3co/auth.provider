@@ -18,7 +18,7 @@ import { type AdapterFactory, createAdapterFactory } from "../adapters/AdapterFa
 import { createMemoryConsentStore, createMemoryPendingConsentStore } from "./memory.mjs";
 import type { ConsentStore, PendingConsentStore } from "./types.mjs";
 
-/** Domain-specific AdapterFactory alias for {@link ConsentStore} (#527). */
+/** Domain-specific AdapterFactory alias for {@link ConsentStore}. */
 export type ConsentStoreFactory = AdapterFactory<ConsentStore>;
 
 /**
@@ -39,12 +39,12 @@ export function registerBuiltinConsentStores(factory: ConsentStoreFactory): void
 }
 
 /**
- * Domain-specific AdapterFactory alias for {@link PendingConsentStore} (#552).
+ * Domain-specific AdapterFactory alias for {@link PendingConsentStore}.
  *
  * The sibling of {@link ConsentStoreFactory}, and wired with it: the consent
  * step needs both slots, and `createOAuthRouter` refuses a composition with one
- * and not the other. A factory for only the first led a composition that
- * followed the pattern straight into that refusal.
+ * and not the other. A factory for only the first would lead a composition
+ * that follows the pattern straight into that refusal.
  */
 export type PendingConsentStoreFactory = AdapterFactory<PendingConsentStore>;
 

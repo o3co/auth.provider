@@ -260,7 +260,7 @@ describe("buildAuthorizationUrl", () => {
 	});
 });
 
-describe("the return URL the flow sends is the one the boot guard checked (#498)", () => {
+describe("the return URL the flow sends is the configured callbackURL", () => {
 	// The boot-time guard validates `config.callbackURL`, but the redirect_uri
 	// the route hands in is derived from `config.federations.<name>.callbackURL`
 	// by the session module. They are one value in every shipped composition;
@@ -311,7 +311,7 @@ describe("exchangeCode", () => {
 		["an explicitly empty scope, which `optionalString` would drop", "", ""],
 		["nothing usable, which is still an answer", "   ", "   "],
 		["no scope field at all", undefined, undefined],
-	])("forwards what Apple says about scope: %s (#647)", async (_label, answered, expected) => {
+	])("forwards what Apple says about scope: %s", async (_label, answered, expected) => {
 		// Apple normally sends none, which the route reads as "as requested"
 		// (RFC 6749 section 3.3). A present answer that names nothing must not
 		// flatten into that, or a response granting none would be recorded as
@@ -455,7 +455,7 @@ describe("exchangeCode", () => {
 		expect(profile.name).toBe("Ada");
 	});
 
-	it("drops a name part longer than the cap rather than truncating it (#498)", async () => {
+	it("drops a name part longer than the cap rather than truncating it", async () => {
 		// The `user` body is unsigned and relayed through the user agent, and
 		// `name` is promotable: without a bound, tens of kilobytes of
 		// attacker-supplied text could reach the claims envelope. A part over the
@@ -578,7 +578,7 @@ describe("exchangeCode", () => {
 		expect(mockClientSecretPost).toHaveBeenNthCalledWith(2, "secret-2");
 	});
 
-	it("follows a rotated privateKey through the key-material path, as the README promises (#498 review)", async () => {
+	it("follows a rotated privateKey through the key-material path", async () => {
 		// `createAppleProvider` must not copy `privateKey` at construction: the
 		// option is read at every exchange so a getter or a re-read file is
 		// enough to rotate without a restart.
@@ -631,20 +631,17 @@ describe("refreshToken", () => {
 		["an explicitly empty scope, which `optionalString` would drop", "", ""],
 		["nothing usable, which is still an answer", "  ", "  "],
 		["no scope field at all", undefined, undefined],
-	])(
-		"refreshToken forwards what Apple says about scope: %s (#647)",
-		async (_l, answered, expected) => {
-			mockRefreshTokenGrant.mockResolvedValueOnce({
-				access_token: "at2",
-				refresh_token: "rt2",
-				expires_in: 3600,
-				...(answered === undefined ? {} : { scope: answered }),
-			});
-			const p = createAppleProvider(baseConfig);
-			const refreshed = await p.refreshToken("old-refresh");
-			expect(refreshed.scope).toBe(expected);
-		},
-	);
+	])("refreshToken forwards what Apple says about scope: %s", async (_l, answered, expected) => {
+		mockRefreshTokenGrant.mockResolvedValueOnce({
+			access_token: "at2",
+			refresh_token: "rt2",
+			expires_in: 3600,
+			...(answered === undefined ? {} : { scope: answered }),
+		});
+		const p = createAppleProvider(baseConfig);
+		const refreshed = await p.refreshToken("old-refresh");
+		expect(refreshed.scope).toBe(expected);
+	});
 
 	it("returns a RefreshedTokens snapshot without re-asserting identity", async () => {
 		mockRefreshTokenGrant.mockResolvedValueOnce({
@@ -814,7 +811,7 @@ describe("isPrivateRelayEmail", () => {
 	});
 });
 
-describe("id_token signature verification is switched on (#542)", () => {
+describe("id_token signature verification is switched on", () => {
 	it("enables the non-repudiation checks on every configuration it builds — the authorization one and each per-call token one", async () => {
 		// The token configuration is rebuilt per call because the secret
 		// rotates, so switching the check on once at construction would cover

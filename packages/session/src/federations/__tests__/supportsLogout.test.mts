@@ -46,7 +46,7 @@ function makeLogoutProvider(name: string, endpoint: string): FederationProvider 
 	};
 }
 
-// The guard itself is core's since #626 P1, and so are its tests
+// The guard itself is core's, and so are its tests
 // (`core/src/federations/__tests__/types.test.mts`), the absent-provider cases
 // included. What stays here is what this package owns: the fixtures its own
 // suites build providers from, and the reference logout URL they produce.

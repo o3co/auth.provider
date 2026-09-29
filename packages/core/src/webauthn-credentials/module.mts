@@ -23,7 +23,7 @@ import { createMemoryWebAuthnCredentialStore } from "./memory.mjs";
  */
 export const memoryWebAuthnCredentialStoreModule = defineModule({
 	name: "core-webauthn-credential-store-memory",
-	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	// What forks per replica, quoted into a refused multi-replica boot.
 	replicaSafety: {
 		unsafe: true,
 		reason:

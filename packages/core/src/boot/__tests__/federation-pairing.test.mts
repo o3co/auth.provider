@@ -52,7 +52,7 @@ const activatorModule = defineModule({
 	},
 });
 
-describe("A5 pairing invariant — step 7.5", () => {
+describe("federation / redirect-policy pairing invariant — step 7.5", () => {
 	it("federation-without-policy: federations[google] without matching policy throws", async () => {
 		const federationOnlyModule = defineModule({
 			name: "test-google-federation-only",

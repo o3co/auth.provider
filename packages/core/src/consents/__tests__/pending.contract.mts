@@ -112,7 +112,7 @@ export function runPendingConsentStoreContract(
 			expect(await store.get("ch-1")).toBeNull();
 		});
 
-		it("names a state the request did not carry as undefined, rather than leaving it out (#626)", async () => {
+		it("names a state the request did not carry as undefined, rather than leaving it out", async () => {
 			const parked = record({ state: undefined });
 			await store.set(parked);
 			expect(await store.get("ch-1")).toStrictEqual(parked);

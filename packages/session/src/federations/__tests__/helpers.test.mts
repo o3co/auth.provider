@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-// fetchGithubPrimaryEmail was removed in code-quality review (I-3): the email-fetch
-// logic was inlined into github.mts using oidc.fetchProtectedResource and is covered
-// by github.test.mts. validateRedirect / resolveCallbackRedirect are exercised through
-// google.test.mts, github.test.mts, and factory.test.mts.
+// The GitHub email fetch is the GitHub adapter's (github.mts, over
+// oidc.fetchProtectedResource) and is covered by its github.test.mts.
+// validateRedirect / resolveCallbackRedirect are exercised through the redirect
+// policy, in redirect-policy.test.mts.
 
 import { describe, test } from "vitest";
 
 describe("helpers", () => {
-	test.todo("fetchGithubPrimaryEmail removed (I-3) — email-fetch logic covered by github.test.mts");
+	test.todo("email-fetch logic is covered by github.test.mts");
 });

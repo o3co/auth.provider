@@ -23,7 +23,7 @@ import {
 } from "#/assertions/issuerRegistry.mjs";
 
 /**
- * #525 — the trust registry's admin surface and entry validation. What an
+ * The trust registry's admin surface and entry validation. What an
  * entry means at verification time is pinned in
  * `registryAssertionVerifier.test.mts`; this file is about the list itself.
  */
@@ -36,7 +36,7 @@ const entry = (over: Partial<AssertionIssuerEntryInput> = {}): AssertionIssuerEn
 	...over,
 });
 
-describe("createMemoryAssertionIssuerRegistry — the admin surface (#525)", () => {
+describe("createMemoryAssertionIssuerRegistry — the admin surface", () => {
 	it("finds what was added, by exact issuer", async () => {
 		const registry = createMemoryAssertionIssuerRegistry([entry()]);
 		expect(await registry.findIssuer("https://devices.example")).toMatchObject({
@@ -174,7 +174,7 @@ describe("createMemoryAssertionIssuerRegistry — the admin surface (#525)", () 
 	});
 });
 
-describe("checkAssertionIssuerEntry — what an entry must say (#525)", () => {
+describe("checkAssertionIssuerEntry — what an entry must say", () => {
 	it("requires an issuer and at least one algorithm", () => {
 		expect(() => checkAssertionIssuerEntry(entry({ issuer: "" }))).toThrow(/issuer is required/);
 		expect(() => checkAssertionIssuerEntry(entry({ algorithms: [] }))).toThrow(

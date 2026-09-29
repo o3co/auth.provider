@@ -15,7 +15,7 @@
  */
 
 /**
- * The RFC 8628 flow end to end (#298): a device asks, a human answers, the
+ * The RFC 8628 flow end to end: a device asks, a human answers, the
  * device polls.
  *
  * Two devices and three requests that arrive out of order, so most of what is
@@ -135,7 +135,7 @@ const makeHarness = (
 	overrides: {
 		settings?: Partial<typeof settings>;
 		rateLimiter?: RateLimiter;
-		/** OR-5 outage policy; the harness defaults to the product's `closed`. */
+		/** The outage policy; the harness defaults to the product's `closed`. */
 		failMode?: RateLimitFailMode;
 		session?: Record<string, unknown>;
 		auditSink?: AuditSink;
@@ -187,8 +187,8 @@ const makeHarness = (
 			rateLimiter,
 			failMode: overrides.failMode ?? "closed",
 			userSessionStore,
-			// No requirement registered: what develop answered, but for the
-			// session-admission ADR's D8 changes (admission.test.mts).
+			// No requirement registered; what admission changes here (the
+			// session-admission ADR's D8) is admission.test.mts's.
 			requirements: resolverForTests([]),
 			requireEmailVerified: overrides.requireEmailVerified ?? false,
 			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
@@ -362,7 +362,7 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		);
 	});
 
-	it("refuses a client with no allowedGrantTypes at all (#326: never acquired by omission)", async () => {
+	it("refuses a client with no allowedGrantTypes at all (never acquired by omission)", async () => {
 		// The grant declares requiresExplicitGrantAllowlist, so the token
 		// endpoint denies by absence for it. The authorization endpoint
 		// applies the same rule, or the two disagree about who may start
@@ -418,9 +418,8 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 	});
 
 	it("draws an omitted scope from defaultScopes, never the whole allowlist", async () => {
-		// #396's rule, applied here: "forgot to send scope" must not be the
-		// maximum grant. The client allows openid+profile and defaults to
-		// openid.
+		// "Forgot to send scope" must not be the maximum grant. The client
+		// allows openid+profile and defaults to openid.
 		const { app, store, clock } = makeHarness();
 		const res = await startDevice(app);
 		const userCode = normaliseUserCode(res.body.user_code as string);
@@ -496,7 +495,7 @@ describe("verification endpoint", () => {
 	);
 
 	it("refuses an approval from an unverified email under requireEmailVerified, and nothing else", async () => {
-		// #297's gate is on issuance: `approve` is what a token is issued from.
+		// The email gate is on issuance: `approve` is what a token is issued from.
 		// A lookup shows the user what is being asked, and a denial issues
 		// nothing, so both still go through.
 		const { app, poll } = makeHarness({ requireEmailVerified: true });
@@ -619,10 +618,9 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 });
 
 describe("audit trail for the human's decision", () => {
-	// The decision that turns a code into a token used to reach nothing but
-	// `logger.info` — optional, unstructured, and not the pipeline the rest of
-	// the product's security events flow through. A device authorization is
-	// a consent event with a subject and a client; it belongs in the sink.
+	// A device authorization is a consent event with a subject and a client;
+	// it belongs in the sink, the pipeline the rest of the product's security
+	// events flow through, not in an optional, unstructured log line.
 
 	it("records device.approved with the subject, the client and the scope", async () => {
 		const { sink, events } = makeSink();
@@ -683,8 +681,8 @@ describe("audit trail for the human's decision", () => {
 			subject: "user-1",
 			details: { action: "lookup", remaining: 0 },
 		});
-		// #457 moved the check behind the shared outage policy; the budget is
-		// still the subject's, and the operator-facing line still fires.
+		// The check sits behind the shared outage policy; the budget is the
+		// subject's, and the operator-facing line fires.
 		expect(spy.check.mock.calls.map(([key]) => key)).toEqual([
 			"device_verification:user:user-1",
 			"device_verification:user:user-1",
@@ -743,12 +741,12 @@ describe("audit trail for the human's decision", () => {
 	});
 });
 
-describe("limiter outage — rateLimit.failMode applies here too (#457)", () => {
-	// Until #457 this endpoint called `rateLimiter.check` outside
-	// `createRateLimitGuard`, so a limiter-backend outage was an unhandled
-	// throw: 500 through the terminal handler, `failMode` ignored, and no
-	// `rate_limit.unavailable` event for the alert operators page on — on the
-	// one endpoint RFC 8628 §5.1 sizes the user code's entropy against.
+describe("limiter outage — rateLimit.failMode applies here too", () => {
+	// This endpoint runs the limiter itself rather than through
+	// `createRateLimitGuard`, so a limiter-backend outage must still follow
+	// `failMode` and raise the `rate_limit.unavailable` event the alert
+	// operators page on — on the one endpoint RFC 8628 §5.1 sizes the user
+	// code's entropy against.
 
 	it('failMode = "closed": answers 503 with the guard\'s envelope and does not decide', async () => {
 		const { app, store, clock } = makeHarness({
@@ -797,8 +795,9 @@ describe("limiter outage — rateLimit.failMode applies here too (#457)", () => 
 		});
 		expect(typeof events[0]?.ip).toBe("string");
 		expect(events[0]?.timestamp).toBeInstanceOf(Date);
-		// An outage is not a subject guessing codes: the #443 signal stays
-		// reserved for a limiter that answered "no".
+		// An outage is not a subject guessing codes: the
+		// `device_verification_rate_limited` line stays reserved for a limiter
+		// that answered "no".
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({ error: "redis down", mode: "closed", tag: "device_verification" }),
 			"rate_limiter_failed_closed",
@@ -991,7 +990,7 @@ describe("polling (RFC 8628 §3.5)", () => {
 		expect((await poll("")).result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
-	it("declares that it must never be acquired by omission (#326)", () => {
+	it("declares that it must never be acquired by omission", () => {
 		const { grant } = makeHarness();
 		expect(grant.requiresExplicitGrantAllowlist).toBe(true);
 	});
@@ -1132,7 +1131,7 @@ describe("code generation", () => {
 	});
 });
 
-describe("store capacity (#445)", () => {
+describe("store capacity", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 	});

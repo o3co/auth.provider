@@ -17,7 +17,7 @@
 /**
  * `establishSession` — the tail of a login both routes share, and the MFA
  * package's completion after them: what it writes, from the `Establishment`
- * core built and nothing beside it (the session-admission ADR's D5), its
+ * core built and nothing beside it (ADR 2026-09-28-session-admission, D5), its
  * sequence, what it hands each write, and the rollback ladder at every point
  * it can fail, driven by stores and steps that fail where a test says.
  */
@@ -213,7 +213,7 @@ const createdSid = (h: ReturnType<typeof harness>): string =>
 	(h.userSessionStore.create.mock.calls[0][0] as { sid: string }).sid;
 
 describe("establishSession", () => {
-	describe("what it writes: the establishment's primary, and nothing beside it (D5)", () => {
+	describe("what it writes: the establishment's primary, and nothing beside it", () => {
 		it("writes the record and the session from the primary — its subject, user, claims, authTime, recorded and redirectTo — whatever the caller hands beside it", async () => {
 			const h = harness();
 			const fedAuthTime = new Date("2026-09-28T08:00:00.000Z");

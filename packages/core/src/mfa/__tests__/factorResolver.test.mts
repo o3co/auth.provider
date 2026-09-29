@@ -91,7 +91,7 @@ function readsTheSlot(key: "auditSink") {
 	});
 }
 
-describe("MfaFactor.amrValues — the static list beside amrFor (D14; the session-admission ADR's D3)", () => {
+describe("MfaFactor.amrValues — the static list beside amrFor", () => {
 	it("holds every value amrFor answers for the fixtures here", () => {
 		for (const kind of ["totp", "webauthn", "email"]) {
 			const f = factor(kind);
@@ -103,7 +103,7 @@ describe("MfaFactor.amrValues — the static list beside amrFor (D14; the sessio
 	});
 });
 
-describe("mfaFactorResolver (D3, D7)", () => {
+describe("mfaFactorResolver", () => {
 	it("resolves every contributed factor by kind, and leaves a kind switched off by config absent", async () => {
 		const totp = factor("totp");
 		const webauthn = factor("webauthn");

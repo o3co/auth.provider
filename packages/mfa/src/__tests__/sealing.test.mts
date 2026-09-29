@@ -85,7 +85,7 @@ const sealedAsFactorData = (plaintext: string) =>
 
 const DATA = { secret: "JBSWY3DPEHPK3PXP", lastUsedStep: 42, nested: { a: [1, 2] } };
 
-describe("a factor's data, sealed to its record (D11)", () => {
+describe("a factor's data, sealed to its record", () => {
 	it("round-trips through JSON, naming the key that sealed it", () => {
 		const sealing = sealingOver([K1, K2]);
 		const sealed = sealing.sealFactorData(RECORD, DATA);
@@ -187,7 +187,7 @@ describe("a factor's data, sealed to its record (D11)", () => {
 	});
 });
 
-describe("a ceremony's state, sealed to its transaction (D11)", () => {
+describe("a ceremony's state, sealed to its transaction", () => {
 	const CHALLENGE = { transactionId: "tx-1", kind: "webauthn", use: "challenge" } as const;
 	const STATE = { challenge: "abc", expected: ["x"] };
 
@@ -241,7 +241,7 @@ describe("a ceremony's state, sealed to its transaction (D11)", () => {
 	});
 });
 
-describe("keyed digests (D7, D11)", () => {
+describe("keyed digests", () => {
 	it("digests under the first key, naming it, the same parts the same way", () => {
 		const digests = sealingOver([K1, K2]).digestsFor("email");
 		const one = digests.digest(["tx-1", "f-1", "123456"]);
@@ -424,7 +424,7 @@ describe("what is sealed is what opening gives back", () => {
 		}
 	});
 
-	it("refuses an accessor anywhere in the value — a getter can answer the check one thing and JSON another — and anything but a plain object or a real array (retro review of #721)", () => {
+	it("refuses an accessor anywhere in the value — a getter can answer the check one thing and JSON another — and anything but a plain object or a real array", () => {
 		const sealing = sealingOver([K1]);
 		/** A getter that answers "checked" to its first read and the secret to every later one. */
 		const shifting = () => {

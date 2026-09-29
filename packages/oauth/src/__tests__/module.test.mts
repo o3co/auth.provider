@@ -421,7 +421,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 	});
 });
 
-describe("oauthModule — the acr table in the served discovery document (the MFA ADR's D15)", () => {
+describe("oauthModule — the acr table in the served discovery document", () => {
 	const acrValues = {
 		"urn:example:pwd": ["pwd"],
 		"urn:example:mfa": ["pwd", "mfa"],
@@ -501,7 +501,7 @@ describe("oauthModule — the acr table in the served discovery document (the MF
 		expect(lines(logger.warn)).toEqual([]);
 	});
 
-	it("drops what only an upstream IdP could assert while the installed federation does not trust its amr (the MFA ADR's D13)", async () => {
+	it("drops what only an upstream IdP could assert while the installed federation does not trust its amr", async () => {
 		// The default: an upstream `mfa` is kept apart from the session's `amr`
 		// and meets no `acr`, so the entry is one nothing installed can meet —
 		// for an installed, enabled federation that says nothing of its trust.
@@ -708,7 +708,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		await handle.dispose();
 	});
 
-	it("advertises exactly the grant types the config actually enabled (#283)", async () => {
+	it("advertises exactly the grant types the config actually enabled", async () => {
 		// End-to-end guard on the anti-drift property: `grant_types_supported` is
 		// read off the same `grantHandlerResolver` `/oauth/token` dispatches
 		// against, so a grant gated off by `oauth.grants.<name>.enabled` cannot be
@@ -1134,7 +1134,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 	});
 });
 
-describe("absence policies (#363, #375)", () => {
+describe("absence policies", () => {
 	it("carries the shared policy constants, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
 		// policies for one key disagree, and sharing the one constant is what
@@ -1150,7 +1150,7 @@ describe("absence policies (#363, #375)", () => {
 	});
 });
 
-describe("oauthModule — the login trip is the loginEntry slot when a module provides it (#728)", () => {
+describe("oauthModule — the login trip is the loginEntry slot when a module provides it", () => {
 	const CLIENT = "client1";
 	const REDIRECT = "https://rp.example/cb";
 	const clientsWithOne = defineModule({
@@ -1233,7 +1233,7 @@ describe("oauthModule — the login trip is the loginEntry slot when a module pr
 	});
 });
 
-describe("oauthModule — a consumer of session admission (the session-admission ADR's D1, D6)", () => {
+describe("oauthModule — a consumer of session admission", () => {
 	it("requires sessionRequirementResolver, the synthetic key every consumer of admission takes", () => {
 		const module = oauthModule({ config: makeValidAppConfig() as never });
 		expect(module.requires).toContain("sessionRequirementResolver");

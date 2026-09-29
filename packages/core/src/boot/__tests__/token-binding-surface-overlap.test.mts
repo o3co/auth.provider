@@ -198,7 +198,7 @@ describe("isTokenBindingMw", () => {
 	});
 });
 
-describe("token-binding surface overlap — boot warning (#199 I4)", () => {
+describe("token-binding surface overlap — boot warning", () => {
 	it("warns when a grantMiddleware-mounted tokenBindingMw coexists with contributed mechanisms", async () => {
 		const warns: CapturedWarn[] = [];
 		const handle = await createApp({
@@ -256,7 +256,7 @@ describe("token-binding surface overlap — boot warning (#199 I4)", () => {
 		await handle.dispose();
 	});
 
-	it("does not warn for an un-migrated v0.7 deployment (legacy surface only)", async () => {
+	it("does not warn when only the legacy surface is used, with no mechanisms contributed", async () => {
 		// With no mechanisms nothing is overridden: a warning would be noise.
 		const warns: CapturedWarn[] = [];
 		const handle = await createApp({

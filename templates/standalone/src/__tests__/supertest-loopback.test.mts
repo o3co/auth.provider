@@ -102,7 +102,7 @@ function recordCloses(server: http.Server, held: ReturnType<typeof holdingApp>):
 	return closes;
 }
 
-describe("#556 — supertest's own server listens on the loopback address it dials", () => {
+describe("supertest's own server listens on the loopback address it dials", () => {
 	it("binds 127.0.0.1, not the dual-stack wildcard", async () => {
 		const server = http.createServer(helloApp());
 		const bound = boundAddress(server);
@@ -151,7 +151,7 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect(responses.map((res) => res.status)).toEqual([200, 200]);
 	});
 
-	it("closes an agent's one server after the last request sent over it, not the first (#703)", async () => {
+	it("closes an agent's one server after the last request sent over it, not the first", async () => {
 		// The request built first is the one whose call bound the server. Closing
 		// the server when that one finishes, as supertest 7.2 does, resets the
 		// connection of a request still on its way: ECONNRESET on Node 26.
@@ -173,7 +173,7 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect(server.listening).toBe(false);
 	});
 
-	it("keeps it open for a request sent while the server is already serving another (#703)", async () => {
+	it("keeps it open for a request sent while the server is already serving another", async () => {
 		const held = holdingApp();
 		const server = http.createServer(held.app);
 		const closes = recordCloses(server, held);
@@ -194,7 +194,7 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect(server.listening).toBe(false);
 	});
 
-	it("binds again for a request built before the server was closed, and sent after (#703)", async () => {
+	it("binds again for a request built before the server was closed, and sent after", async () => {
 		const agent = request.agent(helloApp());
 
 		const first = agent.get("/hello");
@@ -204,7 +204,7 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect((await second).status).toBe(200);
 	});
 
-	it("joins the bind another request made since, for a request built before the server was closed (#703)", async () => {
+	it("joins the bind another request made since, for a request built before the server was closed", async () => {
 		// Built on the first bind, sent while a later request is being served
 		// on the second: it joins that bind — one server, two requests in
 		// flight — and the server closes once, after the last of them.
@@ -234,7 +234,7 @@ describe("#556 — supertest's own server listens on the loopback address it dia
 		expect(server.listening).toBe(false);
 	});
 
-	it("serves a request built on a bind that failed, once another request has bound the server again (#703)", async () => {
+	it("serves a request built on a bind that failed, once another request has bound the server again", async () => {
 		// The first `listen` lands on a port another socket holds; the bind
 		// fails, and the request built on it is not sent until a later request
 		// has bound the server on a free port. It joins that bind rather than

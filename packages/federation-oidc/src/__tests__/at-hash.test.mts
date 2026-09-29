@@ -20,7 +20,7 @@ import { computeAtHash, verifyAtHash } from "#/at-hash.mjs";
 const unsignedJwt = (header: object): string =>
 	`${Buffer.from(JSON.stringify(header)).toString("base64url")}.${Buffer.from("{}").toString("base64url")}.sig`;
 
-describe("at_hash (OIDC Core §3.3.2.11, #524)", () => {
+describe("at_hash (OIDC Core §3.3.2.11)", () => {
 	it("matches the specification's worked example for RS256", () => {
 		expect(computeAtHash("jHkWEdUXMU1BwAsC4vtUsZwnNvTIxEl0z9K3vx5KF0Y", "RS256")).toBe(
 			"77QmUPtjPfzWtF2AnpK9RQ",

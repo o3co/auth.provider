@@ -218,7 +218,7 @@ const messageChain = (err: unknown): string => {
 	return `${e.message ?? ""} ${e.cause?.message ?? ""}`;
 };
 
-describe('#455: the standalone\'s memory modules are refused under deployment.mode = "multi"', () => {
+describe('the standalone\'s memory modules are refused under deployment.mode = "multi"', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -307,7 +307,7 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 	});
 });
 
-describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
+describe('federationTokenStore.type = "redis" in the standalone', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -376,7 +376,7 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 		});
 	});
 
-	it("keeps the memory branch as it was: the default, in single mode, resolves the memory adapter", async () => {
+	it("keeps the memory branch: the default, in single mode, resolves the memory adapter", async () => {
 		const config = resolveConfig({
 			...without(ALL_REDIS_ENV, "FEDERATION_TOKEN_STORE_TYPE"),
 			DEPLOYMENT_MODE: "single",
@@ -389,7 +389,7 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 	});
 });
 
-describe('#561: consentStore.adapter = "redis" in the standalone', () => {
+describe('consentStore.adapter = "redis" in the standalone', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 
 	afterEach(async () => {
@@ -443,7 +443,7 @@ describe('#561: consentStore.adapter = "redis" in the standalone', () => {
 	});
 });
 
-describe("#473: the Redis federation store's plaintext guard, booted from the shipped config", () => {
+describe("the Redis federation store's plaintext guard, booted from the shipped config", () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
 	let errorSpy: ReturnType<typeof vi.spyOn>;

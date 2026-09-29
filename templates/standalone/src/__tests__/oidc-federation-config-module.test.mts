@@ -21,7 +21,7 @@ import { buildModules } from "../buildModules.mjs";
 import { oidcFederationConfigModule } from "../modules.mjs";
 
 /**
- * #524: the scaffold turns every enabled `federations.<name>` of type
+ * The scaffold turns every enabled `federations.<name>` of type
  * `oidc` into one instance of the generic OIDC federation module, fed by a
  * single config bridge. A deployment adds an IdP with configuration only.
  */
@@ -50,7 +50,7 @@ const configWith = (federations: Record<string, unknown>): AppConfig => {
 	} as unknown as AppConfig;
 };
 
-describe("oidcFederationConfigModule (#524)", () => {
+describe("oidcFederationConfigModule", () => {
 	it("has the scaffold's module name and reads config", () => {
 		expect(oidcFederationConfigModule.name).toBe("oidc-federation-config");
 		expect(oidcFederationConfigModule.requires).toEqual(["config"]);
@@ -102,7 +102,7 @@ describe("oidcFederationConfigModule (#524)", () => {
 	});
 });
 
-describe("buildModules gating for OIDC federations (#524)", () => {
+describe("buildModules gating for OIDC federations", () => {
 	it("lists one federation-oidc-<name> per enabled section, plus the bridge once", () => {
 		const names = buildModules(
 			configWith({

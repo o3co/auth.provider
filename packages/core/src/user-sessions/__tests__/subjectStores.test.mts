@@ -18,12 +18,13 @@ import {
 import { runSubjectSessionIndexContract } from "./subjectSessionIndex.contract.mjs";
 
 // The behaviour every adapter owes, shared with `@o3co/auth-provider-redis`'s
-// suite (#321). What stays below is what only the in-process adapter can be
+// suite. What stays below is what only the in-process adapter can be
 // asked: ageing over a clock `vi.useFakeTimers` can actually move.
 runSubjectSessionIndexContract(async () => createInMemorySubjectSessionIndex());
 runSubjectRevocationContract(async () => createInMemorySubjectRevocation());
 
-// #593, D13: the bundled adapter claims the capability, so it owes its contract.
+// The bundled adapter claims the capability, so it owes its contract (the
+// federation-grants ADR, D13).
 runSessionsOnlyRevocationContract(async () => createInMemorySubjectRevocation());
 
 const FUTURE = new Date(Date.now() + 3_600_000);
@@ -32,7 +33,7 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("createInMemorySubjectSessionIndex (#296)", () => {
+describe("createInMemorySubjectSessionIndex", () => {
 	it("lists the sessions added for a subject", async () => {
 		const index = createInMemorySubjectSessionIndex();
 		await index.addSid("u1", "s1", FUTURE);
@@ -155,7 +156,7 @@ describe("createInMemorySubjectSessionIndex (#296)", () => {
 	});
 });
 
-describe("createInMemorySubjectRevocation (#296)", () => {
+describe("createInMemorySubjectRevocation", () => {
 	it("reports its adapter kind", () => {
 		expect(createInMemorySubjectRevocation().kind).toBe("memory");
 	});
@@ -208,11 +209,11 @@ describe("createInMemorySubjectRevocation (#296)", () => {
 	});
 
 	it("expires the watermark once no session it could kill can still exist", async () => {
-		// #593, D13: `revokeBefore` ends the subject's GRANTS as well, so its
-		// record is now floored at a year — a grant may have been consented for
-		// one, and a boundary that lapses under it takes the backstop with it.
-		// The caller's own TTL still bounds a sessions-only stamp, which is what
-		// this rule was always about.
+		// `revokeBefore` ends the subject's GRANTS as well (the federation-grants
+		// ADR, D13), so its record is floored at a year — a grant may have been
+		// consented for one, and a boundary that lapses under it takes the
+		// backstop with it. The caller's own TTL bounds a sessions-only stamp,
+		// and that is what this test checks.
 		vi.useFakeTimers();
 		const store = createInMemorySubjectRevocation();
 		await store.revokeSessionsBefore("u1", new Date(Date.now()), new Date(Date.now() + 1_000));

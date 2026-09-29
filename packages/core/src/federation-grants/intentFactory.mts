@@ -20,7 +20,7 @@ import type { Logger } from "../logging/Logger.mjs";
 import { createMemoryFederationGrantIntentStore } from "./intentMemory.mjs";
 import type { FederationGrantIntentStore } from "./intentStore.mjs";
 
-/** Domain-specific AdapterFactory alias for {@link FederationGrantIntentStore} (#593, slice 6). */
+/** Domain-specific AdapterFactory alias for {@link FederationGrantIntentStore}. */
 export type FederationGrantIntentStoreFactory = AdapterFactory<FederationGrantIntentStore>;
 
 /**

@@ -282,7 +282,7 @@ describe("createSubjectRevocationService", () => {
 			]);
 		});
 
-		it("gives each call one correlation ID of its own when the service was composed without one (#618)", async () => {
+		it("gives a call one correlation ID, carried by every event, when the service was composed without one", async () => {
 			const h = harness();
 			await h.seed();
 			await h.seed({ id: "g-2" });
@@ -303,7 +303,7 @@ describe("createSubjectRevocationService", () => {
 			for (const id of ids) expect(id).toMatch(UUID);
 		});
 
-		it("treats a service composed with an empty correlation ID as composed without one (#618)", async () => {
+		it("treats a service composed with an empty correlation ID as composed without one", async () => {
 			const h = harness();
 			await h.seed();
 			const events: { correlationId: string }[] = [];
@@ -320,7 +320,7 @@ describe("createSubjectRevocationService", () => {
 			expect(events[0]?.correlationId).toMatch(UUID);
 		});
 
-		it("gives a keep pass one correlation ID of its own too: what it ends — the pending grants — reads as one operation (#618)", async () => {
+		it("gives a keep pass one correlation ID of its own too: what it ends — the pending grants — reads as one operation", async () => {
 			const h = harness();
 			for (const id of ["g-p1", "g-p2"]) {
 				await h.store.createPending({

@@ -109,11 +109,12 @@ export function runWebAuthnCredentialStoreContract(
 			expect((await store.listByUserId("u-attacker")).length).toBe(0);
 		});
 
-		// Mirrors the registerFamily concurrent contract at
-		// refresh-token-family/__tests__/adapters.contract.mts:170. The interface
-		// JSDoc promises "N concurrent calls MUST result in exactly one success
-		// and N-1 throws" — this test falsifies adapters that implement non-atomic
-		// upsert (e.g. SQL INSERT without UNIQUE constraint, Redis SET without NX).
+		// Mirrors the registerFamily concurrent contract in
+		// refresh-token-family/__tests__/adapters.contract.mts. The interface
+		// JSDoc promises that of N concurrent calls with one `credentialId`,
+		// exactly one succeeds, and a duplicate throws — this test falsifies
+		// adapters that implement non-atomic upsert (e.g. SQL INSERT without
+		// UNIQUE constraint, Redis SET without NX).
 		it("concurrent registerCredential for same credentialId: exactly one success, N-1 duplicate-credential", async () => {
 			const N = 50;
 			const settled = await Promise.allSettled(

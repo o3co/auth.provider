@@ -230,7 +230,7 @@ describe("CRL resolver — one fetch per distribution point, not one per caller"
 	});
 });
 
-describe("CRL resolver — extensions it does not process (#447, #446)", () => {
+describe("CRL resolver — extensions it does not process", () => {
 	it("remembers a CRL carrying an unsupported critical extension for the negative window, under its own name", async () => {
 		// pkijs's `verify` answers `false` for a critical extension outside its
 		// known list — the same answer as a forged signature — and that used to
@@ -372,15 +372,15 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 	});
 });
 
-describe("CRL resolver — several distribution points on one certificate (#446, #469)", () => {
+describe("CRL resolver — several distribution points on one certificate", () => {
 	it("skips a distribution point carrying reasons without fetching it, and still consults the plain point beside it", async () => {
 		// With reasons, no single CRL is the complete answer, and the
 		// reasons-mask bookkeeping of RFC 5280 §6.3.3 is not implemented. But
 		// a point *without* reasons covers every reason code (§4.2.1.13), so
 		// the plain point's CRL is a complete answer on its own. Giving up on
-		// the whole extension at the partitioned point threw that answer
-		// away (#469); now the point is reported, unfetched, beside the CRL
-		// the other point yielded, and the caller's policy decides.
+		// the whole extension at the partitioned point would throw that answer
+		// away, so the point is reported, unfetched, beside the CRL the other
+		// point yielded, and the caller's policy decides.
 		const { int } = await chain();
 		const leaf = await leafWithPoints(
 			int,
@@ -564,14 +564,14 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 	});
 });
 
-describe("CRL resolver — the signature-algorithm policy applies to the CRL too (#470)", () => {
+describe("CRL resolver — the signature-algorithm policy applies to the CRL too", () => {
 	it("refuses a CRL signed with SHA-1 as algorithm_not_permitted, and remembers it for the negative window", async () => {
 		// pkijs verifies ecdsa-with-SHA1 and sha1WithRSAEncryption without
-		// complaint, so a SHA-1-signed CRL was believed while a SHA-1-signed
-		// certificate on the path was refused. The decision is on the CRL's
-		// shape — the OID in its signatureAlgorithm — and is made before the
-		// signature is checked, so it is remembered the way an unsupported
-		// critical extension is (#447): nothing injected can pin an
+		// complaint, so unchecked, a SHA-1-signed CRL would be believed while a
+		// SHA-1-signed certificate on the path is refused. The decision is on
+		// the CRL's shape — the OID in its signatureAlgorithm — and is made
+		// before the signature is checked, so it is remembered the way an
+		// unsupported critical extension is: nothing injected can pin an
 		// acceptance, a pinned refusal is bounded by the window, and a CA
 		// that signs with SHA-1 costs one probe per window rather than one
 		// fetch per request.
@@ -613,11 +613,11 @@ describe("CRL resolver — the signature-algorithm policy applies to the CRL too
 	});
 
 	it("holds a resolver built without an algorithms policy to the strict default, refusing SHA-1", async () => {
-		// `algorithms` is optional so that this security fix reaches a
+		// `algorithms` is optional so that the strict policy reaches a
 		// consumer who upgrades without touching their code — the resolver
-		// options are public surface (#470 review). Omitting it must mean the
-		// strict default, never "no policy": absent a default, `undefined`
-		// here would have thrown, or worse, waved everything through.
+		// options are public surface. Omitting it must mean the strict
+		// default, never "no policy": absent a default, `undefined` here would
+		// throw, or worse, wave everything through.
 		const { int, leaf } = await chain();
 		const crl = await mintCrl({ issuer: int, revoked: [], hash: "SHA-1" });
 		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });

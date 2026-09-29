@@ -207,7 +207,7 @@ describe("tokenBindingMw", () => {
 		expect(req.tokenBinding).toEqual(fakeMtls);
 	});
 
-	it("intent-explicit: two ambient mechanisms succeeding → first-registered wins (#199 M2)", async () => {
+	it("intent-explicit: two ambient mechanisms succeeding → first-registered wins", async () => {
 		// Pinned with a synthetic second ambient mechanism, so that adding a
 		// real one surfaces the first-wins rule as a failing test instead of
 		// applying it silently. It asserts what the code does today, NOT that
@@ -237,7 +237,7 @@ describe("tokenBindingMw", () => {
 		expect(res.status).not.toHaveBeenCalled();
 	});
 
-	it("strict-mutual-exclusion: two ambient mechanisms succeeding → rejected (#199 M2)", async () => {
+	it("strict-mutual-exclusion: two ambient mechanisms succeeding → rejected", async () => {
 		// Contrast with the case above: strict-mutual-exclusion counts raw
 		// successes and does not care about intent, so it already refuses two
 		// ambient mechanisms. Pinning both makes the asymmetry explicit —
@@ -295,7 +295,7 @@ describe("tokenBindingMw", () => {
 	});
 });
 
-describe("a retry instruction is the mechanism's to state, not core's to know (v0.13.0 audit)", () => {
+describe("a retry instruction is the mechanism's to state, not core's to know", () => {
 	// The dispatcher is deliberately vendor-neutral: string-matching DPoP's
 	// `use_dpop_nonce` to decide the description (here) and the challenge (at
 	// a protected resource) would leave a second mechanism with a retry of its
@@ -525,7 +525,7 @@ describe("a server-side outage is the mechanism's to state, and answers 503", ()
 	});
 });
 
-describe("tokenBindingMw — response headers a mechanism asks for (#530)", () => {
+describe("tokenBindingMw — response headers a mechanism asks for", () => {
 	it("sets the headers a refusal carries and answers use_dpop_nonce with its own description", async () => {
 		const err = Object.assign(new Error("no nonce"), {
 			code: "use_dpop_nonce",
@@ -571,7 +571,7 @@ describe("tokenBindingMw — response headers a mechanism asks for (#530)", () =
 	});
 });
 
-describe("resolveTokenBindingSettings (#728)", () => {
+describe("resolveTokenBindingSettings", () => {
 	// The one reading of `oauth.tokenBinding`: the settings that apply across
 	// every mechanism installed at core's token-binding extension point, and so
 	// core's, as the point is. Boot reads the dispatch policy through this and

@@ -17,7 +17,7 @@ describe("FederationTokenStoreFactory", () => {
 		expect(store.kind).toBe("memory");
 	});
 
-	it("does NOT register the 'redis' backend (relocated to @o3co/auth-provider-redis in Phase 10)", () => {
+	it("does NOT register the 'redis' backend", () => {
 		const f = createFederationTokenStoreFactory();
 		registerBuiltinFederationTokenStores(f);
 		expect(f.registeredTypes()).not.toContain("redis");

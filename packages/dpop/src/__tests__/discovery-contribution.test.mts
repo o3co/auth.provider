@@ -15,7 +15,7 @@
  */
 
 /**
- * dpop `discoveryMetadata` contribution (#283).
+ * dpop `discoveryMetadata` contribution.
  *
  * RFC 9449 §5.1 defines `dpop_signing_alg_values_supported` as authorization
  * server metadata. A client cannot otherwise learn that this deployment
@@ -57,7 +57,7 @@ async function contribution(config: unknown): Promise<OidcDiscoveryContribution>
 	const factory = dpopModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no discoveryMetadata");
 	// Awaited, as the boot planner does: a contribution factory may answer with
-	// a promise, and every kind's declared type says so since #626 P1.
+	// a promise, and every kind's declared type says so.
 	return await factory({ config } as never);
 }
 

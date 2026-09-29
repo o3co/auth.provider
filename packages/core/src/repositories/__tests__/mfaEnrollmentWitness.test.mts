@@ -41,7 +41,7 @@ const verifyOnly: UserRepository = {
 	authenticateByToken: async () => null,
 };
 
-describe("the MFA enrollment witness (D12)", () => {
+describe("the MFA enrollment witness", () => {
 	it("is a boolean the Store may answer on User", () => {
 		expectTypeOf<User["mfaEnrolled"]>().toEqualTypeOf<boolean | undefined>();
 		expect(true).toBe(true);
@@ -104,7 +104,7 @@ describe("the MFA enrollment witness (D12)", () => {
  * malformed: the coordinator answers it 503, logged once, and never opens a
  * first binding.
  */
-describe("readMfaEnrollmentWitness (D12)", () => {
+describe("readMfaEnrollmentWitness", () => {
 	it("answers enrolled for true, and not_enrolled for false or absent", () => {
 		expect(readMfaEnrollmentWitness({ id: "u1", mfaEnrolled: true })).toBe("enrolled");
 		expect(readMfaEnrollmentWitness({ id: "u1", mfaEnrolled: false })).toBe("not_enrolled");

@@ -146,7 +146,7 @@ describe("session grant authentication and token binding", () => {
 		expect(decodeJwt(result.body.access_token).sub).toBe(SUB);
 	});
 
-	it("mirrors the tracked session's amr onto the access token (#481 audit)", async () => {
+	it("mirrors the tracked session's amr onto the access token", async () => {
 		// The session grant already reads the UserSession, which is where `amr`
 		// is recorded, and minted an access token without it — so a resource
 		// server gating on how the user authenticated saw a different answer
@@ -180,7 +180,7 @@ describe("session grant authentication and token binding", () => {
 			["hwk", "fed"],
 		],
 	] as const)(
-		"mirrors what the tracked session vouches for (the MFA ADR's D9, D13) — %s",
+		"mirrors what the tracked session vouches for — %s",
 		async (_label, amr, authentication, stamped) => {
 			const store = createInMemoryUserSessionStore();
 			await store.create({

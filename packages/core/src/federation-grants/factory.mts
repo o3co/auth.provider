@@ -20,7 +20,7 @@ import type { Logger } from "../logging/Logger.mjs";
 import { createMemoryFederationGrantStore } from "./memory.mjs";
 import type { FederationGrantStore } from "./store.mjs";
 
-/** Domain-specific AdapterFactory alias for {@link FederationGrantStore} (#593). */
+/** Domain-specific AdapterFactory alias for {@link FederationGrantStore}. */
 export type FederationGrantStoreFactory = AdapterFactory<FederationGrantStore>;
 
 /**

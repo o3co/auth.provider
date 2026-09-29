@@ -15,9 +15,10 @@
  */
 
 /**
- * The lines this package writes (#593, D18): object-first with the event as
- * the message, every string field sanitised and capped, and a caught error as
- * core's projection — which keeps what an operator needs (the name, the
+ * The lines this package writes (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D18): object-first with the
+ * event as the message, every string field sanitised and capped, and a caught
+ * error as core's projection — which keeps what an operator needs (the name, the
  * message, the code, an upstream's `error`) and drops what a library put
  * beside it (a response body, a command's arguments, a token answer on a
  * cause).

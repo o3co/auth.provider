@@ -116,7 +116,7 @@ const introspect = (app: express.Express, token: string) =>
 		.type("form")
 		.send({ token });
 
-describe("/oauth/introspect — session liveness (R3)", () => {
+describe("/oauth/introspect — session liveness", () => {
 	it("reports active:true while the session named by sid is live", async () => {
 		const store = {
 			kind: "memory",

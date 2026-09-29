@@ -138,7 +138,7 @@ for (const group of MERGE_ROW_GROUPS) {
 	});
 }
 
-describe("the merge — the rows the MFA table does not reach (D2, step 7)", () => {
+describe("the merge — the rows the MFA table does not reach", () => {
 	/** A requirement that is met, reaches `reach`, and steps up nowhere of its own. */
 	const reaching = (name: string, reach: readonly string[]): SessionRequirement => ({
 		name,

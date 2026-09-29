@@ -153,7 +153,7 @@ const tokenRequest = (app: express.Express, grantType: string) =>
 		.type("form")
 		.send({ grant_type: grantType, refresh_token: "rt", code: "code-x" });
 
-describe("allowedGrantTypes — central /oauth/token enforcement (#268)", () => {
+describe("allowedGrantTypes — central /oauth/token enforcement", () => {
 	it("refuses a grant the client did not register for", async () => {
 		const app = await makeApp(["client_credentials"]);
 		const res = await tokenRequest(app, "refresh_token");
@@ -192,7 +192,7 @@ describe("allowedGrantTypes — central /oauth/token enforcement (#268)", () => 
 	});
 });
 
-describe("requiresExplicitGrantAllowlist — deny-by-absence at dispatch (#326)", () => {
+describe("requiresExplicitGrantAllowlist — deny-by-absence at dispatch", () => {
 	it("refuses a strict grant when the client declared no allowlist", async () => {
 		// The base rule admits an absent allowlist; the flag composes the
 		// stricter rule on top so the grant is never acquired by omission.
@@ -240,7 +240,7 @@ describe("requiresExplicitGrantAllowlist — deny-by-absence at dispatch (#326)"
 	});
 });
 
-describe("allowedGrantTypes — /authorize enforcement (#268)", () => {
+describe("allowedGrantTypes — /authorize enforcement", () => {
 	const authorize = (app: express.Express) =>
 		request(app).get("/oauth/authorize").query({
 			response_type: "code",
@@ -310,7 +310,7 @@ describe("allowedGrantTypes — /authorize enforcement (#268)", () => {
  * default. It is read once at router composition, so both enforcement points
  * inherit it rather than each re-reading config.
  */
-describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)", () => {
+describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence", () => {
 	const authorize = (app: express.Express) =>
 		request(app).get("/oauth/authorize").query({
 			response_type: "code",

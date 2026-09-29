@@ -17,7 +17,7 @@
 import type { ExchangeTokenValidationContext, ValidatedToken } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 
-// CC-5 readonly compile-time assertions.
+// Readonly compile-time assertions.
 //
 // These tests verify at compile time that public DTOs are `readonly`. The
 // `@ts-expect-error` directives below cause `tsc --noEmit` to fail (with
@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 // readonly becomes mutable. The runtime body is a no-op — the type system
 // is the assertion. Wrapped in `if (false)` so no runtime mutation runs.
 
-describe("CC-5: validator types readonly (compile-time)", () => {
+describe("validator types are readonly (compile-time)", () => {
 	it("ExchangeTokenValidationContext.role is readonly", () => {
 		if (false as boolean) {
 			const ctx = { role: "subject" } as ExchangeTokenValidationContext;

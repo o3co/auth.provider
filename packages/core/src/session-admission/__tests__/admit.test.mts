@@ -168,7 +168,7 @@ const request = (over: Partial<AdmissionRequest> = {}): AdmissionRequest => ({
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-describe("the claim builders — one reading of each carrier (D2)", () => {
+describe("the claim builders — one reading of each carrier", () => {
 	it("reads a cookie: authenticated only when isAuthenticated is exactly true, sid and user.id when they are non-empty strings", () => {
 		expect(cookie()).toMatchObject({
 			authenticated: true,
@@ -235,7 +235,7 @@ describe("the claim builders — one reading of each carrier (D2)", () => {
 		});
 		expect(tokenClaim({ sub: "user-1" })).toMatchObject({ sid: undefined, subject: "user-1" });
 		expect(tokenClaim({ sub: "user-1" })).not.toHaveProperty("tokenAmr");
-		// A token issued before #481, or one whose amr is not a well-formed list.
+		// A token without an amr, or one whose amr is not a well-formed list.
 		for (const amr of [undefined, [], [""], "pwd", [1]]) {
 			expect(tokenClaim({ sub: "user-1", amr }), JSON.stringify(amr)).not.toHaveProperty(
 				"tokenAmr",
@@ -789,7 +789,7 @@ describe("step 4 — the revocation boundary", () => {
 });
 
 describe("step 5 — the requirements", () => {
-	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt — never the record, with the D9 reading, the action, the asks and now", async () => {
+	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt — never the record, with the vouched authentication, the action, the asks and now", async () => {
 		const asked = { acrValues: ["urn:x"] };
 		const seen: RequirementInput[] = [];
 		const record = session({ amr: ["hwk", "fed"], authentication: undefined });
@@ -817,8 +817,8 @@ describe("step 5 — the requirements", () => {
 		});
 		expect(input.session).not.toBe(record);
 		expect(Object.keys(input.session ?? {})).toEqual(["sid", "sub", "authTime", "expiresAt"]);
-		// The vouched amr, split as D9 reads a pre-upgrade record: `hwk` is an
-		// untrusted IdP's word.
+		// The vouched amr, split as the MFA ADR's D9 reads a pre-upgrade record:
+		// `hwk` is an untrusted IdP's word.
 		expect(input.authentication).toEqual({
 			authentication: {
 				primary: "fed",
@@ -879,7 +879,7 @@ describe("step 5 — the requirements", () => {
 			{ authentication: undefined, amr: [] },
 		]);
 		// With a record, the token's own amr is still what the requirements are
-		// asked about (D9); the record is only the view.
+		// asked about; the record is only the view.
 		await admitSession(
 			deps({ requirements: resolverForTests([watching]) }),
 			request({ claim: tokenClaim({ sid: "sid-1", sub: "user-1", amr: ["hwk", "fed"] }) }),
@@ -1410,7 +1410,7 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 	});
 });
 
-describe("a bundled action is the bundled entry itself (D4)", () => {
+describe("a bundled action is the bundled entry itself", () => {
 	it("accepts the frozen entry, and refuses a literal or a copy carrying a bundled name: the grade is not the caller's to restate", async () => {
 		expect(
 			await admitSession(deps(), request({ action: ADMISSION_ACTIONS["oauth.authorize"] })),
@@ -1429,7 +1429,7 @@ describe("a bundled action is the bundled entry itself (D4)", () => {
 	});
 });
 
-describe("the undeclared-remediation line is capped (D4, D10)", () => {
+describe("the undeclared-remediation line is capped", () => {
 	it("says custom once per name up to 256 names, then once for all", async () => {
 		const { logger, lines } = recordingLogger();
 		const with_ = deps({ logger });
@@ -1559,7 +1559,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 	});
 });
 
-describe("the actions (D4)", () => {
+describe("the actions", () => {
 	it("names the bundled actions with their grades, each frozen", () => {
 		expect(
 			Object.fromEntries(

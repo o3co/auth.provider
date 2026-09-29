@@ -110,7 +110,7 @@ describe("createGithubProvider", () => {
 		expect(tokenRequest?.headers.has("authorization")).toBe(false);
 	});
 
-	it("#597: a callback's iss does not reach the library — the login succeeds and the token request carries only the grant's parameters (#598)", async () => {
+	it("does not forward a callback's iss to the library: the login succeeds and the token request carries only the grant's parameters", async () => {
 		// GitHub names its issuer "https://github.com/login/oauth"; the library
 		// is configured with the profile label "https://github.com". Forwarded,
 		// the library would compare the two and refuse the login.
@@ -233,7 +233,7 @@ describe("createGithubProvider", () => {
 		["a single scope", "read:user", "read:user"],
 		["repeated", "read:user,read:user", "read:user"],
 	])(
-		"answers a space-delimited granted scope when GitHub sends it %s (#647)",
+		"answers a space-delimited granted scope when GitHub sends it %s",
 		async (_label, answered, expected) => {
 			// RFC 6749 section 3.3 makes a scope a SPACE-delimited list, and GitHub
 			// answers with commas. Passed through as it arrives, the whole string
@@ -248,7 +248,7 @@ describe("createGithubProvider", () => {
 		["whitespace only", "  "],
 		["a lone comma", ","],
 	])(
-		"keeps an answer that names nothing distinguishable from no answer: %s (#647)",
+		"keeps an answer that names nothing distinguishable from no answer: %s",
 		async (_label, answered) => {
 			// Normalised to the empty string rather than to `undefined`: the route
 			// reads an ABSENT scope as "as requested", so flattening a present
@@ -259,7 +259,7 @@ describe("createGithubProvider", () => {
 		},
 	);
 
-	it("answers undefined only when GitHub sends no scope field at all (#647)", async () => {
+	it("answers undefined only when GitHub sends no scope field at all", async () => {
 		const { scope: _scope, ...withoutScope } = githubTokenResponse();
 		github.token.body = withoutScope;
 		expect((await exchange()).scope).toBeUndefined();
@@ -396,7 +396,7 @@ describe("createGithubProvider", () => {
 		expect((refusal as Error).message).not.toContain("%%bogus");
 	});
 
-	it("endSession honors configured endSessionEndpoint when present (I-1 — GitHub Enterprise support)", async () => {
+	it("endSession honors configured endSessionEndpoint when present", async () => {
 		const p = createGithubProvider({
 			...baseConfig,
 			endSessionEndpoint: "https://github.example.corp/logout",

@@ -23,7 +23,7 @@ import { createMemorySidSortedSet } from "./internalSidSortedSet.mjs";
  *
  * Insertion order is informational (aids debugging / mirrors Redis ZRANGE
  * output) but NOT load-bearing for cascade revoke — callers iterate
- * order-independently. Per A4 §5.3 + §7.1.
+ * order-independently.
  */
 export function createInMemorySessionFamilyIndex(): SessionFamilyIndex {
 	const set = createMemorySidSortedSet();

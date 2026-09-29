@@ -194,7 +194,7 @@ async function mintIdTokenHint(): Promise<string> {
 		.sign(secretKey);
 }
 
-describe("session grant + logout (R3)", () => {
+describe("session grant + logout", () => {
 	it("the minted access token carries the browser session's sid", async () => {
 		const app = await buildApp(makeUserSessionStore());
 

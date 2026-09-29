@@ -29,16 +29,16 @@ const namespaceOf = (claims: UserSessionClaims, provider = "test"): Record<strin
 	return ns?.[provider] ?? {};
 };
 
-describe("mergeFederatedClaims — precedence (#279)", () => {
+describe("mergeFederatedClaims — precedence", () => {
 	describe("the promotable set", () => {
 		it("contains only non-authorization profile claims", () => {
 			expect([...PROMOTABLE_FEDERATED_CLAIMS]).toEqual(["email", "name", "picture"]);
 		});
 
 		it("excludes every authorization-bearing and verification-bearing claim", () => {
-			// The point of #279: no federated value may reach these, and the set is
-			// the machine-readable statement of that. `emailVerified` is here because
-			// #297 made it a contract-bearing field that can gate token issuance.
+			// No federated value may reach these, and the set is the
+			// machine-readable statement of that. `emailVerified` is here because it
+			// is a contract-bearing field that can gate token issuance.
 			for (const forbidden of ["groups", "roles", "emailVerified", "scope", "permissions"]) {
 				expect(PROMOTABLE_FEDERATED_CLAIMS as readonly string[]).not.toContain(forbidden);
 			}
@@ -131,7 +131,7 @@ describe("mergeFederatedClaims — precedence (#279)", () => {
 		});
 	});
 
-	describe("emailVerified is Store-owned (#297) and federation cannot write it", () => {
+	describe("emailVerified is Store-owned and federation cannot write it", () => {
 		it("does not set emailVerified when the local record does not model it", () => {
 			const claims = mergeFederatedClaims({
 				localClaims: {},

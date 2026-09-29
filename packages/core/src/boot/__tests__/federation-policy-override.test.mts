@@ -39,7 +39,7 @@ const activatorModule = defineModule({
 	},
 });
 
-describe("A5 override mechanism — federationRedirectPolicies", () => {
+describe("override mechanism — federationRedirectPolicies", () => {
 	it("overriding federationRedirectPolicies[google] replaces the policy without replacing FederationProvider", async () => {
 		// `federationRedirectPolicies` is declared in the session package's
 		// ContributesMap declaration-merge. Cast contributes to `never` so this

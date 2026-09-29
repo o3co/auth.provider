@@ -126,7 +126,7 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		}
 	});
 
-	describe("from the slots (#728)", () => {
+	describe("from the slots", () => {
 		const tokenSettings = (over: Record<string, unknown> = {}) =>
 			({
 				accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 7_200 },

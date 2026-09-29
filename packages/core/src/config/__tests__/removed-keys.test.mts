@@ -80,7 +80,7 @@ describe("withRemovedKeys", () => {
 	});
 });
 
-describe("findRelocatedKeys — a key that moved (#728)", () => {
+describe("findRelocatedKeys — a key that moved", () => {
 	const dpopMoved = { from: ["oauth", "dpop"], to: ["dpop"] } as const;
 	const iatRenamed = {
 		from: ["oauth", "dpop", "iat-window-seconds"],
@@ -131,7 +131,7 @@ describe("findRelocatedKeys — a key that moved (#728)", () => {
 		).toEqual(["dpop.iatWindowSeconds"]);
 	});
 
-	it("reads a list of values as one value, and a list of objects element by element, each index a key (#728 R4)", () => {
+	it("reads a list of values as one value, and a list of objects element by element, each index a key", () => {
 		expect(
 			findRelocatedKeys({ old: { list: [1, 2], empty: [] } }, [{ from: ["old"], to: ["new"] }]).map(
 				({ from, to, environmentVariable }) => [from, to, environmentVariable],
@@ -223,7 +223,7 @@ describe("findRelocatedKeys — a key that moved (#728)", () => {
 	});
 });
 
-describe("environmentVariableFor — the variable a path is bound to (#728 B9)", () => {
+describe("environmentVariableFor — the variable a path is bound to", () => {
 	it.each([
 		[["device-grant", "codeLifetimeSeconds"], "DEVICE_GRANT_CODE_LIFETIME_SECONDS"],
 		[["redis-consent-store", "keyPrefix"], "REDIS_CONSENT_STORE_KEY_PREFIX"],

@@ -19,7 +19,7 @@ import {
 	InMemoryClientRepository,
 } from "#/repositories/InMemoryClientRepository.mjs";
 
-describe("ClientEntrySchema — allowedGrantTypes field (Wave 1 §3.4.1)", () => {
+describe("ClientEntrySchema — allowedGrantTypes field", () => {
 	it("accepts absent allowedGrantTypes (existing clients)", () => {
 		const result = ClientEntrySchema.safeParse({
 			tokenEndpointAuthMethod: "client_secret_basic",
@@ -64,7 +64,7 @@ describe("ClientEntrySchema — allowedGrantTypes field (Wave 1 §3.4.1)", () =>
 	});
 });
 
-describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
+describe("ClientEntrySchema — senderConstrained field", () => {
 	it("accepts absent senderConstrained (clients that have not opted in)", () => {
 		const result = ClientEntrySchema.safeParse({
 			tokenEndpointAuthMethod: "client_secret_basic",
@@ -117,7 +117,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success).toBe(false);
 	});
 
-	it("#527: accepts client_name and client_uri for the consent page, refusing a non-URL client_uri", () => {
+	it("accepts client_name and client_uri, refusing an empty client_name and a non-URL client_uri", () => {
 		const base = { tokenEndpointAuthMethod: "client_secret_basic", clientSecret: "s" };
 		expect(
 			ClientEntrySchema.safeParse({
@@ -130,7 +130,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(ClientEntrySchema.safeParse({ ...base, clientUri: "chat.example" }).success).toBe(false);
 	});
 
-	it("rejects empty-string entries in allowedAudiences (#521)", () => {
+	it("rejects empty-string entries in allowedAudiences", () => {
 		// `""` is a malformed audience, not a widening — nothing matches it —
 		// but `generateToken` would stamp `aud: ""` on every token minted for
 		// this client (session, device, jwt-bearer). Refuse it at registration.
@@ -141,7 +141,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		});
 		expect(result.success).toBe(false);
 	});
-	it("#316/#330: accepts firstParty, the marking /authorize requires", () => {
+	it("accepts firstParty: true and keeps it", () => {
 		// The `.strict()` schema had no `firstParty` key, so a YAML/static
 		// registration could not carry the marking /authorize demands: writing
 		// it failed boot as an unrecognized key, omitting it made every
@@ -156,7 +156,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success && result.data.firstParty).toBe(true);
 	});
 
-	it("#316: firstParty stays optional — absence means not first-party", () => {
+	it("firstParty stays optional — absent, it parses as undefined", () => {
 		const result = ClientEntrySchema.safeParse({
 			tokenEndpointAuthMethod: "client_secret_basic",
 			clientSecret: "s",
@@ -165,7 +165,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success && result.data.firstParty).toBeUndefined();
 	});
 
-	it("#316: rejects a non-boolean firstParty", () => {
+	it("rejects a non-boolean firstParty", () => {
 		const result = ClientEntrySchema.safeParse({
 			tokenEndpointAuthMethod: "client_secret_basic",
 			clientSecret: "s",
@@ -174,7 +174,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success).toBe(false);
 	});
 
-	it("#273: accepts allowPlainPkce, the only route to the RFC 7636 plain method", () => {
+	it("accepts allowPlainPkce: true and keeps it", () => {
 		// The schema is `.strict()`, so without the key a registration could
 		// not carry the opt-in at all — and there is deliberately no
 		// server-wide setting that admits `plain` instead.
@@ -187,7 +187,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success && result.data.allowPlainPkce).toBe(true);
 	});
 
-	it("#273: allowPlainPkce stays optional — absence means S256 only", () => {
+	it("allowPlainPkce stays optional — absent, it parses as undefined", () => {
 		const result = ClientEntrySchema.safeParse({
 			tokenEndpointAuthMethod: "client_secret_basic",
 			clientSecret: "s",
@@ -196,7 +196,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success && result.data.allowPlainPkce).toBeUndefined();
 	});
 
-	it("#273: rejects a non-boolean allowPlainPkce", () => {
+	it("rejects a non-boolean allowPlainPkce", () => {
 		// A YAML `allowPlainPkce: "true"` must fail at boot rather than reach
 		// the policy site, where the strict `=== true` would silently ignore
 		// it and the operator would believe the exception was in force.
@@ -209,7 +209,7 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 	});
 });
 
-describe("ClientEntrySchema — allowedRedirectUris shape (#395)", () => {
+describe("ClientEntrySchema — allowedRedirectUris shape", () => {
 	const base = {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: "s",
@@ -265,7 +265,7 @@ describe("ClientEntrySchema — allowedRedirectUris shape (#395)", () => {
 	});
 });
 
-describe("ClientEntrySchema — defaultScopes field (#396)", () => {
+describe("ClientEntrySchema — defaultScopes field", () => {
 	const base = {
 		tokenEndpointAuthMethod: "client_secret_basic",
 		clientSecret: "s",
@@ -298,7 +298,7 @@ describe("ClientEntrySchema — defaultScopes field (#396)", () => {
 	});
 });
 
-describe("ClientEntrySchema — private_key_jwt (#484)", () => {
+describe("ClientEntrySchema — private_key_jwt", () => {
 	const jwk = {
 		kty: "EC",
 		crv: "P-256",
@@ -405,7 +405,7 @@ describe("ClientEntrySchema — private_key_jwt (#484)", () => {
 	});
 });
 
-describe("ClientEntrySchema — clientUri is rendered by a consent page (#527 review)", () => {
+describe("ClientEntrySchema — the schemes clientUri accepts", () => {
 	const parse = (clientUri: string) =>
 		ClientEntrySchema.safeParse({
 			tokenEndpointAuthMethod: "none",

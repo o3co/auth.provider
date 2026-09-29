@@ -187,10 +187,11 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 const HELD = { ttlMs: 120_000, waitForMs: 0 };
 
 /**
- * The behaviour every {@link FederationGrantStore} adapter shares
- * (federation-grants ADR, D2, D16; bare D-numbers below refer to it). The
- * memory adapter runs this in-tree and the Redis adapter against a real Redis,
- * so the two cannot disagree about what a grant is or which write wins.
+ * The behaviour every {@link FederationGrantStore} adapter shares (ADR
+ * 2026-09-17-federation-grants-offline-delegation, D2 and D16; bare D-numbers
+ * below refer to it). The memory adapter runs this in-tree and the Redis
+ * adapter against a real Redis, so the two cannot disagree about what a grant
+ * is or which write wins.
  *
  * Time is passed in, never faked: the port takes it from its caller. The
  * lock's tests, and the one case that waits for the store's own clock to
@@ -388,7 +389,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect(await store.isCurrentIntent("g-1", "h-1", at(10 * MIN))).toBe(false);
 				});
 
-				it("spends nothing: the callback asks before it exchanges the code, and the activation still succeeds (D7)", async () => {
+				it("spends nothing: the callback asks before it exchanges the code, and the activation still succeeds", async () => {
 					await store.createPending(pendingInput());
 					expect(await store.isCurrentIntent("g-1", "h-1", at(MIN))).toBe(true);
 					expect(await store.isCurrentIntent("g-1", "h-1", at(MIN))).toBe(true);
@@ -528,7 +529,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			describe("retireIntent", () => {
-				it("retires whichever intent is current, and changes nothing else: the renewal in flight cannot finish (D13)", async () => {
+				it("retires whichever intent is current, and changes nothing else: the renewal in flight cannot finish", async () => {
 					const grant = await inUse();
 					await nameRenewalIntent();
 					expect(await store.retireIntent({ grantId: "g-1", now: at(DAY + MIN) })).toStrictEqual({
@@ -766,7 +767,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await resident("g-unknown")).toBe(false);
 			});
 
-			it("refuses an expiry beyond the lifetime ceiling of the consent, and accepts one at it (D3)", async () => {
+			it("refuses an expiry beyond the lifetime ceiling of the consent, and accepts one at it", async () => {
 				await store.createPending(pendingInput());
 				const consentAt = at(MIN);
 				const beyond = new Date(consentAt.getTime() + FEDERATION_GRANT_LIFETIME_CEILING_MS + 1);
@@ -806,7 +807,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				).toEqual({ ok: false });
 			});
 
-			it("refuses a consent or an authorization dated after the write: a boundary stamped from then on must always cover it (D13)", async () => {
+			it("refuses a consent or an authorization dated after the write: a boundary stamped from then on must always cover it", async () => {
 				// With no allowance at all. The backstop's comparison has its own, for
 				// the clocks of two replicas; any this rule added would come on top of
 				// it, and a consent dated thirty seconds ahead would slip past a
@@ -1020,11 +1021,12 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					}
 				});
 
-				it("never re-points a grant: a renewal for another upstream account, or under another identity, is refused (D4, D7)", async () => {
+				it("never re-points a grant: a renewal for another upstream account, or under another identity, is refused", async () => {
 					// The connect callback checks the account before it gets here. This
-					// is the same rule at the write, where D2 says rules are enforced:
-					// one slip in that check would otherwise hand a grant ID, and the
-					// client that holds it, to another upstream account.
+					// is the same rule at the write, where ADR
+					// 2026-09-17-federation-grants-offline-delegation, D2, says rules are
+					// enforced: one slip in that check would otherwise hand a grant ID, and
+					// the client that holds it, to another upstream account.
 					const grant = await activated();
 					await nameRenewalIntent();
 					const refused = [
@@ -1042,7 +1044,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect((await renew()).ok).toBe(true);
 				});
 
-				it("leaves an existing grant exactly as it was when it is refused for what it carries (D7)", async () => {
+				it("leaves an existing grant exactly as it was when it is refused for what it carries", async () => {
 					// A credential written beside a `pending` grant is invisible through
 					// the port; beside an active one it is the user's working refresh
 					// token that a partial write would have replaced.
@@ -1056,7 +1058,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						renewal({ expiresAt: new Date(consentAt + FEDERATION_GRANT_LIFETIME_CEILING_MS + 1) }),
 						renewal({ authorizedAt: ahead }),
 						// The consent of a renewal replaces the only evidence the
-						// revocation backstop has (D13): it is bounded like the first one.
+						// revocation backstop has (ADR
+						// 2026-09-17-federation-grants-offline-delegation, D13): it is
+						// bounded like the first one.
 						renewal({ consent: { at: ahead, sid: "sid-2", scopes: ["openid", "offline_access"] } }),
 						renewal({ expiresAt: INVALID }),
 					];
@@ -1092,7 +1096,8 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			it("replaces as a whole: without an access token the record keeps the refresh token only", async () => {
-				// How an ineligible access token is never written (D5). A merge
+				// How an ineligible access token is never written (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D5). A merge
 				// would leave the previous access token in the record.
 				const grant = await activated();
 				await store.replaceCredentials({
@@ -1527,7 +1532,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
-		describe("noteRefreshFailure (D5, D12)", () => {
+		describe("noteRefreshFailure", () => {
 			const failure = (over: Partial<FederationGrantRefreshFailureInput> = {}) => ({
 				at: at(DAY),
 				kind: "unavailable" as const,
@@ -1572,7 +1577,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await store.isCurrentIntent("g-1", "h-g-1", at(DAY))).toBe(false);
 			});
 
-			describe("a stamp that says the user has to come back (D11, D12, #616)", () => {
+			describe("a stamp that says the user has to come back", () => {
 				// The four codes an IdP answers a refresh with when it wants the user
 				// and not a new token. Such a stamp is the grant's memory of that,
 				// read as `reauthorization_required` until an activation clears it —
@@ -2011,8 +2016,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 
 			it("still returns an authorized grant past its expiry, and never its credentials", async () => {
 				// The status route must answer `expired`, not `grant_not_found`. The
-				// credential gets no such retention (D16) — judged on the caller's
-				// clock, whatever TTL a key may still have.
+				// credential gets no such retention (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D16) — judged on the
+				// caller's clock, whatever TTL a key may still have.
 				const grant = await activated();
 				expect((await openedCredentials("g-1", at(30 * DAY - 1)))?.state).toBe("ok");
 				for (const now of [at(30 * DAY), at(31 * DAY)]) {
@@ -2312,7 +2318,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
-		describe("the races of D2, in the order they would happen", () => {
+		describe("the races with a revocation or an expiry, in the order they would happen", () => {
 			it("a callback that passed its checks and activates after a revocation fails", async () => {
 				await store.createPending(pendingInput());
 				expect(await store.isCurrentIntent("g-1", "h-1", at(MIN))).toBe(true);
@@ -2636,7 +2642,8 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect([retired.ok, renewed.ok].filter((ok) => ok)).toHaveLength(1);
 					expect(await store.isCurrentIntent("g-1", "h-re", at(DAY + 3 * MIN))).toBe(false);
 					// A "keep" that retired the renewal in flight left the established
-					// grant exactly as it was (D13).
+					// grant exactly as it was (ADR
+					// 2026-09-17-federation-grants-offline-delegation, D13).
 					expect(await store.open("g-1", at(DAY + 3 * MIN))).toStrictEqual(
 						retired.ok
 							? { grant, credentials: { state: "ok", value: credentials("1") } }
@@ -2769,7 +2776,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
-		describe("acquireRefreshLock (D12)", () => {
+		describe("acquireRefreshLock", () => {
 			it("excludes a second holder of the same grant until the first releases", async () => {
 				const first = await store.acquireRefreshLock("g-1", HELD);
 				if (!first.acquired) throw new Error("fixture: the first acquire failed");
@@ -2785,7 +2792,8 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			it("tells the holder how long it waited before it TOOK the lock: a duration, so that the holder can date the lease on its own clock", async () => {
-				// The holder counts every deadline from when it asked plus this (D12).
+				// The holder counts every deadline from when it asked plus this (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D12).
 				// Counting from the acknowledgement instead overstates what is left of
 				// the TTL by however long the acknowledgement took, and a slow one
 				// lets a second holder in while the first still refreshes.

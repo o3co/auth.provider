@@ -443,7 +443,7 @@ describe("the package-import scan", () => {
 	});
 });
 
-describe("a package imports only core (#728)", () => {
+describe("a package imports only core, save its tolerated edges", () => {
 	it("exempts only compositions that are workspaces", () => {
 		const dirs = new Set(WORKSPACES.map((workspace) => workspace.dir));
 		expect(Object.keys(COMPOSITIONS).filter((dir) => !dirs.has(dir))).toEqual([]);

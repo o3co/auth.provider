@@ -55,7 +55,7 @@ describe("UserSession — what a session store answers with", () => {
 		expectTypeOf<UserSession["amr"]>().toEqualTypeOf<readonly string[] | undefined>();
 	});
 
-	it("names authentication, undefined for a session written before the MFA ADR's D9", () => {
+	it("names authentication, and still lets it be absent in value", () => {
 		// A copy that forgot it would read every session as one written before
 		// it: a federated session's untrusted upstream values split out again,
 		// a verified second factor forgotten.
@@ -66,7 +66,7 @@ describe("UserSession — what a session store answers with", () => {
 	});
 });
 
-describe("SessionAuthentication — how a session was established (the MFA ADR's D9)", () => {
+describe("SessionAuthentication — how a session was established", () => {
 	it("has no optional key: a copy names every field", () => {
 		expectTypeOf<OptionalKeys<SessionAuthentication>>().toEqualTypeOf<never>();
 	});

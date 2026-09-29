@@ -575,7 +575,7 @@ describe("the token route — how a failure is carried", () => {
 		});
 	});
 
-	it("answers a grant whose refresh was refused for the user's absence with 410 by that name, no Retry-After, and never its cached token (#616)", async () => {
+	it("answers a grant whose refresh was refused for the user's absence with 410 by that name, no Retry-After, and never its cached token", async () => {
 		const h = harness();
 		await h.seed();
 		const grant = await h.store.find(GRANT_ID, h.world.now);

@@ -19,7 +19,7 @@ import { callbackUrlForExchange } from "#/federations/callback-url.mjs";
 
 const CALLBACK = "https://auth.test/session/oauth/federation/idp-a/callback";
 
-describe("callbackUrlForExchange (#597)", () => {
+describe("callbackUrlForExchange", () => {
 	it("puts the code on the registered callback", () => {
 		const url = callbackUrlForExchange({ redirectUri: CALLBACK, code: "code-1" });
 		expect(`${url.origin}${url.pathname}`).toBe(CALLBACK);

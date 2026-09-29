@@ -139,7 +139,7 @@ function configWith(
 	return config;
 }
 
-describe("#288: every env-overridable boolean uses one coercion path", () => {
+describe("every env-overridable boolean uses one coercion path", () => {
 	for (const field of ENV_OVERRIDABLE_BOOLEANS) {
 		describe(`${field.key} (${field.envVar})`, () => {
 			for (const [input, expected] of COERCIONS) {

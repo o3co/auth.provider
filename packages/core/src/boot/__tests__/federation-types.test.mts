@@ -15,7 +15,7 @@
  */
 
 /**
- * The `federationTypes` contribution kind (#728): a federation package
+ * The `federationTypes` contribution kind: a federation package
  * declares, keyed by the `type` an entry of the `federations` configuration
  * names, the schema of such an entry and the factory that builds a provider
  * from one entry and its name. Registered by type, so two packages claiming

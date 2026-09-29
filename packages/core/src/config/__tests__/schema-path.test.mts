@@ -15,7 +15,7 @@
  */
 
 /**
- * Where a configuration path lands in a Zod schema (#728): what
+ * Where a configuration path lands in a Zod schema: what
  * `schemasAtPath` finds through each shape a configuration schema takes, what
  * `outputKinds` can and cannot tell of a schema without running it, and what
  * `pickConfigSchema` reads through a record and refuses.

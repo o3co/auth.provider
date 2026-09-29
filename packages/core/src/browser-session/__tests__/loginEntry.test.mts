@@ -15,7 +15,7 @@
  */
 
 /**
- * The `loginEntry` slot (#728): the login page and the `redirect_to`
+ * The `loginEntry` slot: the login page and the `redirect_to`
  * protocol `/authorize` and the federation-grants connect flow send a
  * browser that is not signed in by. Its contract suite and the test double:
  * the double keeps every case, and each way an entry can break the contract

@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
-// #481 — the `amr` value a federated login records (beside the upstream IdP's
-// only for a federation that trusts it, the MFA ADR's D13). Core's since the
-// MFA ADR; re-exported so an import from here keeps working.
+// The `amr` value a federated login records (beside the upstream IdP's only
+// for a federation that trusts it, the MFA ADR's D13). Core's; re-exported so
+// an import from here keeps working.
 export { FEDERATED_AMR } from "@o3co/auth-provider-core";
 // The session-admission ADR's D5 — the answer to a login a session requirement
 // interrupted: the login route's, and a requirement's completion's when
@@ -28,10 +28,10 @@ export {
 	type InterruptionReporter,
 	type InterruptionStep,
 } from "./answer-interruption.mjs";
-// #272 — CSRF protection for the state-changing session routes. Exported so a
+// CSRF protection for the state-changing session routes. Exported so a
 // composition root can issue tokens from its own login page, or mount the same
 // guard on routes this package does not own. Another package reaches the guard
-// through the `csrfGuard` slot the session module provides (#728);
+// through the `csrfGuard` slot the session module provides;
 // `createSessionCsrfGuard` builds that slot's value, for a composition that
 // provides it without the module.
 export type {
@@ -68,7 +68,7 @@ export {
 	type EstablishSessionStep,
 	establishSession,
 } from "./establish-session.mjs";
-// #279 — federated claims never outrank local ones; see claim-precedence.mts.
+// Federated claims never outrank local ones; see claim-precedence.mts.
 export type { FederatedClaimsNamespace } from "./federations/claim-precedence.mjs";
 export {
 	FEDERATED_CLAIMS_KEY,
@@ -78,7 +78,7 @@ export {
 export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect } from "./federations/helpers.mjs";
-// A5 redirect-policy split (per A5 §5.2/§5.3/§9)
+// The federation redirect policy.
 export type {
 	FederationRedirectPolicy,
 	FederationRedirectPolicyConfig,
@@ -87,10 +87,9 @@ export type {
 	RedirectAllowlistValidator,
 	RedirectRejection,
 } from "./federations/redirect-policy.mjs";
-// `validateRedirect` is deliberately NOT exported: the standalone helper
-// derived its answer from `sessionDomain` alone and accepted every http(s) URL
-// when that was unset (#278). Redirect validation now exists only as a policy
-// built from an allowlist. The pieces below are exported so a custom policy can
+// A standalone `validateRedirect` is deliberately NOT exported: redirect
+// validation exists only as a policy built from an allowlist, which fails
+// closed without one. The pieces below are exported so a custom policy can
 // reuse the same rules and rejection vocabulary instead of inventing its own.
 export {
 	checkRedirectShape,
@@ -100,11 +99,9 @@ export {
 	isLoopbackHostname,
 	MAX_REDIRECT_URL_LENGTH,
 } from "./federations/redirect-policy.mjs";
-// #479 — `response_mode=form_post` federations (Sign in with Apple).
-// #494 — a form_post federation's ephemeral state lives in a transaction of
-// its own, addressed by a dedicated cookie, so the application session cookie
-// is never relaxed. Replaces `applyCrossSiteStateCookie`, which is removed —
-// see CHANGELOG for the release that performed the removal.
+// `response_mode=form_post` federations (Sign in with Apple). A form_post
+// federation's ephemeral state lives in a transaction of its own, addressed by
+// a dedicated cookie, so the application session cookie is never relaxed.
 export type {
 	FederationTransactionEnvelope,
 	FederationTransactionSessionStore,
@@ -119,18 +116,18 @@ export {
 	mintFederationTransactionId,
 } from "./federations/transaction.mjs";
 export type { FederationResult } from "./federations/types.mjs";
-// #728 — the login page and its `redirect_to` protocol, the `loginEntry` slot
+// The login page and its `redirect_to` protocol, the `loginEntry` slot
 // `sessionModule` provides; exported so a composition that provides the slot
 // without the module builds it the same way.
 export { createLoginEntry, loginEntryFromConfig } from "./login-entry.mjs";
 // The federation adapter port — `FederationProvider`, `FederationProfile`,
 // the capability interfaces and their guards, and the response-mode
-// helpers — is exported by `@o3co/auth-provider-core` since #626 P1 and is
+// helpers — is exported by `@o3co/auth-provider-core` and is
 // deliberately not re-exported here: one type, one path. So is the adapter
 // toolkit (`codeChallenge`, `callbackUrlForExchange`, `resolveClientSecret`).
 // `FederationResult` above stays because only this router answers with one.
 export { sessionModule } from "./module.mjs";
-// #728 — the `loginCompletion` slot, over the deployment's `csrfGuard`: its own
+// The `loginCompletion` slot, over the deployment's `csrfGuard`: its own
 // module, loaded beside `sessionModule` where a requirement completes a login.
 export { loginCompletionModule } from "./modules/loginCompletionModule.mjs";
 export {
@@ -144,5 +141,5 @@ export {
 	registerBuiltinSessionStores,
 } from "./store/factory.mjs";
 
-// Side-effect: loads ContributesMap + ComponentMap declaration-merges for A5.
+// Side-effect: loads the ContributesMap + ComponentMap declaration merges.
 import "./federations/contributes.mjs";

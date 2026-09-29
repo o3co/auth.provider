@@ -127,7 +127,7 @@ function federationGrantEmissions(source: string): readonly string[] {
 	return found;
 }
 
-describe("the federation-grant emission scan (#593)", () => {
+describe("the federation-grant emission scan", () => {
 	// "Lists no event nothing emits any more" holds only while a declaration
 	// does not count as an emission: a scan that saw core's union of the seven
 	// names would report them all as emitted for ever.
@@ -159,7 +159,7 @@ describe("the federation-grant emission scan (#593)", () => {
 	});
 });
 
-describe("built-in audit event inventory (#369)", () => {
+describe("built-in audit event inventory", () => {
 	const emitted = emittedEventTypes();
 
 	it("finds a plausible emission surface (sanity: the guard is not vacuous)", () => {

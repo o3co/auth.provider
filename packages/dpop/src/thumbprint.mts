@@ -21,8 +21,6 @@ import { calculateJwkThumbprint, type JWK } from "jose";
  * RFC 7638 §3 canonical JWK member selection + SHA-256 hash → base64url.
  * Used to bind a DPoP access token to the client's public key per
  * RFC 9449 §6.1 and to derive the `cnf.jkt` claim.
- *
- * Per Wave 2 Phase 2 spec §5.4 + RFC 7638.
  */
 export const computeJkt = async (jwk: JWK): Promise<string> => {
 	return calculateJwkThumbprint(jwk, "sha256");

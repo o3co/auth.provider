@@ -15,7 +15,7 @@
  */
 
 /**
- * The `oauthTokenSettings` slot (#728): what other modules read of the oauth
+ * The `oauthTokenSettings` slot: what other modules read of the oauth
  * module's token settings, its contract suite and the test double. The
  * double keeps every case; each way a value can break the contract fails
  * the case that names it. The token-binding settings — the dispatch policy
@@ -73,8 +73,8 @@ describe("the oauthTokenSettings slot", () => {
 		expectTypeOf<OAuthTokenSettings["legacyTypAccept"]>().toEqualTypeOf<boolean>();
 		expectTypeOf<OAuthTokenSettings["accessTokenLifetime"]>().toEqualTypeOf<AccessTokenLifetime>();
 		expectTypeOf<OAuthTokenSettings["refreshTokenExpiresIn"]>().toEqualTypeOf<number>();
-		// The token-binding settings are core's (#728): the slot has no member
-		// for either.
+		// The token-binding settings are core's: the slot has no member for
+		// either.
 		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("tokenBinding");
 		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("dispatchPolicy");
 		expectTypeOf<OAuthTokenSettings>().not.toHaveProperty("bindConfidentialClientRefreshTokens");

@@ -15,7 +15,7 @@
  */
 
 /**
- * The `rateLimitBudgets` contribution kind (#728): a module contributes the
+ * The `rateLimitBudgets` contribution kind: a module contributes the
  * budget of each rate-limit prefix it owns — the default limit and window it
  * reads from its own settings — name-keyed by the prefix, and core composes
  * them into one view, the synthetic `rateLimitBudgetResolver`, that a limiter

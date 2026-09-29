@@ -146,7 +146,7 @@ function install(
 	return { spies, logger, exit, signals, finishDraining, failClose };
 }
 
-describe("installGracefulShutdown (#290)", () => {
+describe("installGracefulShutdown", () => {
 	it("listens for both SIGTERM and SIGINT", async () => {
 		const { signals } = install();
 		expect([...signals.keys()].sort()).toEqual(["SIGINT", "SIGTERM"]);
@@ -461,7 +461,7 @@ describe("installGracefulShutdown (#290)", () => {
 	});
 });
 
-describe("#593 slice 7: the cleanup allowance federation grants need", () => {
+describe("the cleanup allowance federation grants need", () => {
 	it("is at least the 45 seconds the package asks for, and only when the feature is on", () => {
 		// The package's drain waits for a rotated credential's write; the
 		// default cleanup budget is the ten-second drain, which is shorter than
@@ -476,7 +476,7 @@ describe("#593 slice 7: the cleanup allowance federation grants need", () => {
 		expect(cleanupAllowanceFor({})).toEqual({});
 	});
 
-	it("grows with the configured refresh tail, so a raised budget is not cut off by a fixed timer (Copilot, #614)", () => {
+	it("grows with the configured refresh tail, so a raised budget is not cut off by a fixed timer", () => {
 		// The longest tail one refresh has: the upstream hard timeout, the
 		// persist budget and the wait for the lock, back to back, plus an exit
 		// margin. The shipped budgets (25 s + 3 s + 5 s) land exactly on the
@@ -510,7 +510,7 @@ describe("#593 slice 7: the cleanup allowance federation grants need", () => {
 		).toEqual({ cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS });
 	});
 
-	it("never asks a timer for more than Node can count: an oversized sum is capped, not overflowed (Copilot, #614)", () => {
+	it("never asks a timer for more than Node can count: an oversized sum is capped, not overflowed", () => {
 		// setTimeout takes a 32-bit signed delay; past it the timer fires after
 		// about a millisecond, which would turn a generous allowance into none.
 		const oversized = cleanupAllowanceFor({

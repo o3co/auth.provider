@@ -81,7 +81,7 @@ async function refusedWith(mtls: Record<string, unknown>): Promise<string> {
 	return result.refused;
 }
 
-describe("oauth.mtls reaches the module through the documented config path (#496)", () => {
+describe("oauth.mtls reaches the module through the documented config path", () => {
 	it("survives boot's parse instead of arriving as the disabled default", async () => {
 		const config = (await booted({
 			enabled: true,
@@ -97,7 +97,7 @@ describe("oauth.mtls reaches the module through the documented config path (#496
 		expect(contributeMechanism(config)).not.toBeNull();
 	});
 
-	it("reaches the empty-allowed-hosts refusal under a fetching revocation mode (#431, #470)", async () => {
+	it("reaches the empty-allowed-hosts refusal under a fetching revocation mode", async () => {
 		const refused = await refusedWith({
 			enabled: true,
 			mode: "full-pki",
@@ -107,7 +107,7 @@ describe("oauth.mtls reaches the module through the documented config path (#496
 		expect(refused).toMatch(/non-empty oauth\.mtls\.full-pki/);
 	});
 
-	it("reaches the undeclared-revocation refusal under full-pki (#341)", async () => {
+	it("reaches the undeclared-revocation refusal under full-pki", async () => {
 		const refused = await refusedWith({
 			enabled: true,
 			mode: "full-pki",
@@ -116,7 +116,7 @@ describe("oauth.mtls reaches the module through the documented config path (#496
 		expect(refused).toMatch(/requires oauth\.mtls\.full-pki\.revocation/);
 	});
 
-	it("reaches the empty-trusted-proxies refusal under a header source (#280)", async () => {
+	it("reaches the empty-trusted-proxies refusal under a header source", async () => {
 		const refused = await refusedWith({ enabled: true, source: "header" });
 		expect(refused).toMatch(/trusted-proxies allowlist/);
 	});

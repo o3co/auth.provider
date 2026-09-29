@@ -15,7 +15,7 @@
  */
 
 /**
- * `unreadableModuleLeaves` (#728): a module's `configSchema` or section leaf
+ * `unreadableModuleLeaves`: a module's `configSchema` or section leaf
  * that would refuse the string an environment variable carries — a bare
  * `z.boolean()`, a `z.number()` that does not coerce, a non-string literal —
  * is covered only where core's transitional base reads the path first AND

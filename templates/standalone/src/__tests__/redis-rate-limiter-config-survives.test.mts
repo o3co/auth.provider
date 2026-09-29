@@ -150,7 +150,7 @@ afterAll(async () => {
 	await booted?.handle.dispose();
 });
 
-describe("the shipped configuration reaches the Redis rate limiter (#495)", () => {
+describe("the shipped configuration reaches the Redis rate limiter", () => {
 	it("selects the Redis adapter the production compose file pins, in phase one", () => {
 		expect(booted.switches.rateLimiter?.adapter).toBe("redis");
 	});
@@ -188,7 +188,7 @@ describe("the shipped configuration reaches the Redis rate limiter (#495)", () =
 	});
 });
 
-describe("the shipped configuration carries an mTLS posture through (#496)", () => {
+describe("the shipped configuration carries an mTLS posture through", () => {
 	it("keeps the operator's mTLS block instead of reporting mTLS off", () => {
 		expect(config.oauth.mtls).toEqual({
 			enabled: true,

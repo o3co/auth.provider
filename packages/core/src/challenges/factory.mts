@@ -22,9 +22,9 @@ import type { ChallengeStore } from "./types.mjs";
 /**
  * Domain-specific AdapterFactory alias for ChallengeStore.
  *
- * Per A1 §5.6: register(type, builder) throws on duplicate; replace(type,
- * builder) is the explicit override path; NO freeze() method (composition-
- * root concern, not module registry).
+ * register(type, builder) throws on duplicate; replace(type, builder) is
+ * the explicit override path; NO freeze() method (composition-root concern,
+ * not module registry).
  */
 export type ChallengeStoreFactory = AdapterFactory<ChallengeStore>;
 

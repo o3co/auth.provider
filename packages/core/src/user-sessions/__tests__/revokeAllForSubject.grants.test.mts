@@ -205,7 +205,7 @@ describe("revokeAllForSubject with a grant store", () => {
 		}
 	});
 
-	it("gives a pass one correlation ID of its own when the caller passes none: every event of the pass carries it, and the next pass another (#618)", async () => {
+	it("gives a pass one correlation ID of its own when the caller passes none: every event of the pass carries it, and the next pass another", async () => {
 		const h = harness();
 		await h.seed();
 		await h.seed({ id: "g-2" });
@@ -233,7 +233,7 @@ describe("revokeAllForSubject with a grant store", () => {
 		expect(first.has(events[2]?.correlationId ?? "")).toBe(false);
 	});
 
-	it("treats an empty correlation ID as none given, once for the pass (#618)", async () => {
+	it("treats an empty correlation ID as none given, once for the pass", async () => {
 		const h = harness();
 		await h.seed();
 		await h.seed({ id: "g-2" });

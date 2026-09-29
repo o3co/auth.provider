@@ -257,7 +257,7 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
-	it("forwards resource when the oauthTokenSettings the composition holds turn resource indicators on, over the configuration (#728)", async () => {
+	it("forwards resource when the oauthTokenSettings the composition holds turn resource indicators on, though the configuration leaves them off", async () => {
 		const { evaluate, signIn } = await boot({ flagIn: "slot" });
 
 		const { result } = await signIn("https://rs.example");
@@ -266,7 +266,7 @@ describe("webauthn grant — the `resource` grantPolicy receives (RFC 8707)", ()
 		expect(evaluate.mock.calls[0]?.[0].resource).toEqual(["https://rs.example"]);
 	});
 
-	it("forwards no resource when the oauthTokenSettings the composition holds leave resource indicators off, though the configuration turns them on (#728)", async () => {
+	it("forwards no resource when the oauthTokenSettings the composition holds leave resource indicators off, though the configuration turns them on", async () => {
 		// The slot's `false` is read: a reader that took it for "unset" would
 		// fall through to the configuration's `true` and forward the resource.
 		const { evaluate, signIn } = await boot({ flagIn: "configuration-over-slot-off" });

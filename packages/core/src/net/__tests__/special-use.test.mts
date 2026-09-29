@@ -18,10 +18,10 @@ import { describe, expect, it } from "vitest";
 import { isSpecialUseAddress } from "#/net/special-use.mjs";
 
 /**
- * #529 — the address ranges a caller-supplied URL must not resolve to. Pinned
+ * The address ranges a caller-supplied URL must not resolve to. Pinned
  * against RFC 6890's table so a range dropped by accident is a failing test.
  */
-describe("isSpecialUseAddress (RFC 6890, #529)", () => {
+describe("isSpecialUseAddress (RFC 6890)", () => {
 	it("refuses every IPv4 special-use range", () => {
 		for (const ip of [
 			"0.0.0.0",
@@ -99,11 +99,11 @@ describe("isSpecialUseAddress (RFC 6890, #529)", () => {
 	});
 });
 
-describe("isSpecialUseAddress — every spelling of an embedded IPv4 address (#529 review)", () => {
+describe("isSpecialUseAddress — the spellings of an embedded IPv4 address", () => {
 	it("judges a mapped or compatible address by its IPv4 half, however it was written", () => {
 		// A DNS answer can carry any legal spelling. `::ffff:0:0/96` is
 		// deliberately absent from the IPv6 table, so a spelling that fell
-		// through to the IPv6 check used to pass the SSRF guard.
+		// through to the IPv6 check would pass the SSRF guard.
 		for (const address of [
 			"::ffff:10.0.0.1",
 			"::ffff:0a00:0001",

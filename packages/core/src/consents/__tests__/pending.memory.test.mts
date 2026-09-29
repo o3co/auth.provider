@@ -43,7 +43,7 @@ const record = (challenge: string, expiresAt = Date.now() + 600_000): PendingCon
 	expiresAt,
 });
 
-describe("createMemoryPendingConsentStore (#552)", () => {
+describe("createMemoryPendingConsentStore", () => {
 	it("counts what is parked, and drops an expired record when it is next touched", async () => {
 		const store = createMemoryPendingConsentStore();
 		await store.set(record("ch-1"));
@@ -66,7 +66,7 @@ describe("createMemoryPendingConsentStore (#552)", () => {
 	});
 });
 
-describe("memoryConsentStoreModule provides the pending-consent slot too (#552)", () => {
+describe("memoryConsentStoreModule provides the pending-consent slot too", () => {
 	it("hands both stores to the composition under the one adapter switch", () => {
 		// One feature, one switch: a deployment that turns consent on gets the
 		// record store the consent step needs with it, rather than a second
@@ -78,7 +78,7 @@ describe("memoryConsentStoreModule provides the pending-consent slot too (#552)"
 	});
 });
 
-describe("createMemoryPendingConsentStore sweeps the records nobody came back for (#552)", () => {
+describe("createMemoryPendingConsentStore sweeps the records nobody came back for", () => {
 	it("drops expired records it was never asked about again once the map has grown past the floor", async () => {
 		// A page that is closed unanswered leaves a record nobody touches, and
 		// touch-on-read alone would keep it for the life of the process.
@@ -101,7 +101,7 @@ describe("createMemoryPendingConsentStore sweeps the records nobody came back fo
 	});
 });
 
-describe("memoryConsentStoreModule's providers (#552)", () => {
+describe("memoryConsentStoreModule's providers", () => {
 	it("builds a live store from each thunk", async () => {
 		const provides = memoryConsentStoreModule.provides as unknown as Record<
 			string,
@@ -117,7 +117,7 @@ describe("memoryConsentStoreModule's providers (#552)", () => {
 	});
 });
 
-describe("the pending-consent store has a factory and a bound per session (#527 audit)", () => {
+describe("the pending-consent store has a factory and a bound per session", () => {
 	it("registers the memory builtin on a factory of its own", async () => {
 		// Every port with a factory has one; the consent store did and the
 		// pending store did not, so a composition following the factory

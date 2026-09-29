@@ -32,7 +32,7 @@ const _extractCookies = (res) => (res.headers["set-cookie"] ?? []).join("; ");
 /**
  * The server's own origin, as a browser would report it.
  *
- * Since #272 `POST /session/login` and `POST /session/logout` reject a request
+ * `POST /session/login` and `POST /session/logout` reject a request
  * that carries neither a same-origin `Origin`/`Referer` nor a valid
  * double-submit CSRF token. A browser sets `Origin` on its own; a scripted
  * client like this one has to say it.
@@ -174,7 +174,7 @@ describe("POST /session/login", () => {
 	});
 });
 
-describe("CSRF on the state-changing session routes (#272)", () => {
+describe("CSRF on the state-changing session routes", () => {
 	it("rejects a login carrying neither an origin signal nor a token", async () => {
 		// The bypass this replaced: omitting `Origin` skipped the check entirely.
 		const res = await client.post("/session/login", {

@@ -51,10 +51,9 @@ describe("parseDerToCertificate", () => {
 	});
 
 	it("copies the input DER bytes into the der field (defensive — not same reference)", () => {
-		// Codex Round 1 Important #4: `readonly der: Uint8Array` only protects
-		// property assignment, not byte mutation. parseDerToCertificate copies
-		// the bytes so a caller mutating the input buffer after parse cannot
-		// tamper with the thumbprint source.
+		// `readonly der: Uint8Array` only protects property assignment, not byte
+		// mutation. parseDerToCertificate copies the bytes so a caller mutating
+		// the input buffer after parse cannot tamper with the thumbprint source.
 		const cert = parseDerToCertificate(TEST_CERT_DER);
 		// Different reference (defensive copy)
 		expect(cert.der).not.toBe(TEST_CERT_DER);
@@ -76,7 +75,7 @@ describe("parseDerToCertificate", () => {
 		const fakeDer = new Uint8Array([0x30, 0x01]);
 		const certWithChain = parseDerToCertificate(TEST_CERT_DER, [fakeDer]);
 		expect(certWithChain.chain).toHaveLength(1);
-		// Chain entries are also defensively copied per Codex Important #4.
+		// Chain entries are also defensively copied.
 		expect(certWithChain.chain?.[0]).not.toBe(fakeDer);
 		expect(Array.from(certWithChain.chain?.[0] ?? [])).toEqual([0x30, 0x01]);
 

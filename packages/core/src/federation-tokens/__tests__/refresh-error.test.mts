@@ -26,8 +26,8 @@ const upstream = (
 		...(headers !== undefined ? { response: new Response(null, { status: 400, headers }) } : {}),
 	});
 
-describe("classifyFederationRefreshError (#593, D12)", () => {
-	describe("the reason — what the session-bound route has always acted on (SF-13)", () => {
+describe("classifyFederationRefreshError", () => {
+	describe("the reason — what the session-bound route has always acted on", () => {
 		it("reads a rejected refresh token off the structured error code", () => {
 			for (const code of ["invalid_grant", "invalid_token"]) {
 				expect(

@@ -19,7 +19,7 @@
  * `readMfaEnrollmentWitness`, which answers a value that is neither a boolean
  * nor absent as `malformed` (`503`, never a first binding). A second reading
  * such as `user.mfaEnrolled === true` would read a Store's `1` or `"true"` as
- * "not enrolled", the downgrade D12 exists to prevent.
+ * "not enrolled", the downgrade that decision exists to prevent.
  *
  * So no product file in any package, nor in the standalone template, reads
  * `mfaEnrolled` but the reader itself: a property access, an element access by
@@ -92,7 +92,7 @@ function productSources(): string[] {
 	return found.sort();
 }
 
-describe("the MFA enrollment witness has one reading (D12)", () => {
+describe("the MFA enrollment witness has one reading", () => {
 	it("is read by no product file, the template's included, but readMfaEnrollmentWitness's", () => {
 		const offenders = productSources()
 			.filter((file) => !ALLOWED.has(file))

@@ -15,7 +15,7 @@
  */
 
 /**
- * A relocated configuration path refuses boot (#728 B10). A loaded module's
+ * A relocated configuration path refuses boot. A loaded module's
  * `section.relocatedFrom` names the paths its section moved from; a
  * configuration that still sets one refuses boot with
  * `config-path-relocated`, naming each key it sets there, the path it moved

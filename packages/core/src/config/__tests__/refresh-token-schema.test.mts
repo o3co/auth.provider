@@ -18,7 +18,7 @@ import { CoreConfigSchema } from "../application.schema.mjs";
  */
 const refreshTokenSchema = CoreConfigSchema.shape.oauth.shape.refreshToken;
 
-describe("oauth.refreshToken schema — removed-field preprocess (Phase G / M4)", () => {
+describe("oauth.refreshToken schema — removed-field preprocess", () => {
 	const validBase = {
 		expiresIn: 86400,
 		unknownFamilyPolicy: "reject" as const,
@@ -66,7 +66,7 @@ describe("oauth.refreshToken schema — removed-field preprocess (Phase G / M4)"
 	});
 });
 
-describe("oauth.refreshToken schema — legacyRtPolicy enum tightening (Phase G / M6)", () => {
+describe("oauth.refreshToken schema — the legacyRtPolicy enum", () => {
 	const validBase = {
 		expiresIn: 86400,
 		unknownFamilyPolicy: "reject" as const,

@@ -216,7 +216,7 @@ const makeAuthzCtx = (body: Record<string, unknown> = {}): GrantContext => ({
 // client_credentials
 // ---------------------------------------------------------------------------
 
-describe("Stage 2 — client_credentials", () => {
+describe("RFC 8707 resource → audience binding — client_credentials", () => {
 	it("derives the audience from an allowed resource when no policy narrows one", async () => {
 		// Without derivation the audience would fall back to
 		// allowedAudiences[0] = API and a request for OTHER would reject,
@@ -299,7 +299,7 @@ describe("Stage 2 — client_credentials", () => {
 // refresh_token
 // ---------------------------------------------------------------------------
 
-describe("Stage 2 — refresh_token", () => {
+describe("RFC 8707 resource → audience binding — refresh_token", () => {
 	it("derives the audience from an allowed resource when no policy narrows one", async () => {
 		// Without derivation `finalAudience` stays the authenticated client id
 		// and an otherwise-allowed resource would reject.
@@ -356,7 +356,7 @@ describe("Stage 2 — refresh_token", () => {
 // authorization_code
 // ---------------------------------------------------------------------------
 
-describe("Stage 2 — authorization_code (enforce-only, no policy at the token endpoint)", () => {
+describe("RFC 8707 resource → audience binding — authorization_code (enforce-only, no policy at the token endpoint)", () => {
 	it("allows when the persisted audience represents the resource presented at /token", async () => {
 		const deps = makeAuthzDeps([API]);
 		const grant = createAuthorizationGrant(deps);
@@ -375,7 +375,7 @@ describe("Stage 2 — authorization_code (enforce-only, no policy at the token e
 		expect(out.result.errorDescription).toContain(OTHER);
 	});
 
-	it("does NOT invoke the policy hook at the token endpoint (C-2 / D-1 preserved)", async () => {
+	it("does NOT invoke the policy hook at the token endpoint", async () => {
 		// The enforcement is a pure comparison against the value persisted at
 		// /authorize, where the policy was evaluated once.
 		const evaluate = vi.fn(async () => ({ outcome: "allow" as const }));
@@ -397,7 +397,7 @@ describe("Stage 2 — authorization_code (enforce-only, no policy at the token e
 		expect(out.result.error).toBe("invalid_target");
 	});
 
-	it("flag off: resource at /token stays ignored, as in Stage 1", async () => {
+	it("flag off: resource at /token stays ignored", async () => {
 		const deps = makeAuthzDeps([API], false);
 		const grant = createAuthorizationGrant(deps);
 		const out = await grant.handle(makeAuthzCtx({ resource: OTHER }));

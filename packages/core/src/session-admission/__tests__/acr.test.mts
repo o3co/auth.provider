@@ -16,7 +16,7 @@
 
 /**
  * The provider's `acr` vocabulary (the MFA ADR's D15, the session-admission
- * ADR's D6): the table as it is read, D15's selection over what a session
+ * ADR's D6): the table as it is read, the selection over what a session
  * vouches for, what a step-up can reach, what the composition can produce,
  * and the drop of the entries nothing installed can satisfy.
  */
@@ -37,7 +37,7 @@ const PHR = "urn:o3co:acr:phr";
 const PWD = "urn:example:pwd";
 const KBA = "urn:example:kba";
 
-/** The template's table (D15), `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
+/** The template's table (the MFA ADR's D15), `phr` uncommented, beside one entry only a password meets and one nothing installed produces. */
 const TABLE: AcrTable = readAcrTable({
 	[MFA]: ["mfa"],
 	[PHR]: [["hwk"], ["swk"]],
@@ -49,7 +49,7 @@ const NOTHING: ReadonlySet<string> = new Set();
 
 const reaching = (...values: string[]) => ({ reach: new Set(values) });
 
-describe("stepUpReach — what a step-up through the registered requirements can add (D2, D6)", () => {
+describe("stepUpReach — what a step-up through the registered requirements can add", () => {
 	it("is the union of every requirement's reach, in registration order", () => {
 		expect([...stepUpReach([reaching("otp", "mfa"), reaching("hwk", "mfa"), reaching()])]).toEqual([
 			"otp",
@@ -71,7 +71,7 @@ describe("stepUpReach — what a step-up through the registered requirements can
 	});
 });
 
-describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa (D3, D14)", () => {
+describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa", () => {
 	it("is the six values a second factor adds, and no primary's marker", () => {
 		expect([...SECOND_FACTOR_AMR].sort()).toEqual([
 			"email",
@@ -86,7 +86,7 @@ describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa
 	});
 });
 
-describe("selectAcr — D15's selection over what the session vouches for", () => {
+describe("selectAcr — the selection over what the session vouches for", () => {
 	it("answers met with no acr when none was requested", () => {
 		expect(selectAcr([], ["pwd"], TABLE, NOTHING)).toEqual({ outcome: "met", acr: undefined });
 	});
@@ -202,7 +202,7 @@ describe("readAcrTable — `oauth.authorize.acrValues` as it is read", () => {
 	});
 });
 
-describe("producibleAmr — what something installed can put in a session's amr (D15)", () => {
+describe("producibleAmr — what something installed can put in a session's amr", () => {
 	it("is pwd alone without a requirement that reaches anything or a federation: no federation callback writes fed", () => {
 		const producible = producibleAmr({
 			reach: NOTHING,
@@ -240,7 +240,7 @@ describe("producibleAmr — what something installed can put in a session's amr 
 
 	it("is anything once a federation whose upstream amr counts is installed", () => {
 		// An upstream IdP may assert any value, and a trusted one is recorded
-		// beside `fed` (D13).
+		// beside `fed` (the MFA ADR's D13).
 		expect(
 			producibleAmr({ reach: NOTHING, federationInstalled: true, trustedFederation: true })
 				.anything,
@@ -254,7 +254,7 @@ describe("producibleAmr — what something installed can put in a session's amr 
 	});
 });
 
-describe("vouchableAcrTable — an entry nothing installed can satisfy is dropped (D15)", () => {
+describe("vouchableAcrTable — an entry nothing installed can satisfy is dropped", () => {
 	const configured = readAcrTable({
 		[PWD]: ["pwd"],
 		"urn:example:fed": ["fed"],

@@ -155,7 +155,7 @@ describe("InMemoryUserRepository", () => {
 		});
 	});
 
-	describe("findSubjectByFederatedIdentity (#593, D7 check 5; #611)", () => {
+	describe("findSubjectByFederatedIdentity", () => {
 		// The contract is a complete answer about ownership — linked to one
 		// user, or established as linked to nobody — or an admission that it
 		// cannot tell. This repository keys links by federation name and `sub`
@@ -163,7 +163,7 @@ describe("InMemoryUserRepository", () => {
 		// registrations of the same IdP a person signed in through. So it can
 		// establish neither answer, and says so, even where a name-and-sub
 		// entry matches: a hit under one registration does not show that no
-		// other registration's link names somebody else (#611).
+		// other registration's link names somebody else.
 		const registration = {
 			provider: "okta",
 			issuer: "https://okta.example",
@@ -212,7 +212,7 @@ describe("InMemoryUserRepository", () => {
 		});
 	});
 
-	describe("linkFederatedIdentity (#482)", () => {
+	describe("linkFederatedIdentity", () => {
 		const apple = { provider: "apple", sub: "a1", token: "apple:a1", claims: {} };
 		const repo = () =>
 			new InMemoryUserRepository(

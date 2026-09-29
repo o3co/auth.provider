@@ -38,7 +38,7 @@ const changed = (patch: Partial<FederationGrantConnection>): FederationGrantConn
 	...patch,
 });
 
-describe("connection revisions (#593, D4)", () => {
+describe("connection revisions", () => {
 	describe("the persisted format", () => {
 		// These two strings are stored on every grant. If a refactor changes what
 		// is hashed — the tag, the field order, the algorithm, the encoding —
@@ -156,9 +156,10 @@ describe("connection revisions (#593, D4)", () => {
 				federation: "okta-2",
 				upstreamIssuer: "https://dev-2.okta.test",
 				upstreamClientId: "0oa-other",
-				// D5 and D10 judge every token against the CURRENT maximum, so a
-				// tightened value takes effect on the next call. Putting it here
-				// would turn a configuration slip into a reconnect for every user.
+				// D5 and D10 of ADR 2026-09-17-federation-grants-offline-delegation
+				// judge every token against the CURRENT maximum, so a tightened value
+				// takes effect on the next call. Putting it here would turn a
+				// configuration slip into a reconnect for every user.
 				maxAccessTokenLifetime: 60,
 				allowScopeSubsets: false,
 			});
@@ -167,7 +168,7 @@ describe("connection revisions (#593, D4)", () => {
 	});
 });
 
-describe("what the revisions leave out (#611)", () => {
+describe("what the revisions leave out", () => {
 	it("is not changed by the identity claims check 5 hands the Store: they change what can be checked, not what was consented to", () => {
 		const withClaims = changed({ identityClaims: ["oid", "tid"] });
 		expect(identityRevision(withClaims)).toBe(identityRevision(base));

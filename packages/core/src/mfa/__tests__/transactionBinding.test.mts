@@ -15,7 +15,7 @@
  */
 
 /**
- * What an MFA transaction is bound to (#742): a typed binding, not a bare
+ * What an MFA transaction is bound to: a typed binding, not a bare
  * browser session id. `isMfaTransactionBoundTo` is the one comparison every
  * use of a transaction makes, and it compares the whole binding, kind
  * included; the contract suite holds each store to keeping the binding whole.

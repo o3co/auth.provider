@@ -15,8 +15,7 @@
  */
 
 /**
- * Coverage for DPoP cnf-claim propagation in the client_credentials grant —
- * Wave 2 Phase 2 §9.1.
+ * Coverage for DPoP cnf-claim propagation in the client_credentials grant.
  *
  * Uses a fake `TokenBindingMechanism` whose `extract` returns a fixed binding,
  * decoupling these tests from the real DPoP verifier package. The full HTTP
@@ -81,7 +80,7 @@ const clientRepo = new InMemoryClientRepository(
 				tokenEndpointAuthMethod: "client_secret_basic" as const,
 				allowedRedirectUris: [],
 				allowedScopes: ["read"],
-				// #396: the old implicit omitted-scope grant, now declared.
+				// What an omitted `scope` parameter grants.
 				defaultScopes: ["read"],
 				allowedAudiences: ["https://api.example"],
 				allowedGrantTypes: ["client_credentials"],

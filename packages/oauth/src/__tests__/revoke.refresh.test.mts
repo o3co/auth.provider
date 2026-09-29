@@ -97,7 +97,7 @@ describe("POST /oauth/revoke — refresh token path", () => {
 			isFamilyRevoked: vi.fn(async () => false),
 		};
 
-		// #277: refresh-token revocation needs no denylist and must keep working
+		// Refresh-token revocation needs no denylist and must keep working
 		// without one. The whole suite runs on a deployment that has declared
 		// access-token revocation unsupported — if that ever stops being a
 		// buildable composition, this fixture fails to construct and says so.
@@ -184,7 +184,7 @@ describe("POST /oauth/revoke — refresh token path", () => {
 		expect(revocations).toEqual([]);
 	});
 
-	it("revokes an already-expired RT (Copilot review #1: ignoreExpiration idempotency)", async () => {
+	it("revokes the family of an already-expired RT", async () => {
 		// RFC 7009 §2.1: revoking an expired-but-valid-signature RT is harmless
 		// idempotency — the family-revocation primitive is idempotent and keeps
 		// cascade checks correct. Without ignoreExpiration the verify would throw
@@ -211,7 +211,7 @@ describe("POST /oauth/revoke — refresh token path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// C1: RFC 7009 §2.1 cross-type fallback — hint=refresh_token with actual AT
+// RFC 7009 §2.1 cross-type fallback — hint=refresh_token with actual AT
 // ---------------------------------------------------------------------------
 
 async function mintAccessTokenForCrossType(opts: {
@@ -232,7 +232,7 @@ async function mintAccessTokenForCrossType(opts: {
 		.sign(createSecretKey(Buffer.from(SECRET)));
 }
 
-describe("POST /oauth/revoke — C1: cross-type fallback (hint=refresh_token + AT-shaped token)", () => {
+describe("POST /oauth/revoke — cross-type fallback (hint=refresh_token + AT-shaped token)", () => {
 	let crossDenylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
 	let crossRevocations: string[];
 	let crossRevocation: RefreshTokenFamilyRevocation;
@@ -279,7 +279,7 @@ describe("POST /oauth/revoke — C1: cross-type fallback (hint=refresh_token + A
 	});
 });
 
-describe("POST /oauth/revoke — private_key_jwt client authentication (#484)", () => {
+describe("POST /oauth/revoke — private_key_jwt client authentication", () => {
 	let privateKey: CryptoKey;
 	let publicJwk: JWK;
 	beforeAll(async () => {

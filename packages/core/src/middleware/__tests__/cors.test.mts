@@ -75,7 +75,7 @@ function buildApp(
 	return app;
 }
 
-describe("corsMw — an exact-match allowlist on the browser-facing surface (#500)", () => {
+describe("corsMw — an exact-match allowlist on the browser-facing surface", () => {
 	describe("the allowlist", () => {
 		it("echoes the matched origin back, exactly", async () => {
 			const res = await request(buildApp([ALLOWED]))
@@ -284,7 +284,7 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface (#50
 			);
 		});
 
-		it("lets a cross-origin DPoP client read the nonce a use_dpop_nonce refusal carries (#530)", async () => {
+		it("lets a cross-origin DPoP client read the nonce a use_dpop_nonce refusal carries", async () => {
 			// RFC 9449 §8: the refusal is an instruction to retry with the nonce
 			// in `DPoP-Nonce`. The header is not CORS-safelisted, so unless it is
 			// exposed a browser client never sees it and the retry never happens.
@@ -346,7 +346,7 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface (#50
 	});
 });
 
-describe("assembleApp mounts the CORS middleware from config (#500)", () => {
+describe("assembleApp mounts the CORS middleware from config", () => {
 	/** A module contributing the OAuth surface at the paths the table names. */
 	const surfaceModule = defineModule({
 		name: "cors-test-surface",
@@ -464,7 +464,7 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 	});
 });
 
-describe("browserFacingCorsRoutes — discovery paths follow the issuer (#528)", () => {
+describe("browserFacingCorsRoutes — discovery paths follow the issuer", () => {
 	const wellKnown = (config: Parameters<typeof browserFacingCorsRoutes>[0]) =>
 		browserFacingCorsRoutes(config)
 			.map((r) => r.path)

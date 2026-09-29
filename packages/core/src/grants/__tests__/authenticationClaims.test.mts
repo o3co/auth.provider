@@ -29,7 +29,7 @@ import {
 	wellFormedAmr,
 } from "#/grants/authenticationClaims.mjs";
 
-describe("wellFormedAmr — the amr a token may carry (#481 audit)", () => {
+describe("wellFormedAmr — the amr a token may carry", () => {
 	it("is a non-empty array of non-empty strings, copied", () => {
 		const source = ["pwd", "mfa"];
 		const amr = wellFormedAmr(source);
@@ -51,7 +51,7 @@ describe("wellFormedAmr — the amr a token may carry (#481 audit)", () => {
 	});
 });
 
-describe("wellFormedAcr — the acr a token may carry (#481 audit)", () => {
+describe("wellFormedAcr — the acr a token may carry", () => {
 	it("is a non-empty string", () => {
 		expect(wellFormedAcr("urn:example:mfa")).toBe("urn:example:mfa");
 	});
@@ -64,7 +64,7 @@ describe("wellFormedAcr — the acr a token may carry (#481 audit)", () => {
 	);
 });
 
-describe("the amr values this provider records (the MFA ADR's D13, D14)", () => {
+describe("the amr values this provider records", () => {
 	it("are RFC 8176's pwd and mfa, and the deployment-defined fed, email and recovery", () => {
 		// RFC 8176 registers `pwd` and `mfa`, and has no value for "through a
 		// federation", "a code mailed to the account" or "a recovery code":
@@ -77,14 +77,14 @@ describe("the amr values this provider records (the MFA ADR's D13, D14)", () => 
 		expect(RECOVERY_CODE_AMR).toBe("recovery");
 	});
 
-	it("include RFC 8176's otp, hwk and swk, which D14 assigns to TOTP and WebAuthn", () => {
+	it("include RFC 8176's otp, hwk and swk", () => {
 		expect(OTP_AMR).toBe("otp");
 		expect(HARDWARE_KEY_AMR).toBe("hwk");
 		expect(SOFTWARE_KEY_AMR).toBe("swk");
 	});
 });
 
-describe("composeAmr — what a verified second factor adds to a session's amr (D14)", () => {
+describe("composeAmr — what a verified second factor adds to a session's amr", () => {
 	it("appends the factor's values and then mfa: a password and a TOTP code", () => {
 		expect(composeAmr(["pwd"], { amr: ["otp"], addsMfa: true })).toEqual(["pwd", "otp", "mfa"]);
 	});
@@ -98,7 +98,7 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 		]);
 	});
 
-	it("adds email and not mfa for an email code that does not add it (O7)", () => {
+	it("adds email and not mfa for an email code that does not add it", () => {
 		expect(composeAmr(["pwd"], { amr: [EMAIL_OTP_AMR], addsMfa: false })).toEqual(["pwd", "email"]);
 	});
 
@@ -130,7 +130,8 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 	it("refuses a factor that names mfa among its own values: mfa comes from addsMfa alone", () => {
 		// Otherwise a factor that does not add `mfa` — the email code, by
 		// default — could put it on a session by listing it, and meet
-		// `urn:o3co:acr:mfa` with a mailbox (O7).
+		// `urn:o3co:acr:mfa` with a mailbox (ADR
+		// 2026-09-25-multi-factor-authentication, O7).
 		expect(() => composeAmr(["pwd"], { amr: [MFA_AMR], addsMfa: false })).toThrow(RangeError);
 		expect(() => composeAmr(["pwd"], { amr: ["otp", MFA_AMR], addsMfa: true })).toThrow(RangeError);
 	});
@@ -141,7 +142,8 @@ describe("composeAmr — what a verified second factor adds to a session's amr (
 	])(
 		"refuses a factor that names the primary marker %s: a second factor cannot forge a primary",
 		(_label, marker) => {
-			// The baseline is decided on the primary (D13), which the session's
+			// The baseline is decided on the primary (ADR
+			// 2026-09-25-multi-factor-authentication, D13), which the session's
 			// `pwd` / `fed` say; a factor listing either would change it.
 			expect(() => composeAmr(["pwd"], { amr: [marker], addsMfa: true })).toThrow(RangeError);
 			expect(() => composeAmr(["fed"], { amr: ["otp", marker], addsMfa: true })).toThrow(

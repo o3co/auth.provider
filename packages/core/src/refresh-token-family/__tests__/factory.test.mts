@@ -27,7 +27,7 @@ describe("createRefreshTokenFamilyStoreFactory", () => {
 		expect(store.kind).toBe("memory");
 	});
 
-	it("register('memory', ...) twice throws (A6+A7 duplicate policy)", () => {
+	it("register('memory', ...) twice throws a duplicate AdapterFactoryError", () => {
 		const f = createRefreshTokenFamilyStoreFactory();
 		registerBuiltinRefreshTokenFamilyStores(f);
 		expect(() => registerBuiltinRefreshTokenFamilyStores(f)).toThrow(

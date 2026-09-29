@@ -24,7 +24,7 @@ import { runConsentStoreContract } from "./adapters.contract.mjs";
 
 runConsentStoreContract("memory", { create: async () => createMemoryConsentStore() });
 
-describe("createMemoryConsentStore (#527)", () => {
+describe("createMemoryConsentStore", () => {
 	it("is bounded by population: one record per subject and client, expired ones dropped on read", async () => {
 		const store = createMemoryConsentStore();
 		await store.grant({
@@ -67,7 +67,7 @@ describe("createMemoryConsentStore (#527)", () => {
 	});
 });
 
-describe("memoryConsentStoreModule (#527)", () => {
+describe("memoryConsentStoreModule", () => {
 	it("provides the slot and declares why it forks per replica", () => {
 		expect(memoryConsentStoreModule.name).toBe("core-consent-store-memory");
 		expect(Object.keys(memoryConsentStoreModule.provides ?? {}).sort()).toEqual([
@@ -78,7 +78,7 @@ describe("memoryConsentStoreModule (#527)", () => {
 	});
 });
 
-describe("consent store factory (#527)", () => {
+describe("consent store factory", () => {
 	it("registers the memory builtin", async () => {
 		const factory = createConsentStoreFactory();
 		registerBuiltinConsentStores(factory);
@@ -87,7 +87,7 @@ describe("consent store factory (#527)", () => {
 	});
 });
 
-describe("consentCovers (#527)", () => {
+describe("consentCovers", () => {
 	const record = {
 		sub: "u",
 		clientId: "c",
@@ -110,7 +110,7 @@ describe("consentCovers (#527)", () => {
 	});
 });
 
-describe("createMemoryConsentStore — grant unions (#527 review)", () => {
+describe("createMemoryConsentStore — grant unions", () => {
 	it("adds to what is recorded rather than replacing it", async () => {
 		// Two browsers answering at once: the second write must not lose the
 		// consent the first one recorded.

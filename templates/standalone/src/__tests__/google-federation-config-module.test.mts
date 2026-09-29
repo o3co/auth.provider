@@ -15,11 +15,10 @@
  */
 
 /**
- * #278: the bridge used to return only `{ clientId, clientSecret, callbackURL }`,
- * dropping the four fields the redirect policy reads. Nothing failed — the
- * policy was simply constructed with an empty config, and the generated app
- * silently ran without a redirect allowlist. These tests fail if the bridge
- * stops forwarding any of them.
+ * The bridge forwards, beside `{ clientId, clientSecret, callbackURL }`, the
+ * four fields the redirect policy reads. A field it dropped would fail nothing
+ * at boot: the policy would be built as if the operator had not configured it.
+ * These tests fail if the bridge stops forwarding any of them.
  */
 
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
@@ -45,7 +44,7 @@ const credentials = {
 	callbackURL: "https://auth.example.com/session/oauth/federation/google/callback",
 };
 
-describe("googleFederationConfigModule — redirect-policy plumbing (#278)", () => {
+describe("googleFederationConfigModule — redirect-policy plumbing", () => {
 	it("forwards sessionDomain, authCallbackUrl, clientUrl and redirectAllowlist", () => {
 		const out = buildConfig({
 			...credentials,
@@ -113,7 +112,7 @@ describe("googleFederationConfigModule — redirect-policy plumbing (#278)", () 
 	});
 });
 
-describe("googleFederationConfigModule — requireAuthorizationResponseIss (#597)", () => {
+describe("googleFederationConfigModule — requireAuthorizationResponseIss", () => {
 	it("is absent by default, so the provider's own default (required) applies", () => {
 		expect("requireAuthorizationResponseIss" in buildConfig(credentials)).toBe(false);
 	});

@@ -72,7 +72,7 @@ describe("createRefreshTokenFamilyRevocation", () => {
 		expect(await revocation.isFamilyRevoked("ghost-id")).toBe(false);
 	});
 
-	it("revokeFamily updater returns a frozen value (I3 freeze regression)", async () => {
+	it("revokeFamily updater returns a frozen value", async () => {
 		// Adapters also freeze on persist, so a recording stub store pins the
 		// wrapper-layer freeze (defence in depth, as in rotation.mts) directly.
 		let captured: RefreshTokenFamily | null = null;

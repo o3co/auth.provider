@@ -153,11 +153,11 @@ describe("POST /oauth/revoke — access token path", () => {
 		expect(res.status).toBe(200);
 	});
 
-	// #277: the pre-fix behaviour of this branch was a warn-logged no-op — the
-	// client got RFC 7009's mandatory 200 and the token stayed valid until
-	// expiry. A warning emitted once per revocation attempt is not a signal an
-	// operator can act on mid-incident, so the branch is gone. What replaces it
-	// depends on whether the caller CLAIMED the capability.
+	// Without a denylist, an access-token revocation cannot take effect: a 200
+	// (RFC 7009's mandatory answer) would leave the token valid until expiry,
+	// and a warning per revocation attempt is not a signal an operator can act
+	// on mid-incident. What happens instead depends on whether the caller
+	// CLAIMED the capability.
 	it("refuses construction when denylist-backed AT revocation is claimed without a denylist", () => {
 		expect(() =>
 			createRevokeRouter(express, {
@@ -211,7 +211,7 @@ describe("POST /oauth/revoke — access token path", () => {
 		expect(res.body.error).toBe("unsupported_token_type");
 	});
 
-	it("fail-closed: AT with no client_id/azp/aud claim is NOT denylisted (Copilot review #2)", async () => {
+	it("fail-closed: AT with no client_id/azp/aud claim is NOT denylisted", async () => {
 		// SECURITY: when ownership cannot be resolved from any of client_id /
 		// azp / aud claims, the previous logic let the denylist.add proceed
 		// (any authenticated client could revoke any AT). Fail-closed: treat
@@ -236,7 +236,7 @@ describe("POST /oauth/revoke — access token path", () => {
 });
 
 // ---------------------------------------------------------------------------
-// C1: RFC 7009 §2.1 cross-type fallback — hint=access_token with an actual RT
+// RFC 7009 §2.1 cross-type fallback — hint=access_token with an actual RT
 // ---------------------------------------------------------------------------
 
 async function mintRefreshTokenForCrossType(opts: {
@@ -256,7 +256,7 @@ async function mintRefreshTokenForCrossType(opts: {
 		.sign(createSecretKey(Buffer.from("test-secret-at-least-32-chars!!")));
 }
 
-describe("POST /oauth/revoke — C1: cross-type fallback (hint=access_token + RT-shaped token)", () => {
+describe("POST /oauth/revoke — cross-type fallback (hint=access_token + RT-shaped token)", () => {
 	let revocations: string[];
 	let crossTypeRevocation: RefreshTokenFamilyRevocation;
 	let crossTypeDenylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
@@ -302,7 +302,7 @@ describe("POST /oauth/revoke — C1: cross-type fallback (hint=access_token + RT
 });
 
 // ---------------------------------------------------------------------------
-// #277: accessTokenRevocation = "unsupported" — the declared-absent capability
+// accessTokenRevocation = "unsupported" — the declared-absent capability
 // ---------------------------------------------------------------------------
 
 describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
@@ -348,7 +348,7 @@ describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
 			.type("form")
 			.send({ token: at, token_type_hint: "access_token" });
 		// RFC 7009 §2.2.1 — the server does not support revoking this token type.
-		// A 200 here would be the very lie #277 was filed about.
+		// A 200 here would claim a revocation that did not happen.
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unsupported_token_type");
 	});
@@ -397,7 +397,7 @@ describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
 });
 
 // ---------------------------------------------------------------------------
-// C2: Public-client revocation (RFC 7009 §2.1 + spec §4.4)
+// Public-client revocation (RFC 7009 §2.1)
 // ---------------------------------------------------------------------------
 
 const publicClientId = "pub-client-1";
@@ -435,7 +435,7 @@ const publicClientRepository: ClientRepository = {
 	},
 };
 
-describe("POST /oauth/revoke — C2: public client support", () => {
+describe("POST /oauth/revoke — public client support", () => {
 	let pubDenylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
 	let pubRevocation: RefreshTokenFamilyRevocation;
 	let pubRevocations: string[];
@@ -463,7 +463,7 @@ describe("POST /oauth/revoke — C2: public client support", () => {
 		pubApp.use("/oauth", router);
 	});
 
-	it("C2: public client can revoke its own AT — denylist updated, 200", async () => {
+	it("public client can revoke its own AT — denylist updated, 200", async () => {
 		const at = await mintAccessToken({ jti: "pub-j-1", clientId: publicClientId });
 		const res = await request(pubApp)
 			.post("/oauth/revoke")
@@ -474,7 +474,7 @@ describe("POST /oauth/revoke — C2: public client support", () => {
 		expect(await pubDenylist.has("pub-j-1")).toBe(true);
 	});
 
-	it("C2: public client can revoke its own RT — family revoked, 200", async () => {
+	it("public client can revoke its own RT — family revoked, 200", async () => {
 		const rt = await mintRefreshTokenForCrossType({
 			familyId: "pub-fam-1",
 			clientId: publicClientId,
@@ -488,7 +488,7 @@ describe("POST /oauth/revoke — C2: public client support", () => {
 		expect(pubRevocations).toContain("pub-fam-1");
 	});
 
-	it("C2: public client revoking another client's token — silent 200, no revocation", async () => {
+	it("public client revoking another client's token — silent 200, no revocation", async () => {
 		// Mint an AT owned by the confidential client (CLIENT_ID), but public client tries to revoke it
 		const at = await mintAccessToken({ jti: "pub-j-cross", clientId: CLIENT_ID });
 		const res = await request(pubApp)

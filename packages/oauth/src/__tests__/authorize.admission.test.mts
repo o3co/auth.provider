@@ -298,7 +298,7 @@ const recordingSink = () => {
 	return { sink, events };
 };
 
-describe("/authorize on admission — the pinned changes (D8)", () => {
+describe("/authorize on admission — the session read", () => {
 	it("(1) a cookie with isAuthenticated but no sid, while a store is wired, is not_live: the login redirect, no code", async () => {
 		const store = storeWith(record());
 		const harness = await makeApp({
@@ -565,7 +565,7 @@ describe("/authorize on admission — a requirement's verdicts", () => {
 	});
 });
 
-describe("/authorize on admission — the step-up trip (the MFA ADR's D17, amended)", () => {
+describe("/authorize on admission — the step-up trip", () => {
 	/** A requirement that steps `/authorize` up until the test flips it to met. */
 	const steppingUp = (
 		whenStillUnmet: "reauthenticate" | "unmet" = "reauthenticate",

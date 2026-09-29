@@ -20,10 +20,11 @@ import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 /**
  * `http.trustProxy` is handed to Express's `trust proxy`, which decides whether
  * `X-Forwarded-For` may rewrite `req.ip` and `X-Forwarded-Proto` may rewrite
- * `req.protocol`. It used to be a boolean, so the only way to accept forwarded
- * headers at all was to accept them from anyone who could reach the process
- * (#292). These tests pin the widened vocabulary and, just as importantly, that
- * a typo fails at boot rather than becoming a policy that never matches.
+ * `req.protocol`. As a boolean alone, the only way to accept forwarded
+ * headers at all would be to accept them from anyone who can reach the
+ * process, so it also takes a hop count or an address list. These tests pin
+ * that vocabulary and, just as importantly, that a typo fails at boot rather
+ * than becoming a policy that never matches.
  */
 function configWithTrustProxy(trustProxy: unknown) {
 	const config = makeValidCoreConfig() as unknown as Record<string, unknown>;
@@ -46,10 +47,9 @@ describe("http.trustProxy — boolean", () => {
 		["true", true],
 		["false", false],
 	])("coerces the env-var string %s to a boolean", (raw, expected) => {
-		// HOCON substitutes `${?HTTP_TRUST_PROXY}` as a string; the only reason
-		// `z.boolean()` used to work is that `@o3co/ts.hocon`'s zod bridge
-		// coerces for a bare boolean leaf. A union has no such bridge, so the
-		// schema has to do it.
+		// HOCON substitutes `${?HTTP_TRUST_PROXY}` as a string. `@o3co/ts.hocon`'s
+		// zod bridge coerces it for a bare boolean leaf, but a union has no such
+		// bridge, so the schema has to do it.
 		const result = parsed(raw);
 		expect(result.success).toBe(true);
 		if (result.success) expect(result.data.http.trustProxy).toBe(expected);

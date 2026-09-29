@@ -67,7 +67,7 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("createOidcProvider (#524)", () => {
+describe("createOidcProvider", () => {
 	describe("discovery at construction", () => {
 		it("resolves the issuer's metadata once and builds the provider from it", async () => {
 			const { idp, provider } = await build();
@@ -272,7 +272,7 @@ describe("createOidcProvider (#524)", () => {
 		});
 	});
 
-	describe("authorization response issuer (RFC 9207, #595)", () => {
+	describe("authorization response issuer (RFC 9207)", () => {
 		// Discovery runs at construction, so the flag has to be on the document
 		// before the provider is built.
 		async function buildAdvertising(advertised: boolean) {

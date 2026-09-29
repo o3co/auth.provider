@@ -112,7 +112,7 @@ beforeEach(() => {
 	ids = 0;
 });
 
-describe("lodging a first-time intent (D6, D16)", () => {
+describe("lodging a first-time intent", () => {
 	it("admits the intent, then creates the pending grant naming it, and answers with both", async () => {
 		const result = await lodgeFederationGrantIntent(deps(), initial());
 		expect(result).toEqual({
@@ -188,7 +188,7 @@ describe("lodging a first-time intent (D6, D16)", () => {
 		// A deployment's own `ClientRepository` validates nothing this code can
 		// see. Read with a bare `.includes`, a comma-joined string would let
 		// "okta-calendar-prod" permit "okta-calendar" — the rule the token
-		// route already applies (D9), applied at lodging too.
+		// route already applies, applied at lodging too.
 		const asString = (value: string) => value as unknown as readonly string[];
 		expect(
 			await lodgeFederationGrantIntent(
@@ -459,7 +459,7 @@ const renewal = (over: Record<string, unknown> = {}) => ({
 	...over,
 });
 
-describe("lodging a reauthorization (D6, D13)", () => {
+describe("lodging a reauthorization", () => {
 	beforeEach(() => {
 		clock = at(2 * MIN);
 	});
@@ -650,7 +650,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 		return marked.grant;
 	};
 
-	it("admits a grant starved of scope — a wider consent is exactly the remedy — and reports the ineligibility it does not change (#616)", async () => {
+	it("admits a grant starved of scope — a wider consent is exactly the remedy — and reports the ineligibility it does not change", async () => {
 		await establish();
 		const before = await starved("scope_exceeded");
 		const result = await lodgeFederationGrantReauthorization(deps(), renewal());
@@ -668,7 +668,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 		});
 	});
 
-	it("refuses every other ineligibility before an intent is lodged: a consent mends none of them (#616)", async () => {
+	it("refuses a grant starved by no finite lifetime, an unsupported token type or a malformed token response before an intent is lodged: a consent mends none of them", async () => {
 		await establish();
 		for (const reason of [
 			"no_finite_lifetime",
@@ -685,7 +685,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 		}
 	});
 
-	it("judges the ineligibility as it reads now, not as the marker was left: a maximum no token can satisfy outranks an old scope marker (#616)", async () => {
+	it("judges the ineligibility as it reads now, not as the marker was left: a maximum no token can satisfy outranks an old scope marker", async () => {
 		await establish();
 		await starved("scope_exceeded");
 		expect(

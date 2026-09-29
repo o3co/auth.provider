@@ -40,7 +40,7 @@ import {
  * WHEN a stored token is refreshed and when it is answered as it is — and that
  * a refresh which brought nothing usable costs the grant nothing it had.
  */
-describe("retrieveFederationGrantToken — when a token is refreshed, and what a refresh may cost (#593, D5, D10)", () => {
+describe("retrieveFederationGrantToken — when a token is refreshed, and what a refresh may cost", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -73,7 +73,8 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			expect(await retrieve({ minTtlSeconds: 3600 })).toMatchObject({
 				ok: true,
 				accessToken: "at-0",
-				// Its true lifetime, short of what was asked: the caller decides (D10).
+				// Its true lifetime, short of what was asked: the caller decides (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D10).
 				expiresIn: 1800,
 				refreshed: false,
 			});
@@ -251,7 +252,9 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				reason: "malformed_token_response",
 				retryAfterSeconds: 300,
 			});
-			// The rotated refresh token is kept (D5) — and so is what still worked.
+			// The rotated refresh token is kept (ADR
+			// 2026-09-17-federation-grants-offline-delegation, D5) — and so is
+			// what still worked.
 			expect(await stored()).toMatchObject({
 				refreshToken: `${SECRET}-rotated`,
 				accessToken: { value: "at-0", obtainedAt: T0 },
@@ -421,13 +424,14 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				"upstream_rejected",
 			],
 		])(
-			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once (a refusal is remembered instead, D12)",
+			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once",
 			async (_, carried, code) => {
 				// If the IdP rotated before its answer was lost, the old refresh token
 				// is presented again whenever the next refresh comes: waiting out the
 				// lock would not change that, and an IdP with a grace window for
 				// exactly this takes a prompt retry, not a late one. Keeping the lock
-				// is for what is still in flight (D12).
+				// is for what is still in flight (ADR
+				// 2026-09-17-federation-grants-offline-delegation, D12).
 				await h.seed();
 				setNow(at(HOUR));
 				h.refresh.mockRejectedValueOnce(

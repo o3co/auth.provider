@@ -197,7 +197,7 @@ describe("full-pki path validation", () => {
 		if (!result.ok) expect(result.step).toBe("no path to trust anchor");
 	});
 
-	it("rejects an unrecognised CRITICAL extension (#341 item 4, RFC 5280 §6.1.2)", async () => {
+	it("rejects an unrecognised CRITICAL extension (RFC 5280 §6.1.2)", async () => {
 		// "Critical" marks the extension as one a validator must understand
 		// before trusting the certificate; ignoring it is the exact opposite.
 		const root = await mintCa("Root", 1);
@@ -212,7 +212,7 @@ describe("full-pki path validation", () => {
 		expect(result.ok).toBe(false);
 	});
 
-	it("rejects an issuer whose keyUsage omits keyCertSign (#341 item 5)", async () => {
+	it("rejects an issuer whose keyUsage omits keyCertSign", async () => {
 		// RFC 5280 §4.2.1.3: when keyUsage is present on a CA it MUST include
 		// keyCertSign to sign certificates. Node's X509Certificate.keyUsage
 		// returns *extended* key usage, so the narrow mode could not see this.
@@ -226,7 +226,7 @@ describe("full-pki path validation", () => {
 		expect(result.ok).toBe(false);
 	});
 
-	it("rejects a path deeper than pathLenConstraint permits (#341 item 6)", async () => {
+	it("rejects a path deeper than pathLenConstraint permits", async () => {
 		// `pathlen:0` on the root says "no sub-CAs beneath me". The chain below
 		// has one, so the root's own statement forbids it. pkijs does not
 		// implement this check — `checkPathLength` in validate.mts does.
@@ -255,7 +255,7 @@ describe("full-pki path validation", () => {
 		expect(result).toEqual({ ok: true });
 	});
 
-	it("enforces excluded name constraints (#341 item 3)", async () => {
+	it("enforces excluded name constraints", async () => {
 		// An unenforced name constraint lets the constrained CA issue for
 		// anything.
 		const root = await mintCa("Root", 1);
@@ -1037,7 +1037,7 @@ describe("full-pki revocation", () => {
 	});
 });
 
-describe("full-pki revocation — distribution points and CRL shapes the resolver does not speak (#446, #447)", () => {
+describe("full-pki revocation — distribution points and CRL shapes the resolver does not speak", () => {
 	const INT_CRL_MIRROR_URL = "http://crl.test/int-mirror.crl";
 
 	/** root → intermediate → leaf, the leaf carrying `leafPoints` as its cRLDistributionPoints. */
@@ -1180,7 +1180,7 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 	});
 
 	it.each(["reject", "allow"] as const)(
-		"refuses a certificate the plain point's CRL lists as revoked, beside a partitioned point, under '%s' (#469)",
+		"refuses a certificate the plain point's CRL lists as revoked, beside a partitioned point, under '%s'",
 		async (onUnavailable) => {
 			// RFC 5280 §4.2.1.13: a point without reasons covers every reason
 			// code, so the plain point's CRL is a complete answer on its own. A
@@ -1210,7 +1210,7 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		},
 	);
 
-	it("under 'allow', accepts a certificate absent from the plain point's CRL beside a partitioned point, and logs the point it could not use (#469)", async () => {
+	it("under 'allow', accepts a certificate absent from the plain point's CRL beside a partitioned point, and logs the point it could not use", async () => {
 		const { root, int, leaf } = await chainWith(
 			distributionPointsExtension([
 				distributionPoint(INT_CRL_URL),
@@ -1242,7 +1242,7 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		);
 	});
 
-	it("under 'reject', refuses the same certificate: a point it could not use is a gap, whatever the cause (#469)", async () => {
+	it("under 'reject', refuses the same certificate: a point it could not use is a gap, whatever the cause", async () => {
 		// The same rule as a point that is down: "reject" is the instruction
 		// not to guess that the CA's other points were redundant — and the
 		// plain point's CRL is still consulted first, so a revocation it
@@ -1328,7 +1328,7 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		}
 	});
 
-	it("names a CRL with an unsupported critical extension under its own reason, and does not re-fetch it within the negative window (#447)", async () => {
+	it("names a CRL with an unsupported critical extension under its own reason, and does not re-fetch it within the negative window", async () => {
 		const { root, int, leaf } = await chainWith(crlDistributionPoints([INT_CRL_URL]));
 		const { impl, calls } = stubFetch({
 			[INT_CRL_URL]: await mintCrl({
@@ -1407,7 +1407,7 @@ const ocspAndCrlChain = () =>
 		int: [ocspAia(ROOT_OCSP_URL), crlDistributionPoints([ROOT_CRL_URL])],
 	});
 
-describe("full-pki revocation — the algorithm policy covers revocation material (#470)", () => {
+describe("full-pki revocation — the algorithm policy covers revocation material", () => {
 	it("refuses, under 'reject', a certificate whose CRL is signed with SHA-1, as algorithm_not_permitted", async () => {
 		// The path pass refuses a SHA-1-signed certificate; the same policy and
 		// configuration key apply to a SHA-1-signed CRL about it, surfaced as
@@ -1486,7 +1486,7 @@ describe("full-pki revocation — the algorithm policy covers revocation materia
 	});
 });
 
-describe("full-pki revocation — mode = ocsp (#431)", () => {
+describe("full-pki revocation — mode = ocsp", () => {
 	it("accepts a certificate the responder reports good, asking each issuer's responder by POST", async () => {
 		const { root, int, leaf } = await ocspChain();
 		const { impl, calls, inits } = stubFetch({
@@ -1750,7 +1750,7 @@ describe("full-pki revocation — mode = ocsp (#431)", () => {
 	});
 });
 
-describe("full-pki revocation — mode = both (#431)", () => {
+describe("full-pki revocation — mode = both", () => {
 	it("asks the responder first and does not fetch the CRL when it answers good", async () => {
 		const { root, int, leaf } = await ocspAndCrlChain();
 		const { impl, calls } = stubFetch({
@@ -1819,7 +1819,7 @@ describe("full-pki revocation — mode = both (#431)", () => {
 		);
 	});
 
-	it("treats an OCSP unknown as final under both — a silent CRL does not answer it (#471)", async () => {
+	it("treats an OCSP unknown as final under both — a silent CRL does not answer it", async () => {
 		// RFC 6960 §2.2: `unknown` is the responder's answer — it does not know
 		// the certificate — and for a serial the CA never issued that is the
 		// whole finding. A CRL cannot list a never-issued serial, so it cannot
@@ -1873,7 +1873,7 @@ describe("full-pki revocation — mode = both (#431)", () => {
 		expect(calls).toContain(INT_CRL_URL);
 	});
 
-	it("under both with on-unavailable = allow, an OCSP unknown the CRL does not list stays unavailable (#471)", async () => {
+	it("under both with on-unavailable = allow, admits a certificate OCSP answers unknown and the CRL does not list", async () => {
 		// The CRL is asked, says nothing about this certificate, and that
 		// silence does not become an answer. The status is still unavailable,
 		// and `allow` admits it by policy.
@@ -2031,7 +2031,7 @@ describe("full-pki revocation — mode = both (#431)", () => {
 	});
 });
 
-describe("full-pki — OCSP must-staple (RFC 7633, #431)", () => {
+describe("full-pki — OCSP must-staple (RFC 7633)", () => {
 	const leafWith = async (root: Minted, extension: pkijs.Extension) =>
 		mintLeaf("client", 10, root, {
 			extensions: [
@@ -2120,7 +2120,7 @@ describe("full-pki — OCSP must-staple (RFC 7633, #431)", () => {
 	});
 });
 
-describe("full-pki revocation — a delegated responder's own revocation (#468)", () => {
+describe("full-pki revocation — a delegated responder's own revocation", () => {
 	/** A delegated responder the CA issued without `id-pkix-ocsp-nocheck`, naming the CA's CRL. */
 	const responderWithoutNoCheck = (int: Minted) =>
 		mintOcspResponder("OCSP Responder", 50, int, {
@@ -2246,7 +2246,7 @@ describe("full-pki revocation — a delegated responder's own revocation (#468)"
 	});
 });
 
-describe("full-pki revocation — a responder checked against a partial CRL (#550 review)", () => {
+describe("full-pki revocation — a responder checked against a partial CRL", () => {
 	it("does not treat a responder as checked when one of its distribution points could not be used", async () => {
 		// The responder names two points; one answers, one is down. That is the
 		// partial answer `on-unavailable` judges on the normal path — it is not

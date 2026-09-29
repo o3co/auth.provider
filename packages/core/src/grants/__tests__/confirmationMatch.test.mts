@@ -76,7 +76,7 @@ describe("matchConfirmation — jkt member (DPoP matrix rows 3-5)", () => {
 	it("refuses to let a third-party mechanism kind satisfy a jkt binding", () => {
 		// `Confirmation` is mechanism-extensible: a mechanism of another kind
 		// emitting `{ jkt }` never validated a DPoP proof, so an equal value
-		// must NOT satisfy the binding (kind boundary, PR #185).
+		// must NOT satisfy the binding (kind boundary).
 		const acme: TokenBinding = { kind: "acme", confirmation: { jkt: "abc" } };
 		expect(matchConfirmation({ jkt: "abc" }, acme)).toEqual({
 			status: "no-proof",
@@ -203,7 +203,7 @@ describe("ownedConfirmation", () => {
 	});
 });
 
-describe("extractConfirmation (moved from oauth types/introspect — #324)", () => {
+describe("extractConfirmation", () => {
 	it("returns undefined for non-objects", () => {
 		expect(extractConfirmation(undefined)).toBeUndefined();
 		expect(extractConfirmation(null)).toBeUndefined();
@@ -230,7 +230,7 @@ describe("extractConfirmation (moved from oauth types/introspect — #324)", () 
 	});
 });
 
-describe("isCompoundConfirmation (moved from oauth types/introspect — #324)", () => {
+describe("isCompoundConfirmation", () => {
 	it("is false for non-objects and empty objects", () => {
 		expect(isCompoundConfirmation(undefined)).toBe(false);
 		expect(isCompoundConfirmation(null)).toBe(false);

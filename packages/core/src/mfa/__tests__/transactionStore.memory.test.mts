@@ -157,7 +157,8 @@ describe("the in-process MfaTransactionStore", () => {
 		await settle(T0, "failure");
 		expect(store.subjects).toBe(1);
 		// Two weeks on the week has let the failure go, but the consecutive run
-		// has not: only a success ends it (D21's hard limit counts it).
+		// has not: only a success ends it (the hard limit of the MFA ADR's D21
+		// counts it).
 		await settle(T0 + 2 * WEEK, "void");
 		expect(store.subjects).toBe(1);
 		await settle(T0 + 2 * WEEK, "success");
@@ -269,7 +270,8 @@ describe("memoryMfaTransactionStoreModule", () => {
 		);
 		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(/per replica/);
 		// With a durable factor store beside it, a restart after an operator
-		// reset lets a password holder bind without the email proof (D25).
+		// reset lets a password holder bind without the email proof (the MFA
+		// ADR's D25).
 		expect(memoryMfaTransactionStoreModule.replicaSafety?.reason).toMatch(
 			/a restart loses the email proof an operator reset required/,
 		);

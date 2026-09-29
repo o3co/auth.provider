@@ -97,7 +97,7 @@ const policyOf = (
 const allow = (extra: Record<string, unknown> = {}) =>
 	policyOf(async () => ({ ...extra, outcome: "allow" }) as GrantPolicyDecision);
 
-describe("jwt-bearer grant — the happy path (#301)", () => {
+describe("jwt-bearer grant — the happy path", () => {
 	it("uses the registered RFC 7523 grant type", () => {
 		expect(JWT_BEARER_GRANT_TYPE).toBe("urn:ietf:params:oauth:grant-type:jwt-bearer");
 	});
@@ -151,7 +151,7 @@ describe("jwt-bearer grant — the happy path (#301)", () => {
 		expect(authenticateByToken).toHaveBeenCalledWith("device:from-verifier");
 	});
 
-	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
+	it("declares requiresExplicitGrantAllowlist: true on the handler contract", () => {
 		// A device credential is a standing capability of a registration, not a
 		// per-user ceremony: like client_credentials and the device grant, a
 		// client without `allowedGrantTypes` must not acquire it by omission.
@@ -178,7 +178,7 @@ describe("jwt-bearer grant — the happy path (#301)", () => {
 	});
 });
 
-describe("jwt-bearer grant — what it refuses (#301)", () => {
+describe("jwt-bearer grant — what it refuses", () => {
 	it("answers invalid_request for a missing assertion", async () => {
 		// RFC 6749 §5.2: a missing parameter is not a bad grant.
 		const { result } = await build({}).handle(ctx({ assertion: undefined }));
@@ -220,7 +220,7 @@ describe("jwt-bearer grant — what it refuses (#301)", () => {
 	});
 });
 
-describe("jwt-bearer grant — oauth.requireEmailVerified (#297)", () => {
+describe("jwt-bearer grant — oauth.requireEmailVerified", () => {
 	// The third point that holds a resolved user at issuance, after
 	// `/authorize` and the `session` grant. A deployment that turned the gate
 	// on would otherwise find two paths gated and this one wide open.
@@ -276,7 +276,7 @@ describe("jwt-bearer grant — oauth.requireEmailVerified (#297)", () => {
 	});
 });
 
-describe("jwt-bearer grant — outage is not refusal (#301)", () => {
+describe("jwt-bearer grant — outage is not refusal", () => {
 	it("answers 503 when the verifier cannot reach a conclusion", async () => {
 		// An attestation service being down is not a bad credential. Answering
 		// invalid_grant would send an operator to re-enrol a device that was fine.
@@ -321,7 +321,7 @@ describe("jwt-bearer grant — outage is not refusal (#301)", () => {
 	});
 });
 
-describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => {
+describe("jwt-bearer grant — scope is a ceiling, never a grant", () => {
 	it("intersects the request with what the assertion authorizes", async () => {
 		const { result } = await build({
 			verifier: verifierFor({ subjectHandle: "d", scope: ["read", "write"] }),
@@ -444,7 +444,7 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 	});
 });
 
-describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never the allowlist (#396)", () => {
+describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never the allowlist", () => {
 	const client = (over: Record<string, unknown>) =>
 		({ authenticatedClient: { clientId: "c1", ...over } }) as never;
 	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
@@ -530,7 +530,7 @@ describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never th
 	});
 });
 
-describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", () => {
+describe("jwt-bearer grant — grantPolicy is consulted, fail-closed", () => {
 	// Like every other minting path, this one evaluates `grantPolicy`, so a
 	// deployment's policy hook sees device logins too.
 	const authed = {
@@ -643,7 +643,7 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", (
 	});
 });
 
-describe("jwt-bearer grant — aud names the client's configured resource audience (#518)", () => {
+describe("jwt-bearer grant — aud names the client's configured resource audience", () => {
 	// Mints `aud` as the session and device grants do,
 	// `client.allowedAudiences?.[0] ?? client.clientId`, so a resource server
 	// pinning its own identifier sees the same audience from all three.
@@ -690,7 +690,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		).toBe("mobile-app");
 	});
 
-	it("mints the issuer as aud without an authenticated client (#520)", async () => {
+	it("mints the issuer as aud without an authenticated client", async () => {
 		// RFC 7523 §3 makes client authentication optional, and with no
 		// registration there is no resource or client to name. RFC 9068 §2.2
 		// still makes `aud` REQUIRED on an `at+jwt`, and any verifier pinning
@@ -745,7 +745,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		expect(claimsOf(result).aud).toBe("https://api.example");
 	});
 
-	it("refuses an out-of-bounds entry in any position, not only the first (#521)", async () => {
+	it("refuses an out-of-bounds entry in any position, not only the first", async () => {
 		// The ceiling check runs over the whole array before the flatten to
 		// `[0]`: a policy returning [allowed, rogue] is refused, not quietly
 		// minted for the allowed one.
@@ -759,7 +759,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		);
 	});
 
-	it("flattens two in-bounds entries to the first (#521)", async () => {
+	it("flattens two in-bounds entries to the first", async () => {
 		const { result } = await build({
 			grantPolicy: allow({ grantedAudience: ["https://other.example", "https://api.example"] }),
 		}).handle(
@@ -769,7 +769,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		expect(claimsOf(result).aud).toBe("https://other.example");
 	});
 
-	it("treats an empty grantedAudience as no decision without a client too (#521)", async () => {
+	it("treats an empty grantedAudience as no decision without a client too", async () => {
 		// An empty array is "no decision" before the no-client refusal is
 		// reached; the boundary of that refusal is exactly a non-empty one.
 		const { result } = await build({ grantPolicy: allow({ grantedAudience: [] }) }).handle(
@@ -779,7 +779,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		expect(claimsOf(result).aud).toBe("https://auth.example");
 	});
 
-	it("logs jwt_bearer_policy_audience_refused for the operator who wired the policy (#521)", async () => {
+	it("logs jwt_bearer_policy_audience_refused for the operator who wired the policy", async () => {
 		// This file's convention (`jwt_bearer_email_not_verified`): a refusal
 		// an operator caused logs, so the operator who wired the gate can see
 		// why devices are being refused.
@@ -836,7 +836,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		}).toEqual({ unsafe: false, within200: true, quotes: true });
 	});
 
-	describe("RFC 8707 resource (#522)", () => {
+	describe("RFC 8707 resource", () => {
 		// Like every sibling minting at /token, this grant derives and enforces
 		// the audience from `resource` under `oauth.resourceIndicator.enabled`.
 		const flagOn = {
@@ -931,7 +931,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		});
 	});
 
-	describe("the assertion issuer's terms (#525)", () => {
+	describe("the assertion issuer's terms", () => {
 		// A registry entry may say which audiences a token minted from its
 		// assertions may name. That list is a ceiling on the issued `aud`
 		// whatever chose it, and, with no authenticated client, the source the
@@ -1035,7 +1035,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 			expect("error" in result && result.error).toBe("server_error");
 		});
 
-		it("issues no refresh token — the assertion is the refresh mechanism (ID-JAG §5, #526)", async () => {
+		it("issues no refresh token — the assertion is the refresh mechanism (ID-JAG §5)", async () => {
 			const { result } = await build({ verifier: trusted(["https://api.example"]) }).handle(
 				ctx({}, client({ allowedAudiences: ["https://api.example"] })),
 			);
@@ -1059,7 +1059,7 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
  * bound. Token exchange holds the subject token to the same rule (its README,
  * security note 16).
  */
-describe("jwt-bearer grant — the token never outlives the assertion (auth.proxy#90)", () => {
+describe("jwt-bearer grant — the token never outlives the assertion", () => {
 	/** A whole epoch second, so the arithmetic below reads exactly. */
 	const NOW = 1_800_000_000;
 	const at = (seconds: number) => vi.setSystemTime(new Date(seconds * 1000));
@@ -1361,7 +1361,7 @@ describe("jwt-bearer grant — the lifetime it mints with, read when it is built
  * login endpoint whose possession check is absent. There is no default
  * verifier: the only possible default is one that accepts things.
  */
-describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
+describe("jwt-bearer grant — enabling it without a verifier", () => {
 	const configWith = (enabled: boolean) =>
 		({
 			...(makeValidAppConfig() as unknown as Record<string, unknown>),
@@ -1423,7 +1423,7 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 		expect(grantsOf(false)[JWT_BEARER_GRANT_TYPE]).toBeUndefined();
 	});
 
-	it("builds the grant when both slots are wired, handing the factory the narrowed values (#626)", () => {
+	it("builds the grant when both slots are wired, handing the factory the narrowed values", () => {
 		// The module lists `assertionVerifier` and `userRepository` optional,
 		// the grant requires them, and the two checks above narrow them: this is
 		// where the wiring either passes them on or drops them.

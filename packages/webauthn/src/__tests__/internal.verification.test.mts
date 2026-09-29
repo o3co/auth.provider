@@ -138,7 +138,7 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 		expect(result).toEqual({ ok: false, reason: "challenge_mismatch" });
 	});
 
-	it("names a credential whose algorithm is outside the pin, rather than answering unknown (v0.13.0 audit)", async () => {
+	it("returns algorithm_not_allowed, rather than unknown, when the credential's algorithm is outside the pin", async () => {
 		// `WEBAUTHN_ALGORITHM_IDS` refuses e.g. ML-DSA-44 (-48). The refusal is
 		// this package's choice, so it gets its own reason, not `unknown`.
 		mockVerifyRegistration.mockRejectedValueOnce(
@@ -166,7 +166,7 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 		expect(result).toEqual({ ok: false, reason: "rp_id_mismatch" });
 	});
 
-	it("accepts only the algorithms registration offered (#516 review)", async () => {
+	it("passes SimpleWebAuthn only the pinned algorithms, -8, -7 and -257", async () => {
 		// The options test pins what is advertised; this pins what is accepted.
 		// Without both, dropping this argument would let SimpleWebAuthn's
 		// runtime-dependent default accept an ML-DSA credential the offer never
@@ -384,7 +384,7 @@ describe("verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)", () => {
 // Multi-origin pass-through + rejection
 // ---------------------------------------------------------------------------
 
-describe("S7 multi-origin: expectedOrigins array forwarding", () => {
+describe("multi-origin: expectedOrigins array forwarding", () => {
 	it("verifyWebAuthnAttestation forwards multi-element expectedOrigins to SimpleWebAuthn intact", async () => {
 		mockVerifyRegistration.mockResolvedValueOnce({
 			verified: true,
@@ -490,7 +490,7 @@ describe("S7 multi-origin: expectedOrigins array forwarding", () => {
 // userVerification enforcement
 // ---------------------------------------------------------------------------
 
-describe("Codex Round 2 P1-1: userVerification enforcement", () => {
+describe("userVerification enforcement", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -701,7 +701,7 @@ describe("stored publicKey is copied before it reaches SimpleWebAuthn", () => {
 	});
 });
 
-describe("cross-origin authentication is the deployment's decision (#554 audit)", () => {
+describe("cross-origin authentication is the deployment's decision", () => {
 	const baseAssertionInput = () => ({
 		credential: makeStoredCredential(5),
 		response: STUB_AUTHENTICATION_RESPONSE,

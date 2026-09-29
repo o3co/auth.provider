@@ -642,7 +642,7 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 	// 14. LifecycleRegistrar drain (step 3 in buildDispose)
 	// ---------------------------------------------------------------------------
 
-	describe("assembleApp — 14. dispose drains LifecycleRegistrar (D-5)", () => {
+	describe("assembleApp — 14. dispose drains LifecycleRegistrar", () => {
 		it("registered cleanups run in LIFO order during AppHandle.dispose", async () => {
 			const order: string[] = [];
 			const reg = createLifecycleRegistrar();
@@ -718,7 +718,7 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 // 18. discovery: only the document's own error is converted
 // ---------------------------------------------------------------------------
 
-describe("assembleApp — 18. discovery: only the document's own error is converted (#626 F4)", () => {
+describe("assembleApp — 18. discovery: only the document's own error is converted", () => {
 	/** A contribution that assembles into a valid document. */
 	const providerRoot = {
 		providerRoot: true,
@@ -752,7 +752,7 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 		return undefined;
 	};
 
-	it("does not convert a router-factory failure, even one that is a DiscoveryDocumentError (#650)", () => {
+	it("does not convert a router-factory failure, even one that is a DiscoveryDocumentError", () => {
 		// Only a document that did not assemble becomes
 		// `reason: "discovery-document-invalid"`. The router factory runs after
 		// planning and outside the conversion, so what it throws arrives as
@@ -809,7 +809,7 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 				]) as FrozenWorld["registries"],
 			}),
 		],
-	])("does not convert %s, even with a DiscoveryDocumentError (#650)", (_label, world) => {
+	])("does not convert %s, even with a DiscoveryDocumentError", (_label, world) => {
 		// Host-supplied code outside the document builder. Only the builder's
 		// own error comes back as a value to convert, so what these throw
 		// arrives as itself whatever its type.
@@ -823,7 +823,7 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 		expect(thrown).not.toBeInstanceOf(BootError);
 	});
 
-	it("does not iterate the collector when no issuer is configured (#650)", () => {
+	it("does not iterate the collector when no issuer is configured", () => {
 		// Reading the collector runs host code, which a deployment that serves
 		// no document must not do. The call site passes a reader, and this pins
 		// that it is not called when no issuer is configured.

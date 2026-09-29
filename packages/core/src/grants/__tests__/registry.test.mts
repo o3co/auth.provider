@@ -23,7 +23,7 @@ const makeHandler = (_name: string): GrantHandler => ({
 	}),
 });
 
-describe("GrantRegistry.register (A6+A7 §2.1: throw on duplicate)", () => {
+describe("GrantRegistry.register (throw on duplicate)", () => {
 	it("registers a handler under a fresh name", () => {
 		const registry = new GrantRegistry();
 		registry.register("foo", makeHandler("a"));
@@ -56,7 +56,7 @@ describe("GrantRegistry.register (A6+A7 §2.1: throw on duplicate)", () => {
 	});
 });
 
-describe("GrantRegistry.replace (A6+A7 §2.2: explicit override)", () => {
+describe("GrantRegistry.replace (explicit override)", () => {
 	it("overwrites a registered handler (happy path)", () => {
 		const registry = new GrantRegistry();
 		const original = makeHandler("original");
@@ -100,7 +100,7 @@ describe("GrantRegistry.replace (A6+A7 §2.2: explicit override)", () => {
 	});
 });
 
-describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
+describe("GrantRegistry.freeze (activation boundary)", () => {
 	it("blocks register on a frozen registry with reason='frozen'", () => {
 		const registry = new GrantRegistry();
 		registry.freeze();
@@ -130,7 +130,7 @@ describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
 	});
 
 	it("frozen precedence: duplicate-after-freeze throws reason='frozen' (NOT 'duplicate')", () => {
-		// Per A6+A7 §2.3: "After freeze(): register throws with reason='frozen'".
+		// After freeze(), register throws with reason='frozen'.
 		// This is unconditional — when both freeze and duplicate conditions
 		// hold, "frozen" wins. The frozen check runs before the duplicate
 		// check in the impl to honour this precedence.
@@ -189,7 +189,7 @@ describe("GrantRegistry.entries (what boot's grants collector lists)", () => {
 	});
 });
 
-describe("GrantRegistryError (A6+A7 §2.4: error class shape)", () => {
+describe("GrantRegistryError (error class shape)", () => {
 	it("carries reason, grantType, and registered snapshot", () => {
 		const err = new GrantRegistryError({
 			reason: "duplicate",

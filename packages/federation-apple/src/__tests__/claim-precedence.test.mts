@@ -19,9 +19,9 @@
  * `mergeFederatedClaims` from `@o3co/auth-provider-session`.
  *
  * `apple.test.mts` asserts the claim names in isolation; this asserts the
- * consequence — that those names land where #279 says they should, without
- * this package restating the promotion rules or being trusted to have guessed
- * them right.
+ * consequence — that those names land where the session package's promotion
+ * rules say they should, without this package restating those rules or being
+ * trusted to have guessed them right.
  */
 
 import {
@@ -87,7 +87,7 @@ describe("Apple claims under the session package's precedence rules", () => {
 			providerName: "apple",
 			mappedClaims: provider.mapClaims(appleProfile()),
 		});
-		// `emailVerified` is Store-owned since #297; `isPrivateEmail` is an Apple
+		// `emailVerified` is Store-owned; `isPrivateEmail` is an Apple
 		// extension. Both are recorded, neither is authoritative here.
 		expect(claims.emailVerified).toBeUndefined();
 		expect(claims.isPrivateEmail).toBeUndefined();

@@ -64,7 +64,7 @@ describe("resolveFederationGrantConnections", () => {
 		});
 	});
 
-	it("carries the identity claims check 5 hands the Store, and none when unset (#611)", () => {
+	it("carries the identity claims it is configured with, and none when unset", () => {
 		expect(resolve({ graph: CONNECTION }).get("graph")?.identityClaims).toEqual([]);
 		expect(
 			resolve({ graph: { ...CONNECTION, identityClaims: ["oid", "tid"] } }).get("graph")
@@ -209,7 +209,7 @@ describe("resolveFederationGrantConnections", () => {
 		).toEqual({ prompt: "consent" });
 	});
 
-	it("refuses a parameter named __proto__, which objects keep or lose depending on how they are built (Copilot)", () => {
+	it("refuses a parameter named __proto__, which objects keep or lose depending on how they are built", () => {
 		// An own `__proto__` survives a spread and is lost to an assignment, so
 		// two adapters storing the same intent would disagree about it. No
 		// authorization server defines the name.

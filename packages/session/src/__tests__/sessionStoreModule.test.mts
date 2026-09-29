@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-// D-5: sessionStoreModule manifest invokes the express-session middleware
+// sessionStoreModule's manifest invokes the express-session middleware
 // factory and forwards `BuilderContext.lifecycle` so the underlying session
 // store registers its disposal callback. Tests exercise the route-contribution
 // factory directly with mock deps — the boot planner integration path is
@@ -83,7 +83,7 @@ function makeRegistrar(): LifecycleRegistrar & { calls: Array<() => Promise<void
 	};
 }
 
-describe("sessionStoreModule (D-5)", () => {
+describe("sessionStoreModule", () => {
 	it("declares lifecycleRegistrar and readinessRegistrar as optional and config as required", () => {
 		const m = sessionStoreModule as unknown as Module;
 		expect(m.name).toBe("session-store");
@@ -105,7 +105,7 @@ describe("sessionStoreModule (D-5)", () => {
 		} as never);
 		expect(route.id).toBe("session-middleware");
 		expect(route.mountPath).toBe("/");
-		// No `before` clause — declarationIndex contract per D-5 calibration.
+		// No `before` clause — its place follows declaration order (declarationIndex).
 		expect(route.before).toBeUndefined();
 		expect(typeof route.handler).toBe("function");
 	});
@@ -231,13 +231,12 @@ describe("sessionStoreModule (D-5)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// #474 — `SESSION_STORAGE_TYPE=memory` under `deployment.mode = "multi"` booted
-// silently. express-session's MemoryStore is per process like every other
-// memory store the replica-safety guard refuses, but this module's manifest
-// carried no `replicaSafety`: the storage type is config, and the static
-// manifest could not know it. `sessionStoreModuleFor(config)` builds the
+// `SESSION_STORAGE_TYPE=memory` under `deployment.mode = "multi"`.
+// express-session's MemoryStore is per process like every other memory store
+// the replica-safety guard refuses, but the storage type is config, which a
+// static manifest cannot know. `sessionStoreModuleFor(config)` builds the
 // manifest from the config the composition root already holds, so the guard
-// reads the declaration at stage 1 like the others (#455).
+// reads the declaration at stage 1 like the others.
 // ---------------------------------------------------------------------------
 
 const memoryConfig = baseConfig;
@@ -248,7 +247,7 @@ const redisConfig: SessionLikeConfig = {
 	},
 };
 
-describe("sessionStoreModuleFor(config) — replica-safety declaration (#474)", () => {
+describe("sessionStoreModuleFor(config) — replica-safety declaration", () => {
 	it("declares replica-unsafe state on the manifest when session.storage.type is memory", () => {
 		const m = sessionStoreModuleFor(memoryConfig as never) as unknown as Module;
 		expect(m.replicaSafety?.unsafe).toBe(true);
@@ -323,7 +322,7 @@ describe("sessionStoreModuleFor(config) — replica-safety declaration (#474)", 
 	});
 });
 
-describe("sessionStoreModule (static manifest) — factory-time refusal under multi (#474)", () => {
+describe("sessionStoreModule (static manifest) — factory-time refusal under multi", () => {
 	// A composition root that wires the static manifest has not told the
 	// stage-1 guard anything, so the route factory — which is where the
 	// storage type is first known for certain — refuses the same combination

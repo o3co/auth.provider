@@ -91,7 +91,7 @@ function citedPaths(): string[] {
 	];
 }
 
-describe("adapter-surface inventory (#305)", () => {
+describe("adapter-surface inventory", () => {
 	const declared = declaredSlots();
 	const documented = documentedSlots();
 
@@ -200,7 +200,7 @@ function unattachedPoliciesInDoc(): Record<string, string> {
 	return found;
 }
 
-describe("adapter-surface absence policies (#458)", () => {
+describe("adapter-surface absence policies", () => {
 	const source = absencePoliciesInSource();
 	const documented = absencePoliciesInDoc();
 	const unattached = unattachedPoliciesInDoc();

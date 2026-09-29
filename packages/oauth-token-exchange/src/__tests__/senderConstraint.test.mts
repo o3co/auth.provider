@@ -128,7 +128,7 @@ const exchange = async (
 // DPoP matrix (RFC 9449) — mirrors refreshToken.mts
 // ---------------------------------------------------------------------------
 
-describe("token exchange — DPoP binding matrix (#265)", () => {
+describe("token exchange — DPoP binding matrix", () => {
 	it("unbound subject, no proof → issues a plain Bearer token", async () => {
 		const res = await exchange({});
 		expect(res.status).toBe(200);
@@ -172,7 +172,7 @@ describe("token exchange — DPoP binding matrix (#265)", () => {
 // mTLS matrix (RFC 8705) — parallel to DPoP
 // ---------------------------------------------------------------------------
 
-describe("token exchange — mTLS binding matrix (#265)", () => {
+describe("token exchange — mTLS binding matrix", () => {
 	it("unbound subject, certificate presented → binds the issued token", async () => {
 		const res = await exchange({}, mtlsBinding);
 		expect(res.status).toBe(200);
@@ -208,7 +208,7 @@ describe("token exchange — mTLS binding matrix (#265)", () => {
 // Mechanism identity and malformed cnf
 // ---------------------------------------------------------------------------
 
-describe("token exchange — cnf edge cases (#265)", () => {
+describe("token exchange — cnf edge cases", () => {
 	it("rejects a subject token carrying a compound cnf", async () => {
 		// This AS never mints one, so a compound cnf means a forged token.
 		const res = await exchange({ cnf: { jkt: JKT, "x5t#S256": X5T } }, dpopBinding);
@@ -301,7 +301,7 @@ const exchangeWithActor = async (
  * precedent for; it stays out of scope rather than approximated by a rule
  * that enforces nothing.
  */
-describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
+describe("token exchange — actor_token DPoP binding matrix", () => {
 	it("unbound actor, no proof → exchanges and records the delegation", async () => {
 		const res = await exchangeWithActor({});
 		expect(res.status).toBe(200);
@@ -341,7 +341,7 @@ describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
 	});
 });
 
-describe("token exchange — actor_token mTLS binding matrix (#309)", () => {
+describe("token exchange — actor_token mTLS binding matrix", () => {
 	it("bound actor, no certificate → invalid_request", async () => {
 		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } });
 		expect(res.status).toBe(400);
@@ -368,7 +368,7 @@ describe("token exchange — actor_token mTLS binding matrix (#309)", () => {
 	});
 });
 
-describe("token exchange — actor_token cnf edge cases (#309)", () => {
+describe("token exchange — actor_token cnf edge cases", () => {
 	it("rejects an actor token carrying a compound cnf", async () => {
 		const res = await exchangeWithActor({ cnf: { jkt: JKT, "x5t#S256": X5T } }, dpopBinding);
 		expect(res.status).toBe(400);

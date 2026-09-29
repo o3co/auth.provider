@@ -70,7 +70,7 @@ const FULL_PKI_DEFAULTS = {
 	"min-rsa-key-bits": 2048,
 };
 
-describe("mode = full-pki — boot invariants (#341)", () => {
+describe("mode = full-pki — boot invariants", () => {
 	it("refuses an empty trusted-cas, as the narrow mode does", async () => {
 		await expect(
 			boot({
@@ -144,7 +144,7 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 	});
 
 	it.each(["ocsp", "both"] as const)(
-		"refuses revocation.mode = %s with no allowed-hosts (#431)",
+		"refuses revocation.mode = %s with no allowed-hosts",
 		async (mode) => {
 			// A responder URL is a destination inside a certificate exactly as a
 			// distribution point is; the same second layer applies.
@@ -168,7 +168,7 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 	);
 
 	it.each(["ocsp", "both"] as const)(
-		"boots with revocation.mode = %s and an allowlist (#431)",
+		"boots with revocation.mode = %s and an allowlist",
 		async (mode) => {
 			const handle = await boot({
 				"full-pki": {
@@ -232,11 +232,11 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 	});
 });
 
-describe("mtlsConfigSchema — full-pki (#341)", () => {
+describe("mtlsConfigSchema — full-pki", () => {
 	const parse = (mtls: Record<string, unknown>) => mtlsConfigSchema.safeParse({ oauth: { mtls } });
 
 	it.each(["ocsp", "both"] as const)(
-		"accepts revocation.mode = %s now that OCSP is implemented (#431)",
+		"accepts revocation.mode = %s with a non-empty allowed-hosts",
 		(mode) => {
 			// Accepted because the code honours it; a mode it does not implement
 			// is refused rather than accepted and ignored (next case).

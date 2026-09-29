@@ -57,7 +57,7 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 });
 
-describe("the package's reference.conf (D19)", () => {
+describe("the package's reference.conf", () => {
 	it("gives the ring no key: without MFA_ENCRYPTION_KEY, the settings are refused, naming it", () => {
 		expect(() => readMfaSettings(resolve())).toThrow(/MFA_ENCRYPTION_KEY/);
 	});
@@ -101,7 +101,7 @@ describe("the package's reference.conf (D19)", () => {
 		);
 	});
 
-	it("defaults a transaction to 600 seconds and 5 attempts, and the lock to D19's numbers", () => {
+	it("defaults a transaction to 600 seconds and 5 attempts, and the lock to a threshold of 5, 900 s base, 86400 s max and memory, a weekly budget of 10, a hard limit of 100, 5 trusted browsers for 30 days", () => {
 		const settings = readMfaSettings(
 			resolve({ MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64") }),
 		);
