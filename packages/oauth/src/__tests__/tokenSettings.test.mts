@@ -30,21 +30,30 @@
  * - The oauth module provides it eagerly: whenever the module is installed the
  *   slot is filled, whether or not a module requires it, so core's own
  *   machinery can read it too.
+ * - It names the slot `authoritative`: while the module is loaded no
+ *   composition may substitute it, since the module's own code reads
+ *   `oauth {}` and a second source would split what the slot's readers see
+ *   from what the module does. A composition without the module fills the
+ *   slot itself.
  */
 
 import {
 	type AppConfig,
+	BootError,
 	type ClientRepository,
 	type CodeRepository,
+	createApp,
 	createSymmetricKeyStore,
 	defineModule,
 	jwksModule,
 	memoryAccessTokenDenylistModule,
+	type OAuthTokenSettings,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "@o3co/auth-provider-core";
 import {
 	createTestApp,
+	createTestOAuthTokenSettings,
 	makeValidAppConfig,
 	oauthTokenSettingsContract,
 } from "@o3co/auth-provider-core/testing";
@@ -177,6 +186,73 @@ describe("the oauth module provides oauthTokenSettings", () => {
 			expect(provided).toEqual(oauthTokenSettingsFrom(config));
 			expect(Object.isFrozen(provided)).toBe(true);
 			expect(Object.isFrozen(provided?.accessTokenLifetime)).toBe(true);
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
+describe("the oauth module names oauthTokenSettings authoritative (#728)", () => {
+	/** Settings that differ from the configuration's, as a second source would. */
+	const SECOND = createTestOAuthTokenSettings({ issuer: "https://second.test" });
+
+	/** A module that requires the slot, and keeps what it was handed. */
+	const reader = (seen: { settings?: OAuthTokenSettings }) =>
+		defineModule({
+			name: "test:token-settings-reader",
+			requires: ["oauthTokenSettings"],
+			contributes: {
+				routes: [
+					(deps) => {
+						seen.settings = deps.oauthTokenSettings;
+						return {
+							id: "test-token-settings-reader",
+							mountPath: "/__test_token_settings_reader__",
+							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+						};
+					},
+				],
+			},
+		});
+
+	it("declares it", () => {
+		expect(oauthModule({ config: fixture() }).authoritative).toEqual(["oauthTokenSettings"]);
+	});
+
+	it("refuses an override of the slot while the module is loaded, naming the module and the key", async () => {
+		// The module goes on reading `oauth {}` — its issuer, its lifetimes —
+		// while every reader of the slot would follow the override.
+		const config = fixture();
+		const caught = await createApp({
+			modules: [oauthModule({ config }), ...stubs, reader({})],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			overrideComponents: { oauthTokenSettings: SECOND },
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err,
+		);
+		expect(caught).toBeInstanceOf(BootError);
+		expect((caught as BootError).reason).toBe("authoritative-component-overridden");
+		expect((caught as BootError).details).toEqual({
+			reason: "authoritative-component-overridden",
+			module: "oauth",
+			componentKey: "oauthTokenSettings",
+		});
+	});
+
+	it("lets a composition without the module fill the slot itself", async () => {
+		const seen: { settings?: OAuthTokenSettings } = {};
+		const config = fixture();
+		const handle = await createApp({
+			modules: [...stubs, reader(seen)],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+			overrideComponents: { oauthTokenSettings: SECOND },
+		});
+		try {
+			expect(seen.settings).toBe(SECOND);
 		} finally {
 			await handle.dispose();
 		}
