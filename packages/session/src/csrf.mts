@@ -145,7 +145,20 @@ const assertValidTtlSeconds = (ttlSeconds: number): void => {
 	}
 };
 
+/**
+ * Reject a protection with nothing to sign with. A caller passing a `secret`
+ * in its place would otherwise build one that throws on its first mint or
+ * check, answering that request with a `500` instead of refusing at boot.
+ */
+const assertSigner: (signer: unknown) => asserts signer is CsrfTokenSigner = (signer) => {
+	const candidate = signer as Partial<CsrfTokenSigner> | null | undefined;
+	if (typeof candidate?.sign !== "function" || typeof candidate.verify !== "function") {
+		throw new Error("csrf: signer is required: a CsrfTokenSigner with sign and verify");
+	}
+};
+
 export const createCsrfProtection = (options: CsrfProtectionOptions): CsrfProtection => {
+	assertSigner(options.signer);
 	const cookieName = options.cookieName ?? DEFAULT_CSRF_COOKIE_NAME;
 	const headerName = (options.headerName ?? DEFAULT_CSRF_HEADER_NAME).toLowerCase();
 	const bodyField = options.bodyField ?? DEFAULT_CSRF_BODY_FIELD;
