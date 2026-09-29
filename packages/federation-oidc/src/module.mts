@@ -47,7 +47,7 @@ function entryFor(
 	const entry = configs?.[name];
 	if (entry === undefined) {
 		throw new Error(
-			`oidcFederationConfigs has no entry for "${name}" — federation:oidc:${name} is in the manifest, so the composition root must supply its config under that name (readOidcFederationConfigs builds the slot from config.federations)`,
+			`oidcFederationConfigs has no entry for "${name}" — federation-oidc-${name} is in the manifest, so the composition root must supply its config under that name (readOidcFederationConfigs builds the slot from config.federations)`,
 		);
 	}
 	return entry;
@@ -63,12 +63,16 @@ function entryFor(
  * discovery included, so a failure refuses boot) and
  * `federationRedirectPolicies.<name>` from its entry in
  * `oidcFederationConfigs`. The name is the `:name` route segment and the
- * prefix of the identity handed to the Store (`<name>:<sub>`).
+ * prefix of the identity handed to the Store (`<name>:<sub>`). The module is
+ * named `federation-oidc-<name>`: kebab-case (#728) for a federation name of
+ * lower-case letters, digits and hyphens; a name with an upper-case letter,
+ * a dot or an underscore, which a federation name may carry, gives a module
+ * name that is not.
  */
 export function oidcFederationModule(name: string): Module {
 	checkFederationName(name);
 	return defineModule({
-		name: `federation:oidc:${name}`,
+		name: `federation-oidc-${name}`,
 		requires: ["oidcFederationConfigs"] as const,
 		contributes: {
 			federations: {

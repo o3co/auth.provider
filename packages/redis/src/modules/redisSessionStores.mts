@@ -65,7 +65,7 @@ const configSchema = z.object({
  * `session_rp_registry_corrupt_envelope`); `consoleLogger` when it is empty.
  */
 export const redisSessionStoresModule = defineModule({
-	name: "redisSessionStores",
+	name: "redis-session-stores",
 	requires: [
 		"userSessionStoreClient",
 		"sessionRPRegistryClient",

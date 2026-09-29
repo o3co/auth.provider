@@ -72,7 +72,7 @@ import { BootError } from "./types.mjs";
  * It used to read a table of module names kept in this file. The table was
  * written against core's modules (#304), and the standalone template wires
  * its *own* in-memory modules under names the table had never heard of —
- * `standalone:in-memory-session-stores`, `standalone:in-memory-code-repository`,
+ * `standalone-in-memory-session-stores`, `standalone-in-memory-code-repository`,
  * the memory federation store — so `deployment.mode = "multi"` booted with
  * exactly the stores that fork per replica the worst (#455). Two vocabularies
  * for "this module holds state in memory", one guard. The manifest is where
