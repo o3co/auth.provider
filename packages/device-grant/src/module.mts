@@ -92,14 +92,15 @@
  * So the route the module mounts is JSON-only — a form body is a "simple"
  * request the browser sends without a preflight, `application/json` is not;
  * the handler refuses any other media type itself — and sits behind the
- * same `createCsrfGuard` `/session/login` runs (#272):
- * a foreign `Origin` / `Referer` is refused outright, the server's own origin
- * or one on `session.csrf.trustedOrigins` is accepted, and a request with no
- * origin signal must carry the session's signed double-submit token. That is
- * one CSRF policy for the product rather than a second one that can drift,
- * which is why this package depends on `@o3co/auth-provider-session` rather
- * than restating an origin check. The guard is built from the `session.*`
- * config slice, so enabling the grant without one fails at boot.
+ * guard `/session/login` runs (#272), the `csrfGuard` slot the session module
+ * provides (#728, #710 C4): a foreign `Origin` / `Referer` is refused
+ * outright, the server's own origin or one on `session.csrf.trustedOrigins`
+ * is accepted, and a request with no origin signal must carry the session's
+ * signed double-submit token. That is one CSRF policy for the product rather
+ * than a second one that can drift, and this package reads it through the
+ * slot's contract in core rather than importing the session package or
+ * reading its configuration. The slot is optional in the manifest, as the
+ * limiter is, and enabling the grant without it fails at boot.
  *
  * ### Each route parses its own body
  *
@@ -140,11 +141,6 @@ import {
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
-import {
-	createCsrfGuard,
-	createCsrfProtectionFromConfig,
-	type SessionCsrfConfigSlice,
-} from "@o3co/auth-provider-session";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import {
@@ -282,6 +278,10 @@ const OPTIONAL = [
 	// The subject's sessions boundary: read by the verification endpoint
 	// (a session it covers) and the grant (an approval it covers).
 	"subjectRevocation",
+	// The one CSRF policy (#728, #710 C4), which the session module provides:
+	// the verification endpoint runs it on the whole route. Required once the
+	// grant is enabled (`requireCsrfGuard`), unused while it is off.
+	"csrfGuard",
 ] as const;
 
 /**
@@ -512,41 +512,29 @@ const disabledRoute = (id: string, mountPath: string) => {
 };
 
 /**
- * The `session.*` slice the verification route's CSRF guard is built from.
+ * The CSRF guard the verification route runs: the `csrfGuard` slot, which the
+ * session module provides — the guard `/session/login` runs, over the same
+ * signed double-submit token, cookie and trust list (#728, #710 C4).
  *
- * Checked structurally rather than declared in `configSchema`: the slice is
- * the session module's to validate, and every deployment that can reach this
- * endpoint mounts that module — `req.session.isAuthenticated` is its field.
- * What is refused here is the composition that enables the grant with no
- * session at all, where the guard would have no signing key and no cookie
- * name and the endpoint would be mounted with no CSRF defence.
+ * Optional in the manifest, required when the grant is on, as the limiter is:
+ * the endpoint authorises on the session cookie, and mounted without the guard
+ * it would have no CSRF defence at all.
  */
-const SAME_SITE_VALUES: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
-
-const requireSessionSlice = (deps: DeviceGrantModuleDeps): SessionCsrfConfigSlice => {
-	const session = deps.config?.session as Partial<SessionCsrfConfigSlice> | undefined;
-	// Every field `createCsrfProtectionFromConfig` reads is checked here, not
-	// just the secret: a slice with no `name` would mint a cookie called
-	// `undefined.csrf`, and one with no `secure`/`sameSite` would set cookie
-	// attributes the operator never chose. Refuse the whole slice instead.
-	const missing: string[] = [];
-	if (typeof session?.secret !== "string" || session.secret === "") missing.push("session.secret");
-	if (typeof session?.name !== "string" || session.name === "") missing.push("session.name");
-	if (typeof session?.secure !== "boolean") missing.push("session.secure");
-	if (!SAME_SITE_VALUES.has(session?.sameSite)) missing.push("session.sameSite");
-	if (missing.length > 0) {
+const requireCsrfGuard = (
+	deps: DeviceGrantModuleDeps,
+): NonNullable<DeviceGrantModuleDeps["csrfGuard"]> => {
+	if (deps.csrfGuard === undefined) {
 		throw new Error(
-			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires the " +
-				`\`session\` config slice; missing or invalid: ${missing.join(", ")}. ` +
-				"POST /oauth/device/verification runs inside the end-user session and is " +
-				"guarded by the same CSRF policy as /session/login — a signed double-submit " +
-				"token derived from session.secret, a cookie named from session.name with " +
-				"session.secure / session.sameSite, and an Origin/Referer check against " +
-				"session.csrf.trustedOrigins — so without the slice the guard cannot be built " +
-				"and the endpoint cannot be mounted safely.",
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+				"csrfGuard component. POST /oauth/device/verification runs inside the end-user " +
+				"session and is guarded by the same CSRF policy as /session/login — a signed " +
+				"double-submit token, and an Origin/Referer check against " +
+				"session.csrf.trustedOrigins — which the session module (sessionModule) provides; " +
+				"without it the endpoint cannot be mounted safely. Install the session module, " +
+				"or leave the grant disabled.",
 		);
 	}
-	return session as SessionCsrfConfigSlice;
+	return deps.csrfGuard;
 };
 
 /**
@@ -830,13 +818,13 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					router.all("/", withinBodyLimit);
 					router.all("/", express.json({ limit: BODY_LIMIT }));
 					router.use(parserRefusals);
-					// The session guard, verbatim: foreign origin refused, same
-					// origin or `session.csrf.trustedOrigins` accepted, no origin
-					// signal → the signed double-submit token `GET /session/csrf`
-					// mints. On the whole route rather than on `approve` / `deny`
-					// alone, for the reason the three actions are one route: no
-					// way to add a fourth that forgets it.
-					const sessionSlice = requireSessionSlice(deps);
+					// The session guard, verbatim — the `csrfGuard` slot: foreign
+					// origin refused, same origin or `session.csrf.trustedOrigins`
+					// accepted, no origin signal → the signed double-submit token
+					// `GET /session/csrf` mints. On the whole route rather than on
+					// `approve` / `deny` alone, for the reason the three actions are
+					// one route: no way to add a fourth that forgets it.
+					const csrfGuard = requireCsrfGuard(deps);
 					// The budget this route is limited by is applied inside the
 					// limiter, seeded from config; asserting it here is what makes
 					// the `rateLimiter` requirement mean five attempts (#448).
@@ -844,11 +832,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
 						"/",
-						createCsrfGuard({
-							csrf: createCsrfProtectionFromConfig(sessionSlice),
-							trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
-							...(deps.logger ? { logger: deps.logger } : {}),
-						}),
+						csrfGuard.middleware,
 						createDeviceVerificationHandler({
 							store: requireDeviceCodeStore(deps),
 							rateLimiter: requireRateLimiter(deps),

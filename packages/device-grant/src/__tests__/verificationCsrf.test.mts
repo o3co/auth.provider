@@ -42,7 +42,7 @@
  *      what it answered and logged when it built the guard itself.
  */
 
-import type { AppConfig, ClientRepository } from "@o3co/auth-provider-core";
+import type { AppConfig, ClientRepository, Logger } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import {
@@ -91,7 +91,7 @@ const makeDeps = (overrides: { csrfGuard?: unknown } = {}) => {
 	const csrfGuard = createSessionCsrfGuard({
 		csrf: createCsrfProtectionFromConfig(SESSION_SLICE),
 		trustedOrigins: SESSION_SLICE.csrf.trustedOrigins,
-		logger,
+		logger: logger as unknown as Logger,
 	});
 	const deps = {
 		config: {

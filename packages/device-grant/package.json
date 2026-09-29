@@ -43,7 +43,6 @@
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
 		"@o3co/auth-provider-oauth": "workspace:^",
-		"@o3co/auth-provider-session": "workspace:^",
 		"express": "^5.0.0"
 	},
 	"devDependencies": {

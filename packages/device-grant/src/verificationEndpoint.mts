@@ -192,6 +192,7 @@ import type {
 	Admission,
 	AdmissionAction,
 	AdmissionDeps,
+	CookieCarrier,
 	Logger,
 	RateLimitContext,
 	RateLimiter,
@@ -455,8 +456,10 @@ export const createDeviceVerificationHandler = (
 		}
 
 		// Then the session behind the cookie, before anything else is asked.
+		// `req.session` is the session middleware's field, which this package
+		// does not type: it reads the cookie's claim through core's reading.
 		const admission = await admitSession(admissionDeps, {
-			claim: cookieClaim(req),
+			claim: cookieClaim(req as CookieCarrier),
 			action: ADMITTED_AS[action],
 		});
 		const session = admission.outcome === "admitted" ? admission.session : null;

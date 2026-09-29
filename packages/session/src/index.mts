@@ -30,7 +30,10 @@ export {
 } from "./answer-interruption.mjs";
 // #272 — CSRF protection for the state-changing session routes. Exported so a
 // composition root can issue tokens from its own login page, or mount the same
-// guard on routes this package does not own.
+// guard on routes this package does not own. Another package reaches the guard
+// through the `csrfGuard` slot the session module provides (#728);
+// `createSessionCsrfGuard` builds that slot's value, for a composition that
+// provides it without the module.
 export type {
 	CsrfCookieAttributes,
 	CsrfGuardOptions,
@@ -46,6 +49,7 @@ export {
 	createCsrfIssueHandler,
 	createCsrfProtection,
 	createCsrfProtectionFromConfig,
+	createSessionCsrfGuard,
 	DEFAULT_CSRF_BODY_FIELD,
 	DEFAULT_CSRF_COOKIE_NAME,
 	DEFAULT_CSRF_HEADER_NAME,
