@@ -175,14 +175,13 @@ describe("a module's section — delivered as deps.section", () => {
 		await handle.dispose();
 	});
 
-	it("declares reference and relocatedFrom without acting on them: nothing is read or refused", async () => {
+	it("declares reference without acting on it: nothing is read", async () => {
 		let seen: unknown;
 		const sectioned = defineModule({
 			name: "fixture-section",
 			section: {
 				schema: RetrySection,
 				reference: new URL("file:///nonexistent/config/reference.conf"),
-				relocatedFrom: ["legacy.fixture"],
 			},
 			contributes: {
 				grantMiddleware: [
@@ -198,7 +197,6 @@ describe("a module's section — delivered as deps.section", () => {
 			modules: [sectioned],
 			bootstrapComponents: bootWith({
 				"fixture-section": { retries: "2" },
-				legacy: { fixture: { retries: "9" } },
 			}),
 		});
 

@@ -230,13 +230,39 @@ test("a section declares its reference.conf, a transitional path and the paths i
 			schema: RetrySection,
 			reference: new URL("../config/reference.conf", import.meta.url),
 			at: "legacy.relocating",
-			relocatedFrom: ["legacy.relocating", "older.relocating"],
+			relocatedFrom: ["older.relocating"],
 		},
 	});
 	expectTypeOf<ModuleSection["schema"]>().toEqualTypeOf<SectionSchema>();
 	expectTypeOf<ModuleSection["reference"]>().toEqualTypeOf<URL | undefined>();
 	expectTypeOf<ModuleSection["at"]>().toEqualTypeOf<string | undefined>();
-	expectTypeOf<ModuleSection["relocatedFrom"]>().toEqualTypeOf<readonly string[] | undefined>();
+	expectTypeOf<ModuleSection["relocatedFrom"]>().toEqualTypeOf<
+		readonly string[] | Readonly<Record<string, string | null>> | undefined
+	>();
+});
+
+test("relocatedFrom is a list of old paths moved whole, or a map from each old path to its path in the section", () => {
+	defineModule({
+		name: "relocating-map",
+		section: {
+			schema: RetrySection,
+			relocatedFrom: {
+				"oauth.retrying": "",
+				"oauth.retrying.max-retries": "retries",
+				"endpoints.retry.url": "page.url",
+				// Removed rather than moved.
+				"oauth.retrying.legacy-flag": null,
+			},
+		},
+	});
+	defineModule({
+		name: "relocating-bad",
+		section: {
+			schema: RetrySection,
+			// @ts-expect-error — a new path is a string of keys
+			relocatedFrom: { "oauth.retrying": 1 },
+		},
+	});
 });
 
 test("a call that writes its type arguments and omits the schema's is refused a section", () => {

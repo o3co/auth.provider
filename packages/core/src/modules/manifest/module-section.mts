@@ -25,10 +25,11 @@
  * `redis-consent-store {}`); its keys are camelCase; its defaults live only
  * in the owning package's `config/reference.conf`; and a module receives only
  * its own section, never another module's. This file is the vocabulary for
- * that. It moves nothing: `at` names where a section sits until it is moved
- * under the module's name, `reference` and `relocatedFrom` are declarations
- * boot does not act on yet, and a module that declares no section is booted
- * as before.
+ * that. It moves nothing by itself: `at` names where a section sits until it
+ * is moved under the module's name, `relocatedFrom` the paths it moved from —
+ * which a configuration still setting refuses boot — `reference` is a
+ * declaration boot does not act on yet, and a module that declares no section
+ * is booted as before.
  */
 
 import type { z } from "zod";
@@ -117,14 +118,71 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	 */
 	readonly at?: string;
 	/**
-	 * The dot-separated paths this section moves from, so that a setting
-	 * still written under an old path can refuse boot naming the new one,
-	 * rather than be ignored.
+	 * The paths this section moved from (#728 B10), so that a setting still
+	 * written at an old path refuses boot naming the new one, rather than be
+	 * ignored. Either form — a list, every index present, or a plain map, its
+	 * prototype `Object.prototype` or `null` — each old path a dot-separated
+	 * path of non-empty keys:
 	 *
-	 * Declared, not yet enforced: boot neither reads nor refuses these paths
-	 * yet.
+	 * - a list of old paths, each moved whole as the section:
+	 *   `["oauth.dpop"]` — `oauth.dpop.nonce.lifetime` is now
+	 *   `dpop.nonce.lifetime`;
+	 * - a map from each old path to its path inside the section, `""` for the
+	 *   section itself, or `null` for a key removed rather than moved — for
+	 *   keys renamed as they moved, a leaf that moved on its own, a key that
+	 *   is gone, or all of these: `{ "oauth.dpop": "",
+	 *   "oauth.dpop.iat-window-seconds": "iatWindowSeconds" }`,
+	 *   `{ "endpoints.login.url": "loginPage.url" }`,
+	 *   `{ "oauth.grants.authorization_code.pkce.requireS256": null }`.
+	 *   A key is mapped by the most specific entry that covers it; the keys
+	 *   below that entry's old path carry over unchanged.
+	 *
+	 * The new path is the section's path as it is read today (`at`, or the
+	 * module's name) followed by the path inside it. When the configuration
+	 * handed to `createApp` sets any key at or under an old path of a loaded
+	 * module, boot refuses before parsing it (`config-path-relocated`), naming
+	 * each such key, where it goes now and the environment variable that binds
+	 * that (#728 B9's naming, a list of objects' elements indexed per #728
+	 * R4) — none while the section is read at a transitional `at`, which
+	 * nothing binds yet — or, for a key mapped to `null`, that it was removed.
+	 * An empty object at an old path sets nothing. An old path may not be, or
+	 * hold, a loaded module's section — its own or another's — no new path may
+	 * lie at, under or over an old path — its own, another of its own, or
+	 * another loaded module's — a key moved there then being refused in turn,
+	 * and no two loaded modules may claim overlapping old paths (the same one,
+	 * or one under the other's), a key set there then having two new paths;
+	 * each is refused at stage 1 (`module-section-path-invalid`). One module may cover its own old path
+	 * with a more specific one. A module that reads its settings through a
+	 * `configSchema` alone declares no section path, so an old path holding
+	 * its settings is not caught.
+	 *
+	 * Who declares a relocation: the module whose section the key moved to —
+	 * except for a switch that decides whether a module is loaded at all (an
+	 * adapter selection, `federations.<name>.enabled`,
+	 * `federationGrants.enabled`). The module it would load may never be, and
+	 * then nothing would refuse the old path: such a relocation is declared by
+	 * a module that is always loaded — the owner of the composition root's
+	 * adapters section.
+	 *
+	 * What an old path must no longer hold by default, so that only an
+	 * operator's own setting is refused: its defaults move with it. A
+	 * `reference.conf` may keep the old path's `${?OLD_VARIABLE}` binding, with
+	 * no default, as a tombstone, so that a variable an operator still exports
+	 * is refused too, rather than ignored — but only when the variable's name
+	 * changed with the path: a variable that keeps its name (a Redis store's
+	 * `…_KEY_PREFIX`) is one the operator set right, and a tombstone for it
+	 * would refuse them (`assertRelocationTombstone` on the testing entry
+	 * holds a tombstone to this). A tombstone works only in a `reference.conf`
+	 * the composition root layers — until the loader layers each package's,
+	 * core's alone. And a composition root that parses the configuration with
+	 * a schema that strips the old path before `createApp` hides it: until the
+	 * loader parses each section on its own, keep the old path declared where
+	 * that schema reads it, presence-only — no `.default()`, preferably
+	 * `z.unknown()` — so that it neither invents a setting nor refuses one.
+	 *
+	 * A bridge for the 0.x line: removed at the first major release — the relocated-paths drift test fails the cut that forgets.
 	 */
-	readonly relocatedFrom?: readonly string[];
+	readonly relocatedFrom?: readonly string[] | Readonly<Record<string, string | null>>;
 }
 
 /**

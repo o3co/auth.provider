@@ -50,6 +50,7 @@ export type {
 	CleanupRecord,
 	CollectedRouteContribution,
 	ComponentWorld,
+	ConfigPathRelocatedDetails,
 	ConfigValidationFailedDetails,
 	ContributeAndOverrideSameKeyDetails,
 	ContributeFactoryFailedDetails,

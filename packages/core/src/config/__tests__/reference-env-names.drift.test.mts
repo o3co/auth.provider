@@ -46,6 +46,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
+import { environmentVariableFor } from "#/config/environment-variable.mjs";
 
 const PACKAGES = fileURLToPath(new URL("../../../../", import.meta.url));
 const TEMPLATE_CONFIG = fileURLToPath(
@@ -133,21 +134,11 @@ const LEGACY: readonly string[] = [
 ];
 
 /**
- * A path in upper snake case: each key split at its capitals and hyphens — a
- * run of capitals is one word, split from a capitalised word after it — and
- * the keys joined by `_`.
+ * A dotted path in upper snake case, by core's own rule — the one the
+ * relocated-path refusal names a key's new variable with, so the guard and the
+ * refusal cannot spell a name two ways.
  */
-const upperSnake = (path: string): string =>
-	path
-		.split(".")
-		.map((key) =>
-			key
-				.replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2")
-				.replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-				.replace(/-/g, "_")
-				.toUpperCase(),
-		)
-		.join("_");
+const upperSnake = (path: string): string => environmentVariableFor(path.split("."));
 
 const MARKER = "__ENVIRONMENT_NAME_MARKER__";
 
