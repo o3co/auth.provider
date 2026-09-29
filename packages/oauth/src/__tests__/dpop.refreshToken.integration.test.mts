@@ -39,6 +39,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	resolveTokenBindingSettings,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
@@ -495,6 +496,38 @@ describe("confidential-client RT binding — opt-in (#275)", () => {
 		expect(result.status).toBe(400);
 		if ("tokens" in result) expect.fail("Expected a rejection");
 		expect(result.error).toBe("invalid_grant");
+	});
+
+	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's (#728)", async () => {
+		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
+		for (const tokenBinding of [
+			undefined,
+			{},
+			{ bindConfidentialClientRefreshTokens: true },
+			{ bindConfidentialClientRefreshTokens: false },
+			// A configuration built by hand, which no schema coerced.
+			{ bindConfidentialClientRefreshTokens: "true" },
+			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+		]) {
+			const config = {
+				...base,
+				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
+			} as unknown as GrantDependencies["config"];
+			const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
+			const { result } = await createRefreshTokenGrant({ ...mockDeps, config }).handle(
+				buildCtx({
+					refreshToken: rt,
+					authenticatedClient: confidentialAuthClient,
+					tokenBinding: dpopBinding("PROOF-JKT-CONF"),
+				}),
+			);
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			const bound = decodeJwt(result.tokens.refresh_token as string).cnf !== undefined;
+			expect(bound, JSON.stringify(tokenBinding)).toBe(
+				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			);
+		}
 	});
 
 	// A public client was already bound; the flag must not reach it.

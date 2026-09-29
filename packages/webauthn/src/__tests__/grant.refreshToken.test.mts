@@ -60,6 +60,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 	type RefreshTokenFamilyRotation,
+	resolveTokenBindingSettings,
 	type TokenBinding,
 	verifyJwt,
 	type WebAuthnCredential,
@@ -600,39 +601,37 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
 	});
 
-	it("binds a confidential client's refresh token when the oauthTokenSettings the composition holds opt in, over the configuration (#728)", async () => {
-		const tokens = await issue(
-			await makeDeps({
-				oauthTokenSettings: createTestOAuthTokenSettings({
-					issuer: ISSUER,
-					bindConfidentialClientRefreshTokens: true,
+	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so, whatever oauthTokenSettings the composition holds (#728)", async () => {
+		// The setting applies across every binding mechanism, so it is core's;
+		// the slot carries none, and the grant reads core's reader.
+		const base = makeConfig() as unknown as { oauth: Record<string, unknown> };
+		for (const tokenBinding of [
+			undefined,
+			{},
+			{ bindConfidentialClientRefreshTokens: true },
+			{ bindConfidentialClientRefreshTokens: false },
+			// A configuration built by hand, which no schema coerced.
+			{ bindConfidentialClientRefreshTokens: "true" },
+			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+		]) {
+			const config = {
+				...base,
+				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
+			} as unknown as GrantDependencies["config"];
+			const tokens = await issue(
+				await makeDeps({
+					config,
+					oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
 				}),
-			}),
-			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
-				tokenBinding: dpopBinding("PROOF-JKT"),
-			}),
-		);
-
-		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
-	});
-
-	it("leaves a confidential client's refresh token unbound when the oauthTokenSettings the composition holds do not opt in, though the configuration does (#728)", async () => {
-		// The slot's `false` is read: a reader that took it for "unset" would
-		// fall through to the configuration's `true` and bind the token.
-		const tokens = await issue(
-			await makeDeps({
-				config: makeConfig({ bindConfidentialClientRefreshTokens: true }),
-				oauthTokenSettings: createTestOAuthTokenSettings({
-					issuer: ISSUER,
-					bindConfidentialClientRefreshTokens: false,
+				makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
+					tokenBinding: dpopBinding("PROOF-JKT"),
 				}),
-			}),
-			makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
-				tokenBinding: dpopBinding("PROOF-JKT"),
-			}),
-		);
-
-		expect(decodePayload(tokens.refresh_token as string).cnf).toBeUndefined();
+			);
+			const bound = decodePayload(tokens.refresh_token as string).cnf !== undefined;
+			expect(bound, JSON.stringify(tokenBinding)).toBe(
+				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			);
+		}
 	});
 
 	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {

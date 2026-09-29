@@ -25,7 +25,7 @@
  *   issuer as written, the lifetimes as core's `resolveAccessTokenLifetime` /
  *   `resolveRefreshTokenLifetime` read them (the deprecated `expiresIn`
  *   included), and every switch on only when it is `true`. The token-binding
- *   dispatch policy is not among them: it is core's, and core reads it.
+ *   settings are not among them: they are core's, and core reads them.
  * - An issuer that is not canonical is refused, as the oauth router refuses it.
  * - The oauth module provides it eagerly: whenever the module is installed the
  *   slot is filled, whether or not a module requires it, so core's own
@@ -103,7 +103,6 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 			legacyTypAccept: false,
 			accessTokenLifetime: resolveAccessTokenLifetime(config),
 			refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
-			bindConfidentialClientRefreshTokens: false,
 			resourceIndicatorEnabled: false,
 			requireEmailVerified: false,
 		});
@@ -115,17 +114,22 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 			legacyTypAccept: true,
 			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 900 },
 			refreshTokenExpiresIn: 7200,
-			bindConfidentialClientRefreshTokens: true,
 			resourceIndicatorEnabled: true,
 			requireEmailVerified: true,
 		});
 	});
 
-	it("carries no dispatch policy, whatever the configuration says: the policy is core's (#728)", () => {
-		// The strict policy is configured, and nothing of it is provided.
+	it("carries no token-binding setting, whatever the configuration says: they are core's (#728)", () => {
+		// The strict policy and the confidential-client binding are configured,
+		// and nothing of either is provided.
 		const settings = oauthTokenSettingsFrom(everySwitchOn()) as unknown as Record<string, unknown>;
-		expect(Object.keys(settings)).not.toContain("tokenBinding");
-		expect(Object.keys(settings)).not.toContain("dispatchPolicy");
+		for (const member of [
+			"tokenBinding",
+			"dispatchPolicy",
+			"bindConfidentialClientRefreshTokens",
+		]) {
+			expect(Object.keys(settings), member).not.toContain(member);
+		}
 	});
 
 	it("refuses an issuer that is not canonical, naming the key", () => {
