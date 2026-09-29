@@ -225,6 +225,48 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 		expect(await onTime.get("tx-1")).toMatchObject({ attempts: 0, challenge: CHALLENGE });
 	});
 
+	it("spends an attempt on, and takes the challenge of, a login whose continuation nests deeper than cjson decodes: the scripts judge the deadline without decoding the record", async () => {
+		// JSON.parse reads a thousand-and-more levels; Redis's cjson refuses
+		// past a thousand. What a read answers live, the scripts must too.
+		let deep: Record<string, unknown> = { leaf: true };
+		for (let level = 0; level < 1100; level += 1) deep = { next: deep };
+		const now = Date.now();
+		const tx = TX({
+			purpose: "login",
+			sid: undefined,
+			challenge: CHALLENGE,
+			continuation: {
+				primary: {
+					subject: "user-1",
+					user: { id: "user-1", deep },
+					claims: {},
+					recorded: {
+						amr: ["pwd"],
+						authentication: {
+							primary: "pwd",
+							federation: undefined,
+							upstreamAmr: undefined,
+							mfaAt: undefined,
+						},
+					},
+					authTimeMs: now - 1_000,
+					redirectTo: undefined,
+					request: {},
+				},
+				done: [],
+				interruptedBy: "mfa",
+			},
+		});
+		const store = storeAt(freshPrefix());
+		await store.create(tx);
+		expect((await store.get("tx-1"))?.continuation?.primary.user).toStrictEqual({
+			id: "user-1",
+			deep,
+		});
+		expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
+		expect(await store.takeChallenge("tx-1", 1)).toStrictEqual(CHALLENGE);
+	});
+
 	it("judges the deadline of a reservation and a take as a read does, to the fraction of a millisecond: at expiresAtMs it is gone, a moment before it is not", async () => {
 		const prefix = freshPrefix();
 		const expiresAtMs = Date.now() + 10 * MINUTE + 0.25;

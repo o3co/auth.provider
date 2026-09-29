@@ -596,6 +596,27 @@ export function runMfaTransactionStoreContract(
 			expect(await store.get("tx-1")).toStrictEqual(winners[0]);
 		});
 
+		it("treats a transaction whose strings hold a lone surrogate as any other: a reservation spends, a take takes, for as long as a read answers it", async () => {
+			// Core admits any string; a store that judges the transaction by a
+			// reading of it stricter than its own read would refuse, for the
+			// transaction's whole life, what every read calls live.
+			const store = await factory();
+			const tx = TX({
+				purpose: "step_up",
+				subject: "user-\udc00",
+				sid: "sid-\ud800",
+				continuation: undefined,
+				redirectTo: undefined,
+				acrValues: ["urn:x:\ud800"],
+				challenge: CHALLENGE,
+			});
+			await store.create(tx);
+			expect(await store.get("tx-1")).toStrictEqual(tx);
+			expect(await store.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
+			expect(await store.takeChallenge("tx-1", 1)).toStrictEqual(CHALLENGE);
+			expect(await store.get("tx-1")).toStrictEqual({ ...tx, attempts: 1, challenge: undefined });
+		});
+
 		it("reserves attempts up to max, then deletes the transaction", async () => {
 			const store = await factory();
 			await store.create(TX());
