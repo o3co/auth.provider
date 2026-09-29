@@ -28,7 +28,10 @@ import type { Module, ModuleSpec } from "./module-spec.mjs";
  *
  * A call that writes its type arguments (`defineModule<Requires,
  * Optional>(…)`) infers none of them: a sectioned module that does names
- * its schema's type as the third (`typeof MySection`).
+ * its schema's type as the third (`typeof MySection`), and one that
+ * declares `authoritative` keys names them as the fourth. `P` is otherwise
+ * inferred from the keys of `provides`, so `authoritative` compiles only
+ * with keys the module provides (#728).
  *
  * Per A2-α §3.1 (TypeScript 5.0+ `const` modifier on generic parameters).
  *
@@ -48,7 +51,8 @@ export function defineModule<
 	const R extends ComponentKey = never,
 	const O extends ComponentKey = never,
 	S extends SectionSchema = never,
->(spec: ModuleSpec<R, O, S>): Module {
+	P extends ComponentKey = never,
+>(spec: ModuleSpec<R, O, S, P>): Module {
 	// Pure pass-through. The boot planner (Phase 4) consumes the erased
 	// Module type; the type-level R/O information is captured at the
 	// defineModule call site for inference but not used at runtime.

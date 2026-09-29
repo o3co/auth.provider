@@ -1,7 +1,7 @@
 {
 	"name": "@o3co/create-auth-provider",
 	"version": "0.0.0",
-	"description": "Scaffold a new o3co/auth.provider project from the standalone template",
+	"description": "Scaffold a new o3co/auth.provider project from one of its templates",
 	"license": "Apache-2.0",
 	"type": "module",
 	"repository": {

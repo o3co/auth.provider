@@ -1,35 +1,49 @@
 # @o3co/create-auth-provider
 
-Last updated: 2026-09-24
+Last updated: 2026-09-29
 
-CLI scaffolder for auth.provider. Generates a new standalone server project from the built-in template.
+CLI scaffolder for auth.provider. Generates a new server project from one of the built-in templates.
 
 ## Responsibility
 
-**Role.** The `npx` entry point that turns the in-repo template
-[`templates/standalone`](../templates/standalone) into a new, independent
-project. It runs once, on the operator's machine; nothing in the generated
+**Role.** The `npx` entry point that turns one of the in-repo templates under
+[`templates/`](../templates) — each a deployable composition root — into a new,
+independent project. It runs once, on the operator's machine; nothing in the generated
 project imports it, and it imports none of the `packages/*` libraries.
 
-**Owns.** Project-name and directory validation, copying the template,
-rewriting the generated `package.json` (name, `workspace:*` → published
-versions), writing the project's `pnpm-workspace.yaml`, and the one-time
-`pnpm-lock.yaml` resolution.
+**Owns.** Project-name, directory and template validation, copying the
+chosen template, rewriting the generated `package.json` (name, `workspace:*`
+→ published versions), writing the project's `pnpm-workspace.yaml`, and the
+one-time `pnpm-lock.yaml` resolution.
 
 **Does not own.** The content of the generated project — source, config,
-Dockerfile, tests — which is the template's (edit `templates/standalone`, not
-this package). Runtime behaviour belongs to `@o3co/auth-provider-core` and the
-libraries the template depends on.
+Dockerfile, tests — which is the template's (edit `templates/<name>`, not
+this package); and which templates there are, and what each is for — the
+[composition templates ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md).
+Runtime behaviour belongs to `@o3co/auth-provider-core` and the libraries the
+template depends on.
 
 **Why a separate package.** It is published on its own with a `bin`, so it can
 be run with `npx` without installing the provider. The monorepo is not in the
-published tarball, so the package carries its own copy of the template and of
-the library versions it pins ([How the template is bundled](#how-the-template-is-bundled)).
+published tarball, so the package carries its own copy of every template and
+of the library versions they pin ([How the templates are bundled](#how-the-templates-are-bundled)).
 
 ## Usage
 
 ```bash
-npx @o3co/create-auth-provider <project-name> [--dir <dir-name>] [--no-lockfile]
+npx @o3co/create-auth-provider <project-name> [--template <name>] [--dir <dir-name>] [--no-lockfile]
+```
+
+`--template` names the template to copy, `standalone` by default. The
+templates are the directories under [`templates/`](../templates) that hold a
+`package.json` (not a symbolic link, not dot-named), and the CLI refuses any
+other name, listing the ones it has.
+What each template is for is in its own README; how the set is drawn — a
+template per composition shape, not per feature — is in the
+[composition templates ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md).
+
+```bash
+npx @o3co/create-auth-provider my-auth-server --template standalone
 ```
 
 `<project-name>` may be either a scoped npm name (`@scope/pkg`) or an unscoped name (`pkg`).
@@ -76,8 +90,8 @@ template's README, which the project carries, gives the commands under
 
 1. Validates `<project-name>` (see [Validation Rules](#validation-rules)).
 2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
-3. Resolves the target directory as `<cwd>/<dir-name>`, and errors if it already exists.
-4. Copies the bundled template to the target directory, excluding `node_modules/` and `dist/`, and restores its `.gitignore` (the tarball carries it as `gitignore`, because npm drops a file named `.gitignore` from a published package).
+3. Checks that `--template` (default `standalone`) names a bundled template, and resolves the target directory as `<cwd>/<dir-name>`, erroring if it already exists.
+4. Copies the named template to the target directory, excluding `node_modules/` and `dist/`, and restores its `.gitignore` (the tarball carries it as `gitignore`, because npm drops a file named `.gitignore` from a published package).
 5. Rewrites `package.json` in the generated directory:
    - Sets `name` to `<project-name>` verbatim (scope-preserving).
    - Keeps `"private": true` on purpose: a scaffolded identity provider should not be publishable by accident. Remove the field yourself if you really intend to publish.
@@ -96,16 +110,25 @@ it is resolved once, here, against the rewritten `package.json`. **Commit it** �
 it is what makes `docker build` reproducible. If step 7 failed or was skipped,
 run `pnpm install` in the project once and commit the result.
 
-## How the template is bundled
+## How the templates are bundled
 
 The package's `prebuild` and `prepack` scripts run
 [`scripts/copy-templates.mjs`](scripts/copy-templates.mjs), which copies
-`templates/standalone` into `create-app/templates/standalone` (git-ignored;
-`node_modules/` and `dist/` excluded) and writes `create-app/templates/versions.json`,
-the current version of every published `@o3co/auth-provider-*` package. The
-tarball ships both (`files: ["dist", "templates"]`), and `scaffold()` reads
-them from there. A scaffold is therefore the template as it was when this
-package was built, pinned to the library versions of that same build.
+every template into `create-app/templates/<name>` (git-ignored; `node_modules/`
+and `dist/` excluded; the destination is rebuilt whole, so a template removed
+from the repository does not linger) and writes `create-app/templates/versions.json`, the current version
+of every published `@o3co/auth-provider-*` package. The tarball ships both
+(`files: ["dist", "templates"]`), and `scaffold()` reads them from there. A
+scaffold is therefore the template as it was when this package was built,
+pinned to the library versions of that same build.
+What a template is — a directory under `templates/`, not a symbolic link and
+not dot-named, holding a `package.json`, named in lowercase kebab-case — is
+defined once, in [`scripts/templates.mjs`](scripts/templates.mjs), which the
+copy and CI's build of every template both use; the scaffolder's
+`availableTemplates()` reads the copy by the same rule.
+[`published-package.test.mts`](src/__tests__/published-package.test.mts)
+packs the package and holds the tarball to the repository: it must ship every
+template, and each must scaffold from it.
 
 CI runs [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs),
 which fails when a published package under `packages/` is missing from
@@ -124,14 +147,19 @@ Both forms must be non-empty, not `.` or `..`, and ≤ 214 characters.
 
 `--dir <value>` must match the unscoped pattern above (same constraints).
 
+`--template <name>` must be the name of a bundled template, exactly; a path is
+never one. A template's name is lowercase kebab-case,
+`^[a-z0-9]+(?:-[a-z0-9]+)*$` (lowercase letters and digits, in parts joined by
+single hyphens); the build refuses a template named otherwise.
+
 ## Known Limitations
 
-- The bundled template's `README.md` / `README.ja.md` carry the upstream title `@o3co/auth-provider-standalone`. When generating a scoped project, that title will not match your `package.json` name; edit it manually if it matters for your use case.
+- Each bundled template's `README.md` / `README.ja.md` carry its upstream title, such as `@o3co/auth-provider-standalone`. When generating a scoped project, that title will not match your `package.json` name; edit it manually if it matters for your use case.
 - The template's README links into this repository with relative paths (`../../docs/…`, `../../packages/…`). Those resolve in the monorepo and not in a scaffolded project, where there is no `docs/` or `packages/` beside it; read them on GitHub instead.
 
 ## Generated Structure
 
-The generated project is a complete copy of
+The generated project is a complete copy of the chosen template, such as
 [`templates/standalone`](../templates/standalone) (without `node_modules/` and
 `dist/`) plus `pnpm-workspace.yaml` (step 6) and, unless `--no-lockfile` was
 given or the lockfile step failed, `pnpm-lock.yaml` (step 7). The template's README describes its layout — which file is
@@ -142,12 +170,15 @@ the composition, which is the host process, and what the scaffold owns.
 The module exports the functions the CLI is built from; their signatures are
 in [`src/index.mts`](src/index.mts).
 
-- `scaffold(targetDir, projectName)` — steps 4–6. Throws if the bundled template is missing or a `workspace:*` dependency has no entry in `versions.json`.
+- `scaffold(targetDir, projectName, template?)` — steps 4–6, from `template` (default `DEFAULT_TEMPLATE`, `"standalone"`). Throws, before writing anything, with `templateRefusal`'s message; and throws if a `workspace:*` dependency has no entry in `versions.json`.
+- `availableTemplates(templatesRoot?)` — the bundled templates' names, sorted.
+- `templateRefusal(template, templates)` — why `template` cannot be scaffolded (none bundled, or not one of them), or `undefined`.
 - `generateLockfile(targetDir)` — step 7. Returns `{ ok: true, command }` or `{ ok: false, reason }` rather than throwing.
-- `main()` — the CLI: reads `process.argv`, and exits non-zero on an invalid argument or an existing directory.
+- `main()` — the CLI: reads `process.argv`, and exits non-zero on an invalid argument, an unknown template or an existing directory.
 - `isValidProjectName(name)` / `isValidDirName(name)` — the [Validation Rules](#validation-rules).
 
 ## See Also
 
-- [`@o3co/auth-provider-standalone`](../templates/standalone) — The template this tool generates from
+- [`templates/`](../templates) — The templates this tool generates from; [`@o3co/auth-provider-standalone`](../templates/standalone) is the default
+- [Composition templates ADR](../packages/core/docs/adr/2026-09-29-composition-templates.md) — Why the templates are split as they are
 - [`@o3co/auth-provider-core`](../packages/core) — Core application factory

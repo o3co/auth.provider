@@ -8,24 +8,28 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
-// Bundles the template into this package (`prebuild` / `prepack`): copies
-// `templates/standalone` to `create-app/templates/standalone`, stages its
-// `.gitignore` under a name npm will publish, and writes
+// Bundles the templates into this package (`prebuild` / `prepack`): copies
+// every template under `templates/` to `create-app/templates/<name>`
+// (`copyTemplates` in `templates.mjs`, which also says what a template is and
+// stages each one's `.gitignore` under a name npm will publish), and writes
 // `create-app/templates/versions.json` — the version of every published
 // sibling package, which `scaffold()` substitutes for `workspace:*`. The
 // published tarball carries no monorepo, so this copy is what a scaffold is
 // made from. `check-versions-json.mjs` keeps the version list below in step
 // with `packages/`.
+//
+// Verified rather than assumed: `published-package.test.mts` packs this
+// package, scaffolds every template from the tarball, and asserts each
+// scaffolded project has a `.gitignore` — which is how its omission (#407) was
+// found in the first place.
 
-import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { copyTemplates } from "./templates.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const src = resolve(__dirname, "../../templates/standalone");
-const dest = resolve(__dirname, "../templates/standalone");
-
-const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
+const destRoot = resolve(__dirname, "../templates");
 
 // NOTE: `reference.conf` is intentionally NOT copied here. It lives in
 // `packages/core/config/reference.conf` and is shipped to consumers via the
@@ -37,39 +41,7 @@ const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 // (`application.conf`, `development.conf`, `production.conf`) — the
 // per-deployment delta layer, not the library baseline.
 
-// Mirrors `shouldCopyTemplateEntry` in src/internal/template-filter.mts: only
-// segments INSIDE `src` are checked against EXCLUDED_DIRS, not the absolute
-// install-prefix path above it. Without this, running the prebuild script with
-// the workspace itself living under a `node_modules` directory would copy zero
-// files. (This script runs at build time before tsc, so it cannot import the
-// compiled module — the logic is duplicated by necessity.)
-const shouldCopy = (source) => {
-	if (source === src) return true;
-	const prefix = src.endsWith(sep) ? src : `${src}${sep}`;
-	if (!source.startsWith(prefix)) return true;
-	const rel = source.slice(prefix.length);
-	return !rel.split(sep).some((segment) => EXCLUDED_DIRS.has(segment));
-};
-
-rmSync(dest, { recursive: true, force: true });
-cpSync(src, dest, {
-	recursive: true,
-	filter: shouldCopy,
-});
-
-// #407: npm drops a file literally named `.gitignore` from a published
-// package, so the template's copy is staged here under a dot-less name and
-// `scaffold()` renames it back when it writes the project. The source of truth
-// stays `templates/standalone/.gitignore`, where it also does its own job for
-// anyone working on the template in-tree.
-//
-// Verified rather than assumed: `published-package.test.mts` packs this
-// package, scaffolds from the tarball, and asserts the scaffolded project has
-// a `.gitignore` — which is how the omission was found in the first place.
-const stagedGitignore = resolve(dest, ".gitignore");
-if (existsSync(stagedGitignore)) {
-	renameSync(stagedGitignore, resolve(dest, "gitignore"));
-}
+copyTemplates(resolve(__dirname, "../../templates"), destRoot);
 
 // Embed package versions so they're available at runtime without
 // traversing the monorepo source tree (which won't exist in published tarballs).
@@ -106,4 +78,4 @@ const versions = {
 	"@o3co/auth-provider-webauthn": readVersion("../../packages/webauthn/package.json"),
 };
 
-writeFileSync(resolve(dest, "..", "versions.json"), `${JSON.stringify(versions, null, "\t")}\n`);
+writeFileSync(resolve(destRoot, "versions.json"), `${JSON.stringify(versions, null, "\t")}\n`);
