@@ -35,7 +35,12 @@
  *   provides without naming it authoritative may be overridden, as before.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type {
+	AuthoritativeComponentOverriddenDetails,
+	AuthoritativeWithoutProvidesDetails,
+	BootErrorDetails,
+} from "../../index.mjs";
 import { createApp } from "../../index.mjs";
 import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
@@ -92,6 +97,14 @@ const refusal = async (booting: Promise<unknown>): Promise<BootError> => {
 };
 
 describe("ModuleSpec.authoritative (#728)", () => {
+	it("publishes both reasons' details on the package's root, as members of BootErrorDetails", () => {
+		expectTypeOf<AuthoritativeWithoutProvidesDetails>().toExtend<BootErrorDetails>();
+		expectTypeOf<AuthoritativeComponentOverriddenDetails>().toExtend<BootErrorDetails>();
+		expectTypeOf<AuthoritativeComponentOverriddenDetails>().toEqualTypeOf<
+			Extract<BootErrorDetails, { reason: "authoritative-component-overridden" }>
+		>();
+	});
+
 	it("refuses a key the module names authoritative and does not provide", async () => {
 		const err = await refusal(
 			createApp({

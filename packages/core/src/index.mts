@@ -114,6 +114,8 @@ export type { AuditEvent, AuditEventDetails, AuditSink, AuditSinkFactory } from 
 export { AUDIT_SINK_ABSENCE_POLICY, BUILT_IN_AUDIT_EVENT_TYPES } from "./audit/types.mjs";
 export type {
 	AppHandle,
+	AuthoritativeComponentOverriddenDetails,
+	AuthoritativeWithoutProvidesDetails,
 	BootErrorDetails,
 	BootErrorReason,
 	BootStage,
