@@ -33,6 +33,17 @@
  * where they live once `oauth {}` is the oauth module's alone is decided
  * with that move.
  *
+ * Not every module can read the slot. The boot planner orders modules, not
+ * components: a module that reads a key depends on the whole module providing
+ * it. So no module in the oauth module's dependency set — the providers of its
+ * `requires` and its `optional` keys, and whatever those depend on in turn —
+ * can read this slot, because the oauth module would depend on it and it on
+ * the oauth module, and boot refuses the pair as a cycle. Such a module reads
+ * the configuration, as before: the default refresh-token family revocation
+ * module is one, since the oauth module reads the `refreshTokenFamilyRevocation`
+ * it provides. Providing the slot from a module that depends on none of them
+ * would lift the constraint; that is left for later.
+ *
  * Each value is resolved — no deprecated alias and no absence left for a
  * reader to interpret — and the whole is frozen, so a reader cannot change
  * what the others read. The contract suite and a test double are published

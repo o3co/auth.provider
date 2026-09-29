@@ -230,10 +230,14 @@ describe("the default modules size the horizon from the configuration", () => {
 		);
 	});
 
-	it("read no oauthTokenSettings: the oauth module reads what they provide (#728)", () => {
-		// The oauth module reads refreshTokenFamilyRevocation, and its grants the
-		// rotation; reading the slot it provides would make each module depend
-		// on the other, which boot refuses as a cycle. They keep reading config.
+	it("read no oauthTokenSettings: the oauth module depends on one of them, and the two agree (#728)", () => {
+		// The planner orders modules, not components. The oauth module reads the
+		// refreshTokenFamilyRevocation the revocation module provides, so that
+		// module reading the slot the oauth module provides would make each
+		// depend on the other, which boot refuses as a cycle. The oauth module
+		// does not read refreshTokenFamilyRotation: the rotation module reads
+		// config beside the revocation module on purpose, so that the two keep
+		// a family revoked on replay for the same horizon.
 		expect(defaultRefreshTokenFamilyRevocationModule.optional ?? []).not.toContain(
 			"oauthTokenSettings",
 		);
