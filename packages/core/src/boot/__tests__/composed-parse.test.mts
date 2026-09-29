@@ -214,6 +214,29 @@ describe("one composed parse over the transitional base", () => {
 			},
 		);
 
+		const emptying = defineModule({
+			name: "emptying-reader",
+			configSchema: z.object({
+				widget: z.object({ size: z.unknown().transform(() => ({})) }),
+			}),
+		});
+
+		it.each([
+			["the value first", [coercing, emptying]],
+			["the empty object first", [emptying, coercing]],
+		])(
+			"refuse boot when one makes an empty object where another makes a value (%s)",
+			async (_label, modules) => {
+				// Laid over each other, the later one would win: an empty object
+				// over the number, or the number over the empty object.
+				const err = await bootRefused(modules, resolved({ widget: { size: "3" } }));
+				expect(err.reason).toBe("config-validation-failed");
+				expect(err.message).toMatch(/widget\.size: /);
+				expect(err.message).toMatch(/"coercing-reader"/);
+				expect(err.message).toMatch(/"emptying-reader"/);
+			},
+		);
+
 		it("boot when one of them declares nothing: an empty object holds no value", async () => {
 			const empty = defineModule({ name: "empty-reader", configSchema: z.object({}) });
 			const config = await bootAndRead([empty, coercing], resolved({ widget: { size: "3" } }));
