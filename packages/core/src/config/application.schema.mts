@@ -2057,6 +2057,14 @@ export const fullSectionsSchema = z.object({
  * Kept as a plain ZodObject (via .extend) for backward compatibility:
  * - consumers can access .shape (e.g. AppConfigSchema.shape.oauth.shape.jwt)
  * - ts.hocon/zod coercion traverses ZodObject shape, not ZodIntersection
+ *
+ * @deprecated A composition root no longer parses its configuration before
+ * `createApp` (#728): it hands `createApp` the configuration it resolved,
+ * and boot parses it once, with each loaded module's own schema — a parse
+ * with this schema first strips every section it does not declare, which is
+ * how #472, #495 and #496 lost theirs. Read what the root needs before it
+ * knows its modules with `readTransitionalConfig`. `AppConfig`, the type,
+ * stays.
  */
 export const AppConfigSchema = CoreConfigSchema.extend(fullSectionsSchema.shape);
 

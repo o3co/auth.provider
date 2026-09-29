@@ -19,12 +19,13 @@
  * `createApp` with the bundled memory limiter module in the `rateLimiter`
  * slot — what a composition actually runs.
  *
- * Absent — the section or the key not given, a module not loaded — seeds
- * nothing, and the prefix runs on the adapter's default, as #270 and #448
- * intend. Present but not a spec a limiter can apply is a configuration
- * someone wrote: it used to be skipped as silently, so the route ran on the
- * adapter's 60 per 60 s instead of what was written. It must refuse to boot,
- * naming the config key, not the limiter.
+ * Absent — the section not given, a module not loaded — seeds nothing, and
+ * the prefix runs on the adapter's default, as #270 and #448 intend. Present
+ * but not a spec a limiter can apply is a configuration someone wrote: it
+ * used to be skipped as silently, so the route ran on the adapter's 60 per
+ * 60 s instead of what was written. It must refuse to boot, naming the config
+ * key, not the limiter — since #728 by the schema core's composed parse
+ * applies to each section it mirrors, before any seed is read.
  */
 
 import express, { Router } from "express";
@@ -105,10 +106,10 @@ const limitOf = async (config: Config, prefix: string): Promise<number | undefin
 	}
 };
 
-describe("a seeded budget whose key is absent", () => {
+describe("a seeded budget whose section is absent", () => {
 	it("seeds nothing, and the prefix runs on the adapter's default", async () => {
 		const config = baseConfig();
-		config.rateLimit = { failMode: "open" };
+		delete (config as Record<string, unknown>).rateLimit;
 		expect(await limitOf(config, "login")).toBe(60);
 		expect(await limitOf(baseConfig(), "device_verification")).toBe(60);
 		expect(await limitOf(baseConfig(), "webauthn-authentication-options")).toBe(60);
@@ -117,10 +118,10 @@ describe("a seeded budget whose key is absent", () => {
 
 describe("a seeded budget given as the strings HOCON substitutes", () => {
 	// An environment variable reaches the config as a string, and every
-	// schema that owns these keys coerces it. createApp parses neither the
-	// `rateLimit` section (unless `sessionModule`, whose schema picks it, is
-	// mounted) nor the `webauthn` section, so a composition that hands it
-	// HOCON directly must boot on the budget written, not refuse it.
+	// schema that owns these keys coerces it — core's composed parse among
+	// them, for the sections it still mirrors (#728) — so a composition that
+	// hands createApp HOCON directly must boot on the budget written, not
+	// refuse it.
 	it("boots on rateLimit.login as numeric strings, and applies it", async () => {
 		const config = baseConfig();
 		config.rateLimit = { ...config.rateLimit, login: { windowMs: "900000", limit: "20" } };
@@ -149,7 +150,7 @@ describe("a seeded budget whose key is present but not a spec a limiter can appl
 			const config = baseConfig();
 			config.rateLimit = { ...config.rateLimit, login };
 			const text = await refusal(config);
-			expect(text, JSON.stringify(login)).toMatch(/rateLimit\.login must be/);
+			expect(text, JSON.stringify(login)).toMatch(/rateLimit\.login/);
 			expect(text, JSON.stringify(login)).not.toMatch(/createMemoryRateLimiter|limits\.login/);
 		}
 	});
@@ -190,7 +191,7 @@ describe("a seeded budget whose key is present but not a spec a limiter can appl
 			config.webauthn = { rateLimit: { authenticationOptions } };
 			const text = await refusal(config);
 			expect(text, JSON.stringify(authenticationOptions)).toMatch(
-				/webauthn\.rateLimit\.authenticationOptions must be/,
+				/webauthn\.rateLimit\.authenticationOptions/,
 			);
 			expect(text, JSON.stringify(authenticationOptions)).not.toMatch(
 				/createMemoryRateLimiter|limits\.webauthn/,

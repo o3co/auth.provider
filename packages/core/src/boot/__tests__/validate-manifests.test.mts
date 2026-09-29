@@ -903,16 +903,16 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		// host environment passing a full AppConfig (with session, repositories,
 		// rateLimit, etc.) would have those sections silently dropped, leaving
 		// `handle.components.config` typed as AppConfig but runtime-shaped as
-		// CoreConfig. The merge-back step in validateAndComposeConfig must
-		// preserve top-level extras while still applying CoreConfigSchema
-		// defaults at the keys it knows about.
+		// CoreConfig. Since #728 the composed parse lays the base's output over
+		// what was written, so a key no schema declares is kept at every depth
+		// — and a section core mirrors, when present, is parsed by its schema.
 		const noSchema = defineModule({ name: "no-schema" });
 		const result = validateManifests({
 			modules: [noSchema],
 			bootstrapComponents: {
 				config: {
 					...minCoreConfig,
-					session: { strategy: "jwt-signed-cookie", cookieName: "_sess" },
+					consumerSession: { strategy: "jwt-signed-cookie", cookieName: "_sess" },
 					customConsumerKey: { whatever: 42 },
 				} as never,
 				pathResolver: minBootstrap.pathResolver,
@@ -922,7 +922,7 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		// Parsed config flows through with the values supplied at the boundary
 		expect((cfg.http as { port: number }).port).toBe(minCoreConfig.http.port);
 		// Top-level extras preserved
-		expect(cfg.session).toEqual({ strategy: "jwt-signed-cookie", cookieName: "_sess" });
+		expect(cfg.consumerSession).toEqual({ strategy: "jwt-signed-cookie", cookieName: "_sess" });
 		expect(cfg.customConsumerKey).toEqual({ whatever: 42 });
 	});
 });

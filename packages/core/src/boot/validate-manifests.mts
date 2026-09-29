@@ -30,14 +30,15 @@
  * Per A2-β §5.1.
  */
 
-import { z } from "zod";
+import type { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
-import { composeConfigSchema } from "../config/application.schema.mjs";
+import { overlayConfig, TransitionalConfigSchema } from "../config/composed.mjs";
 import {
 	findRelocatedKeys,
 	type RelocatedPath,
 	relocatedKeyMessage,
 } from "../config/removed-keys.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -1604,70 +1605,103 @@ function checkLifecycleClosure(modules: readonly NormalisedModule[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// Step 13 — Config schema composition and validation
+// Step 13 — the one composed parse (#728)
 // Per A2-β §5.1 step 13.
 // ---------------------------------------------------------------------------
 
+/** An object literal's kind of object: its prototype is `Object.prototype`, or it has none. */
+function isPlainConfigObject(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const prototype: unknown = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
 /**
- * Step 13: Compose all module `configSchema` entries into a single Zod
- * schema and validate `bootstrapComponents.config` against it.
- * Returns the parsed config value (with Zod defaults / transforms applied)
- * so the caller can substitute it back into bootstrapComponents.
- * On parse failure throws `config-validation-failed`.
+ * Issues as the operator reads them: each path joined with dots, the whole
+ * configuration named as such.
+ */
+function namedIssues(issues: readonly z.core.$ZodIssue[]): string {
+	return issues
+		.map((issue) => `${operatorPath(issue.path) || "(the configuration)"}: ${issue.message}`)
+		.join("; ");
+}
+
+/**
+ * Step 13: parse the configuration a composition root handed over —
+ * `bootstrapComponents.config`, as it resolved it — once, with every schema
+ * that reads it:
+ *
+ * 1. the transitional base (`TransitionalConfigSchema`): core's own sections
+ *    and every section core's schema still mirrors for a package, each
+ *    optional, with the coercions and checks they always applied — so a
+ *    mirrored section is validated when the configuration carries it,
+ *    whether or not the module that reads it is loaded, until the move pull
+ *    requests take the mirrors out (#728);
+ * 2. laid over what was written (`overlayConfig`), so a key no schema
+ *    declares — at the top or under a section core declares — is kept;
+ * 3. then each module's `configSchema`, over the base's output rather than
+ *    what was written — so a module's schema reads an environment variable's
+ *    string as the base coerced it — each laid over the result the same way.
+ *
+ * Returns the composed configuration: what the `config` slot holds once
+ * each module's section is written back into it (`parseModuleSections`).
+ * Every refused value, from the base and from every module's schema, is one
+ * `config-validation-failed` naming each operator path.
  * Per A2-β §5.1 step 13.
  * @internal
  */
 function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
-	const schemas: z.ZodObject<z.ZodRawShape>[] = [];
 	const participants: { readonly module: string; readonly schemaPath?: string }[] = [];
+	const issues: z.core.$ZodIssue[] = [];
+	const raw: unknown = (bootstrap as Record<string, unknown>).config;
 
+	const base = TransitionalConfigSchema.safeParse(raw);
+	if (!base.success) issues.push(...base.error.issues);
+	const overlaid = base.success ? overlayConfig(raw, base.data) : raw;
+
+	let composed = overlaid;
 	for (const m of modules) {
-		if (m.configSchema) {
-			schemas.push(m.configSchema);
-			participants.push({ module: m.name });
-		}
+		if (!m.configSchema) continue;
+		participants.push({ module: m.name });
+		const result = m.configSchema.safeParse(overlaid);
+		if (result.success) composed = overlayConfig(composed, result.data);
+		else issues.push(...result.error.issues);
 	}
 
-	// Always run composeConfigSchema — it always includes CoreConfigSchema as
-	// the base, even when no module declares a configSchema. Skipping the
-	// parse when `schemas.length === 0` would let an invalid `oauth` / `http`
-	// section through and deny module-less consumers the CoreConfigSchema
-	// defaults that downstream code (and the bootstrap.config slot type)
-	// assumes are present.
-	const composedSchema = composeConfigSchema(schemas);
-
-	try {
-		const rawConfig = (bootstrap as Record<string, unknown>).config;
-		const parsed = composedSchema.parse(rawConfig) as Record<string, unknown>;
-		// CoreConfigSchema's top-level z.object strips unknown keys. When no
-		// module declares a configSchema, extras like `session`, `repositories`,
-		// `rateLimit`, `cors`, and consumer-specific top-level keys would be
-		// silently dropped — incompatible with `ComponentMap.config: AppConfig`
-		// (the typed slot promises a fuller shape than CoreConfig). Merge the
-		// parsed result over the raw input: parsed values win at every key the
-		// schema knows about (so Zod defaults apply); raw extras at the top
-		// level are preserved untouched. Per Codex P2 finding on the prior
-		// hardening commit (270914f5).
-		const rawObj =
-			rawConfig !== null && typeof rawConfig === "object"
-				? (rawConfig as Record<string, unknown>)
-				: {};
-		return { ...rawObj, ...parsed };
-	} catch (err) {
-		if (err instanceof z.ZodError) {
-			throw new BootError({
-				message: `Config validation failed — ${err.issues.length} issue(s) found.`,
+	if (issues.length > 0) {
+		throw new BootError({
+			message: `Config validation failed — ${issues.length} issue(s) found: ${namedIssues(issues)}.`,
+			reason: "config-validation-failed",
+			stage: "validateManifests",
+			details: {
 				reason: "config-validation-failed",
-				stage: "validateManifests",
-				details: {
-					reason: "config-validation-failed",
-					issues: err.issues,
-					modules: participants,
-				},
-			});
-		}
-		throw err;
+				issues: issues as z.ZodIssue[],
+				modules: participants,
+			},
+		});
 	}
+	return composed;
+}
+
+/**
+ * The top-level sections of the configuration as written that nothing owns
+ * (#728 B8), sorted: not a section core's transitional base declares — its
+ * own, or one it mirrors — not a top-level key of a loaded module's
+ * `configSchema`, and not the first key of a loaded module's section path.
+ * Boot keeps them in the `config` slot and names them once in the log; a
+ * misspelt section name is what an operator finds there.
+ * @internal
+ */
+function ignoredSections(modules: readonly Module[], raw: unknown): readonly string[] {
+	if (!isPlainConfigObject(raw)) return [];
+	const owned = new Set<string>(Object.keys(TransitionalConfigSchema.shape));
+	for (const m of modules) {
+		for (const key of Object.keys(m.configSchema?.shape ?? {})) owned.add(key);
+		if (m.section !== undefined) owned.add(sectionSegmentsOf(m)[0] as string);
+	}
+	return Object.keys(raw)
+		.filter((key) => !owned.has(key))
+		.sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -1757,51 +1791,101 @@ function parseSection(
 	}
 }
 
+/** What stands in the way of writing a section back: the path, and what it holds. */
+interface WriteBlocked {
+	readonly blockedAt: readonly string[];
+	readonly holding: unknown;
+}
+
 /**
- * Parse every declared section: for each module whose manifest has a
- * `section`, read the value at its path out of the parsed configuration —
- * the one the `config` slot holds, so a section reads what the module read
- * from `config` before it declared one — and parse it with the section's
- * schema, synchronously.
+ * `target` with `value` written at `segments`, copied on the way down — no
+ * object of `target` is changed, and every object on the path is a new one
+ * with the same prototype. A missing object on the path is created; anything
+ * else on it — a scalar, a list, an instance — is where the write is blocked.
+ */
+function writeConfigPath(
+	target: unknown,
+	segments: readonly string[],
+	value: unknown,
+	walked: readonly string[] = [],
+): { readonly written: unknown } | WriteBlocked {
+	if (segments.length === 0) return { written: value };
+	if (target !== undefined && !isPlainConfigObject(target)) {
+		return { blockedAt: walked, holding: target };
+	}
+	const [key, ...rest] = segments as [string, ...string[]];
+	const current = target !== undefined && Object.hasOwn(target, key) ? target[key] : undefined;
+	const below = writeConfigPath(current, rest, value, [...walked, key]);
+	if (!("written" in below)) return below;
+	const copy: Record<string, unknown> =
+		target !== undefined && Object.getPrototypeOf(target) === null
+			? Object.setPrototypeOf({}, null)
+			: {};
+	const define = (name: string, defined: unknown) =>
+		// Defined, not assigned: a key named `__proto__` stays a key.
+		Object.defineProperty(copy, name, {
+			value: defined,
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+	if (target !== undefined) for (const name of Object.keys(target)) define(name, target[name]);
+	define(key, below.written);
+	return { written: copy };
+}
+
+/** How a blocked write's obstacle is named: its kind, never its value (it may be a secret). */
+function kindOf(value: unknown): string {
+	if (value === null) return "null";
+	if (Array.isArray(value)) return "a list";
+	if (typeof value === "object") return "an object that is not plain data";
+	return `a ${typeof value}`;
+}
+
+/**
+ * Parse every declared section and write each back into the configuration:
+ * for each module whose manifest has a `section`, read the value at its path
+ * out of the composed configuration — the base laid over what was written,
+ * so the value arrives coerced where core's schema coerces it and whole
+ * where no schema declares it — and parse it with the section's schema,
+ * synchronously.
  *
- * Returns each sectioned module's parsed value by name. When a schema
- * refuses its value, every section is still parsed, and one
+ * Each module is handed its schema's output as `deps.section`, a deeply
+ * frozen copy (`frozenSection`). The `config` slot gets the same output
+ * written back at the section's path — a loaded module's section is never
+ * stripped — outer sections before inner ones: every section is read before
+ * any is written, so an outer schema that keeps only its own keys does not
+ * take an inner module's section from it, and an inner section's output
+ * lands inside the outer's. A section whose output is `undefined` writes
+ * nothing. A section a scalar, a list or an instance stands in the way of —
+ * the outer section's output left no object where the inner path goes — is
+ * refused at its path.
+ *
+ * When a schema refuses its value, every section is still parsed, and one
  * `config-validation-failed` names every refused one: each issue's path is
  * prefixed with its section's, so the message and `details.issues` name the
  * path the operator wrote (`legacy.fixture.retries`), and `details.modules`
- * lists each refused module with the path its section is read at.
- *
- * The configuration itself is left as it was: a section's parse transforms
- * only what the module is handed as `deps.section` — a deeply frozen copy
- * (`frozenSection`) — never the `config` slot. Every module in `modules` is
- * parsed, whether or not a factory of it will run.
+ * lists each refused module with the path its section is read at. Every
+ * module in `modules` is parsed, whether or not a factory of it will run.
  * @internal
  */
 function parseModuleSections(
 	modules: readonly Module[],
-	parsedConfig: unknown,
-): ReadonlyMap<string, { readonly value: unknown }> {
-	const sections = new Map<string, { readonly value: unknown }>();
+	composedConfig: unknown,
+): {
+	readonly config: unknown;
+	readonly sections: ReadonlyMap<string, { readonly value: unknown }>;
+} {
+	const parsed: {
+		readonly module: Module;
+		readonly segments: readonly string[];
+		readonly data: unknown;
+	}[] = [];
 	const issues: z.ZodIssue[] = [];
 	const refused: { readonly module: string; readonly schemaPath: string }[] = [];
-
-	for (const m of modules) {
-		if (m.section === undefined) continue;
-		const segments = sectionSegmentsOf(m);
-		const result = parseSection(m.section.schema, readConfigPath(parsedConfig, segments));
-		if ("data" in result) {
-			sections.set(m.name, { value: frozenSection(result.data) });
-			continue;
-		}
-		for (const issue of result.issues) {
-			issues.push({ ...issue, path: [...segments, ...issue.path] } as z.ZodIssue);
-		}
-		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
-	}
-
-	if (issues.length > 0) {
+	const refuse = () => {
 		const named = issues.map((issue) => `${operatorPath(issue.path)}: ${issue.message}`);
-		throw new BootError({
+		return new BootError({
 			message: `Config validation failed — ${issues.length} issue(s) found in module sections: ${named.join("; ")}.`,
 			reason: "config-validation-failed",
 			stage: "validateManifests",
@@ -1811,8 +1895,45 @@ function parseModuleSections(
 				modules: refused,
 			},
 		});
+	};
+
+	for (const m of modules) {
+		if (m.section === undefined) continue;
+		const segments = sectionSegmentsOf(m);
+		const result = parseSection(m.section.schema, readConfigPath(composedConfig, segments));
+		if ("data" in result) {
+			parsed.push({ module: m, segments, data: result.data });
+			continue;
+		}
+		for (const issue of result.issues) {
+			issues.push({ ...issue, path: [...segments, ...issue.path] } as z.ZodIssue);
+		}
+		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
 	}
-	return sections;
+	if (issues.length > 0) throw refuse();
+
+	// Outer sections first; `sort` is stable, so equal depths keep module order.
+	let config = composedConfig;
+	const byDepth = [...parsed].sort((a, b) => a.segments.length - b.segments.length);
+	for (const { module, segments, data } of byDepth) {
+		if (data === undefined) continue;
+		const result = writeConfigPath(config, segments, data);
+		if ("written" in result) {
+			config = result.written;
+			continue;
+		}
+		issues.push({
+			code: "custom",
+			path: [...segments],
+			message: `module "${module.name}"'s section cannot be written back: ${operatorPath(result.blockedAt) || "the configuration"} holds ${kindOf(result.holding)}, not an object`,
+		} as z.ZodIssue);
+		refused.push({ module: module.name, schemaPath: sectionPathOf(module) });
+	}
+	if (issues.length > 0) throw refuse();
+
+	const sections = new Map<string, { readonly value: unknown }>();
+	for (const { module, data } of parsed) sections.set(module.name, { value: frozenSection(data) });
+	return { config, sections };
 }
 
 // ---------------------------------------------------------------------------
@@ -2185,6 +2306,7 @@ function checkModuleSectionPaths(rawModules: readonly Module[]): void {
 				: `its new path "${target.join(".")}" holds "${chained.entry}", an old path of module "${chained.module}", so a key moved under it could be refused in turn`,
 		);
 	}
+	checkModuleSectionOwners(rawModules);
 }
 
 /**
@@ -2217,6 +2339,35 @@ function checkRelocatedConfigPaths(rawModules: readonly Module[], bootstrap: Boo
 			})),
 		},
 	});
+}
+
+/**
+ * A section has one owner (#728): two modules whose sections are read at the
+ * same path — the same keys, a module's name counting as one key — would
+ * each be handed the other's configuration and each write it back. Throws
+ * `module-section-path-shared` naming the path and every module declaring
+ * it, in module order. A section inside another module's is not shared: it
+ * is written back inside the outer one (`parseModuleSections`).
+ * @internal
+ */
+function checkModuleSectionOwners(rawModules: readonly Module[]): void {
+	const owners = new Map<string, { readonly at: string; readonly modules: string[] }>();
+	for (const m of rawModules) {
+		if (m.section === undefined) continue;
+		const key = JSON.stringify(sectionSegmentsOf(m));
+		const entry = owners.get(key) ?? { at: sectionPathOf(m), modules: [] };
+		entry.modules.push(m.name);
+		owners.set(key, entry);
+	}
+	for (const { at, modules } of owners.values()) {
+		if (modules.length < 2) continue;
+		throw new BootError({
+			message: `Modules ${modules.map((name) => `"${name}"`).join(", ")} each declare their section at "${at}": a section has one owner. Declare each module's section at a path of its own.`,
+			reason: "module-section-path-shared",
+			stage: "validateManifests",
+			details: { reason: "module-section-path-shared", at, modules },
+		});
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2368,7 +2519,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 	},
 	{
 		id: "module-section-paths",
-		spec: "issue #728 (a section's transitional path and the paths it moved from)",
+		spec: "issue #728 (a section's transitional path, the paths it moved from, and its one owner)",
 		run: (ctx) => checkModuleSectionPaths(ctx.rawModules),
 	},
 	{
@@ -2446,14 +2597,17 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
  * `Module[]`, `bootstrapComponents`, `contributionKinds`, and
  * `overrideComponents` and runs the two check registries around the
  * config-parse stage: {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then A2-β §5.1
- * step 13 (`validateAndComposeConfig`, which produces the parsed config),
- * then {@link STAGE_ONE_POST_CONFIG_CHECKS}.
+ * step 13 (`validateAndComposeConfig`, the one composed parse, and
+ * `parseModuleSections`, which writes each module's section back into the
+ * parsed config), then {@link STAGE_ONE_POST_CONFIG_CHECKS}.
  *
  * Returns a `ValidatedManifests` on success. Throws a typed `BootError`
  * on the first violation in input-array order.
  *
- * The stage is **deterministic and side-effect-free**: same inputs → same
- * output / same error. Per A2-β §5.1.
+ * The stage is **deterministic**: same inputs → same output / same error.
+ * Its only side effects are boot notices to the wired logger — the
+ * top-level sections nothing owns (`config_sections_ignored`, #728 B8) and
+ * the replica-safety warning. Per A2-β §5.1.
  */
 export function validateManifests(input: ValidateManifestsInput): ValidatedManifests {
 	const { modules, bootstrapComponents, contributionKinds, overrideComponents } = input;
@@ -2483,15 +2637,23 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// registry row because it PRODUCES a value — the parsed config (with Zod
 	// defaults / transforms applied) that replaces the original config in the
 	// returned bootstrapComponents, and that every post-config row reads.
-	const parsedConfig = validateAndComposeConfig(modules, bootstrapComponents);
+	const composedConfig = validateAndComposeConfig(modules, bootstrapComponents);
+	// Each module's own section (#728), parsed out of that configuration by
+	// the module's schema and written back at its path — before any
+	// post-config row, which may assume the configuration is valid.
+	const { config: parsedConfig, sections } = parseModuleSections(modules, composedConfig);
 	const substitutedBootstrap: BootstrapMap = {
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
-	// Each module's own section (#728), parsed out of that configuration by
-	// the module's schema — before any post-config row, which may assume the
-	// configuration is valid.
-	const sections = parseModuleSections(modules, parsedConfig);
+	// #728 B8: the top-level sections nothing loaded owns, kept in the config
+	// slot and named once — to the logger the composition wired, as every
+	// boot notice is.
+	const ignored = ignoredSections(modules, (bootstrapComponents as Record<string, unknown>).config);
+	if (ignored.length > 0) {
+		const logger = overrideComponents?.logger ?? bootstrapComponents.logger ?? consoleLogger;
+		logger.warn({ sections: [...ignored] }, "config_sections_ignored");
+	}
 
 	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
 	for (const check of STAGE_ONE_POST_CONFIG_CHECKS) {
