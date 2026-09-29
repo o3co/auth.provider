@@ -42,7 +42,7 @@ responsibilities:
   (`session.csrf.*`), which other packages run through the `csrfGuard` slot;
   the login rate-limit guard's wiring (`rateLimit.login`); the redirect
   allowlists (`session.redirectAllowlist`, `federations.<name>.redirectAllowlist`);
-- what the two modules provide other packages through slots whose contracts
+- what the modules provide other packages through slots whose contracts
   are core's ([#728](https://github.com/o3co/auth.provider/issues/728)):
   `csrfGuard`, `loginEntry` and `loginCompletion`, and `sessionCookiePolicy`
   — [below](#what-the-modules-provide-other-packages);
@@ -175,7 +175,7 @@ Each provider runs core's contract suite in this package's tests.
 | --- | --- | --- | --- |
 | `csrfGuard` | `sessionModule` | The [CSRF policy](#csrf-on-the-state-changing-routes) `POST /session/login` runs: `check` and `middleware` for a request that changes state — the same `403 access_denied` and log line — `checkNavigation` for a navigation that starts a flow (the [account-link start](#account-linking-across-federations-482)'s rule), and `issue`. The token's form field is `csrf_token`. | Device verification, once the grant is enabled |
 | `loginEntry` | `sessionModule` | The login page, `endpoints.login.url`, and `urlFor(returnTo)`, which adds `redirect_to` to the page's own query. Built when no page is configured, and failing where the page is read. | `/authorize` when a module provides it; the federation-grants connect flow, once grants are enabled |
-| `loginCompletion` | `sessionModule` | [`establishSession`](#establishing-the-session) and [`answerInterruption`](#when-a-requirement-interrupts-the-login) over the session stores the module requires, `session.maxAge` and its CSRF guard. | A requirement's completion (the MFA package's) |
+| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#establishing-the-session) and [`answerInterruption`](#when-a-requirement-interrupts-the-login) over the session stores and the `csrfGuard` the module requires, and `session.maxAge`. Its own module, loaded beside `sessionModule`: an interruption's token is the deployment's `csrfGuard`'s, whoever filled the slot, and `sessionModule` cannot require the slot it fills. | A requirement's completion (the MFA package's) |
 | `sessionCookiePolicy` | the session store's module | The session cookie's name, `secure`, `sameSite`, domain and lifetime, as express-session is given them. Refused wherever it would break core's contract: where the store refuses the cookie, with the store's message — a `__Host-` name that is not secure or that names a domain — and where the store does not yet — a name that is not a cookie name, a `__Secure-` name or a `SameSite=None` cookie that is not secure, a lifetime out of range. | Nothing bundled yet |
 
 The CSRF token's key is derived from `session.secret`, which the session
@@ -412,7 +412,7 @@ not an interruption `admitPrimary` or `resumePrimary` answered — core's
 `isInterruptAdmission`, so a copy of one or an object shaped like one too —
 is a `RangeError` before the session is touched. A requirement's completion
 reaches it through the `loginCompletion` slot, whose answer carries a token
-from the session module's CSRF guard; a caller of the function hands it
+from the deployment's `csrfGuard`; a caller of the function hands it
 anything with `issue` — the login route's `CsrfProtection`, or a `csrfGuard`.
 The token is signed, not stored, so every guard built from one configuration
 accepts the others'.

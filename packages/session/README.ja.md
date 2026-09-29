@@ -15,7 +15,7 @@
 **持つもの:**
 
 - `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線（`rateLimit.login`）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
-- 二つのモジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの（[#728](https://github.com/o3co/auth.provider/issues/728)）: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` — [後述](#モジュールが他のパッケージに提供するもの)。
+- モジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの（[#728](https://github.com/o3co/auth.provider/issues/728)）: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` — [後述](#モジュールが他のパッケージに提供するもの)。
 - フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
 - `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
 - express-session ミドルウェア、その cookie、そのストア（`session.*`、`session.storage.*`）。
@@ -81,7 +81,7 @@ const handle = await createApp({
 | --- | --- | --- | --- |
 | `csrfGuard` | `sessionModule` | `POST /session/login` が実行する [CSRF ポリシー](#状態変更ルートの-csrf-対策): 状態を変えるリクエストには `check` と `middleware` — 同じ `403 access_denied` と同じログ行 — フローを始めるナビゲーションには `checkNavigation`（[アカウントリンクの開始](#フェデレーション間のアカウントリンク482)の規則）、そして `issue`。トークンのフォームフィールドは `csrf_token`。 | デバイス検証（グラントが有効なとき） |
 | `loginEntry` | `sessionModule` | ログインページ `endpoints.login.url` と、ページ自身のクエリに `redirect_to` を加える `urlFor(returnTo)`。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | モジュールが提供していれば `/authorize`。federation-grants の connect フロー（グラントが有効なとき） |
-| `loginCompletion` | `sessionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストア、`session.maxAge`、その CSRF ガードの上に作られる。 | requirement の完了処理（MFA パッケージのもの） |
+| `loginCompletion` | `loginCompletionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストアと `csrfGuard`、`session.maxAge` の上に作られる。`sessionModule` と並べて読み込む独立したモジュール: 中断の応答のトークンは、誰がスロットを埋めたかによらずデプロイメントの `csrfGuard` のものであり、`sessionModule` は自分が埋めるスロットを require できない。 | requirement の完了処理（MFA パッケージのもの） |
 | `sessionCookiePolicy` | セッションストアのモジュール | express-session に渡すとおりのセッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命。core の契約を破る場合は拒否する: ストアが cookie を拒否する場合はストアと同じメッセージで — secure でない、またはドメインを指定した `__Host-` の名前 — 、ストアがまだ拒否しない場合も — cookie の名前でない名前、secure でない `__Secure-` の名前や `SameSite=None` の cookie、範囲外の寿命。 | バンドルされたものはまだない |
 
 CSRF トークンの鍵は `session.secret` から導出され、`session.secret` はセッションストアのモジュールが所有する。`session` が二つのモジュールの読む一つのセクションである間は、session モジュールがルートと同じくそこから導出する。セッションストアの設定が独自のセクションになる前に、鍵はセッションストアが提供する狭いスロットを通してガードに届くようになり、secret は所有者の外に出ない。`sessionModule` なしで `csrfGuard` を提供する組み立ては `createSessionCsrfGuard` で作る。
@@ -144,7 +144,7 @@ CSRF トークンの鍵は `session.secret` から導出され、`session.secret
 
 `UserSession` は書かれない。セッションは後で requirement の完了ルートが確立する: core の `resumePrimary` でログインを再開し（このログインでまだ済んでいない requirement に順に問い合わせる — 完了した requirement には二度と問い合わせない）、それが答える establishment で [`establishSession`](#セッションの確立) を呼ぶ — 別の requirement が中断すれば、それをログインとまったく同じように返す。再生成、例外を投げるか core が拒否する本文を返す `open`、失敗した保存は、いずれもリクエストの cookie セッションを手放し何も確立しない `503 temporarily_unavailable` で、`login_store_unavailable`（`store: "cookie_session"` と `step` `regenerate` か `save`、または requirement の名前と `step: "open"`）として一度だけログに出る。保存に失敗したあとは、requirement のレコードは、どのブラウザも持たないセッション id に束縛されたまま、自身の有効期限に任される。`403` がパスワードを持つ者にパスワードが正しかったことを伝えるのは受け入れている（MFA の ADR の D23）。
 
-この手順と失敗時の応答は、パッケージが export する一つの関数 `answerInterruption(admission, { req, res, csrf, reporter })`（[`src/answer-interruption.mts`](src/answer-interruption.mts)）である。ログインのルートがこれを呼び、`resumePrimary` が別の中断を答えたときは requirement の完了ルートも呼ぶ。応答 — 渡された `CsrfProtection` による新しいトークンを伴う `403`、または `503` — を送り、失敗は呼び出し側の reporter に一度だけ（上と同じ `store` と `step` で）伝えるので、各呼び出し側は自分の語彙でログを出す。送ったもの（`answered`、またはストアとステップを伴う `unavailable`）を答える。`admitPrimary` か `resumePrimary` が答えた中断でないもの — core の `isInterruptAdmission` によるので、そのコピーやそれに似せたオブジェクトも — は、セッションに触れる前に `RangeError` になる。requirement の完了処理は `loginCompletion` スロットを通してこれに到達し、その応答は session モジュールの CSRF ガードのトークンを伴う。関数を直接呼ぶ側は `issue` を持つもの — ログインのルートの `CsrfProtection`、または `csrfGuard` — を渡す。トークンは保存されず署名されるので、一つの設定から作ったガードは互いのトークンを受け入れる。
+この手順と失敗時の応答は、パッケージが export する一つの関数 `answerInterruption(admission, { req, res, csrf, reporter })`（[`src/answer-interruption.mts`](src/answer-interruption.mts)）である。ログインのルートがこれを呼び、`resumePrimary` が別の中断を答えたときは requirement の完了ルートも呼ぶ。応答 — 渡された `CsrfProtection` による新しいトークンを伴う `403`、または `503` — を送り、失敗は呼び出し側の reporter に一度だけ（上と同じ `store` と `step` で）伝えるので、各呼び出し側は自分の語彙でログを出す。送ったもの（`answered`、またはストアとステップを伴う `unavailable`）を答える。`admitPrimary` か `resumePrimary` が答えた中断でないもの — core の `isInterruptAdmission` によるので、そのコピーやそれに似せたオブジェクトも — は、セッションに触れる前に `RangeError` になる。requirement の完了処理は `loginCompletion` スロットを通してこれに到達し、その応答はデプロイメントの `csrfGuard` のトークンを伴う。関数を直接呼ぶ側は `issue` を持つもの — ログインのルートの `CsrfProtection`、または `csrfGuard` — を渡す。トークンは保存されず署名されるので、一つの設定から作ったガードは互いのトークンを受け入れる。
 
 ### セッションの確立
 
