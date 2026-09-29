@@ -36,7 +36,7 @@ describe("githubFederationModule const Module", () => {
 	});
 
 	it("produces provider.name == 'github' (single-tenant invariant)", () => {
-		// v0.5.0 single-tenant: provider.name is fixed at "github". See
+		// Single-tenant: provider.name is fixed at "github". See
 		// google-module.test.mts for the full rationale.
 		const factory = githubFederationModule.contributes?.federations?.github;
 		if (typeof factory !== "function") throw new Error("factory missing");
@@ -47,8 +47,8 @@ describe("githubFederationModule const Module", () => {
 				callbackURL: "https://example.com/cb",
 			},
 		} as never);
-		// #626 P1: the contribution type is still `unknown` (core's contributes-map.mts);
-		// the cast goes when it is not.
+		// The factory's type allows a promise (`Contributed<FederationProvider>`);
+		// this one answers synchronously, hence the cast.
 		expect((provider as { name: string }).name).toBe("github");
 	});
 });
