@@ -40,7 +40,7 @@ resolves, and as a peer that is your composition's one copy.
 
 ## Bootstrap
 
-The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. Core's `AppConfigSchema` passes through the `webauthn` keys it names — every key `webauthnConfigSchema` reads, which `config.test.mts` pins ([#496](https://github.com/o3co/auth.provider/issues/496)) — checking little more than their types, and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
+The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. `webauthnModule` declares it as its section's reference, so core's `moduleReferences(modules)` names it among the files to layer (#728). Core's `AppConfigSchema` passes through the `webauthn` keys it names — every key `webauthnConfigSchema` reads, which `config.test.mts` pins ([#496](https://github.com/o3co/auth.provider/issues/496)) — checking little more than their types, and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
 
 ```hocon
 # config/application.conf — what has no default

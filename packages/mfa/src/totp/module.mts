@@ -25,12 +25,23 @@
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import { readMfaTotpSettings } from "../config.mjs";
 import { createTotpFactor, TOTP_FACTOR_KIND } from "./factor.mjs";
 
 /** The TOTP factor, contributed as `mfaFactors.totp`; `null` when switched off by its configuration. */
 export const mfaTotpFactorModule = defineModule({
 	name: "mfa-totp-factor",
+	// #728: the package's `config/reference.conf` holds this section's
+	// defaults. Its schema checks nothing yet: the factor's factory reads the
+	// section itself (`readMfaTotpSettings`) and refuses what it cannot use as
+	// that factory's failure; the schema takes over when the section moves
+	// under the module's name.
+	section: {
+		schema: z.unknown(),
+		reference: new URL("../../config/reference.conf", import.meta.url),
+		at: "mfa.factors.totp",
+	},
 	requires: ["config"] as const,
 	contributes: {
 		mfaFactors: {

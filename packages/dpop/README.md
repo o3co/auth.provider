@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-09-26
+Last updated: 2026-09-29
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -112,8 +112,11 @@ oauth {
 ```
 
 The defaults are the ones shown; the module's schema applies them, and the
-package ships them as HOCON in [`src/reference.conf`](src/reference.conf)
-(exported as `@o3co/auth-provider-dpop/reference.conf`). The public exports are
+package ships them as HOCON in [`config/reference.conf`](config/reference.conf)
+(exported as `@o3co/auth-provider-dpop/reference.conf`), which `dpopModule`
+declares as its section's reference, so core's `moduleReferences(modules)`
+names it for a composition root that layers what its modules declare (#728).
+The public exports are
 listed in [`src/index.mts`](src/index.mts). `oauth.dpop.replay-store` is
 retired: the seen-set's own module chooses the backend, and a config that
 still sets the key fails boot naming it.
