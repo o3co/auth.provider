@@ -54,6 +54,7 @@ describe("stage-1 check registries (#368)", () => {
 			"unique-module-names",
 			"provides-closure",
 			"bootstrap-synthetic-disjointness",
+			"reserved-component-keys",
 			"session-requirement-kind-guard",
 			"requires-closure",
 			"contribution-kind-coverage",
@@ -65,6 +66,7 @@ describe("stage-1 check registries (#368)", () => {
 			"same-module-contribute-override",
 			"list-shaped-overrides",
 			"lifecycle-closure",
+			"module-section-paths",
 		]);
 		expect(STAGE_ONE_POST_CONFIG_CHECKS.map((c) => c.id)).toEqual([
 			"grant-policy-issuer",

@@ -657,13 +657,13 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 29 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three)
+// BootErrorReason — 31 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added two)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 29 reasons.
+ * exactly 31 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
  * OIDC discovery aggregator
@@ -672,7 +672,8 @@ export type BootStage =
  * reason into), and module-factory-not-called (a `modules` entry that is the
  * factory rather than the manifest it builds), and the session-admission
  * ADR's D3 and D7 (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing).
+ * session-requirements-undeclared, session-requirement-missing), and #728's
+ * module sections (reserved-component-key, module-section-path-invalid).
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -703,10 +704,12 @@ export type BootErrorReason =
 	| "component-absence-undeclared"
 	| "session-requirement-kind-guarded"
 	| "session-requirements-undeclared"
-	| "session-requirement-missing";
+	| "session-requirement-missing"
+	| "reserved-component-key"
+	| "module-section-path-invalid";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 30 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR)
+// Per-reason *Details interfaces — one per BootErrorReason, 31 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
 // ---------------------------------------------------------------------------
 
 /**
@@ -882,6 +885,39 @@ export interface InvalidRouteAdvertisementPathDetails {
 	/** The offending advertisement.path value. */
 	readonly path: string;
 	readonly identityKind: "missing-leading-slash";
+}
+
+/**
+ * A component key reserved for something that is not a slot (#728): `section`
+ * is the key under which a module's own configuration section is set on its
+ * deps, so no module may provide, require or optionally read a component of
+ * that name, and no host may bootstrap or override one — the section would
+ * shadow it, or it the section. A module source carries `module`; the host
+ * sources are composition-root data and carry none.
+ */
+export type ReservedComponentKeyDetails =
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: string;
+			readonly source: "module-provides" | "module-requires" | "module-optional";
+			readonly module: string;
+	  }
+	| {
+			readonly reason: "reserved-component-key";
+			readonly componentKey: string;
+			readonly source: "bootstrapComponents" | "overrideComponents";
+	  };
+
+/**
+ * A manifest's `section.at` that is not a dot-separated path of non-empty
+ * keys (#728): `""`, `"a..b"`, `".a"`, `"a."` — or not a string at all. Such
+ * a path names no section anyone wrote.
+ */
+export interface ModuleSectionPathInvalidDetails {
+	readonly reason: "module-section-path-invalid";
+	readonly module: string;
+	/** The `at` the manifest wrote. */
+	readonly at: unknown;
 }
 
 /**
@@ -1152,8 +1188,9 @@ export interface SessionRequirementMissingDetails {
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
  * (component-absence-undeclared), module-factory-not-called and the
  * session-admission ADR's three (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing) — one member
- * per `BootErrorReason`, 29 in all.
+ * session-requirements-undeclared, session-requirement-missing) and #728's two
+ * (reserved-component-key, module-section-path-invalid) — one member per
+ * `BootErrorReason`, 31 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1184,7 +1221,9 @@ export type BootErrorDetails =
 	| ComponentAbsenceUndeclaredDetails
 	| SessionRequirementKindGuardedDetails
 	| SessionRequirementsUndeclaredDetails
-	| SessionRequirementMissingDetails;
+	| SessionRequirementMissingDetails
+	| ReservedComponentKeyDetails
+	| ModuleSectionPathInvalidDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

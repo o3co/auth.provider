@@ -29,10 +29,11 @@ import type { Provider, ProviderDeps } from "./provider.mjs";
  *
  * Per A2-α §2.1.
  *
- * @deprecated A module declares its own section instead —
+ * To be deprecated once the loader layers each package's `reference.conf`
+ * (#728): a module then declares its own section instead —
  * {@link ModuleSection}, the manifest's `section` field — and receives it
- * parsed as `deps.section` (#728). A `configSchema` still composes with
- * core's schema as before.
+ * parsed as `deps.section`. Until then a `configSchema` composes with core's
+ * schema as before, and is what keeps a section's keys through core's parse.
  */
 export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
 
@@ -96,16 +97,18 @@ export interface ReplicaSafetyDeclaration {
  * Parameterised manifest type. The R / O generics are inferred at the
  * call site of `defineModule(...)` and carry the literal key sets
  * declared in `requires` / `optional` so providers and contribution
- * factories receive a typed deps object. `S` is inferred from
- * `section.schema` and types the deps' `section`; it stays `never` for a
- * module that declares no section.
+ * factories receive a typed deps object. `S` is the section's schema, which
+ * types the deps' `section`: `defineModule` infers it from `section.schema`
+ * and leaves it `never` for a module that declares no section. Written out,
+ * `ModuleSpec<R, O>` defaults it to the widest schema, `SectionSchema` — the
+ * erased form, so `ModuleSpec<ComponentKey, ComponentKey>` is `Module`.
  *
  * Per A2-α §2.1, §3.1.
  */
 export interface ModuleSpec<
 	R extends ComponentKey = never,
 	O extends ComponentKey = never,
-	S extends SectionSchema = never,
+	S extends SectionSchema = SectionSchema,
 > {
 	/** Module identity — unique across all modules in a single createApp call. */
 	readonly name: string;
@@ -122,9 +125,12 @@ export interface ModuleSpec<
 	/**
 	 * Optional Zod schema declaring this module's config slice.
 	 *
-	 * @deprecated Declare the module's own `section` instead, and read it
-	 * from `deps.section` (#728). A `configSchema` still composes with core's
-	 * schema and parses the whole configuration, as before.
+	 * To be deprecated once the loader layers each package's
+	 * `reference.conf` (#728), in favour of the module's own `section`, read
+	 * from `deps.section`. Until then it composes with core's schema and
+	 * parses the whole configuration, as before — and, for a section still at
+	 * a path under a parent core's schema declares, it is what keeps the
+	 * section's keys (see `ModuleSection.at`).
 	 */
 	readonly configSchema?: ConfigSchema;
 
@@ -227,9 +233,12 @@ export interface ModuleSpec<
  * way because `ComponentKey = never` in the empty baseline; the
  * widening is the structurally-correct erasure for all later phases.
  *
- * `S = SectionSchema`, the widest section schema, erases the section the
- * same way (#728): `section.schema` is covariant in it, and in the deps the
- * widest schema is read as `section: never` (`SectionDeps`), which every
- * sectioned factory accepts — as a module without a section's factories do.
+ * `S = SectionSchema`, the widest section schema and `ModuleSpec`'s default
+ * for it, erases the section the same way (#728): `section.schema` is
+ * covariant in it, and in the deps the widest schema is read as
+ * `section: never` (`SectionDeps`), which every sectioned factory accepts —
+ * as a module without a section's factories do. Being the default, it keeps
+ * `ModuleSpec<ComponentKey, ComponentKey>` — how this type was spelled
+ * before sections — the same type as `Module`.
  */
-export type Module = ModuleSpec<ComponentKey, ComponentKey, SectionSchema>;
+export type Module = ModuleSpec<ComponentKey, ComponentKey>;

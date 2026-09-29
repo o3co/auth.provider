@@ -50,7 +50,23 @@ export type SectionSchema = z.ZodType;
  * refuses refuses boot with `config-validation-failed`, each issue's path
  * prefixed with the section's, so the error names what the operator wrote
  * (`device-grant.codeLifetimeSeconds`); every refused section is reported in
- * the one error. No factory of any module runs before that.
+ * the one error, and so is a schema that cannot answer synchronously (an
+ * async refinement, a transform that throws). No factory of any module runs
+ * before that.
+ *
+ * A section is parsed for every module in `modules`, whether or not any of
+ * its factories runs — a module whose provider an `overrideComponents` entry
+ * replaces included.
+ *
+ * `deps.section` is one object, deeply frozen, handed to every factory of the
+ * module: plain data — objects and arrays — is a frozen copy, apart from the
+ * `config` slot even where the schema passed a subtree through
+ * (`z.unknown()`); a value that is not plain data (a `URL`, a `Buffer`, a
+ * class instance a transform built) is handed over as the schema made it.
+ *
+ * `section` is not a slot, and the name is reserved: a module that provides,
+ * requires or optionally reads a component named `section`, or a host that
+ * bootstraps or overrides one, refuses boot (`reserved-component-key`).
  */
 export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	/**
@@ -63,21 +79,37 @@ export interface ModuleSection<S extends SectionSchema = SectionSchema> {
 	readonly schema: S;
 	/**
 	 * The package's `config/reference.conf`, which holds this section's
-	 * defaults. Resolve it from the module's own file, so it names the file
-	 * inside the installed package whether the module runs from `src/` or
-	 * `dist/`: `new URL("../config/reference.conf", import.meta.url)`.
+	 * defaults: a `file:` URL that names that file wherever the module's own
+	 * file sits. Resolved from the module's file, the relative part depends on
+	 * how deep that file is: `new URL("../config/reference.conf",
+	 * import.meta.url)` from a file directly under `src/` (and so `dist/`),
+	 * `"../../config/reference.conf"` from one a directory further down.
 	 *
 	 * Declared, not yet read: boot does not layer the references beneath the
 	 * configuration yet, so the composition root still layers them itself.
+	 * The loader that will is what resolves and reads this URL.
 	 */
 	readonly reference?: URL;
 	/**
 	 * Where the section sits today, as a dot-separated path of keys
 	 * (`"oauth.dpop"`, `"redisConsentStore"`), for a section that has not
 	 * moved under the module's name yet. Unset, the section is the top-level
-	 * key named exactly as the module is (`name`, not split on dots). A
-	 * transitional field: it goes once every section sits under its module's
-	 * name.
+	 * key named exactly as the module is (`name`, not split on dots). Every
+	 * key must be non-empty — `""`, `"a..b"`, `".a"` and `"a."` refuse boot
+	 * (`module-section-path-invalid`) — and each is read as an own property,
+	 * never one an object inherits. A transitional field: it goes once every
+	 * section sits under its module's name.
+	 *
+	 * The section is read from the configuration *after* core's schema parsed
+	 * it, the object the `config` slot holds, so a module moved onto
+	 * `deps.section` sees what it read from `config` before. That has a
+	 * consequence for a path under a parent core's schema declares (`oauth`,
+	 * `http`, `redisConsentStore`, …): core's schema strips the keys it does not
+	 * declare there and coerces the ones it does, and a module's `configSchema`
+	 * still composed with it can inject defaults. So a key survives to the
+	 * section only if core's schema — or a `configSchema` still present —
+	 * keeps it. Keep the module's `configSchema`, or core's mirror of the
+	 * section, until the loader parses each section on its own.
 	 */
 	readonly at?: string;
 	/**

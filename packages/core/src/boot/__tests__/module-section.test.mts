@@ -697,7 +697,8 @@ describe("a module's section — manifest refusals", () => {
 			const err = await refusal(
 				createApp({
 					modules: given.modules ?? [],
-					bootstrapComponents: bootWith(given.bootstrap ?? {}),
+					// A bootstrap component beside `config`, not a key inside it.
+					bootstrapComponents: { ...bootWith({}), ...given.bootstrap } as BootstrapMap,
 					...(given.override === undefined ? {} : { overrideComponents: given.override as never }),
 				}),
 			);

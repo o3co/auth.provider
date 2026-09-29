@@ -37,6 +37,7 @@ import type { ComponentKey, ComponentMap } from "../modules/manifest/component-m
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
 	BootstrapMap,
@@ -44,6 +45,7 @@ import type {
 	ContributionKind,
 	ContributionKindMap,
 	NormalisedModule,
+	ReservedComponentKeyDetails,
 	ValidatedManifests,
 	ValidatedModule,
 } from "./types.mjs";
@@ -1036,11 +1038,17 @@ export function checkFederationStoresWiring(
 // Per issue #363; #375 folded #277's access-token check onto it.
 // ---------------------------------------------------------------------------
 
-/** Read a dotted path off the parsed config without asserting its shape. */
+/**
+ * Read a dotted path off the parsed config without asserting its shape. Each
+ * key is read as an own property: one an object inherits (`constructor`,
+ * `toString`) is not configuration anyone wrote, and reads as absent.
+ */
 function readConfigPath(config: unknown, path: readonly string[]): unknown {
 	let value: unknown = config;
 	for (const segment of path) {
-		if (value === null || typeof value !== "object") return undefined;
+		if (value === null || typeof value !== "object" || !Object.hasOwn(value, segment)) {
+			return undefined;
+		}
 		value = (value as Record<string, unknown>)[segment];
 	}
 	return value;
@@ -1505,6 +1513,70 @@ function operatorPath(path: readonly PropertyKey[]): string {
 }
 
 /**
+ * A parsed section as every factory of its module receives it: plain data —
+ * arrays, and objects whose prototype is `Object.prototype` or `null` —
+ * copied and frozen all the way down, so no factory can change what another
+ * reads, and a subtree the schema passed through (`z.unknown()`) is not the
+ * `config` slot's own object. Anything else — a `URL`, a `Buffer`, a class
+ * instance a transform built — is handed over as the schema made it: freezing
+ * a typed array throws, and copying an instance would lose what it is.
+ */
+function frozenSection(value: unknown, copies = new Map<object, unknown>()): unknown {
+	if (value === null || typeof value !== "object") return value;
+	const known = copies.get(value);
+	if (known !== undefined) return known;
+	if (Array.isArray(value)) {
+		const copy: unknown[] = [];
+		copies.set(value, copy);
+		for (const item of value) copy.push(frozenSection(item, copies));
+		return Object.freeze(copy);
+	}
+	const prototype: unknown = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) return value;
+	// The same prototype as the original: `Object.prototype`, or none.
+	const copy: object = prototype === null ? Object.setPrototypeOf({}, null) : {};
+	copies.set(value, copy);
+	for (const key of Reflect.ownKeys(value)) {
+		if (!Object.prototype.propertyIsEnumerable.call(value, key)) continue;
+		// Defined, not assigned: a key named `__proto__` stays a key.
+		Object.defineProperty(copy, key, {
+			value: frozenSection((value as Record<PropertyKey, unknown>)[key], copies),
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
+	}
+	return Object.freeze(copy);
+}
+
+/**
+ * Parse one section with its schema. A schema that throws instead of
+ * answering — an async refinement (Zod cannot finish it synchronously), or a
+ * transform that throws — is one more issue at the section's own path, so it
+ * refuses boot the way a refused value does, naming the path, rather than
+ * escaping stage 1 as a bare error.
+ */
+function parseSection(
+	schema: z.ZodType,
+	value: unknown,
+): { readonly data: unknown } | { readonly issues: readonly z.ZodIssue[] } {
+	try {
+		const result = schema.safeParse(value);
+		return result.success ? { data: result.data } : { issues: result.error.issues };
+	} catch (thrown) {
+		return {
+			issues: [
+				{
+					code: "custom",
+					path: [],
+					message: `the section's schema threw instead of answering, so it could not be parsed synchronously: ${failureSummary(thrown)}`,
+				} as z.ZodIssue,
+			],
+		};
+	}
+}
+
+/**
  * Parse every declared section: for each module whose manifest has a
  * `section`, read the value at its path out of the parsed configuration —
  * the one the `config` slot holds, so a section reads what the module read
@@ -1519,7 +1591,9 @@ function operatorPath(path: readonly PropertyKey[]): string {
  * lists each refused module with the path its section is read at.
  *
  * The configuration itself is left as it was: a section's parse transforms
- * only what the module is handed as `deps.section`, never the `config` slot.
+ * only what the module is handed as `deps.section` — a deeply frozen copy
+ * (`frozenSection`) — never the `config` slot. Every module in `modules` is
+ * parsed, whether or not a factory of it will run.
  * @internal
  */
 function parseModuleSections(
@@ -1533,12 +1607,12 @@ function parseModuleSections(
 	for (const m of modules) {
 		if (m.section === undefined) continue;
 		const segments = sectionSegmentsOf(m);
-		const result = m.section.schema.safeParse(readConfigPath(parsedConfig, segments));
-		if (result.success) {
-			sections.set(m.name, { value: result.data });
+		const result = parseSection(m.section.schema, readConfigPath(parsedConfig, segments));
+		if ("data" in result) {
+			sections.set(m.name, { value: frozenSection(result.data) });
 			continue;
 		}
-		for (const issue of result.error.issues) {
+		for (const issue of result.issues) {
 			issues.push({ ...issue, path: [...segments, ...issue.path] } as z.ZodIssue);
 		}
 		refused.push({ module: m.name, schemaPath: sectionPathOf(m) });
@@ -1655,6 +1729,92 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// #728 — the module section's manifest rules
+// ---------------------------------------------------------------------------
+
+/**
+ * Component keys that are not slots. `section` is the key a module's own
+ * configuration section is set under on its deps object, beside its slots.
+ */
+const RESERVED_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(new Set(["section"]));
+
+/**
+ * No module provides, requires or optionally reads a component named like a
+ * reserved key, and no host bootstraps or overrides one: the deps object would
+ * carry both under one name, and one would shadow the other.
+ * Throws `reserved-component-key`.
+ * @internal
+ */
+function checkReservedComponentKeys(
+	modules: readonly NormalisedModule[],
+	bootstrap: BootstrapMap,
+	override: Partial<ComponentMap> | undefined,
+): void {
+	const refuse = (key: string, where: string, details: ReservedComponentKeyDetails): never => {
+		throw new BootError({
+			message: `${where} "${key}", a name reserved for the module's own configuration section on its deps; name the component otherwise.`,
+			reason: "reserved-component-key",
+			stage: "validateManifests",
+			details,
+		});
+	};
+	for (const m of modules) {
+		const sources = [
+			["module-provides", m.providesKeys, "provides"],
+			["module-requires", m.requires, "requires"],
+			["module-optional", m.optional, "optionally reads"],
+		] as const;
+		for (const [source, keys, verb] of sources) {
+			for (const key of keys as readonly string[]) {
+				if (RESERVED_COMPONENT_KEYS.has(key)) {
+					refuse(key, `Module "${m.name}" ${verb} a component named`, {
+						reason: "reserved-component-key",
+						componentKey: key,
+						source,
+						module: m.name,
+					});
+				}
+			}
+		}
+	}
+	const hostSources = [
+		["bootstrapComponents", bootstrap],
+		["overrideComponents", override ?? {}],
+	] as const;
+	for (const [source, components] of hostSources) {
+		for (const key of Object.keys(components)) {
+			if (RESERVED_COMPONENT_KEYS.has(key)) {
+				refuse(key, `${source} contains a component named`, {
+					reason: "reserved-component-key",
+					componentKey: key,
+					source,
+				});
+			}
+		}
+	}
+}
+
+/**
+ * Every `section.at` is a dot-separated path of non-empty keys. `""`,
+ * `"a..b"`, `".a"` and `"a."` — or a value that is not a string — name no
+ * section anyone wrote. Throws `module-section-path-invalid`.
+ * @internal
+ */
+function checkModuleSectionPaths(rawModules: readonly Module[]): void {
+	for (const m of rawModules) {
+		const at: unknown = m.section?.at;
+		if (at === undefined) continue;
+		if (typeof at === "string" && at.split(".").every((key) => key.length > 0)) continue;
+		throw new BootError({
+			message: `Module "${m.name}" declares its section at ${JSON.stringify(at) ?? String(at)}, which is not a dot-separated path of non-empty keys.`,
+			reason: "module-section-path-invalid",
+			stage: "validateManifests",
+			details: { reason: "module-section-path-invalid", module: m.name, at },
+		});
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The stage-1 check registries (#368)
 // ---------------------------------------------------------------------------
 
@@ -1736,6 +1896,12 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 			),
 	},
 	{
+		id: "reserved-component-keys",
+		spec: "issue #728 (the module section's deps key)",
+		run: (ctx) =>
+			checkReservedComponentKeys(ctx.modules, ctx.bootstrapComponents, ctx.overrideComponents),
+	},
+	{
 		id: "session-requirement-kind-guard",
 		spec: "A2-β §5.1 (after step 3): the session-admission ADR's D3",
 		run: (ctx) => checkSessionRequirementKindGuard(ctx.modules),
@@ -1790,6 +1956,11 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeCheck
 		id: "lifecycle-closure",
 		spec: "A2-β §5.1 step 12",
 		run: (ctx) => checkLifecycleClosure(ctx.modules),
+	},
+	{
+		id: "module-section-paths",
+		spec: "issue #728 (a section's transitional path)",
+		run: (ctx) => checkModuleSectionPaths(ctx.rawModules),
 	},
 ]);
 
