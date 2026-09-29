@@ -33,13 +33,15 @@
  * where they live once `oauth {}` is the oauth module's alone is decided
  * with that move.
  *
- * Nor is the token-binding dispatch policy (`oauth.tokenBinding.dispatch-policy`),
- * though it sits in `oauth {}` today: it arbitrates between the mechanisms
- * contributed to core's token-binding extension point, and the extension
- * point's owner, core, owns the policy (#728). Core reads it with its own
- * `resolveTokenBindingDispatchPolicy`, in every composition, and a slot that
- * carried it would be a second source for it; the contract refuses one that
- * does. Where the key lives is decided with the move of the configuration.
+ * Nor are the token-binding settings, `oauth.tokenBinding` — the dispatch
+ * policy and whether a confidential client's refresh tokens are bound —
+ * though they sit in `oauth {}` today: they apply across every mechanism
+ * installed at core's token-binding extension point, and the extension
+ * point's owner, core, owns them (#728). Core reads them with its own
+ * `resolveTokenBindingSettings` — boot the policy, the grants the binding
+ * rule — in every composition, and a slot that carried one would be a second
+ * source for it; the contract refuses one that does. Where the keys live is
+ * decided with the move of the configuration.
  *
  * Not every module can read the slot. The boot planner orders modules, not
  * components: a module that reads a key depends on the whole module providing
@@ -81,12 +83,6 @@ export interface OAuthTokenSettings {
 	readonly accessTokenLifetime: AccessTokenLifetime;
 	/** `oauth.refreshToken.expiresIn`, in seconds, as `resolveRefreshTokenLifetime` reads it. */
 	readonly refreshTokenExpiresIn: number;
-	/**
-	 * `oauth.tokenBinding.bindConfidentialClientRefreshTokens`, `false` when
-	 * unset: whether a grant binds a confidential client's refresh token to the
-	 * key or certificate presented, as it always binds a public client's (#275).
-	 */
-	readonly bindConfidentialClientRefreshTokens: boolean;
 	/**
 	 * `oauth.resourceIndicator.enabled`, `false` when unset: whether RFC 8707
 	 * resource indicators decide a token's audience.

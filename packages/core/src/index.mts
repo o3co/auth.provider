@@ -622,11 +622,12 @@ export { terminalErrorHandler } from "./middleware/terminalError.mjs";
 export {
 	type DispatchPolicy,
 	isTokenBindingMw,
-	resolveTokenBindingDispatchPolicy,
+	resolveTokenBindingSettings,
 	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
 	type TokenBindingMiddlewareOptions,
 	type TokenBindingRefusal,
+	type TokenBindingSettings,
 	tokenBindingMw,
 } from "./middleware/tokenBinding.mjs";
 // Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /

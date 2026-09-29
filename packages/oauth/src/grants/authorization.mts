@@ -41,6 +41,7 @@ import {
 	type ProviderDeps,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	resolveTokenBindingSettings,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -682,12 +683,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			//
 			// Mechanism-neutral, because the gate is and because
 			// `oauth.tokenBinding` is where cross-mechanism policy already
-			// lives. Nothing else is needed to make it mean something: the
+			// lives — core's, read through its one reader of the section
+			// (#728). Nothing else is needed to make it mean something: the
 			// refresh-time continuity matrix runs off the RT's own `cnf`, so a
 			// confidential client's newly bound RT is enrolled in it by the same
 			// rule that already covers public clients.
 			const bindConfidentialClients =
-				config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
+				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 			const bindRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 

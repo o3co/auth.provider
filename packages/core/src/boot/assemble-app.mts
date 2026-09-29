@@ -40,7 +40,7 @@ import { protectedResourceBindingMw } from "../middleware/protectedResourceBindi
 import { terminalErrorHandler } from "../middleware/terminalError.mjs";
 import {
 	type DispatchPolicy,
-	resolveTokenBindingDispatchPolicy,
+	resolveTokenBindingSettings,
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
@@ -786,9 +786,9 @@ export function assembleApp(
 		if (mechanisms.length > 0) {
 			// Core's own policy, for core's own extension point (#728): read
 			// from the configuration in every composition, never from a slot.
-			const dispatchPolicy: DispatchPolicy = resolveTokenBindingDispatchPolicy(
+			const dispatchPolicy: DispatchPolicy = resolveTokenBindingSettings(
 				(frozen.components as Record<string, unknown>).config,
-			);
+			).dispatchPolicy;
 			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
 			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });
 			router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(composed));

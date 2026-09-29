@@ -70,7 +70,8 @@
  *   `refreshToken.mts` apply: public clients always, confidential clients only
  *   under `oauth.tokenBinding.bindConfidentialClientRefreshTokens` (#275),
  *   because for them the client secret is already the refresh-time
- *   authenticator (RFC 9449 §5).
+ *   authenticator (RFC 9449 §5). The setting is core's, read through
+ *   `resolveTokenBindingSettings` as those grants read it (#728).
  *
  *   The response `token_type` says which of the two the access token is: "DPoP"
  *   for a DPoP-bound token (RFC 9449 §5), "Bearer" otherwise — including for an
@@ -132,6 +133,7 @@ import {
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
+	resolveTokenBindingSettings,
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -637,8 +639,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				// access token, which has no such second credential behind it.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
 				const bindConfidentialClients =
-					tokenSettings?.bindConfidentialClientRefreshTokens ??
-					config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
+					resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens;
 				const bindRefreshToken =
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 

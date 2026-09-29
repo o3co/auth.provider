@@ -30,9 +30,10 @@
  *   deprecated `expiresIn` read in its place) and `resolveRefreshTokenLifetime`;
  * - every switch on only when it is `true`.
  *
- * The token-binding dispatch policy is not among them, though its key sits in
- * `oauth {}`: it is core's, the owner of the token-binding extension point,
- * and core reads it itself (#728).
+ * The token-binding settings are not among them, though their keys sit in
+ * `oauth {}` under `tokenBinding`: they apply across core's token-binding
+ * extension point, so they are core's, and core reads them itself with
+ * `resolveTokenBindingSettings` (#728).
  *
  * The whole is frozen, the nested members too, so no reader can change what
  * the others read.
@@ -50,7 +51,6 @@ import {
 /** The keys of `oauth {}` the settings are read from, as a configuration may carry them. */
 interface OAuthTokenSection {
 	readonly jwt?: { readonly issuer?: unknown; readonly legacyTypAccept?: unknown };
-	readonly tokenBinding?: { readonly bindConfidentialClientRefreshTokens?: unknown };
 	readonly resourceIndicator?: { readonly enabled?: unknown };
 	readonly requireEmailVerified?: unknown;
 }
@@ -73,8 +73,6 @@ export function oauthTokenSettingsFrom(config: AppConfig): OAuthTokenSettings {
 		legacyTypAccept: oauth?.jwt?.legacyTypAccept === true,
 		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
 		refreshTokenExpiresIn: resolveRefreshTokenLifetime(config),
-		bindConfidentialClientRefreshTokens:
-			oauth?.tokenBinding?.bindConfidentialClientRefreshTokens === true,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
 		requireEmailVerified: oauth?.requireEmailVerified === true,
 	});

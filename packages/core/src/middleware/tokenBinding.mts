@@ -175,20 +175,53 @@ export interface TokenBindingRefusal {
 export type DispatchPolicy = "intent-explicit" | "strict-mutual-exclusion";
 
 /**
- * The dispatch policy a configuration declares, `oauth.tokenBinding.dispatch-policy`:
- * `strict-mutual-exclusion` when it says so, `intent-explicit` otherwise —
- * an absent key included.
- *
- * The one reading of the key. The policy is core's, the owner of the
- * token-binding extension point it arbitrates (#728): boot reads it through
- * this in every composition, and no slot carries it — not the oauth module's
- * `oauthTokenSettings`, though the key sits in `oauth {}` until the
- * configuration moves. Takes any value, as boot holds the configuration.
+ * The settings that apply across every mechanism installed at core's
+ * token-binding extension point, as the configuration's `oauth.tokenBinding`
+ * section declares them (#728). They are core's, as the extension point is:
+ * no slot carries them — not the oauth module's `oauthTokenSettings`, though
+ * the section sits in `oauth {}` until the configuration moves.
  */
-export function resolveTokenBindingDispatchPolicy(config: unknown): DispatchPolicy {
-	const raw = (config as { oauth?: { tokenBinding?: { "dispatch-policy"?: unknown } } } | null)
-		?.oauth?.tokenBinding?.["dispatch-policy"];
-	return raw === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
+export interface TokenBindingSettings {
+	/**
+	 * `dispatch-policy`: how `tokenBindingMw` arbitrates between the mechanisms
+	 * contributed as `tokenBindingMechanisms` — `strict-mutual-exclusion` when
+	 * the section says so, `intent-explicit` otherwise, an absent key included.
+	 */
+	readonly dispatchPolicy: DispatchPolicy;
+	/**
+	 * `bindConfidentialClientRefreshTokens`: whether a grant binds a
+	 * confidential client's refresh token to the key or certificate presented,
+	 * as it always binds a public client's (#275) — `true` only when the
+	 * section says `true`.
+	 */
+	readonly bindConfidentialClientRefreshTokens: boolean;
+}
+
+/**
+ * The token-binding settings a configuration declares, frozen: the one
+ * reading of `oauth.tokenBinding`. Boot reads the dispatch policy through it,
+ * and every grant that mints a refresh token reads the confidential-client
+ * rule through it, so the section has one reader to move when it moves.
+ * Takes any value, as boot holds the configuration.
+ */
+export function resolveTokenBindingSettings(config: unknown): TokenBindingSettings {
+	const section = (
+		config as {
+			oauth?: {
+				tokenBinding?: {
+					"dispatch-policy"?: unknown;
+					bindConfidentialClientRefreshTokens?: unknown;
+				};
+			};
+		} | null
+	)?.oauth?.tokenBinding;
+	return Object.freeze({
+		dispatchPolicy:
+			section?.["dispatch-policy"] === "strict-mutual-exclusion"
+				? "strict-mutual-exclusion"
+				: "intent-explicit",
+		bindConfidentialClientRefreshTokens: section?.bindConfidentialClientRefreshTokens === true,
+	});
 }
 
 export interface TokenBindingMiddlewareOptions {

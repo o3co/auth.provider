@@ -19,7 +19,7 @@
  * issuer the discovery document, the CORS table and a session requirement's
  * page are built on. The token-binding dispatch policy is not among them: it
  * is core's, and boot reads it from the configuration with
- * `resolveTokenBindingDispatchPolicy`, whatever the composition holds.
+ * `resolveTokenBindingSettings`, whatever the composition holds.
  *
  * The issuer is the `oauthTokenSettings` slot's when the composition holds
  * it — the oauth module provides the slot eagerly, so it is there whenever

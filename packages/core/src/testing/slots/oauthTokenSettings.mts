@@ -21,8 +21,8 @@
  * when the value breaks the rule. What it holds the settings to is what the
  * configuration schema holds `oauth {}` to, resolved: a canonical issuer,
  * lifetimes within the one-year ceiling with the access-token default not
- * above its max, every switch a boolean, no token-binding dispatch policy —
- * the policy is core's — and the whole frozen. `createTestOAuthTokenSettings` answers the fixture
+ * above its max, every switch a boolean, no token-binding setting — those
+ * are core's — and the whole frozen. `createTestOAuthTokenSettings` answers the fixture
  * configuration's settings, resolved, with any member replaced; it checks
  * nothing, so a test of a broken value builds it here. Published on
  * `@o3co/auth-provider-core/testing`.
@@ -84,13 +84,17 @@ export function oauthTokenSettingsContract(
 			},
 		},
 		{
-			name: "carries no token-binding dispatch policy: the policy is core's",
+			name: "carries no token-binding setting: they are core's",
 			run: async () => {
 				const settings = build() as unknown as Record<string, unknown>;
-				for (const member of ["tokenBinding", "dispatchPolicy"]) {
+				for (const member of [
+					"tokenBinding",
+					"dispatchPolicy",
+					"bindConfidentialClientRefreshTokens",
+				]) {
 					assert.ok(
 						!(member in settings),
-						`the settings carry ${member}: the token-binding dispatch policy is core's, the owner of the token-binding extension point, which reads it from its own configuration — a slot that carried it would be a second source (#728)`,
+						`the settings carry ${member}: the token-binding settings are core's, the owner of the token-binding extension point, which reads them from its own configuration with resolveTokenBindingSettings — a slot that carried one would be a second source (#728)`,
 					);
 				}
 			},
@@ -101,7 +105,6 @@ export function oauthTokenSettingsContract(
 				const settings = build();
 				const switches: Record<string, unknown> = {
 					legacyTypAccept: settings.legacyTypAccept,
-					bindConfidentialClientRefreshTokens: settings.bindConfidentialClientRefreshTokens,
 					resourceIndicatorEnabled: settings.resourceIndicatorEnabled,
 					requireEmailVerified: settings.requireEmailVerified,
 				};
@@ -134,7 +137,6 @@ export interface TestOAuthTokenSettingsOverrides {
 	readonly legacyTypAccept?: boolean;
 	readonly accessTokenLifetime?: Partial<AccessTokenLifetime>;
 	readonly refreshTokenExpiresIn?: number;
-	readonly bindConfidentialClientRefreshTokens?: boolean;
 	readonly resourceIndicatorEnabled?: boolean;
 	readonly requireEmailVerified?: boolean;
 }
@@ -156,7 +158,6 @@ export function createTestOAuthTokenSettings(
 			maxExpiresIn: overrides.accessTokenLifetime?.maxExpiresIn ?? 3600,
 		}),
 		refreshTokenExpiresIn: overrides.refreshTokenExpiresIn ?? 86_400,
-		bindConfidentialClientRefreshTokens: overrides.bindConfidentialClientRefreshTokens ?? false,
 		resourceIndicatorEnabled: overrides.resourceIndicatorEnabled ?? false,
 		requireEmailVerified: overrides.requireEmailVerified ?? false,
 	});
