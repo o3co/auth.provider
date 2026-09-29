@@ -2601,7 +2601,7 @@ describe("consent — what an outage logs", () => {
 	});
 
 	it.each(["GET", "POST"] as const)(
-		"logs the judgement that could not be made on %s, which it used to answer in silence — the session's part as admission's line, with the method",
+		"logs the judgement that could not be made on %s — the session's part as admission's line, with the method",
 		async (method) => {
 			const w = world();
 			const { challenge, grantId } = await asked(w);
