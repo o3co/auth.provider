@@ -166,6 +166,18 @@ export function runMfaFactorStoreContract(factory: MfaFactorStoreContractFactory
 			expect(await store.list("user-1")).toEqual([]);
 		});
 
+		it("refuses, with a RangeError, an update at Number.MAX_SAFE_INTEGER — the next version would be no safe integer — and changes nothing, whatever the stored version; the update that reaches it passes", async () => {
+			const store = await factory();
+			const max = Number.MAX_SAFE_INTEGER;
+			await store.create(RECORD({ version: max - 1 }));
+			const next = { data: "v2.re-sealed", label: undefined, lastUsedAt: undefined };
+			const reached = await store.update("user-1", "factor-1", max - 1, next);
+			expect(reached).toStrictEqual({ ...RECORD(), ...next, version: max });
+			await expect(store.update("user-1", "factor-1", max, next)).rejects.toThrow(RangeError);
+			expect(await store.list("user-1")).toStrictEqual([reached]);
+			await expect(store.update("user-1", "gone", max, next)).rejects.toThrow(RangeError);
+		});
+
 		it("lets exactly one of N concurrent updates at one version win", async () => {
 			const store = await factory();
 			await store.create(RECORD());
