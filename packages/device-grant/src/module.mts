@@ -669,13 +669,6 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 };
 
 /**
- * The device grant, built for one config — see the file header for what
- * `oauth.deviceAuthorization.enabled` decides here.
- *
- * Hand it the config the composition root boots with, as `oauthModule({ config })`
- * and `oauthAuthorizationModule({ config })` take theirs.
- */
-/**
  * The `oauth.deviceAuthorization` section as the module declares it (#728):
  * its schema, the package's `config/reference.conf` that holds its defaults,
  * and the path it sits at until it moves under the module's name.
@@ -684,6 +677,13 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
  */
 const DEVICE_GRANT_SECTION_SCHEMA = deviceGrantConfigSchema.shape.oauth.shape.deviceAuthorization;
 
+/**
+ * The device grant, built for one config — see the file header for what
+ * `oauth.deviceAuthorization.enabled` decides here.
+ *
+ * Hand it the config the composition root boots with, as `oauthModule({ config })`
+ * and `oauthAuthorizationModule({ config })` take theirs.
+ */
 export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 	const enabled = isEnabled(params.config);
 	return defineModule<Requires, Optional, typeof DEVICE_GRANT_SECTION_SCHEMA>({

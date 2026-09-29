@@ -84,6 +84,17 @@ import { createRegistrationOptionsHandler } from "./routes/registrationOptions.m
 import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs";
 
 /**
+ * The `webauthn` section as the module declares it (#728): the package's
+ * `config/reference.conf`, which holds its defaults, and the path it sits at.
+ * Its schema checks nothing yet: the module reads the section through the
+ * `webauthnConfig` slot, which the deployment fills from it with
+ * `webauthnConfigSchema` (or hard-codes), and a check here would refuse at
+ * boot what that slot accepts today. The schema takes over when the section
+ * moves under the module's name.
+ */
+const WEBAUTHN_SECTION_SCHEMA = z.unknown();
+
+/**
  * Declarative manifest for the WebAuthn passkey module.
  *
  * Consumer composition roots provide `webauthnConfig` via a small bootstrap
@@ -106,17 +117,6 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
  * from `config.rateLimit.failMode`, the same key the OAuth endpoints and
  * `/session/login` read.
  */
-/**
- * The `webauthn` section as the module declares it (#728): the package's
- * `config/reference.conf`, which holds its defaults, and the path it sits at.
- * Its schema checks nothing yet: the module reads the section through the
- * `webauthnConfig` slot, which the deployment fills from it with
- * `webauthnConfigSchema` (or hard-codes), and a check here would refuse at
- * boot what that slot accepts today. The schema takes over when the section
- * moves under the module's name.
- */
-const WEBAUTHN_SECTION_SCHEMA = z.unknown();
-
 export const webauthnModule = defineModule<
 	| "webauthnConfig"
 	| "webauthnCredentialStore"

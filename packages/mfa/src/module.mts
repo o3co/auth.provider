@@ -233,11 +233,6 @@ function stepUpPageOf(config: unknown): StepUpPage {
 const passThrough = (_req: unknown, _res: unknown, next: () => void): void => next();
 
 /**
- * The MFA module (see this file's header): the `mfa` session requirement and
- * the MFA routes' mount. `options.environment` reaches the development
- * sample key's refusal.
- */
-/**
  * The `mfa` section as the module declares it (#728): the package's
  * `config/reference.conf`, which holds its defaults, and the path it sits at.
  * Its schema checks nothing yet: the requirement's factory reads the section
@@ -248,6 +243,11 @@ const passThrough = (_req: unknown, _res: unknown, next: () => void): void => ne
  */
 const MFA_SECTION_SCHEMA = z.unknown();
 
+/**
+ * The MFA module (see this file's header): the `mfa` session requirement and
+ * the MFA routes' mount. `options.environment` reaches the development
+ * sample key's refusal.
+ */
 export function mfaModule(options: MfaModuleOptions = {}): Module {
 	return defineModule<
 		| "config"
