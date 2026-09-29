@@ -21,13 +21,16 @@
  * element's index is a word of its own (`mfa.encryptionKeys.0.key` is
  * `MFA_ENCRYPTION_KEYS_0_KEY`), and a camelCase key splits at each capital.
  *
- * It reads every package's `config/reference.conf`: each `${?VAR}` (or
- * `${VAR}`) outside a comment is resolved alone, set to a marker, and the
- * paths the marker lands on are the paths the variable sets. A name that is
- * not the upper-snake-case form of each of its paths fails, unless it is on
- * `TODAY`: the names that predate the rule, which the move pull requests
- * rename. That list may only shrink — an entry that no longer holds fails
- * until it is removed.
+ * It reads every package's `config/reference.conf` and the standalone
+ * template's configuration layers (`templates/standalone/config/*.conf`):
+ * each `${?VAR}` (or `${VAR}`) outside a comment is resolved alone, set to a
+ * marker, and the paths the marker lands on are the paths the variable sets.
+ * A name that is not the upper-snake-case form of each of its paths fails,
+ * unless it is on `TODAY`: the names that predate the rule, which the move
+ * pull requests rename. That list may only shrink, and two checks hold it
+ * there: an entry that no longer holds fails until it is removed, and the
+ * list's length has a ceiling, `TODAY_CEILING`, that a name added to it
+ * breaks — each move pull request lowers the ceiling by the names it renames.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -37,8 +40,21 @@ import { parseFile } from "@o3co/ts.hocon";
 import { describe, expect, it } from "vitest";
 
 const PACKAGES = fileURLToPath(new URL("../../../../", import.meta.url));
+const TEMPLATE_CONFIG = fileURLToPath(
+	new URL("../../../../../templates/standalone/config/", import.meta.url),
+);
 
-/** The names that predate the rule, as `<package>: <VAR> at <path>`; the move pull requests rename them. */
+/**
+ * How long `TODAY` may be: its length today. A move pull request that renames
+ * names lowers it by as many; nothing raises it.
+ */
+const TODAY_CEILING = 61;
+
+/**
+ * The names that predate the rule, as `<layer>: <VAR> at <path>` — `<layer>`
+ * is a package's directory name, or `template` for the standalone template's
+ * layers; the move pull requests rename them.
+ */
 const TODAY: readonly string[] = [
 	"core: LOG_LEVEL at logging.level",
 	"core: OAUTH_JWT_ALGORITHM at oauth.jwt.signingKey.local.algorithm",
@@ -124,23 +140,32 @@ function substitutedNames(text: string): string[] {
 	];
 }
 
-/** Every package's `config/reference.conf`, by package directory name. */
-const REFERENCES: readonly (readonly [string, string])[] = readdirSync(PACKAGES, {
-	withFileTypes: true,
-})
-	.filter((entry) => entry.isDirectory())
-	.map((entry) => [entry.name, join(PACKAGES, entry.name, "config", "reference.conf")] as const)
-	.filter(([, path]) => {
-		try {
-			readFileSync(path);
-			return true;
-		} catch {
-			return false;
-		}
-	});
+/** Whether `path` can be read. */
+function readable(path: string): boolean {
+	try {
+		readFileSync(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
-/** Every variable each reference substitutes, with each path it sets. */
-const FOUND = REFERENCES.flatMap(([name, path]) =>
+/**
+ * Every configuration layer the repository ships, by the name `TODAY` gives
+ * it: each package's `config/reference.conf` by package directory name, and
+ * the standalone template's layers as `template`.
+ */
+const LAYERS: readonly (readonly [string, string])[] = [
+	...readdirSync(PACKAGES, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory())
+		.map((entry) => [entry.name, join(PACKAGES, entry.name, "config", "reference.conf")] as const),
+	...readdirSync(TEMPLATE_CONFIG)
+		.filter((file) => file.endsWith(".conf"))
+		.map((file) => ["template", join(TEMPLATE_CONFIG, file)] as const),
+].filter(([, path]) => readable(path));
+
+/** Every variable each layer substitutes, with each path it sets. */
+const FOUND = LAYERS.flatMap(([name, path]) =>
 	substitutedNames(readFileSync(path, "utf8")).map((variable) => ({
 		package: name,
 		variable,
@@ -156,11 +181,19 @@ const MISNAMED: readonly string[] = FOUND.flatMap(({ package: name, variable, pa
 );
 
 describe("an environment variable is named after the path it sets (#728 B9)", () => {
-	it("reads the packages' references (the guard is not vacuous)", () => {
-		expect(REFERENCES.map(([name]) => name)).toEqual(
-			expect.arrayContaining(["core", "mfa", "webauthn"]),
+	it("reads the packages' references and the template's layers (the guard is not vacuous)", () => {
+		expect(LAYERS.map(([name]) => name)).toEqual(
+			expect.arrayContaining(["core", "mfa", "webauthn", "template"]),
 		);
-		expect(FOUND.length).toBeGreaterThan(50);
+		expect(
+			LAYERS.filter(([name]) => name === "template").map(([, path]) =>
+				path.slice(TEMPLATE_CONFIG.length),
+			),
+		).toEqual(expect.arrayContaining(["application.conf", "development.conf", "production.conf"]));
+		expect(FOUND.filter(({ package: name }) => name === "template").length).toBeGreaterThanOrEqual(
+			55,
+		);
+		expect(FOUND.length).toBeGreaterThan(100);
 	});
 
 	it("resolves every variable a reference substitutes to a path it sets", () => {
@@ -175,6 +208,11 @@ describe("an environment variable is named after the path it sets (#728 B9)", ()
 		expect(upperSnake("oauth.dpop.nonce.ttl-seconds")).toBe("OAUTH_DPOP_NONCE_TTL_SECONDS");
 		expect(upperSnake("mfa.encryptionKeys.0.key")).toBe("MFA_ENCRYPTION_KEYS_0_KEY");
 		expect(upperSnake("http.trustProxy")).toBe("HTTP_TRUST_PROXY");
+		// A run of capitals is one word, split from the word after it.
+		expect(upperSnake("cache.cacheTTLSeconds")).toBe("CACHE_CACHE_TTL_SECONDS");
+		expect(upperSnake("oauth.clientIdMetadataDocuments.maxURLBytes")).toBe(
+			"OAUTH_CLIENT_ID_METADATA_DOCUMENTS_MAX_URL_BYTES",
+		);
 	});
 
 	it("names every variable after its path, but for the names that predate the rule", () => {
@@ -183,5 +221,9 @@ describe("an environment variable is named after the path it sets (#728 B9)", ()
 
 	it("keeps no name on the list that is now named after its path: the list only shrinks", () => {
 		expect(TODAY.filter((entry) => !MISNAMED.includes(entry))).toEqual([]);
+	});
+
+	it("adds no name to the list: its length stays under the ceiling the move pull requests lower", () => {
+		expect(TODAY.length).toBeLessThanOrEqual(TODAY_CEILING);
 	});
 });
