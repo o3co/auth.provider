@@ -580,7 +580,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 		mfaModule({ reach: new Set(reach) } as Partial<SessionRequirement>);
 	const factorModule = (value: () => unknown) =>
 		defineModule({ name: "test:factors", contributes: { mfaFactors: { totp: value as never } } });
-	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
+	const expected = { sessionRequirements: { expected: ["mfa"] } };
 
 	it("a getter that answers a valid list at registration and another afterwards: the recomputation reads what was validated", async () => {
 		const shifting = (later: readonly string[]) => {
@@ -697,21 +697,11 @@ describe("what could throw raw at the end of stage 4 fails as a BootError", () =
 			},
 		});
 		const err = await refusal(
-			boot([flaky, ...stores, mfaModule()], {
-				sessionRequirements: { expected: ["mfa"] },
-				mfa: { mode: "required" },
-			}),
+			boot([flaky, ...stores, mfaModule()], { sessionRequirements: { expected: ["mfa"] } }),
 		);
 		expect(err).toBeInstanceOf(BootError);
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ kind: "sessionRequirements", name: "mfa" });
-	});
-
-	it("an mfa.mode that readMfaMode refuses fails as config-validation-failed at mfa.mode, not as a raw RangeError", async () => {
-		const err = await refusal(boot([], { mfa: { mode: 7 } }));
-		expect(err).toBeInstanceOf(BootError);
-		expect(err.reason).toBe("config-validation-failed");
-		expect(err.details).toMatchObject({ issues: [{ path: ["mfa", "mode"] }] });
 	});
 });
 
@@ -1029,7 +1019,7 @@ describe("the name mfa is reserved, and bound to core's MFA ports", () => {
 		name: "test:factors",
 		contributes: { mfaFactors: { totp: () => totp } },
 	});
-	const expected = { sessionRequirements: { expected: ["mfa"] }, mfa: { mode: "required" } };
+	const expected = { sessionRequirements: { expected: ["mfa"] } };
 
 	it("accepts an MFA implementation: the ports required, the reach the factors' union with mfa, mfa.step_up declared", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
@@ -1162,7 +1152,6 @@ describe("stage 4: the reach without mfa, a refusal's cleanups, every consumer n
 		const seen: { resolver?: SessionRequirementResolver } = {};
 		const handle = await boot([plain, ...stores, mfaModule(), consumer(seen)], {
 			sessionRequirements: { expected: ["mfa"] },
-			mfa: { mode: "required" },
 		});
 		try {
 			expect([...(seen.resolver?.get("mfa")?.reach ?? [])]).toEqual(["otp"]);

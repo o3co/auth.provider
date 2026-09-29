@@ -24,7 +24,6 @@
 import { FEDERATED_AMR, MFA_AMR, PASSWORD_AMR } from "../grants/authenticationClaims.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import { readMfaMode } from "../mfa/mode.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
@@ -547,12 +546,15 @@ const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>): boolean =>
  * - accept the reserved name `mfa` only from a module that requires every one
  *   of `MFA_PORTS`, reaches what core recomputes from the enabled factors,
  *   and declares `mfa.step_up` among its remediations;
- * - refuse `mfa.mode` other than `off` with no `mfa` requirement
- *   (`session-requirement-missing`), before the declaration, so the
- *   composition is told to install the module;
+ * - refuse a name in `sessionRequirements.expected` that no module
+ *   registers (`session-requirement-missing`), whether or not anything
+ *   consults admission: the composition would believe a requirement is in
+ *   force that is not. Checked first, so a composition is told to install
+ *   the module rather than to fix the list;
  * - when a module requires or reads `sessionRequirementResolver`, require
- *   `sessionRequirements.expected` to be the set of registered names
- *   (`session-requirements-undeclared`).
+ *   `sessionRequirements.expected`, and every registered name in it
+ *   (`session-requirements-undeclared`). With no such module a requirement
+ *   changes no decision, so none is required.
  *
  * A refused requirement is `contribute-factory-failed`. Logs
  * `session_requirements_registered` at info when a consumer or a requirement
@@ -648,56 +650,55 @@ async function checkSessionRequirements(
 			...(normalised.optional as readonly string[]),
 		].includes("sessionRequirementResolver");
 	});
-	const config = components.config;
-	// Before the declaration: a composition that asks for MFA without the
-	// module is told to install it, not to fix a list. The mode is the parsed
-	// configuration's — stage 1's schema admits off, optional and required
-	// alone — so the reader answers, never throws, here.
-	const mode = readMfaMode(config);
-	if (mode !== undefined && mode !== "off" && !registered.includes(MFA_REQUIREMENT_NAME)) {
+	const expected = (
+		components.config as { sessionRequirements?: { expected?: unknown } } | undefined
+	)?.sessionRequirements?.expected;
+	const declared =
+		Array.isArray(expected) && expected.every((name) => typeof name === "string")
+			? (expected as readonly string[])
+			: undefined;
+	const missing = [...new Set(declared)].filter((name) => !registered.includes(name));
+	if (declared !== undefined && missing.length > 0) {
 		const cleanupErrors = await runCleanupsReverse(material.cleanups);
 		throw new BootError({
 			message:
-				`mfa.mode = "${mode}" asks for a second factor, but no requirement named "${MFA_REQUIREMENT_NAME}" is registered: ` +
-				'install the MFA module, or set mfa.mode = "off".',
+				`sessionRequirements.expected names [${missing.join(", ")}], which no installed module registers ` +
+				`([${registered.join(", ")}] registered): install the module that registers each, ` +
+				"or remove the name from sessionRequirements.expected.",
 			reason: "session-requirement-missing",
 			stage: "applyContributions",
 			details: {
 				reason: "session-requirement-missing",
-				configKey: "mfa.mode",
-				mode,
-				requirement: MFA_REQUIREMENT_NAME,
+				configKey: "sessionRequirements.expected",
+				missing,
+				declared,
+				registered,
 				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
 			},
 		});
 	}
-	if (consumedBy.length > 0) {
-		const declared = (config as { sessionRequirements?: { expected?: unknown } } | undefined)
-			?.sessionRequirements?.expected;
-		const declaredNames =
-			Array.isArray(declared) && declared.every((name) => typeof name === "string")
-				? (declared as readonly string[])
-				: undefined;
-		if (declaredNames === undefined || !sameSet(new Set(declaredNames), new Set(registered))) {
-			const cleanupErrors = await runCleanupsReverse(material.cleanups);
-			throw new BootError({
-				message:
-					`sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
-					`${declaredNames === undefined ? "nothing is declared" : `[${declaredNames.join(", ")}] is declared`}, ` +
-					`[${registered.join(", ")}] registered, and ${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
-					"consult session admission. Write the key to state what this composition expects (`[]` for none).",
+	if (
+		consumedBy.length > 0 &&
+		(declared === undefined || registered.some((name) => !declared.includes(name)))
+	) {
+		const cleanupErrors = await runCleanupsReverse(material.cleanups);
+		throw new BootError({
+			message:
+				`sessionRequirements.expected must name exactly the session requirements this composition registers: ` +
+				`${declared === undefined ? "nothing is declared" : `[${declared.join(", ")}] is declared`}, ` +
+				`[${registered.join(", ")}] registered, and ${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
+				"consult session admission. Write the key to state what this composition expects (`[]` for none).",
+			reason: "session-requirements-undeclared",
+			stage: "applyContributions",
+			details: {
 				reason: "session-requirements-undeclared",
-				stage: "applyContributions",
-				details: {
-					reason: "session-requirements-undeclared",
-					configKey: "sessionRequirements.expected",
-					declared: declaredNames,
-					registered,
-					consumedBy,
-					...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-				},
-			});
-		}
+				configKey: "sessionRequirements.expected",
+				declared,
+				registered,
+				consumedBy,
+				...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+			},
+		});
 	}
 	if (consumedBy.length > 0 || registrations.length > 0) {
 		const logger = components.logger as Logger | undefined;

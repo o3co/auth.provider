@@ -66,7 +66,7 @@ import express from "express";
 import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
+import { buildModules } from "#/buildModules.mjs";
 import {
 	type OwnLayers,
 	readOwnLayers,
@@ -201,15 +201,14 @@ export function ownFiles(): string[] {
  * Phase one, as `app.mts` reads it: the switches `buildModules` chooses
  * the modules by — and `reads`, what a module added to the composition reads
  * when it is built — from the composition's own files under `env` over core's
- * `reference.conf`, with the posture on session admission derived from the
- * parsed mode.
+ * `reference.conf`.
  */
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
 	reads: readonly string[] = [],
 	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
 ): AppConfig {
-	return withSessionRequirements(readSwitches(own, { reads }));
+	return readSwitches(own, { reads });
 }
 
 // ---------------------------------------------------------------------------
@@ -653,7 +652,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
-	const resolved = adjust(resolveForBoot(own, modules, switches.sessionRequirements));
+	const resolved = adjust(resolveForBoot(own, modules));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {

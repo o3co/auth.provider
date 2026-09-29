@@ -20,7 +20,7 @@
  * 1. `readSwitches` — its own files over core's `reference.conf`, read with
  *    core's transitional reader — parses only `SWITCHES`, what the template
  *    reads before it knows its modules: the switches `buildModules` chooses
- *    them by, the log level, `mfa.mode`;
+ *    them by, and the log level;
  * 2. `resolveForBoot` — its own files over the `reference.conf` of every
  *    package its modules come from, core's last — handed to `createApp`
  *    unparsed, which parses it once with every loaded module's schema.
@@ -45,7 +45,7 @@ import {
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "../buildModules.mjs";
+import { buildModules } from "../buildModules.mjs";
 import {
 	readOwnLayers,
 	readSwitches,
@@ -168,10 +168,8 @@ describe("phase one reads its switches and nothing else", () => {
 
 	it("reads, before boot, only paths among its switches", () => {
 		const { config, reads } = recording(
-			withSessionRequirements(readSwitches(readOwnLayers(ownFiles("production"), { env }))),
+			readSwitches(readOwnLayers(ownFiles("production"), { env })),
 		);
-		// The posture on session admission is derived above, as `app.mts`
-		// derives it; `buildModules` and the logger read the result.
 		createAppLogger(config);
 		buildModules(config, { environment: "production" });
 		const covered = (path: string) =>
@@ -182,9 +180,7 @@ describe("phase one reads its switches and nothing else", () => {
 					switchPath.startsWith(`${path}.`),
 			);
 		expect(reads.size).toBeGreaterThan(10);
-		expect([...reads].filter((path) => !covered(path) && path !== "sessionRequirements")).toEqual(
-			[],
-		);
+		expect([...reads].filter((path) => !covered(path))).toEqual([]);
 	});
 
 	it("still refuses a switch it reads that the schema refuses, naming it", () => {
@@ -198,7 +194,7 @@ describe("phase one reads its switches and nothing else", () => {
 describe("phase two: what createApp is handed", () => {
 	const env = ENVIRONMENTS["the secrets alone"] as Readonly<Record<string, string>>;
 	const own = readOwnLayers(ownFiles("development"), { env });
-	const switches = withSessionRequirements(readSwitches(own));
+	const switches = readSwitches(own);
 
 	/**
 	 * A package the template does not load, shipping a reference.conf of its
@@ -220,11 +216,10 @@ describe("phase two: what createApp is handed", () => {
 
 	it("layers each loaded module's reference beneath the template's own files, over core's", () => {
 		const modules = [...buildModules(switches, { environment: "development" }), widgetModule()];
-		const resolved = resolveForBoot(
-			own,
-			modules,
-			switches.sessionRequirements,
-		) as unknown as Record<string, Record<string, unknown>>;
+		const resolved = resolveForBoot(own, modules) as unknown as Record<
+			string,
+			Record<string, unknown>
+		>;
 		// The package's own section, from its reference.
 		expect(resolved.widget).toEqual({ size: 3 });
 		// The template's application.conf wins over a package's reference…
@@ -235,27 +230,22 @@ describe("phase two: what createApp is handed", () => {
 
 	it("layers no reference a loaded module does not declare", () => {
 		const modules = buildModules(switches, { environment: "development" });
-		const resolved = resolveForBoot(
-			own,
-			modules,
-			switches.sessionRequirements,
-		) as unknown as Record<string, unknown>;
+		const resolved = resolveForBoot(own, modules) as unknown as Record<string, unknown>;
 		expect(resolved).not.toHaveProperty("widget");
 	});
 
-	it("hands the configuration over as resolved, unparsed, with phase one's posture on session admission", () => {
+	it("hands the configuration over as resolved and unparsed, with the shipped sessionRequirements.expected whatever MFA_MODE says", () => {
 		const optionalOwn = readOwnLayers(ownFiles("development"), {
 			env: { ...env, MFA_MODE: "optional", HTTP_PORT: "8080" },
 		});
-		const optional = withSessionRequirements(readSwitches(optionalOwn));
 		const resolved = resolveForBoot(
 			optionalOwn,
 			buildModules(switches, { environment: "development" }),
-			optional.sessionRequirements,
 		) as unknown as Record<string, Record<string, unknown>>;
 		// An environment variable's string, as HOCON substituted it: createApp parses it.
 		expect(resolved.http?.port).toBe("8080");
-		expect(resolved.sessionRequirements).toEqual({ expected: ["mfa"] });
+		expect(resolved.mfa?.mode).toBe("optional");
+		expect(resolved.sessionRequirements).toEqual({ expected: [] });
 	});
 });
 
@@ -269,8 +259,8 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		const operator = operatorLayer('rateLimiter.adapter = "redis"\n');
 		const own = readOwnLayers([operator, ...ownFiles("production")], { env });
 		writeFileSync(operator, 'rateLimiter.adapter = "memory"\n');
-		const switches = withSessionRequirements(readSwitches(own));
-		const resolved = resolveForBoot(own, [], switches.sessionRequirements) as unknown as {
+		const switches = readSwitches(own);
+		const resolved = resolveForBoot(own, []) as unknown as {
 			rateLimiter: { adapter: unknown };
 		};
 		expect(switches.rateLimiter?.adapter).toBe("redis");
@@ -281,8 +271,8 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 		const changing: Record<string, string> = { ...env, RATE_LIMITER_ADAPTER: "redis" };
 		const own = readOwnLayers(ownFiles("production"), { env: changing });
 		changing.RATE_LIMITER_ADAPTER = "memory";
-		const switches = withSessionRequirements(readSwitches(own));
-		const resolved = resolveForBoot(own, [], switches.sessionRequirements) as unknown as {
+		const switches = readSwitches(own);
+		const resolved = resolveForBoot(own, []) as unknown as {
 			rateLimiter: { adapter: unknown };
 		};
 		expect(switches.rateLimiter?.adapter).toBe("redis");
@@ -292,17 +282,13 @@ describe("both phases read one snapshot of the composition's own layers", () => 
 	it("reads every switch as boot's parse has it, for the shipped environments", async () => {
 		for (const environment of ["development", "production"]) {
 			for (const [name, shipped] of Object.entries(ENVIRONMENTS)) {
-				// `mfa.mode` off: boot refuses another mode with no requirement
-				// named `mfa` registered, and the template installs none. Phase
-				// one's reading of the mode is pinned against the pre-parse above.
-				const variables = { ...shipped, MFA_MODE: "off" };
-				const own = readOwnLayers(ownFiles(environment), { env: variables });
-				const switches = withSessionRequirements(readSwitches(own));
+				const own = readOwnLayers(ownFiles(environment), { env: shipped });
+				const switches = readSwitches(own);
 				const modules = buildModules(switches, { environment });
 				const handle = await createApp({
 					modules: [],
 					bootstrapComponents: {
-						config: resolveForBoot(own, modules, switches.sessionRequirements),
+						config: resolveForBoot(own, modules),
 						pathResolver: (s: string) => s,
 						...FEDERATION_STORES,
 					} as never,

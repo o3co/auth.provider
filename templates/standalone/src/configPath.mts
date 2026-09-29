@@ -120,11 +120,11 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
 
 /**
  * What the template reads before it knows its modules: the switches
- * `buildModules` and its module factories choose by, the log level
- * (`logger.mts`) and `mfa.mode`. A module a deployment adds that reads its
- * configuration when it is built adds those paths here, or passes them to
- * `readSwitches` as `reads`. `two-phase-config.test.mts` holds the list to
- * what the template reads.
+ * `buildModules` and its module factories choose by, and the log level
+ * (`logger.mts`). A module a deployment adds that reads its configuration
+ * when it is built adds those paths here, or passes them to `readSwitches` as
+ * `reads`. `two-phase-config.test.mts` holds the list to what the template
+ * reads.
  *
  * Every path here and in `reads` must be one core's transitional base
  * declares (a section core's schema has, or mirrors for a package), or
@@ -135,7 +135,6 @@ export function resolveLayers(own: OwnLayers, references: readonly URL[]): Recor
  */
 export const SWITCHES: readonly string[] = [
 	"logging",
-	"mfa.mode",
 	"federations",
 	"federationGrants.enabled",
 	"federationGrantStore.adapter",
@@ -177,18 +176,11 @@ export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): App
  * Phase two: what `createApp` parses once, with every loaded module's schema:
  * the composition's own layers, the same read phase one had, over the
  * `reference.conf` of every package `modules` come from, core's last,
- * resolved and unparsed. `sessionRequirements`, the posture on session
- * admission derived from the parsed `mfa.mode` in phase one, is written in
- * beside it (ADR 2026-09-28-session-admission).
+ * resolved and unparsed.
  *
  * Typed `AppConfig` because that is the `config` slot's type; read the parsed
  * configuration from `handle.components.config`, not from this.
  */
-export function resolveForBoot(
-	own: OwnLayers,
-	modules: readonly Module[],
-	sessionRequirements: AppConfig["sessionRequirements"],
-): AppConfig {
-	const resolved = resolveLayers(own, moduleReferences(modules));
-	return { ...resolved, sessionRequirements } as unknown as AppConfig;
+export function resolveForBoot(own: OwnLayers, modules: readonly Module[]): AppConfig {
+	return resolveLayers(own, moduleReferences(modules)) as unknown as AppConfig;
 }

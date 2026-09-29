@@ -15,9 +15,7 @@
  */
 
 /**
- * `mfa.mode` as a consumer reads it (the MFA ADR's D19): the boot check that
- * refuses `mfa.mode` without a requirement named `mfa` (the session-admission
- * ADR's D7), and the MFA package.
+ * `mfa.mode` as a consumer reads it (the MFA ADR's D19): the MFA package.
  */
 
 import { describe, expect, it } from "vitest";

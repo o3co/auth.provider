@@ -15,11 +15,11 @@
  */
 
 /**
- * `mfa.mode` as its consumers read it: the boot check that refuses a mode other
- * than `off` while no requirement named `mfa` is registered
- * (`session-requirement-missing`), and the MFA package, whose requirement is its
- * one request-time reader. Session consumers never read it; admission decides
- * what "logged in" means (ADR 2026-09-28-session-admission).
+ * `mfa.mode` as its consumers read it: the MFA package, whose requirement is
+ * its one request-time reader. Boot does not read it; what a composition
+ * expects of session admission is `sessionRequirements.expected`. Session
+ * consumers never read it; admission decides what "logged in" means (ADR
+ * 2026-09-28-session-admission).
  */
 
 /**

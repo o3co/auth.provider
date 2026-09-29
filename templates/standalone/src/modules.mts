@@ -459,9 +459,9 @@ export const standaloneRedisClientsModule: Module = defineModule({
 				.federationTokenStoreClient;
 		},
 		// The two MFA stores' clients, required by `redisMfaFactorStoreModule`
-		// and `redisMfaTransactionStoreModule`. This template installs neither
-		// while `mfa.mode` is `off`; the slots are provided anyway, for the
-		// device-code slot's reason. Each module checks the server's eviction
+		// and `redisMfaTransactionStoreModule`. This template installs
+		// neither; the slots are provided anyway, for the device-code slot's
+		// reason. Each module checks the server's eviction
 		// policy and persistence when it boots (ADR
 		// 2026-09-25-multi-factor-authentication).
 		mfaFactorStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {

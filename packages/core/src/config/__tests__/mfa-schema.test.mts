@@ -21,10 +21,8 @@
  * stores' key prefixes, which the Redis package's modules read.
  *
  * `mfa.mode` is `"off"` by reference default and admits its three values; one
- * that is none of the three is refused here, naming its key. Whether a mode
- * other than `off` is honoured is boot's to refuse (`session-requirement-missing`
- * when no requirement named `mfa` is registered), so an operator who wrote
- * `required` never believes their logins ask for a second factor.
+ * that is none of the three is refused here, naming its key. The MFA package
+ * reads it; boot does not.
  */
 
 import { fileURLToPath } from "node:url";

@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import { type AppConfig, createApp } from "@o3co/auth-provider-core";
 import express from "express";
 import helmet from "helmet";
-import { buildModules, withSessionRequirements } from "./buildModules.mjs";
+import { buildModules } from "./buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "./configPath.mjs";
 import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
@@ -35,9 +35,8 @@ const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, e
 // Read once, so both phases read the same thing.
 const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one: what the template reads before it knows its modules, only for
-// those choices, plus the session requirements derived from the parsed
-// `mfa.mode` (`withSessionRequirements`).
-const switches: AppConfig = withSessionRequirements(readSwitches(own));
+// those choices.
+const switches: AppConfig = readSwitches(own);
 
 // Built from config so its level is operator-controlled, and wired into
 // `bootstrapComponents` so every module that declares `optional: ["logger"]`
@@ -80,7 +79,7 @@ await (async (): Promise<void> => {
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
-			config: resolveForBoot(own, modules, switches.sessionRequirements),
+			config: resolveForBoot(own, modules),
 			pathResolver: import.meta.resolve,
 			logger,
 		},

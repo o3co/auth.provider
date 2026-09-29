@@ -443,7 +443,7 @@ describe("the session requirements: the MFA package's, and the two a deployment 
 		);
 	});
 
-	it("are declared: the composition's sessionRequirements.expected names exactly them — mfa, as the template derives it from mfa.mode, and the deployment's own", async () => {
+	it("are declared: the composition's sessionRequirements.expected names exactly them — mfa, as a deployment that installs the MFA package declares it, and the deployment's own", async () => {
 		const { config } = await boot();
 		expect([...(config.sessionRequirements?.expected ?? [])].sort()).toEqual(
 			[...REGISTERED].sort(),

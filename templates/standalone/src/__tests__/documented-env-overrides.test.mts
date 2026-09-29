@@ -25,7 +25,7 @@ import {
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { buildModules, withSessionRequirements } from "../buildModules.mjs";
+import { buildModules } from "../buildModules.mjs";
 import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
 
 /**
@@ -182,10 +182,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- multi-factor authentication ----------------------------------
-	// The mode (ADR 2026-09-25-multi-factor-authentication), which
-	// `sessionRequirements.expected` is derived from in TypeScript (ADR
-	// 2026-09-28-session-admission), and the two store switches a composition
-	// installs MFA's stores from.
+	// The mode (ADR 2026-09-25-multi-factor-authentication), which the MFA
+	// package reads, and the two store switches a composition installs MFA's
+	// stores from.
 	MFA_MODE: "off",
 	MFA_FACTOR_STORE_ADAPTER: "redis",
 	MFA_TRANSACTION_STORE_ADAPTER: "redis",
@@ -293,9 +292,9 @@ function ownFiles(configEnv: string, operatorLayer?: string): string[] {
 	return [file, envConfPath, applicationConfPath];
 }
 
-/** Phase one, as `app.mts` reads it: the switches, with the posture on session admission. */
+/** Phase one, as `app.mts` reads it: the switches. */
 function readShippedSwitches(env: Record<string, string>, configEnv = "production"): AppConfig {
-	return withSessionRequirements(readSwitches(readOwnLayers(ownFiles(configEnv), { env })));
+	return readSwitches(readOwnLayers(ownFiles(configEnv), { env }));
 }
 
 /**
@@ -315,9 +314,9 @@ const FEDERATION_STORES = Object.fromEntries(
 
 /**
  * The shipped layers under `env`, as `app.mts` hands them to boot, and the
- * configuration boot parsed: phase one for the posture on session admission,
- * phase two resolved over every loaded package's reference (core's, for the
- * template's modules) and parsed once by `createApp` — no bridge on the way.
+ * configuration boot parsed: phase two, resolved over every loaded package's
+ * reference (core's, for the template's modules) and parsed once by
+ * `createApp` — no bridge on the way.
  * No module is loaded: the parse is what this suite asks about, and each
  * key it reads is one core's schema declares.
  */
@@ -327,11 +326,10 @@ async function bootParsed(
 	operatorLayer?: string,
 ): Promise<AppConfig> {
 	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
-	const switches = withSessionRequirements(readSwitches(own));
 	const handle = await createApp({
 		modules: [],
 		bootstrapComponents: {
-			config: resolveForBoot(own, [], switches.sessionRequirements),
+			config: resolveForBoot(own, []),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,
