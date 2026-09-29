@@ -1,6 +1,6 @@
 # `core/src/federations`
 
-Last updated: 2026-09-26
+Last updated: 2026-09-29
 
 The federation adapter port: what an upstream-IdP adapter implements, and what everything downstream of it reads.
 
@@ -18,6 +18,7 @@ This directory owns the contract an adapter implements — `FederationProvider` 
 
 - The contract is [`types.mts`](./types.mts); the response-mode vocabulary is [`response-mode.mts`](./response-mode.mts), the scope grammar [`scope.mts`](./scope.mts), the token-type rule [`token-type.mts`](./token-type.mts). The adapter toolkit is `codeChallenge` ([`pkce.mts`](./pkce.mts)), `callbackUrlForExchange` ([`callback-url.mts`](./callback-url.mts)), `FederationClientSecret` / `resolveClientSecret` ([`client-secret.mts`](./client-secret.mts)) and `federationTokenSnapshot` ([`token-snapshot.mts`](./token-snapshot.mts)). Everything here is exported from the package root.
 - `FederationProvider` is also the value type of the `federations` contribution kind ([`../modules/manifest/contributes-map.mts`](../modules/manifest/contributes-map.mts)) and of the `federationProviders` slot ([`../modules/manifest/synthetic-keys.mts`](../modules/manifest/synthetic-keys.mts)) — one type.
+- A `federations` contribution may declare, beside its factory, the `type` it handles and the schema of an entry of that type (`FederationContribution`, [#728](https://github.com/o3co/auth.provider/issues/728)): the declaration configured entries are to be dispatched by. Boot does not dispatch by it yet — the provider registers under the contribution's name either way.
 - A contribution factory may answer with the value or a promise of it (`Contributed<T>`): `applyContributions` awaits it, which is what lets an adapter discover issuer metadata at boot.
 
 ## Inputs and outputs
