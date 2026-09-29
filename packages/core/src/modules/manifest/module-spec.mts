@@ -199,7 +199,9 @@ export interface ModuleSpec<
 	 *
 	 * Typed to the keys of `provides`: `defineModule` infers them as `P`, and
 	 * a call that writes its type arguments names `P` as the fourth to
-	 * declare any.
+	 * declare any. Only an inferred `P` holds the list to what the module
+	 * provides; one written is taken as given, and the stage-1 row
+	 * `authoritative-closure` refuses a key the module does not provide.
 	 */
 	readonly authoritative?: readonly NoInfer<P>[];
 
