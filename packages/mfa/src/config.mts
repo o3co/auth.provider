@@ -39,7 +39,7 @@
  * - `mfa.transactionTtlSeconds`, a transaction's life, 60-1800 seconds (the
  *   step-8 owner decision; the ADR states no bounds), from which every
  *   `expiresAtMs` is derived and nothing else; `mfa.maxAttemptsPerTransaction`,
- *   a positive whole number, what the store's `reserveAttempt` takes; and
+ *   1-10 (the owner's bound for step 8; the ADR states none); and
  *   `mfa.lockout`, D21's subject lock, held to core's `checkMfaLockoutPolicy`
  *   under that key — step 3's obligations, refused at boot (D8, D21).
  *
@@ -121,6 +121,9 @@ const RING_SHAPE = "must be a list of { id?, key } entries";
 
 const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
 
+/** The fewest and the most attempts one transaction may allow (the owner's bound for step 8; the ADR states none). */
+const MFA_MAX_ATTEMPTS_PER_TRANSACTION = { min: 1, max: 10 } as const;
+
 const POSITIVE_WHOLE = "must be a positive whole number";
 const positiveWhole = z
 	.number({ error: POSITIVE_WHOLE })
@@ -176,7 +179,11 @@ export const mfaConfigSchema = z.object(
 			MFA_TRANSACTION_TTL_SECONDS.max,
 			" seconds",
 		),
-		maxAttemptsPerTransaction: positiveWhole,
+		maxAttemptsPerTransaction: wholeNumber(
+			MFA_MAX_ATTEMPTS_PER_TRANSACTION.min,
+			MFA_MAX_ATTEMPTS_PER_TRANSACTION.max,
+			"",
+		),
 		lockout: lockoutSchema,
 	},
 	{ error: SECTION_MISSING },

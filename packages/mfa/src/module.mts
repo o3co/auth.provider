@@ -41,8 +41,11 @@
  *   key, which the settings accepted, it says so once, at warn.
  * - **The routes' mount.** Contributes the route `mfa-routes` at
  *   `/session/mfa`, after the session middleware. Its factory runs after
- *   every name-keyed contribution has registered, so it is where
- *   `mfa.mode = "required"` with no counting factor enabled is refused
+ *   every name-keyed contribution has registered, so it is where the
+ *   installed factors are held to what the requirement needs of them: an
+ *   enabled factor whose kind core's hint grammar refuses — a first
+ *   binding's `hints.enrollable` names it — is refused, naming the kind;
+ *   and `mfa.mode = "required"` with no counting factor enabled is refused
  *   (`mfa-no-counting-factor`, D20): nobody could meet the requirement. The
  *   routes themselves — the transaction, the challenge, the verification —
  *   are build-order step 8's third part; until then it answers nothing and
@@ -56,6 +59,7 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
+	isHintToken,
 	type Logger,
 	type MfaFactorResolver,
 	type Module,
@@ -129,6 +133,22 @@ export class MfaNoCountingFactorError extends RangeError {
 			'mfa.mode is "required", but no counting factor is enabled, so nobody could meet the requirement: enable one — mfa.factors.totp.enabled (MFA_TOTP_ENABLED), or another factor module\'s — or set mfa.mode = "optional"',
 		);
 		this.name = "MfaNoCountingFactorError";
+	}
+}
+
+/**
+ * An enabled factor whose kind core's hint grammar refuses: a first
+ * binding's answer lists the kinds (`hints.enrollable`), and core would
+ * refuse that answer at every such login. `JSON.stringify` quotes the kind,
+ * whatever it holds.
+ */
+function refuseUnhintableKinds(factors: MfaFactorResolver): void {
+	for (const [kind] of factors.entries()) {
+		if (!isHintToken(kind)) {
+			throw new RangeError(
+				`the MFA factor of kind ${JSON.stringify(kind)} cannot be offered: a first binding's hints.enrollable names each kind, and core admits a hint only of the form ^[a-z][a-z0-9_-]{0,63}$ — contribute the factor under such a kind`,
+			);
+		}
 	}
 }
 
@@ -214,6 +234,7 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 			routes: [
 				(deps) => {
 					const { mode } = mfaBootState(deps.mfaFactorResolver);
+					refuseUnhintableKinds(deps.mfaFactorResolver);
 					if (
 						mode === "required" &&
 						![...deps.mfaFactorResolver.entries()].some(([, factor]) => factor.counting)
