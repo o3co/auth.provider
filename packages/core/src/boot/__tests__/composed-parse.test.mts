@@ -449,6 +449,20 @@ describe("config_sections_ignored — a top-level section nobody owns (#728 B8)"
 		expect(ignored).toEqual([[{ sections: ["typoSection", "zeta"] }, "config_sections_ignored"]]);
 	});
 
+	it("names the sections of a configuration handed as an object that is not plain data, by its own keys", async () => {
+		// Boot's parse takes an instance as the configuration; its own keys are
+		// the sections, and a key its prototype carries is not one.
+		const logger = recordingLogger();
+		const instance = Object.assign(
+			Object.create({ inheritedSection: { enabled: true } }),
+			resolved({ typoSection: { enabled: true } }),
+		) as Record<string, unknown>;
+		await bootAndRead([], instance, logger);
+		expect(
+			logger.warn.mock.calls.filter(([, message]) => message === "config_sections_ignored"),
+		).toEqual([[{ sections: ["typoSection"] }, "config_sections_ignored"]]);
+	});
+
 	it("logs nothing when every section is owned", async () => {
 		const logger = recordingLogger();
 		await bootAndRead(
