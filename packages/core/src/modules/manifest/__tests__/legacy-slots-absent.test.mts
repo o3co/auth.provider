@@ -8,7 +8,7 @@ import { expectTypeOf, test } from "vitest";
 // Mirrors the namespace-level test in component-map.test.mts at the package
 // boundary, so a legacy shape re-introduced from any sub-file is caught.
 
-test("legacy v0.4.x slots are NOT in v0.5.0 ComponentMap (package-boundary check)", () => {
+test("the package's exported ComponentMap has no refreshTokenStore slot and no userSessionStore of the registerRP shape", () => {
 	// The userSessionStore slot name is reused with a narrow type (`create` /
 	// `get` / `delete` only), so discriminate on `registerRP` to detect ONLY
 	// the legacy shape. `?: infer V` handles both required and optional slot

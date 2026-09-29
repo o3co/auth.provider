@@ -16,7 +16,7 @@
 import { expect, test } from "vitest";
 import { SYNTHETIC_COMPONENT_KEYS } from "../synthetic-keys.mjs";
 
-test("SYNTHETIC_COMPONENT_KEYS has 9 members after A5 + D-5 + readiness + MFA + session admission + rate-limit budgets", () => {
+test("SYNTHETIC_COMPONENT_KEYS has 9 members", () => {
 	// 4 federation and grant keys + lifecycleRegistrar + readinessRegistrar +
 	// mfaFactorResolver (the MFA ADR's D3) + sessionRequirementResolver (the
 	// session-admission ADR's D3) + rateLimitBudgetResolver = 9.
@@ -39,7 +39,7 @@ test("SYNTHETIC_COMPONENT_KEYS still includes the original 3 keys", () => {
 	expect(SYNTHETIC_COMPONENT_KEYS.has("grantHandlerResolver")).toBe(true);
 });
 
-test("SYNTHETIC_COMPONENT_KEYS includes lifecycleRegistrar (D-5)", () => {
+test("SYNTHETIC_COMPONENT_KEYS includes lifecycleRegistrar", () => {
 	// The boot planner owns the LifecycleRegistrar slot. Reserved so a consumer
 	// can't supply their own via bootstrapComponents/overrideComponents while
 	// the planner silently drains its own instance.

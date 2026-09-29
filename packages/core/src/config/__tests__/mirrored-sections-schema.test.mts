@@ -93,7 +93,7 @@ describe("redisFederationGrantStore's listing allowance", () => {
 });
 
 describe("oauth.mtls's mirror", () => {
-	it("coerces the env-var spelling of enabled (#288)", () => {
+	it("coerces the env-var spelling of enabled", () => {
 		const parsed = parse({ ...base, oauth: { ...base.oauth, mtls: { enabled: "true" } } });
 		expect(parsed.oauth.mtls?.enabled).toBe(true);
 	});
@@ -108,7 +108,7 @@ describe("oauth.mtls's mirror", () => {
 });
 
 describe("oauth.dpop's mirror", () => {
-	it("coerces the env-var spelling of enabled (#288)", () => {
+	it("coerces the env-var spelling of enabled", () => {
 		const parsed = parse({ ...base, oauth: { ...base.oauth, dpop: { enabled: "1" } } });
 		expect(parsed.oauth.dpop?.enabled).toBe(true);
 	});

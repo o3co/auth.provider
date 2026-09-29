@@ -73,7 +73,7 @@ function withRevocation(accessToken: "denylist" | "unsupported") {
 	return { oauth: { ...base.oauth, revocation: { accessToken } } };
 }
 
-describe("access-token revocation wiring (#277 via the declared-absence guard)", () => {
+describe("access-token revocation wiring through the declared-absence guard", () => {
 	it("fails boot when a module carries the policy but nothing provides the denylist", async () => {
 		await expect(
 			createApp({

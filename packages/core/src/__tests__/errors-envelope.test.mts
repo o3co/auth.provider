@@ -23,7 +23,7 @@ import {
 	sanitizeErrorText,
 } from "#/errors/envelope.mjs";
 
-describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
+describe("errorEnvelope helper (RFC 6749 §5.2)", () => {
 	it("includes error_description and error_uri when provided", () => {
 		const e = errorEnvelope("invalid_grant", "Token expired", "https://docs.example.com");
 		expect(e).toEqual({

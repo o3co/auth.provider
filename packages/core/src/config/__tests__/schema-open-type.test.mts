@@ -248,7 +248,7 @@ describe("schema nested repositories", () => {
 	// `endpoints.client` / `endpoints.authCallback` are not schema fields: no
 	// production consumer reads them, and a config that writes them has them
 	// stripped rather than passed through to AppConfig.
-	describe("IH-10: endpoints.client / endpoints.authCallback are removed from schema", () => {
+	describe("endpoints.client / endpoints.authCallback are not schema fields", () => {
 		it("parsed result does not expose client or authCallback keys", () => {
 			const result = fullSectionsSchema.parse(makeValidFullSections());
 			expect(Object.keys(result.endpoints)).not.toContain("client");
@@ -274,7 +274,7 @@ describe("schema nested repositories", () => {
 	// `endpoints.login.url` is `z.string()`, not optional: the oauth module's
 	// `configSchema` requires it at boot, and the base schema matches that
 	// contract, so AppConfig does not type the field as optional.
-	describe("IH-17: endpoints.login.url is required at the base schema level", () => {
+	describe("endpoints.login.url is required at the base schema level", () => {
 		it("rejects config missing endpoints.login.url", () => {
 			const base = makeValidFullSections();
 			const configWithoutLoginUrl = {
@@ -294,7 +294,7 @@ describe("schema nested repositories", () => {
 	// distinct from the OAuth-endpoint `RateLimitSpec.windowSeconds`. Keep
 	// the field name as a semantic anchor — renaming requires updating every
 	// `express-rate-limit` consumer's unit conversion.
-	describe("IH-18: rateLimit.login.windowMs is the canonical field name (express-rate-limit)", () => {
+	describe("rateLimit.login.windowMs is the canonical field name (express-rate-limit)", () => {
 		it("rateLimit.login uses windowMs, not windowSeconds", () => {
 			const result = fullSectionsSchema.shape.rateLimit.parse({
 				login: { windowMs: 900000, limit: 20 },

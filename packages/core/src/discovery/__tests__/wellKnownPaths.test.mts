@@ -22,7 +22,7 @@ import { discoveryPathsFor } from "#/discovery/wellKnownPaths.mjs";
  * Discovery appends its suffix to the issuer; RFC 8414 inserts its well-known
  * string between host and path. Both forms are served from one home.
  */
-describe("discoveryPathsFor (#528)", () => {
+describe("discoveryPathsFor", () => {
 	it("serves the two root forms for an issuer with no path", () => {
 		expect(discoveryPathsFor("https://auth.example")).toEqual({
 			oidc: ["/.well-known/openid-configuration"],

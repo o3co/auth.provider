@@ -22,7 +22,7 @@ import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 
-describe("generateToken — a caller-supplied identity (v0.13.0 audit)", () => {
+describe("generateToken — a caller-supplied identity and lifetime", () => {
 	it("refuses an empty jti rather than signing a token with no identity", async () => {
 		// `jti` is supplied when a token's identity is reserved before it is
 		// signed. An empty one would be signed as-is, and every replay
@@ -455,7 +455,7 @@ describe("generateToken cnf coexists with other claims", () => {
 	});
 });
 
-describe("generateToken — a reserved identity (#449)", () => {
+describe("generateToken — a reserved identity", () => {
 	const keyStore = createSymmetricKeyStore("a-test-secret-at-least-32-chars!!");
 	const claimsOf = (token: string): Record<string, unknown> =>
 		JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf-8")) as Record<

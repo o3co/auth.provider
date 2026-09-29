@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { parseAccessTokenAuthorization, parseAccessTokenHeader } from "#/accessTokenHeader.mjs";
 
-describe("parseAccessTokenHeader (moved from oauth — #324)", () => {
+describe("parseAccessTokenHeader", () => {
 	it("accepts the Bearer scheme (RFC 6750 §2.1)", () => {
 		expect(parseAccessTokenHeader("Bearer abc.def.ghi")).toBe("abc.def.ghi");
 	});

@@ -193,7 +193,7 @@ describe("REPLICA_UNSAFE_MODULES", () => {
 // The declaration lives on the manifest, not in a table of names
 // ---------------------------------------------------------------------------
 
-describe("checkReplicaSafety — modules that declare replicaSafety on their manifest (#455)", () => {
+describe("checkReplicaSafety — modules that declare replicaSafety on their manifest", () => {
 	// A composition root wires its own in-memory modules (the standalone
 	// template's `standalone-in-memory-session-stores`, …) under names core has
 	// never heard of. A module's manifest is where it says what it holds; the
@@ -290,7 +290,7 @@ describe("checkReplicaSafety — modules that declare replicaSafety on their man
 	});
 });
 
-describe("replicaUnsafeReason — reads the manifest (#455)", () => {
+describe("replicaUnsafeReason — reads the manifest", () => {
 	it("returns the declared reason for a declaring module", () => {
 		expect(replicaUnsafeReason(declaring("test:holds-state", "codes are not shared"))).toBe(
 			"codes are not shared",

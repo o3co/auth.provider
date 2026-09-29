@@ -123,7 +123,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 		expect(verified.payload.sub).toBe("u-1");
 	});
 
-	it("fail-closed: denylist.has() throwing causes JwtVerificationError reason=revocation_unavailable (Copilot review #3, #459)", async () => {
+	it("rejects with reason 'revocation_unavailable' when denylist.has() throws", async () => {
 		// SECURITY: if the denylist backend (e.g. Redis) is unavailable, revocation
 		// state is unknown, and failing open would accept revoked tokens during
 		// the outage. This pins the refusal; its reason is `revocation_unavailable`,
@@ -187,7 +187,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
  * `jwt_verify_rejected reason=revoked` line, for every token on every
  * replica, until the backend came back. Nothing here lets a token through.
  */
-describe("verifyJwt — denylist backend outage (#459)", () => {
+describe("verifyJwt — denylist backend outage", () => {
 	/** A denylist whose consult always fails — a transient outage, not a revocation. */
 	const outageDenylist = (): AccessTokenDenylist => ({
 		kind: "outage",

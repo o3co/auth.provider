@@ -29,7 +29,7 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
  */
 const base = makeValidAppConfig();
 
-describe("federationGrantStore.adapter (#593 slice 7)", () => {
+describe("federationGrantStore.adapter", () => {
 	it.each(["memory", "redis"] as const)("accepts %s", (adapter) => {
 		expect(
 			AppConfigSchema.parse({ ...base, federationGrantStore: { adapter } }).federationGrantStore,
@@ -43,7 +43,7 @@ describe("federationGrantStore.adapter (#593 slice 7)", () => {
 	});
 });
 
-describe("federationGrantIntentStore.adapter (#593 slice 7)", () => {
+describe("federationGrantIntentStore.adapter", () => {
 	it.each(["memory", "redis"] as const)("accepts %s", (adapter) => {
 		expect(
 			AppConfigSchema.parse({ ...base, federationGrantIntentStore: { adapter } })

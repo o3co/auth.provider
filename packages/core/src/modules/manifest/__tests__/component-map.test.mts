@@ -10,7 +10,7 @@ test("ComponentMap accumulates declaration-merged slots from each phase", () => 
 	expectTypeOf<Bootstrap>().toEqualTypeOf<"config" | "pathResolver">();
 });
 
-test("ComponentMap does NOT contain v0.4.x legacy slots (X1/X2 amendment)", () => {
+test("ComponentMap has no refreshTokenStore slot and no userSessionStore of the registerRP shape", () => {
 	// ComponentMap MUST NOT declare the legacy `userSessionStore:
 	// UserSessionStoreBase` nor `refreshTokenStore: RefreshTokenStoreBase`.
 	// The two checks differ:

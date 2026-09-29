@@ -185,7 +185,7 @@ describe("FederationProfile shape", () => {
 	});
 });
 
-describe("identity claims (#611)", () => {
+describe("identity claims", () => {
 	it("accepts printable names, and an empty list", () => {
 		expect(identityClaimsProblem([])).toBeUndefined();
 		expect(

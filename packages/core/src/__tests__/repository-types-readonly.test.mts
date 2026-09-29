@@ -20,7 +20,7 @@ import type { Client, Code, CodeData, User } from "../repositories/types.mjs";
 // Readonly compile-time assertions for repository DTOs. See
 // readonly-types.test.mts in oauth-token-exchange for the rationale.
 
-describe("CC-5: repository DTOs readonly (compile-time)", () => {
+describe("repository DTOs readonly (compile-time)", () => {
 	it("User fields are readonly", () => {
 		if (false as boolean) {
 			const u = { id: "x", username: "y" } as User;

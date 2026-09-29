@@ -92,7 +92,7 @@ describe("jwksModule", () => {
 		await handle.dispose();
 	});
 
-	it("refuses to publish an empty key set when the keystore is symmetric (#282)", async () => {
+	it("refuses to publish an empty key set when the keystore is symmetric", async () => {
 		// End-to-end through the module, not just the route factory: an HS256
 		// deployment that wires jwksModule used to advertise a `jwks_uri` that
 		// answered 200 with zero keys.

@@ -53,7 +53,7 @@ const activatorModule = defineModule({
 	},
 });
 
-describe("A3 wiring — happy path with all-memory composition", () => {
+describe("refresh-token family wiring — happy path with all-memory composition", () => {
 	it("createApp({ memory store + default rotation + default revocation }) yields working wrappers", async () => {
 		const handle = await createApp({
 			modules: [
@@ -89,7 +89,7 @@ describe("A3 wiring — happy path with all-memory composition", () => {
 	});
 });
 
-describe("A3 wiring — override path", () => {
+describe("refresh-token family wiring — override path", () => {
 	it("custom refreshTokenFamilyRotation module REPLACES the default (no duplicate-provides error)", async () => {
 		const customRotationModule = defineModule({
 			name: "test-custom-rotation",
@@ -155,7 +155,7 @@ describe("A3 wiring — override path", () => {
 	});
 });
 
-describe("A3 wiring — direct adapter constructor", () => {
+describe("refresh-token family wiring — direct adapter constructor", () => {
 	it("createMemoryRefreshTokenFamilyStore() composes without going through createApp", () => {
 		const store = createMemoryRefreshTokenFamilyStore();
 		expect(store.kind).toBe("memory");

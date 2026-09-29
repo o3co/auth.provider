@@ -28,7 +28,7 @@ import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
  */
 const base = makeValidAppConfig();
 
-describe("consentStore.adapter (#527, #561)", () => {
+describe("consentStore.adapter", () => {
 	it.each(["none", "memory", "redis"] as const)("accepts %s", (adapter) => {
 		expect(AppConfigSchema.parse({ ...base, consentStore: { adapter } }).consentStore).toEqual({
 			adapter,
@@ -42,7 +42,7 @@ describe("consentStore.adapter (#527, #561)", () => {
 	});
 });
 
-describe("redisConsentStore survives AppConfigSchema (#561)", () => {
+describe("redisConsentStore survives AppConfigSchema", () => {
 	it("keeps the Redis module's key namespace", () => {
 		const parsed = AppConfigSchema.parse({
 			...base,

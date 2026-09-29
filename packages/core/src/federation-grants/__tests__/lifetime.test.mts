@@ -32,7 +32,7 @@ const at = (ms: number) => new Date(CONSENT.getTime() + ms);
 /** A grant as the expiry rules see it: when it was consented, and until when. */
 const grant = (lifetimeMs: number) => ({ consent: { at: CONSENT }, expiresAt: at(lifetimeMs) });
 
-describe("federation grant lifetime (#593, D3)", () => {
+describe("federation grant lifetime", () => {
 	describe("FEDERATION_GRANT_LIFETIME_CEILING_MS", () => {
 		it("is one year, the ceiling the config schema puts on every duration", () => {
 			expect(FEDERATION_GRANT_LIFETIME_CEILING_MS).toBe(365 * DAY);

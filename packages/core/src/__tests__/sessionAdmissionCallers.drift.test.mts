@@ -433,7 +433,7 @@ const counted = (sites: readonly Site[]): Partial<Record<What, number>> => {
 	return counts;
 };
 
-describe("session-admission callers (the session-admission ADR's D10)", () => {
+describe("session-admission callers", () => {
 	it("finds a store read whatever the receiver is called: a property, an alias, a destructured name, a typed parameter", () => {
 		for (const source of [
 			"await deps.userSessionStore.get(sid);",
@@ -585,7 +585,7 @@ describe("session-admission callers (the session-admission ADR's D10)", () => {
 		expect(offenders("continuationOf", RESUME_PRIMARY_CALLERS)).toEqual([]);
 	});
 
-	it("has the federation callback build its login's establishment through establishWithoutAsking, once — the password login asks, through admitPrimary (D5)", () => {
+	it("has the federation callback call establishWithoutAsking exactly once", () => {
 		const [callback] = ESTABLISH_WITHOUT_ASKING_CALLERS;
 		const found = (sites.get(callback) ?? []).filter((s) => s.what === "establishWithoutAsking");
 		expect(found, `${callback} — the callback's login path`).toHaveLength(1);

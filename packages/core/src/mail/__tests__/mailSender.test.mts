@@ -37,7 +37,7 @@ const MESSAGE: MailMessage = {
 	text: "Your code is 123456. It expires in 10 minutes.",
 };
 
-describe("the mailSender slot (D5)", () => {
+describe("the mailSender slot", () => {
 	it("is optional, and holds a MailSender", () => {
 		expectTypeOf<ComponentMap["mailSender"]>().toEqualTypeOf<MailSender | undefined>();
 		expectTypeOf<MailSender["send"]>().toEqualTypeOf<(message: MailMessage) => Promise<void>>();

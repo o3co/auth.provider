@@ -85,7 +85,7 @@ describe("parseScopeTokens", () => {
 		["undefined", undefined],
 		["an object", {}],
 		["an array", ["openid"]],
-	])("names nothing for %s, which is not a string (D5)", (_label, value) => {
+	])("names nothing for %s, which is not a string", (_label, value) => {
 		expect(parseScopeTokens(value)).toEqual([]);
 	});
 });

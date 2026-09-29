@@ -49,7 +49,7 @@ const NOTHING: ReadonlySet<string> = new Set();
 
 const reaching = (...values: string[]) => ({ reach: new Set(values) });
 
-describe("stepUpReach — what a step-up through the registered requirements can add (D2, D6)", () => {
+describe("stepUpReach — what a step-up through the registered requirements can add", () => {
 	it("is the union of every requirement's reach, in registration order", () => {
 		expect([...stepUpReach([reaching("otp", "mfa"), reaching("hwk", "mfa"), reaching()])]).toEqual([
 			"otp",
@@ -71,7 +71,7 @@ describe("stepUpReach — what a step-up through the registered requirements can
 	});
 });
 
-describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa (D3, D14)", () => {
+describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa", () => {
 	it("is the six values a second factor adds, and no primary's marker", () => {
 		expect([...SECOND_FACTOR_AMR].sort()).toEqual([
 			"email",
@@ -86,7 +86,7 @@ describe("SECOND_FACTOR_AMR — the values reserved to the requirement named mfa
 	});
 });
 
-describe("selectAcr — D15's selection over what the session vouches for", () => {
+describe("selectAcr — the selection over what the session vouches for", () => {
 	it("answers met with no acr when none was requested", () => {
 		expect(selectAcr([], ["pwd"], TABLE, NOTHING)).toEqual({ outcome: "met", acr: undefined });
 	});
@@ -202,7 +202,7 @@ describe("readAcrTable — `oauth.authorize.acrValues` as it is read", () => {
 	});
 });
 
-describe("producibleAmr — what something installed can put in a session's amr (D15)", () => {
+describe("producibleAmr — what something installed can put in a session's amr", () => {
 	it("is pwd alone without a requirement that reaches anything or a federation: no federation callback writes fed", () => {
 		const producible = producibleAmr({
 			reach: NOTHING,
@@ -254,7 +254,7 @@ describe("producibleAmr — what something installed can put in a session's amr 
 	});
 });
 
-describe("vouchableAcrTable — an entry nothing installed can satisfy is dropped (D15)", () => {
+describe("vouchableAcrTable — an entry nothing installed can satisfy is dropped", () => {
 	const configured = readAcrTable({
 		[PWD]: ["pwd"],
 		"urn:example:fed": ["fed"],

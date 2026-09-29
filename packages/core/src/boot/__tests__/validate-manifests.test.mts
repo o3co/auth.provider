@@ -834,7 +834,7 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		expect.fail("should have thrown");
 	});
 
-	it("CoreConfigSchema is enforced even when zero modules declare configSchema (Codex P2-A)", () => {
+	it("CoreConfigSchema is enforced even when zero modules declare configSchema", () => {
 		// With no module declaring a configSchema, CoreConfigSchema is still
 		// parsed: a config missing the required `oauth` object must throw
 		// `config-validation-failed`.
@@ -874,7 +874,7 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		expect(parsed.http.port).toBe(minCoreConfig.http.port);
 	});
 
-	it("preserves top-level extra config keys not in any schema (Codex P2 strip-unknown regression)", () => {
+	it("preserves top-level extra config keys not in any schema", () => {
 		// CoreConfigSchema's top-level z.object strips unknown keys, which would
 		// leave a host's full AppConfig runtime-shaped as CoreConfig. The
 		// composed parse lays the base's output over what was written, so a key

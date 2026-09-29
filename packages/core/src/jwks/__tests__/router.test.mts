@@ -254,7 +254,7 @@ describe("JWKS Cache-Control", () => {
 	});
 });
 
-describe("JWKS endpoint — never publishes an empty key set (#282)", () => {
+describe("JWKS endpoint — never publishes an empty key set", () => {
 	it("refuses to serve for HS256 instead of publishing `{ keys: [] }`", async () => {
 		// A 200 `{ keys: [] }` would mislead: a relying party cannot tell it
 		// apart from "this issuer has rotated all its keys away", so it caches

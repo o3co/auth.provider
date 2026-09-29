@@ -52,7 +52,7 @@ const anyReach = (requirements: SessionRequirement[], issuer?: string) =>
 		...(issuer === undefined ? {} : { issuer }),
 	});
 
-describe("checkStepUpPage — the deployment's page for a step-up (D2, D3)", () => {
+describe("checkStepUpPage — the deployment's page for a step-up", () => {
 	it("accepts a path, and an absolute URL on the issuer's origin, answering a frozen copy", () => {
 		for (const url of ["/mfa", "/account/mfa?step=1", `${ISSUER}/mfa`, `${ISSUER}/a/b#c`]) {
 			const page = checkStepUpPage({ url, params: { hint: "x" } }, ISSUER);
@@ -164,7 +164,7 @@ describe("checkStepUpPage — the deployment's page for a step-up (D2, D3)", () 
 	});
 });
 
-describe("stepUpPageUrl — the step-up page as a browser is sent to it (D2, D8)", () => {
+describe("stepUpPageUrl — the step-up page as a browser is sent to it", () => {
 	it("resolves a path on the issuer and sets each param on the query: one absolute URL string", () => {
 		expect(
 			stepUpPageUrl(
@@ -205,7 +205,7 @@ describe("stepUpPageUrl — the step-up page as a browser is sent to it (D2, D8)
 	});
 });
 
-describe("the registered page — resolved once, at registration, on the issuer it was validated on (D3, D8)", () => {
+describe("the registered page — resolved once, at registration, on the issuer it was validated on", () => {
 	const paged = (stepUpPage: SessionRequirement["stepUpPage"]): SessionRequirement => ({
 		name: "x",
 		reach: new Set(),
@@ -254,7 +254,7 @@ describe("the registered page — resolved once, at registration, on the issuer 
 	});
 });
 
-describe("resolverForTests — the resolver a test builds (D1)", () => {
+describe("resolverForTests — the resolver a test builds", () => {
 	const requirement = (
 		name: string,
 		over: Partial<SessionRequirement> = {},
@@ -564,7 +564,7 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 	});
 });
 
-describe("sealRegisteredReach — a registered reach, read once after the name-keyed pass and sealed on the copy (D3)", () => {
+describe("sealRegisteredReach — a registered reach, read once after the name-keyed pass and sealed on the copy", () => {
 	// `"none"` rather than `undefined`: a default parameter would replace an
 	// explicit `undefined` with the page.
 	const requirement = (
@@ -729,7 +729,7 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 });
 
 describe("the shapes the contract names", () => {
-	it("RequirementInput is a view, the D9 reading, the action, the asks and now", () => {
+	it("RequirementInput is a session view, the requirement session, the carrier and now, and a verdict names no page", () => {
 		expectTypeOf<RequirementInput["session"]>().toEqualTypeOf<SessionView | null>();
 		expectTypeOf<SessionView>().toEqualTypeOf<{
 			readonly sid: string;

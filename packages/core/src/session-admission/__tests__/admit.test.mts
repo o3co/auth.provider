@@ -168,7 +168,7 @@ const request = (over: Partial<AdmissionRequest> = {}): AdmissionRequest => ({
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
-describe("the claim builders — one reading of each carrier (D2)", () => {
+describe("the claim builders — one reading of each carrier", () => {
 	it("reads a cookie: authenticated only when isAuthenticated is exactly true, sid and user.id when they are non-empty strings", () => {
 		expect(cookie()).toMatchObject({
 			authenticated: true,
@@ -789,7 +789,7 @@ describe("step 4 — the revocation boundary", () => {
 });
 
 describe("step 5 — the requirements", () => {
-	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt — never the record, with the D9 reading, the action, the asks and now", async () => {
+	it("hands each requirement a view of the session — sid, sub, authTime, expiresAt — never the record, with the vouched authentication, the action, the asks and now", async () => {
 		const asked = { acrValues: ["urn:x"] };
 		const seen: RequirementInput[] = [];
 		const record = session({ amr: ["hwk", "fed"], authentication: undefined });
@@ -1410,7 +1410,7 @@ describe("every untrusted input is read once, into a copy — a getter or a swap
 	});
 });
 
-describe("a bundled action is the bundled entry itself (D4)", () => {
+describe("a bundled action is the bundled entry itself", () => {
 	it("accepts the frozen entry, and refuses a literal or a copy carrying a bundled name: the grade is not the caller's to restate", async () => {
 		expect(
 			await admitSession(deps(), request({ action: ADMISSION_ACTIONS["oauth.authorize"] })),
@@ -1429,7 +1429,7 @@ describe("a bundled action is the bundled entry itself (D4)", () => {
 	});
 });
 
-describe("the undeclared-remediation line is capped (D4, D10)", () => {
+describe("the undeclared-remediation line is capped", () => {
 	it("says custom once per name up to 256 names, then once for all", async () => {
 		const { logger, lines } = recordingLogger();
 		const with_ = deps({ logger });
@@ -1559,7 +1559,7 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 	});
 });
 
-describe("the actions (D4)", () => {
+describe("the actions", () => {
 	it("names the bundled actions with their grades, each frozen", () => {
 		expect(
 			Object.fromEntries(

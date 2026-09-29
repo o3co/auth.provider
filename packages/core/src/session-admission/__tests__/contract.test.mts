@@ -93,7 +93,7 @@ const failing = async (over: Partial<RequirementContractInput>): Promise<string[
 describe("sessionRequirementContract — a well-formed fixture", () => {
 	const cases = sessionRequirementContract(input());
 
-	it("names every case of D3", () => {
+	it("names each of its cases, in order", () => {
 		expect(cases.map((c) => c.name)).toEqual([
 			"name equals its key, and a fixture is never named mfa",
 			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",

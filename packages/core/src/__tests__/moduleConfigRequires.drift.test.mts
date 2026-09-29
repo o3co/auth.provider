@@ -640,7 +640,7 @@ describe("the workspaces it walks", () => {
 	});
 });
 
-describe("no manifest outside core requires config (#728)", () => {
+describe("no manifest outside core requires config but the ones CONFIG_REQUIRERS lists", () => {
 	it("reads every manifest's requires and optional", () => {
 		expect(
 			FOUND.filter(

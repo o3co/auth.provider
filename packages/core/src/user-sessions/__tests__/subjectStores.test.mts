@@ -33,7 +33,7 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("createInMemorySubjectSessionIndex (#296)", () => {
+describe("createInMemorySubjectSessionIndex", () => {
 	it("lists the sessions added for a subject", async () => {
 		const index = createInMemorySubjectSessionIndex();
 		await index.addSid("u1", "s1", FUTURE);
@@ -156,7 +156,7 @@ describe("createInMemorySubjectSessionIndex (#296)", () => {
 	});
 });
 
-describe("createInMemorySubjectRevocation (#296)", () => {
+describe("createInMemorySubjectRevocation", () => {
 	it("reports its adapter kind", () => {
 		expect(createInMemorySubjectRevocation().kind).toBe("memory");
 	});

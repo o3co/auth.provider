@@ -124,7 +124,7 @@ const startJwksServer = async (): Promise<JwksServer> => {
 	};
 };
 
-describe("createRegistryAssertionVerifier — issuers and their keys (#525)", () => {
+describe("createRegistryAssertionVerifier — issuers and their keys", () => {
 	it("accepts an assertion from a registered issuer and says which issuer it was, and until when", async () => {
 		const exp = Math.floor(Date.now() / 1000) + 300;
 		const result = await verifierOver([entryA()]).verify(
@@ -216,7 +216,7 @@ describe("createRegistryAssertionVerifier — issuers and their keys (#525)", ()
 	});
 });
 
-describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", () => {
+describe("createRegistryAssertionVerifier — a remote JWKS endpoint", () => {
 	let jwks: JwksServer;
 	const rotated = generateKeyPairSync("ed25519");
 
@@ -252,7 +252,7 @@ describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", ()
 		expect(await verifier.verify(await mint({ sub: "d" }, { kid: "k1" }))).toBeNull();
 	});
 
-	it("fetches through the fetch it is given — an egress proxy, as client assertions already allow (v0.13.0 audit)", async () => {
+	it("fetches the key set through the fetch it is given", async () => {
 		// `createClientAssertionVerifier` took a fetch for a client's `jwksUri`;
 		// this verifier did not, so a deployment behind an egress proxy could
 		// verify `private_key_jwt` but not a trusted issuer's assertions.
@@ -309,7 +309,7 @@ describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", ()
 	});
 });
 
-describe("createRegistryAssertionVerifier — the terms of an entry (#525)", () => {
+describe("createRegistryAssertionVerifier — the terms of an entry", () => {
 	it("admits only the clients an entry names, and no unauthenticated presenter when it names any", async () => {
 		const verifier = verifierOver([entryA({ allowedClients: ["mobile-app"] })]);
 		const assertion = await mint({ sub: "d" });
@@ -404,7 +404,7 @@ describe("createRegistryAssertionVerifier — the terms of an entry (#525)", () 
 	});
 });
 
-describe("an entry is data a store can hold (v0.13.0 audit)", () => {
+describe("an entry is data a store can hold", () => {
 	// The README tells a deployment that registers issuers at runtime to
 	// implement the registry over its own store. The entry used to carry its
 	// claim readers as functions, which no store holds: a store-backed registry
@@ -496,7 +496,7 @@ describe("an entry is data a store can hold (v0.13.0 audit)", () => {
 	});
 });
 
-describe("createRegistryAssertionVerifier — what every entry refuses (#525)", () => {
+describe("createRegistryAssertionVerifier — what every entry refuses", () => {
 	it("refuses an assertion not addressed to this server, and accepts any of several names for it", async () => {
 		const verifier = verifierOver([entryA()], [AS, `${AS}/oauth/token`]);
 		expect(await verifier.verify(await mint({ sub: "d" }, { aud: AS }))).not.toBeNull();
@@ -569,7 +569,7 @@ describe("createRegistryAssertionVerifier — what every entry refuses (#525)", 
 	});
 });
 
-describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => {
+describe("createRegistryAssertionVerifier — the ID-JAG profile", () => {
 	// draft-ietf-oauth-identity-assertion-authz-grant: what an enterprise IdP
 	// mints for a client so this server can issue it a token. Cases are built
 	// from the draft's own requirements; almost all are refusals.
@@ -664,7 +664,7 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 		);
 	});
 
-	it("refuses an ID-JAG issued longer ago than the lifetime ceiling, however far its exp (v0.13.0 audit)", async () => {
+	it("refuses an ID-JAG issued longer ago than the lifetime ceiling though its exp is still ahead, and accepts a recent one", async () => {
 		// `iat` was required and never bounded; `exp` did all the work. The
 		// `private_key_jwt` verifier bounds both, and an ID-JAG's `jti` is
 		// remembered until `exp`, so an old assertion with a distant `exp` is

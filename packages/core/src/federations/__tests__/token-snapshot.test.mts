@@ -57,7 +57,7 @@ describe("federationTokenSnapshot — one reading of a token response for every 
 		expect("scope" in silent).toBe(false);
 	});
 
-	it("reads a scope that is present and not a string as an answer naming nothing, never as silence (#647)", () => {
+	it("reads a scope that is present and not a string as an answer naming nothing, never as silence", () => {
 		// The bundled adapters' library refuses such an answer first, but the
 		// snapshot is exported: an adapter reading its token response some
 		// other way must not have `scope: 42` read downstream as "as

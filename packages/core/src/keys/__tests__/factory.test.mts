@@ -127,7 +127,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 	});
 });
 
-describe("registerBuiltinKeyStores - HS256 secret entropy floor (#282)", () => {
+describe("registerBuiltinKeyStores - HS256 secret entropy floor", () => {
 	function build(secret: string) {
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
@@ -188,7 +188,7 @@ describe("registerBuiltinKeyStores - HS256 secret entropy floor (#282)", () => {
 	});
 });
 
-describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
+describe("registerBuiltinKeyStores - HS256 multi-key rotation", () => {
 	it("factory passes previousSecrets through to createSymmetricKeyStore so an old token verifies via the new keystore", async () => {
 		// Old keystore signs a token with kid "v0".
 		const oldKs = createSymmetricKeyStore(STRONG_SECRET_PREVIOUS, "v0");
@@ -524,7 +524,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		).rejects.toThrow(/Invalid expiresAt for previous key "v1"/i);
 	});
 
-	it("throws when nothing at all is configured, naming the exact keys to set (#282)", async () => {
+	it("throws when nothing at all is configured, naming the exact keys to set", async () => {
 		// The critical operator-facing case: reference.conf now defaults to
 		// EdDSA, so a deployment that configures no key material reaches this
 		// path. It must fail at boot with instructions, never fall back to a
@@ -545,7 +545,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		expect(message).toMatch(/openssl genpkey -algorithm ed25519/i);
 	});
 
-	it("points an operator who set only OAUTH_JWT_SECRET at the HS256 opt-in (#282)", async () => {
+	it("points an operator who set only OAUTH_JWT_SECRET at the HS256 opt-in", async () => {
 		// Upgrade path: a 0.x deployment carrying only OAUTH_JWT_SECRET now
 		// lands on the EdDSA default. The error must connect the two.
 		const factory = createKeyStoreFactory();

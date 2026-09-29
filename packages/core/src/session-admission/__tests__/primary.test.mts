@@ -156,7 +156,7 @@ const deps = (requirements: SessionRequirement[], logger?: Logger): AdmissionDep
 	now: () => NOW,
 });
 
-describe("admitPrimary — the login asks before anything is written (D5)", () => {
+describe("admitPrimary — the login asks before anything is written", () => {
 	it("establishes when no requirement interrupts, over the primary passwordPrimary built from the route's facts, branded", async () => {
 		const source = facts();
 		const built = passwordPrimary(source);
@@ -290,7 +290,7 @@ describe("admitPrimary — the login asks before anything is written (D5)", () =
 	});
 });
 
-describe("the interruption's answer — validated before the route sees it (D5)", () => {
+describe("the interruption's answer — validated before the route sees it", () => {
 	const interrupt = async (
 		open: RequirementInterruption["open"],
 		hintKeys: readonly string[] = ["enrollable", "email_proof"],
@@ -453,7 +453,7 @@ describe("the interruption's answer — validated before the route sees it (D5)"
 	});
 });
 
-describe("resumePrimary — after a ceremony completes (D5)", () => {
+describe("resumePrimary — after a ceremony completes", () => {
 	const continuation = (over: Partial<PrimaryContinuation> = {}): PrimaryContinuation => ({
 		...continuationOf(primary(), [], "mfa"),
 		...over,
@@ -802,7 +802,7 @@ describe("resumePrimary — after a ceremony completes (D5)", () => {
 	});
 });
 
-describe("establishWithoutAsking — a federated login's establishment, from the federation's own facts (D5)", () => {
+describe("establishWithoutAsking — a federated login's establishment, from the federation's own facts", () => {
 	const federated = {
 		subject: "user-1",
 		user: { id: "user-1" },

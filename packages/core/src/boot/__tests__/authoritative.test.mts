@@ -88,7 +88,7 @@ const refusal = async (booting: Promise<unknown>): Promise<BootError> => {
 	return caught as BootError;
 };
 
-describe("ModuleSpec.authoritative (#728)", () => {
+describe("ModuleSpec.authoritative", () => {
 	it("publishes both reasons' details on the package's root, as members of BootErrorDetails", () => {
 		expectTypeOf<AuthoritativeWithoutProvidesDetails>().toExtend<BootErrorDetails>();
 		expectTypeOf<AuthoritativeComponentOverriddenDetails>().toExtend<BootErrorDetails>();

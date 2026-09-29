@@ -27,7 +27,7 @@
 import { describe, expect, it } from "vitest";
 import { buildCanonicalRequestUrl } from "#/net/request-url.mjs";
 
-describe("buildCanonicalRequestUrl (#292, #356)", () => {
+describe("buildCanonicalRequestUrl", () => {
 	it("concatenates the configured origin with an origin-form target", () => {
 		expect(buildCanonicalRequestUrl("https://as.example", "/oauth/authorize?client_id=x")).toBe(
 			"https://as.example/oauth/authorize?client_id=x",

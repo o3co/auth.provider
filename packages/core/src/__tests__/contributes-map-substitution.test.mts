@@ -46,7 +46,7 @@ import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from ".
 // to import downwards to name them: it asserts the identity, and that a
 // module contributing a federation that is not one fails to compile.
 
-describe("AS-M1: same-package concrete substitutions in contributes-map", () => {
+describe("same-package concrete substitutions in contributes-map", () => {
 	it("GrantHandler is the concrete grants/types GrantHandler", () => {
 		expectTypeOf<GrantHandler>().toEqualTypeOf<ConcreteGrantHandler>();
 		expect(true).toBe(true);
@@ -57,7 +57,7 @@ describe("AS-M1: same-package concrete substitutions in contributes-map", () => 
 		expect(true).toBe(true);
 	});
 
-	it("MfaFactor is the second-factor contract in mfa/factor (D3, D7)", () => {
+	it("MfaFactor is the second-factor contract in mfa/factor", () => {
 		// `MfaFactor` is the contract a factor implements, so what a module
 		// contributes and what the coordinator reads back through
 		// `mfaFactorResolver` are one type.
@@ -65,7 +65,7 @@ describe("AS-M1: same-package concrete substitutions in contributes-map", () => 
 		expect(true).toBe(true);
 	});
 
-	it("an mfaFactors factory may answer null: the factor switched off by its configuration (D3)", () => {
+	it("an mfaFactors factory may answer null: the factor switched off by its configuration", () => {
 		expectTypeOf<ReturnType<MfaFactorFactory<unknown>>>().toEqualTypeOf<
 			Contributed<ConcreteMfaFactor | null>
 		>();
@@ -83,7 +83,7 @@ describe("AS-M1: same-package concrete substitutions in contributes-map", () => 
 	});
 });
 
-describe("#626 P1: the two contracts core owns now", () => {
+describe("the two contracts core owns: FederationProvider and ExchangeTokenValidator", () => {
 	// The contracts live in core, so the substitution is an identity: what a
 	// module registers, what the resolver returns and what a consumer reads
 	// are one type.
@@ -118,7 +118,7 @@ describe("#626 P1: the two contracts core owns now", () => {
 	});
 });
 
-describe("#728: rate-limit budgets and declared federation contributions", () => {
+describe("rate-limit budgets and declared federation contributions", () => {
 	const provider = {
 		name: "acme",
 		scope: ["openid"],

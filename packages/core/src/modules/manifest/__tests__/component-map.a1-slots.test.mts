@@ -7,7 +7,7 @@ import type { ChallengeCeremony, ChallengeStore } from "../../../challenges/type
 import type { ReplaySeenSet } from "../../../replay-seen-set/types.mjs";
 import type { ComponentMap } from "../component-map.mjs";
 
-describe("ComponentMap — A1 slots (Phase 5)", () => {
+describe("ComponentMap — the challenge and replay slots", () => {
 	it("exposes optional challengeStore slot of ChallengeStore type", () => {
 		expectTypeOf<ComponentMap["challengeStore"]>().toEqualTypeOf<ChallengeStore | undefined>();
 	});

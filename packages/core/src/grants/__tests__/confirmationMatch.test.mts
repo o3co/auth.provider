@@ -203,7 +203,7 @@ describe("ownedConfirmation", () => {
 	});
 });
 
-describe("extractConfirmation (moved from oauth types/introspect — #324)", () => {
+describe("extractConfirmation", () => {
 	it("returns undefined for non-objects", () => {
 		expect(extractConfirmation(undefined)).toBeUndefined();
 		expect(extractConfirmation(null)).toBeUndefined();
@@ -230,7 +230,7 @@ describe("extractConfirmation (moved from oauth types/introspect — #324)", () 
 	});
 });
 
-describe("isCompoundConfirmation (moved from oauth types/introspect — #324)", () => {
+describe("isCompoundConfirmation", () => {
 	it("is false for non-objects and empty objects", () => {
 		expect(isCompoundConfirmation(undefined)).toBe(false);
 		expect(isCompoundConfirmation(null)).toBe(false);

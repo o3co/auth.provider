@@ -116,7 +116,7 @@ function sourceFiles(dir: string, found: string[] = []): string[] {
 	return found;
 }
 
-describe("every package keeps its defaults at config/reference.conf (#728)", () => {
+describe("every package keeps its defaults at config/reference.conf", () => {
 	it("finds the packages that ship defaults (the guard is not vacuous)", () => {
 		expect(REFERENCES).toEqual(
 			expect.arrayContaining([
@@ -156,7 +156,7 @@ describe("every package keeps its defaults at config/reference.conf (#728)", () 
 	});
 });
 
-describe("the shipped references are disjoint, and each package checks its own (#728)", () => {
+describe("the shipped references are disjoint, and each package checks its own", () => {
 	const files = REFERENCES.map((path) => join(REPO_ROOT, path));
 	const label = (file: string) => relative(REPO_ROOT, file);
 

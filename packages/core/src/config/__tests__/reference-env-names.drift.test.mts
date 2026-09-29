@@ -194,7 +194,7 @@ const MISNAMED: readonly string[] = FOUND.flatMap(({ package: name, variable, pa
 		.map((path) => `${name}: ${variable} at ${path}`),
 );
 
-describe("an environment variable is named after the path it sets (#728 B9)", () => {
+describe("an environment variable is named after the path it sets", () => {
 	it("reads the packages' references and the template's layers (the guard is not vacuous)", () => {
 		expect(LAYERS.map(([name]) => name)).toEqual(
 			expect.arrayContaining(["core", "mfa", "webauthn", "template"]),

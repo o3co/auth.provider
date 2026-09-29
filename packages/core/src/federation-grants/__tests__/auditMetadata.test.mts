@@ -41,8 +41,8 @@ const grant: AuthorizedFederationGrant = {
 	refreshFailure: undefined,
 };
 
-describe("federationGrantAuditMetadata (#593, D18)", () => {
-	it("carries the upstream identity as issuer and subject only, whatever else the record's object holds (#611)", () => {
+describe("federationGrantAuditMetadata", () => {
+	it("carries the upstream identity as issuer and subject only, whatever else the record's object holds", () => {
 		// Check 5 carries verified claims beside the subject; an event is not a
 		// place they may reach, even through a record object that picked them up.
 		const metadata = federationGrantAuditMetadata({

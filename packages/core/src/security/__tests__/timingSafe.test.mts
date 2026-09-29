@@ -17,7 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { constantTimeStringEqual } from "../timingSafe.mjs";
 
-describe("constantTimeStringEqual (SF-3 + MIN-4)", () => {
+describe("constantTimeStringEqual", () => {
 	it("returns true for two equal strings", () => {
 		expect(constantTimeStringEqual("abc", "abc")).toBe(true);
 	});

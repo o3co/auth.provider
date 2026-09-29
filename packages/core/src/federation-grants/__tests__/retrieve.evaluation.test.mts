@@ -33,7 +33,7 @@ import {
 	T0,
 } from "./retrieve.harness.mjs";
 
-describe("retrieveFederationGrantToken — what is evaluated before any token (#593, D10, D11)", () => {
+describe("retrieveFederationGrantToken — what is evaluated before any token", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -97,7 +97,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token (#
 			expect((await retrieve()).ok).toBe(true);
 		});
 
-		it("clamps expires_in to what is left of the grant: a cache hint for a cooperating worker (D15)", async () => {
+		it("clamps expires_in to what is left of the grant: a cache hint for a cooperating worker", async () => {
 			await h.seed({ expiresAt: at(20 * MIN) });
 			setNow(at(10 * MIN));
 			expect(await retrieve()).toMatchObject({ ok: true, expiresIn: 600 });
@@ -203,7 +203,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token (#
 			expect(h.store.holdsCredential("g-1")).toBe(false);
 		});
 
-		it("surfaces a backstop revocation that could not be written: a revocation outage is not answered as a revocation (D13)", async () => {
+		it("surfaces a backstop revocation that could not be written: a revocation outage is not answered as a revocation", async () => {
 			await h.seed();
 			h.world.boundary = at(MIN);
 			vi.spyOn(h.store, "revoke").mockRejectedValue(new Error("redis down"));
@@ -280,7 +280,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token (#
 			});
 		});
 
-		it("answers 503 for a key that is not in the ring, and keeps the record: an outage is not a status (D16)", async () => {
+		it("answers 503 for a key that is not in the ring, and a reauthorization for a credential that does not open: an outage is not a status", async () => {
 			const grant = await h.seed();
 			vi.spyOn(h.store, "open").mockResolvedValue({
 				grant,
@@ -609,7 +609,7 @@ describe("retrieveFederationGrantToken — what is evaluated before any token (#
 		});
 	});
 
-	it("never puts a long-lived secret in a denial or an audit event (D18)", async () => {
+	it("never puts a long-lived secret in a denial or an audit event", async () => {
 		await h.seed();
 		const results = [
 			await retrieve({ grantId: "g-unknown" }),

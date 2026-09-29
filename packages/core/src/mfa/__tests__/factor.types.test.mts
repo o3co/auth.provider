@@ -37,7 +37,7 @@ import type {
 } from "#/mfa/factor.mjs";
 
 describe("the MfaFactor contract", () => {
-	it("hands every call the transaction id and keyed digests under the ring, never a key (D11)", () => {
+	it("hands every call the transaction id and keyed digests that carry a key id, not a key", () => {
 		expectTypeOf<MfaCeremonyContext["transactionId"]>().toEqualTypeOf<string>();
 		expectTypeOf<MfaCeremonyContext["digests"]>().toEqualTypeOf<MfaDigests>();
 		expectTypeOf<MfaKeyedDigest>().toEqualTypeOf<{
@@ -56,14 +56,14 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
-	it("lets a verification refuse a sign count that did not increase (F7, D28)", () => {
+	it("lets a verification refuse a sign count that did not increase", () => {
 		expectTypeOf<Extract<MfaVerification, { ok: false }>["reason"]>().toEqualTypeOf<
 			"invalid" | "expired" | "replayed" | "malformed" | "sign_count_regression"
 		>();
 		expect(true).toBe(true);
 	});
 
-	it("takes the pending challenge by default, and a factor opts in to reuse (F5, F7)", () => {
+	it("lets a factor opt in to a reusable challenge, and offers no single-use flag", () => {
 		// Fail closed: a contributed WebAuthn-like factor that forgets the flag
 		// gets a challenge that answers one verification. The email factor opts
 		// in to a code that stands across attempts.
@@ -72,7 +72,7 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
-	it("names the amr values a verification may add statically, beside amrFor (D14; the session-admission ADR's D3)", () => {
+	it("names the amr values a verification may add statically, beside amrFor", () => {
 		// `amrFor(data)` depends on a record — a WebAuthn credential is `hwk` or
 		// `swk` by its backup flag — so the values a factor can ever add are
 		// declared once, for the MFA requirement's reach and for the acr drop
@@ -82,7 +82,7 @@ describe("the MfaFactor contract", () => {
 		expect(true).toBe(true);
 	});
 
-	it("may say a user cannot enroll one, without throwing (F3, F5)", () => {
+	it("may say a user cannot enroll one, without throwing", () => {
 		expectTypeOf<MfaFactor["enrollable"]>().toEqualTypeOf<
 			((user: Readonly<Record<string, unknown>>) => boolean) | undefined
 		>();

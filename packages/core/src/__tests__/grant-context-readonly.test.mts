@@ -20,7 +20,7 @@ import type { GrantContext } from "../grants/types.mjs";
 // Readonly compile-time assertions for GrantContext. See
 // readonly-types.test.mts in oauth-token-exchange for the rationale.
 
-describe("CC-5: GrantContext readonly (compile-time)", () => {
+describe("GrantContext readonly (compile-time)", () => {
 	it("GrantContext top-level fields are readonly", () => {
 		if (false as boolean) {
 			const ctx = {

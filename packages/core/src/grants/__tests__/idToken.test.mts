@@ -22,7 +22,7 @@ import { generateIdToken } from "../idToken.mjs";
 describe("generateIdToken", () => {
 	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
 
-	it("emits typ: JWT header (#394 — standard spelling, disjoint from at+jwt)", async () => {
+	it("emits typ: JWT header (standard spelling, disjoint from at+jwt)", async () => {
 		const { token } = await generateIdToken({
 			sub: "u-1",
 			aud: "client-1",
@@ -152,7 +152,7 @@ describe("generateIdToken", () => {
 	});
 });
 
-describe("generateIdToken — amr / acr (#481)", () => {
+describe("generateIdToken — amr / acr", () => {
 	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
 	const base = {
 		sub: "u-1",

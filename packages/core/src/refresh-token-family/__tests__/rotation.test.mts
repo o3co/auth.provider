@@ -107,7 +107,7 @@ describe("createRefreshTokenFamilyRotation", () => {
 	// replay path must cost exactly ONE store operation, and the family must
 	// already be revoked by the time `rotate` returns.
 	// -----------------------------------------------------------------------
-	describe("#274: replay detection and family revocation are one atomic write", () => {
+	describe("replay detection and family revocation are one atomic write", () => {
 		it("revokes the family in the SAME updateFamily call that detects the replay", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
 			const probe = counting(store);
@@ -292,7 +292,7 @@ describe("createRefreshTokenFamilyRotation", () => {
 	// All ceilings here are `>= 60s` so loaded CI runners cannot lazy-GC the
 	// family between `register` and `rotate`/`findFamily`; the cap depends
 	// only on the ordering of `ceiling` vs the requested expiry.
-	describe("IH-13: absolute expiry cap (no sliding window)", () => {
+	describe("absolute expiry cap (no sliding window)", () => {
 		it("does not extend family expiresAtMs on rotation when caller requests later expiry", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
 			const rotation = createRefreshTokenFamilyRotation({

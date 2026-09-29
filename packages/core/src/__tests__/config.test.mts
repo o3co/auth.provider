@@ -61,7 +61,7 @@ describe("provider config", () => {
 		expect(config.session.csrf?.trustedOrigins).toEqual([]);
 	});
 
-	it("fails to build a keystore when reference.conf is loaded with NO key material (#282)", async () => {
+	it("fails to build a keystore when reference.conf is loaded with NO key material", async () => {
 		// A deployment that sets no signing key at all must not boot.
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
@@ -82,7 +82,7 @@ describe("provider config", () => {
 		expect(message).toMatch(/openssl genpkey -algorithm ed25519/i);
 	});
 
-	it("fails to build a keystore when only OAUTH_JWT_SECRET is set, and says how to opt into HS256 (#282)", async () => {
+	it("fails to build a keystore when only OAUTH_JWT_SECRET is set, and says how to opt into HS256", async () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_ISSUER: "https://auth.test",
@@ -97,7 +97,7 @@ describe("provider config", () => {
 		);
 	});
 
-	it("HS256 remains selectable through OAUTH_JWT_ALGORITHM with a strong secret (#282)", async () => {
+	it("HS256 is selectable through OAUTH_JWT_ALGORITHM with a strong secret", async () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_ISSUER: "https://auth.test",
@@ -112,7 +112,7 @@ describe("provider config", () => {
 		expect(keyStore.algorithm).toBe("HS256");
 	});
 
-	it("HS256 selected with a weak secret fails at boot (#282)", async () => {
+	it("fails to build a keystore when HS256 is selected with a weak secret", async () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_ISSUER: "https://auth.test",
@@ -128,7 +128,7 @@ describe("provider config", () => {
 		);
 	});
 
-	it("rejects a SESSION_SECRET below the 256-bit floor (#282)", () => {
+	it("rejects a SESSION_SECRET below the 256-bit floor", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_ISSUER: "https://auth.test",

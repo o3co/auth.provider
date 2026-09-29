@@ -92,7 +92,7 @@ function productSources(): string[] {
 	return found.sort();
 }
 
-describe("the MFA enrollment witness has one reading (D12)", () => {
+describe("the MFA enrollment witness has one reading", () => {
 	it("is read by no product file, the template's included, but readMfaEnrollmentWitness's", () => {
 		const offenders = productSources()
 			.filter((file) => !ALLOWED.has(file))

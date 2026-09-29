@@ -175,7 +175,7 @@ describe("createTrustedProxyMatcher — literal addresses", () => {
 	});
 });
 
-describe("createTrustedProxyMatcher — CIDR ranges (#292)", () => {
+describe("createTrustedProxyMatcher — CIDR ranges", () => {
 	it("matches an address inside an IPv4 range and rejects one outside it", () => {
 		const isTrusted = createTrustedProxyMatcher(["10.0.0.0/8"]);
 		expect(isTrusted("10.0.0.1")).toBe(true);

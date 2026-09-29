@@ -154,7 +154,7 @@ describe("AppConfigSchema exports signingKey shape (integration)", () => {
 	});
 });
 
-describe("signingKey.local schema - HS256 rotation (IH-9)", () => {
+describe("signingKey.local schema - HS256 rotation", () => {
 	it("rejects HS256 with previousKeys (asymmetric-shaped field) via discriminated union strict", () => {
 		const result = jwtSchema.safeParse({
 			issuer: "https://auth.test",

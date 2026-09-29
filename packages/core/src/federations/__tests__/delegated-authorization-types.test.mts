@@ -29,7 +29,7 @@ import type {
  * fields of a token snapshot are checked — which `Omit` over an index
  * signature would not do.
  */
-describe("delegated authorization types (#593, D17)", () => {
+describe("delegated authorization types", () => {
 	it("an adapter with the capability is a refresher core can use, and its answer is what core reads", () => {
 		const tokens: DelegatedTokens = {
 			accessToken: "at",

@@ -39,7 +39,7 @@ import {
  * stored serves it. The look's own verdicts — expired, revoked — come first.
  * See ADR 2026-09-17-federation-grants-offline-delegation, D10.
  */
-describe("retrieveFederationGrantToken — what a failed refresh leaves the caller with (#593, D10, D12)", () => {
+describe("retrieveFederationGrantToken — what a failed refresh leaves the caller with", () => {
 	let h: Harness;
 
 	beforeEach(() => {

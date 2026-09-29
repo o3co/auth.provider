@@ -82,7 +82,7 @@ describe("the session object's cross-field check does not swallow its sub-sectio
 		if (result.success) expect(result.data.session.csrf?.ttlSeconds).toBe(900);
 	});
 
-	it("keeps #272's 86400 policy ceiling on csrf.ttlSeconds — the #282 one-year bound must not loosen it", () => {
+	it("keeps the 86400 policy ceiling on csrf.ttlSeconds, tighter than the one-year bound", () => {
 		const base = makeValidAppConfig();
 		const over = AppConfigSchema.safeParse({
 			...base,

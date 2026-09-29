@@ -229,7 +229,7 @@ describe("the default modules size the horizon from the configuration", () => {
 		);
 	});
 
-	it("read no oauthTokenSettings: the oauth module depends on one of them, and the two agree (#728)", () => {
+	it("take no oauthTokenSettings as an optional dependency", () => {
 		// The planner orders modules, not components. The oauth module reads the
 		// refreshTokenFamilyRevocation the revocation module provides, so that
 		// module reading the slot the oauth module provides would make each

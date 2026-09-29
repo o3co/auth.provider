@@ -19,7 +19,7 @@ import { CoreConfigSchema } from "../application.schema.mjs";
  */
 const authorizeSchema = CoreConfigSchema.shape.oauth.shape.authorize;
 
-describe("oauth.authorize schema — removed-field preprocess (#330)", () => {
+describe("oauth.authorize schema — removed-field preprocess", () => {
 	it("accepts an absent authorize section (the key is no longer required)", () => {
 		const result = authorizeSchema.safeParse(undefined);
 		expect(result.success).toBe(true);
@@ -62,7 +62,7 @@ describe("oauth.authorize schema — removed-field preprocess (#330)", () => {
 	});
 });
 
-describe("oauth.authorize.acrValues (#481)", () => {
+describe("oauth.authorize.acrValues", () => {
 	it("accepts a table of acr value → the amr values a session must carry", () => {
 		const parsed = authorizeSchema.parse({
 			acrValues: { "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] },
@@ -80,7 +80,7 @@ describe("oauth.authorize.acrValues (#481)", () => {
 	});
 });
 
-describe("oauth.authorize.acrValues — any-of entries (the MFA ADR's D15)", () => {
+describe("oauth.authorize.acrValues — any-of entries", () => {
 	it("accepts a list of lists: any one list met satisfies the acr", () => {
 		const parsed = authorizeSchema.parse({
 			acrValues: { "urn:o3co:acr:phr": [["hwk"], ["swk"]], "urn:o3co:acr:mfa": ["mfa"] },

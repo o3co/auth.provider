@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as core from "#/index.mjs";
 
-describe("core barrel — Wave 1 AccessTokenDenylist exports", () => {
+describe("core barrel — AccessTokenDenylist exports", () => {
 	it("re-exports createMemoryAccessTokenDenylist", () => {
 		expect(typeof core.createMemoryAccessTokenDenylist).toBe("function");
 	});
@@ -17,7 +17,7 @@ describe("core barrel — Wave 1 AccessTokenDenylist exports", () => {
 	});
 });
 
-describe("core barrel — #282 signing defaults and secret entropy floor", () => {
+describe("core barrel — signing defaults and secret entropy floor", () => {
 	it("re-exports DEFAULT_SIGNING_ALGORITHM as an asymmetric algorithm", () => {
 		// A composition root that hand-builds its keystore config reads this
 		// rather than restating "EdDSA" and drifting from reference.conf.
@@ -33,7 +33,7 @@ describe("core barrel — #282 signing defaults and secret entropy floor", () =>
 	});
 });
 
-describe("core barrel — #593 federation grant domain rules", () => {
+describe("core barrel — federation grant domain rules", () => {
 	it("re-exports the rules a store adapter, the routes and an integrator all have to agree on", () => {
 		expect(core.FEDERATION_GRANT_LIFETIME_CEILING_MS).toBe(31_536_000_000);
 		for (const name of [
@@ -171,7 +171,7 @@ describe("core barrel — the sealing leaf", () => {
 	});
 });
 
-describe("core barrel — the unused #69 MFA surface is gone (the MFA ADR's D3)", () => {
+describe("core barrel — the MFA router surface", () => {
 	it("exports none of its values", () => {
 		// The router put three flows' continuations into callbacks a
 		// composition root wrote, its store could not consume atomically, and
@@ -198,7 +198,7 @@ describe("core barrel — the router's terminal error handler", () => {
 	});
 });
 
-describe("core barrel — the trusted-proxy address vocabulary (#292)", () => {
+describe("core barrel — the trusted-proxy address vocabulary", () => {
 	it("re-exports what validates and matches an entry, and not the predicate nothing called", () => {
 		for (const name of [
 			"checkTrustedProxyEntry",
@@ -212,15 +212,15 @@ describe("core barrel — the trusted-proxy address vocabulary (#292)", () => {
 		expect(Object.hasOwn(core, "isTrustedProxyEntry")).toBe(false);
 	});
 
-	it("re-exports the hop ceiling http.trustProxy is held to, which the httpSettings contract reads (#728)", () => {
+	it("re-exports the hop ceiling http.trustProxy is held to, which the httpSettings contract reads", () => {
 		expect(core.MAX_TRUST_PROXY_HOPS).toBe(255);
 	});
 
-	it("re-exports the check a reader holds a composition's oauthTokenSettings to before reading it (#728)", () => {
+	it("re-exports the check a reader holds a composition's oauthTokenSettings to before reading it", () => {
 		expect(typeof core.checkOAuthTokenSettings).toBe("function");
 	});
 
-	it("re-exports the one reading of the token-binding settings, which are core's (#728)", () => {
+	it("re-exports the one reading of the token-binding settings, which are core's", () => {
 		expect(typeof core.resolveTokenBindingSettings).toBe("function");
 		// One reader of the section, not one per key.
 		expect(Object.hasOwn(core, "resolveTokenBindingDispatchPolicy")).toBe(false);

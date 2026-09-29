@@ -113,7 +113,7 @@ describe("revokeFederationGrant", () => {
 		expect(JSON.stringify(events)).not.toContain(SECRET);
 	});
 
-	it("gives a revocation audited with no correlation ID one of its own — never an empty string (#618)", async () => {
+	it("gives a revocation audited with no correlation ID one of its own — never an empty string", async () => {
 		const { h, deps: d, events } = deps();
 		await h.seed();
 		await revokeFederationGrant(d as never, "g-1", "subject");
@@ -121,7 +121,7 @@ describe("revokeFederationGrant", () => {
 		expect(revoked[0]?.correlationId).toMatch(UUID);
 	});
 
-	it("treats an empty correlation ID as none given: an empty string correlates nothing (#618)", async () => {
+	it("treats an empty correlation ID as none given: an empty string correlates nothing", async () => {
 		const { h, deps: d, events } = deps({ correlationId: "" });
 		await h.seed();
 		await revokeFederationGrant(d as never, "g-1", "subject");

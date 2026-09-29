@@ -357,7 +357,7 @@ describe("csrfGuardContract — each way a guard can break it", () => {
 		).toContain(RULES.navigation);
 	});
 
-	it("a request with no origin signal waved through — the pre-#272 guard", async () => {
+	it("a request with no origin signal waved through", async () => {
 		expect(
 			await failing(
 				withPolicy((req, original) =>

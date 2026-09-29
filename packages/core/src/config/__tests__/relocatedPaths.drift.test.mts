@@ -63,7 +63,7 @@ function sourcesNamingRelocations(dir: string = coreSrc): string[] {
 	return found;
 }
 
-describe("relocated-path refusals are removed at the first major release (#728 B10)", () => {
+describe("relocated-path refusals are removed at the first major release", () => {
 	it("reads the newest release a CHANGELOG lists", () => {
 		expect(
 			newestRelease("## [0.16.0] - 2026-09-26\n\n## [0.9.0] - 2026-01-01\n## [0.15.2] - x\n"),

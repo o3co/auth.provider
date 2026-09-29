@@ -68,7 +68,7 @@ runKeyStoreContract("createRemoteSigningKeyStore (EdDSA)", {
 		}),
 });
 
-describe("createRemoteSigningKeyStore — the private key stays out of process (#303)", () => {
+describe("createRemoteSigningKeyStore — the private key stays out of process", () => {
 	const build = (overrides: Record<string, unknown> = {}) =>
 		createRemoteSigningKeyStore({
 			algorithm: "EdDSA",
@@ -194,7 +194,7 @@ describe("createRemoteSigningKeyStore — the private key stays out of process (
 
 // --- ES256: the DER trap ----------------------------------------------------
 
-describe("derToJoseEcdsaSignature (#303)", () => {
+describe("derToJoseEcdsaSignature", () => {
 	const ec = generateKeyPairSync("ec", { namedCurve: "P-256" });
 	const ecSpki = ec.publicKey.export({ type: "spki", format: "pem" }).toString();
 
@@ -329,7 +329,7 @@ describe("derToJoseEcdsaSignature (#303)", () => {
 
 // --- what this store refuses to be -----------------------------------------
 
-describe("createRemoteSigningKeyStore — algorithm boundary (#303)", () => {
+describe("createRemoteSigningKeyStore — algorithm boundary", () => {
 	it("has no HS256 variant, because a shared secret has no public half", async () => {
 		// Offering it would let a deployment believe it had moved key material
 		// out of reach when every verifier still needs the same bytes. The

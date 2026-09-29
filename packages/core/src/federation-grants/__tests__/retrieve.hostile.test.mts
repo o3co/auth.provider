@@ -45,7 +45,7 @@ const lockIsFree = async (h: Harness): Promise<boolean> => {
 	return lock.acquired;
 };
 
-describe("retrieveFederationGrantToken — dependencies and upstreams that misbehave (#593, D5, D12)", () => {
+describe("retrieveFederationGrantToken — dependencies and upstreams that misbehave", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -985,7 +985,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		});
 	});
 
-	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated (D18)", async () => {
+	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated", async () => {
 		await h.seed();
 		setNow(GONE);
 		// Exactly the shape of an opaque token, and of an error code.

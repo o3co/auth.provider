@@ -98,14 +98,14 @@ const versionSectionCiting = (
 /** A released tag, optionally followed by a marker: `v0.10.0 (#NNN)`. */
 const RELEASED_TAG = /^v\d+\.\d+\.\d+(?:\s|$)/;
 
-describe("removedIn stamps (#458)", () => {
+describe("removedIn stamps vs. the CHANGELOG", () => {
 	const stamps = removedInStamps();
 
 	it("finds stamps at all — the scan is not vacuously passing", () => {
 		expect(stamps.length).toBeGreaterThan(0);
 	});
 
-	it("never reads a legacy ## [Unreleased] section as the release that shipped a PR (#547 review)", () => {
+	it("never reads a legacy ## [Unreleased] section as the release that shipped a PR", () => {
 		const sections = changelogSections(
 			"## [Unreleased]\n- pending (#123)\n\n## [0.9.0] - 2026-01-01\n- shipped (#100)\n",
 		);

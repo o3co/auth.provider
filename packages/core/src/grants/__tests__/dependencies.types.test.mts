@@ -41,7 +41,7 @@ type GrantSlots = ProviderDeps<
 	| "logger"
 >;
 
-describe("GrantDependencies is defined on ComponentMap slots (#626 P2)", () => {
+describe("GrantDependencies is defined on ComponentMap slots", () => {
 	it("is exactly ProviderDeps of the slots a grant may read", () => {
 		// `.branded` because ProviderDeps is an intersection of two mapped
 		// types (see modules/manifest/__tests__/provider.test.mts).

@@ -129,7 +129,7 @@ const bootApp = async (mechanism: TokenBindingMechanism | null) => {
 	return app;
 };
 
-describe("protected-resource sender-constraint mount (#264)", () => {
+describe("protected-resource sender-constraint mount", () => {
 	const surfaces = [
 		{ name: "userinfo", method: "get" as const, path: "/oauth/userinfo" },
 		{
@@ -203,7 +203,7 @@ describe("protected-resource sender-constraint mount (#264)", () => {
 	});
 });
 
-describe("fail-closed coverage at the extension seam (#327)", () => {
+describe("fail-closed coverage at the extension seam", () => {
 	it("refuses a bound token replayed as a plain Bearer at a module-contributed route", async () => {
 		// Core does not know this route, and it is guarded all the same.
 		const app = await bootApp(dpopMech);

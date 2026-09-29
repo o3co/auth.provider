@@ -7,7 +7,7 @@ import type {
 	RouteHandler,
 } from "../route-contribution.mjs";
 
-test("RouteContribution has mountPath + handler + optional id + A2-β §4.2 fields", () => {
+test("RouteContribution has mountPath + handler + optional id, routes, before and after", () => {
 	expectTypeOf<RouteContribution>().toEqualTypeOf<{
 		readonly mountPath: string;
 		readonly handler: RouteHandler;

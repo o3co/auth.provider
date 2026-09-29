@@ -1574,7 +1574,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		expect(sessionRecordReads("const a = record.amr;", "x.cjs")).toHaveLength(1);
 	});
 
-	it("reads a session's amr and authentication only through the D9 readers, each read pinned to its receiver", () => {
+	it("reads a session's amr and authentication only through the session readers, each read pinned to its receiver", () => {
 		const beyond = [...sessionRecordReadSites()].flatMap(([file, reads]) =>
 			readsBeyondAllowance(file, reads, SESSION_RECORD_READS_ALLOWED),
 		);

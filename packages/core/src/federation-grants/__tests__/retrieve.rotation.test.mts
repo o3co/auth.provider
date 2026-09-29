@@ -40,7 +40,7 @@ import {
  * WHEN a stored token is refreshed and when it is answered as it is — and that
  * a refresh which brought nothing usable costs the grant nothing it had.
  */
-describe("retrieveFederationGrantToken — when a token is refreshed, and what a refresh may cost (#593, D5, D10)", () => {
+describe("retrieveFederationGrantToken — when a token is refreshed, and what a refresh may cost", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -424,7 +424,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				"upstream_rejected",
 			],
 		])(
-			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once (a refusal is remembered instead, D12)",
+			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once",
 			async (_, carried, code) => {
 				// If the IdP rotated before its answer was lost, the old refresh token
 				// is presented again whenever the next refresh comes: waiting out the

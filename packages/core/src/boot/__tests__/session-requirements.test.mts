@@ -211,7 +211,7 @@ const hostCollector = () => ({
 	entries: () => [][Symbol.iterator](),
 });
 
-describe("the sessionRequirements kind and sessionRequirementResolver (D3)", () => {
+describe("the sessionRequirements kind and sessionRequirementResolver", () => {
 	it("registers each requirement under its key in init order, projects them through the resolver, and admitSession accepts that resolver", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
 		const handle = await boot(
@@ -340,7 +340,7 @@ describe("the sessionRequirements kind and sessionRequirementResolver (D3)", () 
 	});
 });
 
-describe("the three channels, three refusals (D3)", () => {
+describe("the kind guard: no override of sessionRequirements, and no host collector for a guarded kind", () => {
 	it("refuses an override of sessionRequirements: session-requirement-kind-guarded", async () => {
 		const overriding = defineModule({
 			name: "test:overriding",
@@ -391,7 +391,7 @@ describe("the three channels, three refusals (D3)", () => {
 	});
 });
 
-describe("a requirement that reaches nothing completes an interruption with an empty addition (D5)", () => {
+describe("a requirement that reaches nothing completes an interruption with an empty addition", () => {
 	it("interrupts a login through boot's own resolver, is resumed with amr [] — read back through the persisted DTO — and establishes over pwd alone", async () => {
 		// Two requirements a deployment might write, neither reaching anything
 		// (only mfa does): each interrupts until its own record says the
@@ -467,7 +467,7 @@ describe("a requirement that reaches nothing completes an interruption with an e
 	});
 });
 
-describe("a factor's amrValues are held at registration (D3)", () => {
+describe("a factor's amrValues are held at registration", () => {
 	it.each([
 		["absent", undefined],
 		["a string", "otp"],
@@ -498,7 +498,7 @@ describe("a factor's amrValues are held at registration (D3)", () => {
 	);
 });
 
-describe("the two declaration refusals run the cleanups, and carry what a cleanup threw (D7)", () => {
+describe("the two declaration refusals run the cleanups, and carry what a cleanup threw", () => {
 	const closing = defineModule({
 		name: "test:closing",
 		provides: { closingSlot: () => 1 },
@@ -531,7 +531,7 @@ describe("the two declaration refusals run the cleanups, and carry what a cleanu
 	});
 });
 
-describe("the remediation actions core issues (D4)", () => {
+describe("the remediation actions core issues", () => {
 	it("issues one branded action per declared route to the module that holds the requirement object it contributed — never through the resolver", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
 		const original = requirement("a", { remediations: ["a.step_up", "a.recover"] });
@@ -553,7 +553,7 @@ describe("the remediation actions core issues (D4)", () => {
 	});
 });
 
-describe("the overrides guard reads what the pass reads (D3)", () => {
+describe("the overrides guard reads what the pass reads", () => {
 	it("refuses an overrides getter that answers a sessionRequirements entry to the normaliser and nothing to a second read", async () => {
 		let reads = 0;
 		const evil = {
@@ -573,7 +573,7 @@ describe("the overrides guard reads what the pass reads (D3)", () => {
 	});
 });
 
-describe("a factor's values are read once, at registration, and the reach is recomputed from that snapshot alone (D3)", () => {
+describe("a factor's values are read once, at registration, and the reach is recomputed from that snapshot alone", () => {
 	const mfaWith = (reach: readonly string[]) =>
 		mfaModule({ reach: new Set(reach) } as Partial<SessionRequirement>);
 	const factorModule = (value: () => unknown) =>
@@ -675,7 +675,7 @@ describe("a factor's values are read once, at registration, and the reach is rec
 	});
 });
 
-describe("a raw throw at the end of stage 4 is a BootError with the cleanups run (D3, D7)", () => {
+describe("what could throw raw at the end of stage 4 fails as a BootError", () => {
 	it("a factor whose amrValues throw on a later read — the requirement's own getter's — fails as the mfa contribution, not as a raw TypeError", async () => {
 		let reads = 0;
 		const flaky = defineModule({
@@ -713,7 +713,7 @@ describe("a raw throw at the end of stage 4 is a BootError with the cleanups run
 	});
 });
 
-describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
+describe("the reach and the page, checked at the end of stage 4", () => {
 	it("refuses a second-factor value in the reach of a requirement not named mfa, naming the module and the requirement", async () => {
 		const err = await refusal(
 			boot(
@@ -778,7 +778,7 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 		}
 	});
 
-	it("resolves the page on the issuer of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
+	it("resolves the page on the issuer of the oauthTokenSettings the composition holds, over the configuration's", async () => {
 		const seen: { resolver?: SessionRequirementResolver } = {};
 		const handle = await boot(
 			[
@@ -880,7 +880,7 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 	});
 });
 
-describe("the declaration: sessionRequirements.expected (D7)", () => {
+describe("the declaration: sessionRequirements.expected", () => {
 	it("is required whenever a consumer of admission is installed: none declared refuses the boot, naming the key, what is declared and what is registered", async () => {
 		const { sessionRequirements: _none, ...undeclared } = config() as Record<string, unknown>;
 		for (const key of ["requires", "optional"] as const) {
@@ -936,7 +936,7 @@ describe("the declaration: sessionRequirements.expected (D7)", () => {
 	});
 });
 
-describe("mfa.mode asks for a requirement that is not installed (D7)", () => {
+describe("mfa.mode asks for a requirement that is not installed", () => {
 	it.each(["required", "optional"] as const)(
 		"refuses mfa.mode = %s with no requirement named mfa: session-requirement-missing",
 		async (mode) => {
@@ -969,7 +969,7 @@ describe("mfa.mode asks for a requirement that is not installed (D7)", () => {
 	});
 });
 
-describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
+describe("the name mfa is reserved, and bound to core's MFA ports", () => {
 	const totp = factor("totp", ["otp"], true);
 	const factors = defineModule({
 		name: "test:factors",
@@ -1062,7 +1062,7 @@ describe("the name mfa is reserved, and bound to core's MFA ports (D3)", () => {
 	});
 });
 
-describe("the boot line (D3)", () => {
+describe("the session_requirements_registered boot line", () => {
 	it("says once at info, in order, each requirement's name, its module and its remediations, when a consumer or a requirement is present", async () => {
 		const { logger, lines } = recordingLogger();
 		const handle = await boot(
@@ -1099,7 +1099,7 @@ describe("the boot line (D3)", () => {
 	});
 });
 
-describe("the stage-4 paths each driven (D3, D7)", () => {
+describe("stage 4: the reach without mfa, a refusal's cleanups, every consumer named", () => {
 	it("recomputes the mfa reach without mfa when no factor adds it", async () => {
 		const plain = defineModule({
 			name: "test:factors",

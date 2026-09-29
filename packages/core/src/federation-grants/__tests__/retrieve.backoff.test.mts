@@ -42,7 +42,7 @@ import {
  * during an incident are N upstream calls. See ADR
  * 2026-09-17-federation-grants-offline-delegation, D12.
  */
-describe("retrieveFederationGrantToken — a failed refresh is remembered (#593, D12)", () => {
+describe("retrieveFederationGrantToken — a failed refresh is remembered", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -288,7 +288,7 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 	});
 
 	describe("what a stored stamp may say about the upstream", () => {
-		it("repeats only a code this provider knows, whatever a stored stamp carries (#593, D11)", async () => {
+		it("repeats only a code this provider knows, whatever a stored stamp carries", async () => {
 			await h.seed();
 			// The stamp stands and the stored token is gone, so every answer below
 			// comes from the stamp without the upstream being asked at all — which

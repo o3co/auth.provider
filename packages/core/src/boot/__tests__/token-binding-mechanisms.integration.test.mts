@@ -192,7 +192,7 @@ describe("tokenBindingMechanisms — core synthesis", () => {
 		await handle.dispose();
 	});
 
-	it("reads the dispatch policy from the configuration whatever oauthTokenSettings the composition holds: the policy is core's (#728)", async () => {
+	it("reads the dispatch policy from the configuration whatever oauthTokenSettings the composition holds: the policy is core's", async () => {
 		// The token-binding extension point is core's, and so is the policy that
 		// arbitrates between its mechanisms: the oauth module's slot carries no
 		// policy, and one a host's value carries anyway is not read.

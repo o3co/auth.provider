@@ -209,7 +209,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("strips dead endpoints fields (client / authCallback removed in IH-10)", () => {
+	it("strips the endpoints fields the schema does not declare (client / authCallback)", () => {
 		const endpointsWithDeadFields = {
 			endpoints: {
 				login: { url: "/login" },

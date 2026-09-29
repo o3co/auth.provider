@@ -507,7 +507,7 @@ describe("a section nested in another module's", () => {
 	});
 });
 
-describe("config_sections_ignored — a top-level section nobody owns (#728 B8)", () => {
+describe("config_sections_ignored — a top-level section nobody owns", () => {
 	it("is kept, and named once in the log with every other one", async () => {
 		const logger = recordingLogger();
 		const reader = defineModule({

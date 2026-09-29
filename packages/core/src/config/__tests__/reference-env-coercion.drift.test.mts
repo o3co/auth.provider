@@ -37,7 +37,7 @@ import {
 } from "#/config/schema-path.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
-describe("every leaf core's schema declares reads the string an environment variable arrives as (#728)", () => {
+describe("every leaf core's schema declares reads the string an environment variable arrives as", () => {
 	it("walks the whole base (the guard is not vacuous)", () => {
 		const unreadable = unreadableLeafPaths(
 			z.object({

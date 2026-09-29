@@ -40,7 +40,7 @@ const section = fullSectionsSchema.pick({ federationGrants: true });
 const parse = (federationGrants: unknown) =>
 	section.parse({ federationGrants } as never).federationGrants;
 
-describe("the federationGrants section (#593)", () => {
+describe("the federationGrants section", () => {
 	it("survives the pre-parse with every key an operator set", () => {
 		// The failure this guards against is silent: an undeclared block is
 		// stripped, the module sees defaults, and an operator's encryption keys
@@ -81,7 +81,7 @@ describe("the federationGrants section (#593)", () => {
 		expect(parse(written)).toStrictEqual(written);
 	});
 
-	it("takes the booleans as the strings HOCON substitution leaves behind (#288)", () => {
+	it("takes the booleans as the strings HOCON substitution leaves behind", () => {
 		// `${?VAR}` arrives as a string, so a section that declared a plain
 		// boolean would refuse every environment-driven deployment.
 		expect(parse({ enabled: "true" })?.enabled).toBe(true);

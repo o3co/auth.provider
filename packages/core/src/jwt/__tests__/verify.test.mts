@@ -95,7 +95,7 @@ const baseOptions: JwtVerifyOptions = {
 	expectedAudience: TEST_AUDIENCE,
 };
 
-describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
+describe("verifyJwt — the id_token typ", () => {
 	const keyStore = makeKeyStore();
 	it('accepts typ "JWT" as the id_token default', async () => {
 		const jwt = await signValidAccessToken({ typ: "JWT" }, keyStore);
@@ -103,7 +103,7 @@ describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
 		expect(verified.header.typ).toBe("JWT");
 	});
 
-	it('refuses the pre-#394 "id+jwt" on id_token — the #394 window is closed (#402)', async () => {
+	it('refuses typ "id+jwt" on id_token', async () => {
 		// The id_token `typ` is the standard `JWT`, and `id+jwt` is refused
 		// rather than accepted for a migration window: with no deployment
 		// behind this provider there is no population of `id+jwt` tokens to

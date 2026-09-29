@@ -75,7 +75,7 @@ function hasPath(tree: unknown, path: string): boolean {
 	return true;
 }
 
-describe("core's reference.conf holds only what core's schema declares (#472)", () => {
+describe("core's reference.conf holds only what core's schema declares", () => {
 	const resolved = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }).toObject();
 	// The base alone, stripping what it does not declare: nothing laid back over it.
 	const parsed = TransitionalConfigSchema.parse(resolved);
@@ -97,7 +97,7 @@ describe("core's reference.conf holds only what core's schema declares (#472)", 
 	});
 });
 
-describe("core's reference.conf declares the operator keys a composition layering on it alone needs (#570)", () => {
+describe("core's reference.conf declares the operator keys a composition layering on it alone needs", () => {
 	// The drift diff above proves the schema keeps every path the file has; it
 	// cannot notice a path the file should have and does not. Declared only in
 	// the standalone template, `linkFederatedIdentityUrl` would have its
@@ -128,7 +128,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		expect(parsed.repositories?.user?.http).not.toHaveProperty("linkFederatedIdentityUrl");
 	});
 
-	it("substitutes CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL and keeps it through boot's parse (#613)", () => {
+	it("substitutes CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL and keeps it through boot's parse", () => {
 		const raw = parseFile(REFERENCE_CONF_PATH, {
 			env: {
 				...REQUIRED_ENV,
@@ -143,7 +143,7 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		);
 	});
 
-	it("leaves the lookup URL absent when unset, and ships an empty coverage declaration (#613)", () => {
+	it("leaves the lookup URL absent when unset, and ships an empty coverage declaration", () => {
 		// Absent, not blank: the repository defines the two lookup methods only
 		// when the URL is there, and that absence is the boot refusal an
 		// operator reads. The coverage list is HOCON's to fill; an empty default

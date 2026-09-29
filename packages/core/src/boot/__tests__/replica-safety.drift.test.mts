@@ -122,7 +122,7 @@ function collectModules(dir: string): ScannedModule[] {
 	return found;
 }
 
-describe("replica-safety declarations vs. the modules that exist (#304, #455)", () => {
+describe("replica-safety declarations vs. the modules that exist", () => {
 	const allModules = collectModules(join(repoRoot, "packages"));
 	const coreModules = collectModules(join(repoRoot, "packages", "core"));
 	const moduleNames = [...new Set(allModules.map((m) => m.name))];

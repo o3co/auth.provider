@@ -136,7 +136,7 @@ function occurrenceSites(): string[] {
 	return files;
 }
 
-describe("design-campaign provenance index (#386)", () => {
+describe("design-campaign provenance index", () => {
 	const indexText = readFileSync(indexPath, "utf8");
 	const indexed = idsIn(indexText, A_DOC_LOOSE);
 

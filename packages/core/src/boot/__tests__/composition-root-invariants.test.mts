@@ -37,7 +37,7 @@ const noopGrantPolicy: GrantPolicyHook = {
 // grantPolicy / jwt.issuer invariant
 // ---------------------------------------------------------------------------
 
-describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
+describe("grantPolicy/issuer invariant", () => {
 	function configWithIssuer(issuer: string | undefined): ReturnType<typeof makeValidCoreConfig> {
 		const base = makeValidCoreConfig();
 		const oauth = base.oauth as Record<string, unknown>;

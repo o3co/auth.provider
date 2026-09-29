@@ -16,7 +16,7 @@ import type { ProviderDeps } from "../provider.mjs";
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata + sessionRequirements + rateLimitBudgets + federationTypes", () => {
+test("ContributesMap has exactly core's thirteen contribution kinds", () => {
 	// `federationRedirectPolicies` is absent: the session package adds it
 	// through `declare module` augmentation.
 	type Keys = keyof ContributesMap<LocalDeps>;
@@ -58,7 +58,7 @@ test("Name-keyed kinds are readonly records", () => {
 // grantMiddleware kind
 // ---------------------------------------------------------------------------
 
-test("ContributesMap includes grantMiddleware kind (Wave 2 Phase 1 retro)", () => {
+test("ContributesMap includes grantMiddleware kind", () => {
 	type GMDeps = ProviderDeps<"config", never>;
 	type Keys = keyof ContributesMap<GMDeps>;
 	type GrantMiddlewareKey = "grantMiddleware";

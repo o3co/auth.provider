@@ -59,7 +59,7 @@ describe("RefreshTokenStorageError", () => {
 		}
 	});
 
-	it("reason union has exactly 4 members (TS-M1 added 'corrupt-data')", () => {
+	it("reason union includes duplicate-family, expired-at-issue, conflict-exhausted and corrupt-data", () => {
 		const all: RefreshTokenStorageErrorReason[] = [
 			"duplicate-family",
 			"expired-at-issue",
@@ -74,7 +74,7 @@ describe("RefreshTokenStorageError", () => {
 	// unknown extra fields (`.strict()` schema). The redis-side parse path is
 	// exercised in `packages/redis/__tests__/refresh-token-family-validation.test.mts`;
 	// this test only confirms the union member is constructable.
-	it("accepts corrupt-data reason (TS-M1)", () => {
+	it("accepts corrupt-data reason", () => {
 		const err = new RefreshTokenStorageError({ reason: "corrupt-data" });
 		expect(err.reason).toBe("corrupt-data");
 		expect(err.name).toBe("RefreshTokenStorageError");

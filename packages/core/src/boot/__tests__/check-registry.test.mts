@@ -29,7 +29,7 @@ import {
 	STAGE_ONE_PRE_CONFIG_CHECKS,
 } from "#/boot/validate-manifests.mjs";
 
-describe("stage-1 check registries (#368)", () => {
+describe("stage-1 check registries", () => {
 	const all = [...STAGE_ONE_PRE_CONFIG_CHECKS, ...STAGE_ONE_POST_CONFIG_CHECKS];
 
 	it("gives every check a unique id", () => {

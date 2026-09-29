@@ -155,7 +155,7 @@ describe("InMemoryUserRepository", () => {
 		});
 	});
 
-	describe("findSubjectByFederatedIdentity (#593, D7 check 5; #611)", () => {
+	describe("findSubjectByFederatedIdentity", () => {
 		// The contract is a complete answer about ownership — linked to one
 		// user, or established as linked to nobody — or an admission that it
 		// cannot tell. This repository keys links by federation name and `sub`
@@ -212,7 +212,7 @@ describe("InMemoryUserRepository", () => {
 		});
 	});
 
-	describe("linkFederatedIdentity (#482)", () => {
+	describe("linkFederatedIdentity", () => {
 		const apple = { provider: "apple", sub: "a1", token: "apple:a1", claims: {} };
 		const repo = () =>
 			new InMemoryUserRepository(

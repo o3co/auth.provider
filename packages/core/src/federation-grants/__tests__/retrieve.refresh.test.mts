@@ -65,7 +65,7 @@ function deferred<T>(): Deferred<T> {
 	return { promise, resolve, reject };
 }
 
-describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", () => {
+describe("retrieveFederationGrantToken — the refresh", () => {
 	let h: Harness;
 
 	beforeEach(() => {
@@ -145,7 +145,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			expect(lock.acquired).toBe(true);
 		});
 
-		it("sends the grant's resource: an upstream that needed it at authorization needs it at refresh too (D17)", async () => {
+		it("sends the grant's resource: an upstream that needed it at authorization needs it at refresh too", async () => {
 			h.world.connections.set(connection.name, {
 				...connection,
 				resource: "https://calendar.example/",
@@ -296,7 +296,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("a fresh token that may not be disclosed (D5)", () => {
+	describe("a fresh token that may not be disclosed", () => {
 		const cases: Array<[string, Partial<DelegatedTokens>, string]> = [
 			[
 				"a lifetime over the maximum",
@@ -341,7 +341,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		}
 
-		it("a wider consent on the same connection does not widen the narrower grant (row 7: G1, G2)", async () => {
+		it("a wider consent on the same connection does not widen the narrower grant", async () => {
 			// G1 consented for the narrow set; G2, later, for the whole
 			// connection. An IdP that accumulates consent (ADR
 			// 2026-09-17-federation-grants-offline-delegation, D19) answers G1's
@@ -429,7 +429,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("an upstream that refuses (D11, D12)", () => {
+	describe("an upstream that refuses", () => {
 		it("requires reauthorization for a STRUCTURED invalid_grant, and deletes the credentials", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -476,7 +476,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		});
 
-		describe("an upstream that asked for the user (#616, D11, D12)", () => {
+		describe("an upstream that asked for the user", () => {
 			// The four codes an IdP answers with when it wants the user and not a
 			// new token. Nothing said the refresh token is bad, so both tokens are
 			// kept; nothing is mended by waiting, so no wait is told; and the
@@ -884,7 +884,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		);
 	});
 
-	describe("a writer that loses never returns the token it fetched (D2, D10)", () => {
+	describe("a writer that loses never returns the token it fetched", () => {
 		it("the grant is revoked while the upstream is being asked", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -1092,7 +1092,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("the lock (D12)", () => {
+	describe("the lock", () => {
 		it("makes a second caller wait, look again, and answer with what the first one stored: the upstream is asked once", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -1178,7 +1178,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("a slow upstream must not cost users their grants (D12)", () => {
+	describe("a slow upstream must not cost users their grants", () => {
 		it("answers the caller at the soft deadline, and persists the late result all the same", async () => {
 			await h.seed();
 			setNow(GONE);
@@ -1266,7 +1266,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("a replacement that cannot be persisted (D12)", () => {
+	describe("a replacement that cannot be persisted", () => {
 		it("is retried inside the lock, within a budget, and then answered as a storage outage", async () => {
 			const grant = await h.seed();
 			setNow(GONE);
@@ -1343,7 +1343,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		});
 	});
 
-	describe("what is presented to the upstream, and asked of the store (D12)", () => {
+	describe("what is presented to the upstream, and asked of the store", () => {
 		it("presents the refresh token read UNDER the lock, not the one read before waiting for it", async () => {
 			// Another replica rotated the refresh token while this call waited. What
 			// this call read before the wait is the old one, and presenting it is
@@ -1605,7 +1605,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	});
 });
 
-describe("assertFederationGrantRetrievalLimits (#593, D12)", () => {
+describe("assertFederationGrantRetrievalLimits", () => {
 	it("accepts the defaults: 25 s + 3 s leave two of the lock's 30", () => {
 		expect(() => assertFederationGrantRetrievalLimits(limits)).not.toThrow();
 	});

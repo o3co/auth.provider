@@ -104,7 +104,7 @@ function boot(value?: "watermark" | "unsupported") {
 /** `boot()` plus `oauth.revocation.subject = <value>`. */
 const bootDeclaring = (value: "watermark" | "unsupported") => boot(value);
 
-describe("SUBJECT_REVOCATION_ABSENCE_POLICY (#406)", () => {
+describe("SUBJECT_REVOCATION_ABSENCE_POLICY", () => {
 	it("refuses boot when the watermark slot is unfilled and undeclared", async () => {
 		await expect(
 			createApp({ modules: [watermarkConsumer], bootstrapComponents: boot() }),

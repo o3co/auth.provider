@@ -44,7 +44,7 @@ const authorization: FederationGrantAuthorization = {
 	resource: undefined,
 };
 
-describe("FederationGrant — the shapes the union admits (#593, D1)", () => {
+describe("FederationGrant — the shapes the union admits", () => {
 	it("admits a grant revoked while pending, which has no authorization to keep", () => {
 		const grant: FederationGrant = {
 			...base,

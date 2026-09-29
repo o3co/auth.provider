@@ -127,7 +127,7 @@ test("RefreshTokenFamilyRevocation exposes revokeFamily + isFamilyRevoked", () =
 	expectTypeOf<RefreshTokenFamilyRevocation>().toEqualTypeOf<RevocationShape>();
 });
 
-test("ComponentMap exposes the 3 A3 slots as readonly optional", () => {
+test("ComponentMap types the 3 refresh-token-family slots as possibly undefined", () => {
 	expectTypeOf<ComponentMap["refreshTokenFamilyStore"]>().toEqualTypeOf<
 		RefreshTokenFamilyStore | undefined
 	>();

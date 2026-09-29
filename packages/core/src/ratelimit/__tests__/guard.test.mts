@@ -108,7 +108,7 @@ describe("createRateLimitGuard — allow path", () => {
 		expect(limiter.keys[0]).toMatch(/^token:ip:.+/);
 	});
 
-	it("passes the same normalized ip into the check context as the key uses (CP-10)", async () => {
+	it("passes the same ip into the check context as the key uses", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: true }));
 		await hit(makeApp(createRateLimitGuard({ limiter, tag: "login", failMode: "open" })));
 		const ctx = limiter.contexts[0] as { ip?: string; userAgent?: string };
@@ -147,7 +147,7 @@ describe("createRateLimitGuard — deny path", () => {
 		expect(res.body).toEqual({ error: "rate_limited", error_description: "limit:token" });
 	});
 
-	it("answers with a caller's fixed description where one was declared (#593)", async () => {
+	it("answers with a caller's fixed description where one was declared", async () => {
 		// The federation-grant routes answer in core's denial vocabulary, where
 		// a throttle is `rate_limited/provider` and `error_description` is a
 		// stable identifier a client switches on rather than prose. Without
@@ -168,7 +168,7 @@ describe("createRateLimitGuard — deny path", () => {
 		expect(res.body).toEqual({ error: "rate_limited", error_description: "provider" });
 	});
 
-	it("falls back to the stock description when reason is empty (AS-2 `||`, not `??`)", async () => {
+	it("falls back to the stock description when reason is empty", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, reason: "" }));
 		const res = await hit(
 			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
@@ -275,7 +275,7 @@ describe("createRateLimitGuard — RateLimit-* headers", () => {
 	});
 });
 
-describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () => {
+describe("createRateLimitGuard — limiter outage (failMode policy)", () => {
 	it("failMode='open': lets the request through and logs rate_limiter_failed_open", async () => {
 		const logger = makeLogger();
 		const limiter = scriptedLimiter(() => new Error("redis down"));
@@ -393,7 +393,7 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 	});
 });
 
-describe("checkWithFailMode — the guard's check + outage policy, for a route that is not a middleware (#457)", () => {
+describe("checkWithFailMode — the guard's check + outage policy, for a route that is not a middleware", () => {
 	// `POST /oauth/device/verification` keys its budget on the authenticated
 	// subject and needs the request's `action` for its own 429 audit event, so
 	// it cannot sit behind the guard as a middleware. What it can share is the
