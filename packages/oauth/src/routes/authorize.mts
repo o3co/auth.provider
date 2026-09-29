@@ -39,11 +39,13 @@ import {
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
+	LOGIN_RETURN_PARAMETER,
 	type Logger,
 	type LoginEntry,
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
+	loginPageUrlFor,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
@@ -132,10 +134,11 @@ export interface AuthorizeHandlerOptions {
 
 /**
  * The parameter this endpoint adds to a page it sends the browser to, naming
- * the request to come back to. The login page's own URL may not carry it
- * (`oauthModule`'s configSchema refuses one that does).
+ * the request to come back to: core's `LOGIN_RETURN_PARAMETER`, which the
+ * login page and a requirement's step-up page both read. The login page's own
+ * URL may not carry it (`oauthModule`'s configSchema refuses one that does).
  */
-export const REDIRECT_TO_PARAM = "redirect_to";
+export const REDIRECT_TO_PARAM = LOGIN_RETURN_PARAMETER;
 
 /**
  * The login trip read from the configuration, for a composition in which no
@@ -145,24 +148,12 @@ export const REDIRECT_TO_PARAM = "redirect_to";
  * hand-built config missing the key fails at the same point (request time) it
  * always did — `oauthModule`'s configSchema is what turns the missing key into
  * a boot failure for schema-validated deployments, and refuses a login URL
- * that carries `redirect_to` of its own. `redirect_to` is added to the login
- * URL's query: the page may carry a query of its own (e.g. `/login?tenant=x`),
- * so `redirect_to` joins with `&` there and `?` otherwise — a second `?` would
- * corrupt both parameters — and may carry a fragment, which is kept after the
- * query: `/login#x` becomes `/login?redirect_to=…#x`, where the page reads it
- * (a `?` inside the fragment is not the query's). The target is encoded whole
- * with `encodeURIComponent`, not as a form, so nothing of it reads as the
- * page's query or fragment. The session module's entry adds it the same way.
+ * that carries `redirect_to` of its own. The URL is built by core's
+ * `loginPageUrlFor` — `redirect_to` in the page's query, before any fragment,
+ * the target encoded whole — the rule the session module's entry keeps too.
  */
 export const loginTripFromConfig = (loginUrl: () => string): Pick<LoginEntry, "urlFor"> => ({
-	urlFor: (returnTo: string): string => {
-		const url = loginUrl();
-		const fragmentAt = url.indexOf("#");
-		const page = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
-		const fragment = fragmentAt === -1 ? "" : url.slice(fragmentAt);
-		const joiner = page.includes("?") ? "&" : "?";
-		return `${page}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(returnTo)}${fragment}`;
-	},
+	urlFor: (returnTo: string): string => loginPageUrlFor(loginUrl(), returnTo),
 });
 
 /** The login-page redirect with the request to come back to. */

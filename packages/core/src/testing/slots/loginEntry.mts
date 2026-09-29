@@ -29,6 +29,7 @@
  */
 
 import assert from "node:assert/strict";
+import { loginPageCarriesReturn, loginPageUrlFor } from "../../browser-session/login-page.mjs";
 import type { LoginEntry } from "../../browser-session/types.mjs";
 import type { ContractCase } from "../../session-admission/testing/requirement.contract.mjs";
 import { CONTRACT_ORIGIN } from "./fake-http.mjs";
@@ -62,13 +63,6 @@ const CARRYING_PAGES: readonly string[] = [
 const splitFragment = (url: string): readonly [string, string] => {
 	const at = url.indexOf("#");
 	return at === -1 ? [url, ""] : [url.slice(0, at), url.slice(at)];
-};
-
-/** Whether `url`'s own query, before any fragment, carries `redirect_to`. */
-const carriesReturnParameter = (url: string): boolean => {
-	const [page] = splitFragment(url);
-	const at = page.indexOf("?");
-	return at !== -1 && new URLSearchParams(page.slice(at + 1)).has(RETURN_PARAMETER);
 };
 
 const TARGETS: readonly string[] = [
@@ -203,21 +197,19 @@ export function loginEntryContract(input: LoginEntryContractInput): readonly Con
 
 /**
  * A `LoginEntry` for `url` — the fixture configuration's `/login` by
- * default — joining `redirect_to` with `?`, or `&` to a page that has a
- * query, before any fragment, the target encoded whole; a page whose own
- * query carries `redirect_to` is refused. Frozen.
+ * default — over core's login-page rule (`loginPageUrlFor`,
+ * `loginPageCarriesReturn`): `redirect_to` joined with `?`, or `&` to a page
+ * that has a query, before any fragment, the target encoded whole; a page
+ * whose own query carries `redirect_to` is refused. Frozen.
  */
 export function createTestLoginEntry(url = "/login"): LoginEntry {
-	if (carriesReturnParameter(url)) {
+	if (loginPageCarriesReturn(url)) {
 		throw new TypeError(
 			`createTestLoginEntry: the login page must not carry "${RETURN_PARAMETER}" of its own, and was ${JSON.stringify(url)}`,
 		);
 	}
-	const [page, fragment] = splitFragment(url);
-	const joiner = page.includes("?") ? "&" : "?";
 	return Object.freeze({
 		url,
-		urlFor: (returnTo: string): string =>
-			`${page}${joiner}${RETURN_PARAMETER}=${encodeURIComponent(returnTo)}${fragment}`,
+		urlFor: (returnTo: string): string => loginPageUrlFor(url, returnTo),
 	});
 }

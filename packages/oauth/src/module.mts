@@ -20,6 +20,8 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
+	LOGIN_RETURN_PARAMETER,
+	loginPageCarriesReturn,
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
@@ -31,22 +33,7 @@ import express from "express";
 import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
-import { REDIRECT_TO_PARAM } from "./routes/authorize.mjs";
 import { createOAuthRouter } from "./routes.mjs";
-
-/**
- * Whether `url` — a path or an absolute URL — carries `redirect_to` in its own
- * query, read as `/authorize`'s login redirect writes it: the text before any
- * `#`, after the first `?` — so a fragment is never mistaken for the query,
- * and a URL `URL` could not parse is held to the rule all the same. The name
- * is matched as `URLSearchParams.has` matches it — exactly, after decoding, so
- * `redirect%5Fto` and a `redirect_to` with no value count.
- */
-const carriesRedirectTo = (url: string): boolean => {
-	const page = url.split("#", 1)[0] ?? "";
-	const queryAt = page.indexOf("?");
-	return queryAt !== -1 && new URLSearchParams(page.slice(queryAt + 1)).has(REDIRECT_TO_PARAM);
-};
 
 /**
  * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
@@ -72,8 +59,8 @@ const oauthConfigSchema = z.object({
 			url: z
 				.string()
 				.min(1)
-				.refine((url) => !carriesRedirectTo(url), {
-					message: `endpoints.login.url must not carry a "${REDIRECT_TO_PARAM}" query parameter of its own: the provider adds "${REDIRECT_TO_PARAM}" when it sends a browser to the login page, naming the request to come back to`,
+				.refine((url) => !loginPageCarriesReturn(url), {
+					message: `endpoints.login.url must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own: the provider adds "${LOGIN_RETURN_PARAMETER}" when it sends a browser to the login page, naming the request to come back to`,
 				}),
 		}),
 	}),

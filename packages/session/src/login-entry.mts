@@ -28,32 +28,20 @@
  * hold to its allowlist.
  */
 
-import type { LoginEntry } from "@o3co/auth-provider-core";
-
-/** The parameter a login page reads where to come back to from. */
-const RETURN_PARAMETER = "redirect_to";
-
-/**
- * Whether `page` carries the return parameter in its own query, read as
- * `urlFor` writes it: the text before any `#`, after the first `?`, the name
- * matched as `URLSearchParams.has` matches it (so `redirect%5Fto` and one
- * with no value count). The same rule oauth's configSchema holds
- * `endpoints.login.url` to.
- */
-const carriesReturnParameter = (page: string): boolean => {
-	const beforeFragment = page.split("#", 1)[0] ?? "";
-	const queryAt = beforeFragment.indexOf("?");
-	return (
-		queryAt !== -1 && new URLSearchParams(beforeFragment.slice(queryAt + 1)).has(RETURN_PARAMETER)
-	);
-};
+import {
+	LOGIN_RETURN_PARAMETER,
+	type LoginEntry,
+	loginPageCarriesReturn,
+	loginPageUrlFor,
+} from "@o3co/auth-provider-core";
 
 /**
  * The login entry for the page `url` — a path or an absolute URL, which may
  * carry a query and a fragment of its own, but not `redirect_to`: `urlFor`
- * adds it, and a page that carried one would send two. `urlFor` adds
- * `redirect_to` to the page's query, before any fragment, the target encoded
- * whole. Frozen.
+ * adds it, and a page that carried one would send two. The rule is core's
+ * (`loginPageCarriesReturn`, `loginPageUrlFor`), the one `/authorize`'s own
+ * fallback keeps too: `redirect_to` in the page's query, before any fragment,
+ * the target encoded whole. Frozen.
  */
 export function createLoginEntry(url: string): LoginEntry {
 	if (typeof url !== "string" || url === "") {
@@ -61,19 +49,14 @@ export function createLoginEntry(url: string): LoginEntry {
 			`createLoginEntry: the login page must be a non-empty string, and was ${JSON.stringify(url)}`,
 		);
 	}
-	if (carriesReturnParameter(url)) {
+	if (loginPageCarriesReturn(url)) {
 		throw new TypeError(
-			`createLoginEntry: the login page must not carry a "${RETURN_PARAMETER}" query parameter of its own — urlFor adds it — and was ${JSON.stringify(url)}`,
+			`createLoginEntry: the login page must not carry a "${LOGIN_RETURN_PARAMETER}" query parameter of its own — urlFor adds it — and was ${JSON.stringify(url)}`,
 		);
 	}
-	const fragmentAt = url.indexOf("#");
-	const page = fragmentAt === -1 ? url : url.slice(0, fragmentAt);
-	const fragment = fragmentAt === -1 ? "" : url.slice(fragmentAt);
-	const joiner = page.includes("?") ? "&" : "?";
 	return Object.freeze({
 		url,
-		urlFor: (returnTo: string): string =>
-			`${page}${joiner}${RETURN_PARAMETER}=${encodeURIComponent(returnTo)}${fragment}`,
+		urlFor: (returnTo: string): string => loginPageUrlFor(url, returnTo),
 	});
 }
 
