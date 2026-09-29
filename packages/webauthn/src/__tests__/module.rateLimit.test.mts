@@ -30,6 +30,7 @@ import {
 	createApp,
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
+	type DeploymentMode,
 	defaultChallengeCeremonyModule,
 	defineModule,
 	type GrantPolicyHook,
@@ -575,6 +576,85 @@ describe("webauthn authentication/options rate limit — fallback under deployme
 		const { handle } = await bootApp(makeWebAuthnConfig(7), [
 			defineModule({ name: "test:webauthn-rl-logger-5", provides: { logger: () => logger } }),
 		]);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
+			"webauthn_authentication_options_rate_limiter_not_shared",
+		);
+		await handle.dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The mode comes from core's `deploymentMode` slot, which core fills from the
+// configuration's `deployment.mode`: the module reads nothing of `deployment`
+// itself.
+// ---------------------------------------------------------------------------
+
+describe("webauthn authentication/options rate limit — the deploymentMode slot", () => {
+	/** The authentication/options route's factory, run by hand with the slot as given. */
+	const buildOptionsRoute = (
+		deploymentMode: DeploymentMode,
+		deployment: Record<string, unknown>,
+		logger: Logger,
+	) => {
+		const deps = {
+			webauthnConfig: makeWebAuthnConfig(7),
+			webauthnCredentialStore: {},
+			challengeStore: {},
+			challengeCeremony: {},
+			keyStore: {},
+			config: { ...makeCoreConfig(), deployment },
+			deploymentMode,
+			logger,
+		};
+		const routes = (webauthnModule.contributes?.routes ?? []) as unknown as ((deps: unknown) => {
+			id: string;
+		})[];
+		return routes
+			.map((factory) => factory(deps))
+			.find((route) => route.id === "webauthn-authentication-options");
+	};
+
+	it("requires the slot", () => {
+		expect(webauthnModule.requires).toContain("deploymentMode");
+	});
+
+	it('refuses the per-process fallback when the slot says "multi", whatever the configuration\'s deployment says', () => {
+		expect(() => buildOptionsRoute("multi", { mode: "single" }, spyLogger())).toThrow(
+			expect.objectContaining({
+				name: "BootError",
+				reason: "replica-unsafe-adapter",
+				details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
+			}),
+		);
+	});
+
+	it('is silent when the slot says "single" and warns when it says "unset", whatever the configuration\'s deployment says', () => {
+		const single = spyLogger();
+		expect(buildOptionsRoute("single", { mode: "multi" }, single)?.id).toBe(
+			"webauthn-authentication-options",
+		);
+		expect(single.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"webauthn_authentication_options_rate_limiter_not_shared",
+		);
+		const unset = spyLogger();
+		buildOptionsRoute("unset", { mode: "multi" }, unset);
+		expect(unset.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
+			"webauthn_authentication_options_rate_limiter_not_shared",
+		);
+	});
+
+	it("keeps the warning, through createApp, for an empty deployment section", async () => {
+		const logger = spyLogger();
+		const { handle } = await bootApp(
+			makeWebAuthnConfig(7),
+			[defineModule({ name: "test:webauthn-rl-logger-6", provides: { logger: () => logger } })],
+			"open",
+			undefined,
+			{ deployment: {} },
+		);
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
 			"webauthn_authentication_options_rate_limiter_not_shared",
