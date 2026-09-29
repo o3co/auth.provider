@@ -31,8 +31,13 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { coerceBooleanFromEnv } from "#/config/application.schema.mjs";
 import { TransitionalConfigSchema } from "#/config/composed.mjs";
-import { readsEnvironmentString, unreadableLeafPaths } from "#/config/schema-path.mjs";
+import {
+	readsEnvironmentString,
+	schemasAtPath,
+	unreadableLeafPaths,
+} from "#/config/schema-path.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 
 describe("every leaf core's schema declares reads the string an environment variable arrives as (#728)", () => {
@@ -54,9 +59,30 @@ describe("every leaf core's schema declares reads the string an environment vari
 		expect(readsEnvironmentString(z.boolean())).toBe(false);
 		expect(readsEnvironmentString(z.number().int().optional())).toBe(false);
 		expect(readsEnvironmentString(z.coerce.number())).toBe(true);
-		expect(readsEnvironmentString(z.preprocess((value) => value, z.boolean()))).toBe(true);
 		expect(readsEnvironmentString(z.union([z.boolean(), z.string()]))).toBe(true);
 		expect(readsEnvironmentString(z.enum(["a", "b"]))).toBe(true);
+	});
+
+	it("trusts a preprocess only as far as the schema it hands on, unless it is one of core's environment coercers", () => {
+		// A preprocess's function sees the string first, but whether it does
+		// anything with it is not something the guard can see: the identity
+		// preprocess over a boolean still refuses `"false"`.
+		const identity = z.preprocess((value) => value, z.boolean());
+		expect(identity.safeParse("false").success).toBe(false);
+		expect(readsEnvironmentString(identity)).toBe(false);
+		// Judged by what it hands on: a list of strings reads one.
+		expect(readsEnvironmentString(z.preprocess((value) => value, z.array(z.string())))).toBe(true);
+		// Core's coercers are known to read it.
+		expect(readsEnvironmentString(coerceBooleanFromEnv)).toBe(true);
+		expect(readsEnvironmentString(coerceBooleanFromEnv.optional())).toBe(true);
+		const durations = schemasAtPath(TransitionalConfigSchema, ["oauth", "jwt", "jwksCacheMaxAge"]);
+		expect(durations).toHaveLength(1);
+		expect(durations.every(readsEnvironmentString)).toBe(true);
+		expect(
+			schemasAtPath(TransitionalConfigSchema, ["federationGrants", "tombstoneRetention"]).every(
+				readsEnvironmentString,
+			),
+		).toBe(true);
 	});
 });
 

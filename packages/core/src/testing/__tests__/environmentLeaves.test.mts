@@ -62,6 +62,17 @@ describe("unreadableModuleLeaves — what core's base hands a module's leaf", ()
 		).toEqual(["level-reader: logging.level"]);
 	});
 
+	it("reports a module's preprocess that hands a string on to a boolean untouched", () => {
+		expect(
+			unreadableModuleLeaves([
+				reading(
+					"identity-reader",
+					z.object({ widget: z.object({ on: z.preprocess((value) => value, z.boolean()) }) }),
+				),
+			]),
+		).toEqual(["identity-reader: widget.on"]);
+	});
+
 	it("reports a module's leaf at a path the base does not declare", () => {
 		expect(
 			unreadableModuleLeaves([
