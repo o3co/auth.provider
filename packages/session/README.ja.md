@@ -80,7 +80,7 @@ const handle = await createApp({
 | スロット | 提供者 | 内容 | 読む側 |
 | --- | --- | --- | --- |
 | `csrfGuard` | `sessionModule` | `POST /session/login` が実行する [CSRF ポリシー](#状態変更ルートの-csrf-対策): 状態を変えるリクエストには `check` と `middleware` — 同じ `403 access_denied` と同じログ行 — フローを始めるナビゲーションには `checkNavigation`（[アカウントリンクの開始](#フェデレーション間のアカウントリンク482)の規則）、そして `issue`。トークンのフォームフィールドは `csrf_token`。 | デバイス検証（グラントが有効なとき） |
-| `loginEntry` | `sessionModule` | ログインページ `endpoints.login.url` と、ページ自身のクエリに `redirect_to` を加える `urlFor(returnTo)`。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | モジュールが提供していれば `/authorize`。federation-grants の connect フロー（グラントが有効なとき） |
+| `loginEntry` | `sessionModule` | ログインページ `endpoints.login.url` と、ページ自身のクエリの fragment より前に `redirect_to` を加える `urlFor(returnTo)`。クエリに既に `redirect_to` を持つページは、`/authorize` 自身のフォールバックと同じく、エントリの構築時に拒否される。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | モジュールが提供していれば `/authorize`。federation-grants の connect フロー（グラントが有効なとき） |
 | `loginCompletion` | `loginCompletionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストアと `csrfGuard`、`session.maxAge` の上に作られる。`sessionModule` と並べて読み込む独立したモジュール: 中断の応答のトークンは、誰がスロットを埋めたかによらずデプロイメントの `csrfGuard` のものであり、`sessionModule` は自分が埋めるスロットを require できない。 | requirement の完了処理（MFA パッケージのもの） |
 | `sessionCookiePolicy` | セッションストアのモジュール | express-session に渡すとおりのセッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命。core の契約を破る場合は拒否する: ストアが cookie を拒否する場合はストアと同じメッセージで — secure でない、またはドメインを指定した `__Host-` の名前 — 、ストアがまだ拒否しない場合も — cookie の名前でない名前、secure でない `__Secure-` の名前や `SameSite=None` の cookie、範囲外の寿命。 | バンドルされたものはまだない |
 

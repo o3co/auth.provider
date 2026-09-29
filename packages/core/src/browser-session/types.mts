@@ -37,7 +37,10 @@ import type { Request, RequestHandler, Response } from "express";
  * the federation-grants connect flow — redirects it to `urlFor(returnTo)`.
  */
 export interface LoginEntry {
-	/** The login page: a path or an absolute URL, which may carry a query of its own. */
+	/**
+	 * The login page: a path or an absolute URL, which may carry a query and a
+	 * fragment of its own, but not `redirect_to` — `urlFor` adds it.
+	 */
 	readonly url: string;
 	/**
 	 * The login page with `redirect_to` naming `returnTo` — where the browser
