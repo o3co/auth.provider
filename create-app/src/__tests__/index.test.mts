@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,9 +14,15 @@ vi.mock("node:child_process", () => ({ spawnSync: spawnSyncMock }));
 // Imported AFTER vi.mock (repo pattern — see federation-google's test suite)
 // so the mocked child_process is definitely registered before the module
 // under test loads, independent of transform hoisting behavior.
-const { generateLockfile, isValidDirName, isValidProjectName, main, scaffold } = await import(
-	"../index.mjs"
-);
+const {
+	availableTemplates,
+	DEFAULT_TEMPLATE,
+	generateLockfile,
+	isValidDirName,
+	isValidProjectName,
+	main,
+	scaffold,
+} = await import("../index.mjs");
 
 const enoent = (bin: string) => Object.assign(new Error(`spawn ${bin} ENOENT`), { code: "ENOENT" });
 
@@ -195,6 +201,76 @@ describe("scaffold", () => {
 		}
 
 		expect(Object.keys(versions).sort()).toEqual(Object.keys(expectedPackages).sort());
+	});
+});
+
+describe("availableTemplates", () => {
+	let root: string;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "create-auth-provider-templates-"));
+	});
+
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("lists every directory that holds a package.json, sorted, and nothing else", () => {
+		for (const name of ["zeta", "alpha"]) {
+			mkdirSync(join(root, name));
+			writeFileSync(join(root, name, "package.json"), "{}\n");
+		}
+		// A directory without a manifest is not a template, and neither is a file
+		// beside the templates — `copy-templates.mjs` writes `versions.json` there.
+		mkdirSync(join(root, "not-a-template"));
+		writeFileSync(join(root, "versions.json"), "{}\n");
+
+		expect(availableTemplates(root)).toEqual(["alpha", "zeta"]);
+	});
+
+	it("lists none when the templates directory does not exist", () => {
+		expect(availableTemplates(join(root, "missing"))).toEqual([]);
+	});
+
+	it("includes the default template in what this package ships", () => {
+		expect(availableTemplates()).toContain(DEFAULT_TEMPLATE);
+		expect(DEFAULT_TEMPLATE).toBe("standalone");
+	});
+});
+
+describe("scaffold — choosing a template", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "create-auth-provider-choice-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("copies the template it is named", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth", DEFAULT_TEMPLATE);
+
+		expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
+		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
+		expect(pkg.name).toBe("my-auth");
+	});
+
+	it.each([
+		{ case: "an unknown name", template: "nope" },
+		{ case: "a path out of the templates directory", template: "../templates/standalone" },
+		{ case: "a nested path", template: "standalone/src" },
+		{ case: "the versions file beside the templates", template: "versions.json" },
+	])("refuses $case, naming the templates it has, and writes nothing", ({ template }) => {
+		const targetDir = join(tempDir, "my-auth");
+
+		expect(() => scaffold(targetDir, "my-auth", template)).toThrow(
+			`Unknown template '${template}'. Available templates: `,
+		);
+		expect(() => scaffold(targetDir, "my-auth", template)).toThrow(/Available templates: .*standalone/);
+		expect(existsSync(targetDir)).toBe(false);
 	});
 });
 
@@ -454,6 +530,27 @@ describe("main (argv parsing and directory derivation)", () => {
 		expect(spawnSyncMock).not.toHaveBeenCalled();
 	});
 
+	// Positive: --template names the template, in both forms
+	it("--template <name> scaffolds from that template", () => {
+		const r = runMain(["my-auth", "--template", "standalone"]);
+		expect(r.exitCode).toBe(0);
+		expect(existsSync(join(workdir, "my-auth", "src", "app.mts"))).toBe(true);
+	});
+
+	it("--template=<name> scaffolds from that template", () => {
+		const r = runMain(["--template=standalone", "my-auth"]);
+		expect(r.exitCode).toBe(0);
+		expect(existsSync(join(workdir, "my-auth", "src", "app.mts"))).toBe(true);
+	});
+
+	it("an unknown --template is refused before anything is written, naming the templates", () => {
+		const r = runMain(["my-auth", "--template", "nope"]);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr).toMatch(/Unknown template 'nope'/);
+		expect(r.stderr).toMatch(/standalone/);
+		expect(existsSync(join(workdir, "my-auth"))).toBe(false);
+	});
+
 	// Positive: flags may come before the positional
 	it("flags before positional: --dir custom my-auth", () => {
 		const r = runMain(["--dir", "custom", "my-auth"]);
@@ -481,6 +578,11 @@ describe("main (argv parsing and directory derivation)", () => {
 		{ case: "--dir empty equals form", args: ["foo", "--dir="] },
 		{ case: "--dir missing value", args: ["foo", "--dir"] },
 		{ case: "--dir duplicated", args: ["foo", "--dir", "a", "--dir", "b"] },
+		{ case: "--template missing value", args: ["foo", "--template"] },
+		{ case: "--template empty space form", args: ["foo", "--template", ""] },
+		{ case: "--template empty equals form", args: ["foo", "--template="] },
+		{ case: "--template duplicated", args: ["foo", "--template", "a", "--template", "b"] },
+		{ case: "--template out of the templates directory", args: ["foo", "--template", ".."] },
 		{ case: "unknown flag", args: ["foo", "--unknown"] },
 		{ case: "literal double-dash", args: ["foo", "--"] },
 	])("rejects: $case", ({ args }) => {
