@@ -91,6 +91,7 @@ export type {
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
 	SyntheticKeyCollisionDetails,
+	TokenSettingsLifetimeExceedsConfigurationDetails,
 	UnknownContributionKindDetails,
 	ValidatedManifests,
 	ValidatedModule,

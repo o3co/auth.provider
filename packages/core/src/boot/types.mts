@@ -760,7 +760,8 @@ export type BootErrorReason =
 	| "contribution-malformed"
 	| "config-path-relocated"
 	| "authoritative-without-provides"
-	| "authoritative-component-overridden";
+	| "authoritative-component-overridden"
+	| "token-settings-lifetime-exceeds-configuration";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — one per BootErrorReason, 36 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
@@ -959,6 +960,24 @@ export interface AuthoritativeComponentOverriddenDetails {
 	readonly reason: "authoritative-component-overridden";
 	readonly module: string;
 	readonly componentKey: ComponentKey;
+}
+
+/**
+ * An `oauthTokenSettings` a host filled names a token lifetime longer than
+ * the one core resolves from the configuration, which sizes the retention
+ * of what revokes that token.
+ */
+export interface TokenSettingsLifetimeExceedsConfigurationDetails {
+	readonly reason: "token-settings-lifetime-exceeds-configuration";
+	readonly componentKey: "oauthTokenSettings";
+	/** The host map the slot came from. */
+	readonly source: "bootstrapComponents" | "overrideComponents";
+	/** The slot's member, as the contract names it. */
+	readonly member: "accessTokenLifetime.maxExpiresIn" | "refreshTokenExpiresIn";
+	/** The slot's lifetime, in seconds. */
+	readonly slotSeconds: number;
+	/** The lifetime core resolves from the configuration, in seconds. */
+	readonly configurationSeconds: number;
 }
 
 /** Per A2-β §6.1. */
@@ -1352,7 +1371,7 @@ export interface SessionRequirementMissingDetails {
  * session-requirements-undeclared, session-requirement-missing) and #728's seven
  * (reserved-component-key, module-section-path-invalid, contribution-kind-guarded,
  * contribution-malformed, config-path-relocated, authoritative-without-provides,
- * authoritative-component-overridden) — one member per `BootErrorReason`, 36 in
+ * authoritative-component-overridden) — one member per `BootErrorReason`, 37 in
  * all.
  */
 export type BootErrorDetails =
@@ -1391,7 +1410,8 @@ export type BootErrorDetails =
 	| ContributionMalformedDetails
 	| ConfigPathRelocatedDetails
 	| AuthoritativeWithoutProvidesDetails
-	| AuthoritativeComponentOverriddenDetails;
+	| AuthoritativeComponentOverriddenDetails
+	| TokenSettingsLifetimeExceedsConfigurationDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

@@ -156,6 +156,7 @@ export type {
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
 	SyntheticKeyCollisionDetails,
+	TokenSettingsLifetimeExceedsConfigurationDetails,
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
 // Boot planner — BootError catalogue. `createApp` is exported above (via app.mjs).

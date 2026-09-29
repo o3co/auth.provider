@@ -32,7 +32,13 @@
 
 import { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
-import { composeConfigSchema } from "../config/application.schema.mjs";
+import {
+	type AccessTokenLifetimeSource,
+	composeConfigSchema,
+	type RefreshTokenLifetimeSource,
+	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
+} from "../config/application.schema.mjs";
 import {
 	findRelocatedKeys,
 	type RelocatedPath,
@@ -2363,6 +2369,90 @@ interface StageOneContext {
 	readonly plannedKeys: ReadonlySet<string>;
 }
 
+/** A read of a host's value that answers `undefined` rather than throwing. */
+const readHostMember = (read: () => unknown): unknown => {
+	try {
+		return read();
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * An `oauthTokenSettings` a host fills — through `bootstrapComponents` or
+ * `overrideComponents` — names no token lifetime longer than the one core
+ * resolves from the configuration. That configured lifetime sizes retention:
+ * the default refresh-token family modules keep a revoked family for the
+ * configured access-token maximum, and the subject revocation boundary
+ * outlasts the configured lifetimes, and neither can read the slot. A grant
+ * minting on a longer slot lifetime would issue a token that outlives the
+ * record revoking it, so boot refuses the slot
+ * (`token-settings-lifetime-exceeds-configuration`), naming the member and
+ * both values. A value a module provides derives from that module's section
+ * and is not held here. A member that is not a number is left to the
+ * readers' `checkOAuthTokenSettings`, which refuses it by name.
+ * @internal
+ */
+function checkHostTokenSettingsLifetimes(
+	bootstrapComponents: BootstrapMap,
+	overrideComponents: Partial<ComponentMap> | undefined,
+	parsedConfig: unknown,
+): void {
+	const sources = [
+		["bootstrapComponents", (bootstrapComponents as Record<string, unknown>).oauthTokenSettings],
+		[
+			"overrideComponents",
+			(overrideComponents as Record<string, unknown> | undefined)?.oauthTokenSettings,
+		],
+	] as const;
+	for (const [source, value] of sources) {
+		if (typeof value !== "object" || value === null) continue;
+		const settings = value as {
+			readonly accessTokenLifetime?: { readonly maxExpiresIn?: unknown } | null;
+			readonly refreshTokenExpiresIn?: unknown;
+		};
+		const members = [
+			{
+				member: "accessTokenLifetime.maxExpiresIn",
+				configKey: "oauth.accessToken.maxExpiresIn",
+				slotSeconds: readHostMember(() => settings.accessTokenLifetime?.maxExpiresIn),
+				configured: () =>
+					resolveAccessTokenLifetime(parsedConfig as AccessTokenLifetimeSource).maxExpiresIn,
+			},
+			{
+				member: "refreshTokenExpiresIn",
+				configKey: "oauth.refreshToken.expiresIn",
+				slotSeconds: readHostMember(() => settings.refreshTokenExpiresIn),
+				configured: () => resolveRefreshTokenLifetime(parsedConfig as RefreshTokenLifetimeSource),
+			},
+		] as const;
+		for (const { member, configKey, slotSeconds, configured } of members) {
+			if (typeof slotSeconds !== "number") continue;
+			const configurationSeconds = configured();
+			if (!(slotSeconds > configurationSeconds)) continue;
+			throw new BootError({
+				stage: "validateManifests",
+				reason: "token-settings-lifetime-exceeds-configuration",
+				message:
+					`oauthTokenSettings from ${source} names ${member} = ${slotSeconds} s, longer than the ` +
+					`${configurationSeconds} s core resolves from the configuration (${configKey}). ` +
+					"That configured lifetime sizes retention — the refresh-token family modules keep a " +
+					"revoked family, and the subject revocation boundary lasts, only that long — so a token " +
+					"minted on the slot's lifetime would outlive the record that revokes it. Lower the " +
+					"slot's lifetime to the configuration's or below, or raise the configuration's.",
+				details: {
+					reason: "token-settings-lifetime-exceeds-configuration",
+					componentKey: "oauthTokenSettings",
+					source,
+					member,
+					slotSeconds,
+					configurationSeconds,
+				},
+			});
+		}
+	}
+}
+
 /** One stage-1 check: an id for humans, a spec pointer, and the run. */
 export interface StageOneCheck {
 	readonly id: string;
@@ -2557,6 +2647,16 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
 		},
+	},
+	{
+		id: "host-token-settings-lifetimes",
+		spec: "issue #728 (a host-filled oauthTokenSettings lifetime is at most the configuration's)",
+		run: (ctx) =>
+			checkHostTokenSettingsLifetimes(
+				ctx.bootstrapComponents,
+				ctx.overrideComponents,
+				ctx.parsedConfig,
+			),
 	},
 	{
 		id: "route-order-edges",
