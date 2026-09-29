@@ -198,10 +198,10 @@ const register = (app: express.Express, route: "options" | "verify" = "options")
 describe("webauthnSessionSubjectModule — the manifest", () => {
 	const module = webauthnSessionSubjectModule({ subjectFor: bySubject });
 
-	it("requires the resolver and the user-session store: the cookie path it serves is the store-backed one", () => {
+	it("requires the resolver and the user-session store — the cookie path it serves is the store-backed one — and the config, whose issuer a step-up page is resolved on", () => {
 		expect(module.name).toBe("webauthn-session-subject");
 		expect([...(module.requires ?? [])].sort()).toEqual(
-			["sessionRequirementResolver", "userSessionStore"].sort(),
+			["config", "sessionRequirementResolver", "userSessionStore"].sort(),
 		);
 	});
 
