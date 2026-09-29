@@ -19,22 +19,20 @@
  * store on the standalone template's one ioredis socket (the added packages'
  * device-code and challenge stores included), express-session on its own
  * node-redis connection, all against the Redis package's shared test
- * container (`testRedis()`, one database for this file).
+ * container (`testRedis()`, one database for this file). With every package
+ * on:
  *
- * What it holds, with every package on:
- *
- * - the replica-safety declarations: the all-Redis set boots with nothing
- *   declaring replica-unsafe state, and each added memory store is refused at
- *   boot, by name;
- * - the state really is shared: two replicas booted on the one database, a
+ * - the all-Redis set boots with nothing declaring replica-unsafe state, and
+ *   each added memory store is refused at boot, by name;
+ * - the state really is shared: on two replicas booted on the one database, a
  *   flow started on one finishes on the other — a login and an authorization
  *   code, a device authorization, a DPoP proof's single use, a login's MFA
  *   transaction.
  *
  * The WebAuthn credential store is the one exception: no package ships a
- * shared one, and the WebAuthn README has a production deployment wire its own
- * database. The fixture stands one in (`deploymentCredentialStoreModule`);
- * what `multi` refuses is the bundled memory module, and that is checked here.
+ * shared one, so the fixture stands in the deployment's own
+ * (`deploymentCredentialStoreModule`); what `multi` refuses, and this checks,
+ * is the bundled memory module.
  */
 
 import {

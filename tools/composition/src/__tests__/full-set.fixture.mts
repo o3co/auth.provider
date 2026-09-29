@@ -21,27 +21,22 @@
  * them to that manifest — the device grant, DPoP, mTLS, token exchange,
  * WebAuthn, the MFA package (`mfaModules` over the MFA stores, `mfa.mode =
  * "optional"`, a key of the deployment's own), and the Apple and GitHub
- * federations.
+ * federations. What the template's fixture substitutes, this one inherits.
+ * What it adds:
  *
- * What the template's fixture substitutes, this one inherits. What it adds:
- *
- * - The settings with no default laid over the configuration (each feature's
- *   switch, the WebAuthn relying party, the two federation sections). The
- *   added packages' `reference.conf` files are layered because their modules
- *   declare them (`section.reference`): the template's fixture layers what
- *   the loaded modules declare, as `app.mts` does (#728).
+ * - The settings with no default laid over the configuration. The added
+ *   packages' `reference.conf` files are layered because their modules
+ *   declare them (`section.reference`), as `app.mts` does.
  * - The small modules each package's README has a deployment write: the
  *   WebAuthn, Apple and GitHub config bridges and a `grantPolicy` (WebAuthn
  *   refuses to boot without one, and no package ships one). The federation
- *   bridges add each adapter's `fetch`, pointed at a fake upstream: core's
- *   fake OpenID Provider for Apple, the GitHub package's fake GitHub.
- * - mTLS runs in-process on its `header` source from a loopback peer — the
- *   shape a TLS-terminating proxy in front of the provider gives it — with the
- *   mTLS package's test certificate.
+ *   bridges point each adapter's `fetch` at a fake upstream.
+ * - mTLS in-process on its `header` source from a loopback peer — the shape
+ *   a TLS-terminating proxy gives it — with the mTLS package's test
+ *   certificate.
  * - WebAuthn registration reads `req.webauthnSubject`, which the package's
- *   `webauthnSessionSubjectModule` sets from the admitted browser session
- *   (the session-admission ADR's D8); the deployment writes the mapper, here
- *   the session's opaque subject.
+ *   `webauthnSessionSubjectModule` sets from the admitted browser session;
+ *   the deployment's mapper here is the session's opaque subject.
  *
  * The fakes are shared by every boot in a file and put back as they were made
  * before each one (`resettable`, from the template's fixture).
@@ -140,7 +135,7 @@ export interface Features {
 	readonly apple: boolean;
 	readonly github: boolean;
 	/**
-	 * The MFA package: installed is on (the session-admission ADR's D7), so
+	 * The MFA package: installed is on (ADR 2026-09-28-session-admission), so
 	 * its switch is its modules' presence — with `mfa.mode = "optional"` and
 	 * `mfa` declared — or their absence with `mfa.mode = "off"`.
 	 */
@@ -178,9 +173,9 @@ function withFeatures(config: AppConfig, features: Features): AppConfig {
 	};
 	return {
 		...config,
-		// The session-admission ADR's D7: a deployment that installs MFA declares
-		// it — as the template derives it from a mode other than `off` — and one
-		// that adds requirements of its own declares them beside it.
+		// A deployment that installs MFA declares it — as the template derives
+		// it from a mode other than `off` — and one that adds requirements of
+		// its own declares them beside it.
 		sessionRequirements: {
 			expected: [
 				...(c.sessionRequirements?.expected ?? []),
@@ -283,8 +278,8 @@ export const FIXTURE_REQUIREMENTS = ["fixture-page", "fixture-bare"] as const;
 
 /**
  * The 403 the fixture requirements answer a login they interrupt with: the
- * closed body core validates (the session-admission ADR's D5), a hint under
- * the one key the page requirement declares.
+ * closed body core validates, a hint under the one key the page requirement
+ * declares.
  */
 export const FIXTURE_INTERRUPTION = {
 	page: { status: 403, body: { error: "fixture_page_required", hints: { fixture_hint: true } } },
@@ -314,40 +309,37 @@ const FIXTURE_UNAVAILABLE = {
 /**
  * Two session requirements a deployment might write, registered under the
  * `sessionRequirements` kind so the full set exercises the kind through the
- * template's boot (the session-admission ADR's D3, D7): one with a page — the
- * shape of a step-up, over an empty reach, since only the MFA requirement
- * adds vouched values in this release — and one bare. Each admits every use
+ * template's boot (ADR 2026-09-28-session-admission): one with a page (a
+ * step-up's shape, over an empty reach) and one bare. Each admits every use
  * and interrupts the login of the subjects in `interrupt` alone, so the full
  * set's own logins run uninterrupted.
  *
- * Each is also what a requirement's module is at establishment (D5): its
- * interruption records the ceremony it opens — bound to the regenerated
- * express session, with the continuation core built — in the requirement's
- * own record (here, memory), and its completion route, `POST
- * <FIXTURE_COMPLETION>/complete` on that session, completes it adding
- * nothing (`amr: []`: the requirement reaches nothing), resumes the login
- * through `resumePrimary` — which does not ask a requirement already done in
- * that login again, so a fixture interrupts every login it is asked about —
- * and answers what admission answers, through the session package's
- * exports: another requirement's interruption, as the login answers one
- * (`answerInterruption`), or the session established (`establishSession`).
- * Every ceremony opened is pushed on `ceremonies`, for a test to read, and
- * `failAskOnce` makes one requirement's next ask an outage. A ceremony is
- * spent when its completion is presented, whatever the resumption answers.
+ * Each also acts as a requirement's module at establishment. Its interruption
+ * records the ceremony it opens (bound to the regenerated express session,
+ * with the continuation core built) in its own record, here memory. Its
+ * completion route, `POST <FIXTURE_COMPLETION>/complete` on that session,
+ * spends the ceremony whatever the resumption answers, completes it adding
+ * nothing (`amr: []`), resumes the login through `resumePrimary` (which does
+ * not ask a requirement already done in that login again, so a fixture
+ * interrupts every login it is asked about), and answers what admission
+ * answers through the session package's exports: another requirement's
+ * interruption (`answerInterruption`) or the session established
+ * (`establishSession`). Every ceremony opened is pushed on `ceremonies`;
+ * `failAskOnce` makes one requirement's next ask an outage.
  *
- * A sketch of a completion route, not one to copy: the real one (the MFA
- * package's) sits behind the session's CSRF guard, projects every error it
- * logs, and answers a `RangeError` from `resumePrimary` — a continuation
- * naming a requirement a deploy removed, say — as "log in again".
+ * A sketch, not a route to copy: the real one (the MFA package's) sits
+ * behind the session's CSRF guard, projects every error it logs, and answers
+ * a `RangeError` from `resumePrimary` (a continuation naming a requirement a
+ * deploy removed, say) as "log in again".
  */
 function requirementModules(
 	interrupt: ReadonlySet<string>,
 	ceremonies: FixtureCeremony[],
 	outage: { once: FixtureCeremony["requirement"] | undefined },
 ): Module[] {
-	// Neither reaches anything: in this release only the MFA requirement adds
-	// vouched values to a session, and a page may still stand with an empty
-	// reach (a step-up that adds no value).
+	// Neither reaches anything: only the requirement named `mfa` may declare a
+	// non-empty reach, and a page may still stand with an empty one (a step-up
+	// that adds no value).
 	const noReach: ReadonlySet<string> = new Set();
 	const fixture = (spec: {
 		readonly module: string;
