@@ -506,12 +506,15 @@ describe("resolverForTests — the resolver a test builds (D1)", () => {
 	it("holds a fixture to boot's rules by default — a non-empty reach under any name but mfa, a reserved value, a reach without a page are refused — and lifts the reach rules under allowAnyReach for the merge-table tests", () => {
 		const page = { url: "/x", params: {} };
 		const onIssuer = { issuer: ISSUER };
+		// The seal's refusal, with the remedy a test has: the opt-out below.
 		expect(() =>
 			resolverForTests(
 				[requirement("x", { reach: new Set(["risk-ok"]), stepUpPage: page })],
 				onIssuer,
 			),
-		).toThrow(/mfa/);
+		).toThrow(
+			/only the requirement named "mfa" adds vouched values to a session, so any other reach must be empty — pass allowAnyReach for a test of admission's own mechanics$/,
+		);
 		expect(() =>
 			resolverForTests([requirement("x", { reach: new Set(["otp"]), stepUpPage: page })], onIssuer),
 		).toThrow(RangeError);
@@ -594,6 +597,13 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		// The page is still asked for first: a reach without one says so.
 		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"]), "none"))).toThrow(
 			/where the step-up starts/,
+		);
+		// Boot's refusal and the contract suite's name no test remedy.
+		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"])))).not.toThrow(
+			/allowAnyReach/,
+		);
+		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"])))).toThrow(
+			/so any other reach must be empty$/,
 		);
 		// And a registered copy that is refused is not sealed.
 		const registered = registeredRequirement(requirement("risk", new Set(["risk-ok"])), ISSUER);
