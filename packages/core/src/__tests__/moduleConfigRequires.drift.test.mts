@@ -553,9 +553,60 @@ describe("the manifest scan", () => {
 		expect(found.filter(readsConfig).map(({ name }) => name)).toEqual(["required", "optional"]);
 	});
 
+	it("takes a literal outside a defineModule call as a manifest only when it lists requires or optional", () => {
+		// A literal with a `name` and a flag called `optional` is no manifest;
+		// one whose `requires` or `optional` is a list, written or through a
+		// const, is.
+		const found = manifestsIn(
+			"example.mts",
+			[
+				'const flags = { name: "x", optional: true };',
+				'const described = { name: "y", requires: "config" };',
+				'const computed = { name: "w", requires: build() };',
+				'const REQUIRES = ["config"] as const;',
+				'const bound = { name: "b", requires: REQUIRES };',
+				'const listed = { name: "l", optional: ["config"] };',
+				'const mixed = { name: "m", requires: [dynamic] };',
+			].join("\n"),
+		);
+		expect(found.map(({ name, requires, optional }) => [name, requires, optional])).toEqual([
+			["b", ["config"], []],
+			["l", [], ["config"]],
+			["m", undefined, []],
+		]);
+	});
+
 	it("walks a plausible workspace (the guard is not vacuous)", () => {
 		expect(FOUND.length).toBeGreaterThan(20);
 		expect(FOUND.some((manifest) => manifest.name === "oauth")).toBe(true);
+	});
+});
+
+describe("the workspaces it walks", () => {
+	const yaml = (...patterns: string[]) =>
+		`packages:\n${patterns.map((pattern) => `  - "${pattern}"\n`).join("")}\nother: 1\n`;
+
+	it("expands dir/* to the packages under it, and keeps a bare path that is a package", () => {
+		const dirs = workspaceDirsIn(yaml("packages/*", "create-app"), repoRoot);
+		expect(dirs).toContain("packages/oauth");
+		expect(dirs).toContain("create-app");
+		expect(dirs).not.toContain("packages");
+	});
+
+	it("refuses a pattern it cannot expand, rather than walking nothing under it and passing", () => {
+		for (const pattern of [
+			"packages/**",
+			"!packages/core",
+			"packages/{oauth,session}",
+			"packages/o*",
+			"no-such-workspace",
+		]) {
+			expect(() => workspaceDirsIn(yaml(pattern), repoRoot), pattern).toThrow(pattern);
+		}
+	});
+
+	it("refuses a file that names no workspace", () => {
+		expect(() => workspaceDirsIn("packages:\n\nother: 1\n", repoRoot)).toThrow(/no workspace/);
 	});
 });
 
