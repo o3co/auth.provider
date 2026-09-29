@@ -675,11 +675,25 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
  * Hand it the config the composition root boots with, as `oauthModule({ config })`
  * and `oauthAuthorizationModule({ config })` take theirs.
  */
+/**
+ * The `oauth.deviceAuthorization` section as the module declares it (#728):
+ * its schema, the package's `config/reference.conf` that holds its defaults,
+ * and the path it sits at until it moves under the module's name.
+ * `configSchema` keeps composing the same schema with core's until then, so
+ * the section is parsed from what it already kept.
+ */
+const DEVICE_GRANT_SECTION_SCHEMA = deviceGrantConfigSchema.shape.oauth.shape.deviceAuthorization;
+
 export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 	const enabled = isEnabled(params.config);
-	return defineModule<Requires, Optional>({
+	return defineModule<Requires, Optional, typeof DEVICE_GRANT_SECTION_SCHEMA>({
 		name: "device-grant",
 		configSchema: deviceGrantConfigSchema,
+		section: {
+			schema: DEVICE_GRANT_SECTION_SCHEMA,
+			reference: new URL("../config/reference.conf", import.meta.url),
+			at: "oauth.deviceAuthorization",
+		},
 		requires: REQUIRES,
 		optional: OPTIONAL,
 		// #363: optional to wire, not optional to decide. A composition with no

@@ -74,6 +74,7 @@ import {
 	type StepUpPage,
 	supportsSecondFactorUpdate,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import { type MfaSettings, readMfaSettings } from "./config.mjs";
 import { createMfaRequirement, type MfaRequirementMode } from "./requirement.mjs";
 import { createMfaSealing, type MfaSealing } from "./sealing.mjs";
@@ -236,6 +237,17 @@ const passThrough = (_req: unknown, _res: unknown, next: () => void): void => ne
  * the MFA routes' mount. `options.environment` reaches the development
  * sample key's refusal.
  */
+/**
+ * The `mfa` section as the module declares it (#728): the package's
+ * `config/reference.conf`, which holds its defaults, and the path it sits at.
+ * Its schema checks nothing yet: the requirement's factory reads the section
+ * itself (`readMfaSettings`) and refuses what it cannot use as that
+ * factory's failure, which a check here would turn into a refusal at an
+ * earlier stage. The schema takes over when the section moves under the
+ * module's name.
+ */
+const MFA_SECTION_SCHEMA = z.unknown();
+
 export function mfaModule(options: MfaModuleOptions = {}): Module {
 	return defineModule<
 		| "config"
@@ -244,9 +256,15 @@ export function mfaModule(options: MfaModuleOptions = {}): Module {
 		| "mfaTransactionStore"
 		| "userSessionStore"
 		| "sessionRequirementResolver",
-		"auditSink" | "logger"
+		"auditSink" | "logger",
+		typeof MFA_SECTION_SCHEMA
 	>({
 		name: "mfa",
+		section: {
+			schema: MFA_SECTION_SCHEMA,
+			reference: new URL("../config/reference.conf", import.meta.url),
+			at: "mfa",
+		},
 		requires: [
 			"config",
 			"mfaFactorResolver",
