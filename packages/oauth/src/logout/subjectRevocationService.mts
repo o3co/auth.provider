@@ -51,10 +51,11 @@ import { cascadeLogout } from "./cascadeLogout.mjs";
 const NAME = "subjectRevocationServiceModule";
 
 /**
- * Core strips the keys no installed module declares, and the two this reads —
- * whether grants exist at all, and whether keeping one is allowed — both live
- * in that block. Taking core's shape rather than restating it keeps the
- * `${?VAR}` coercions in one place (#288).
+ * Core strips the keys no installed module declares, and the one this reads —
+ * whether keeping a grant is allowed — lives in that block. Taking core's
+ * shape rather than restating it keeps the `${?VAR}` coercions in one place
+ * (#288). Whether grants exist at all is the `federationGrantStore` slot's to
+ * say (#728), not a key of this block.
  */
 const configSchema = z.object({
 	federationGrants: fullSectionsSchema.shape.federationGrants,
@@ -76,8 +77,8 @@ const REQUIRES = [
  * deployment declare either capability absent, and a module that REQUIRED
  * them could not be installed there at all; absence is reported instead,
  * in `unavailable`, exactly as `revokeAllForSubject` has always reported
- * it. What is refused is the pairing that matters: no boundary while
- * federation grants are enabled, in the provider below.
+ * it. What is refused is the pairing that matters: no boundary while a
+ * federation grant store is wired, in the provider below.
  */
 const OPTIONAL = [
 	"subjectSessionIndex",
@@ -85,6 +86,11 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
+	// What the boundary must outlive (#728): the oauth module's token
+	// lifetimes and the session store's session lifetime, read from the
+	// configuration when the composition holds neither.
+	"oauthTokenSettings",
+	"sessionCookiePolicy",
 ] as const;
 
 /**
@@ -94,9 +100,6 @@ const OPTIONAL = [
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type SubjectRevocationServiceModuleDeps = ProviderDeps<Requires, Optional>;
-
-const grantsEnabled = (deps: SubjectRevocationServiceModuleDeps): boolean =>
-	deps.config.federationGrants?.enabled === true;
 
 /**
  * What ended a grant, told to the deployment's sink.
@@ -169,8 +172,9 @@ const auditor = (
  * The refusals are here rather than at request time because each is structural
  * — what a component *is* — and a subject revocation is the wrong moment to
  * discover that the grants it should have ended had nowhere to be read from.
- * They apply only when grants are enabled: a deployment with the feature off
- * gets exactly the service #296 would have had.
+ * They apply only where grants exist — where the composition holds a
+ * `federationGrantStore` (#728) — and a deployment without one gets exactly
+ * the service #296 would have had.
  */
 export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	name: "subject-revocation-service",
@@ -193,16 +197,11 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	lifecycle: { subjectRevocationService: { eager: true } },
 	provides: {
 		subjectRevocationService: (deps: SubjectRevocationServiceModuleDeps) => {
-			const enabled = grantsEnabled(deps);
+			// Grants exist where the composition holds a store for them (#728):
+			// the federation-grants module refuses to enable them without one,
+			// so the store, not a key of that module's section, is what says so.
 			const store = deps.federationGrantStore;
-			if (enabled && store === undefined) {
-				throw new Error(
-					`${NAME}: federationGrants.enabled = true requires a federationGrantStore ` +
-						"component. Without it a subject-wide revocation would end the sessions and " +
-						"the tokens, report itself complete, and leave every offline credential the " +
-						"subject had standing (D13).",
-				);
-			}
+			const enabled = store !== undefined;
 			const subjectRevocation = enabled
 				? requireFederationGrantSubjectRevocation({
 						module: NAME,
@@ -236,9 +235,16 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 				// The boundary must outlive the longest-lived thing it covers,
 				// which is configuration this module can read and the service
 				// cannot.
-				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config),
-				...(enabled && store !== undefined ? { federationGrantStore: store } : {}),
-				// Gated on the feature: an allowance to keep grants in a
+				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config, {
+					...(deps.oauthTokenSettings === undefined
+						? {}
+						: { tokenSettings: deps.oauthTokenSettings }),
+					...(deps.sessionCookiePolicy === undefined
+						? {}
+						: { sessionCookie: deps.sessionCookiePolicy }),
+				}),
+				...(store === undefined ? {} : { federationGrantStore: store }),
+				// Gated on the grant store: an allowance to keep grants in a
 				// deployment that has none is an allowance over nothing, and
 				// letting it through would make the service refuse an adapter
 				// that a grantless deployment has every right to use.

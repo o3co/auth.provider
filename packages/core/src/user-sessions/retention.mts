@@ -32,6 +32,7 @@
  * resolved, not fixed.
  */
 
+import type { SessionCookiePolicy } from "../browser-session/types.mjs";
 import {
 	type AccessTokenLifetimeSource,
 	type RefreshTokenLifetimeSource,
@@ -40,6 +41,7 @@ import {
 } from "../config/application.schema.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "../federation-grants/lifetime.mjs";
 import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 
 /**
  * One minute more than the longest grant the code will ever allow.
@@ -97,10 +99,27 @@ const lifetimeMs = (value: unknown, path: string): number => {
  * boundary has no such hole, because its floor comes from a ceiling the code
  * enforces rather than from configuration.
  */
-export function resolveSubjectRevocationHorizonMs(config: unknown): number {
+export function resolveSubjectRevocationHorizonMs(
+	config: unknown,
+	/**
+	 * The lifetimes as the slots carry them, when the caller holds them
+	 * (#728): the oauth module's `oauthTokenSettings` and the session store's
+	 * `sessionCookiePolicy`. Each value absent here is read from `config`, as
+	 * before.
+	 */
+	from: {
+		readonly tokenSettings?: Pick<
+			OAuthTokenSettings,
+			"accessTokenLifetime" | "refreshTokenExpiresIn"
+		>;
+		readonly sessionCookie?: Pick<SessionCookiePolicy, "maxAgeMs">;
+	} = {},
+): number {
 	const root = config as { session?: { maxAge?: unknown } } | undefined;
 	// Through the key's one reader, which holds it to the schema's rule.
-	const refreshMs = resolveRefreshTokenLifetime(config as RefreshTokenLifetimeSource) * 1000;
+	const refreshMs =
+		(from.tokenSettings?.refreshTokenExpiresIn ??
+			resolveRefreshTokenLifetime(config as RefreshTokenLifetimeSource)) * 1000;
 	// The MAXIMUM, not the default. `oauth.accessToken.expiresIn` is what a
 	// grant mints when the request asks for nothing; token exchange may ask
 	// for more, up to `maxExpiresIn`. Sizing the horizon from the default
@@ -110,8 +129,12 @@ export function resolveSubjectRevocationHorizonMs(config: unknown): number {
 	// correct reader of that pair, alias and all, and it refuses a value that
 	// is not a lifetime rather than letting this compute from one.
 	const accessMs =
-		resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn * 1000;
-	const sessionMs = lifetimeMs(root?.session?.maxAge, "session.maxAge");
+		(
+			from.tokenSettings?.accessTokenLifetime ??
+			resolveAccessTokenLifetime(config as AccessTokenLifetimeSource)
+		).maxExpiresIn * 1000;
+	const sessionMs =
+		from.sessionCookie?.maxAgeMs ?? lifetimeMs(root?.session?.maxAge, "session.maxAge");
 	const longest = Math.max(
 		sessionMs,
 		refreshMs + DEFAULT_CLOCK_SKEW_MS,
