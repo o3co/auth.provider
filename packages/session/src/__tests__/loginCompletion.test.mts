@@ -24,8 +24,12 @@
  * - `createLoginCompletion` keeps core's contract (`loginCompletionContract`)
  *   over a session store that answers and one that is down, with its
  *   records counted and the CSRF token's cookie named.
- * - The session module provides it, over the stores it requires and the
- *   CSRF guard it provides: the contract holds of the provided completion.
+ * - The login-completion module provides it, over the stores and the
+ *   `csrfGuard` it requires: the contract holds of the provided completion,
+ *   and an interruption's fresh token is the deployment's guard's — the one
+ *   the session module provides, or one a composition put in its place.
+ * - The session module does not provide it: a provider there could not read
+ *   the `csrfGuard` slot its own module fills.
  */
 
 import {
@@ -48,6 +52,7 @@ import express from "express";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLoginCompletion } from "#/login-completion.mjs";
 import { sessionModule } from "#/module.mjs";
+import { loginCompletionModule } from "#/modules/loginCompletionModule.mjs";
 
 /** A memory session store that counts the records it holds. */
 const countingStore = (): { readonly store: UserSessionStore; readonly records: () => number } => {
@@ -116,7 +121,7 @@ describe("createLoginCompletion keeps core's loginCompletion contract", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The session module provides it
+// The login-completion module provides it
 // ---------------------------------------------------------------------------
 
 const providing = <T,>(name: string, slot: string, value: T) =>
@@ -151,51 +156,99 @@ const stores = [
 	} as unknown as SessionFederationIndex),
 ];
 
-const provided: { completion?: LoginCompletion; dispose?: () => Promise<void> } = {};
-
-beforeAll(async () => {
-	const handle = await createTestApp({
-		modules: [
-			sessionModule,
-			...stores,
-			defineModule({
-				name: "test:login-completion-consumer",
-				requires: ["loginCompletion"],
-				contributes: {
-					routes: [
-						(deps) => {
-							provided.completion = deps.loginCompletion;
-							return { id: "test:probe", mountPath: "/probe", handler: express.Router() };
-						},
-					],
+/** A module that hands the test the `loginCompletion` it requires. */
+const consumer = (seen: { completion?: LoginCompletion }) =>
+	defineModule({
+		name: "test:login-completion-consumer",
+		requires: ["loginCompletion"],
+		contributes: {
+			routes: [
+				(deps) => {
+					seen.completion = deps.loginCompletion;
+					return { id: "test:probe", mountPath: "/probe", handler: express.Router() };
 				},
-			}),
-		],
-		bootstrapComponents: {
-			config: makeValidAppConfig() as AppConfig,
-			pathResolver: (s: string) => s,
+			],
 		},
 	});
-	provided.dispose = () => handle.dispose();
+
+const provided: { completion?: LoginCompletion } = {};
+/** The same, with a CSRF guard of the composition's own in the session module's place. */
+const substituted: { completion?: LoginCompletion } = {};
+/** A guard whose token cookie no configuration-derived guard would set. */
+const substitute = createTestCsrfGuard({
+	sessionCookie: {
+		name: "substitute.session",
+		secure: true,
+		sameSite: "lax",
+		domain: undefined,
+		maxAgeMs: 3_600_000,
+	},
+});
+const disposers: (() => Promise<void>)[] = [];
+
+beforeAll(async () => {
+	const bootstrapComponents = {
+		config: makeValidAppConfig() as AppConfig,
+		pathResolver: (s: string) => s,
+	};
+	const handle = await createTestApp({
+		modules: [sessionModule, loginCompletionModule, ...stores, consumer(provided)],
+		bootstrapComponents,
+	});
+	disposers.push(() => handle.dispose());
+	const overridden = await createTestApp({
+		modules: [sessionModule, loginCompletionModule, ...stores, consumer(substituted)],
+		bootstrapComponents,
+		overrideComponents: { csrfGuard: substitute },
+	});
+	disposers.push(() => overridden.dispose());
 });
 
 afterAll(async () => {
-	await provided.dispose?.();
+	await Promise.all(disposers.splice(0).map((dispose) => dispose()));
 });
 
-describe("the session module provides loginCompletion", () => {
+describe("the login-completion module provides loginCompletion", () => {
 	it("is frozen", () => {
 		expect(provided.completion).toBeDefined();
 		expect(Object.isFrozen(provided.completion)).toBe(true);
 	});
 
+	it("requires the csrfGuard slot and the session stores, and provides loginCompletion alone", () => {
+		expect(loginCompletionModule.name).toBe("login-completion");
+		expect(loginCompletionModule.requires).toEqual(
+			expect.arrayContaining(["config", "userSessionStore", "csrfGuard"]),
+		);
+		expect(Object.keys(loginCompletionModule.provides ?? {})).toEqual(["loginCompletion"]);
+	});
+
+	it("is not the session module's: a provider there could not read the guard its own module fills", () => {
+		expect(Object.keys(sessionModule.provides ?? {})).not.toContain("loginCompletion");
+	});
+
 	// Over the session store the module requires, and the token of the CSRF
-	// guard it provides: the fixture's session cookie is `__Host-auth.session`.
+	// guard the session module provides: the fixture's session cookie is
+	// `__Host-auth.session`.
 	it.each(
 		loginCompletionContract({
 			build: () => provided.completion as LoginCompletion,
 			records: () => moduleStore.records(),
 			csrfCookieName: "__Host-auth.session.csrf",
+		}),
+	)("$name", async ({ run }) => {
+		await run();
+	});
+});
+
+describe("the login-completion module answers with the deployment's csrfGuard, whoever filled it", () => {
+	// The composition put its own guard in the slot: an interruption's fresh
+	// token is that guard's — its cookie — so the page goes on posting to
+	// routes that run the same guard.
+	it.each(
+		loginCompletionContract({
+			build: () => substituted.completion as LoginCompletion,
+			records: () => moduleStore.records(),
+			csrfCookieName: substitute.cookieName,
 		}),
 	)("$name", async ({ run }) => {
 		await run();
