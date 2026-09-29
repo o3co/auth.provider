@@ -284,7 +284,7 @@ It reads the two files above once, under one snapshot of the environment
 variable changed, while the process starts cannot make boot parse something
 other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the adapters,
-the federations, the log level, `mfa.mode` — from the two files above over
+the federations, the log level — from the two files above over
 core's `reference.conf` alone (`readSwitches`, with core's transitional
 reader), parsing those paths (`SWITCHES`) and nothing else. It sees nothing
 a package's `reference.conf` alone sets — none is layered yet — and a module
@@ -992,6 +992,8 @@ To add a custom module, import it in `src/buildModules.mts` and add it to the ar
 ```
 
 Keep the other rules there too: the session store module stays first, and a module that fills a store slot replaces that slot's adapter switch rather than being added beside it. [`src/app.mts`](src/app.mts) needs no change: it passes `buildModules(config, …)` to `createApp`, mounts the router `createApp` returns, and wires the server's lifetime — `installGracefulShutdown` (below) drains it and calls `handle.dispose()`.
+
+A module that contributes a session requirement — the MFA package's `mfa`, or one of your own — changes what "logged in" means, so its name goes in `sessionRequirements.expected`, which `config/application.conf` ships as `[]`: the template installs none. Boot compares the list with what the modules register. A name listed that nothing registers refuses the boot (`session-requirement-missing`), and so does a registered requirement the list leaves out (`session-requirements-undeclared`). `mfa.mode` does not install or declare anything: it is the MFA package's setting.
 
 ### Shutdown guarantees
 
