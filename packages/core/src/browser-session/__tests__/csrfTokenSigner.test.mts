@@ -43,7 +43,8 @@ const RULES = {
 	otherSigner: "verify refuses another signer's signature, and the two sign differently",
 	malformed:
 		"verify never throws: an empty, non-base64url or wrong-length signature, or a value that is not a string, is refused",
-	alone: "the signer carries sign and verify alone: no key and no secret",
+	alone:
+		"the signer is a plain object carrying sign and verify alone, own or inherited: no key and no secret",
 	frozen: "the signer is frozen",
 	separated:
 		"the signature is not the session cookie's: not an HMAC of the payload under the session secret itself",
@@ -263,6 +264,53 @@ describe("csrfTokenSignerContract — each way a signer can break it", () => {
 			}) as CsrfTokenSigner;
 		};
 		expect(await failing({ build, other })).toEqual([RULES.alone]);
+	});
+
+	it("a frozen signer whose own prototype carries its key", async () => {
+		const build = () => {
+			const key = randomBytes(32).toString("hex");
+			const signer = Object.create({ key }) as CsrfTokenSigner;
+			return Object.freeze(
+				Object.assign(signer, {
+					sign: (payload: string) => hmac(key, payload, "base64url"),
+					verify: (payload: string, signature: string) =>
+						typeof payload === "string" && signature === hmac(key, payload, "base64url"),
+				}),
+			);
+		};
+		expect(await failing({ build, other })).toEqual([RULES.alone]);
+	});
+
+	it("a signer whose prototype is neither Object.prototype nor null, though it carries nothing", async () => {
+		const build = () =>
+			Object.freeze(
+				Object.assign(Object.create(Object.freeze({})) as CsrfTokenSigner, {
+					...createTestCsrfTokenSigner(),
+				}),
+			);
+		expect(await failing({ build, other })).toEqual([RULES.alone]);
+	});
+
+	it("a signer with sign and verify on its class's prototype", async () => {
+		class ClassSigner implements CsrfTokenSigner {
+			readonly #inner = createTestCsrfTokenSigner();
+			sign(payload: string): string {
+				return this.#inner.sign(payload);
+			}
+			verify(payload: string, signature: string): boolean {
+				return this.#inner.verify(payload, signature);
+			}
+		}
+		const build = () => Object.freeze(new ClassSigner());
+		expect(await failing({ build, other })).toEqual([RULES.alone]);
+	});
+
+	it("keeps a signer with a null prototype", async () => {
+		const build = () =>
+			Object.freeze(
+				Object.assign(Object.create(null) as CsrfTokenSigner, { ...createTestCsrfTokenSigner() }),
+			);
+		expect(await failing({ build, other })).toEqual([]);
 	});
 
 	it("a signer that is not frozen", async () => {
