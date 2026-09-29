@@ -34,6 +34,7 @@ import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "./routes.mjs";
+import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 
 /**
  * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
@@ -180,6 +181,19 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 			accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		},
+		// #728: what other modules read of `oauth {}` — the issuer, the token
+		// lifetimes, the token-binding settings and the two switches — resolved
+		// once from the section this module owns, and frozen. The readers
+		// outside this package take the slot instead of reading the section.
+		provides: {
+			oauthTokenSettings: (deps) => oauthTokenSettingsFrom(deps.config),
+		},
+		// Eager: core's own machinery — the token-binding middleware's dispatch
+		// policy, the discovery document's issuer, a requirement's step-up page —
+		// reads the slot beside the modules that require it, and core is no
+		// module the planner could activate the provider for. Filled whenever
+		// this module is installed.
+		lifecycle: { oauthTokenSettings: { eager: true } },
 		contributes: {
 			routes: [
 				// oauth-endpoints — always contributed (Theme D: const shape).

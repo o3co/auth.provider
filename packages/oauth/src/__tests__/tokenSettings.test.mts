@@ -120,7 +120,7 @@ describe("oauthTokenSettingsFrom answers what the readers resolve for themselves
 
 	it("refuses an issuer that is not canonical, naming the key", () => {
 		const base = fixture();
-		for (const issuer of ["auth.test", "https://auth.test/", "https://auth.test?x=1", undefined]) {
+		for (const issuer of ["auth.test", "http://auth.test", "https://auth.test?x=1", undefined]) {
 			const config = {
 				...base,
 				oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer } },

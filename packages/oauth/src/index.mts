@@ -60,6 +60,10 @@ export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
+// #728 — the oauthTokenSettings slot's value, which oauthModule provides;
+// exported so a composition that provides the slot without the module
+// resolves it the same way.
+export { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 export {
 	extractConfirmation,
 	type IntrospectResponse,
