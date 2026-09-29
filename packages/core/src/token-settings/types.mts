@@ -21,8 +21,12 @@
  * A token cannot exist apart from OAuth, so its settings belong to the oauth
  * module's section, `oauth {}`. A key several modules read has one owner, and
  * the others receive it through a slot whose contract is core's: the owner
- * parses its section once and provides these values, and a reader requires
- * the slot rather than reading the section. The members are what modules
+ * parses its section once and provides these values, and a reader reads the
+ * slot rather than the section. Every reader lists it as optional, since
+ * each also runs in compositions without the oauth module, and reads the
+ * configuration only when no module provides the slot — never a member of
+ * one beside the configuration: a slot it holds is read whole, checked first
+ * with `checkOAuthTokenSettings`. The members are what modules
  * outside `packages/oauth` read today. Two settings of the section are not
  * here: the grant-type allowlist switch, which only the oauth module reads,
  * and the revocation modes (`oauth.revocation.accessToken`,
