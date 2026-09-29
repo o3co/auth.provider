@@ -514,15 +514,35 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		const read = sealRegisteredReach(requirement("mfa", reach));
 		expect([...read]).toEqual(["otp", "hwk", "mfa"]);
 		expect(read).not.toBe(reach);
-		expect([...sealRegisteredReach(requirement("risk", new Set(["risk-ok"])))]).toEqual([
-			"risk-ok",
-		]);
 		expect(sealRegisteredReach(requirement("plain", new Set(), "none")).size).toBe(0);
+	});
+
+	it("refuses a non-empty reach under any name but mfa — in this release only the MFA requirement adds vouched values to a session — the one home of the rule boot, resolverForTests and the contract suite hold a reach to", () => {
+		for (const name of ["risk", "consent", "x"]) {
+			expect(() => sealRegisteredReach(requirement(name, new Set(["risk-ok"]))), name).toThrow(
+				RangeError,
+			);
+			expect(() => sealRegisteredReach(requirement(name, ["risk-ok"])), name).toThrow(
+				/only the requirement named "mfa" adds vouched values to a session/,
+			);
+			// Nothing reached: accepted, with or without a page.
+			expect(sealRegisteredReach(requirement(name, new Set())).size, name).toBe(0);
+		}
+		// The page is still asked for first: a reach without one says so.
+		expect(() => sealRegisteredReach(requirement("risk", new Set(["risk-ok"]), "none"))).toThrow(
+			/where the step-up starts/,
+		);
+		// And a registered copy that is refused is not sealed.
+		const registered = registeredRequirement(requirement("risk", new Set(["risk-ok"])));
+		expect(() => sealRegisteredReach(registered)).toThrow(RangeError);
+		expect("add" in registered.reach).toBe(true);
+		// The requirement named mfa reaches what its factors do, a value of its own included.
+		expect([...sealRegisteredReach(requirement("mfa", new Set(["risk-ok"])))]).toEqual(["risk-ok"]);
 	});
 
 	it("reads the getter once", () => {
 		let reads = 0;
-		const source = requirement("x", undefined);
+		const source = requirement("mfa", undefined);
 		Object.defineProperty(source, "reach", {
 			get() {
 				reads++;
@@ -538,12 +558,12 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		const live = new Set(["risk-ok"]);
 		let current = live;
 		const source = {
-			name: "risk",
+			name: "mfa",
 			get reach() {
 				reads++;
 				return current;
 			},
-			stepUpPage: { url: "/risk", params: {} },
+			stepUpPage: { url: "/mfa", params: {} },
 			remediations: [],
 			hintKeys: [],
 			admit: async () => ({ outcome: "met" as const }),
@@ -582,9 +602,9 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 		expect(seen).toEqual(["risk-ok"]);
 	});
 
-	it("answers a frozen set of its own for a requirement that is not a registered copy — the contract suite's fixture — and seals nothing on it", () => {
+	it("answers a frozen set of its own for a requirement that is not a registered copy — what the contract suite checks — and seals nothing on it", () => {
 		const live = new Set(["risk-ok"]);
-		const source = requirement("risk", live);
+		const source = requirement("mfa", live);
 		const checked = sealRegisteredReach(source);
 		expect(checked).not.toBe(live);
 		live.add("other");
@@ -593,10 +613,10 @@ describe("sealRegisteredReach — a registered reach, read once after the name-k
 	});
 
 	it("accepts an iterable of values that is not a string — an array — answering a Set, and seals a registered copy on it", () => {
-		expect([...sealRegisteredReach(requirement("risk", ["risk-ok", "risk-ok"]))]).toEqual([
+		expect([...sealRegisteredReach(requirement("mfa", ["risk-ok", "risk-ok"]))]).toEqual([
 			"risk-ok",
 		]);
-		const registered = registeredRequirement(requirement("risk", ["risk-ok"]));
+		const registered = registeredRequirement(requirement("mfa", ["risk-ok"]));
 		sealRegisteredReach(registered);
 		expect("add" in registered.reach).toBe(false);
 		expect(registered.reach.has("risk-ok")).toBe(true);
