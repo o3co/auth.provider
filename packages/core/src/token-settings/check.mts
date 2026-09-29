@@ -148,14 +148,33 @@ export function lifetimeBeyondConfigurationMessage(
 }
 
 /**
- * `value`, the `oauthTokenSettings` a composition holds, as it is when it
- * keeps what its readers read: a canonical issuer, the access-token default
- * and max each a lifetime with the default not above the max, the
- * refresh-token lifetime a lifetime, every switch a boolean — and neither
- * lifetime longer than the one core resolves from `config`, whoever provides
- * the slot. A `RangeError` naming the first member that does not, with both
- * values for a lifetime, or naming the slot when it holds no settings object
- * at all.
+ * A member of a host's value, read once. A read that throws — a getter, a
+ * proxy trap — is refused, naming the member, rather than answered.
+ */
+const readOnce = (member: string, read: () => unknown): unknown => {
+	try {
+		return read();
+	} catch (err) {
+		throw new RangeError(
+			`oauthTokenSettings.${member} could not be read: reading it threw. ${WHY}`,
+			{ cause: err },
+		);
+	}
+};
+
+/**
+ * The `oauthTokenSettings` a composition holds, as a snapshot its readers
+ * read: each member a reader reads, read from `value` exactly once, held to
+ * what its readers read — a canonical issuer, the access-token default and
+ * max each a lifetime with the default not above the max, the refresh-token
+ * lifetime a lifetime, every switch a boolean, and neither lifetime longer
+ * than the one core resolves from `config`, whoever provides the slot — and
+ * answered frozen at every level. What is validated is what is answered: a
+ * getter that answers otherwise on a later read, or a host that changes its
+ * object afterwards, changes nothing a reader holds. A member no reader reads
+ * is neither refused nor carried. A `RangeError` names the first member that
+ * does not hold, with both values for a lifetime, or whose read throws, or
+ * names the slot when it holds no settings object at all.
  */
 export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthTokenSettings {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -163,37 +182,59 @@ export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthT
 			`oauthTokenSettings must be the settings object its contract describes, and the composition's slot holds ${shown(value)}. ${WHY}`,
 		);
 	}
-	const settings = value as Record<string, unknown>;
-	const rejection = checkCanonicalIssuer(settings.issuer);
-	if (rejection !== null) refuse("issuer", describeIssuerRejection(rejection), settings.issuer);
-	const lifetime = settings.accessTokenLifetime as
-		| { readonly defaultExpiresIn?: unknown; readonly maxExpiresIn?: unknown }
-		| null
-		| undefined;
+	const slot = value as Record<string, unknown>;
+	const issuer = readOnce("issuer", () => slot.issuer);
+	const lifetime = readOnce("accessTokenLifetime", () => slot.accessTokenLifetime);
+	const lifetimeMembers =
+		typeof lifetime === "object" && lifetime !== null
+			? (lifetime as Record<string, unknown>)
+			: undefined;
+	const defaultExpiresIn =
+		lifetimeMembers === undefined
+			? undefined
+			: readOnce("accessTokenLifetime.defaultExpiresIn", () => lifetimeMembers.defaultExpiresIn);
+	const maxExpiresIn =
+		lifetimeMembers === undefined
+			? undefined
+			: readOnce("accessTokenLifetime.maxExpiresIn", () => lifetimeMembers.maxExpiresIn);
+	const refreshTokenExpiresIn = readOnce("refreshTokenExpiresIn", () => slot.refreshTokenExpiresIn);
+	const switches = new Map<(typeof SWITCHES)[number], unknown>(
+		SWITCHES.map((name) => [name, readOnce(name, () => slot[name])]),
+	);
+
+	const rejection = checkCanonicalIssuer(issuer);
+	if (rejection !== null) refuse("issuer", describeIssuerRejection(rejection), issuer);
 	if (
-		typeof lifetime !== "object" ||
-		lifetime === null ||
-		!isLifetimeSeconds(lifetime.defaultExpiresIn) ||
-		!isLifetimeSeconds(lifetime.maxExpiresIn) ||
-		lifetime.defaultExpiresIn > lifetime.maxExpiresIn
+		!isLifetimeSeconds(defaultExpiresIn) ||
+		!isLifetimeSeconds(maxExpiresIn) ||
+		defaultExpiresIn > maxExpiresIn
 	) {
-		refuse(
+		return refuse(
 			"accessTokenLifetime",
 			`must be a default and a max, each a whole number of seconds from 1 to ${MAX_DURATION_SECONDS}, the default not above the max`,
 			lifetime,
 		);
 	}
-	if (!isLifetimeSeconds(settings.refreshTokenExpiresIn)) {
-		refuse(
+	if (!isLifetimeSeconds(refreshTokenExpiresIn)) {
+		return refuse(
 			"refreshTokenExpiresIn",
 			`must be a whole number of seconds from 1 to ${MAX_DURATION_SECONDS}`,
-			settings.refreshTokenExpiresIn,
+			refreshTokenExpiresIn,
 		);
 	}
-	for (const name of SWITCHES) {
-		if (typeof settings[name] !== "boolean") refuse(name, "must be true or false", settings[name]);
+	for (const [name, read] of switches) {
+		if (typeof read !== "boolean") refuse(name, "must be true or false", read);
 	}
-	const beyond = lifetimeBeyondConfiguration(settings, config);
+
+	const snapshot: OAuthTokenSettings = Object.freeze({
+		issuer: issuer as string,
+		legacyTypAccept: switches.get("legacyTypAccept") as boolean,
+		accessTokenLifetime: Object.freeze({ defaultExpiresIn, maxExpiresIn }),
+		refreshTokenExpiresIn,
+		resourceIndicatorEnabled: switches.get("resourceIndicatorEnabled") as boolean,
+		requireEmailVerified: switches.get("requireEmailVerified") as boolean,
+	});
+	const beyond = lifetimeBeyondConfiguration(snapshot, config);
 	if (beyond !== undefined) throw new RangeError(lifetimeBeyondConfigurationMessage(beyond));
-	return value as OAuthTokenSettings;
+	return snapshot;
 }
