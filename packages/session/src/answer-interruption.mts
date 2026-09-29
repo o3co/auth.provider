@@ -15,37 +15,35 @@
  */
 
 /**
- * The answer to a login a session requirement interrupted (the
- * session-admission ADR's D5), as one function. `POST /session/login`
- * (`routes/Session.mts`) calls it when `admitPrimary` answers `interrupt`,
- * and a requirement's completion route when `resumePrimary` does — another
- * requirement interrupts the login the first one resumed — so the package
- * exports it, and the MFA package's completion answers the same way.
+ * The answer to a login a session requirement interrupted, as one function.
+ * `POST /session/login` (`routes/Session.mts`) calls it when `admitPrimary`
+ * answers `interrupt`, and a requirement's completion route when
+ * `resumePrimary` does (another requirement interrupts the login the first
+ * one resumed), so the package exports it and the MFA package's completion
+ * answers the same way.
  *
- * The two phases, because the express session is regenerated between them:
+ * Two phases, because the express session is regenerated between them:
  *
- * 1. `req.session.regenerate` — a fresh session id, left unauthenticated: no
- *    `isAuthenticated`, `user`, `sid` or `redirectTo` is written.
- * 2. `admission.open(req.sessionID)` — the requirement's ceremony, bound to
- *    that id; the requirement persists the continuation core built, and core
+ * 1. `req.session.regenerate`: a fresh session id, left unauthenticated (no
+ *    `isAuthenticated`, `user`, `sid` or `redirectTo` is written).
+ * 2. `admission.open(req.sessionID)`: the requirement's ceremony, bound to
+ *    that id. The requirement persists the continuation core built, and core
  *    validates its answer against the closed body before it comes back.
  * 3. `req.session.save`, before the answer.
- * 4. The requirement's `403` with its body, and a fresh CSRF token (the MFA
- *    ADR's D27: a convenience after the regeneration, as a successful login
- *    gets one).
+ * 4. The requirement's `403` with its body, and a fresh CSRF token, as a
+ *    successful login gets one after the regeneration.
  *
  * No `UserSession` is written: the requirement's completion establishes the
  * session, through `resumePrimary` and `establishSession`.
  *
- * Each point that can fail answers `503 temporarily_unavailable` with the
- * request's cookie session dropped (`abandonCookieSession`), and is told to
- * the caller's reporter once — so each caller logs in its own vocabulary:
- * the regeneration's store (`cookie_session` / `regenerate`); `open`
- * throwing — the requirement's outage, or an answer core refused, which is
- * the requirement's fault and answered the same way — under the
- * requirement's name (`open`); the save (`cookie_session` / `save`), after
- * which the requirement's record is left to its own expiry, bound to a
- * session id no browser holds.
+ * Each point that can fail answers `503 temporarily_unavailable`, drops the
+ * request's cookie session (`abandonCookieSession`) and tells the caller's
+ * reporter once, so each caller logs in its own vocabulary: the regeneration
+ * as `cookie_session` / `regenerate`; a throw from `open` (the requirement's
+ * outage, or an answer core refused) under the requirement's name, `open`;
+ * the save as `cookie_session` / `save`, after which the requirement's record
+ * is left to its own expiry, bound to a session id no browser holds.
+ * See ADR 2026-09-28-session-admission, D5.
  */
 
 import {
@@ -108,8 +106,6 @@ export async function answerInterruption(
 	admission: InterruptAdmission,
 	{ req, res, csrf, reporter }: AnswerInterruptionDeps,
 ): Promise<AnswerInterruptionResult> {
-	// Core's brand, checked at runtime: a copy of an interruption, or an
-	// object shaped like one, is refused before the session is touched.
 	if (!isInterruptAdmission(admission)) {
 		throw new RangeError(
 			"answerInterruption: the admission must be an interruption admitPrimary or resumePrimary answered",

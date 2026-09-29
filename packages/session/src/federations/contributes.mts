@@ -16,20 +16,14 @@
 
 /**
  * Declaration-merge augmentations for `@o3co/auth-provider-core` contributed
- * by `@o3co/auth-provider-session`.
+ * by `@o3co/auth-provider-session`: the `federationRedirectPolicies`
+ * contribution kind and the synthetic ComponentMap key
+ * `federationRedirectPolicyResolver`.
  *
- * A5 adds one new contribution kind (`federationRedirectPolicies`) and one
- * new synthetic ComponentMap key (`federationRedirectPolicyResolver`).
- *
- * Per A5 §6 (ContributesMap extension) + A5 §7 (ComponentMap synthetic key).
- *
- * TRADE-OFF (same as synthetic-keys.mts NORMATIVE comment): merging
- * `federationRedirectPolicyResolver` onto ComponentMap means the type system
- * does NOT reject `provides: { federationRedirectPolicyResolver: ... }` at
- * compile time. That collision is caught at RUNTIME by validate-manifests
- * step 3a (`BootError({ reason: "synthetic-key-collision" })`). The type-level
- * benefit is typed `requires: ["federationRedirectPolicyResolver"]` for
- * downstream module authors.
+ * Trade-off: merging the synthetic key onto ComponentMap means the type system
+ * does not reject `provides: { federationRedirectPolicyResolver: ... }`; boot
+ * does (`BootError({ reason: "synthetic-key-collision" })`). In exchange,
+ * downstream modules get a typed `requires: ["federationRedirectPolicyResolver"]`.
  */
 
 import type { ProviderDeps } from "@o3co/auth-provider-core";
@@ -40,16 +34,15 @@ import type {
 
 declare module "@o3co/auth-provider-core" {
 	/**
-	 * A5 §6: new name-keyed contribution kind for redirect policies.
+	 * Name-keyed contribution kind for redirect policies.
 	 *
-	 * Per-kind duplicate policy (per A2-α §4.5):
 	 * - `contributes.federationRedirectPolicies[name]`: throw on duplicate.
 	 * - `overrides.federationRedirectPolicies[name]`: throw if name not already registered.
 	 * - Registration order does not affect dispatch (keyed by exact name match).
 	 *
-	 * Pairing invariant (A5 §6 NORMATIVE, enforced by validate-manifests step 7.5):
-	 * every `federations[name]` MUST have a matching `federationRedirectPolicies[name]`
-	 * and vice versa. Mismatch → BootError({ reason: "federation-redirect-policy-unpaired" }).
+	 * Pairing invariant, enforced by validate-manifests: every `federations[name]`
+	 * MUST have a matching `federationRedirectPolicies[name]` and vice versa.
+	 * Mismatch → BootError({ reason: "federation-redirect-policy-unpaired" }).
 	 */
 	interface ContributesMap<Deps = ProviderDeps<never, never>> {
 		readonly federationRedirectPolicies?: {
@@ -58,21 +51,15 @@ declare module "@o3co/auth-provider-core" {
 	}
 
 	/**
-	 * A5 §7: synthetic ComponentMap key for the redirect-policy resolver.
+	 * Synthetic key for the redirect-policy resolver: a read-only projection of
+	 * the boot planner's `federationRedirectPolicies` collector, parallel to
+	 * `federationProviders`. The `Resolver` suffix follows
+	 * `tokenExchangeValidatorResolver` / `grantHandlerResolver` and keeps it
+	 * apart from the contribution kind's name.
 	 *
-	 * SYNTHETIC (per A2-α §6.5). Read-only projection of the boot planner's
-	 * `federationRedirectPolicies` collector. Parallel to the existing
-	 * `federationProviders` synthetic key.
-	 *
-	 * Naming: `Resolver` suffix follows the 2-of-3 existing synthetic-key convention
-	 * (`tokenExchangeValidatorResolver`, `grantHandlerResolver`) and avoids collision
-	 * with the contribution kind name `federationRedirectPolicies`.
-	 *
-	 * Constraints (enforced at boot by validate-manifests step 3a/3b/3c):
-	 * - A module MUST NOT declare `federationRedirectPolicyResolver` in `provides`.
-	 * - `bootstrapComponents` MUST NOT carry this key.
-	 * - `overrideComponents` MUST NOT carry this key.
-	 * - A module MAY declare this key in `requires` / `optional`.
+	 * Enforced at boot by validate-manifests: no module declares it in
+	 * `provides`, and neither `bootstrapComponents` nor `overrideComponents`
+	 * carries it. A module MAY declare it in `requires` / `optional`.
 	 */
 	interface ComponentMap {
 		readonly federationRedirectPolicyResolver?: ReadonlyMap<string, FederationRedirectPolicy>;

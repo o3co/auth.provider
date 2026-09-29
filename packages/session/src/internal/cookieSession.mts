@@ -67,22 +67,17 @@ export const USER_DIRECTORY_UNAVAILABLE = Object.freeze({
 
 /**
  * express-session's middleware, with its store failures answered here rather
- * than handed on as `next(err)`.
- *
- * express-session reports a store error two ways, and neither reached a log
- * line as the outage it is:
+ * than handed on as `next(err)` (README, "Browser session store").
  *
  * - **Before the route runs**, when it cannot load the request's session (the
- *   store is unreachable or times out): the request used to end in the
- *   terminal handler as a `500`. It is `503 temporarily_unavailable` now,
- *   answered here, and no route runs — every route behind this middleware
- *   reads `req.session`. A record the store answers with but that cannot be
- *   read is not an outage and does not come here: the Redis store reads it as
- *   absent (`../store/factory.mts`), so the browser starts a fresh session.
+ *   store is unreachable or times out): `503 temporarily_unavailable`, and no
+ *   route runs, since every route behind this middleware reads `req.session`.
+ *   A record the store answers with but that cannot be read is not an outage
+ *   and does not come here: the Redis store reads it as absent
+ *   (`../store/factory.mts`), so the browser starts a fresh session.
  * - **After the route answered**, when it cannot save the session or refresh
- *   its expiry: the answer has gone, so it stands; the error used to reach
- *   Express's final handler, which printed its stack and dropped the
- *   connection. It is logged here and goes no further.
+ *   its expiry: the answer has gone, so it stands, and the error goes no
+ *   further.
  *
  * Either way it is one line at error level, `session_middleware_store_unavailable`,
  * with `store: "cookie_session"`, `step` (`load` or `save`) and the error's
@@ -112,13 +107,12 @@ export function guardCookieSession(
 
 /**
  * Run one of the express session's callback operations — `regenerate`,
- * `save` — as a promise of its failure. An error handed to the callback is
- * the store's failure; so is one thrown synchronously, before the callback
- * is ever called: a store serialises the record in the call itself
- * (`MemoryStore`'s `JSON.stringify`), so a record it cannot serialise — a
- * `User` carrying a `BigInt` or a cycle — throws there, not through the
- * callback, and must be answered exactly as a callback error is rather than
- * escape the route as a `500` with the session still saved.
+ * `save` — as a promise of its failure. A synchronous throw is the store's
+ * failure too: a store serialises the record in the call itself
+ * (`MemoryStore`'s `JSON.stringify`), so a record it cannot serialise (a
+ * `User` carrying a `BigInt` or a cycle) throws there, and must be answered
+ * exactly as a callback error is rather than escape the route as a `500` with
+ * the session still saved.
  */
 export const sessionOperation = (
 	run: (done: (err: unknown) => void) => unknown,

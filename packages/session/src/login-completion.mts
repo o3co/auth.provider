@@ -16,18 +16,15 @@
 
 /**
  * The tail of a login as core's `LoginCompletion` — the `loginCompletion`
- * slot the login-completion module provides (`./modules/loginCompletionModule.mts`;
- * #728; the session-admission ADR's D5), over the deployment's `csrfGuard`.
+ * slot `./modules/loginCompletionModule.mts` provides (see ADR
+ * 2026-09-28-session-admission), over the deployment's `csrfGuard`.
  *
  * A requirement's completion (the MFA package's, after `resumePrimary`)
- * finishes a login as the login routes do, and a package imports only core:
- * it requires this slot instead of importing `establishSession` and
- * `answerInterruption`. The two are this package's
- * (`./establish-session.mts`, `./answer-interruption.mts`), with what the
- * provider holds bound here — the session stores, the session's lifetime,
- * and the deployment's CSRF guard, whose fresh token an interruption's `403`
- * carries —
- * so that a caller hands only the request, the response where one is
+ * finishes a login as the login routes do, but a package imports only core,
+ * so it requires this slot instead of importing `establishSession` and
+ * `answerInterruption`. The session stores, the session's lifetime and the
+ * CSRF guard (whose fresh token an interruption's `403` carries) are bound
+ * here, so a caller hands only the request, the response where one is
  * answered, and a reporter that logs in its own vocabulary.
  */
 

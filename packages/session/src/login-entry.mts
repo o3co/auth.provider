@@ -16,16 +16,14 @@
 
 /**
  * The deployment's login page as core's `LoginEntry` — the `loginEntry` slot
- * the session module provides (#728): the page a browser that is not signed
- * in is sent to (`endpoints.login.url`), and the `redirect_to` protocol that
- * brings it back. `/authorize` and the federation-grants connect flow built
- * that URL by hand from the configuration; they read it here instead.
+ * the session module provides: the page a browser that is not signed in is
+ * sent to (`endpoints.login.url`), and the `redirect_to` protocol that brings
+ * it back. `/authorize` and the federation-grants connect flow read it here.
  *
- * The protocol is theirs as it was: `redirect_to` added to the page's own
- * query — `&`-joined when the page already has one, since a second `?` would
- * corrupt both parameters — the target encoded whole, so nothing of it reads
- * as the page's query or fragment. What comes back is the login route's to
- * hold to its allowlist.
+ * `redirect_to` is added to the page's own query (`&`-joined when the page
+ * already has one, since a second `?` would corrupt both parameters), the
+ * target encoded whole so nothing of it reads as the page's query or
+ * fragment. What comes back is the login route's to hold to its allowlist.
  */
 
 import {
@@ -63,13 +61,13 @@ export function createLoginEntry(url: string): LoginEntry {
 /**
  * The login entry for `endpoints.login.url`.
  *
- * Built whether or not the page is configured. Core's schema takes any
+ * Built whether or not the page is configured: core's schema takes any
  * string, the empty one included, and a hand-built configuration may leave
- * the key out; the oauth module's schema requires a page, and the
+ * the key out, while the oauth module's schema requires a page and the
  * federation-grants connect flow refuses to boot enabled without one. So a
  * composition that installs a consumer of the slot and never sends a browser
- * to log in boots as it did. Without a page, the entry fails where the page
- * is read, naming the key: `url` and `urlFor` throw.
+ * to log in still boots. Without a page, `url` and `urlFor` throw, naming the
+ * key.
  */
 export function loginEntryFromConfig(config: unknown): LoginEntry {
 	const written = (config as { endpoints?: { login?: { url?: unknown } } } | undefined)?.endpoints

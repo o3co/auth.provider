@@ -16,58 +16,40 @@
 
 /**
  * The federation transaction: a `form_post` federation's ephemeral state, held
- * outside the application session (#494).
+ * outside the application session (README, "The transaction cookie").
  *
- * A `form_post` callback arrives as a **cross-site POST** from the IdP's
- * origin, and a `SameSite=Lax` cookie — the deployment default, and the right
- * default — is not sent on one. The flow therefore needs *a* cookie that
- * survives a cross-site POST. It does not need *the session* cookie to be that
- * cookie, and making it one is what #494 was: the start route is unauthenticated,
- * so any third party who caused one navigation permanently downgraded the
- * victim's authenticated session cookie to `SameSite=None`.
+ * A `form_post` callback arrives as a **cross-site POST**, on which a
+ * `SameSite=Lax` cookie is not sent. The flow needs *a* cookie that survives
+ * one, and it must not be the session cookie: the start route is
+ * unauthenticated, so anything it changed about the session cookie any third
+ * party could change. So the cross-site part has its own cookie (an opaque id,
+ * `HttpOnly; Secure; SameSite=None`, path-scoped to the callback route,
+ * expiring with the transaction) and its own record (the envelope the callback
+ * needs, deleted the moment the callback consumes it). The application session
+ * cookie is never touched.
  *
- * So the cross-site part is given its own cookie and its own record:
- *
- * - the cookie carries nothing but an opaque id, is `HttpOnly; Secure;
- *   SameSite=None`, is path-scoped to the one callback route that reads it, and
- *   expires with the transaction rather than with the session;
- * - the record holds the envelope the callback needs — `state`, `codeVerifier`,
- *   `nonce`, `redirectTo`, provider name — and is deleted the moment the
- *   callback consumes it.
- *
- * The application session cookie is never touched, and a browser that abandons
- * the flow at the IdP is left holding one short-lived cookie that expires on
- * its own.
- *
- * **The record lives in the session store**, keyed under a prefix of its own,
- * rather than in a component slot invented for it. That store is already wired,
- * already covered by the replica-safety guard (#474), and already the thing a
- * deployment points at Redis; a second slot would be a second thing to
- * configure and a second thing to get wrong. The prefix keeps the two key
- * spaces disjoint, so a transaction record can never be loaded as a session
- * even by something that could forge a session cookie signature.
+ * **The record lives in the session store** under a key prefix of its own,
+ * rather than in a component slot invented for it: that store is already
+ * wired, covered by the replica-safety guard and pointed at Redis. The prefix
+ * keeps the key spaces disjoint, so a transaction record can never be loaded
+ * as a session, even by something that could forge a session cookie signature.
  */
 
 import { randomBytes } from "node:crypto";
 
 /**
- * How long a federation transaction may sit unconsumed.
- *
- * The window a user has between being redirected to the IdP and coming back:
- * long enough to type a password and satisfy the IdP's own MFA, short enough
- * that an abandoned flow leaves nothing meaningful behind. It bounds the
- * transaction cookie's `Max-Age` and the stored record's expiry together, so
- * neither can outlive the other.
+ * How long a federation transaction may sit unconsumed: long enough to type a
+ * password and satisfy the IdP's own MFA, short enough that an abandoned flow
+ * leaves nothing meaningful behind. It bounds the transaction cookie's
+ * `Max-Age` and the stored record's expiry together, so neither can outlive
+ * the other.
  */
 export const DEFAULT_FEDERATION_TRANSACTION_TTL_MS = 600_000; // 10 min
 
 /**
  * Key prefix separating transaction records from the sessions sharing the
- * store.
- *
- * express-session generates its ids with `uid-safe`, which emits only
- * base64url characters, so no session id can ever collide with a key that
- * carries this prefix.
+ * store. express-session generates its ids with `uid-safe`, which emits only
+ * base64url characters, so no session id can collide with a key carrying it.
  */
 export const FEDERATION_TRANSACTION_KEY_PREFIX = "fedtx:";
 
@@ -79,24 +61,23 @@ export interface FederationTransactionEnvelope {
 	readonly name: string;
 	readonly state: string;
 	readonly codeVerifier: string;
-	/** PB-4 nonce — absent for OAuth-only providers. */
+	/** OIDC nonce — absent for OAuth-only providers. */
 	readonly nonce?: string | undefined;
 	readonly redirectTo?: string | undefined;
 	/**
-	 * #482: the start leg asked to link this identity to the account of the
-	 * session `sid` — the one the browser held then — rather than to log in.
-	 * The callback binds to that session: a `form_post` callback arrives
-	 * without the application session cookie, so the record is what says
-	 * whose link this is.
+	 * The start leg asked to link this identity to the account of the session
+	 * `sid` (the one the browser held then) rather than to log in. A
+	 * `form_post` callback arrives without the application session cookie, so
+	 * the record is what says whose link this is.
 	 */
 	readonly link?: LinkIntent | undefined;
 }
 
 /**
  * What a `?link=1` start records: the session admission let link, and that
- * session's subject (the session-admission ADR's D8) — together the callback's
- * link claim. `subject` is absent only in a transaction a start wrote before
- * it recorded one, which the callback refuses.
+ * session's subject — together the callback's link claim (see ADR
+ * 2026-09-28-session-admission). The callback refuses an intent without
+ * `subject`.
  */
 export interface LinkIntent {
 	readonly sid: string;
@@ -140,23 +121,16 @@ export const mintFederationTransactionId = (): string => randomBytes(32).toStrin
 
 /**
  * Name the transaction cookie after the deployment's session cookie, the way
- * the CSRF cookie is named: `<session.name>.federation`, so it inherits the
- * operator's naming rather than introducing an unrelated one.
- *
- * The prefix is the deviation, and it is deliberate. Any prefix the session
- * name carries is stripped and `__Secure-` is applied **unconditionally**, so
- * the result is always `__Secure-<base>.federation` — including for a session
- * cookie named with no prefix at all.
+ * the CSRF cookie is named: any prefix the session name carries is stripped
+ * and `__Secure-` applied **unconditionally**, giving
+ * `__Secure-<base>.federation` even for an unprefixed session cookie.
  *
  * `__Secure-` rather than `__Host-`, because `__Host-` requires `Path=/` and
- * this cookie is deliberately path-scoped to the callback route; a `__Host-`
- * name would be silently dropped by every browser and the callback would fail
- * with nothing visibly wrong. Unconditionally, because unlike the session
- * cookie — whose `Secure` flag is the operator's `session.secure` to set — this
- * cookie is `SameSite=None` and therefore *always* issued with `Secure`. The
- * prefix states that invariant where a browser will enforce it, so the cookie
- * cannot be set over a plain-HTTP hop by anything, including an attacker in a
- * position to inject one.
+ * this cookie is path-scoped to the callback route: every browser would
+ * silently drop a `__Host-` name. Unconditionally, because this cookie is
+ * `SameSite=None` and therefore *always* issued with `Secure`; the prefix
+ * states that where a browser enforces it, so nothing, including an attacker
+ * in a position to inject a cookie, can set it over a plain-HTTP hop.
  */
 export const deriveFederationTransactionCookieName = (sessionCookieName: string): string => {
 	const base = sessionCookieName.replace(/^__(?:Host|Secure)-/, "");
@@ -202,13 +176,11 @@ const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => 
  * Adapt the express-session store the deployment already runs into a
  * transaction store.
  *
- * The record is shaped like a session — an envelope beside a `cookie` bearing
- * `expires` — because that shape is what the store implementations read to
- * decide when a record dies. `MemoryStore` drops a record whose
- * `cookie.expires` has passed on the next read; `connect-redis` turns the same
- * field into the Redis key's `EX`. Writing the expiry there means an abandoned
- * transaction is reaped by the store itself, with no sweeper of ours, in both
- * deployments.
+ * The record is shaped like a session (an envelope beside a `cookie` bearing
+ * `expires`) because that is what the stores read to decide when a record
+ * dies: `MemoryStore` drops it on the next read after `cookie.expires`, and
+ * `connect-redis` turns the field into the key's `EX`. So an abandoned
+ * transaction is reaped by the store itself, with no sweeper of ours.
  */
 export const createFederationTransactionStore = (
 	store: FederationTransactionSessionStore,
