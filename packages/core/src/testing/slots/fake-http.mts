@@ -18,7 +18,7 @@
  * The request and response the slot contract suites drive a component over,
  * without a server: the part of Express's a component of these slots is
  * held to. A request carries its headers (`headers`, `get`, `header`), its
- * own origin (`protocol`, `host`, `hostname`), a path, an empty parsed body,
+ * own origin (`protocol`, `host`, `hostname`), a path, a parsed body,
  * and an express session — `session` with `regenerate` and `save` as
  * express-session has them, and `sessionID` — whose regenerations and saves
  * are counted. A response records `status`, `json` / `send` / `end`, the
@@ -48,6 +48,8 @@ export interface FakeRequestOptions {
 	readonly path?: string;
 	/** Header names are matched without regard to case, as Node's are. */
 	readonly headers?: Readonly<Record<string, string>>;
+	/** The parsed body, as a body parser leaves it; empty by default. */
+	readonly body?: Readonly<Record<string, unknown>>;
 	/** Every `regenerate` fails with this: an express-session store that is down. */
 	readonly regenerateFails?: unknown;
 	/** Every `save` fails with this. */
@@ -84,7 +86,7 @@ export function fakeRequest(options: FakeRequestOptions = {}): {
 		hostname: CONTRACT_HOST,
 		ip: "192.0.2.10",
 		headers,
-		body: {},
+		body: { ...(options.body ?? {}) },
 		query: {},
 		get(name: string): string | undefined {
 			return headers[name.toLowerCase()];

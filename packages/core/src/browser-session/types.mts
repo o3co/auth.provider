@@ -55,13 +55,39 @@ export type CsrfVerdict =
 			readonly reason: "foreign_origin" | "token_absent" | "token_invalid";
 	  };
 
+/** Whether a navigation may start a flow that will change state, and why not. */
+export type NavigationVerdict =
+	| { readonly outcome: "accepted" }
+	| {
+			readonly outcome: "refused";
+			readonly reason: "cross_site" | "foreign_origin" | "origin_absent";
+	  };
+
 /**
- * The one policy for whether a browser's request may change state (#272,
- * #710): a request whose `Origin` — or, without one, `Referer` — names
- * another origin is refused whatever else it carries; one that names this
- * origin or a trusted one is accepted; with neither, a signed double-submit
- * token decides — the value of the `cookieName` cookie, echoed in the
- * `headerName` header.
+ * The one policy for whether a browser may change state (#272; #710, C4),
+ * in its two forms.
+ *
+ * - **A request that changes state** (`check`, `middleware`) — a login, a
+ *   logout, device verification, an MFA route, the federation-grants
+ *   consent answer. A request whose `Origin` — or, without one, `Referer` —
+ *   names another origin is refused whatever else it carries; one that
+ *   names this origin or a trusted one is accepted; with neither, a signed
+ *   double-submit token decides: the value of the `cookieName` cookie,
+ *   echoed in the `headerName` header or in the `bodyField` of a parsed
+ *   form body.
+ * - **A navigation that starts such a flow** (`checkNavigation`) — the
+ *   account-link start, a GET a page navigates to, which carries no token
+ *   and often no `Origin`. `Sec-Fetch-Site` answers first where the browser
+ *   sends it: `same-origin` and `none` (a typed URL, a bookmark) are
+ *   accepted, `cross-site` is refused; otherwise — `same-site`, which a
+ *   sibling subdomain sends too, an unknown value, or none — the `Origin`
+ *   or `Referer` the request names is held to this origin and the trusted
+ *   ones, and a request that names neither is refused.
+ *
+ * Open (#728): the token's signing key is derived from the session
+ * cookie's secret, which the session store's module owns, while the
+ * session module provides the guard; how the key reaches the guard's
+ * provider is decided with the provider.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -69,16 +95,29 @@ export interface CsrfGuard {
 	/** The request header the token is echoed in. */
 	readonly headerName: string;
 	/**
-	 * The policy's verdict on `req`, for a route that answers a refusal in
-	 * its own vocabulary. Reads the request alone and never throws.
+	 * The field of a parsed form body the token may be echoed in instead of
+	 * the header; absent when the guard reads the header alone.
+	 */
+	readonly bodyField?: string;
+	/**
+	 * The request policy's verdict on `req`, for a route that answers a
+	 * refusal in its own vocabulary. Reads the request alone — its headers,
+	 * its cookies and, for `bodyField`, its parsed body — and never throws.
 	 */
 	check(req: Request): CsrfVerdict;
+	/** The navigation policy's verdict on `req`. Reads its headers alone; never throws, never reads a token. */
+	checkNavigation(req: Request): NavigationVerdict;
 	/**
-	 * The policy as middleware: hands the request on when `check` accepts it;
-	 * otherwise answers `403 access_denied` itself, and the route never runs.
+	 * The request policy as middleware: hands the request on when `check`
+	 * accepts it; otherwise answers `403 access_denied` itself, and the
+	 * route never runs.
 	 */
 	readonly middleware: RequestHandler;
-	/** Sets a fresh token on `res`, in a cookie script can read, and answers it. */
+	/**
+	 * Sets a fresh token on `res` — in the `cookieName` cookie, readable by
+	 * script, on path `/`, secure, same-site and scoped as the session
+	 * cookie is — and answers it.
+	 */
 	issue(res: Response): string;
 }
 
