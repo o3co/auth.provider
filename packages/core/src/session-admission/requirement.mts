@@ -716,12 +716,16 @@ export function registeredRequirement(value: unknown, issuer?: string): Register
  * a second-factor value unless the requirement is named `mfa`
  * (`SECOND_FACTOR_AMR`), and a `stepUpPage` when the reach is not empty —
  * a requirement that reaches nothing may still register one, a step-up that
- * adds no value. The end of boot's stage 4 runs it over every registration
- * (`contribute-factory-failed`, naming the requirement), and the contract
- * suite over a requirement under test. Answers the reach as read, a
- * read-only view over a set of its own — and seals a registered copy on it:
- * the copy answers the snapshot from then on, whatever the contributor's own
- * `Set` does.
+ * adds no value — and, in this release, empty unless the requirement is
+ * named `mfa`: the one way a completed step-up is written into a live
+ * session is MFA's, so any other requirement's reach could never be met.
+ * The one home of these rules: the end of boot's stage 4 runs it over every
+ * registration (`contribute-factory-failed`, naming the requirement),
+ * `resolverForTests` over a test's requirements, and the contract suite
+ * over a requirement under test. Answers the reach as read, a read-only
+ * view over a set of its own — and seals a registered copy on it: the copy
+ * answers the snapshot from then on, whatever the contributor's own `Set`
+ * does. A reach it refuses is not sealed.
  */
 export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySet<string> {
 	const refuse = (what: string): never => {
@@ -745,6 +749,11 @@ export function sealRegisteredReach(requirement: SessionRequirement): ReadonlySe
 	}
 	if (read.size > 0 && requirement.stepUpPage === undefined) {
 		refuse("a requirement that reaches something must declare where the step-up starts");
+	}
+	if (read.size > 0 && requirement.name !== MFA_REQUIREMENT_NAME) {
+		refuse(
+			`reaches ${[...read].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty`,
+		);
 	}
 	return seal(requirement, read);
 }

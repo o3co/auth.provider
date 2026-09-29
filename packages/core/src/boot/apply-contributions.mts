@@ -591,19 +591,8 @@ async function checkSessionRequirements(
 		} catch (cause) {
 			return failed(registration, cause);
 		}
-		if (registration.name !== MFA_REQUIREMENT_NAME) {
-			// In this release only the MFA requirement adds vouched values to a
-			// session: nothing else can record what another requirement reached.
-			if (reach.size > 0) {
-				return failed(
-					registration,
-					new RangeError(
-						`a requirement named "${registration.name}" reaches ${[...reach].map((value) => `"${value}"`).join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session, so any other reach must be empty`,
-					),
-				);
-			}
-			continue;
-		}
+		// Any other name reaches nothing in this release (the seal refused it).
+		if (registration.name !== MFA_REQUIREMENT_NAME) continue;
 		// biome-ignore lint/style/noNonNullAssertion: the plan has a blueprint for every module it planned
 		const blueprint = material.plan.depsBlueprint.get(registration.module)!;
 		const requires = blueprint.requires as readonly string[];

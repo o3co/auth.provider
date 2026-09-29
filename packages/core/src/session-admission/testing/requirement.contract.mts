@@ -22,7 +22,8 @@
  * (`it.each(cases)("$name", ({ run }) => run())`) and nothing here depends
  * on one. What it holds a requirement to: its name is its key, and a
  * fixture is never named `mfa`; its `reach` and `stepUpPage` are what boot
- * accepts (`sealRegisteredReach`, `checkStepUpPage`); its `remediations`
+ * accepts (`sealRegisteredReach`, `checkStepUpPage`) — the reach empty
+ * unless the name is `mfa`, in this release — its `remediations`
  * are names, each once; its `hintKeys` are hint names; admission never
  * calls its `admit` with a dead session or for a declared remediation; its
  * `admit` answers a verdict, a `step_up` only with a page registered; an
@@ -170,16 +171,9 @@ export function sessionRequirementContract(
 		},
 		{
 			name: "reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
+			// The rule's one home is the seal boot runs; this case names it.
 			run: async () => {
-				const registered = registeredRequirement(build(), issuer);
-				const reach = sealRegisteredReach(registered);
-				if (registered.name !== MFA_REQUIREMENT_NAME) {
-					assert.equal(
-						reach.size,
-						0,
-						`"${registered.name}" reaches ${[...reach].join(", ")}: only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session in this release`,
-					);
-				}
+				sealRegisteredReach(registeredRequirement(build(), issuer));
 			},
 		},
 		{
