@@ -1,6 +1,6 @@
 # auth.provider
 
-Last updated: 2026-09-25
+Last updated: 2026-09-29
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -90,7 +90,10 @@ The scaffold does not boot on its defaults alone. `pnpm run debug` reads no
 user service (`CLIENT_USER_AUTHENTICATE_URL`,
 `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`), and a Redis on `localhost:6379`. The
 [template's README](templates/standalone/README.md#usage) gives the commands,
-and [create-app](create-app/README.md) says what the scaffolder generates.
+and [create-app](create-app/README.md) says what the scaffolder generates and
+how `--template` picks the template it copies (`standalone` by default; the
+[composition templates ADR](packages/core/docs/adr/2026-09-29-composition-templates.md)
+says how the templates are split).
 
 ## Architecture
 
@@ -140,7 +143,7 @@ Each package's README states what it owns and why it is separate. In brief:
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis implementations of core's store ports, for a deployment with more than one replica | Keeps a database driver out of core. The standalone template needs it in every deployment (its refresh-token families live in Redis); only a composition root of your own, on one replica, can leave it out |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | The HTTP user repository — the client of your user service ("the Store") | A production adapter for an external service, kept out of core |
 | [`templates/standalone`](templates/standalone/) | — | The deployable composition root: module choice, config, logger, shutdown, Docker | Per-deployment choices, copied rather than imported; never published |
-| [`create-app`](create-app/) | `@o3co/create-auth-provider` | The `npx` scaffolder that copies the template into a new project | Published on its own with a `bin` |
+| [`create-app`](create-app/) | `@o3co/create-auth-provider` | The `npx` scaffolder that copies a template (`--template`, default `standalone`) into a new project | Published on its own with a `bin` |
 
 ## Endpoints
 

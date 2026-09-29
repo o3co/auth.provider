@@ -9,7 +9,7 @@ export default defineConfig({
 		// #556: the test files in this package share one directory on disk and
 		// must not run at the same time. `published-package.test.mts` runs
 		// `npm pack`, whose `prepack` hook (`scripts/copy-templates.mjs`) deletes
-		// `create-app/templates/standalone` and copies it back; every `scaffold()`
+		// `create-app/templates` and copies the templates back; every `scaffold()`
 		// in `index.test.mts` copies FROM that directory. With files in parallel,
 		// a scaffold that lands inside the delete-and-copy window reads a
 		// half-written template and fails with ENOENT — which is how

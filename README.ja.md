@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-09-25
+最終更新: 2026-09-29
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -84,7 +84,10 @@ pnpm install
 （`OAUTH_JWT_ISSUER`）、署名鍵のペア、セッションシークレット、ユーザーサービスの
 2 つの URL（`CLIENT_USER_AUTHENTICATE_URL`、`CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL`）、
 そして `localhost:6379` の Redis。コマンドは[テンプレートの README](templates/standalone/README.ja.md#使い方)
-に、スキャフォルダーが何を生成するかは [create-app](create-app/README.ja.md) にある。
+に、スキャフォルダーが何を生成するか、`--template` でコピーするテンプレートをどう選ぶか
+（デフォルトは `standalone`。テンプレートの分け方は
+[コンポジションテンプレートの ADR](packages/core/docs/adr/2026-09-29-composition-templates.md)）
+は [create-app](create-app/README.ja.md) にある。
 
 ## アーキテクチャ
 
@@ -134,7 +137,7 @@ templates/standalone          composes the packages above; create-app copies it
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | core のストアポートの Redis 実装。複数レプリカのデプロイメント向け | データベースドライバーを core の外に置く。standalone テンプレートはどのデプロイメントでもこれを必要とする（refresh token family が Redis にある）。これなしで済むのは、単一レプリカで動く独自のコンポジションルートだけ |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | HTTP ユーザーリポジトリ — ユーザーサービス（「the Store」）のクライアント | 外部サービス向けの本番用アダプターを core の外に置く |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なコンポジションルート: モジュールの選択、設定、ロガー、シャットダウン、Docker | デプロイメントごとの選択。import ではなくコピーされ、公開されない |
-| [`create-app`](create-app/) | `@o3co/create-auth-provider` | テンプレートを新しいプロジェクトにコピーする `npx` スキャフォルダー | `bin` 付きで単独公開される |
+| [`create-app`](create-app/) | `@o3co/create-auth-provider` | テンプレート（`--template`、デフォルト `standalone`）を新しいプロジェクトにコピーする `npx` スキャフォルダー | `bin` 付きで単独公開される |
 
 ## エンドポイント
 

@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # The standalone template pins its base image by digest. A digest never moves,
+  # Each template pins its base image by digest. A digest never moves,
   # which is the point — and also means it never picks up the CVE fixes that
   # `node:26-alpine` rebuilds carry. This is the update path: Dependabot bumps
   # tag and digest together, so the pin stays deliberate instead of stale.
@@ -14,11 +14,23 @@ updates:
   # Since then CI's publish-readiness job builds the Dockerfile's `node-base`
   # stage from the pinned digest and installs the dependency set on it, so a
   # future major that breaks the image fails a check rather than an operator.
+  #
+  # Every template is covered by the glob, and one bump of an image is one pull
+  # request across all of them (`group-by: dependency-name`): the templates
+  # keep their Dockerfile identical (the composition templates ADR's D4,
+  # packages/core/docs/adr/2026-09-29-composition-templates.md), and a pull
+  # request that bumped it in one template only would break that.
   - package-ecosystem: "docker"
-    directory: "/templates/standalone"
+    directories:
+      - "/templates/*"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      base-image:
+        patterns:
+          - "*"
+        group-by: dependency-name
 
   - package-ecosystem: "npm"
     directory: "/"

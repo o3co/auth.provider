@@ -8,14 +8,32 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { listTemplates } from "../../scripts/templates.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CREATE_APP_DIR = resolve(__dirname, "../..");
+
+/**
+ * The templates the repository holds, as the build reads them
+ * (`scripts/templates.mjs`, which `copy-templates.mjs` and CI use). Read from
+ * the repository rather than from the packed tarball, so a template the pack
+ * leaves out is a failure here instead of a smaller list.
+ */
+const REPOSITORY_TEMPLATES: readonly string[] = listTemplates(
+	resolve(CREATE_APP_DIR, "../templates"),
+);
+
+/** Every file under `dir`, relative to it, sorted. */
+const filesUnder = (dir: string): string[] =>
+	readdirSync(dir, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => join(entry.parentPath, entry.name).slice(dir.length + 1))
+		.sort();
 
 interface NpmPackResult {
 	readonly filename: string;
@@ -24,6 +42,7 @@ interface NpmPackResult {
 describe("published-package install context (e2e)", () => {
 	let workspace: string;
 	let tarballPath: string;
+	let installRoot: string;
 
 	beforeAll(() => {
 		workspace = mkdtempSync(join(tmpdir(), "create-auth-provider-e2e-"));
@@ -44,74 +63,107 @@ describe("published-package install context (e2e)", () => {
 		});
 		const [packed] = JSON.parse(stdout) as readonly NpmPackResult[];
 		tarballPath = join(workspace, packed.filename);
+
+		// Regression for v0.5.0 npx bug: simulate the actual install layout
+		// (~/.npm/_npx/<hash>/node_modules/@o3co/create-auth-provider/) so the
+		// cpSync filter sees an absolute source path whose ancestors include
+		// 'node_modules'. Before the fix, the filter excluded every file and
+		// `cpSync` left the target directory empty.
+		installRoot = join(workspace, "node_modules", "@o3co", "create-auth-provider");
+		mkdirSync(installRoot, { recursive: true });
+		execFileSync("tar", ["-xzf", tarballPath, "--strip-components=1", "-C", installRoot]);
 	}, 120_000);
 
 	afterAll(() => {
 		if (workspace) rmSync(workspace, { recursive: true, force: true });
 	});
 
-	it("scaffolds successfully when installed under a path containing 'node_modules'", () => {
-		// Regression for v0.5.0 npx bug: simulate the actual install layout
-		// (~/.npm/_npx/<hash>/node_modules/@o3co/create-auth-provider/) so the
-		// cpSync filter sees an absolute source path whose ancestors include
-		// 'node_modules'. Before the fix, the filter excluded every file and
-		// `cpSync` left the target directory empty.
-		const installRoot = join(workspace, "node_modules", "@o3co", "create-auth-provider");
-		mkdirSync(installRoot, { recursive: true });
-		execFileSync("tar", ["-xzf", tarballPath, "--strip-components=1", "-C", installRoot]);
+	it("reads a plausible repository (the loop below is not vacuous)", () => {
+		expect(REPOSITORY_TEMPLATES).toContain("standalone");
+	});
 
-		const projectCwd = join(workspace, "scaffold-cwd");
-		mkdirSync(projectCwd);
-		execFileSync("node", [join(installRoot, "dist", "cli.mjs"), "my-test-project"], {
-			cwd: projectCwd,
-			encoding: "utf-8",
+	it("ships every template the repository holds, and no other", () => {
+		const shipped = readdirSync(join(installRoot, "templates"), { withFileTypes: true })
+			.filter((entry) => entry.isDirectory())
+			.map((entry) => entry.name)
+			.sort();
+		expect(shipped).toEqual(REPOSITORY_TEMPLATES);
+	});
+
+	it("scaffolds the default template, standalone, when no --template is given", () => {
+		const cli = join(installRoot, "dist", "cli.mjs");
+		const byDefault = join(workspace, "scaffold-cwd-default");
+		const named = join(workspace, "scaffold-cwd-named-standalone");
+		mkdirSync(byDefault);
+		mkdirSync(named);
+		execFileSync("node", [cli, "my-test-project", "--no-lockfile"], { cwd: byDefault });
+		execFileSync("node", [cli, "my-test-project", "--no-lockfile", "--template", "standalone"], {
+			cwd: named,
 		});
 
-		const targetDir = join(projectCwd, "my-test-project");
-		expect(existsSync(targetDir)).toBe(true);
-		expect(existsSync(join(targetDir, "package.json"))).toBe(true);
-		expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
-		expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
-		// #556: the scaffold's vitest.config.mts loads this setup file, and vitest
-		// refuses to start without it — so the tarball has to carry it.
-		expect(existsSync(join(targetDir, "vitest.supertest-loopback.mts"))).toBe(true);
-		expect(readFileSync(join(targetDir, "vitest.config.mts"), "utf-8")).toContain(
-			'setupFiles: ["./vitest.supertest-loopback.mts"]',
-		);
-
-		// #407: the scaffold must arrive with a .gitignore, or the first
-		// `git add .` commits the `.env` and the signing key the README's own
-		// setup steps tell the operator to create right there. Asserted from
-		// the PACKED tarball rather than the working tree, because npm has a
-		// long history of dropping a file literally named `.gitignore` from a
-		// published package — a check against the repo would pass while every
-		// real `npx` scaffold shipped without one.
-		const gitignorePath = join(targetDir, ".gitignore");
-		expect(existsSync(gitignorePath)).toBe(true);
-		const gitignore = readFileSync(gitignorePath, "utf-8");
-		expect(gitignore).toContain(".env");
-		expect(gitignore).toContain("*.pem");
-		// `.env.example` is the documentation and must survive the `.env.*` rule.
-		expect(gitignore).toMatch(/^!\.env\.example$/m);
-
-		// #705: what `.gitignore` keeps out of git, `.dockerignore` keeps out of
-		// the image — the client registry above all, which may hold client
-		// secrets. npm does not drop this name, but a `files` list or an
-		// `.npmignore` could, and the scaffold would then bake the registry
-		// into every image it builds. Asserted from the packed tarball for the
-		// same reason as `.gitignore` above.
-		const dockerignorePath = join(targetDir, ".dockerignore");
-		expect(existsSync(dockerignorePath)).toBe(true);
-		expect(readFileSync(dockerignorePath, "utf-8")).toMatch(/^config\/clients\.yaml$/m);
-
-		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
-		expect(pkg.name).toBe("my-test-project");
-		for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {
-			const deps = pkg[section] as Record<string, string> | undefined;
-			if (!deps) continue;
-			for (const [, version] of Object.entries(deps)) {
-				expect(version).not.toBe("workspace:*");
-			}
-		}
+		const files = filesUnder(join(byDefault, "my-test-project"));
+		expect(files).toContain("src/app.mts");
+		expect(files).toEqual(filesUnder(join(named, "my-test-project")));
 	}, 30_000);
+
+	it.each(REPOSITORY_TEMPLATES)(
+		"scaffolds the %s template when installed under a path containing 'node_modules'",
+		(template) => {
+			const projectCwd = join(workspace, `scaffold-cwd-${template}`);
+			mkdirSync(projectCwd);
+			execFileSync(
+				"node",
+				[join(installRoot, "dist", "cli.mjs"), "my-test-project", "--template", template],
+				{ cwd: projectCwd, encoding: "utf-8" },
+			);
+
+			const targetDir = join(projectCwd, "my-test-project");
+			expect(existsSync(targetDir)).toBe(true);
+			expect(existsSync(join(targetDir, "package.json"))).toBe(true);
+			expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
+			expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
+			// #556: the scaffold's vitest.config.mts loads this setup file, and vitest
+			// refuses to start without it — so the tarball has to carry it.
+			expect(existsSync(join(targetDir, "vitest.supertest-loopback.mts"))).toBe(true);
+			expect(readFileSync(join(targetDir, "vitest.config.mts"), "utf-8")).toContain(
+				'setupFiles: ["./vitest.supertest-loopback.mts"]',
+			);
+
+			// #407: the scaffold must arrive with a .gitignore, or the first
+			// `git add .` commits the `.env` and the signing key the README's own
+			// setup steps tell the operator to create right there. Asserted from
+			// the PACKED tarball rather than the working tree, because npm has a
+			// long history of dropping a file literally named `.gitignore` from a
+			// published package — a check against the repo would pass while every
+			// real `npx` scaffold shipped without one.
+			const gitignorePath = join(targetDir, ".gitignore");
+			expect(existsSync(gitignorePath)).toBe(true);
+			const gitignore = readFileSync(gitignorePath, "utf-8");
+			expect(gitignore).toContain(".env");
+			expect(gitignore).toContain("*.pem");
+			// `.env.example` is the documentation and must survive the `.env.*` rule.
+			expect(gitignore).toMatch(/^!\.env\.example$/m);
+
+			// #705: what `.gitignore` keeps out of git, `.dockerignore` keeps out of
+			// the image — the client registry above all, which may hold client
+			// secrets. npm does not drop this name, but a `files` list or an
+			// `.npmignore` could, and the scaffold would then bake the registry
+			// into every image it builds. Asserted from the packed tarball for the
+			// same reason as `.gitignore` above.
+			const dockerignorePath = join(targetDir, ".dockerignore");
+			expect(existsSync(dockerignorePath)).toBe(true);
+			expect(readFileSync(dockerignorePath, "utf-8")).toMatch(/^config\/clients\.yaml$/m);
+
+			const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
+			expect(pkg.name).toBe("my-test-project");
+			for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {
+				const deps = pkg[section] as Record<string, string> | undefined;
+				if (!deps) continue;
+				for (const [, version] of Object.entries(deps)) {
+					expect(version).not.toBe("workspace:*");
+				}
+			}
+		},
+		30_000,
+	);
 });
