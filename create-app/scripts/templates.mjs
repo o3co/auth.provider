@@ -84,7 +84,7 @@ export function copyTemplates(srcRoot, destRoot) {
 		const dest = resolve(destRoot, name);
 		cpSync(src, dest, { recursive: true, filter: shouldCopyFrom(src) });
 
-		// #407: npm drops a file literally named `.gitignore` from a published
+		// npm drops a file literally named `.gitignore` from a published
 		// package, so each template's copy is staged under a dot-less name and
 		// `scaffold()` renames it back when it writes the project. The source of
 		// truth stays `templates/<name>/.gitignore`, where it also does its own
