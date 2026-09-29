@@ -65,7 +65,7 @@ const refusedBecause = (reason: RegExp) => ({
 	cause: { message: expect.stringMatching(reason) },
 });
 
-describe("Google authorization response issuer (RFC 9207, #597)", () => {
+describe("Google authorization response issuer (RFC 9207)", () => {
 	it("accepts Google's own iss", async () => {
 		const { idp, provider } = await build();
 		const profile = await exchangeWith(provider, { iss: GOOGLE.issuer });

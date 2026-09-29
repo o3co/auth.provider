@@ -98,7 +98,7 @@ describe("createGoogleProvider on openid-client", () => {
 		// A scope that is not a string never reaches the adapter: openid-client
 		// refuses the answer first (google.token-snapshot.test.mts).
 		["no scope field at all", undefined, undefined],
-	])("forwards what Google says about scope: %s (#647)", async (_label, answered, expected) => {
+	])("forwards what Google says about scope: %s", async (_label, answered, expected) => {
 		// The route reads an ABSENT scope as "as requested" (RFC 6749 section 3.3)
 		// and a present one as what was granted. Flattening "present but names
 		// nothing" into absence would have it record every requested scope as
@@ -182,20 +182,17 @@ describe("createGoogleProvider on openid-client", () => {
 		["an explicitly empty scope, which `optionalString` would drop", "", ""],
 		["nothing usable, which is still an answer", "  ", "  "],
 		["no scope field at all", undefined, undefined],
-	])(
-		"refreshToken forwards what Google says about scope: %s (#647)",
-		async (_l, answered, expected) => {
-			mockRefreshTokenGrant.mockResolvedValueOnce({
-				access_token: "at2",
-				refresh_token: "rt2",
-				expires_in: 3600,
-				...(answered === undefined ? {} : { scope: answered }),
-			});
-			const p = createGoogleProvider(baseConfig);
-			const refreshed = await p.refreshToken("old-refresh");
-			expect(refreshed.scope).toBe(expected);
-		},
-	);
+	])("refreshToken forwards what Google says about scope: %s", async (_l, answered, expected) => {
+		mockRefreshTokenGrant.mockResolvedValueOnce({
+			access_token: "at2",
+			refresh_token: "rt2",
+			expires_in: 3600,
+			...(answered === undefined ? {} : { scope: answered }),
+		});
+		const p = createGoogleProvider(baseConfig);
+		const refreshed = await p.refreshToken("old-refresh");
+		expect(refreshed.scope).toBe(expected);
+	});
 
 	it("refreshToken returns a RefreshedTokens snapshot without sub (caller preserves stored sub)", async () => {
 		mockRefreshTokenGrant.mockResolvedValueOnce({
@@ -235,7 +232,7 @@ describe("createGoogleProvider on openid-client", () => {
 	// Google federation OIDC compliance (nonce, jwks_uri, alg pin)
 	// -----------------------------------------------------------------------
 
-	describe("PB-4: id_token verification + nonce binding", () => {
+	describe("id_token verification + nonce binding", () => {
 		// jwks_uri + alg pin in serverMetadata: without jwks_uri and
 		// id_token_signing_alg_values_supported, openid-client cannot verify the RS256
 		// signature. The alg list is locked to RS256 (no `none`/`HS256` confusion).
@@ -390,7 +387,7 @@ describe("createGoogleProvider on openid-client", () => {
 	// UserInfo sub binding (OIDC §5.3.2)
 	// -----------------------------------------------------------------------
 
-	describe("PB-5: UserInfo sub binding against id_token sub", () => {
+	describe("UserInfo sub binding against id_token sub", () => {
 		// When id_token has a sub, the route passes that sub (not skipSubjectCheck)
 		// as expectedSubject to fetchUserInfo. openid-client compares it against UserInfo.sub
 		// and throws on mismatch.
@@ -488,7 +485,7 @@ describe("createGoogleProvider on openid-client", () => {
 	});
 });
 
-describe("id_token signature verification is switched on (#542)", () => {
+describe("id_token signature verification is switched on", () => {
 	const config = {
 		clientId: "client-id",
 		clientSecret: "client-secret",
