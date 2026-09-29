@@ -144,8 +144,9 @@ tests fill the slot with instead of importing the owner's package. The session
 package's modules provide theirs: the session module `loginEntry` and
 `csrfGuard`, the login-completion module `loginCompletion`, the session store's
 module `sessionCookiePolicy`.
-`oauthTokenSettings`, `httpSettings` and `deploymentMode` are declared ahead of
-their providers, and their readers still read the configuration.
+`csrfTokenSigner`, `oauthTokenSettings`, `httpSettings` and `deploymentMode` are
+declared ahead of their providers, and their readers still read the
+configuration.
 
 | Slot | Type | Wiring | Declared in | Purpose |
 | --- | --- | --- | --- | --- |
