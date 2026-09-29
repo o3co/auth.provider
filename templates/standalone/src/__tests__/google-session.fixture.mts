@@ -37,6 +37,7 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
+	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -59,7 +60,7 @@ import express from "express";
 import request from "supertest";
 import { expect } from "vitest";
 import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
+import { resolveConfigPaths } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
@@ -127,7 +128,7 @@ function resolveConfig(google: GoogleWiring): AppConfig {
 		validate(
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 			AppConfigSchema,
 		),
 	) as AppConfig;

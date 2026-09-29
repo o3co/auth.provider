@@ -37,18 +37,17 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { type AppConfig, AppConfigSchema, type Module } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	AppConfigSchema,
+	coreReference,
+	type Module,
+} from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import {
-	readSwitches,
-	resolveConfigPaths,
-	resolveForBoot,
-	resolveLibraryReferenceConfPath,
-	SWITCHES,
-} from "../configPath.mjs";
+import { readSwitches, resolveConfigPaths, resolveForBoot, SWITCHES } from "../configPath.mjs";
 import { createAppLogger } from "../logger.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -88,7 +87,9 @@ function preParsed(environment: string, env: Readonly<Record<string, string>>): 
 	const read = (file: string) => parseFile(file, { env: { ...env } });
 	const [top, application] = ownFiles(environment) as [string, string];
 	return validate(
-		read(top).withFallback(read(application)).withFallback(read(resolveLibraryReferenceConfPath())),
+		read(top)
+			.withFallback(read(application))
+			.withFallback(read(fileURLToPath(coreReference()))),
 		AppConfigSchema,
 	);
 }

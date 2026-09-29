@@ -38,6 +38,7 @@ import { inspect } from "node:util";
 import {
 	type AppConfig,
 	AppConfigSchema,
+	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -52,7 +53,7 @@ import express from "express";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 import { repositoriesModule } from "../modules.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
@@ -106,7 +107,7 @@ const resolve = (env: Record<string, string>): AppConfig => {
 		validate(
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 			AppConfigSchema,
 		),
 	);

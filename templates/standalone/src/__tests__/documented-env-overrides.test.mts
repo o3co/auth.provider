@@ -18,15 +18,15 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppConfig, createApp, resolveAccessTokenLifetime } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	coreReference,
+	createApp,
+	resolveAccessTokenLifetime,
+} from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import {
-	readSwitches,
-	resolveConfigPaths,
-	resolveForBoot,
-	resolveLibraryReferenceConfPath,
-} from "../configPath.mjs";
+import { readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
 
 /**
  * #288 — boot the shipped config with EVERY documented override supplied the
@@ -390,7 +390,7 @@ function documentedInReadme(path: string = readmePath): Set<string> {
 function liveSubstitutions(): Set<string> {
 	const { applicationConfPath } = resolveConfigPaths(configDir, "production");
 	return new Set([
-		...substitutionsIn(resolveLibraryReferenceConfPath()),
+		...substitutionsIn(fileURLToPath(coreReference())),
 		...substitutionsIn(applicationConfPath),
 	]);
 }

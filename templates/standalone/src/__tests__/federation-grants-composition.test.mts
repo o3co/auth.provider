@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
+	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -43,7 +44,7 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 import { cleanupAllowanceFor, FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS } from "../shutdown.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
@@ -153,7 +154,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 		validate(
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 			AppConfigSchema,
 		),
 	);

@@ -15,12 +15,12 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
+import { type AppConfig, AppConfigSchema, coreReference } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 
 // config/ is two levels above this test file:
 //   src/__tests__/ → src/ → standalone/ → config/
@@ -38,7 +38,7 @@ const testEnv = {
 
 function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, env);
-	const libraryReferencePath = resolveLibraryReferenceConfPath();
+	const libraryReferencePath = fileURLToPath(coreReference());
 	const resolvedEnv = { ...testEnv, ...extraEnv };
 	return validate(
 		parseFile(envConfPath, { env: resolvedEnv })
@@ -169,7 +169,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 			// library layer has to hold that on its own — a composition root that
 			// forgets to override it must not thereby lose its audit trail.
 			const referenceOnly = validate(
-				parseFile(resolveLibraryReferenceConfPath(), { env: testEnv }),
+				parseFile(fileURLToPath(coreReference()), { env: testEnv }),
 				AppConfigSchema,
 			);
 			expect(referenceOnly.audit?.sink.type).toBe("console");

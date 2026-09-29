@@ -55,6 +55,7 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
+	coreReference,
 	createApp,
 	createKeyStoreFactory,
 	defineModule,
@@ -68,7 +69,7 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { resolveConfigPaths } from "../configPath.mjs";
 
 // The redis session-store builder dynamically imports these (#474 puts the
 // Redis session store in the baseline); mock them so no socket opens.
@@ -174,7 +175,7 @@ function resolveConfig(env: Record<string, string>): AppConfig {
 		validate(
 			parseFile(envConfPath, { env })
 				.withFallback(parseFile(applicationConfPath, { env }))
-				.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+				.withFallback(parseFile(fileURLToPath(coreReference()), { env })),
 			AppConfigSchema,
 		),
 	);
