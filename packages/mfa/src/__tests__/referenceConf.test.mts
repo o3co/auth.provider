@@ -31,7 +31,7 @@ import { AppConfigSchema } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MFA_DEVELOPMENT_SAMPLE_KEY, readMfaSettings } from "#/config.mjs";
+import { MFA_DEVELOPMENT_SAMPLE_KEY, readMfaSettings, readMfaTotpSettings } from "#/config.mjs";
 import { createMfaSealing } from "#/sealing.mjs";
 
 const require = createRequire(import.meta.url);
@@ -64,10 +64,11 @@ describe("the package's reference.conf (D19)", () => {
 
 	it("puts MFA_ENCRYPTION_KEY first in the ring, and defaults TOTP to on, SHA1, 6 digits, 30 s, a window of 1, the issuer's host", () => {
 		const key = randomBytes(32).toString("base64");
-		const settings = readMfaSettings(resolve({ MFA_ENCRYPTION_KEY: key }));
+		const config = resolve({ MFA_ENCRYPTION_KEY: key });
+		const settings = readMfaSettings(config);
 		expect(settings.encryptionKeys).toHaveLength(1);
 		expect(settings.encryptionKeys[0]?.key.equals(Buffer.from(key, "base64"))).toBe(true);
-		expect(settings.totp).toEqual({
+		expect(readMfaTotpSettings(config)).toEqual({
 			enabled: true,
 			algorithm: "SHA1",
 			digits: 6,
@@ -119,15 +120,11 @@ describe("the package's reference.conf (D19)", () => {
 	});
 
 	it("reads MFA_TOTP_ENABLED and MFA_TOTP_ISSUER", () => {
-		const settings = readMfaSettings(
-			resolve({
-				MFA_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
-				MFA_TOTP_ENABLED: "false",
-				MFA_TOTP_ISSUER: "Example Co",
-			}),
+		const totp = readMfaTotpSettings(
+			resolve({ MFA_TOTP_ENABLED: "false", MFA_TOTP_ISSUER: "Example Co" }),
 		);
-		expect(settings.totp.enabled).toBe(false);
-		expect(settings.totp.issuer).toBe("Example Co");
+		expect(totp.enabled).toBe(false);
+		expect(totp.issuer).toBe("Example Co");
 	});
 
 	it("keeps core's mfa.mode beside the package's keys", () => {

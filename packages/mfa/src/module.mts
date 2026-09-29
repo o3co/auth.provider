@@ -140,9 +140,20 @@ export function mfaBootState(factors: MfaFactorResolver): MfaBootState {
 export class MfaNoCountingFactorError extends RangeError {
 	readonly reason = "mfa-no-counting-factor";
 
-	constructor() {
+	/**
+	 * `enabledKinds`: the factors enabled, none of which counts — kinds core's
+	 * hint grammar has already admitted, so the message quotes nothing else.
+	 * The MFA module cannot tell which factor modules are installed (a
+	 * switched-off factor is absent from the resolver), so the TOTP factor's
+	 * key is named second, and only for a composition that installs it.
+	 */
+	constructor(enabledKinds: readonly string[]) {
+		const enabled =
+			enabledKinds.length === 0
+				? "no factor is enabled"
+				: `the enabled factors (${enabledKinds.join(", ")}) do not count`;
 		super(
-			'mfa.mode is "required", but no counting factor is enabled, so nobody could meet the requirement: enable one — mfa.factors.totp.enabled (MFA_TOTP_ENABLED), or another factor module\'s — or set mfa.mode = "optional"',
+			`mfa.mode is "required", but ${enabled}, so nobody could meet the requirement: enable an installed counting factor through its module's \`enabled\` key — for the TOTP factor, when mfaTotpFactorModule is installed, mfa.factors.totp.enabled (MFA_TOTP_ENABLED) — or set mfa.mode = "optional"`,
 		);
 		this.name = "MfaNoCountingFactorError";
 	}
@@ -200,7 +211,9 @@ function checkInstalledFactors(factors: MfaFactorResolver, mode: MfaRequirementM
 	}
 	const counting = installed.filter(([, factor]) => factor.counting).length;
 	if (counting > HINT_LIST_MAX) throw new MfaTooManyFactorsError(counting);
-	if (mode === "required" && counting === 0) throw new MfaNoCountingFactorError();
+	if (mode === "required" && counting === 0) {
+		throw new MfaNoCountingFactorError(installed.map(([kind]) => kind));
+	}
 }
 
 /** The page a step-up starts on: `endpoints.mfa.url` (D19), which core's reference.conf defaults. */

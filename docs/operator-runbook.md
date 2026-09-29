@@ -287,8 +287,11 @@ Module-level messages that arrive wrapped in a factory failure:
   hint list carries: enable fewer; and
   an `MfaNoCountingFactorError` `cause` whose `reason` is
   `mfa-no-counting-factor` — `mfa.mode = "required"` with no counting factor
-  enabled, which nobody could meet: turn one on (`mfa.factors.totp.enabled`,
-  `MFA_TOTP_ENABLED`) or set `optional`. Without a `userSessionStore` the
+  enabled, which nobody could meet: turn on an installed counting factor
+  through its module's `enabled` key (for the TOTP factor, when
+  `mfaTotpFactorModule` is installed, `mfa.factors.totp.enabled` /
+  `MFA_TOTP_ENABLED`), or set `optional`. The message names the enabled
+  factor kinds. Without a `userSessionStore` the
   module is refused at the requires-closure (`missing-required-component`),
   naming the slot. A requirement named `mfa` whose reach is not what the
   enabled factors reach is core's refusal (`contribute-factory-failed`,

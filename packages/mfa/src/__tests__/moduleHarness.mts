@@ -46,7 +46,7 @@ import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-sessio
 import express from "express";
 import request from "supertest";
 import { type Mock, vi } from "vitest";
-import { type MfaModuleOptions, mfaModules } from "#/module.mjs";
+import { type MfaModuleOptions, mfaModule, mfaModules } from "#/module.mjs";
 
 export const ISSUER = "https://auth.example";
 
@@ -188,6 +188,8 @@ export interface BootOptions {
 	readonly extraModules?: readonly Module[];
 	/** Leave the session package's login out: the MFA modules and their stores alone. */
 	readonly withoutLogin?: boolean;
+	/** Install `mfaModule` alone, without the TOTP factor's module: a composition whose factors are all another package's. */
+	readonly withoutTotpModule?: boolean;
 	readonly logger?: SpyLogger;
 }
 
@@ -224,7 +226,9 @@ export function modulesFor(options: BootOptions = {}): {
 				: [providing("test:user-session-store", { userSessionStore: () => userSessionStore })]),
 			providing("test:mfa-factor-store", { mfaFactorStore: () => factorStore }),
 			providing("test:mfa-transaction-store", { mfaTransactionStore: () => transactionStore }),
-			...mfaModules(options.options ?? { environment: "development" }),
+			...(options.withoutTotpModule === true
+				? [mfaModule(options.options ?? { environment: "development" })]
+				: mfaModules(options.options ?? { environment: "development" })),
 			...(options.extraModules ?? []),
 		],
 		factorStore,

@@ -236,22 +236,36 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 		expect((err.cause as Error).message).toMatch(/remove the MFA module/);
 	});
 
-	it("refuses required with no counting factor enabled — mfa-no-counting-factor, once the factors have registered — naming the mfa.factors.*.enabled keys", async () => {
+	it("refuses required with no counting factor enabled — mfa-no-counting-factor, once the factors have registered — telling the operator to enable an installed counting factor's module, the TOTP factor's key second", async () => {
 		const err = await refusal({ config: configFor("required", TOTP_OFF) });
 		expect(err.reason).toBe("contribute-factory-failed");
 		expect(err.details).toMatchObject({ module: "mfa", kind: "routes" });
 		expect(err.cause).toMatchObject({ reason: "mfa-no-counting-factor" });
 		const message = (err.cause as Error).message;
-		expect(message).toContain("mfa.factors.totp.enabled");
-		expect(message).toContain("MFA_TOTP_ENABLED");
+		expect(message).toContain("no factor is enabled");
+		expect(message).toContain("an installed counting factor through its module's `enabled` key");
+		expect(message).toContain(
+			"for the TOTP factor, when mfaTotpFactorModule is installed, mfa.factors.totp.enabled (MFA_TOTP_ENABLED)",
+		);
+		expect(message.indexOf("`enabled` key")).toBeLessThan(message.indexOf("MFA_TOTP_ENABLED"));
 	});
 
-	it("refuses required when every enabled factor is one that does not count", async () => {
-		const err = await refusal({
-			config: configFor("required", TOTP_OFF),
-			extraModules: [contributing(stubFactor("recovery_code", ["recovery"], { counting: false }))],
-		});
-		expect(err.cause).toMatchObject({ reason: "mfa-no-counting-factor" });
+	it("refuses required when every enabled factor is one that does not count, naming the enabled kinds — with the TOTP factor's module or without it", async () => {
+		for (const withoutTotpModule of [false, true]) {
+			const err = await refusal({
+				config: configFor("required", TOTP_OFF),
+				withoutTotpModule,
+				extraModules: [
+					contributing(stubFactor("recovery_code", ["recovery"], { counting: false })),
+				],
+			});
+			expect(err.cause, String(withoutTotpModule)).toMatchObject({
+				reason: "mfa-no-counting-factor",
+			});
+			expect((err.cause as Error).message, String(withoutTotpModule)).toContain(
+				"the enabled factors (recovery_code) do not count",
+			);
+		}
 	});
 
 	it("accepts required when a counting factor of another package's is the one enabled", async () => {
@@ -410,6 +424,63 @@ describe("the boot refusals (the MFA ADR's D20; the session-admission ADR's D7)"
 // ---------------------------------------------------------------------------
 // The development sample key
 // ---------------------------------------------------------------------------
+
+describe("the factors' sections are the factors' modules' to read (the module review of 2026-09-29)", () => {
+	/** An issuer with no host a TOTP issuer could default to: an IPv6 literal would put a colon in the otpauth label. */
+	const NO_TOTP_HOST = "https://[2001:db8::1]";
+	const withIssuer = (config: ReturnType<typeof configFor>, issuer: string) =>
+		({ ...config, oauth: { ...config.oauth, jwt: { ...config.oauth.jwt, issuer } } }) as never;
+
+	it("boots without the TOTP factor's module over another package's counting factor, though no TOTP issuer could be derived: a composition without TOTP is never refused over it", async () => {
+		const { handle } = await boot({
+			config: withIssuer(configFor("required"), NO_TOTP_HOST),
+			withoutTotpModule: true,
+			extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
+		});
+		expect(
+			[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+		).toEqual(["hwk", "mfa", "swk"]);
+	});
+
+	it("boots optional without the TOTP factor's module and without any factor, over the same configuration", async () => {
+		const { handle } = await boot({
+			config: withIssuer(configFor("optional"), NO_TOTP_HOST),
+			withoutTotpModule: true,
+		});
+		expect(handle.components.sessionRequirementResolver?.get("mfa")?.reach.size).toBe(0);
+	});
+
+	it("boots without the TOTP factor's module whatever mfa.factors.totp holds, or without it", async () => {
+		const totp = mfaSection("required").factors.totp;
+		for (const factors of [
+			{ totp: { ...totp, digits: 9 } },
+			{ totp: { ...totp, issuer: "a:b" } },
+			{ totp: { enabled: "yes" } },
+			undefined,
+		]) {
+			const { handle } = await boot({
+				config: configFor("required", { factors }),
+				withoutTotpModule: true,
+				extraModules: [contributing(stubFactor("webauthn", ["hwk", "swk"]))],
+			});
+			expect(
+				[...(handle.components.sessionRequirementResolver?.get("mfa")?.reach ?? [])].sort(),
+				JSON.stringify(factors),
+			).toEqual(["hwk", "mfa", "swk"]);
+		}
+	});
+
+	it("leaves the refusal to the TOTP factor's module when it is installed: the same issuer refuses the boot there, naming MFA_TOTP_ISSUER", async () => {
+		const err = await refusal({ config: withIssuer(configFor("required"), NO_TOTP_HOST) });
+		expect(err.reason).toBe("contribute-factory-failed");
+		expect(err.details).toMatchObject({
+			kind: "mfaFactors",
+			name: "totp",
+			module: "mfa-totp-factor",
+		});
+		expect((err.cause as Error).message).toContain("MFA_TOTP_ISSUER");
+	});
+});
 
 describe("the development sample key (D11, #473's rule)", () => {
 	const sample = () =>
