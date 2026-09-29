@@ -66,6 +66,7 @@ import {
 	type UserSessionStore,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
+import { unreadableModuleLeaves } from "@o3co/auth-provider-core/testing";
 import { DEVICE_CODE_GRANT_TYPE, deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import {
 	ACCESS_TOKEN_TYPE,
@@ -77,6 +78,7 @@ import {
 	authorize,
 	basic,
 	codeFrom,
+	composedModules,
 	contributionNames,
 	cookiesOf,
 	DISCOVERY_PATHS,
@@ -88,12 +90,14 @@ import {
 	JSON_TYPE,
 	KIB,
 	type ModuleOrder,
+	MULTI_ENV,
 	type OutageCase,
 	ownFiles,
 	padForm,
 	padJson,
 	REVERSED,
 	redeem,
+	resolveConfig,
 	SINGLE_ENV,
 	TEMPLATE_DEPENDENCIES,
 	TOO_LARGE,
@@ -119,6 +123,7 @@ import {
 	type FixtureCeremony,
 	type FullSet,
 	type FullSetOptions,
+	fullSetOptions,
 	GATEWAY,
 	GITHUB_LANDING,
 	REQUIRED_BINDER,
@@ -375,6 +380,20 @@ describe("the configuration createApp is handed reaches every loaded module whol
 		// And off where nothing says on: the grant is opt-in.
 		const unset = readSwitches(ownFiles(), { env: SINGLE_ENV });
 		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
+	});
+
+	it("reads every leaf a module declares from the string an environment variable carries, every store on Redis", async () => {
+		// Boot's parse is plain Zod: a bare boolean or number a module reads,
+		// with core's base not coercing the path first, would refuse `"false"`.
+		const options = await fullSetOptions({ stores: "redis" });
+		const switches = resolveConfig(MULTI_ENV);
+		const modules = composedModules(options.config ? options.config(switches) : switches, {
+			...options,
+			env: MULTI_ENV,
+			shippedRefreshTokenFamilyStore: true,
+		});
+		expect(modules.length).toBeGreaterThan(40);
+		expect(unreadableModuleLeaves(modules)).toEqual([]);
 	});
 
 	it("names no section as ignored: every one it is handed has an owner", async () => {
