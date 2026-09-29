@@ -66,7 +66,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { checkRequestOrigin } from "../csrf.mjs";
+import { checkNavigationOrigin } from "../csrf.mjs";
 import { type EstablishSessionStep, establishSession } from "../establish-session.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { consentedScope } from "../federations/consented-scope.mjs";
@@ -200,30 +200,6 @@ const readCsrfTrustedOrigins = (config: unknown): readonly string[] => {
 		?.session?.csrf;
 	const list = csrf?.trustedOrigins;
 	return Array.isArray(list) ? list.filter((o): o is string => typeof o === "string") : [];
-};
-
-/**
- * Whether a `?link=1` start carries positive evidence that the user asked for
- * it on this deployment's own pages (v0.13.0 audit).
- *
- * Fetch Metadata answers first where the browser sends it: `same-origin` is a
- * page of this origin, `none` a typed URL or a bookmark — no page sent the
- * browser — and `cross-site` is refused. `same-site` is not enough on its own:
- * it is the registrable domain, so a user-controlled sibling such as
- * `blog.example.com` sends it too. That, an absent header (a browser predating
- * Fetch Metadata still carries the SameSite=Lax cookie on a cross-site
- * navigation) and a value this code does not know all fall to the origin the
- * request names, held to the same rule as the session CSRF guard: this origin
- * or one on `session.csrf.trustedOrigins`. A GET navigation sends no `Origin`,
- * so that is the `Referer` — and a missing one is refused, because the
- * navigating page chooses its own referrer policy.
- */
-const isLinkStartTrusted = (req: Request, trustedOrigins: readonly string[]): boolean => {
-	const site = req.get("sec-fetch-site");
-	if (site === "same-origin" || site === "none") return true;
-	if (site === "cross-site") return false;
-	const verdict = checkRequestOrigin(req, trustedOrigins);
-	return verdict === "same-origin" || verdict === "trusted";
 };
 
 /**
@@ -1441,10 +1417,12 @@ export const createRouter = (
 				// session cookie is SameSite=Lax, which a top-level cross-site
 				// navigation carries; paired with a login CSRF at the IdP, a forced
 				// `?link=1` would link the attacker's identity to the victim's
-				// account (v0.13.0 audit). See `isLinkStartTrusted` for what counts
-				// as evidence. An ordinary login start is not held to this: an RP on
-				// another domain starting a federated login is the normal shape.
-				if (!isLinkStartTrusted(req, linkTrustedOrigins)) {
+				// account (v0.13.0 audit). What counts as evidence is the navigation
+				// rule of the session's CSRF policy (`checkNavigationOrigin`, the
+				// `csrfGuard` slot's `checkNavigation`). An ordinary login start is
+				// not held to this: an RP on another domain starting a federated
+				// login is the normal shape.
+				if (checkNavigationOrigin(req, linkTrustedOrigins).outcome !== "accepted") {
 					logger.warn(
 						{
 							provider: provider.name,
