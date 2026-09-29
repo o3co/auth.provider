@@ -112,6 +112,7 @@ export default defineConfig({
 				// tsconfig.test.json.
 				"src/token-settings/__tests__/**/*.test.mts",
 				"src/browser-session/__tests__/**/*.test.mts",
+				"src/deployment/__tests__/**/*.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

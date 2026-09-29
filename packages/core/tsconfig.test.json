@@ -68,7 +68,8 @@
 		// The slots modules share what one of them owns through (#728); paired
 		// with vitest.config.mts.
 		"src/token-settings/**/*.mts",
-		"src/browser-session/**/*.mts"
+		"src/browser-session/**/*.mts",
+		"src/deployment/**/*.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
