@@ -16,8 +16,8 @@
 
 /**
  * The session package's `loginEntry`: the deployment's login page
- * (`endpoints.login.url`) and the `redirect_to` protocol `/authorize` and
- * the federation-grants connect flow send a browser there by. It holds the
+ * (`endpoints.login.url`) and the `redirect_to` protocol by which `/authorize`
+ * and the federation-grants connect flow send a browser to it. It holds the
  * page to the rules `/authorize`'s own login redirect keeps (oauth's
  * configSchema and `loginRedirect`). With no login page configured it is
  * still built, so a composition that installs a consumer and never sends a

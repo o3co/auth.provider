@@ -26,8 +26,8 @@
  * process open. The count bounds the work per write; the floor bounds the
  * O(size) scans per second, and runs on the monotonic clock so a wall clock
  * stepped back cannot stall sweeps (expiry itself stays on the wall clock).
- * The resident set is the live entries plus at most those that expired
- * within one interval.
+ * Between sweeps, entries that have expired stay resident: however many
+ * expire before the next write that meets both the count and the floor.
  */
 
 /**

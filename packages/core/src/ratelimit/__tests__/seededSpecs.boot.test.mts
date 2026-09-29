@@ -21,9 +21,9 @@
  *
  * Absent — the section not given, a module not loaded — seeds nothing, and
  * the prefix runs on the adapter's default. Present but not a spec a limiter
- * can apply is a configuration someone wrote, so it must refuse to boot,
- * naming the config key, not the limiter — by the schema core's composed
- * parse applies to each section it mirrors, before any seed is read.
+ * can apply is a configuration someone wrote, so it must refuse to boot and
+ * name the config key, not the limiter. Core's composed parse refuses it with
+ * the schema of the section that holds it, before any seed is read.
  */
 
 import express, { Router } from "express";
