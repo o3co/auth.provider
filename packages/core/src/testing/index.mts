@@ -98,6 +98,11 @@ export {
 	type TestCsrfGuardOptions,
 } from "./slots/csrfGuard.mjs";
 export {
+	type CsrfTokenSignerContractInput,
+	createTestCsrfTokenSigner,
+	csrfTokenSignerContract,
+} from "./slots/csrfTokenSigner.mjs";
+export {
 	type DeploymentModeContractInput,
 	deploymentModeContract,
 } from "./slots/deploymentMode.mjs";

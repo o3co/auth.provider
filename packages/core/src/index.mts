@@ -176,6 +176,7 @@ export {
 // configuration.
 export type {
 	CsrfGuard,
+	CsrfTokenSigner,
 	CsrfVerdict,
 	LoginEntry,
 	NavigationVerdict,
