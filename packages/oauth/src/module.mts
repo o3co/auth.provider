@@ -35,8 +35,9 @@ import { createOAuthRouter } from "./routes.mjs";
 
 /**
  * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
- * unconditionally reads `config.endpoints.login.url` to build the redirect
- * for unauthenticated requests (`routes.mts:339`). The base
+ * reads `config.endpoints.login.url` to build the redirect for
+ * unauthenticated requests when no module provides the `loginEntry` slot,
+ * and the session module builds that slot from the same key (#728). The base
  * `endpoints.login.url` is `z.string().optional()` in `CoreConfigSchema`
  * (production defaults are supplied via HOCON env-var substitution
  * `${?ENDPOINTS_LOGIN_URL}`), but a config that omits the env var passes

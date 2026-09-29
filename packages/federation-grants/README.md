@@ -26,7 +26,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
 - client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`;
-- the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, `endpoints.login.url`);
+- the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, and the login page through the `loginEntry` slot its session module provides);
 - whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 
 **Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
@@ -72,7 +72,7 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store: `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
-Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, a `loginEntry` (the session module's, which needs `endpoints.login.url`), a `userSessionStore` (what session admission reads), and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -529,15 +529,19 @@ and plain text, never a JSON body.
 1. A prefetch parks nothing (`204`).
 2. An unknown, spent or expired handle: `400`, plain.
 3. Not signed in: `303` to `endpoints.login.url?redirect_to=<this link>` —
-   the handle and nothing else from the original query. It is `/oauth/authorize`'s
-   login round trip: the login page signs the user in and then returns the
-   browser to `redirect_to` **verbatim** itself. It is not a value to post as
-   `redirect_to` to `POST /session/login`, whose exact-match allowlist names
-   fixed landing pages and would refuse this link — as it would refuse an
-   authorize URL — for carrying a per-flow handle. Core's schema leaves
-   `endpoints.login.url` optional and only `oauthModule` requires it, so an
-   enabled deployment without it is refused at boot rather than answering
-   this step with a 500.
+   the handle and nothing else from the original query — built by the
+   `loginEntry` slot the session module provides
+   ([#728](https://github.com/o3co/auth.provider/issues/728)). It is
+   `/oauth/authorize`'s login round trip: the login page signs the user in
+   and then returns the browser to `redirect_to` **verbatim** itself. It is
+   not a value to post as `redirect_to` to `POST /session/login`, whose
+   exact-match allowlist names fixed landing pages and would refuse this
+   link — as it would refuse an authorize URL — for carrying a per-flow
+   handle. The slot is optional in the manifest and required once grants are
+   enabled, and core's schema takes an empty `endpoints.login.url` that only
+   `oauthModule` refuses, so an enabled deployment without the slot, or
+   without a login page, is refused at boot rather than answering this step
+   with a 500.
 4. Signed in as someone other than the intent's subject: `403`, plain, and no
    redirect anywhere.
 5. Session admission does not admit the session — the durable session is

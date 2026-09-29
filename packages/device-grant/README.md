@@ -22,16 +22,16 @@ Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed bu
 - the verification page — the deployment's ([below](#the-library-provides-the-api-the-deployment-provides-the-page));
 - the `DeviceCodeStore` port, the code generators and the memory adapter — `@o3co/auth-provider-core`; the Redis adapter — `@o3co/auth-provider-redis` ([Storage](#storage));
 - `/oauth/token` and client authentication — `@o3co/auth-provider-oauth`;
-- the browser session, login and the CSRF policy — `@o3co/auth-provider-session`; whether the session behind the cookie may act — core's session admission (`admitSession`), which reads the `UserSession` store (core's port, filled by a session-store module), the subject's sessions boundary and the registered session requirements;
+- the browser session, login and the CSRF policy — `@o3co/auth-provider-session`, whose session module provides the policy as the `csrfGuard` slot; whether the session behind the cookie may act — core's session admission (`admitSession`), which reads the `UserSession` store (core's port, filled by a session-store module), the subject's sessions boundary and the registered session requirements;
 - the rate limiter and the seeding of its budget — core's and Redis's limiter modules;
 - what a log line may carry of an error — core's `loggableError`, which both routes log their failures through.
 
-**Why a separate package, and why it depends on two siblings.** Most deployments authorize no devices, so the grant and its routes are a package a deployment adds rather than a part of every token endpoint; the store port sits in core so that a store adapter depends on core and never on this package. The package itself sits on top of two sibling packages, and takes one piece from each so that there is one implementation rather than two that can drift:
+**Why a separate package, and what it takes from its siblings.** Most deployments authorize no devices, so the grant and its routes are a package a deployment adds rather than a part of every token endpoint; the store port sits in core so that a store adapter depends on core and never on this package. It takes two pieces from sibling packages, so that there is one implementation rather than two that can drift:
 
-- from `@o3co/auth-provider-oauth`, `createClientAuthMiddleware` — `/oauth/device_authorization` authenticates a client exactly as `/oauth/token` does, `private_key_jwt` and its `replaySeenSet` included;
-- from `@o3co/auth-provider-session`, the CSRF guard (`createCsrfGuard`, `createCsrfProtectionFromConfig`) — the verification endpoint runs the policy `POST /session/login` runs ([below](#post-oauthdeviceverification)).
+- from `@o3co/auth-provider-oauth`, `createClientAuthMiddleware` — `/oauth/device_authorization` authenticates a client exactly as `/oauth/token` does, `private_key_jwt` and its `replaySeenSet` included. An import that predates [#728](https://github.com/o3co/auth.provider/issues/728)'s rule that a package imports only core, tolerated until a slot replaces it; `@o3co/auth-provider-oauth` is a peer dependency;
+- from `@o3co/auth-provider-session`, the CSRF guard — the verification endpoint runs the policy `POST /session/login` runs ([below](#post-oauthdeviceverification)) — through the `csrfGuard` slot its session module provides, whose contract is core's. This package does not import the session package.
 
-Neither sibling imports this package. Both are peer dependencies, installed whether or not the composition mounts their modules.
+Neither sibling imports this package.
 
 ## The flow
 
@@ -59,9 +59,11 @@ Neither sibling imports this package. Both are peer dependencies, installed whet
 npm install @o3co/auth-provider-device-grant @o3co/auth-provider-core @o3co/auth-provider-oauth @o3co/auth-provider-session express
 ```
 
-Peer dependencies: `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
-`@o3co/auth-provider-session` and `express@^5.0.0`. The package depends on
-`zod`.
+Peer dependencies: `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`
+and `express@^5.0.0`. The package depends on `zod`.
+`@o3co/auth-provider-session` is what provides the `csrfGuard` slot an
+enabled grant requires; a composition that provides it otherwise does not
+need it.
 
 Its defaults ship as HOCON in [`config/reference.conf`](config/reference.conf)
 (exported as `@o3co/auth-provider-device-grant/reference.conf`). Layer it
@@ -115,7 +117,8 @@ const handle = await createApp({
     // deployment with its own login must do all of what they do: create a
     // `UserSession` in the userSessionStore, and write `isAuthenticated`,
     // `user.id` (the record's `sub`) and that record's `sid` on the session —
-    // the route answers anything less `401 login_required`.
+    // the route answers anything less `401 login_required`. It also provides
+    // the csrfGuard slot the verification route requires once the grant is on.
     sessionModule,
     // Dev-only; a scaled deployment wires `redisDeviceCodeStoreModule` from
     // `@o3co/auth-provider-redis` instead — see "Storage".
@@ -135,7 +138,7 @@ const handle = await createApp({
 });
 ```
 
-The verification route's CSRF guard is built from the `session.*` config slice — see [JSON only, behind the session CSRF guard](#post-oauthdeviceverification). An enabled grant needs `oauthModule` (or another token endpoint dispatching through core's grant registry) in the same composition: the module boots without one, but the device codes it hands out could never be redeemed. [`composition.test.mts`](./src/__tests__/composition.test.mts) boots this composition through `createApp`, with the repositories stubbed and the rest real. The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) shows the full order of a real composition root; it does not mount this grant.
+The verification route's CSRF guard is the `csrfGuard` slot `sessionModule` provides — see [JSON only, behind the session CSRF guard](#post-oauthdeviceverification). An enabled grant needs `oauthModule` (or another token endpoint dispatching through core's grant registry) in the same composition: the module boots without one, but the device codes it hands out could never be redeemed. [`composition.test.mts`](./src/__tests__/composition.test.mts) boots this composition through `createApp`, with the repositories stubbed and the rest real. The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) shows the full order of a real composition root; it does not mount this grant.
 
 ### Beside `oauthModule`
 
@@ -176,13 +179,13 @@ Requires an authenticated end-user session that session admission admits for the
 
 Errors: `400 invalid_request` (`malformed_body` for JSON the parser cannot read; otherwise a missing or unknown `action`), `401 login_required` (no authenticated session — "session identifier (sid) is required" for one with no `sid` — one whose `UserSession` has ended, expired or that the subject's sessions boundary covers, or one a session requirement asks to sign in again), `403 access_denied` (CSRF; or, under `oauth.requireEmailVerified`, an `approve` from a user without a verified email), `403 step_up_required` (a session requirement asks for a step-up; `requirement` names it and `page` is where the step-up starts), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a JSON body over 16 KiB), `415 invalid_request` (a body that is not `application/json`; `unsupported_encoding` for a charset or `Content-Encoding` the parser cannot decode), `429 slow_down`, `500 server_error` (`unexpected_error`, logged as `device_route_unexpected_error`), `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`), `503 temporarily_unavailable` (the device-code store cannot be read or written, logged as `device_verification_store_unavailable`, see [Storage](#storage); or session admission could not answer — "session store unavailable" for the user-session store, "revocation store unavailable" for the subject's sessions boundary, "session requirement unavailable" for a session requirement (core's `describeAdmissionOutage`) — logged by admission as `session_admission_unavailable`).
 
-**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule is the endpoint's wherever it is mounted ([Beside `oauthModule`](#beside-oauthmodule)). And the route runs the same `createCsrfGuard` as `POST /session/login`:
+**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule is the endpoint's wherever it is mounted ([Beside `oauthModule`](#beside-oauthmodule)). And the route runs the guard `POST /session/login` runs — the `csrfGuard` slot the session module provides ([#728](https://github.com/o3co/auth.provider/issues/728), #710 C4):
 
 - a foreign `Origin` / `Referer` is refused with `403 access_denied` and logged as `csrf_origin_rejected`;
 - the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
 - a request with no origin signal at all (a non-browser client) must present the signed double-submit token from `GET /session/csrf`: the `<session.name>.csrf` cookie echoed in the `x-csrf-token` header.
 
-The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
+**Enabling the grant requires a `csrfGuard` component**, so boot fails without one, naming it. The slot is optional in the manifest, so a deployment that leaves the grant off needs none. One CSRF policy for the product, read through its contract in core, not a second origin check that can drift from it — and not a guard rebuilt from the session's configuration: this package reads no `session.*` key.
 
 **The checks run in this order:** the declared body size (`413`), the JSON parser (`413` for a chunked body over the bound, `415 unsupported_encoding` for one it cannot decode, `400 malformed_body` for one it cannot read), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`), the action (`400`), session admission (`401 login_required`, `403 step_up_required`, or `503` when it cannot answer), the email gate on `approve` (`403`), the budget (`429`, or the limiter outage's `503`) and the code. So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`. The action comes before the session too, since it names what admission is asked about: an unknown action is `400` whether or not the cookie is signed in, and whether or not the session store can answer.
 

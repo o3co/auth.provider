@@ -14,7 +14,8 @@
 
 **持つもの:**
 
-- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`、および `@o3co/auth-provider-device-grant` が再利用する export 済みのガード）。ログインのレート制限ガードの配線（`rateLimit.login`）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
+- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`）— 他のパッケージは `csrfGuard` スロットを通してこれを実行する。ログインのレート制限ガードの配線（`rateLimit.login`）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
+- 二つのモジュールが、契約が core にあるスロットを通して他のパッケージに提供するもの（[#728](https://github.com/o3co/auth.provider/issues/728)）: `csrfGuard`、`loginEntry`、`loginCompletion`、そして `sessionCookiePolicy` — [後述](#モジュールが他のパッケージに提供するもの)。
 - フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
 - `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
 - express-session ミドルウェア、その cookie、そのストア（`session.*`、`session.storage.*`）。
@@ -35,7 +36,7 @@
 - ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別であり、`extractFederationSection` はルーターがコールバック URL を読むのと同じ設定の形を読む。どちらもルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
 - ストア: `req.session` そのものであり、それを書くのはここのルートである。フェデレーションルーターは `form_post` トランザクションも同じストアに置く。`sessionModule` とは別のモジュールになっているのは、他のパッケージがこれらのルートなしに `req.session` を読むから — `oauth` の `/authorize`・同意・ログアウト、`device-grant` の検証ページ、`federation-grants` のブラウザ向けルート — であり、独自のログインを持つデプロイはストアだけをインストールする。
 
-**ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/establish-session.mts`](src/establish-session.mts) は二つのルーターが共有するログインの末尾。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取りと `User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
+**ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/establish-session.mts`](src/establish-session.mts) は二つのルーターが共有するログインの末尾。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取りと `User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。[`src/login-entry.mts`](src/login-entry.mts)、[`src/login-completion.mts`](src/login-completion.mts)、[`src/session-cookie-policy.mts`](src/session-cookie-policy.mts) は、CSRF ガードのほかにモジュールが他のパッケージに提供するもの。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
 
 ## インストール
 
@@ -71,6 +72,19 @@ const handle = await createApp({
 ```
 
 完全な組み立ては standalone テンプレートの [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) にある。
+
+### モジュールが他のパッケージに提供するもの
+
+パッケージは core だけを import する（[#728](https://github.com/o3co/auth.provider/issues/728)）ので、他のパッケージがブラウザセッションについて必要とするものは、契約が core にあるスロットを通して届く（[`core/src/browser-session/types.mts`](../core/src/browser-session/types.mts)、[`core/src/session-admission/login-completion.mts`](../core/src/session-admission/login-completion.mts)）。各提供者は、このパッケージのテストで core の契約スイートを実行する。
+
+| スロット | 提供者 | 内容 | 読む側 |
+| --- | --- | --- | --- |
+| `csrfGuard` | `sessionModule` | `POST /session/login` が実行する [CSRF ポリシー](#状態変更ルートの-csrf-対策): 状態を変えるリクエストには `check` と `middleware` — 同じ `403 access_denied` と同じログ行 — フローを始めるナビゲーションには `checkNavigation`（[アカウントリンクの開始](#フェデレーション間のアカウントリンク482)の規則）、そして `issue`。トークンのフォームフィールドは `csrf_token`。 | デバイス検証（グラントが有効なとき） |
+| `loginEntry` | `sessionModule` | ログインページ `endpoints.login.url` と、ページ自身のクエリに `redirect_to` を加える `urlFor(returnTo)`。ページが設定されていなくても作られ、ページが読まれる場所で失敗する。 | モジュールが提供していれば `/authorize`。federation-grants の connect フロー（グラントが有効なとき） |
+| `loginCompletion` | `sessionModule` | [`establishSession`](#セッションの確立) と [`answerInterruption`](#requirement-がログインを中断するとき)。モジュールが require するセッションストア、`session.maxAge`、その CSRF ガードの上に作られる。 | requirement の完了処理（MFA パッケージのもの） |
+| `sessionCookiePolicy` | セッションストアのモジュール | express-session に渡すとおりのセッション cookie の名前、`secure`、`sameSite`、ドメイン、寿命。ブラウザが捨てる cookie は拒否する。 | バンドルされたものはまだない |
+
+CSRF トークンの鍵は `session.secret` から導出され、`session.secret` はセッションストアのモジュールが所有する。`session` が二つのモジュールの読む一つのセクションである間は、session モジュールがルートと同じくそこから導出する。セッションストアの設定が独自のセクションになる前に、鍵はセッションストアが提供する狭いスロットを通してガードに届くようになり、secret は所有者の外に出ない。`sessionModule` なしで `csrfGuard` を提供する組み立ては `createSessionCsrfGuard` で作る。
 
 ## ブラウザセッションストア
 
@@ -130,7 +144,7 @@ const handle = await createApp({
 
 `UserSession` は書かれない。セッションは後で requirement の完了ルートが確立する: core の `resumePrimary` でログインを再開し（このログインでまだ済んでいない requirement に順に問い合わせる — 完了した requirement には二度と問い合わせない）、それが答える establishment で [`establishSession`](#セッションの確立) を呼ぶ — 別の requirement が中断すれば、それをログインとまったく同じように返す。再生成、例外を投げるか core が拒否する本文を返す `open`、失敗した保存は、いずれもリクエストの cookie セッションを手放し何も確立しない `503 temporarily_unavailable` で、`login_store_unavailable`（`store: "cookie_session"` と `step` `regenerate` か `save`、または requirement の名前と `step: "open"`）として一度だけログに出る。保存に失敗したあとは、requirement のレコードは、どのブラウザも持たないセッション id に束縛されたまま、自身の有効期限に任される。`403` がパスワードを持つ者にパスワードが正しかったことを伝えるのは受け入れている（MFA の ADR の D23）。
 
-この手順と失敗時の応答は、パッケージが export する一つの関数 `answerInterruption(admission, { req, res, csrf, reporter })`（[`src/answer-interruption.mts`](src/answer-interruption.mts)）である。ログインのルートがこれを呼び、`resumePrimary` が別の中断を答えたときは requirement の完了ルートも呼ぶ。応答 — 渡された `CsrfProtection` による新しいトークンを伴う `403`、または `503` — を送り、失敗は呼び出し側の reporter に一度だけ（上と同じ `store` と `step` で）伝えるので、各呼び出し側は自分の語彙でログを出す。送ったもの（`answered`、またはストアとステップを伴う `unavailable`）を答える。`admitPrimary` か `resumePrimary` が答えた中断でないもの — core の `isInterruptAdmission` によるので、そのコピーやそれに似せたオブジェクトも — は、セッションに触れる前に `RangeError` になる。完了ルートは `CsrfProtection` を `createCsrfProtectionFromConfig(config.session)` で作る: トークンは保存されず署名されるので、これとログインのルーターのものは互いのトークンを受け入れる。
+この手順と失敗時の応答は、パッケージが export する一つの関数 `answerInterruption(admission, { req, res, csrf, reporter })`（[`src/answer-interruption.mts`](src/answer-interruption.mts)）である。ログインのルートがこれを呼び、`resumePrimary` が別の中断を答えたときは requirement の完了ルートも呼ぶ。応答 — 渡された `CsrfProtection` による新しいトークンを伴う `403`、または `503` — を送り、失敗は呼び出し側の reporter に一度だけ（上と同じ `store` と `step` で）伝えるので、各呼び出し側は自分の語彙でログを出す。送ったもの（`answered`、またはストアとステップを伴う `unavailable`）を答える。`admitPrimary` か `resumePrimary` が答えた中断でないもの — core の `isInterruptAdmission` によるので、そのコピーやそれに似せたオブジェクトも — は、セッションに触れる前に `RangeError` になる。requirement の完了処理は `loginCompletion` スロットを通してこれに到達し、その応答は session モジュールの CSRF ガードのトークンを伴う。関数を直接呼ぶ側は `issue` を持つもの — ログインのルートの `CsrfProtection`、または `csrfGuard` — を渡す。トークンは保存されず署名されるので、一つの設定から作ったガードは互いのトークンを受け入れる。
 
 ### セッションの確立
 
@@ -177,7 +191,7 @@ const handle = await createApp({
 
 トークンは乱数 nonce と有効期限（`session.csrf.ttlSeconds`）に対する署名付きでステートレスな HMAC で、鍵は `session.secret` の HKDF 展開 — 親ドメインの cookie を書けるサブドメインでも偽造できない。クロスオリジンのログイン UI は自身のオリジンを `session.csrf.trustedOrigins` に載せる。`cors.allowedOrigins` は CSRF の信頼を与えない。
 
-`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler` は、独自のログインページをマウントしたり独自のルートを保護したりする組み立てのために export されている（[`src/csrf.mts`](src/csrf.mts)）。`@o3co/auth-provider-device-grant` はこれらで検証ページを守っている。
+他のパッケージはこのポリシーを import せず、`sessionModule` が提供する `csrfGuard` スロットを通して実行する — デバイス検証はその `middleware` をマウントする。`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler`、`createSessionCsrfGuard` は、独自のログインページをマウントしたり独自のルートを保護したりする組み立てのために export されている（[`src/csrf.mts`](src/csrf.mts)）。
 
 ### セッションが認証について記録するもの
 
@@ -478,6 +492,7 @@ export const exampleFederationModule = defineModule({
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | 二つの組み込みストア、`session-store` の readiness probe、Redis クライアントのエラーリスナー |
 | [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | 実際の express-session と connect-redis の下で cookie セッションのストアが失敗するとき: ミドルウェアの `503` とその 1 行、そしてルートが答えた障害が一度だけ答えられ、セッションが書き直されないこと |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | 署名付きトークン、オリジン検査、ガードの受理規則 |
+| [`src/__tests__/csrfGuard.test.mts`](src/__tests__/csrfGuard.test.mts)、[`loginEntry.test.mts`](src/__tests__/loginEntry.test.mts)、[`loginCompletion.test.mts`](src/__tests__/loginCompletion.test.mts)、[`sessionCookiePolicy.test.mts`](src/__tests__/sessionCookiePolicy.test.mts) | モジュールが他のパッケージに提供するもの: それぞれ core の契約を守ること、モジュールが提供すること、ガードが `/session/login` のものと同じく応答・ログし `GET /session/csrf` が渡すトークンを受け入れること、ログインエントリがページなしで作られ読まれる場所で失敗すること |
 | [`src/__tests__/establish-session.test.mts`](src/__tests__/establish-session.test.mts) | ログインの末尾: 書くもの（establishment の primary だけ、そして偽の establishment の拒否）、その手順、各書き込みに渡すもの、失敗しうるあらゆる点でのロールバック |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、障害時の応答とそのログ 1 行、ログインのレート制限ガード |
 | [`src/routes/__tests__/Session.loginAdmission.test.mts`](src/routes/__tests__/Session.loginAdmission.test.mts) | セッションアドミッション上のパスワードログイン: requirement に問われること、各 outcome への応答、中断の二段階と再生成以降の各失敗への応答。単独の `answerInterruption` — その応答、各失敗での reporter と答え、拒否するもの |

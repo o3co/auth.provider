@@ -133,6 +133,12 @@ const csrfGuardOf = (config: AppConfig, logger: Logger): CsrfGuard => {
  *   - "federationRedirectPolicyResolver" — synthetic per A5 §7 (planner-derived
  *     from `federationRedirectPolicies.<name>` contributions).
  *
+ * `provides` (#728) — what other packages need of the browser session,
+ * through slots whose contracts are core's, so that none imports this
+ * package: `csrfGuard` (the guard these routes run), `loginEntry` (the login
+ * page and its `redirect_to` protocol) and `loginCompletion` (the tail of a
+ * login, for a requirement's completion).
+ *
  * `providerCallbackUrls` is derived from `config.federations` inside the
  * federation-routes lambda — a route-local config projection, not a synthetic
  * key. Per A2-γ §11.5 synthetic keys are reserved for planner projections of

@@ -84,10 +84,13 @@ export type NavigationVerdict =
  *   or `Referer` the request names is held to this origin and the trusted
  *   ones, and a request that names neither is refused.
  *
- * Open (#728): the token's signing key is derived from the session
- * cookie's secret, which the session store's module owns, while the
- * session module provides the guard; how the key reaches the guard's
- * provider is decided with the provider.
+ * The token's signing key is derived from the session cookie's secret,
+ * which the session store's module owns, while the session module provides
+ * the guard (#728): the session module derives it from the `session`
+ * section the two modules still share, and before the session store's
+ * configuration becomes a section of its own the key reaches the guard
+ * through a narrow slot the session store provides, so that the secret
+ * never leaves its owner.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -146,7 +149,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly loginEntry?: LoginEntry;
 		/** The one browser-origin / CSRF policy (#728, #710): provided by the session module. */
 		readonly csrfGuard?: CsrfGuard;
-		/** The session cookie's attributes (#728): provided by the module that owns the session cookie. */
+		/** The session cookie's attributes (#728): provided by the session store's module, which owns the session cookie. */
 		readonly sessionCookiePolicy?: SessionCookiePolicy;
 	}
 }
