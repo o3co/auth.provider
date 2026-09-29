@@ -26,6 +26,7 @@ import { z } from "zod";
 import {
 	outputKinds,
 	pickConfigSchema,
+	readsEnvironmentString,
 	schemasAtPath,
 	unreadableLeafPaths,
 } from "#/config/schema-path.mjs";
@@ -130,5 +131,47 @@ describe("pickConfigSchema — the schema of the paths read alone", () => {
 				new RangeError(`cannot read "${path}": not a dot-separated path of non-empty keys`),
 			);
 		}
+	});
+});
+
+describe("readsEnvironmentString — every scalar type classified, an unknown one refused", () => {
+	it.each([
+		["a string", z.string()],
+		["an enum", z.enum(["memory", "redis"])],
+		["a string literal", z.literal("on")],
+		["a template literal", z.templateLiteral(["v", z.number()])],
+		["z.coerce.string()", z.coerce.string()],
+		["z.coerce.number()", z.coerce.number()],
+		["z.coerce.boolean()", z.coerce.boolean()],
+		["z.coerce.bigint()", z.coerce.bigint()],
+		["z.coerce.date()", z.coerce.date()],
+		["any", z.any()],
+		["unknown", z.unknown()],
+	])("reads the string with %s", (_label, schema) => {
+		expect(readsEnvironmentString(schema)).toBe(true);
+	});
+
+	it.each([
+		["a boolean", z.boolean()],
+		["a number", z.number()],
+		["a bigint", z.bigint()],
+		["a date", z.date()],
+		["null", z.null()],
+		["undefined", z.undefined()],
+		["void", z.void()],
+		["never", z.never()],
+		["NaN", z.nan()],
+		["a symbol", z.symbol()],
+		["a custom schema", z.custom<string>((value) => typeof value === "string")],
+		["a map", z.map(z.string(), z.string())],
+		["a set", z.set(z.string())],
+		["a tuple", z.tuple([z.string()])],
+		["a numeric literal", z.literal(1)],
+	])("does not read the string with %s", (_label, schema) => {
+		expect(readsEnvironmentString(schema)).toBe(false);
+	});
+
+	it("reports a leaf of a type it does not read, in an object", () => {
+		expect(unreadableLeafPaths(z.object({ value: z.date(), name: z.string() }))).toEqual(["value"]);
 	});
 });
