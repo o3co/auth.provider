@@ -34,12 +34,6 @@ import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
 import {
-	type AccessTokenLifetimeSource,
-	type RefreshTokenLifetimeSource,
-	resolveAccessTokenLifetime,
-	resolveRefreshTokenLifetime,
-} from "../config/application.schema.mjs";
-import {
 	defineConfigKey,
 	isPlainConfigObject,
 	operatorPath,
@@ -60,6 +54,10 @@ import type {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import {
+	lifetimeBeyondConfiguration,
+	lifetimeBeyondConfigurationMessage,
+} from "../token-settings/check.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
@@ -2610,28 +2608,17 @@ interface StageOneContext {
 	readonly plannedKeys: ReadonlySet<string>;
 }
 
-/** A read of a host's value that answers `undefined` rather than throwing. */
-const readHostMember = (read: () => unknown): unknown => {
-	try {
-		return read();
-	} catch {
-		return undefined;
-	}
-};
-
 /**
  * An `oauthTokenSettings` a host fills — through `bootstrapComponents` or
  * `overrideComponents` — names no token lifetime longer than the one core
- * resolves from the configuration. That configured lifetime sizes retention:
- * the default refresh-token family modules keep a revoked family for the
- * configured access-token maximum, and the subject revocation boundary
- * outlasts the configured lifetimes, and neither can read the slot. A grant
- * minting on a longer slot lifetime would issue a token that outlives the
- * record revoking it, so boot refuses the slot
+ * resolves from the configuration (`lifetimeBeyondConfiguration`, the rule
+ * every reader's `checkOAuthTokenSettings` applies to a held slot, whoever
+ * provides it). A host map is known before any provider runs, so boot
+ * refuses it here, with the map it came from
  * (`token-settings-lifetime-exceeds-configuration`), naming the member and
- * both values. A value a module provides derives from that module's section
- * and is not held here. A member that is not a number is left to the
- * readers' `checkOAuthTokenSettings`, which refuses it by name.
+ * both values; a value a module provides is refused where a reader first
+ * reads it. A member that is not a number is left to the readers' check,
+ * which refuses it by name.
  * @internal
  */
 function checkHostTokenSettingsLifetimes(
@@ -2648,49 +2635,21 @@ function checkHostTokenSettingsLifetimes(
 	] as const;
 	for (const [source, value] of sources) {
 		if (typeof value !== "object" || value === null) continue;
-		const settings = value as {
-			readonly accessTokenLifetime?: { readonly maxExpiresIn?: unknown } | null;
-			readonly refreshTokenExpiresIn?: unknown;
-		};
-		const members = [
-			{
-				member: "accessTokenLifetime.maxExpiresIn",
-				configKey: "oauth.accessToken.maxExpiresIn",
-				slotSeconds: readHostMember(() => settings.accessTokenLifetime?.maxExpiresIn),
-				configured: () =>
-					resolveAccessTokenLifetime(parsedConfig as AccessTokenLifetimeSource).maxExpiresIn,
-			},
-			{
-				member: "refreshTokenExpiresIn",
-				configKey: "oauth.refreshToken.expiresIn",
-				slotSeconds: readHostMember(() => settings.refreshTokenExpiresIn),
-				configured: () => resolveRefreshTokenLifetime(parsedConfig as RefreshTokenLifetimeSource),
-			},
-		] as const;
-		for (const { member, configKey, slotSeconds, configured } of members) {
-			if (typeof slotSeconds !== "number") continue;
-			const configurationSeconds = configured();
-			if (!(slotSeconds > configurationSeconds)) continue;
-			throw new BootError({
-				stage: "validateManifests",
+		const found = lifetimeBeyondConfiguration(value, parsedConfig);
+		if (found === undefined) continue;
+		throw new BootError({
+			stage: "validateManifests",
+			reason: "token-settings-lifetime-exceeds-configuration",
+			message: lifetimeBeyondConfigurationMessage(found, source),
+			details: {
 				reason: "token-settings-lifetime-exceeds-configuration",
-				message:
-					`oauthTokenSettings from ${source} names ${member} = ${slotSeconds} s, longer than the ` +
-					`${configurationSeconds} s core resolves from the configuration (${configKey}). ` +
-					"That configured lifetime sizes retention — the refresh-token family modules keep a " +
-					"revoked family, and the subject revocation boundary lasts, only that long — so a token " +
-					"minted on the slot's lifetime would outlive the record that revokes it. Lower the " +
-					"slot's lifetime to the configuration's or below, or raise the configuration's.",
-				details: {
-					reason: "token-settings-lifetime-exceeds-configuration",
-					componentKey: "oauthTokenSettings",
-					source,
-					member,
-					slotSeconds,
-					configurationSeconds,
-				},
-			});
-		}
+				componentKey: "oauthTokenSettings",
+				source,
+				member: found.member,
+				slotSeconds: found.slotSeconds,
+				configurationSeconds: found.configurationSeconds,
+			},
+		});
 	}
 }
 

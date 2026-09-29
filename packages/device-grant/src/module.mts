@@ -320,7 +320,7 @@ const tokenSettings = (deps: DeviceGrantModuleDeps) => {
 	const held = () =>
 		deps.oauthTokenSettings === undefined
 			? undefined
-			: checkOAuthTokenSettings(deps.oauthTokenSettings);
+			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config);
 	return {
 		issuer: (): string => {
 			const settings = held();

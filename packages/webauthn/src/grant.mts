@@ -230,7 +230,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const tokenSettings =
 		deps.oauthTokenSettings === undefined
 			? undefined
-			: checkOAuthTokenSettings(deps.oauthTokenSettings);
+			: checkOAuthTokenSettings(deps.oauthTokenSettings, config);
 	const accessTokenExpiresIn = (
 		tokenSettings === undefined
 			? resolveAccessTokenLifetime(config)

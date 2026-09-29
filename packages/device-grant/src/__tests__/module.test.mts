@@ -185,6 +185,9 @@ const boot = (overrides: Overrides) => {
 /** What `createApp` hands a contribution: the config, and whatever slots the test wires. */
 type TestDeps = { readonly config: unknown } & Readonly<Record<string, unknown>>;
 
+/** Lifetimes within the 300 s access token these tests configure, which every reader holds a slot to. */
+const WITHIN_CONFIGURATION = { accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 } };
+
 /** The contributions of the module built for `deps.config`, as `createApp` would call them with `deps`. */
 const contributionsFor = (deps: TestDeps) =>
 	deviceGrantModule({ config: deps.config as AppConfig }).contributes;
@@ -464,6 +467,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			oauth: {
 				jwt: { issuer: "https://as.example.test" },
 				accessToken: { expiresIn: 300 },
+				refreshToken: { expiresIn: 86_400 },
 				deviceAuthorization: {
 					enabled: true,
 					"verification-uri": "https://example.test/device",
@@ -637,7 +641,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// signed-in user-1 has no verified email.
 		const app = mountVerificationRoute({
 			...enabledDeps(),
-			oauthTokenSettings: createTestOAuthTokenSettings({ requireEmailVerified: true }),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				...WITHIN_CONFIGURATION,
+				requireEmailVerified: true,
+			}),
 		});
 		const res = await request(app)
 			.post("/oauth/device/verification")
@@ -673,7 +680,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// does with the setting off.
 		const res = await approve({
 			...configOn(),
-			oauthTokenSettings: createTestOAuthTokenSettings({ requireEmailVerified: false }),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				...WITHIN_CONFIGURATION,
+				requireEmailVerified: false,
+			}),
 		});
 		const off = await approve(enabledDeps());
 		expect(res.status).not.toBe(403);
@@ -1635,6 +1645,7 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 			oauth: {
 				jwt: { issuer: ISSUER },
 				accessToken: { expiresIn: 300 },
+				refreshToken: { expiresIn: 86_400 },
 				deviceAuthorization: {
 					enabled: true,
 					"verification-uri": "https://example.test/device",
@@ -1677,7 +1688,10 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 		const SLOT_ISSUER = "https://slot.example.test";
 		const app = mountWith({
 			...depsWith(createMemoryReplaySeenSet()),
-			oauthTokenSettings: createTestOAuthTokenSettings({ issuer: SLOT_ISSUER }),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				...WITHIN_CONFIGURATION,
+				issuer: SLOT_ISSUER,
+			}),
 		});
 		const post = async (issuer: string) =>
 			request(app)

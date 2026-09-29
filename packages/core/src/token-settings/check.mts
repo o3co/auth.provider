@@ -34,7 +34,13 @@
  * reads is left alone, and whether the value is frozen is the contract's.
  */
 
-import { isLifetimeSeconds } from "../config/application.schema.mjs";
+import {
+	type AccessTokenLifetimeSource,
+	isLifetimeSeconds,
+	type RefreshTokenLifetimeSource,
+	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
+} from "../config/application.schema.mjs";
 import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { describeValue } from "../errors/describe-value.mjs";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
@@ -56,15 +62,102 @@ const refuse = (member: string, rule: string, value: unknown): never => {
 
 const SWITCHES = ["legacyTypAccept", "resourceIndicatorEnabled", "requireEmailVerified"] as const;
 
+/** A token lifetime a slot names beyond the one core resolves from the configuration. */
+export interface LifetimeBeyondConfiguration {
+	/** The slot's member, as the contract names it. */
+	readonly member: "accessTokenLifetime.maxExpiresIn" | "refreshTokenExpiresIn";
+	/** The configuration key core resolves the lifetime from. */
+	readonly configKey: "oauth.accessToken.maxExpiresIn" | "oauth.refreshToken.expiresIn";
+	/** The slot's lifetime, in seconds. */
+	readonly slotSeconds: number;
+	/** The lifetime core resolves from the configuration, in seconds. */
+	readonly configurationSeconds: number;
+}
+
+/** A read of a slot's member that answers `undefined` rather than throwing. */
+const readMember = (read: () => unknown): unknown => {
+	try {
+		return read();
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * The first token lifetime `settings` names beyond the one core resolves
+ * from `config` — the access-token maximum, then the refresh-token lifetime —
+ * or `undefined` when neither is. A member that is not a number is not
+ * compared, and one whose read throws counts as none. The configured
+ * lifetimes size retention: the default refresh-token family modules keep a
+ * revoked family, and the subject revocation boundary lasts, only that long,
+ * and neither reads the slot, so a longer slot lifetime would mint a token
+ * that outlives the record revoking it. A configuration that resolves no
+ * lifetime is refused by its resolver, naming the key. Internal to core.
+ */
+export function lifetimeBeyondConfiguration(
+	settings: object,
+	config: unknown,
+): LifetimeBeyondConfiguration | undefined {
+	const slot = settings as {
+		readonly accessTokenLifetime?: { readonly maxExpiresIn?: unknown } | null;
+		readonly refreshTokenExpiresIn?: unknown;
+	};
+	const members = [
+		{
+			member: "accessTokenLifetime.maxExpiresIn",
+			configKey: "oauth.accessToken.maxExpiresIn",
+			slotSeconds: readMember(() => slot.accessTokenLifetime?.maxExpiresIn),
+			configured: () =>
+				resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn,
+		},
+		{
+			member: "refreshTokenExpiresIn",
+			configKey: "oauth.refreshToken.expiresIn",
+			slotSeconds: readMember(() => slot.refreshTokenExpiresIn),
+			configured: () => resolveRefreshTokenLifetime(config as RefreshTokenLifetimeSource),
+		},
+	] as const;
+	for (const { member, configKey, slotSeconds, configured } of members) {
+		if (typeof slotSeconds !== "number") continue;
+		const configurationSeconds = configured();
+		if (slotSeconds > configurationSeconds) {
+			return { member, configKey, slotSeconds, configurationSeconds };
+		}
+	}
+	return undefined;
+}
+
+/**
+ * The refusal of a lifetime beyond the configuration's: the member, both
+ * values, the configuration key, and why. `from` names where the slot came
+ * from, when the caller knows.
+ */
+export function lifetimeBeyondConfigurationMessage(
+	found: LifetimeBeyondConfiguration,
+	from?: string,
+): string {
+	return (
+		`oauthTokenSettings.${found.member} is ${found.slotSeconds} s` +
+		`${from === undefined ? "" : ` in the slot from ${from}`}, longer than the ` +
+		`${found.configurationSeconds} s core resolves from the configuration (${found.configKey}). ` +
+		"That configured lifetime sizes retention — the refresh-token family modules keep a revoked " +
+		"family, and the subject revocation boundary lasts, only that long — so a token minted on " +
+		"the slot's lifetime would outlive the record that revokes it. Lower the slot's lifetime to " +
+		"the configuration's or below, or raise the configuration's."
+	);
+}
+
 /**
  * `value`, the `oauthTokenSettings` a composition holds, as it is when it
  * keeps what its readers read: a canonical issuer, the access-token default
  * and max each a lifetime with the default not above the max, the
- * refresh-token lifetime a lifetime, every switch a boolean. A `RangeError`
- * naming the first member that does not, or naming the slot when it holds
- * no settings object at all.
+ * refresh-token lifetime a lifetime, every switch a boolean — and neither
+ * lifetime longer than the one core resolves from `config`, whoever provides
+ * the slot. A `RangeError` naming the first member that does not, with both
+ * values for a lifetime, or naming the slot when it holds no settings object
+ * at all.
  */
-export function checkOAuthTokenSettings(value: unknown): OAuthTokenSettings {
+export function checkOAuthTokenSettings(value: unknown, config: unknown): OAuthTokenSettings {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		throw new RangeError(
 			`oauthTokenSettings must be the settings object its contract describes, and the composition's slot holds ${shown(value)}. ${WHY}`,
@@ -100,5 +193,7 @@ export function checkOAuthTokenSettings(value: unknown): OAuthTokenSettings {
 	for (const name of SWITCHES) {
 		if (typeof settings[name] !== "boolean") refuse(name, "must be true or false", settings[name]);
 	}
+	const beyond = lifetimeBeyondConfiguration(settings, config);
+	if (beyond !== undefined) throw new RangeError(lifetimeBeyondConfigurationMessage(beyond));
 	return value as OAuthTokenSettings;
 }

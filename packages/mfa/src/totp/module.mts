@@ -55,7 +55,7 @@ export const mfaTotpFactorModule = defineModule({
 					// always one, so the configuration's is read only without it.
 					oauthTokenSettings === undefined
 						? {}
-						: { issuer: checkOAuthTokenSettings(oauthTokenSettings).issuer },
+						: { issuer: checkOAuthTokenSettings(oauthTokenSettings, config).issuer },
 				);
 				return settings.enabled ? createTotpFactor(settings) : null;
 			},

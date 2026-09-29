@@ -261,7 +261,7 @@ export const dpopModule = defineModule<
 				const issuer =
 					deps.oauthTokenSettings === undefined
 						? typedConfig.oauth.jwt?.issuer
-						: checkOAuthTokenSettings(deps.oauthTokenSettings).issuer;
+						: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
 				if (typeof issuer !== "string" || issuer === "") {
 					throw new Error(
 						"dpopModule: config.oauth.jwt.issuer is required when DPoP is enabled. Its origin " +

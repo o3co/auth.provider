@@ -169,7 +169,7 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 				const settings =
 					deps.oauthTokenSettings === undefined
 						? undefined
-						: checkOAuthTokenSettings(deps.oauthTokenSettings);
+						: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config);
 				return createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
 					issuer: settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer,

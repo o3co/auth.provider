@@ -43,7 +43,7 @@ type Components = Readonly<Record<string, unknown>>;
  */
 export function compositionIssuer(components: Components): unknown {
 	if (components.oauthTokenSettings !== undefined) {
-		return checkOAuthTokenSettings(components.oauthTokenSettings).issuer;
+		return checkOAuthTokenSettings(components.oauthTokenSettings, components.config).issuer;
 	}
 	return (components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth?.jwt
 		?.issuer;

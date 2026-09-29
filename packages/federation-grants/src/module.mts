@@ -150,7 +150,7 @@ export type FederationGrantsModuleDeps = ProviderDeps<Requires, Optional>;
 const issuerOf = (deps: FederationGrantsModuleDeps): string =>
 	deps.oauthTokenSettings === undefined
 		? deps.config.oauth.jwt.issuer
-		: checkOAuthTokenSettings(deps.oauthTokenSettings).issuer;
+		: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
 
 const isEnabled = (deps: FederationGrantsModuleDeps): boolean =>
 	deps.config.federationGrants?.enabled === true;

@@ -1520,8 +1520,13 @@ describe("tokenExchangeModule's contributions read oauthTokenSettings over the c
 			},
 		};
 	};
+	// Within the configuration's lifetimes, which every reader holds a slot to.
 	const settings = (overrides: Parameters<typeof createTestOAuthTokenSettings>[0] = {}) =>
-		createTestOAuthTokenSettings({ issuer: ISSUER, ...overrides });
+		createTestOAuthTokenSettings({
+			issuer: ISSUER,
+			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+			...overrides,
+		});
 
 	type ValidatorFactory = (deps: unknown) => {
 		validate(token: string, ctx: { role: "subject" }): Promise<unknown>;

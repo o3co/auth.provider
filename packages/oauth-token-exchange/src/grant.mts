@@ -92,7 +92,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	const { defaultExpiresIn, maxExpiresIn } =
 		deps.oauthTokenSettings === undefined
 			? resolveAccessTokenLifetime(deps.config)
-			: checkOAuthTokenSettings(deps.oauthTokenSettings).accessTokenLifetime;
+			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).accessTokenLifetime;
 
 	return {
 		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn
