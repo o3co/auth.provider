@@ -26,7 +26,7 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { defineModule } from "../../modules/manifest/index.mjs";
+import { defineModule, type Module } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -336,4 +336,379 @@ describe("a module without a section", () => {
 		expect(keys).toEqual(["config"]);
 		await handle.dispose();
 	});
+});
+
+describe("a module's section — read from the parsed configuration", () => {
+	it("sees what core's schema made of the path: coerced, and stripped of keys core does not declare", async () => {
+		// The choice pinned: the section is read out of the configuration the
+		// config slot holds, after core's parse. Under a parent core's schema
+		// declares, a key core does not keep is gone and a value core coerces
+		// arrives coerced — so a section read raw would refuse `port: "3000"`.
+		let seen: unknown;
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: {
+				schema: z.object({ port: z.number(), extra: z.string().optional() }),
+				at: "http",
+			},
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						seen = deps.section;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [sectioned],
+			bootstrapComponents: bootWith({
+				http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000, extra: "dropped" },
+			}),
+		});
+
+		expect(seen).toEqual({ port: 3000 });
+		await handle.dispose();
+	});
+
+	it("reads own keys only: a path segment an object inherits is absent", async () => {
+		let seen: unknown = "unset";
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: z.unknown(), at: "constructor" },
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						seen = deps.section;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) });
+
+		expect(seen).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("reads a module's name as one key, never split on its dots", async () => {
+		let seen: unknown;
+		const sectioned = defineModule({
+			name: "fixture.section",
+			section: { schema: RetrySection },
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						seen = deps.section;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [sectioned],
+			bootstrapComponents: bootWith({
+				"fixture.section": { retries: 1 },
+				fixture: { section: { retries: 2 } },
+			}),
+		});
+
+		expect(seen).toEqual({ retries: 1 });
+		await handle.dispose();
+	});
+
+	it("hands an absent section a schema accepts as `undefined`, under a `section` key that is there", async () => {
+		let deps: Record<string, unknown> | undefined;
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection.optional() },
+			contributes: {
+				grantMiddleware: [
+					(given) => {
+						deps = given as Record<string, unknown>;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) });
+
+		expect(deps !== undefined && "section" in deps).toBe(true);
+		expect(deps?.section).toBeUndefined();
+		await handle.dispose();
+	});
+});
+
+describe("a module's section — one frozen object", () => {
+	it("hands every factory the same deeply frozen section, apart from the config slot", async () => {
+		const seen: unknown[] = [];
+		let config: Record<string, unknown> | undefined;
+		const sectioned = defineModule({
+			name: "fixture-section",
+			requires: ["config"],
+			section: {
+				schema: z.object({
+					nested: z.object({ list: z.array(z.number()) }),
+					free: z.unknown(),
+				}),
+			},
+			provides: {
+				sectionFixtureSlot: (deps) => {
+					seen.push(deps.section);
+					return 1;
+				},
+			},
+			lifecycle: { sectionFixtureSlot: { eager: true } },
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						seen.push(deps.section);
+						config = deps.config as unknown as Record<string, unknown>;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [sectioned],
+			bootstrapComponents: bootWith({
+				"fixture-section": { nested: { list: [1, 2] }, free: { deep: { value: 1 } } },
+			}),
+		});
+
+		const [first, second] = seen as [
+			{ nested: { list: number[] }; free: { deep: { value: number } } },
+			unknown,
+		];
+		expect(second).toBe(first);
+		expect(Object.isFrozen(first)).toBe(true);
+		expect(Object.isFrozen(first.nested)).toBe(true);
+		expect(Object.isFrozen(first.nested.list)).toBe(true);
+		expect(Object.isFrozen(first.free)).toBe(true);
+		expect(Object.isFrozen(first.free.deep)).toBe(true);
+		// A subtree the schema passed through is a copy: the config slot's own is
+		// neither the section's nor frozen by it.
+		expect(config).toBeDefined();
+		const raw = (config?.["fixture-section"] as { free: { deep: object } } | undefined)?.free;
+		expect(raw).toBeDefined();
+		if (raw === undefined) return;
+		expect(raw).not.toBe(first.free);
+		expect(Object.isFrozen(raw.deep)).toBe(false);
+		await handle.dispose();
+	});
+
+	it("hands over a value that is not plain data as the schema made it", async () => {
+		let seen: { url: URL; key: Buffer } | undefined;
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: {
+				schema: z.object({
+					url: z.string().transform((value) => new URL(value)),
+					key: z.string().transform((value) => Buffer.from(value, "utf8")),
+				}),
+			},
+			contributes: {
+				grantMiddleware: [
+					(deps) => {
+						seen = deps.section;
+						return null;
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [sectioned],
+			bootstrapComponents: bootWith({
+				"fixture-section": { url: "https://idp.example/a", key: "k" },
+			}),
+		});
+
+		expect(seen?.url).toBeInstanceOf(URL);
+		expect(seen?.url.href).toBe("https://idp.example/a");
+		expect(Buffer.isBuffer(seen?.key)).toBe(true);
+		expect(seen?.key.toString("utf8")).toBe("k");
+		await handle.dispose();
+	});
+});
+
+describe("a module's section — refused, more", () => {
+	it("names every refused key of one section", async () => {
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [sectioned],
+				bootstrapComponents: bootWith({ "fixture-section": { retries: 0, label: 7 } }),
+			}),
+		);
+
+		expect(err.message).toContain("fixture-section.retries");
+		expect(err.message).toContain("fixture-section.label");
+		expect(err.details).toMatchObject({
+			issues: [
+				expect.objectContaining({ path: ["fixture-section", "retries"] }),
+				expect.objectContaining({ path: ["fixture-section", "label"] }),
+			],
+			modules: [{ module: "fixture-section", schemaPath: "fixture-section" }],
+		});
+	});
+
+	it("is refused before the post-config rows run", async () => {
+		// Under "multi" the replica-safety row would refuse this module; the
+		// section's refusal comes first.
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection },
+			replicaSafety: { unsafe: true, reason: "state forks per replica" },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [sectioned],
+				bootstrapComponents: bootWith({
+					deployment: { mode: "multi" },
+					"fixture-section": { retries: "x" },
+				}),
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+	});
+
+	it("is parsed for every installed module, one whose provider is overridden included", async () => {
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection },
+			provides: { sectionFixtureSlot: () => 1 },
+		});
+
+		const err = await refusal(
+			createApp({
+				modules: [sectioned],
+				bootstrapComponents: bootWith({ "fixture-section": { retries: "x" } }),
+				overrideComponents: { sectionFixtureSlot: 2 },
+			}),
+		);
+
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toContain("fixture-section.retries");
+	});
+
+	it.each([
+		["an async refinement", RetrySection.refine(async () => true)],
+		[
+			"a transform that throws",
+			RetrySection.transform(() => {
+				throw new Error("transform failed");
+			}),
+		],
+	])(
+		"a schema that cannot answer synchronously — %s — is refused naming the section",
+		async (_label, schema) => {
+			const sectioned = defineModule({ name: "fixture-section", section: { schema } });
+
+			const err = await refusal(
+				createApp({
+					modules: [sectioned],
+					bootstrapComponents: bootWith({ "fixture-section": { retries: 1 } }),
+				}),
+			);
+
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.message).toContain("fixture-section: ");
+			expect(err.details).toMatchObject({
+				issues: [expect.objectContaining({ code: "custom", path: ["fixture-section"] })],
+				modules: [{ module: "fixture-section", schemaPath: "fixture-section" }],
+			});
+		},
+	);
+});
+
+describe("a module's section — manifest refusals", () => {
+	it.each(["", "a..b", ".a", "a."])("refuses `at: %j`, a path with an empty key", async (at) => {
+		const sectioned = defineModule({
+			name: "fixture-section",
+			section: { schema: RetrySection, at },
+		});
+
+		const err = await refusal(
+			createApp({ modules: [sectioned], bootstrapComponents: bootWith({}) }),
+		);
+
+		expect(err.reason).toBe("module-section-path-invalid");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toEqual({
+			reason: "module-section-path-invalid",
+			module: "fixture-section",
+			at,
+		});
+	});
+
+	const noop = { grantMiddleware: [() => null] };
+
+	/** Where `section` is named as a slot: in a module, or by the host. */
+	interface Given {
+		readonly modules?: Module[];
+		readonly bootstrap?: Record<string, unknown>;
+		readonly override?: Record<string, unknown>;
+	}
+
+	it.each<[string, Given, Record<string, string>]>([
+		[
+			"a module provides it",
+			{
+				modules: [defineModule({ name: "fixture-slot", provides: { section: () => 1 } as never })],
+			},
+			{ source: "module-provides", module: "fixture-slot" },
+		],
+		[
+			"a module requires it",
+			{
+				modules: [
+					defineModule({ name: "fixture-slot", requires: ["section"] as never, contributes: noop }),
+				],
+			},
+			{ source: "module-requires", module: "fixture-slot" },
+		],
+		[
+			"a module reads it optionally",
+			{
+				modules: [
+					defineModule({ name: "fixture-slot", optional: ["section"] as never, contributes: noop }),
+				],
+			},
+			{ source: "module-optional", module: "fixture-slot" },
+		],
+		["the host bootstraps it", { bootstrap: { section: 1 } }, { source: "bootstrapComponents" }],
+		["the host overrides it", { override: { section: 1 } }, { source: "overrideComponents" }],
+	])(
+		"reserves `section` for the deps' section: refused when %s",
+		async (_label, given, expected) => {
+			const err = await refusal(
+				createApp({
+					modules: given.modules ?? [],
+					bootstrapComponents: bootWith(given.bootstrap ?? {}),
+					...(given.override === undefined ? {} : { overrideComponents: given.override as never }),
+				}),
+			);
+
+			expect(err.reason).toBe("reserved-component-key");
+			expect(err.stage).toBe("validateManifests");
+			expect(err.details).toEqual({
+				reason: "reserved-component-key",
+				componentKey: "section",
+				...expected,
+			});
+		},
+	);
 });

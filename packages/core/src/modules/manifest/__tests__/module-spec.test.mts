@@ -45,6 +45,9 @@ test("Module is the widened ModuleSpec alias (post-inference)", () => {
 	// slots. The assertion below is Phase-5-stable: both sides expand
 	// identically. The third argument is the widest section schema (#728).
 	expectTypeOf<Module>().toEqualTypeOf<ModuleSpec<ComponentKey, ComponentKey, SectionSchema>>();
+	// And that is `ModuleSpec`'s default for it, so the two-argument spelling
+	// integrators wrote before sections existed still names `Module`.
+	expectTypeOf<Module>().toEqualTypeOf<ModuleSpec<ComponentKey, ComponentKey>>();
 });
 
 test("ModuleSpec has the 11 baseline fields, all readonly", () => {

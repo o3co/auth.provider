@@ -238,3 +238,25 @@ test("a section declares its reference.conf, a transitional path and the paths i
 	expectTypeOf<ModuleSection["at"]>().toEqualTypeOf<string | undefined>();
 	expectTypeOf<ModuleSection["relocatedFrom"]>().toEqualTypeOf<readonly string[] | undefined>();
 });
+
+test("a call that writes its type arguments and omits the schema's is refused a section", () => {
+	defineModule<"config", never>({
+		name: "explicit-without-schema",
+		requires: ["config"],
+		// @ts-expect-error — `S` was not given, so it is `never`: no section may be declared
+		section: { schema: RetrySection },
+	});
+	defineModule<"config", never, typeof RetrySection>({
+		name: "explicit-with-schema",
+		requires: ["config"],
+		section: { schema: RetrySection },
+		contributes: {
+			grantMiddleware: [
+				(deps) => {
+					expectTypeOf(deps.section).toEqualTypeOf<z.output<typeof RetrySection>>();
+					return null;
+				},
+			],
+		},
+	});
+});
