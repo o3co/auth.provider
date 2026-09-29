@@ -18,7 +18,7 @@ import { type AppConfig, createApp } from "@o3co/auth-provider-core";
 import express from "express";
 import helmet from "helmet";
 import { buildModules, withSessionRequirements } from "./buildModules.mjs";
-import { readSwitches, resolveConfigPaths, resolveForBoot } from "./configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "./configPath.mjs";
 import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
@@ -36,16 +36,20 @@ const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
 const configDir = new URL("../config/", import.meta.url);
 const configDirPath = fileURLToPath(configDir);
 const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, env);
-const ownFiles = [envConfPath, applicationConfPath];
+// The template's own layers, read once — each file parsed once, under one
+// snapshot of the environment — so both phases below read the same thing: a
+// file replaced, or a variable changed, while the process starts cannot make
+// boot parse something other than what the modules were chosen by.
+const own = readOwnLayers([envConfPath, applicationConfPath]);
 // Phase one, transitional (#728): what the template reads before it knows
 // its modules — the switches `buildModules` chooses them by, the log level,
-// `mfa.mode` — from its own files over core's reference.conf, with core's
+// `mfa.mode` — from its own layers over core's reference.conf, with core's
 // transitional reader. Only for those choices: the configuration the
 // modules read is phase two's, parsed by `createApp`. The session-admission
 // ADR's D7: what this composition expects of session admission is derived
 // from the parsed `mfa.mode`, in TypeScript, and written into the
 // configuration boot compares with what registers.
-const switches: AppConfig = withSessionRequirements(readSwitches(ownFiles));
+const switches: AppConfig = withSessionRequirements(readSwitches(own));
 
 // The logger is built from config so its level is operator-controlled, and it
 // is wired into `bootstrapComponents` so every module that declares
@@ -97,7 +101,7 @@ await (async (): Promise<void> => {
 	// key), the same logger every module gets through the slot below.
 	//
 	// Phase two (#728): `createApp` is handed the configuration as resolved —
-	// the template's own files over the reference.conf of every package its
+	// the template's own layers, the same read, over the reference.conf of every package its
 	// modules come from, core's last — and parses it once, with every loaded
 	// module's schema; a section is never stripped on the way. What the
 	// template reads from here on it reads from the parsed configuration.
@@ -105,7 +109,7 @@ await (async (): Promise<void> => {
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {
-			config: resolveForBoot(ownFiles, modules, switches.sessionRequirements),
+			config: resolveForBoot(own, modules, switches.sessionRequirements),
 			pathResolver: import.meta.resolve,
 			logger,
 		},

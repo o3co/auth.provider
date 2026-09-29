@@ -26,7 +26,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "../buildModules.mjs";
-import { readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
+import { readOwnLayers, readSwitches, resolveConfigPaths, resolveForBoot } from "../configPath.mjs";
 
 /**
  * #288 — boot the shipped config with EVERY documented override supplied the
@@ -313,7 +313,7 @@ function ownFiles(configEnv: string, operatorLayer?: string): string[] {
 
 /** Phase one, as `app.mts` reads it: the switches, with the posture on session admission. */
 function readShippedSwitches(env: Record<string, string>, configEnv = "production"): AppConfig {
-	return withSessionRequirements(readSwitches(ownFiles(configEnv), { env }));
+	return withSessionRequirements(readSwitches(readOwnLayers(ownFiles(configEnv), { env })));
 }
 
 /**
@@ -344,12 +344,12 @@ async function bootParsed(
 	configEnv = "production",
 	operatorLayer?: string,
 ): Promise<AppConfig> {
-	const own = ownFiles(configEnv, operatorLayer);
-	const switches = withSessionRequirements(readSwitches(own, { env }));
+	const own = readOwnLayers(ownFiles(configEnv, operatorLayer), { env });
+	const switches = withSessionRequirements(readSwitches(own));
 	const handle = await createApp({
 		modules: [],
 		bootstrapComponents: {
-			config: resolveForBoot(own, [], switches.sessionRequirements, { env }),
+			config: resolveForBoot(own, [], switches.sessionRequirements),
 			pathResolver: (s: string) => s,
 			...FEDERATION_STORES,
 		} as never,
@@ -676,9 +676,9 @@ describe("#288: the shipped config boots with every documented override supplied
 				["optional", ["mfa"]],
 				["required", ["mfa"]],
 			] as const) {
-				const switches = readSwitches(ownFiles("production"), {
-					env: { ...DOCUMENTED_ENV, MFA_MODE: mode },
-				});
+				const switches = readSwitches(
+					readOwnLayers(ownFiles("production"), { env: { ...DOCUMENTED_ENV, MFA_MODE: mode } }),
+				);
 				expect(switches.mfa?.mode, mode).toBe(mode);
 				// The key has no default: nothing in the shipped HOCON writes it.
 				expect(switches.sessionRequirements, mode).toBeUndefined();

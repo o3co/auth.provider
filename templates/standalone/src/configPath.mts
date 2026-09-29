@@ -14,6 +14,30 @@
  * limitations under the License.
  */
 
+/**
+ * Where the template's configuration comes from, and the two phases it is
+ * read in (#728).
+ *
+ * The composition's own layers — `{env}.conf` over `application.conf` — are
+ * read once (`readOwnLayers`): each file parsed once, under one snapshot of
+ * the environment. Both phases are built from that one read:
+ *
+ * 1. `readSwitches` — the snapshot over core's `reference.conf` — parses the
+ *    switches the template chooses its modules by (`SWITCHES`), before it
+ *    knows them;
+ * 2. `resolveForBoot` — the same snapshot over the `reference.conf` of every
+ *    package the loaded modules come from, core's last — is what `createApp`
+ *    parses, once.
+ *
+ * So a switch phase one reads is the value boot's parse has — a file
+ * replaced, or a variable changed, while the process starts cannot split
+ * them (adapter selections have no disagreement guard at boot) — pinned for
+ * the shipped environments by `two-phase-config.test.mts`. Two limits, both
+ * of what phase one layers rather than of when it reads: a switch only a
+ * package's `reference.conf` sets reads as unset in phase one, and a loaded
+ * module's own schema may make something else of a switch at boot.
+ */
+
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -23,7 +47,7 @@ import {
 	moduleReferences,
 	readTransitionalConfig,
 } from "@o3co/auth-provider-core";
-import { parseFile } from "@o3co/ts.hocon";
+import { type Config, empty, parseFile } from "@o3co/ts.hocon";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
@@ -47,29 +71,63 @@ export function resolveConfigPaths(configDirPath: string, env: string): Resolved
 
 export interface ResolveOptions {
 	/**
-	 * The environment `${?VAR}` substitutions read — the process's when
-	 * unset. Tests pass their own.
+	 * The environment `${?VAR}` substitutions read — a snapshot of the
+	 * process's when unset. Tests pass their own.
 	 */
 	readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
- * The composition's configuration, resolved to plain data and parsed by
- * nothing (#728): its own files, highest first — `{env}.conf`, then
- * `application.conf` — over `references`, the `reference.conf` files of the
- * packages it loads, in the order `moduleReferences` answers them (core's
- * last). A path set in two layers takes the higher one's value.
+ * The composition's own layers, read once (#728): its files parsed once, and
+ * the snapshot of the environment every layer's `${?VAR}` substitutes. Both
+ * phases are built from one read, so a file replaced while the process
+ * starts, or a variable changed, cannot make boot parse something other than
+ * what the switches were read from.
  */
-export function resolveLayers(
+export interface OwnLayers {
+	/** The composition's own files, highest first, parsed and layered. */
+	readonly config: Config;
+	/** The environment the files were substituted with; the references are too. */
+	readonly env: Readonly<Record<string, string>>;
+}
+
+/**
+ * Read the composition's own files — highest first, `{env}.conf` then
+ * `application.conf` — once, under one snapshot of the environment
+ * (`options.env`, or the process's as it is now).
+ */
+export function readOwnLayers(
 	ownFiles: readonly string[],
-	references: readonly URL[],
 	options: ResolveOptions = {},
-): Record<string, unknown> {
-	const read = (file: string) =>
-		options.env === undefined ? parseFile(file) : parseFile(file, { env: { ...options.env } });
-	const [top, ...below] = [...ownFiles, ...references.map((reference) => fileURLToPath(reference))];
-	if (top === undefined) return {};
-	const layered = below.reduce((config, file) => config.withFallback(read(file)), read(top));
+): OwnLayers {
+	const env: Readonly<Record<string, string>> = {
+		...(options.env ??
+			Object.fromEntries(
+				Object.entries(process.env).filter(
+					(entry): entry is [string, string] => entry[1] !== undefined,
+				),
+			)),
+	};
+	const config = ownFiles.reduce<Config>(
+		(layered, file) => layered.withFallback(parseFile(file, { env: { ...env } })),
+		empty(),
+	);
+	return { config, env };
+}
+
+/**
+ * The composition's configuration, resolved to plain data and parsed by
+ * nothing (#728): its own layers, read once (`readOwnLayers`), over
+ * `references`, the `reference.conf` files of the packages it loads, in the
+ * order `moduleReferences` answers them (core's last), substituted with the
+ * same environment. A path set in two layers takes the higher one's value.
+ */
+export function resolveLayers(own: OwnLayers, references: readonly URL[]): Record<string, unknown> {
+	const layered = references.reduce<Config>(
+		(config, reference) =>
+			config.withFallback(parseFile(fileURLToPath(reference), { env: { ...own.env } })),
+		own.config,
+	);
 	return layered.toObject() as Record<string, unknown>;
 }
 
@@ -110,16 +168,16 @@ export const SWITCHES: readonly string[] = [
 	"oauth.accessToken",
 ];
 
-export interface SwitchesOptions extends ResolveOptions {
+export interface SwitchesOptions {
 	/** Paths read beside `SWITCHES`: what a module a deployment adds reads when it is built. */
 	readonly reads?: readonly string[];
 }
 
 /**
  * Phase one, transitional (#728): the switches (`SWITCHES`, and `reads`) from
- * the template's own files over core's `reference.conf` alone, read with core's
- * `readTransitionalConfig` — each parsed with the schema core declares at its
- * path, everything else as written. Use it for those choices only.
+ * the composition's own layers over core's `reference.conf` alone, read with
+ * core's `readTransitionalConfig` — each parsed with the schema core declares
+ * at its path, everything else as written. Use it for those choices only.
  *
  * Phase one sees nothing a package's `reference.conf` alone sets: before the
  * modules are known, no package's reference is layered. A switch whose
@@ -127,11 +185,8 @@ export interface SwitchesOptions extends ResolveOptions {
  * own files. It goes when the switches move into the template's own section,
  * the only one read before the modules are chosen (#728 B5).
  */
-export function readSwitches(
-	ownFiles: readonly string[],
-	options: SwitchesOptions = {},
-): AppConfig {
-	return readTransitionalConfig(resolveLayers(ownFiles, [coreReference()], options), [
+export function readSwitches(own: OwnLayers, options: SwitchesOptions = {}): AppConfig {
+	return readTransitionalConfig(resolveLayers(own, [coreReference()]), [
 		...SWITCHES,
 		...(options.reads ?? []),
 	]);
@@ -139,9 +194,9 @@ export function readSwitches(
 
 /**
  * Phase two: the configuration `createApp` parses — once, with every loaded
- * module's schema (#728) — from the composition's own files over the
- * `reference.conf` of every package `modules` come from, core's last, as
- * resolved and unparsed. `sessionRequirements` is the posture on session
+ * module's schema (#728) — from the composition's own layers, the same read
+ * phase one had, over the `reference.conf` of every package `modules` come
+ * from, core's last, as resolved and unparsed. `sessionRequirements` is the posture on session
  * admission, derived from the parsed `mfa.mode` in phase one (the
  * session-admission ADR's D7) and written in beside what was resolved.
  *
@@ -150,11 +205,10 @@ export function readSwitches(
  * the handle (`handle.components.config`), not from this.
  */
 export function resolveForBoot(
-	ownFiles: readonly string[],
+	own: OwnLayers,
 	modules: readonly Module[],
 	sessionRequirements: AppConfig["sessionRequirements"],
-	options: ResolveOptions = {},
 ): AppConfig {
-	const resolved = resolveLayers(ownFiles, moduleReferences(modules), options);
+	const resolved = resolveLayers(own, moduleReferences(modules));
 	return { ...resolved, sessionRequirements } as unknown as AppConfig;
 }

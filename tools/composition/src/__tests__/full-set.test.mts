@@ -105,7 +105,7 @@ import {
 	WEB,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
-import { readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
+import { readOwnLayers, readSwitches } from "@o3co/auth-provider-standalone/src/configPath.mts";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
 import type { Express } from "express";
 import request from "supertest";
@@ -377,15 +377,19 @@ describe("the configuration createApp is handed reaches every loaded module whol
 			`oauth.deviceAuthorization {\n  enabled = \${?DEVICE_GRANT_ENABLED}\n  verification-uri = "${ISSUER}/device"\n}\n`,
 		);
 		const reads = ["oauth.deviceAuthorization.enabled"];
-		const switches = readSwitches([operator, ...ownFiles()], {
-			env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
-			reads,
-		});
+		const switches = readSwitches(
+			readOwnLayers([operator, ...ownFiles()], {
+				env: { ...SINGLE_ENV, DEVICE_GRANT_ENABLED: "true" },
+			}),
+			{ reads },
+		);
 		expect(contributionNames(deviceGrantModule({ config: switches }), "grants")).toEqual([
 			DEVICE_CODE_GRANT_TYPE,
 		]);
 		// And off where nothing says on: the grant is opt-in.
-		const unset = readSwitches([operator, ...ownFiles()], { env: SINGLE_ENV, reads });
+		const unset = readSwitches(readOwnLayers([operator, ...ownFiles()], { env: SINGLE_ENV }), {
+			reads,
+		});
 		expect(contributionNames(deviceGrantModule({ config: unset }), "grants")).toEqual([]);
 	});
 

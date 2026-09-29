@@ -76,7 +76,13 @@ import helmet from "helmet";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules, withSessionRequirements } from "#/buildModules.mjs";
-import { readSwitches, resolveConfigPaths, resolveForBoot } from "#/configPath.mjs";
+import {
+	type OwnLayers,
+	readOwnLayers,
+	readSwitches,
+	resolveConfigPaths,
+	resolveForBoot,
+} from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
 
 export const ISSUER = "https://auth.test";
@@ -210,8 +216,9 @@ export function ownFiles(): string[] {
 export function resolveConfig(
 	env: Readonly<Record<string, string>>,
 	reads: readonly string[] = [],
+	own: OwnLayers = readOwnLayers(ownFiles(), { env }),
 ): AppConfig {
-	return withSessionRequirements(readSwitches(ownFiles(), { env, reads }));
+	return withSessionRequirements(readSwitches(own, { reads }));
 }
 
 // ---------------------------------------------------------------------------
@@ -646,17 +653,17 @@ export interface Composition {
 export async function compose(options: ComposeOptions = {}): Promise<Composition> {
 	const env = options.env ?? SINGLE_ENV;
 	const adjust = (config: AppConfig) => (options.config ? options.config(config) : config);
-	// Phase one: the switches the modules are chosen by.
-	const switches = resolveConfig(env, options.reads);
+	// The composition's own layers, read once for both phases, as `app.mts`
+	// reads them. Phase one: the switches the modules are chosen by.
+	const own = readOwnLayers(ownFiles(), { env });
+	const switches = resolveConfig(env, options.reads, own);
 	const config = adjust(switches);
 	const fakes = await sharedUpstreams();
 	const modules = composedModules(config, options);
 	const logger = createRecordingLogger();
 	// Phase two: the configuration as resolved over every loaded package's
 	// reference.conf, which createApp parses once.
-	const resolved = adjust(
-		resolveForBoot(ownFiles(), modules, switches.sessionRequirements, { env }),
-	);
+	const resolved = adjust(resolveForBoot(own, modules, switches.sessionRequirements));
 	const handle = await createApp({
 		modules,
 		bootstrapComponents: {

@@ -277,8 +277,12 @@ Configuration is loaded from `config/application.conf` (HOCON format). Each valu
    `moduleReferences(modules)` lists them, core's last. A key neither file
    above sets takes its value from here.
 
-It reads them in two phases ([#728](https://github.com/o3co/auth.provider/issues/728);
-[`src/configPath.mts`](src/configPath.mts)). First, before it knows its
+It reads the two files above once, under one snapshot of the environment
+(`readOwnLayers`), and builds two phases from that one read
+([#728](https://github.com/o3co/auth.provider/issues/728);
+[`src/configPath.mts`](src/configPath.mts)) — so a file replaced, or a
+variable changed, while the process starts cannot make boot parse something
+other than what the modules were chosen by. First, before it knows its
 modules, it reads the switches `buildModules` chooses them by — the adapters,
 the federations, the log level, `mfa.mode` — from the two files above over
 core's `reference.conf` alone (`readSwitches`, with core's transitional
