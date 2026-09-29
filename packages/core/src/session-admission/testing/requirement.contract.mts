@@ -22,7 +22,8 @@
  * (`it.each(cases)("$name", ({ run }) => run())`) and nothing here depends
  * on one. What it holds a requirement to: its name is its key, and a
  * fixture is never named `mfa`; its `reach` and `stepUpPage` are what boot
- * accepts (`sealRegisteredReach`, `checkStepUpPage`); its `remediations`
+ * accepts (`sealRegisteredReach`, `checkStepUpPage`) — the reach empty
+ * unless the name is `mfa`, in this release — its `remediations`
  * are names, each once; its `hintKeys` are hint names; admission never
  * calls its `admit` with a dead session or for a declared remediation; its
  * `admit` answers a verdict, a `step_up` only with a page registered; an
@@ -38,7 +39,6 @@ import { readAcrTable } from "../acr.mjs";
 import { admitPrimary, admitSession, cookieClaim } from "../admit.mjs";
 import {
 	ADMISSION_ACTIONS,
-	checkStepUpPage,
 	isHintKey,
 	issuedRemediationActions,
 	MFA_REQUIREMENT_NAME,
@@ -61,7 +61,14 @@ export interface RequirementContractInput {
 	readonly key: string;
 	/** Whether the requirement under test is a fixture: a fixture is never named `mfa`. */
 	readonly fixture: boolean;
-	/** The issuer its page is held to; the page's shape alone when absent. */
+	/**
+	 * The issuer its page is registered on: held to the issuer's origin and
+	 * resolved on it, as boot registers it on `oauth.jwt.issuer`. When absent,
+	 * an absolute page is held to its shape alone and resolved on itself, and
+	 * a path page is refused — registration has nothing to resolve it on — so
+	 * every case that registers the requirement fails: pass the issuer for a
+	 * requirement whose page is a path.
+	 */
 	readonly issuer?: string;
 	/** A fresh requirement for each case, so no case sees another's state. */
 	readonly build: () => SessionRequirement;
@@ -161,25 +168,12 @@ export function sessionRequirementContract(
 			},
 		},
 		{
-			name: "reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
+			name: "reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
+			// Registration validates the page (`checkStepUpPage`, on the issuer
+			// when one is given); the seal boot runs holds the reach to its
+			// rules — their one home.
 			run: async () => {
-				const registered = registeredRequirement(build(), issuer);
-				sealRegisteredReach(registered);
-				if (registered.stepUpPage !== undefined) checkStepUpPage(registered.stepUpPage, issuer);
-			},
-		},
-		{
-			name: "reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
-			run: async () => {
-				const registered = registeredRequirement(build(), issuer);
-				const reach = sealRegisteredReach(registered);
-				if (registered.name !== MFA_REQUIREMENT_NAME) {
-					assert.equal(
-						reach.size,
-						0,
-						`"${registered.name}" reaches ${[...reach].join(", ")}: only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session in this release`,
-					);
-				}
+				sealRegisteredReach(registeredRequirement(build(), issuer));
 			},
 		},
 		{

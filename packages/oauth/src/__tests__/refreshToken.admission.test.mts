@@ -145,7 +145,9 @@ const makeGrant = (opts: {
 		keyStore: createSymmetricKeyStore(SECRET),
 		refreshTokenFamilyRotation: rotation,
 		refreshTokenFamilyRevocation: { revokeFamily: vi.fn(async () => {}) } as never,
-		sessionRequirementResolver: resolverForTests(opts.requirements ?? []),
+		sessionRequirementResolver: resolverForTests(opts.requirements ?? [], {
+			issuer: "https://issuer.test",
+		}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 		...(opts.logger ? { logger: opts.logger } : {}),

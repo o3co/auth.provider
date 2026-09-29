@@ -764,7 +764,13 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 			{ sessionRequirements: { expected: ["consent"] } },
 		);
 		try {
-			expect(seen.resolver?.get("consent")?.stepUpPage).toEqual({ url: "/consent", params: {} });
+			// Resolved once, here, on the configuration's issuer
+			// (oauth.jwt.issuer): what every consumer answers or navigates to.
+			expect(seen.resolver?.get("consent")?.stepUpPage).toEqual({
+				url: "/consent",
+				params: {},
+				href: "https://auth.test/consent",
+			});
 			expect(seen.resolver?.get("consent")?.reach.size).toBe(0);
 		} finally {
 			await handle.dispose();

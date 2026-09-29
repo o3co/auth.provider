@@ -1928,16 +1928,19 @@ describe("/authorize — the acr table at boot (the MFA ADR's D15)", () => {
 		const { router } = await createOAuthRouter(express, {
 			registry: new GrantRegistry(),
 			config: makeConfig({ authorize: { acrValues } }),
-			requirements: resolverForTests([
-				{
-					name: "mfa",
-					reach: new Set(["otp", "mfa"]),
-					stepUpPage: { url: "/mfa", params: {} },
-					remediations: ["mfa.step_up"],
-					hintKeys: [],
-					admit: async () => ({ outcome: "met" }),
-				},
-			]),
+			requirements: resolverForTests(
+				[
+					{
+						name: "mfa",
+						reach: new Set(["otp", "mfa"]),
+						stepUpPage: { url: "/mfa", params: {} },
+						remediations: ["mfa.step_up"],
+						hintKeys: [],
+						admit: async () => ({ outcome: "met" }),
+					},
+				],
+				{ issuer: "https://issuer.example" },
+			),
 			clientRepository: { findById: async () => null, authenticate: async () => null },
 			codeRepository: {
 				createCode: async () => ({ code: "c", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),

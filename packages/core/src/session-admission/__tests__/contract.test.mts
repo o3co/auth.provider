@@ -96,8 +96,7 @@ describe("sessionRequirementContract — a well-formed fixture", () => {
 	it("names every case of D3", () => {
 		expect(cases.map((c) => c.name)).toEqual([
 			"name equals its key, and a fixture is never named mfa",
-			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
-			"reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session",
+			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set",
 			"remediations are the requirement's own routes — <name>.<route> — each once, none a consumer's action in ADMISSION_ACTIONS",
 			"hintKeys are hint names",
 			"admit is never called with a dead session",
@@ -125,7 +124,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 
 	it("a reach with a reserved value under another name, a primary's marker, or a page missing", async () => {
 		const reach =
-			"reach holds non-empty strings, no primary's marker, and no reserved value unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set";
+			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set";
 		expect(await failing({ build: () => fixture({ reach: new Set(["otp"]) }) })).toContain(reach);
 		expect(await failing({ build: () => fixture({ reach: new Set(["pwd"]) }) })).toContain(reach);
 		expect(await failing({ build: () => fixture({ reach: new Set(["fixture-ok"]) }) })).toContain(
@@ -150,7 +149,7 @@ describe("sessionRequirementContract — each way a requirement can break it", (
 
 	it("a reach under any name but mfa: only the MFA requirement adds vouched values in this release", async () => {
 		const only =
-			"reach is empty unless the name is mfa: in this release only the MFA requirement adds vouched values to a session";
+			"reach holds non-empty strings, no primary's marker, no second-factor value unless the name is mfa, and — in this release — nothing at all unless the name is mfa; stepUpPage is set when reach is not empty, and is valid when set";
 		expect(
 			await failing({
 				build: () =>
@@ -274,7 +273,7 @@ describe("sessionRequirementContract — the paths a fixture's shape takes", () 
 		for (const { name, run } of cases) await expect(run(), name).resolves.toBeUndefined();
 	});
 
-	it("passes every case with no issuer given, the page held to its shape alone", async () => {
+	it("passes every case with no issuer given, for a requirement that registers no step-up page", async () => {
 		for (const { name, run } of sessionRequirementContract(input({ issuer: undefined }))) {
 			await expect(run(), name).resolves.toBeUndefined();
 		}

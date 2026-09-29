@@ -383,16 +383,19 @@ describe("acr_values_supported (#481)", () => {
 		// advertised, while `phr` still needs a key nothing reaches.
 		const meta = await discoveryContribution(
 			{
-				sessionRequirementResolver: resolverForTests([
-					{
-						name: "mfa",
-						reach: new Set(["otp", "mfa"]),
-						stepUpPage: { url: "/mfa", params: {} },
-						remediations: ["mfa.step_up"],
-						hintKeys: [],
-						admit: async () => ({ outcome: "met" }),
-					},
-				]),
+				sessionRequirementResolver: resolverForTests(
+					[
+						{
+							name: "mfa",
+							reach: new Set(["otp", "mfa"]),
+							stepUpPage: { url: "/mfa", params: {} },
+							remediations: ["mfa.step_up"],
+							hintKeys: [],
+							admit: async () => ({ outcome: "met" }),
+						},
+					],
+					{ issuer: "https://issuer.example" },
+				),
 			},
 			withAcr({
 				"urn:example:pwd": ["pwd"],

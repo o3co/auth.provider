@@ -600,19 +600,23 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const deps = enabledDeps();
 		const app = mountVerificationRoute({
 			...deps,
-			sessionRequirementResolver: resolverForTests([
-				{
-					name: "fixture",
-					reach: new Set<string>(),
-					stepUpPage: { url: "/step-up", params: {} },
-					remediations: [],
-					hintKeys: [],
-					admit: async ({ action }) =>
-						action.name === "device.approve"
-							? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
-							: { outcome: "met" },
-				},
-			]),
+			sessionRequirementResolver: resolverForTests(
+				[
+					{
+						name: "fixture",
+						reach: new Set<string>(),
+						stepUpPage: { url: "/step-up", params: {} },
+						remediations: [],
+						hintKeys: [],
+						admit: async ({ action }) =>
+							action.name === "device.approve"
+								? { outcome: "step_up", whenStillUnmet: "reauthenticate" }
+								: { outcome: "met" },
+					},
+				],
+				// Boot registers each page on oauth.jwt.issuer.
+				{ issuer: "https://as.example.test" },
+			),
 		});
 		const verify = (action: string) =>
 			request(app)
@@ -625,7 +629,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(approve.body).toMatchObject({
 			error: "step_up_required",
 			requirement: "fixture",
-			// Resolved on the issuer the module reads, oauth.jwt.issuer.
+			// Resolved at registration on the issuer, oauth.jwt.issuer.
 			page: "https://as.example.test/step-up",
 		});
 		expect((await verify("lookup")).status).toBe(404);

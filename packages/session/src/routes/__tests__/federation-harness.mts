@@ -69,6 +69,13 @@ export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookie
 );
 
 /**
+ * The issuer a harness test registers its requirements' pages on, as boot
+ * registers them on `oauth.jwt.issuer`. The router is handed no issuer: the
+ * page arrives resolved.
+ */
+export const HARNESS_ISSUER = "https://as.example.com";
+
+/**
  * Records held by the shim's express-session `Store`, keyed exactly as the
  * route keys them. The federation transaction records land here (#494).
  */

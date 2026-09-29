@@ -13,7 +13,7 @@ It is a directory of its own so that the consumers cannot disagree on what a liv
 ## Public contract
 
 - `admit.mts`: `admitSession`, `admitPrimary`, `resumePrimary`, `establishWithoutAsking`, `passwordPrimary`, `isEstablishment`, `isInterruptAdmission`, `cookieClaim` / `codeClaimFirstRead` / `codeClaimRevalidation` / `linkClaim` / `tokenClaim`; for the boot planner and the test resolver alone, `sessionRequirementResolverOver`.
-- `requirement.mts`: the types, `ADMISSION_ACTIONS`, `checkStepUpPage`, `registeredRequirement`, `sealRegisteredReach`, the hint grammar (`isHintKey`, `isHintToken`), `MFA_REQUIREMENT_NAME`.
+- `requirement.mts`: the types, `ADMISSION_ACTIONS`, `checkStepUpPage`, `stepUpPageUrl`, `registeredRequirement`, `sealRegisteredReach`, the hint grammar (`isHintKey`, `isHintToken`), `MFA_REQUIREMENT_NAME`.
 - `primary.mts`: `checkPrimaryAuthentication`, `checkPrimaryAdditions`, `checkPrimaryContinuation`.
 - `acr.mts`: `readAcrTable`, `selectAcr`, `stepUpReach`, `producibleAmr`, `vouchableAcrTable`, `SECOND_FACTOR_AMR`.
 - `testing/`: `resolverForTests` and `sessionRequirementContract`, published on `@o3co/auth-provider-core/testing`.

@@ -27,6 +27,7 @@ import type { Logger } from "#/logging/Logger.mjs";
 import { readAcrTable } from "#/session-admission/acr.mjs";
 import {
 	admitSession,
+	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	cookieClaim,
@@ -47,6 +48,8 @@ import { resolverForTests } from "#/session-admission/testing/resolver.mjs";
 import type { SubjectRevocation, UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 
 const NOW = new Date("2026-09-28T12:00:00Z");
+/** The issuer each resolver here registers its pages on. */
+const ISSUER = "https://auth.test";
 const minutesAgo = (minutes: number): Date => new Date(NOW.getTime() - minutes * 60_000);
 
 const session = (over: Partial<UserSession> = {}): UserSession => ({
@@ -155,7 +158,7 @@ const deps = (over: Partial<AdmissionDeps> = {}): AdmissionDeps => ({
 
 /** A resolver over reaching non-mfa fixtures: a test of admission's own mechanics, the reach rules boot holds lifted. */
 const anyReach = (requirements: SessionRequirement[]) =>
-	resolverForTests(requirements, { allowAnyReach: true });
+	resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER });
 
 const request = (over: Partial<AdmissionRequest> = {}): AdmissionRequest => ({
 	claim: cookie(),
@@ -287,6 +290,22 @@ describe("what admitSession refuses before it reads anything (a caller's fault i
 		await expect(
 			admitSession(deps({ requirements: undefined as never }), request()),
 		).rejects.toThrow(RangeError);
+	});
+
+	it("is the one construction-time check a consumer factory built by hand runs: checkResolver names the factory for a resolver missing or forged, and answers the one it built", () => {
+		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+		for (const missing of [undefined, null]) {
+			expect(() => checkResolver(missing, "createThing"), String(missing)).toThrow(RangeError);
+			expect(() => checkResolver(missing, "createThing"), String(missing)).toThrow(
+				/^createThing: requirements is required — the sessionRequirementResolver the boot planner built/,
+			);
+		}
+		expect(() => checkResolver(forged, "createThing")).toThrow(RangeError);
+		expect(() => checkResolver(forged, "createThing")).toThrow(
+			/^createThing: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
+		const built = resolverForTests([]);
+		expect(checkResolver(built, "createThing")).toBe(built);
 	});
 
 	it("refuses an action that is not a name with one of the three grades — before a store is read or a requirement asked, never as a skipped requirement", async () => {
@@ -1060,7 +1079,9 @@ describe("step 5 — the requirements", () => {
 			outcome: "step_up",
 			requirement: "r",
 			session: record,
-			page: { url: "/r", params: { v: "1" } },
+			// As registered: resolved once, on the issuer, to the URL a
+			// consumer answers.
+			page: { url: "/r", params: { v: "1" }, href: `${ISSUER}/r?v=1` },
 			acrValues: [],
 			whenStillUnmet: "unmet",
 		});
@@ -1159,13 +1180,20 @@ describe("step 5 — the requirements", () => {
 		});
 		expect(
 			await admitSession(
-				deps({ userSessionStore: holding(record), requirements: resolverForTests([consent]) }),
+				deps({
+					userSessionStore: holding(record),
+					requirements: resolverForTests([consent], { issuer: ISSUER }),
+				}),
 				request(),
 			),
 		).toMatchObject({
 			outcome: "step_up",
 			requirement: "consent",
-			page: { url: "/consent", params: { reason: "terms" } },
+			page: {
+				url: "/consent",
+				params: { reason: "terms" },
+				href: `${ISSUER}/consent?reason=terms`,
+			},
 			session: record,
 		});
 	});
@@ -1469,13 +1497,16 @@ describe("step 6 — acr_values, with the reach of what is registered", () => {
 	it("holds the token's amr in the merge too: a step-up is offered by what the token holds beside the requirement's reach", async () => {
 		const both = readAcrTable({ "urn:example:both": ["kba", "hwk"] });
 		const record = session();
-		const requirements = resolverForTests([
-			met("mfa", {
-				reach: new Set(["hwk"]),
-				stepUpPage: { url: "/mfa", params: {} },
-				remediations: ["mfa.step_up"],
-			}),
-		]);
+		const requirements = resolverForTests(
+			[
+				met("mfa", {
+					reach: new Set(["hwk"]),
+					stepUpPage: { url: "/mfa", params: {} },
+					remediations: ["mfa.step_up"],
+				}),
+			],
+			{ issuer: ISSUER },
+		);
 		expect(
 			await admitSession(
 				deps({ userSessionStore: holding(record), acrTable: both, requirements }),

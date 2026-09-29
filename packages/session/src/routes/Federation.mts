@@ -42,6 +42,7 @@ import {
 	type AuditSink,
 	admitSession,
 	auditErrorText,
+	checkResolver,
 	consoleLogger,
 	cookieClaim,
 	emitAuditEvent,
@@ -129,13 +130,16 @@ const NO_ACR_TABLE = Object.freeze({});
  * session-admission ADR's D8): `403 step_up_required`, the requirement that
  * asked, and its page — the start is a browser navigation, and the page the
  * link was started from can send the user through the step-up and start it
- * again. The page is as the requirement registered it, validated then.
+ * again. The page is the one every consumer answers: as registered, resolved
+ * then on the issuer — not on the account page's origin — its params on the
+ * query, and no return parameter: the page that probed the start knows
+ * where it comes back to.
  */
 const stepUpRequired = (admission: Extract<Admission, { outcome: "step_up" }>) => ({
 	error: "step_up_required",
 	error_description: "Linking a federated identity requires a step-up first",
 	requirement: admission.requirement,
-	page: admission.page,
+	page: admission.page.href,
 });
 
 /**
@@ -421,8 +425,9 @@ export const createRouter = (
 		 * The registered session requirements (the session-admission ADR's
 		 * D1): the synthetic key `sessionRequirementResolver`, which
 		 * `sessionModule` passes, or `resolverForTests` in a test. Required:
-		 * the link routes admit their session through it, and admission refuses
-		 * any resolver the boot planner did not build.
+		 * the link routes admit their session through it, and a missing
+		 * resolver, or one the boot planner did not build, is refused here, at
+		 * construction (core's `checkResolver`).
 		 */
 		requirements: SessionRequirementResolver;
 		/**
@@ -433,7 +438,7 @@ export const createRouter = (
 		logger?: Logger;
 	},
 ): Router => {
-	if (!requirements) throw new Error("federation routes require requirements");
+	checkResolver(requirements, "federation routes");
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
 	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
@@ -599,10 +604,12 @@ export const createRouter = (
 		// the two are one; a "form_post" callback is a cross-site POST that the
 		// application session cookie (SameSite=Lax) does not accompany, so
 		// `req.session` is a fresh one there and the recorded sid is the only
-		// binding. A request that does carry an authenticated session must be
-		// that same one: switching accounts in between links nothing.
+		// binding. A request that does carry an authenticated session — read as
+		// every reader reads the cookie, its claim — must be that same one:
+		// switching accounts in between links nothing.
 		const currentSid = link.sid;
-		if (req.session.isAuthenticated === true && req.session.sid !== currentSid) {
+		const cookie = cookieClaim(req);
+		if (cookie.authenticated && cookie.sid !== currentSid) {
 			return res.status(401).json({
 				error: "login_required",
 				error_description: "The link was started from a different session",

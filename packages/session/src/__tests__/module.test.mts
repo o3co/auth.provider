@@ -385,7 +385,10 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			userSessionStore: { ...makeUserSessionStore(), get: async () => record },
 			federationTokenStore: makeFederationTokenStore(),
 			sessionFederationIndex: makeSessionFederationIndex(),
-			sessionRequirementResolver: resolverForTests(extra.requirements ?? []),
+			// Boot registers each page on oauth.jwt.issuer — the valid config's.
+			sessionRequirementResolver: resolverForTests(extra.requirements ?? [], {
+				issuer: "https://auth.test",
+			}),
 			...(extra.subjectRevocation ? { subjectRevocation: extra.subjectRevocation } : {}),
 		});
 		expect(contribution.id).toBe("federation-routes");
@@ -435,7 +438,12 @@ describe("sessionModule — the link routes are a consumer of session admission"
 			],
 		});
 		expect(res.status).toBe(403);
-		expect(res.body).toMatchObject({ error: "step_up_required", requirement: "fixture" });
+		expect(res.body).toMatchObject({
+			error: "step_up_required",
+			requirement: "fixture",
+			// As registered: resolved on oauth.jwt.issuer.
+			page: "https://auth.test/fixture/step-up",
+		});
 	});
 });
 

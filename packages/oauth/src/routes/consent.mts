@@ -66,6 +66,7 @@ import {
 	admitSession,
 	type ClientRepository,
 	type ConsentStore,
+	checkResolver,
 	cookieClaim,
 	describeAdmissionOutage,
 	emitAuditEvent,
@@ -79,7 +80,6 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { requireRequirements } from "../admission.mjs";
 import { isClientIdMetadataDocumentClient } from "../clients/clientIdMetadataDocument.mjs";
 
 /** How long a parked `/authorize` request waits for the consent page. */
@@ -172,7 +172,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore,
 		subjectRevocation,
-		requirements: requireRequirements("createConsentRouter", opts.requirements),
+		requirements: checkResolver(opts.requirements, "createConsentRouter"),
 		acrTable: {},
 		logger,
 		auditSink,
@@ -193,9 +193,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		res: Response,
 		challenge: unknown,
 	): Promise<PendingConsentRecord | null> => {
-		// The flag as every reader reads it (the session-admission ADR's D2):
-		// exactly `true`, never merely truthy.
-		if (req.session?.isAuthenticated !== true) {
+		// The flag as every reader reads it — the cookie's claim (the
+		// session-admission ADR's D2): exactly `true`, never merely truthy.
+		if (!cookieClaim(req).authenticated) {
 			jsonError(res, 401, "login_required", "no authenticated session");
 			return null;
 		}

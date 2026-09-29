@@ -607,7 +607,8 @@ nothing else; the grant keeps working.
 | The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
 | A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
 | This deployment's own throttle (`federation_grants_browser`) | 429 | `rate_limited` | `provider` |
-| A store, the session store, the sessions boundary or a session requirement could not answer | 503 | `temporarily_unavailable` | `storage` |
+| A store of this package could not answer | 503 | `temporarily_unavailable` | `storage` |
+| Session admission could not answer — the session store, the sessions boundary or a session requirement — described as every consumer of admission describes it (core's `describeAdmissionOutage`) | 503 | `temporarily_unavailable` | `session store unavailable`, `revocation store unavailable` or `session requirement unavailable` |
 | The client registry could not answer — judging the question or describing the client | 503 | `temporarily_unavailable` | `client registry unavailable` |
 | The limiter backend is down, under `rateLimit.failMode = "closed"` | 503 | `temporarily_unavailable` | `rate_limiter` |
 | The upstream URL could not be built, or the federation lost the capability (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |

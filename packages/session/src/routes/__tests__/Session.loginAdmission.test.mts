@@ -314,7 +314,22 @@ describe("the session router takes the session requirements (the session-admissi
 				logger: spyLogger() as unknown as Logger,
 				requirements: undefined as never,
 			}),
-		).toThrow("session routes require requirements");
+		).toThrow(/^session routes: requirements is required/);
+	});
+
+	it("throws at construction with a resolver the planner did not build: a forged one never reaches a login", () => {
+		const forged = { get: () => undefined, entries: () => [][Symbol.iterator]() };
+		expect(() =>
+			createRouter(express, {
+				userRepository: {} as UserRepository,
+				config,
+				csrf,
+				logger: spyLogger() as unknown as Logger,
+				requirements: forged as never,
+			}),
+		).toThrow(
+			/^session routes: requirements must be the sessionRequirementResolver the boot planner built/,
+		);
 	});
 });
 

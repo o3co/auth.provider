@@ -37,6 +37,7 @@ import {
 	type AuditSink,
 	admitPrimary,
 	BootError,
+	checkResolver,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
@@ -169,13 +170,13 @@ export const createRouter = (
 		 * D5): the synthetic key `sessionRequirementResolver`, which
 		 * `sessionModule` passes, or `resolverForTests` in a test. Required: a
 		 * password login asks them through `admitPrimary` before anything is
-		 * written, and admission refuses any resolver the boot planner did not
-		 * build.
+		 * written, and a missing resolver, or one the boot planner did not
+		 * build, is refused here, at construction (core's `checkResolver`).
 		 */
 		requirements: SessionRequirementResolver;
 	},
 ): Router => {
-	if (!requirements) throw new Error("session routes require requirements");
+	checkResolver(requirements, "session routes");
 	const router = express.Router();
 
 	/**

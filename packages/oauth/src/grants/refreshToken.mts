@@ -21,6 +21,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	boundPolicyAudience,
+	checkResolver,
 	deriveAudienceFromResources,
 	describeAdmissionOutage,
 	evaluateGrantPolicy,
@@ -49,7 +50,7 @@ import {
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
-import { requireRequirements, stepUpRefusal } from "../admission.mjs";
+import { stepUpRefusal } from "../admission.mjs";
 
 /**
  * Taken off the family ceiling a rotation reports before the refresh token's
@@ -132,7 +133,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation,
-		requirements: requireRequirements("createRefreshTokenGrant", deps.sessionRequirementResolver),
+		requirements: checkResolver(deps.sessionRequirementResolver, "createRefreshTokenGrant"),
 		acrTable: {},
 		logger,
 		auditSink: deps.auditSink,

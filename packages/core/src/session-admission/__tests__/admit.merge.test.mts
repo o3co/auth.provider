@@ -58,7 +58,11 @@ import type { UserSession, UserSessionStore } from "#/user-sessions/types.mjs";
 
 const { MFA, PHR, KBA } = MERGE_ACR;
 
+/** The issuer each page is registered on. */
+const ISSUER = "https://auth.test";
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
+/** The page as registered: what a step_up admission carries. */
+const REGISTERED_PAGE = { ...PAGE, href: `${ISSUER}/mfa` };
 
 const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
 
@@ -117,7 +121,7 @@ const deps = (session: UserSession | null, requirements: SessionRequirement[]): 
 	subjectRevocation: undefined,
 	// The merge's own mechanics need two reaching requirements: the reach
 	// rules boot holds a registration to are lifted here, the snapshot kept.
-	requirements: resolverForTests(requirements, { allowAnyReach: true }),
+	requirements: resolverForTests(requirements, { allowAnyReach: true, issuer: ISSUER }),
 	acrTable: MERGE_ACR_TABLE,
 	logger: undefined,
 	auditSink: undefined,
@@ -133,7 +137,7 @@ const decide = (row: MergeRow): Promise<Admission> =>
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, PAGE));
+			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, REGISTERED_PAGE));
 		});
 	});
 }
@@ -164,7 +168,7 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 			outcome: "step_up",
 			requirement: "keys",
 			session,
-			page: { url: "/keys", params: { via: "keys" } },
+			page: { url: "/keys", params: { via: "keys" }, href: `${ISSUER}/keys?via=keys` },
 			acrValues: [PHR],
 			whenStillUnmet: "unmet",
 		});
@@ -214,7 +218,7 @@ describe("the merge — the rows the MFA table does not reach (D2, step 7)", () 
 			outcome: "step_up",
 			requirement: "first",
 			session,
-			page: { url: "/first", params: { via: "first" } },
+			page: { url: "/first", params: { via: "first" }, href: `${ISSUER}/first?via=first` },
 			acrValues: [],
 			whenStillUnmet: "unmet",
 		});

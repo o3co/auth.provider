@@ -123,9 +123,9 @@
  * requirement's `reauthenticate` or `unmet` "sign in again to continue": the
  * page has no other remedy to offer a device. A `step_up` is
  * `403 step_up_required` with the `requirement` that asked and its `page` —
- * the requirement's registered step-up page as an absolute URL on the
- * issuer, its params on the query and no return parameter, since the page
- * that called knows where it returns (the ADR's D8: a browser-facing
+ * the requirement's step-up page as registered: resolved at registration on
+ * the issuer, its params on the query and no return parameter, since the
+ * page that called knows where it returns (the ADR's D8: a browser-facing
  * consumer answers the page) — on any of the three actions: the MFA requirement never steps up `lookup` or `deny` (a
  * user refuses a phished device request without one, the ADR's D6), but
  * another requirement may. An outage — the store, the boundary, or a
@@ -198,20 +198,17 @@ import type {
 	RateLimitFailMode,
 	RateLimitOutageLogger,
 	SessionRequirementResolver,
-	StepUpPage,
 	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	ADMISSION_ACTIONS,
 	admitSession,
-	checkCanonicalIssuer,
 	checkResolver,
 	checkWithFailMode,
 	consoleLogger,
 	cookieClaim,
 	describeAdmissionOutage,
-	describeIssuerRejection,
 	emitAuditEvent,
 	isEmailVerified,
 	normaliseUserCode,
@@ -304,18 +301,6 @@ const admissionLogger = (logger: DeviceGrantDependencies["logger"]): Logger => {
 	return adapted;
 };
 
-/**
- * Where the step-up starts, as the page is sent there: the requirement's
- * registered page as an absolute URL on the issuer, its params set on the
- * query (the session-admission ADR's D2, D8). No return parameter: the
- * deployment's verification page knows where it comes back to.
- */
-const stepUpUrl = (page: StepUpPage, issuer: string): string => {
-	const url = new URL(page.url, issuer);
-	for (const [name, value] of Object.entries(page.params)) url.searchParams.set(name, value);
-	return url.href;
-};
-
 /** The three descriptions `401 login_required` had before admission, and the one it adds. */
 const NO_SESSION = "an authenticated end-user session is required to approve a device";
 const NO_SID = "session identifier (sid) is required";
@@ -332,7 +317,6 @@ const loginRequired = (description: string) =>
  */
 const refusalOf = (
 	admission: Admission,
-	issuer: string,
 ): { readonly status: number; readonly body: Record<string, unknown> } => {
 	switch (admission.outcome) {
 		case "unavailable":
@@ -350,7 +334,10 @@ const refusalOf = (
 					error: "step_up_required",
 					error_description: "the session must step up before it can do this",
 					requirement: admission.requirement,
-					page: stepUpUrl(admission.page, issuer),
+					// Where the step-up starts, as registered — resolved on the issuer
+					// then, as every consumer answers it. No return parameter: the
+					// deployment's verification page knows where it comes back to.
+					page: admission.page.href,
 				},
 			};
 		case "unauthenticated":
@@ -395,12 +382,6 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 */
 	readonly requirements: SessionRequirementResolver;
 	/**
-	 * Required: `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer` — an
-	 * absolute `https:` URL (`http:` on a loopback host) — what a step-up
-	 * page, which may be a path, is answered on (see the file header).
-	 */
-	readonly issuer: string;
-	/**
 	 * `oauth.requireEmailVerified` (#297), resolved. Required rather than
 	 * defaulted, so a composition that mounts this handler by hand states
 	 * whether the gate holds instead of losing it by omission.
@@ -427,21 +408,9 @@ export const createDeviceVerificationHandler = (
 				"the live UserSession behind the cookie's sid before it is answered",
 		);
 	}
-	// Likewise the resolver — missing, or one the planner did not build — and
-	// the issuer: refused here, not answered 500 on every request. The issuer
-	// is held to core's canonical rule, the one `oauth.jwt.issuer` is held to:
-	// `URL.canParse` also accepts `mailto:` or `urn:`, on which no page can be
-	// resolved, so the first step-up would throw.
-	const requirements = checkResolver(options.requirements);
-	const issuerRejection = checkCanonicalIssuer(options.issuer);
-	if (issuerRejection !== null) {
-		throw new TypeError(
-			`createDeviceVerificationHandler: issuer ${describeIssuerRejection(issuerRejection)} — ` +
-				"it is oauth.jwt.issuer, on which a step-up page is answered",
-		);
-	}
-	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
-	const issuer = options.issuer;
+	// Likewise the resolver — missing, or one the planner did not build:
+	// refused here, not answered 500 on every request.
+	const requirements = checkResolver(options.requirements, "createDeviceVerificationHandler");
 	const now = options.now ?? Date.now;
 	// Admission's dependencies: this handler's own slots and clock.
 	const admissionDeps: AdmissionDeps = {
@@ -492,7 +461,7 @@ export const createDeviceVerificationHandler = (
 		});
 		const session = admission.outcome === "admitted" ? admission.session : null;
 		if (session === null) {
-			const refusal = refusalOf(admission, issuer);
+			const refusal = refusalOf(admission);
 			respond(res, refusal.status, refusal.body);
 			return;
 		}

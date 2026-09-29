@@ -23,8 +23,8 @@
  * (`registeredRequirement`): its shape held to the contract, its page on the
  * issuer's origin when one is given, and what the resolver answers a copy —
  * its reach sealed as boot seals it: read once when the resolver is built,
- * held to the reach rules boot holds it to (`sealRegisteredReach`, and an
- * empty reach under any name but `mfa` in this release), a read-only
+ * held to the reach rules boot holds it to (`sealRegisteredReach`, an empty
+ * reach under any name but `mfa` in this release among them), a read-only
  * snapshot answered afterwards. `allowAnyReach` lifts the reach rules —
  * the snapshot stays — for the tests of admission's own mechanics that
  * need two reaching requirements (the merge table); nothing else uses it.
@@ -32,7 +32,6 @@
 
 import { sessionRequirementResolverOver } from "../admit.mjs";
 import {
-	MFA_REQUIREMENT_NAME,
 	type RegisteredRequirement,
 	registeredRequirement,
 	type SessionRequirement,
@@ -40,6 +39,9 @@ import {
 	sealRegisteredReach,
 	snapshotReach,
 } from "../requirement.mjs";
+
+/** What a test that meets the one-reacher rule can do about it. */
+const ALLOW_ANY_REACH_REMEDY = "pass allowAnyReach for a test of admission's own mechanics";
 
 /**
  * The resolver a test hands a consumer: `requirements` by their names, in the
@@ -67,12 +69,7 @@ export function resolverForTests(
 			snapshotReach(requirement);
 			continue;
 		}
-		const reach = sealRegisteredReach(requirement);
-		if (requirement.name !== MFA_REQUIREMENT_NAME && reach.size > 0) {
-			throw new RangeError(
-				`resolverForTests: "${requirement.name}" reaches ${[...reach].join(", ")}: in this release only the requirement named "${MFA_REQUIREMENT_NAME}" adds vouched values to a session — pass allowAnyReach for a test of admission's own mechanics`,
-			);
-		}
+		sealRegisteredReach(requirement, ALLOW_ANY_REACH_REMEDY);
 	}
 	return sessionRequirementResolverOver({
 		get: (name) => byName.get(name),

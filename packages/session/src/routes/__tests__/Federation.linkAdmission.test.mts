@@ -51,6 +51,7 @@ import { describe, expect, it, vi } from "vitest";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import {
 	buildFederationApp,
+	HARNESS_ISSUER,
 	HARNESS_TRANSACTION_COOKIE_NAME,
 	type HarnessApp,
 } from "./federation-harness.mjs";
@@ -197,7 +198,9 @@ function setup(options: Setup = {}): HarnessApp & { repo: LinkableRepo } {
 		providers,
 		providerCallbackUrls,
 		userRepository: repo,
-		requirements: resolverForTests(options.requirement ? [options.requirement] : []),
+		requirements: resolverForTests(options.requirement ? [options.requirement] : [], {
+			issuer: HARNESS_ISSUER,
+		}),
 		...(options.subjectRevocation ? { subjectRevocation: options.subjectRevocation } : {}),
 		...(options.logger ? { logger: options.logger } : {}),
 		...(options.auditSink ? { auditSink: options.auditSink } : {}),
@@ -414,7 +417,7 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 		});
 	});
 
-	it("answers a requirement's step-up with 403 step_up_required, the requirement and its page, and records nothing", async () => {
+	it("answers a requirement's step-up with 403 step_up_required, the requirement and its page as one absolute URL on the issuer, and records nothing", async () => {
 		const fixture = fixtureRequirement({ outcome: "step_up", whenStillUnmet: "reauthenticate" });
 		const harness = setup({ requirement: fixture.requirement });
 		plant(harness, SIGNED_IN);
@@ -424,7 +427,12 @@ describe("the ?link=1 start reads the session through admission (session.link)",
 			error: "step_up_required",
 			error_description: "Linking a federated identity requires a step-up first",
 			requirement: "fixture",
-			page: { url: "/fixture/step-up", params: { requirement: "fixture" } },
+			// The shape every consumer answers (the session-admission ADR's D8, as
+			// amended): the page as registered, resolved on the issuer — not on
+			// the account page's origin — its params on the query, no return
+			// parameter: the page that probed the start knows where it returns.
+			// The router's config carries no issuer: nothing here reads one.
+			page: `${HARNESS_ISSUER}/fixture/step-up?requirement=fixture`,
 		});
 		expect(recordedLink(harness)).toBeUndefined();
 		expect(harness.records.size).toBe(0);

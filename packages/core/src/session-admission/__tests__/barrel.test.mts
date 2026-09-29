@@ -18,8 +18,9 @@
  * What the package barrel exports of session admission (the session-admission
  * ADR's D1): the consumers' surface — the decision, the claim builders, the
  * establishment, `checkResolver` for a consumer factory built by hand, the
- * checks a store runs — and none of boot's internals: registration, the
- * seal, the continuation builders are core's own.
+ * checks a store runs — and none
+ * of core's internals: registration, the seal, the continuation builders,
+ * and what only admission itself calls.
  */
 
 import { describe, expect, it } from "vitest";
@@ -32,6 +33,37 @@ describe("the barrel's session-admission surface", () => {
 		expect(() =>
 			core.checkResolver({ get: () => undefined, entries: () => [][Symbol.iterator]() }),
 		).toThrow(RangeError);
+	});
+
+	it("does not export what no consumer outside core calls: the acr selection, the establishment checks admission runs, admission's own store names and their predicate, the hint-key grammar", () => {
+		// Admission's own: `selectAcr` has one product caller (admitSession);
+		// the primary's checks run inside admitPrimary / resumePrimary; a
+		// consumer describes an outage with describeAdmissionOutage, never by
+		// the list; registration checks hint keys. Each stays exported from its
+		// file for core.
+		for (const internal of [
+			// Registration resolves each page once (`href`); no consumer does.
+			"stepUpPageUrl",
+			"selectAcr",
+			"checkPrimaryAuthentication",
+			"checkPrimaryAdditions",
+			"ADMISSION_INFRASTRUCTURE_STORES",
+			"isAdmissionInfrastructureStore",
+			"isHintKey",
+		]) {
+			expect(Object.hasOwn(core, internal), internal).toBe(false);
+		}
+		// What a consumer or a store does call stays.
+		for (const kept of [
+			"admitSession",
+			"describeAdmissionOutage",
+			"checkPrimaryContinuation",
+			"isHintToken",
+			"stepUpReach",
+			"readAcrTable",
+		]) {
+			expect(Object.hasOwn(core, kept), kept).toBe(true);
+		}
 	});
 
 	it("does not export boot's internals: registration, the seal and the continuation builders", () => {

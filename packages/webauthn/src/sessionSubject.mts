@@ -31,10 +31,12 @@
  * once as `webauthn_session_subject_invalid`); `unavailable` is
  * `503 temporarily_unavailable`, described by what failed (core's
  * `describeAdmissionOutage`), logged once by admission; `step_up` is
- * `403 step_up_required` with the requirement and its page; a browser that
- * is not signed in passes on untouched (a bearer bridge's subject stands);
- * every other outcome clears any subject an earlier middleware set, and the
- * route answers its own `401`.
+ * `403 step_up_required` with the requirement and its page — as registered,
+ * one absolute URL resolved on the issuer at registration, as every
+ * consumer answers it;
+ * a browser that is not signed in passes on untouched (a bearer bridge's
+ * subject stands); every other outcome clears any subject an earlier
+ * middleware set, and the route answers its own `401`.
  *
  * It requires `userSessionStore`: the cookie path it serves is the
  * store-backed one, so an admitted session is always a record the mapper can
@@ -47,6 +49,7 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	admitSession,
 	type CookieCarrier,
+	checkResolver,
 	consoleLogger,
 	cookieClaim,
 	defineModule,
@@ -103,7 +106,9 @@ const refuseInvalidSubject = (res: Response): void => {
  * The module (the session-admission ADR's D8): requires the resolver and
  * the user-session store; takes `subjectRevocation`, `auditSink` and
  * `logger` when they are wired, the first two under their shared absence
- * policies. Throws a `TypeError` when `subjectFor` is not a function.
+ * policies. Throws a `TypeError` when `subjectFor` is not a function, and
+ * its route factory a `RangeError` for a resolver missing or not the
+ * planner's (core's `checkResolver`).
  */
 export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOptions): Module {
 	if (typeof options !== "object" || options === null || typeof options.subjectFor !== "function") {
@@ -129,13 +134,19 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 		contributes: {
 			routes: [
 				(deps) => {
+					// Refused here, when the route is built — a missing resolver, or
+					// one the planner did not build — not on the first request.
+					const requirements = checkResolver(
+						deps.sessionRequirementResolver,
+						"webauthnSessionSubjectModule",
+					);
 					const logger = deps.logger ?? consoleLogger;
 					const admitRegistration: RequestHandler = async (req, res, next) => {
 						const admission = await admitSession(
 							{
 								userSessionStore: deps.userSessionStore,
 								subjectRevocation: deps.subjectRevocation,
-								requirements: deps.sessionRequirementResolver,
+								requirements,
 								acrTable: NO_ACR_TABLE,
 								logger,
 								auditSink: deps.auditSink,
@@ -158,7 +169,10 @@ export function webauthnSessionSubjectModule(options: WebAuthnSessionSubjectOpti
 								error: "step_up_required",
 								error_description: "Registering a passkey requires a step-up first",
 								requirement: admission.requirement,
-								page: admission.page,
+								// Where the step-up starts, as registered — resolved then on
+								// the issuer, not on the account page's origin. No return
+								// parameter: the account page knows where it comes back to.
+								page: admission.page.href,
 							});
 							return;
 						}

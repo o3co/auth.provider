@@ -227,6 +227,14 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+ADMISSION_ACTIONS\b/,
 	},
 	{
+		// Refused under the name device verification's copy had, too.
+		concept:
+			"the step-up page as a browser is sent to it — resolved on the issuer, its params on the query (the session-admission ADR's D2, D8)",
+		home: "packages/core/src/session-admission/requirement.mts",
+		definition: /(?:function|const)\s+stepUp(?:Page)?Url\b/,
+		homeDefinition: /(?:function|const)\s+stepUpPageUrl\b/,
+	},
+	{
 		concept: "the acr table — oauth.authorize.acrValues as it is read (the MFA ADR's D15)",
 		home: "packages/core/src/session-admission/acr.mts",
 		definition: /(?:function|const)\s+readAcrTable\b/,

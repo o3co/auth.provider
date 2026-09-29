@@ -16,41 +16,17 @@
 
 /**
  * What every consumer of session admission in this package shares (the
- * session-admission ADR's D1, D8): the refusal a hand-built factory answers
- * when it is given no requirements resolver, and the token endpoint's shape
- * of a `step_up` refusal — `invalid_grant` with `step_up: "<requirement>"`,
- * RFC 6749's vocabulary with one member beside it (the MFA ADR's D16 row),
- * which the `session`, `authorization_code` and `refresh_token` grants all
- * answer and `/oauth/token` copies onto the wire.
+ * session-admission ADR's D1, D8): the token endpoint's shape of a `step_up`
+ * refusal — `invalid_grant` with `step_up: "<requirement>"`, RFC 6749's
+ * vocabulary with one member beside it (the MFA ADR's D16 row), which the
+ * `session`, `authorization_code` and `refresh_token` grants all answer and
+ * `/oauth/token` copies onto the wire. The refusal a factory built by hand
+ * answers for a missing or forged requirements resolver is core's
+ * `checkResolver(value, factory)`, which every consumer factory runs at
+ * construction.
  */
 
-import {
-	checkResolver,
-	type GrantError,
-	type SessionRequirementResolver,
-} from "@o3co/auth-provider-core";
-
-/**
- * The resolver a factory was handed, or a throw naming the option: a
- * composition that bypasses the boot planner cannot build a consumer with
- * an empty or home-made resolver. A missing one is refused here, where the
- * operator can read why, not at the first request; one the planner or
- * `resolverForTests` did not build — a copy, an `as` cast, a hand-made
- * object — is refused by core's `checkResolver`, the same check
- * `admitSession` applies, so a forged resolver never decides the acr drop
- * either.
- */
-export function requireRequirements(
-	factory: string,
-	requirements: SessionRequirementResolver | undefined,
-): SessionRequirementResolver {
-	if (requirements === undefined) {
-		throw new Error(
-			`${factory}: requirements is required — the sessionRequirementResolver the boot planner built (the manifests pass it), or resolverForTests from @o3co/auth-provider-core/testing in a test`,
-		);
-	}
-	return checkResolver(requirements);
-}
+import type { GrantError } from "@o3co/auth-provider-core";
 
 /** The token endpoint's `step_up` refusal: `invalid_grant`, and the requirement that asked, so an updated client can offer the step-up. */
 export interface StepUpRefusal extends GrantError {

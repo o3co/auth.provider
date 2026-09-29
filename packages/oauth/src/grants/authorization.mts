@@ -21,6 +21,7 @@ import {
 	type AdmissionDeps,
 	admitSession,
 	auditErrorText,
+	checkResolver,
 	codeClaimFirstRead,
 	codeClaimRevalidation,
 	constantTimeStringEqual,
@@ -47,7 +48,7 @@ import {
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-import { requireRequirements, stepUpRefusal } from "../admission.mjs";
+import { stepUpRefusal } from "../admission.mjs";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
@@ -115,7 +116,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	const admissionDeps: AdmissionDeps = {
 		userSessionStore: deps.userSessionStore,
 		subjectRevocation: deps.subjectRevocation,
-		requirements: requireRequirements("createAuthorizationGrant", deps.sessionRequirementResolver),
+		requirements: checkResolver(deps.sessionRequirementResolver, "createAuthorizationGrant"),
 		acrTable: {},
 		logger,
 		auditSink: deps.auditSink,

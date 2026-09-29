@@ -79,7 +79,11 @@ const FACTOR_SETS: Readonly<Record<MergeFactors, () => MfaFactor[]>> = {
 };
 
 /** `endpoints.mfa.url` as core's reference.conf ships it. */
+/** The issuer each page is registered on, as boot registers it on oauth.jwt.issuer. */
+const ISSUER = "https://auth.test";
 const PAGE: StepUpPage = { url: "/mfa", params: {} };
+/** The page as registered: what a step_up admission carries. */
+const REGISTERED_PAGE = { ...PAGE, href: `${ISSUER}/mfa` };
 
 /** The requirement the MFA module registers under `mode`, over the factors of `factors`. */
 const realRequirement = (
@@ -115,6 +119,7 @@ const deps = (row: MergeRow): AdmissionDeps => ({
 	subjectRevocation: undefined,
 	requirements: resolverForTests(
 		row.mode === "off" ? [] : [realRequirement(row.mode, row.factors)],
+		{ issuer: ISSUER },
 	),
 	acrTable: MERGE_ACR_TABLE,
 	logger: undefined,
@@ -131,7 +136,7 @@ const decide = (row: MergeRow): Promise<Admission> =>
 for (const group of MERGE_ROW_GROUPS) {
 	describe(group.title, () => {
 		it.each(group.rows)("$row", async (row) => {
-			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, PAGE));
+			expect(await decide(row)).toEqual(mergeAdmission(row.expected, row.session, REGISTERED_PAGE));
 		});
 	});
 }

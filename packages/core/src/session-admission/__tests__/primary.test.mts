@@ -145,7 +145,10 @@ const deps = (requirements: SessionRequirement[], logger?: Logger): AdmissionDep
 	subjectRevocation: undefined,
 	// The mechanics over a reaching `risk` fixture; the boot-shaped case is in
 	// boot/__tests__/session-requirements.test.mts.
-	requirements: resolverForTests(requirements, { allowAnyReach: true }),
+	requirements: resolverForTests(requirements, {
+		allowAnyReach: true,
+		issuer: "https://auth.test",
+	}),
 	acrTable: readAcrTable({}),
 	logger,
 	auditSink: undefined,
