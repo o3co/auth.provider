@@ -16,10 +16,12 @@
 
 /**
  * What the session package owns of the browser session that other packages
- * use, as three slots whose contracts are core's (#728): the login page a
+ * use, as slots whose contracts are core's (#728): the login page a
  * browser that is not signed in is sent to (`loginEntry`), the one policy
  * for whether a browser's request may change state (`csrfGuard`, #710),
- * and the session cookie's attributes (`sessionCookiePolicy`). The session package
+ * the session cookie's attributes (`sessionCookiePolicy`), and the CSRF
+ * token's signature (`csrfTokenSigner`), which the owner of the session
+ * secret provides to the guard's provider. The session package
  * owns the configuration behind them; another package requires the slot
  * rather than reading that configuration or rebuilding the policy from it.
  *
@@ -86,11 +88,11 @@ export type NavigationVerdict =
  *
  * The token's signing key is derived from the session cookie's secret,
  * which the session store's module owns, while the session module provides
- * the guard (#728): the session module derives it from the `session`
- * section the two modules still share, and before the session store's
- * configuration becomes a section of its own the key reaches the guard
- * through a narrow slot the session store provides, so that the secret
- * never leaves its owner.
+ * the guard (#728): the key is to reach the guard's provider as
+ * `csrfTokenSigner`, the signer the owner of the secret provides — never as
+ * the secret or the key itself. Until the session store's configuration
+ * becomes a section of its own, the session module still derives it from the
+ * `session` section the two modules share.
  */
 export interface CsrfGuard {
 	/** The cookie the double-submit token is set in; script reads it. */
@@ -125,6 +127,38 @@ export interface CsrfGuard {
 }
 
 /**
+ * The CSRF token's signature (#728): what the `csrfGuard` provider signs a
+ * double-submit token with, and checks one against, without holding the key.
+ *
+ * The key has one owner — the module that owns the session cookie's secret
+ * (`session.secret`: the session store's) — which derives it from that secret
+ * for this purpose alone, so a token's signature is never a session cookie's
+ * signature, nor an oracle for one. How it derives the key is the owner's, not
+ * this contract's: two providers that derive it differently do not verify each
+ * other's tokens, so switching between them invalidates the tokens outstanding
+ * (short-lived, and issued afresh), and a provider that must keep verifying
+ * what an earlier one issued pins that derivation in its own tests. Neither
+ * the secret nor the derived key leaves the signer: a plain object, its prototype
+ * `Object.prototype` or `null`, that carries `sign` and `verify` alone, own or
+ * inherited, and is frozen.
+ */
+export interface CsrfTokenSigner {
+	/**
+	 * The signature of `payload` under this signer's key: a non-empty
+	 * base64url string without padding — it sits between a token's `.`
+	 * separators — and the same one for the same payload.
+	 */
+	sign(payload: string): string;
+	/**
+	 * Whether `signature` is what `sign(payload)` answers. Compared in
+	 * constant time, so how much of a guess was right does not show in how
+	 * long the answer takes; never throws — an empty, non-base64url or
+	 * wrong-length signature, or a value that is not a string, is `false`.
+	 */
+	verify(payload: string, signature: string): boolean;
+}
+
+/**
  * The session cookie's attributes: what a module that sets a cookie of its
  * own beside the session's — or that sizes what must outlive a session —
  * needs of them.
@@ -149,6 +183,12 @@ declare module "@o3co/auth-provider-core" {
 		readonly loginEntry?: LoginEntry;
 		/** The one browser-origin / CSRF policy (#728, #710): provided by the session module. */
 		readonly csrfGuard?: CsrfGuard;
+		/**
+		 * The CSRF token's signature (#728): provided by the module that owns the
+		 * session cookie's secret (the session store's), read by the `csrfGuard`
+		 * provider.
+		 */
+		readonly csrfTokenSigner?: CsrfTokenSigner;
 		/** The session cookie's attributes (#728): provided by the session store's module, which owns the session cookie. */
 		readonly sessionCookiePolicy?: SessionCookiePolicy;
 	}
