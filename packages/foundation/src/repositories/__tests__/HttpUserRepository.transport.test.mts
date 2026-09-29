@@ -63,7 +63,7 @@ const looking = (origin: string) =>
 		timeout: 5000,
 	});
 
-describe("the identity lookup on the wire (#613)", () => {
+describe("the identity lookup on the wire", () => {
 	it("releases the body of an answer it refuses, so a failing Store does not hold a socket per failure", async () => {
 		// A refused answer's unfinished body is cancelled and its connection
 		// closed, rather than held until garbage collection — the leak

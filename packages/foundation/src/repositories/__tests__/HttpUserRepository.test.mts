@@ -116,7 +116,7 @@ describe("HttpUserRepository", () => {
 	// 200 whose body is not a `User`, so `sub: undefined` never reaches the
 	// authentication flow; "upstream broken" is distinct from "user not
 	// found" (401).
-	describe("TS-2: upstream response shape validation", () => {
+	describe("upstream response shape validation", () => {
 		it("throws when upstream 200 returns an object missing required fields", async () => {
 			server.use(
 				http.post(`${BASE_URL}/user/authenticate`, () => {
@@ -170,7 +170,7 @@ describe("HttpUserRepository", () => {
 	// The endpoints receive plaintext credentials. The check lives in the
 	// CONSTRUCTOR so a misconfigured deployment fails at boot rather than at
 	// the first login attempt.
-	describe("#285: endpoints must be https (loopback carve-out)", () => {
+	describe("endpoints must be https (loopback carve-out)", () => {
 		const secure = {
 			authenticateUrl: "https://users.example.com/authenticate",
 			authenticateByTokenUrl: "https://users.example.com/authenticate-by-token",
@@ -248,7 +248,7 @@ describe("HttpUserRepository", () => {
 	// `setTimeout` clamps `0`, a negative number and `NaN` to "fire
 	// immediately", so a typo'd or blank-env timeout would abort every
 	// request instead of allowing a long one.
-	describe("#285: timeout validation", () => {
+	describe("timeout validation", () => {
 		const urls = {
 			authenticateUrl: "https://users.example.com/authenticate",
 			authenticateByTokenUrl: "https://users.example.com/authenticate-by-token",
@@ -316,7 +316,7 @@ describe("HttpUserRepository", () => {
 
 	// `res.json()` buffers whatever the upstream sends. A hostile or
 	// broken Store could stream gigabytes into the process.
-	describe("#285: response body cap", () => {
+	describe("response body cap", () => {
 		const capped = () =>
 			new HttpUserRepository({
 				authenticateUrl: `${BASE_URL}/user/authenticate`,
@@ -416,7 +416,7 @@ describe("HttpUserRepository", () => {
 		});
 	});
 
-	describe("linkFederatedIdentity (#482)", () => {
+	describe("linkFederatedIdentity", () => {
 		const LINK_URL = `${BASE_URL}/user/link`;
 		const linking = () =>
 			new HttpUserRepository({
@@ -489,7 +489,7 @@ describe("HttpUserRepository", () => {
 // The identity lookup over HTTP: the client of a Store that resolves who
 // holds an upstream identity, and the boot-time declaration of which
 // registrations that Store covers.
-describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
+describe("findSubjectByFederatedIdentity over HTTP", () => {
 	const LOOKUP_URL = `${BASE_URL}/user/federated-identity`;
 	const REG = {
 		provider: "entra-files",

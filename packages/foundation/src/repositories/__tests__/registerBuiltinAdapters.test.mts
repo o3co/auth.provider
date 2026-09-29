@@ -88,7 +88,7 @@ describe("registerBuiltinAdapters", () => {
 		expect(invalid).toBeNull();
 	});
 
-	it("http builder wires linkFederatedIdentityUrl only when the config carries it (#482)", async () => {
+	it("http builder wires linkFederatedIdentityUrl only when the config carries it", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		registerBuiltinAdapters({ userFactory });
 		const base = {
@@ -106,7 +106,7 @@ describe("registerBuiltinAdapters", () => {
 		expect(typeof withLink.linkFederatedIdentity).toBe("function");
 	});
 
-	it("http builder wires the identity lookup and its coverage only when the config carries them (#613)", async () => {
+	it("http builder wires the identity lookup and its coverage only when the config carries them", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		registerBuiltinAdapters({ userFactory });
 		const base = {
@@ -217,7 +217,7 @@ describe("registerBuiltinAdapters", () => {
 	// The builder is where a deployment's configuration first meets the
 	// adapter, so every rejection below is a boot failure rather than a
 	// first-login failure.
-	describe("#285: configuration is rejected at build time", () => {
+	describe("configuration is rejected at build time", () => {
 		const build = (over: Record<string, unknown>) => {
 			const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 			registerBuiltinAdapters({ userFactory });
