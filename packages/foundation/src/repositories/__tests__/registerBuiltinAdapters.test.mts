@@ -214,7 +214,7 @@ describe("registerBuiltinAdapters", () => {
 		).rejects.toThrow(/authenticateByTokenUrl/);
 	});
 
-	// #285: the builder is where a deployment's configuration first meets the
+	// The builder is where a deployment's configuration first meets the
 	// adapter, so every rejection below is a boot failure rather than a
 	// first-login failure.
 	describe("#285: configuration is rejected at build time", () => {
