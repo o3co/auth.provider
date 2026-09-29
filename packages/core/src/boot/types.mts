@@ -590,7 +590,10 @@ export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> 
 	/**
 	 * Component values originating from the host environment (config,
 	 * pathResolver, etc.) — pre-seeded into the DI graph before any module
-	 * factory runs.
+	 * factory runs. A key a loaded module provides collides
+	 * (`bootstrap-component-collision`), and `__proto__` as an own key — a
+	 * computed key, or one JSON.parse wrote — names no component and refuses
+	 * boot (`reserved-component-key`).
 	 */
 	readonly bootstrapComponents: B;
 
@@ -610,7 +613,13 @@ export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> 
 	 * the consumer's responsibility.
 	 *
 	 * Mutually exclusive with `bootstrapComponents` for the same key (collision
-	 * throws `bootstrap-component-collision` at validateManifests).
+	 * throws `bootstrap-component-collision` at validateManifests). And not for
+	 * a key a loaded module names `authoritative` (#728): a setting its readers
+	 * take as the module's own, which the module's code goes on deriving from
+	 * its section — an entry for one throws
+	 * `authoritative-component-overridden`; with that module not loaded, the
+	 * entry fills the slot as any other does. `__proto__` as an own key names
+	 * no component and throws `reserved-component-key`.
 	 */
 	readonly overrideComponents?: Partial<ComponentMap>;
 }
@@ -694,13 +703,13 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 34 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added five)
+// BootErrorReason — 36 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring; the session-admission ADR's D3 and D7 added three; #728 added seven)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 34 reasons.
+ * exactly 36 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
  * OIDC discovery aggregator
@@ -711,8 +720,9 @@ export type BootStage =
  * ADR's D3 and D7 (session-requirement-kind-guarded,
  * session-requirements-undeclared, session-requirement-missing), and #728's
  * module sections (reserved-component-key, module-section-path-invalid),
- * contribution kinds (contribution-kind-guarded, contribution-malformed) and
- * relocated paths (config-path-relocated).
+ * contribution kinds (contribution-kind-guarded, contribution-malformed),
+ * relocated paths (config-path-relocated) and authoritative keys
+ * (authoritative-without-provides, authoritative-component-overridden).
  */
 export type BootErrorReason =
 	| "module-factory-not-called"
@@ -753,7 +763,7 @@ export type BootErrorReason =
 	| "authoritative-component-overridden";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — one per BootErrorReason, 34 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
+// Per-reason *Details interfaces — one per BootErrorReason, 36 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
 // ---------------------------------------------------------------------------
 
 /**
@@ -962,12 +972,20 @@ export interface InvalidRouteAdvertisementPathDetails {
 }
 
 /**
- * A module that declares its own configuration section and also requires or
- * optionally reads a component under the key the section is set on (#728):
- * `section`. Its deps would carry both under one name, the section shadowing
- * the slot. A component named `section` is otherwise an ordinary slot — a
- * module without a section may provide or read one, and a host may bootstrap
- * or override one — so only this module is refused.
+ * A key no component may be named where it was written (#728), in either of
+ * two places:
+ *
+ * - a module that declares its own configuration section and also requires
+ *   or optionally reads a component under the key the section is set on:
+ *   `section`. Its deps would carry both under one name, the section
+ *   shadowing the slot. A component named `section` is otherwise an ordinary
+ *   slot — a module without a section may provide or read one, and a host may
+ *   bootstrap or override one — so only this module is refused; `module`
+ *   names it;
+ * - a host map, `bootstrapComponents` or `overrideComponents`, carrying
+ *   `__proto__` as its own key: set on the component map it would replace
+ *   the map's prototype, so every key of its value would read as a component
+ *   no module provided. `source` names the map.
  */
 export type ReservedComponentKeyDetails =
 	| {
@@ -1331,10 +1349,11 @@ export interface SessionRequirementMissingDetails {
  * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
  * (component-absence-undeclared), module-factory-not-called and the
  * session-admission ADR's three (session-requirement-kind-guarded,
- * session-requirements-undeclared, session-requirement-missing) and #728's five
+ * session-requirements-undeclared, session-requirement-missing) and #728's seven
  * (reserved-component-key, module-section-path-invalid, contribution-kind-guarded,
- * contribution-malformed, config-path-relocated) — one member per
- * `BootErrorReason`, 34 in all.
+ * contribution-malformed, config-path-relocated, authoritative-without-provides,
+ * authoritative-component-overridden) — one member per `BootErrorReason`, 36 in
+ * all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
