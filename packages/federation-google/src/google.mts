@@ -34,7 +34,7 @@ import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes googleFederationConfig as a typed
 // DI slot. Consumers supply this via a small bootstrap module that reads from
-// app config (per A5 §10.1 const-Module pattern).
+// app config.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly googleFederationConfig?: GoogleProviderConfig;
@@ -69,12 +69,11 @@ export interface GoogleProviderConfig {
 	/**
 	 * Whether a callback without the RFC 9207 `iss` parameter is refused.
 	 * Default `true`: Google's discovery document advertises
-	 * `authorization_response_iss_parameter_supported`, and its OpenID Connect
-	 * reference says the parameter "is always returned". This metadata is
-	 * hand-built and not discovered, so if Google ever stopped sending it no
-	 * deployment could log in until a release shipped — `false` is the
-	 * operator's way out meanwhile. It permits absence only: an `iss` that is
-	 * sent and is not Google's is refused either way (#597).
+	 * `authorization_response_iss_parameter_supported`, and its reference says
+	 * the parameter "is always returned". This metadata is hand-built, so should
+	 * Google stop sending it, `false` lets deployments log in without waiting
+	 * for a release. It permits absence only: an `iss` that is sent and is not
+	 * Google's is refused either way.
 	 */
 	requireAuthorizationResponseIss?: boolean;
 	/**
@@ -82,15 +81,13 @@ export interface GoogleProviderConfig {
 	 * when omitted; any other value, `null` included, is refused at
 	 * construction.
 	 *
-	 * Google issues a refresh token only when the user is shown the consent
-	 * screen, and without `prompt` it shows that screen only the first time.
-	 * Upstream tokens are kept per session, so `"offline"` sends
-	 * `access_type=offline` **and** `prompt=consent`: every sign-in shows
-	 * Google's consent screen and every session gets a refresh token that
-	 * `POST /oauth/federation/google/token` can use. `"online"` sends neither:
-	 * no consent screen after the first sign-in and no refresh token at all,
-	 * for a deployment that uses Google to sign in and never refreshes
-	 * Google's access token.
+	 * Google issues a refresh token only on its consent screen, which it shows
+	 * unprompted only the first time, and upstream tokens are kept per session.
+	 * So `"offline"` sends `access_type=offline` **and** `prompt=consent`: every
+	 * sign-in shows the consent screen and every session gets a refresh token
+	 * for `POST /oauth/federation/google/token`. `"online"` sends neither: no
+	 * consent screen after the first sign-in and no refresh token, for a
+	 * deployment that never refreshes Google's access token.
 	 */
 	accessType?: "offline" | "online";
 	/**
@@ -109,7 +106,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(`Google federation "google" requires clientId, clientSecret, and callbackURL`);
 	}
-	// #597: the library reads this as a truthy flag, and an environment override
+	// The library reads this as a truthy flag, and an environment override
 	// arrives as the string "false" — which is truthy. A bridge that forwards it
 	// uncoerced would leave the requirement on during the very incident the
 	// switch exists for, so anything that is not a boolean is refused here.
@@ -140,10 +137,8 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			`Google federation "google": accessType must be "offline" or "online", got ${got}`,
 		);
 	}
-	// Google issues a refresh token only on a consent screen, and shows one
-	// unprompted only the first time. Asked for offline access, every sign-in
-	// asks for the screen too: the tokens are kept per session, so a session
-	// opened without one could never be refreshed. An earlier session's
+	// Offline access asks for the consent screen on every sign-in (see
+	// `accessType`): tokens are kept per session, and an earlier session's
 	// refresh token is not reachable from a new one — keeping one per
 	// `google:<sub>` would be a store that outlives sessions.
 	const offlineAccess: Readonly<Record<string, string>> =
@@ -152,12 +147,9 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
 	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
 	//
-	// PB-4: `jwks_uri` names where Google publishes the keys the id_token is
-	// verified against, and `id_token_signing_alg_values_supported` pins `RS256`
-	// so the library refuses `none` / `HS256` confusion should the published
-	// JWKS be coerced. Neither does anything on its own: openid-client 6 treats
-	// an id_token from the token endpoint as delivered over TLS and skips its
-	// signature unless `enableNonRepudiationChecks` is on — see below (#542).
+	// The RS256 pin refuses `none` / `HS256` confusion should the published
+	// JWKS be coerced. It and `jwks_uri` take effect only through
+	// `enableNonRepudiationChecks` below.
 	const serverMetadata: oidc.ServerMetadata = {
 		issuer: GOOGLE_ISSUER,
 		authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -165,7 +157,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		userinfo_endpoint: "https://www.googleapis.com/oauth2/v3/userinfo",
 		jwks_uri: config.jwksUri ?? GOOGLE_JWKS_URI,
 		id_token_signing_alg_values_supported: ["RS256"],
-		// #597: mirrors what Google's own discovery document says. With it the
+		// Mirrors what Google's own discovery document says. With it the
 		// library refuses a callback that carries no `iss`; without it, only one
 		// that carries a wrong `iss`.
 		authorization_response_iss_parameter_supported: config.requireAuthorizationResponseIss ?? true,
@@ -173,11 +165,10 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
 	if (config.fetch) oidcConfig[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
-	// #542: verify the id_token's signature against `jwks_uri` — the key looked
-	// up by `kid`, the set cached and refetched when an unknown `kid` appears.
-	// Without this the RS256 pin above is inert, `jwks_uri` is never fetched,
-	// and a token signed by anyone is accepted on the strength of the token
-	// endpoint's TLS alone.
+	// Verify the id_token's signature against `jwks_uri` — the key looked up
+	// by `kid`, the set cached and refetched when an unknown `kid` appears.
+	// openid-client 6 otherwise skips it, accepting a token signed by anyone
+	// on the strength of the token endpoint's TLS alone.
 	oidc.enableNonRepudiationChecks(oidcConfig);
 
 	return {
@@ -190,7 +181,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			readonly codeVerifier: string;
 			readonly nonce?: string;
 		}): URL {
-			// PB-4: Google is OIDC-only, so nonce binding is mandatory (OIDC §3.1.3.7).
+			// Google is OIDC-only, so nonce binding is mandatory (OIDC §3.1.3.7).
 			// Fail closed when a caller forgets to thread nonce — silently dropping it would
 			// produce an authorization request whose id_token cannot be bound to the session.
 			if (typeof params.nonce !== "string" || params.nonce.length === 0) {
@@ -216,10 +207,9 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			readonly nonce?: string;
 			readonly callbackParams?: Readonly<Record<string, string>>;
 		}): Promise<FederationProfile> {
-			// PB-4: same fail-closed guard as buildAuthorizationUrl. Pre-PB-4 sessions written
-			// to the store before the upgrade have no `nonce` field; rather than silently
-			// degrading verification we reject so the user re-authenticates with a fresh
-			// (nonce-bearing) session.
+			// Same fail-closed guard as buildAuthorizationUrl: a session with no
+			// `nonce` is rejected, so the user re-authenticates with a nonce-bearing
+			// one, rather than verification silently degrading.
 			if (typeof params.nonce !== "string" || params.nonce.length === 0) {
 				throw new Error(
 					'Google federation "google" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.',
@@ -228,7 +218,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 
 			// openid-client's authorizationCodeGrant expects the full callback URL.
 			// We synthesize it from redirectUri + code since the route receives them separately.
-			// #597: and from the callback's RFC 9207 `iss`, which Google sends, so
+			// The callback's RFC 9207 `iss`, which Google sends, goes with it, so
 			// that the library compares it with GOOGLE_ISSUER.
 			const callbackUrl = callbackUrlForExchange({
 				redirectUri: params.redirectUri,
@@ -236,7 +226,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				callbackParams: params.callbackParams,
 			});
 
-			// PB-4: passing `expectedNonce` activates openid-client's nonce check (OIDC §3.1.3.7)
+			// Passing `expectedNonce` activates openid-client's nonce check (OIDC §3.1.3.7)
 			// and *also* asserts an id_token is present in the response.
 			const tokens = await oidc.authorizationCodeGrant(oidcConfig, callbackUrl, {
 				pkceCodeVerifier: params.codeVerifier,
@@ -247,7 +237,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			// over — after it verified the id_token — and not after UserInfo.
 			const obtainedAt = Date.now();
 
-			// PB-5: bind UserInfo response sub against the verified id_token sub (OIDC §5.3.2).
+			// Bind the UserInfo response sub to the verified id_token sub (OIDC §5.3.2).
 			// Google id_tokens always carry a non-empty string sub. If the claim is absent,
 			// non-string, or empty we MUST fail closed — falling back to `skipSubjectCheck`
 			// would silently downgrade the binding contract for a token we cannot identify.
@@ -270,7 +260,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
 				picture: typeof userInfo.picture === "string" ? userInfo.picture : undefined,
 				// The tokens as Google stated them: the lifetime as sent or none,
-				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
+				// the scope as sent (what it granted, RFC 6749 §5.1), and the
 				// token type — core's one reading for every adapter.
 				...federationTokenSnapshot(tokens, obtainedAt),
 			};
@@ -292,12 +282,10 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			// Google does not publish an OIDC end_session_endpoint in its discovery document.
 			// Operators MUST pass endSessionEndpoint explicitly for upstream logout.
 			// Absent that, redirect directly to postLogoutRedirectUri (or accounts.google.com/Logout).
-			// That redirect is safe only because of the caller's side of the
-			// contract (core's `EndSessionRequest`): the URI handed here is one
-			// already matched against the client's registered
-			// postLogoutRedirectUris, or none — `oauth`'s logout routes check it
-			// first. Handed a request's value unchecked, this would answer with
-			// wherever the request asked to go.
+			// That redirect is safe only because the URI handed here is already
+			// matched against the client's registered postLogoutRedirectUris, or
+			// none (core's `EndSessionRequest`; `oauth`'s logout routes check it
+			// first).
 			if (config.endSessionEndpoint) {
 				let url: URL;
 				try {
@@ -345,24 +333,17 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 /**
  * Const Module for the Google federation integration.
  *
- * Contributes both `federations.google` (FederationProvider — upstream OIDC
- * protocol) and `federationRedirectPolicies.google` (FederationRedirectPolicy
- * — consumer redirect URL policy).
- *
- * Config supplied via the `googleFederationConfig` ComponentMap slot
- * (per A5 §10.1 const-Module pattern). v0.5.0 is single-tenant: the federation
- * is registered under name "google". Multi-tenant support deferred post-publish.
- *
- * Per A5 §10.1.
+ * Contributes `federations.google` (the upstream OIDC provider) and
+ * `federationRedirectPolicies.google` (the consumer redirect URL policy).
+ * Config is supplied via the `googleFederationConfig` ComponentMap slot.
+ * Single-tenant: registered under the name "google".
  */
 export const googleFederationModule = defineModule({
 	name: "federation-google",
 	requires: ["googleFederationConfig"] as const,
 	contributes: {
 		federations: {
-			// v0.5.0 is single-tenant: provider.name is fixed at "google".
-			// Multi-tenant support deferred to post-publish; consumers needing
-			// multiple Google apps will get an additive Config shape.
+			// Single-tenant: provider.name is fixed at "google".
 			google: (deps) => createGoogleProvider(deps.googleFederationConfig),
 		},
 		federationRedirectPolicies: {
