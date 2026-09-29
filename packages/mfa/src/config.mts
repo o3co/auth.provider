@@ -15,38 +15,16 @@
  */
 
 /**
- * The `mfa` configuration this package reads (the MFA ADR's D11, D19, D20,
- * D22), and the refusals D20 gives the MFA configuration: `mfa.mode` is
- * core's; the rest of the section — which core's schema passes through — is
- * read here.
+ * The `mfa` configuration this package reads; `mfa.mode` is core's. Keys,
+ * ranges, defaults and refusals: see README, Configuration, and ADR
+ * 2026-09-25-multi-factor-authentication.
  *
- * - `mfa.encryptionKeys`, the key ring every factor's data is sealed under:
- *   each key canonical base64 of 32 bytes, named by its id or — an entry
- *   written without one — by its fingerprint, the ring checked by core's sealing
- *   rule under the key it was read from (no empty ring, no duplicate id, every
- *   id within the rule) and refused for one key under two ids, every refusal
- *   naming the entry by index and quoting neither a key nor an id. The published development sample key is refused
- *   by #473's rule: where the environment the configuration was selected by,
- *   or `NODE_ENV`, is `production` or `staging`, and under
- *   `deployment.mode = "multi"`.
- * - `mfa.factors.totp`: the parameters of a new enrollment (digits 6-8,
- *   period 15-120 s — the step-8 owner decision, the ADR stating no bounds
- *   for either — SHA1, SHA256 or SHA512), the window every verification
- *   allows (0-2, D22), and the issuer an authenticator app shows, defaulting
- *   — for a factor that is on — to the host `oauth.jwt.issuer` names. Read by
- *   the TOTP factor's module alone (`readMfaTotpSettings`), which never holds
- *   a key and reads none of the keys below; the MFA module's settings read no
- *   factor's section, so a composition without the TOTP factor is never
- *   refused over it.
- * - `mfa.transactionTtlSeconds`, a transaction's life, 60-1800 seconds (the
- *   step-8 owner decision; the ADR states no bounds), from which every
- *   `expiresAtMs` is derived and nothing else; `mfa.maxAttemptsPerTransaction`,
- *   1-10 (the owner's bound for step 8; the ADR states none); and
- *   `mfa.lockout`, D21's subject lock, held to core's `checkMfaLockoutPolicy`
- *   under that key — step 3's obligations, refused at boot (D8, D21).
- *
- * No default is written here: they live in `config/reference.conf` (ADR
- * 2026-04-30). A refusal is a `RangeError` whose message starts with the key.
+ * `mfa.factors.totp` is read by the TOTP factor's module alone
+ * (`readMfaTotpSettings`), which never holds a key; the MFA module's settings
+ * read no factor's section. The bounds on digits, period, a transaction's
+ * life and its attempts are owner decisions, recorded in the ADR's
+ * amendments rather than its decisions. A refusal is a `RangeError` whose
+ * message starts with the key and quotes no key or id.
  */
 
 import { createHmac } from "node:crypto";
@@ -67,7 +45,7 @@ import { MFA_TRANSACTION_TTL_SECONDS } from "./transactions.mjs";
 /**
  * A published key for development only — canonical base64 of 32 bytes, the
  * ASCII text `o3co:mfa:development-sample-key!` — which a development
- * configuration may carry in place of `MFA_ENCRYPTION_KEY` (D11). Everyone
+ * configuration may carry in place of `MFA_ENCRYPTION_KEY`. Everyone
  * holds it, so data sealed under it is sealed from nobody: the settings
  * refuse it wherever the configuration was selected as production or
  * staging, `NODE_ENV` is either, or `deployment.mode` is `"multi"`.
@@ -101,7 +79,7 @@ const isShowableIssuer = (issuer: string): boolean =>
 	!hasControlCharacter(issuer) &&
 	!issuer.includes(":");
 
-/** `mfa.factors.totp`: the TOTP factor's switch and parameters (D19). */
+/** `mfa.factors.totp`: the TOTP factor's switch and parameters. */
 export const mfaTotpConfigSchema = z.object(
 	{
 		enabled: coerceBooleanFromEnv,
@@ -123,7 +101,7 @@ const RING_SHAPE = "must be a list of { id?, key } entries";
 
 const factorsSchema = z.object({ totp: mfaTotpConfigSchema }, { error: SECTION_MISSING });
 
-/** The fewest and the most attempts one transaction may allow (the owner's bound for step 8; the ADR states none). */
+/** The fewest and the most attempts one transaction may allow. */
 const MFA_MAX_ATTEMPTS_PER_TRANSACTION = { min: 1, max: 10 } as const;
 
 const POSITIVE_WHOLE = "must be a positive whole number";
@@ -133,7 +111,7 @@ const positiveWhole = z
 	.positive({ error: POSITIVE_WHOLE });
 
 /**
- * `mfa.lockout`, D21's subject lock: each field a positive whole number here;
+ * `mfa.lockout`, the subject lock: each field a positive whole number here;
  * how the fields relate — `threshold` at most `hardLimit`, `hardLimit` at
  * most NIST's cap, `maxSeconds` at least `baseSeconds`, every duration within
  * the Date range — is core's `checkMfaLockoutPolicy`, which `readMfaSettings`
@@ -154,13 +132,12 @@ const lockoutSchema = z.object(
 );
 
 /**
- * The shapes of the `mfa` keys this package reads — the key ring, the
- * factors, a transaction's life and attempts, and the subject lock (D19) —
- * with TOTP's ranges and the transaction's. The ring's refusals (a key that
- * is not 32 bytes, an empty ring, a duplicate id), the sample key's and how
- * the lock's fields relate are not the schema's: `readMfaSettings` makes
- * them, where the keys are decoded, the environment is known and core's rule
- * is applied, and they are what D20 calls the MFA config schema's.
+ * The shapes of the `mfa` keys this package reads (the key ring, the factors,
+ * a transaction's life and attempts, and the subject lock) with TOTP's ranges
+ * and the transaction's. The ring's refusals (a key that is not 32 bytes, an
+ * empty ring, a duplicate id), the sample key's and how the lock's fields
+ * relate are not the schema's: `readMfaSettings` makes them, where the keys
+ * are decoded, the environment is known and core's rule is applied.
  * `mfa.mode` is core's.
  */
 export const mfaConfigSchema = z.object(
@@ -225,15 +202,15 @@ export interface MfaSettings {
 	 * say so at boot.
 	 */
 	readonly developmentSampleKeyAccepted: boolean;
-	/** A transaction's life, in seconds: every `expiresAtMs` is derived from it and nothing else (D8). */
+	/** A transaction's life, in seconds: every `expiresAtMs` is derived from it and nothing else. */
 	readonly transactionTtlSeconds: number;
-	/** The attempts one transaction allows (D21). */
+	/** The attempts one transaction allows. */
 	readonly maxAttemptsPerTransaction: number;
-	/** D21's subject lock, held to core's rule. */
+	/** The subject lock, held to core's rule. */
 	readonly lockout: MfaLockoutPolicy;
 }
 
-/** What a composition root tells the settings that its configuration cannot (#473). */
+/** What a composition root tells the settings that its configuration cannot. */
 export interface MfaSettingsOptions {
 	/**
 	 * The name the deployment selected its configuration by — the standalone
@@ -272,7 +249,7 @@ function parseSection<T>(schema: z.ZodType<T>, value: unknown, prefix: string): 
 /**
  * The host the deployment's issuer names, which the TOTP issuer defaults to:
  * `given` — the `oauthTokenSettings` slot's issuer, when the composition holds
- * it (#728) — or `oauth.jwt.issuer` as the configuration carries it.
+ * it — or `oauth.jwt.issuer` as the configuration carries it.
  */
 function issuerHost(config: ConfigShape, given: string | undefined): string {
 	const issuer = given ?? config.oauth?.jwt?.issuer;
@@ -312,7 +289,7 @@ function totpSettings(
 /**
  * `mfa.factors.totp`, read on its own — what the TOTP factor's module reads. A
  * `RangeError` names each key refused. `options.issuer` is the deployment's
- * issuer when the composition holds the `oauthTokenSettings` slot (#728): an
+ * issuer when the composition holds the `oauthTokenSettings` slot: an
  * unset TOTP issuer defaults to its host rather than `oauth.jwt.issuer`'s.
  */
 export function readMfaTotpSettings(
@@ -329,7 +306,7 @@ export function readMfaTotpSettings(
 }
 
 /**
- * The sample key's refusal (#473's rule): the environment the configuration
+ * The sample key's refusal: the environment the configuration
  * was selected by, or `NODE_ENV`, is production or staging, or
  * `deployment.mode` is `"multi"`. Every key opens, so it is refused wherever
  * it sits in the ring. Answers whether the ring carries it — accepted, when
@@ -436,7 +413,7 @@ function refuseRepeatedKey(ring: SealingKeyRing): void {
  * and the subject lock — held to core's `checkMfaLockoutPolicy` under
  * `mfa.lockout`. No factor's section: the TOTP factor's is
  * {@link readMfaTotpSettings}'s. `options.environment` is the
- * name the composition root selected its configuration by (#473). A refusal
+ * name the composition root selected its configuration by. A refusal
  * is a `RangeError` that names the key and quotes no key material.
  */
 export function readMfaSettings(config: unknown, options: MfaSettingsOptions = {}): MfaSettings {

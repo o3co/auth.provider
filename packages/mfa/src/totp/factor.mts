@@ -15,32 +15,17 @@
  */
 
 /**
- * The `totp` second factor (the MFA ADR's F6, D14, D21, D22), as core's
- * `MfaFactor` contract states it.
+ * The `totp` second factor, as core's `MfaFactor` contract states it. See
+ * README, "The TOTP factor", and ADR 2026-09-25-multi-factor-authentication.
  *
- * - It adds `otp`, and `mfa` beside it; it counts as MFA; its proof, six to
- *   eight digits, is guessable, so the subject lock applies to it.
- * - A verification checks the factor the request named — no other of the
- *   subject's — under that factor's own algorithm, digits and period (F6: the
- *   parameters are stored per factor, so a configuration change never breaks
- *   an enrollment), at the configured window, and only at a step after the
- *   factor's `lastUsedStep`; it answers the step it matched as the factor's
- *   next data, which the coordinator writes by compare-and-set on the record's
- *   version. A code at or before `lastUsedStep` is `replayed`.
- * - A proof it cannot read — anything but a string of exactly the factor's
- *   number of ASCII digits — is `malformed`. Data or a pending state that is
- *   not a TOTP record is thrown, never answered as a wrong code: an unreadable
- *   factor is the coordinator's `503`, not the user's mistake (D11). What is
- *   thrown names the field and never quotes the secret.
- * - Enrollment — core's contract requires it of every factor — hands out a
- *   secret of the algorithm's output length (20, 32 or 64 bytes) in base32,
- *   and the `otpauth://` URI authenticator apps read, labelled
- *   `issuer:account` (the account's email, else its username); the pending
- *   state carries the parameters it was begun under, and completing binds the
- *   factor at the step its proof matched, so that code is spent.
- *
- * The factor holds no key, no store and no transaction: the coordinator opens
- * and seals what it is handed and returns (D7).
+ * A verification checks the factor the request named, no other, under that
+ * factor's stored parameters, and only at a step after its `lastUsedStep` (a
+ * code at or before it is `replayed`). The step it matched is the factor's
+ * next data, which the coordinator writes by compare-and-set on the record's
+ * version. Data or a pending state that is not a TOTP record is thrown (the
+ * coordinator's `503`), never answered as a wrong code, and what is thrown
+ * never quotes the secret. The factor holds no key, no store and no
+ * transaction: the coordinator opens and seals what it is handed and returns.
  */
 
 import { randomBytes } from "node:crypto";
@@ -158,7 +143,7 @@ function accountOf(user: Readonly<Record<string, unknown>>): string {
 }
 
 /**
- * The Key URI authenticator apps and Apple's Passwords read (F6):
+ * The Key URI authenticator apps and Apple's Passwords read:
  * `otpauth://totp/<issuer>:<account>?secret=…&issuer=…&algorithm=…&digits=…&period=…`,
  * each name percent-encoded.
  */
@@ -174,7 +159,7 @@ function otpauthUri(
 	);
 }
 
-/** The `amr` values a verification adds; the same for every record (D14). */
+/** The `amr` values a verification adds; the same for every record. */
 const AMR: readonly string[] = Object.freeze([OTP_AMR]);
 
 /** The `totp` factor, with `settings` for new enrollments and the window. */
