@@ -51,6 +51,7 @@ import {
 	type SessionRequirementResolver,
 } from "#/session-admission/requirement.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
+import { createTestOAuthTokenSettings } from "#/testing/slots/oauthTokenSettings.mjs";
 
 const config = (over: Record<string, unknown> = {}) => ({
 	...makeValidCoreConfig(),
@@ -135,6 +136,8 @@ const boot = (
 	over: Record<string, unknown> = {},
 	extra: Partial<Parameters<typeof createApp>[0]> = {},
 	logger?: Logger,
+	/** Components the host bootstraps beside the configuration. */
+	components: Record<string, unknown> = {},
 ) =>
 	createApp({
 		modules,
@@ -142,6 +145,7 @@ const boot = (
 			config: config(over),
 			pathResolver: (p: string) => p,
 			...(logger === undefined ? {} : { logger }),
+			...components,
 		} as never,
 		...extra,
 	});
@@ -772,6 +776,27 @@ describe("the reach and the page, read once at the end of stage 4 (D3)", () => {
 				href: "https://auth.test/consent",
 			});
 			expect(seen.resolver?.get("consent")?.reach.size).toBe(0);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("resolves the page on the issuer of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
+		const seen: { resolver?: SessionRequirementResolver } = {};
+		const handle = await boot(
+			[
+				contributing("test:consent", {
+					consent: () => requirement("consent", { stepUpPage: { url: "/consent", params: {} } }),
+				}),
+				consumer(seen),
+			],
+			{ sessionRequirements: { expected: ["consent"] } },
+			{},
+			undefined,
+			{ oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://slot.test" }) },
+		);
+		try {
+			expect(seen.resolver?.get("consent")?.stepUpPage?.href).toBe("https://slot.test/consent");
 		} finally {
 			await handle.dispose();
 		}

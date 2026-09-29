@@ -60,10 +60,12 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 	type RefreshTokenFamilyRotation,
+	resolveTokenBindingSettings,
 	type TokenBinding,
 	verifyJwt,
 	type WebAuthnCredential,
 } from "@o3co/auth-provider-core";
+import { createTestOAuthTokenSettings } from "@o3co/auth-provider-core/testing";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -597,6 +599,56 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 		);
 
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: "PROOF-JKT" });
+	});
+
+	it("binds a confidential client's refresh token exactly when core's resolveTokenBindingSettings says so, whatever oauthTokenSettings the composition holds (#728)", async () => {
+		// The setting applies across every binding mechanism, so it is core's;
+		// the slot carries none, and the grant reads core's reader.
+		const base = makeConfig() as unknown as { oauth: Record<string, unknown> };
+		for (const tokenBinding of [
+			undefined,
+			{},
+			{ bindConfidentialClientRefreshTokens: true },
+			{ bindConfidentialClientRefreshTokens: false },
+			// A configuration built by hand, which no schema coerced.
+			{ bindConfidentialClientRefreshTokens: "true" },
+			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+		]) {
+			const config = {
+				...base,
+				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
+			} as unknown as GrantDependencies["config"];
+			const tokens = await issue(
+				await makeDeps({
+					config,
+					oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER }),
+				}),
+				makeCtx(makeClient({ tokenEndpointAuthMethod: "client_secret_basic" }), {
+					tokenBinding: dpopBinding("PROOF-JKT"),
+				}),
+			);
+			const bound = decodePayload(tokens.refresh_token as string).cnf !== undefined;
+			expect(bound, JSON.stringify(tokenBinding)).toBe(
+				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			);
+		}
+	});
+
+	it("mints the lifetimes of the oauthTokenSettings the composition holds, over the configuration's (#728)", async () => {
+		const tokens = await issue(
+			await makeDeps({
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: ISSUER,
+					accessTokenLifetime: { defaultExpiresIn: 111, maxExpiresIn: 111 },
+					refreshTokenExpiresIn: 2222,
+				}),
+			}),
+			makeCtx(makeClient()),
+		);
+		const access = decodePayload(tokens.access_token);
+		const refresh = decodePayload(tokens.refresh_token as string);
+		expect((access.exp as number) - (access.iat as number)).toBe(111);
+		expect((refresh.exp as number) - (refresh.iat as number)).toBe(2222);
 	});
 
 	it("emits no cnf when the request carried no binding", async () => {

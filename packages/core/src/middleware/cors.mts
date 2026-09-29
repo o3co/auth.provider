@@ -148,10 +148,19 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  * `boot/assemble-app.mts` already carry. A downstream that re-mounts the OAuth
  * router elsewhere must build its own table.
  */
-export function browserFacingCorsRoutes(config: {
-	oauth?: { jwt?: { jwksPath?: unknown; issuer?: unknown } };
-}): readonly CorsRoute[] {
-	const issuer = config.oauth?.jwt?.issuer;
+export function browserFacingCorsRoutes(
+	config: {
+		oauth?: { jwt?: { jwksPath?: unknown; issuer?: unknown } };
+	},
+	/**
+	 * The issuer the discovery paths are derived from, when the caller holds
+	 * it apart from the configuration — core's `assembleApp` hands the
+	 * `oauthTokenSettings` slot's (#728), so the table and the discovery route
+	 * name one issuer. `oauth.jwt.issuer` otherwise.
+	 */
+	options: { readonly issuer?: string } = {},
+): readonly CorsRoute[] {
+	const issuer = options.issuer ?? config.oauth?.jwt?.issuer;
 	const discovery = discoveryPathsFor(typeof issuer === "string" ? issuer : undefined);
 	return [
 		{ path: "/oauth/token", methods: ["POST"] },

@@ -16,6 +16,7 @@
 
 import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+	checkOAuthTokenSettings,
 	defineModule,
 	type Module,
 	type ProviderDeps,
@@ -119,6 +120,11 @@ const OPTIONAL = [
 	// the one ends the other. Optional as it is on `oauthModule`: without a
 	// store no surface judges a `sid`.
 	"userSessionStore",
+	// What the oauth module provides of `oauth {}` (#728): the lifetimes the
+	// grant mints within, and the issuer and `legacyTypAccept` the validator
+	// holds a subject token to. Read from the configuration when no module
+	// provides it, as before.
+	"oauthTokenSettings",
 ] as const;
 
 /**
@@ -156,10 +162,17 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 				}),
 		},
 		tokenExchangeValidators: {
-			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) =>
-				createSelfIssuedAccessTokenValidator({
+			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) => {
+				// The slot whole, checked first, when the composition holds it
+				// (#728); the configuration's keys when not — never one beside
+				// the other.
+				const settings =
+					deps.oauthTokenSettings === undefined
+						? undefined
+						: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config);
+				return createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
-					issuer: deps.config.oauth.jwt.issuer,
+					issuer: settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer,
 					// No `refreshTokenFamilyRevocation`: the grant owns the family
 					// check — see the optional-keys comment above.
 					// #367: revocation stores, forwarded like every other
@@ -171,9 +184,13 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 					// this, the validator's `?? true` fallback masked any
 					// explicit `legacyTypAccept = false` configuration — the
 					// strict mode would not actually engage at this site.
-					legacyTypAccept: deps.config.oauth.jwt.legacyTypAccept,
+					legacyTypAccept:
+						settings === undefined
+							? deps.config.oauth.jwt.legacyTypAccept
+							: settings.legacyTypAccept,
 					logger: deps.logger,
-				}),
+				});
+			},
 		},
 	},
 });

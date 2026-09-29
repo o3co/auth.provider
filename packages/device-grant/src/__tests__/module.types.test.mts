@@ -42,6 +42,9 @@ const OPTIONAL = [
 	"subjectRevocation",
 	// The one CSRF policy (#728, #710 C4): required once the grant is enabled.
 	"csrfGuard",
+	// What the oauth module provides of `oauth {}` (#728); read with the
+	// configuration's value as the fallback.
+	"oauthTokenSettings",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

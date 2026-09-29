@@ -54,6 +54,7 @@
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	checkOAuthTokenSettings,
 	defineModule,
 	type FederationGrantConnection,
 	type FederationGrantRefresher,
@@ -125,6 +126,10 @@ const OPTIONAL = [
 	// The login page connect sends a browser that is not signed in to, which
 	// the session module provides (#728): required once grants are enabled.
 	"loginEntry",
+	// What the oauth module provides of `oauth {}` (#728): the issuer every
+	// route and the acquisition settings are built on. Read from the
+	// configuration when no module provides it, as before.
+	"oauthTokenSettings",
 ] as const;
 
 /**
@@ -135,6 +140,17 @@ const OPTIONAL = [
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type FederationGrantsModuleDeps = ProviderDeps<Requires, Optional>;
+
+/**
+ * The issuer the routes and the acquisition settings are built on: the
+ * `oauthTokenSettings` slot's when the composition holds it (#728), the slot
+ * read whole and checked first, otherwise `oauth.jwt.issuer` as the
+ * configuration carries it.
+ */
+const issuerOf = (deps: FederationGrantsModuleDeps): string =>
+	deps.oauthTokenSettings === undefined
+		? deps.config.oauth.jwt.issuer
+		: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).issuer;
 
 const isEnabled = (deps: FederationGrantsModuleDeps): boolean =>
 	deps.config.federationGrants?.enabled === true;
@@ -425,6 +441,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					deps.config,
 					connections,
 					deps.loginEntry,
+					{ issuer: issuerOf(deps) },
 				);
 				const intentStore = requireFederationGrantIntentStore(deps.federationGrantIntentStore);
 				requireFederationGrantIdentityLookup(
@@ -449,7 +466,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 							limits: lifetimes,
 						},
 						clientRepository: deps.clientRepository,
-						issuer: deps.config.oauth.jwt.issuer,
+						issuer: issuerOf(deps),
 						rateLimiter,
 						failMode,
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
@@ -487,6 +504,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 					deps.config,
 					connections,
 					deps.loginEntry,
+					{ issuer: issuerOf(deps) },
 				);
 				const limits = resolveFederationGrantRetrievalLimits(deps.config);
 				return {
@@ -509,7 +527,7 @@ export const federationGrantsModule = defineModule<Requires, Optional>({
 						authorizerFor: authorizerFor(deps),
 						consentUrl: acquisition.consentUrl,
 						login: acquisition.login,
-						issuer: deps.config.oauth.jwt.issuer,
+						issuer: issuerOf(deps),
 						rateLimiter: requireLimiter(deps),
 						failMode: requireFailMode(deps),
 						background: deps.federationGrantBackground,

@@ -40,6 +40,7 @@ import { protectedResourceBindingMw } from "../middleware/protectedResourceBindi
 import { terminalErrorHandler } from "../middleware/terminalError.mjs";
 import {
 	type DispatchPolicy,
+	resolveTokenBindingSettings,
 	type TokenBindingMechanism,
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
@@ -47,6 +48,7 @@ import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import { failureDetail } from "./failure-summary.mjs";
+import { compositionIssuer } from "./oauth-token-settings.mjs";
 import type {
 	AppHandle,
 	CleanupRecord,
@@ -65,6 +67,14 @@ import { BootError } from "./types.mjs";
  * @internal
  */
 type ExpressFactory = (() => Express) & { Router: () => Router };
+
+/** The issuer the CORS table's discovery paths derive from: the composition's, when it is a string. */
+const corsIssuerOptions = (
+	components: Readonly<Record<string, unknown>>,
+): { readonly issuer?: string } => {
+	const issuer = compositionIssuer(components);
+	return typeof issuer === "string" ? { issuer } : {};
+};
 
 // ---------------------------------------------------------------------------
 // Internal: post-apply route collision check (§5.6 pre-pass, MUST-FIX 2)
@@ -574,7 +584,11 @@ export function assembleApp(
 	// `try` around the planner kept converting some of it: two review rounds on
 	// #650 found one such path each (the router factory, then the host reads).
 	const planning = planDiscoveryDocument({
-		issuer: frozen.components.config?.oauth?.jwt?.issuer,
+		// The oauth module's `oauthTokenSettings` when the composition holds it
+		// (#728), otherwise the configuration's issuer, as before.
+		// The planner validates what it is handed, as it did the configuration's
+		// value, typed as the configuration types it.
+		issuer: compositionIssuer(frozen.components as Record<string, unknown>) as string | undefined,
 		// `KeyStore.algorithm` is typed, but a host may put an object of its own
 		// in the slot through `bootstrapComponents` / `overrideComponents`, which
 		// is not checked at that boundary — so the reading is still guarded, and
@@ -669,7 +683,9 @@ export function assembleApp(
 		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
 				allowedOrigins,
-				routes: browserFacingCorsRoutes(config ?? {}),
+				// On the issuer the discovery route is served on: the oauth
+				// module's `oauthTokenSettings` when the composition holds it (#728).
+				routes: browserFacingCorsRoutes(config ?? {}, corsIssuerOptions(components)),
 				...(logger ? { logger } : {}),
 			});
 			if (mw !== null) router.use(mw);
@@ -768,12 +784,11 @@ export function assembleApp(
 			if (m !== null) mechanisms.push(m);
 		}
 		if (mechanisms.length > 0) {
-			const config = (frozen.components as Record<string, unknown>).config as
-				| { oauth?: { tokenBinding?: { "dispatch-policy"?: unknown } } }
-				| undefined;
-			const rawPolicy = config?.oauth?.tokenBinding?.["dispatch-policy"];
-			const dispatchPolicy: DispatchPolicy =
-				rawPolicy === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
+			// Core's own policy, for core's own extension point (#728): read
+			// from the configuration in every composition, never from a slot.
+			const dispatchPolicy: DispatchPolicy = resolveTokenBindingSettings(
+				(frozen.components as Record<string, unknown>).config,
+			).dispatchPolicy;
 			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
 			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });
 			router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(composed));

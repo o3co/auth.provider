@@ -133,6 +133,7 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	checkOAuthTokenSettings,
 	consoleLogger,
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
@@ -289,6 +290,12 @@ const OPTIONAL = [
 	// the verification endpoint runs it on the whole route. Required once the
 	// grant is enabled (`requireCsrfGuard`), unused while it is off.
 	"csrfGuard",
+	// What the oauth module provides of `oauth {}` (#728): the issuer client
+	// authentication is held to, the access-token lifetime the grant mints and
+	// `requireEmailVerified`. Optional: an enabled grant boots without the
+	// oauth module — another token endpoint may dispatch through core's grant
+	// registry — and then reads the configuration, as before (`tokenSettings`).
+	"oauthTokenSettings",
 ] as const;
 
 /**
@@ -299,6 +306,42 @@ const OPTIONAL = [
 type Requires = (typeof REQUIRES)[number];
 type Optional = (typeof OPTIONAL)[number];
 export type DeviceGrantModuleDeps = ProviderDeps<Requires, Optional>;
+
+/**
+ * What this module reads of `oauth {}`: the `oauthTokenSettings` slot when a
+ * module provides it (#728) — read whole, held first to what its readers read
+ * (`checkOAuthTokenSettings`), never a member of it beside the configuration —
+ * otherwise the configuration read as it always was: the issuer as written,
+ * the lifetime through core's `resolveAccessTokenLifetime`, and
+ * `requireEmailVerified` on only when `true`. Each is read where it is needed,
+ * so a composition that never reaches one never resolves it.
+ */
+const tokenSettings = (deps: DeviceGrantModuleDeps) => {
+	const held = () =>
+		deps.oauthTokenSettings === undefined
+			? undefined
+			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config);
+	return {
+		issuer: (): string => {
+			const settings = held();
+			return settings === undefined ? deps.config.oauth.jwt.issuer : settings.issuer;
+		},
+		accessTokenDefaultExpiresIn: (): number => {
+			const settings = held();
+			return (
+				settings === undefined
+					? resolveAccessTokenLifetime(deps.config)
+					: settings.accessTokenLifetime
+			).defaultExpiresIn;
+		},
+		requireEmailVerified: (): boolean => {
+			const settings = held();
+			return settings === undefined
+				? deps.config.oauth?.requireEmailVerified === true
+				: settings.requireEmailVerified;
+		},
+	};
+};
 
 const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSlice | null => {
 	const slice = deps.config?.oauth?.deviceAuthorization as
@@ -720,7 +763,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 								return createDeviceCodeGrant({
 									store: requireDeviceCodeStore(deps),
 									keyStore: deps.keyStore,
-									accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
+									accessTokenExpiresIn: tokenSettings(deps).accessTokenDefaultExpiresIn(),
 									logger: deps.logger,
 									// An approval a later sessions boundary covers is refused
 									// at the poll (see grant.mts).
@@ -781,7 +824,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					router.all(
 						"/",
 						createClientAuthMiddleware(deps.clientRepository, {
-							issuer: deps.config.oauth.jwt.issuer,
+							issuer: tokenSettings(deps).issuer(),
 							allowPublicClients: true,
 							// #484: the composition's replay store, so a `private_key_jwt`
 							// client is authenticated here the way it is at every other
@@ -860,7 +903,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							requirements: deps.sessionRequirementResolver,
 							// #297, read as `/authorize` reads it: `=== true`, so a
 							// hand-built config that never passed the schema is off.
-							requireEmailVerified: deps.config.oauth?.requireEmailVerified === true,
+							requireEmailVerified: tokenSettings(deps).requireEmailVerified(),
 							// The sessions boundary admission reads, when the
 							// composition wires one.
 							...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),

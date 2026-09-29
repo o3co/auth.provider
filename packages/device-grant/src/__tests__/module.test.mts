@@ -42,6 +42,7 @@ import {
 } from "@o3co/auth-provider-core";
 import {
 	createTestCsrfGuard,
+	createTestOAuthTokenSettings,
 	makeValidCoreConfig,
 	makeValidFullSections,
 	resolverForTests,
@@ -183,6 +184,9 @@ const boot = (overrides: Overrides) => {
 
 /** What `createApp` hands a contribution: the config, and whatever slots the test wires. */
 type TestDeps = { readonly config: unknown } & Readonly<Record<string, unknown>>;
+
+/** Lifetimes within the 300 s access token these tests configure, which every reader holds a slot to. */
+const WITHIN_CONFIGURATION = { accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 } };
 
 /** The contributions of the module built for `deps.config`, as `createApp` would call them with `deps`. */
 const contributionsFor = (deps: TestDeps) =>
@@ -463,6 +467,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			oauth: {
 				jwt: { issuer: "https://as.example.test" },
 				accessToken: { expiresIn: 300 },
+				refreshToken: { expiresIn: 86_400 },
 				deviceAuthorization: {
 					enabled: true,
 					"verification-uri": "https://example.test/device",
@@ -629,6 +634,61 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			expect(res.status).toBe(403);
 			expect(res.body.error_description).toBe("refused by the slot");
 		}
+	});
+
+	it("holds an approval to requireEmailVerified of the oauthTokenSettings a module provides, over the configuration's (#728)", async () => {
+		// The configuration leaves it off; the slot turns it on, and the
+		// signed-in user-1 has no verified email.
+		const app = mountVerificationRoute({
+			...enabledDeps(),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				...WITHIN_CONFIGURATION,
+				requireEmailVerified: true,
+			}),
+		});
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "approve", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(403);
+		expect(res.body).toEqual({
+			error: "access_denied",
+			error_description: "email address is not verified",
+		});
+	});
+
+	it("reads requireEmailVerified off the oauthTokenSettings a module provides when the configuration turns it on (#728)", async () => {
+		// The other way round: the slot says false, and a reader that took
+		// `false` for "unset" would fall through to the configuration's `true`.
+		const approve = (deps: TestDeps) =>
+			request(mountVerificationRoute(deps))
+				.post("/oauth/device/verification")
+				.set("Host", "as.example.test")
+				.set("Origin", "http://as.example.test")
+				.send({ action: "approve", user_code: "BCDF-GHJK" });
+		const configOn = (): TestDeps => {
+			const base = enabledDeps();
+			return {
+				...base,
+				config: { ...base.config, oauth: { ...base.config.oauth, requireEmailVerified: true } },
+			};
+		};
+		// The configuration alone holds the approval.
+		expect((await approve(configOn())).status).toBe(403);
+		// The slot's false is read, and the approval goes on to the code as it
+		// does with the setting off.
+		const res = await approve({
+			...configOn(),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				...WITHIN_CONFIGURATION,
+				requireEmailVerified: false,
+			}),
+		});
+		const off = await approve(enabledDeps());
+		expect(res.status).not.toBe(403);
+		expect(res.status).toBe(off.status);
+		expect(res.body).toEqual(off.body);
 	});
 
 	/** A limiter whose backend is down: every check rejects, as a Redis client would. */
@@ -1477,6 +1537,54 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 		const payload = decodeJwt(result.tokens?.access_token as string);
 		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
 	});
+
+	it("mints the default lifetime of the oauthTokenSettings a module provides, over the configuration's (#728)", async () => {
+		// The oauth module owns `oauth {}` and provides what others read of it;
+		// a composition without it reads the configuration as before (above).
+		const store = {
+			...createMemoryDeviceCodeStore(),
+			poll: async () => ({
+				status: "approved" as const,
+				authorization: {
+					userCode: "BCDF-GHJK",
+					clientId: CONFIDENTIAL_ID,
+					requestedScope: ["openid"],
+					expiresAtMs: Date.now() + 600_000,
+					intervalSeconds: 5,
+					status: "approved" as const,
+					subject: "user-1",
+					grantedScope: ["openid"],
+					approvedAtMs: Date.now(),
+				},
+			}),
+		} satisfies DeviceCodeStore;
+		const base = makeValidCoreConfig();
+		const deps = {
+			config: {
+				oauth: {
+					...base.oauth,
+					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+					deviceAuthorization: { enabled: true, "verification-uri": "https://example.test/device" },
+				},
+			},
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				accessTokenLifetime: { defaultExpiresIn: 900, maxExpiresIn: 7200 },
+			}),
+			deviceCodeStore: store,
+			keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
+		};
+		const factory = contributionsFor(deps)?.grants?.[DEVICE_CODE_GRANT_TYPE] as (deps: unknown) => {
+			handle(ctx: unknown): Promise<{ result: { tokens?: Record<string, unknown> } }>;
+		};
+		const { result } = await factory(deps).handle({
+			body: { device_code: "device-code-1" },
+			session: {},
+			metadata: {},
+			issuer: "https://as.example.test",
+			authenticatedClient: confidentialClient,
+		});
+		expect(result.tokens?.expires_in).toBe(900);
+	});
 });
 
 describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", () => {
@@ -1507,12 +1615,12 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 		authenticate: async () => null,
 	};
 
-	const assertion = async (): Promise<string> => {
+	const assertion = async (issuer = ISSUER): Promise<string> => {
 		const now = Math.floor(Date.now() / 1000);
 		return new SignJWT({
 			iss: JWT_CLIENT,
 			sub: JWT_CLIENT,
-			aud: `${ISSUER}/oauth/token`,
+			aud: `${issuer}/oauth/token`,
 			iat: now,
 			exp: now + 60,
 			jti: `jti-${Math.random().toString(36).slice(2)}`,
@@ -1537,6 +1645,7 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 			oauth: {
 				jwt: { issuer: ISSUER },
 				accessToken: { expiresIn: 300 },
+				refreshToken: { expiresIn: 86_400 },
 				deviceAuthorization: {
 					enabled: true,
 					"verification-uri": "https://example.test/device",
@@ -1573,6 +1682,27 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 
 		expect(res.status).toBe(200);
 		expect(typeof res.body.device_code).toBe("string");
+	});
+
+	it("authenticates the client against the issuer of the oauthTokenSettings a module provides (#728)", async () => {
+		const SLOT_ISSUER = "https://slot.example.test";
+		const app = mountWith({
+			...depsWith(createMemoryReplaySeenSet()),
+			oauthTokenSettings: createTestOAuthTokenSettings({
+				...WITHIN_CONFIGURATION,
+				issuer: SLOT_ISSUER,
+			}),
+		});
+		const post = async (issuer: string) =>
+			request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({
+					client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+					client_assertion: await assertion(issuer),
+				});
+		expect((await post(SLOT_ISSUER)).status).toBe(200);
+		expect((await post(ISSUER)).status).toBe(401);
 	});
 
 	it("refuses a replayed assertion, because the store is the composition's", async () => {

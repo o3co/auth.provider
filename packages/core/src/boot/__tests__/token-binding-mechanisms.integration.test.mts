@@ -42,6 +42,7 @@ import { createApp } from "../../index.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 import type { BootstrapMap } from "../types.mjs";
 
 // ---------------------------------------------------------------------------
@@ -199,6 +200,37 @@ describe("tokenBindingMechanisms — core synthesis", () => {
 		const res = await request(app).post("/oauth/token").send({});
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_request");
+
+		await handle.dispose();
+	});
+
+	it("reads the dispatch policy from the configuration whatever oauthTokenSettings the composition holds: the policy is core's (#728)", async () => {
+		// The token-binding extension point is core's, and so is the policy that
+		// arbitrates between its mechanisms: the oauth module's slot carries no
+		// policy, and one a host's value carries anyway is not read.
+		const settings = {
+			...createTestOAuthTokenSettings(),
+			tokenBinding: { dispatchPolicy: "strict-mutual-exclusion" },
+		};
+		const received: { binding?: unknown } = {};
+		const handle = await createApp({
+			modules: [
+				contributingModule("ambient-mtls", () => mtlsMech),
+				contributingModule("explicit-dpop", () => dpopMech),
+				makeObserverModule(received),
+			],
+			bootstrapComponents: {
+				...makeBoot("intent-explicit"),
+				oauthTokenSettings: settings,
+			} as unknown as BootstrapMap,
+		});
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const res = await request(app).post("/oauth/token").send({});
+		expect(res.status).toBe(200);
+		expect(received.binding).toEqual({ kind: "dpop", confirmation: { jkt: "fake-jkt" } });
 
 		await handle.dispose();
 	});

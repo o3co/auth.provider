@@ -85,6 +85,11 @@ const OPTIONAL = [
 	"federationGrantStore",
 	"auditSink",
 	"logger",
+	// What the boundary must outlive (#728): the oauth module's token
+	// lifetimes and the session store's session lifetime, read from the
+	// configuration when the composition holds neither.
+	"oauthTokenSettings",
+	"sessionCookiePolicy",
 ] as const;
 
 /**
@@ -234,9 +239,17 @@ export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 						).outcome === "done",
 				}),
 				// The boundary must outlive the longest-lived thing it covers,
-				// which is configuration this module can read and the service
-				// cannot.
-				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config),
+				// which this module can read and the service cannot: the slots'
+				// lifetimes when the composition holds them (#728), otherwise
+				// the configuration's.
+				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config, {
+					...(deps.oauthTokenSettings === undefined
+						? {}
+						: { tokenSettings: deps.oauthTokenSettings }),
+					...(deps.sessionCookiePolicy === undefined
+						? {}
+						: { sessionCookie: deps.sessionCookiePolicy }),
+				}),
 				...(enabled && store !== undefined ? { federationGrantStore: store } : {}),
 				// Gated on the feature: an allowance to keep grants in a
 				// deployment that has none is an allowance over nothing, and

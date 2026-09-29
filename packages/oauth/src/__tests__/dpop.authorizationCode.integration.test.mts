@@ -37,6 +37,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	resolveTokenBindingSettings,
 } from "@o3co/auth-provider-core";
 import { resolverForTests } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -408,6 +409,34 @@ describe("confidential-client RT binding — opt-in, authorization_code (#275)",
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) expect.fail("Expected tokens in result");
 		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+
+	it("binds exactly when core's resolveTokenBindingSettings says so: the setting is core's (#728)", async () => {
+		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
+		for (const tokenBinding of [
+			undefined,
+			{},
+			{ bindConfidentialClientRefreshTokens: true },
+			{ bindConfidentialClientRefreshTokens: false },
+			// A configuration built by hand, which no schema coerced.
+			{ bindConfidentialClientRefreshTokens: "true" },
+			{ "dispatch-policy": "strict-mutual-exclusion", bindConfidentialClientRefreshTokens: true },
+		]) {
+			const config = {
+				...base,
+				oauth: { ...base.oauth, ...(tokenBinding === undefined ? {} : { tokenBinding }) },
+			} as unknown as GrantDependencies["config"];
+			const { result } = await createAuthorizationGrant({
+				...makeDeps(vi.fn().mockResolvedValue({ ...validCode })),
+				config,
+			}).handle(dpopCtx());
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			const bound = decodePayload(result.tokens.refresh_token as string).cnf !== undefined;
+			expect(bound, JSON.stringify(tokenBinding)).toBe(
+				resolveTokenBindingSettings(config).bindConfidentialClientRefreshTokens,
+			);
+		}
 	});
 });
 

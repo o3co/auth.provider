@@ -30,13 +30,13 @@ import {
 	type RefreshTokenFamilyRevocation,
 	type TokenBinding,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
-import { decodeJwt } from "jose";
+import { createTestOAuthTokenSettings, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { decodeJwt, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import { ISSUER, keyStore, secretKey, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -1499,5 +1499,133 @@ describe("absence policy (#375)", () => {
 		expect(tokenExchangeModule.absencePolicies?.accessTokenDenylist).toBe(
 			ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		);
+	});
+});
+
+describe("tokenExchangeModule's contributions read oauthTokenSettings over the configuration (#728)", () => {
+	// Beside oauthModule the slot is derived from the same `oauth {}` the
+	// configuration carries, and nothing substitutes it, so the two cannot
+	// disagree there. Which one a contribution reads shows only here, where
+	// the deps hand it a slot that disagrees with the configuration — as a
+	// composition without oauthModule, which fills the slot itself, may.
+	const SLOT_ISSUER = "https://slot.example";
+	const configWith = (jwt: Record<string, unknown> = {}) => {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: ISSUER, ...jwt },
+				accessToken: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+			},
+		};
+	};
+	// Within the configuration's lifetimes, which every reader holds a slot to.
+	const settings = (overrides: Parameters<typeof createTestOAuthTokenSettings>[0] = {}) =>
+		createTestOAuthTokenSettings({
+			issuer: ISSUER,
+			accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+			...overrides,
+		});
+
+	type ValidatorFactory = (deps: unknown) => {
+		validate(token: string, ctx: { role: "subject" }): Promise<unknown>;
+	};
+	const validatorFor = (deps: Record<string, unknown>) => {
+		const factory = tokenExchangeModule.contributes?.tokenExchangeValidators?.[ACCESS_TOKEN_TYPE];
+		if (factory === undefined) throw new Error("the module contributes no access_token validator");
+		return (factory as ValidatorFactory)({ keyStore, ...deps });
+	};
+
+	/** What `signSelfIssuedAccessToken` signs, with no `typ` header. */
+	const untypedToken = async () => {
+		const now = Math.floor(Date.now() / 1000);
+		return new SignJWT({ sub: "user-1", scope: "read", iss: ISSUER, aud: "client-a" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0" })
+			.setIssuedAt(now)
+			.setExpirationTime(now + 3600)
+			.sign(secretKey);
+	};
+
+	it("holds a subject token to the slot's issuer, not the configuration's", async () => {
+		const validator = validatorFor({
+			config: configWith(),
+			oauthTokenSettings: settings({ issuer: SLOT_ISSUER }),
+		});
+		expect(
+			await validator.validate(await signSelfIssuedAccessToken({}), { role: "subject" }),
+		).toBeNull();
+		expect(
+			await validator.validate(await signSelfIssuedAccessToken({ iss: SLOT_ISSUER }), {
+				role: "subject",
+			}),
+		).not.toBeNull();
+	});
+
+	it("accepts a subject token with no typ when the slot's legacyTypAccept is on and the configuration's off", async () => {
+		const token = await untypedToken();
+		const config = configWith({ legacyTypAccept: false });
+		expect(await validatorFor({ config }).validate(token, { role: "subject" })).toBeNull();
+		expect(
+			await validatorFor({
+				config,
+				oauthTokenSettings: settings({ legacyTypAccept: true }),
+			}).validate(token, { role: "subject" }),
+		).not.toBeNull();
+	});
+
+	it("refuses a subject token with no typ when the slot's legacyTypAccept is off and the configuration's on", async () => {
+		// A reader that took the slot's `false` for "unset" would fall through
+		// to the configuration's `true`.
+		const token = await untypedToken();
+		const config = configWith({ legacyTypAccept: true });
+		expect(await validatorFor({ config }).validate(token, { role: "subject" })).not.toBeNull();
+		expect(
+			await validatorFor({
+				config,
+				oauthTokenSettings: settings({ legacyTypAccept: false }),
+			}).validate(token, { role: "subject" }),
+		).toBeNull();
+	});
+
+	it("reads a slot whole: one without legacyTypAccept is refused, naming the member, not read beside the configuration's", async () => {
+		// Read member by member, the configuration's `true` would stand in for
+		// the member the slot lacks, and accept an untyped token on a slot
+		// nobody meant to say so.
+		const { legacyTypAccept: _dropped, ...withoutSwitch } = settings();
+		expect(() =>
+			validatorFor({
+				config: configWith({ legacyTypAccept: true }),
+				oauthTokenSettings: withoutSwitch,
+			}),
+		).toThrow(/oauthTokenSettings\.legacyTypAccept/);
+	});
+
+	it("mints the slot's default lifetime, not the configuration's", async () => {
+		const factory = tokenExchangeModule.contributes?.grants?.[TOKEN_EXCHANGE_GRANT_TYPE];
+		if (factory === undefined) throw new Error("the module contributes no token_exchange grant");
+		const grant = (factory as (deps: unknown) => GrantHandler)({
+			config: configWith(),
+			keyStore,
+			clientRepository,
+			refreshTokenFamilyRevocation: makeStatefulStore(),
+			tokenExchangeValidatorResolver: new Map([
+				[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
+			]),
+			oauthTokenSettings: settings({
+				accessTokenLifetime: { defaultExpiresIn: 123, maxExpiresIn: 123 },
+			}),
+		});
+		const { result } = await grant.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-1", aud: "billing" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) return;
+		expect(result.tokens.expires_in).toBe(123);
 	});
 });

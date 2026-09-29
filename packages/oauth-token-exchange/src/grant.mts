@@ -22,6 +22,7 @@ import type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
 	GrantPolicyRequest,
+	OAuthTokenSettings,
 	ProviderDeps,
 	PublicClient,
 	TokenExchangeValidatorResolver,
@@ -30,6 +31,7 @@ import type {
 import {
 	auditErrorList,
 	auditErrorText,
+	checkOAuthTokenSettings,
 	consoleLogger,
 	formatObject,
 	generateToken,
@@ -73,6 +75,8 @@ export interface TokenExchangeDependencies
 		>,
 		ProviderDeps<"clientRepository"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
+	/** What the oauth module provides of `oauth {}` (#728); the configuration is read when absent. */
+	readonly oauthTokenSettings?: OAuthTokenSettings;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
@@ -82,7 +86,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	// fault, refused before any request — read per request, it answered every
 	// exchange with a 500, after client authentication had spent whatever it
 	// spends.
-	const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(deps.config);
+	// The oauth module's settings when the composition holds them (#728),
+	// read whole and checked first; otherwise the configuration, through
+	// core's one reader of the pair.
+	const { defaultExpiresIn, maxExpiresIn } =
+		deps.oauthTokenSettings === undefined
+			? resolveAccessTokenLifetime(deps.config)
+			: checkOAuthTokenSettings(deps.oauthTokenSettings, deps.config).accessTokenLifetime;
 
 	return {
 		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn

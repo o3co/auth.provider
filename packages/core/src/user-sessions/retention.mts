@@ -32,14 +32,20 @@
  * resolved, not fixed.
  */
 
+import type { SessionCookiePolicy } from "../browser-session/types.mjs";
 import {
+	type AccessTokenLifetime,
 	type AccessTokenLifetimeSource,
+	isLifetimeSeconds,
 	type RefreshTokenLifetimeSource,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "../config/application.schema.mjs";
+import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "../config/durations.mjs";
+import { describeValue } from "../errors/describe-value.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "../federation-grants/lifetime.mjs";
 import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
+import type { OAuthTokenSettings } from "../token-settings/types.mjs";
 
 /**
  * One minute more than the longest grant the code will ever allow.
@@ -58,19 +64,59 @@ export const SUBJECT_REVOCATION_MIN_RETENTION_MS = FEDERATION_GRANT_LIFETIME_CEI
 /**
  * Milliseconds an operator configured, or a refusal that names the path. The
  * token lifetimes have resolvers of their own in the configuration schema;
- * this reads what has none.
+ * this reads what has none, `session.maxAge`.
  */
 const lifetimeMs = (value: unknown, path: string): number => {
 	const raw = typeof value === "number" ? value : Number.NaN;
 	if (!Number.isFinite(raw) || raw <= 0) {
 		throw new RangeError(
 			`resolveSubjectRevocationHorizonMs: ${path} must be a positive number of ` +
-				`milliseconds, and was ${JSON.stringify(value)}. ` +
+				`milliseconds, and was ${describeValue(value)}. ` +
 				"The subject's revocation boundary is sized from it, and one computed from a " +
 				"missing lifetime expires while the sessions it covers are still being accepted.",
 		);
 	}
 	return raw;
+};
+
+/**
+ * The session lifetime a `sessionCookiePolicy` carries, held to the rule the
+ * configuration's `session.maxAge` is held to where it is parsed — whole
+ * milliseconds from 1 to the one-year ceiling, as the schema and the session
+ * store's provider hold it — or a refusal that names the slot's member.
+ */
+const slotLifetimeMs = (value: unknown, path: string): number => {
+	if (
+		typeof value !== "number" ||
+		!Number.isInteger(value) ||
+		value < 1 ||
+		value > MAX_DURATION_MS
+	) {
+		throw new RangeError(
+			`resolveSubjectRevocationHorizonMs: ${path} must be a whole number of milliseconds ` +
+				`from 1 to ${MAX_DURATION_MS}, and was ${describeValue(value)}. ` +
+				"The subject's revocation boundary is sized from it, and one computed from a " +
+				"lifetime that is not one expires while the sessions it covers are still accepted.",
+		);
+	}
+	return value;
+};
+
+/**
+ * Seconds a slot carries, held to the rule the configuration's token lifetimes
+ * are (`isLifetimeSeconds`), or a refusal that names the slot's member. A slot
+ * a host filled by hand meets no schema either.
+ */
+const slotLifetimeSeconds = (value: unknown, path: string): number => {
+	if (!isLifetimeSeconds(value)) {
+		throw new RangeError(
+			`resolveSubjectRevocationHorizonMs: ${path} must be a whole number of seconds ` +
+				`from 1 to ${MAX_DURATION_SECONDS}, and was ${describeValue(value)}. ` +
+				"The subject's revocation boundary is sized from it, and one computed from a " +
+				"lifetime that is not one expires while the tokens it covers are still accepted.",
+		);
+	}
+	return value;
 };
 
 /**
@@ -97,10 +143,34 @@ const lifetimeMs = (value: unknown, path: string): number => {
  * boundary has no such hole, because its floor comes from a ceiling the code
  * enforces rather than from configuration.
  */
-export function resolveSubjectRevocationHorizonMs(config: unknown): number {
+export function resolveSubjectRevocationHorizonMs(
+	config: unknown,
+	/**
+	 * The lifetimes as the slots carry them, when the caller holds them
+	 * (#728): the oauth module's `oauthTokenSettings` and the session store's
+	 * `sessionCookiePolicy`. A slot handed here is read in place of `config`
+	 * and held to the rule the configuration's key is held to — a RangeError
+	 * naming the slot's member otherwise; a slot not handed is read from
+	 * `config`, as before.
+	 */
+	from: {
+		readonly tokenSettings?: Pick<
+			OAuthTokenSettings,
+			"accessTokenLifetime" | "refreshTokenExpiresIn"
+		>;
+		readonly sessionCookie?: Pick<SessionCookiePolicy, "maxAgeMs">;
+	} = {},
+): number {
 	const root = config as { session?: { maxAge?: unknown } } | undefined;
+	const { tokenSettings, sessionCookie } = from;
 	// Through the key's one reader, which holds it to the schema's rule.
-	const refreshMs = resolveRefreshTokenLifetime(config as RefreshTokenLifetimeSource) * 1000;
+	const refreshMs =
+		(tokenSettings === undefined
+			? resolveRefreshTokenLifetime(config as RefreshTokenLifetimeSource)
+			: slotLifetimeSeconds(
+					tokenSettings.refreshTokenExpiresIn,
+					"oauthTokenSettings.refreshTokenExpiresIn",
+				)) * 1000;
 	// The MAXIMUM, not the default. `oauth.accessToken.expiresIn` is what a
 	// grant mints when the request asks for nothing; token exchange may ask
 	// for more, up to `maxExpiresIn`. Sizing the horizon from the default
@@ -110,8 +180,17 @@ export function resolveSubjectRevocationHorizonMs(config: unknown): number {
 	// correct reader of that pair, alias and all, and it refuses a value that
 	// is not a lifetime rather than letting this compute from one.
 	const accessMs =
-		resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn * 1000;
-	const sessionMs = lifetimeMs(root?.session?.maxAge, "session.maxAge");
+		(tokenSettings === undefined
+			? resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn
+			: slotLifetimeSeconds(
+					(tokenSettings.accessTokenLifetime as Partial<AccessTokenLifetime> | undefined)
+						?.maxExpiresIn,
+					"oauthTokenSettings.accessTokenLifetime.maxExpiresIn",
+				)) * 1000;
+	const sessionMs =
+		sessionCookie === undefined
+			? lifetimeMs(root?.session?.maxAge, "session.maxAge")
+			: slotLifetimeMs(sessionCookie.maxAgeMs, "sessionCookiePolicy.maxAgeMs");
 	const longest = Math.max(
 		sessionMs,
 		refreshMs + DEFAULT_CLOCK_SKEW_MS,

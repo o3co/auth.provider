@@ -38,7 +38,11 @@ import {
 	defineModule,
 	InMemoryUserRepository,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	makeValidCoreConfig,
+	makeValidFullSections,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import {
@@ -176,6 +180,8 @@ interface Setup {
 	 * provides when `endpoints.login.url` names no page.
 	 */
 	readonly withLoginEntry?: boolean | "unconfigured";
+	/** The oauthTokenSettings the composition holds (#728); none by default. */
+	readonly tokenSettingsIssuer?: string;
 }
 
 /**
@@ -231,6 +237,11 @@ const boot = (setup: Setup) => {
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
+			...(setup.tokenSettingsIssuer === undefined
+				? {}
+				: {
+						oauthTokenSettings: createTestOAuthTokenSettings({ issuer: setup.tokenSettingsIssuer }),
+					}),
 			...(() => {
 				const { federationGrantIntentStore, userRepository, loginEntry } = acquisitionComponents();
 				return {
@@ -436,6 +447,14 @@ describe("what creating a grant needs (slice 6)", () => {
 	it("refuses a deployment with no consent page, before a user could reach one that is not there", async () => {
 		await expect(boot({ grants: { consent: {} } })).rejects.toThrow(
 			/federationGrants\.consent\.url/,
+		);
+	});
+
+	it("holds every connection's callback to the origin of the oauthTokenSettings issuer, over the configuration's (#728)", async () => {
+		// The callbacks are written on the configuration's issuer; the slot names
+		// another origin, so they are no longer on the provider's own.
+		await expect(boot({ tokenSettingsIssuer: "https://slot.test" })).rejects.toThrow(
+			/callbackURL must be on the provider's own origin \(https:\/\/slot\.test\)/,
 		);
 	});
 

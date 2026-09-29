@@ -156,6 +156,7 @@ export type {
 	RouteOrderCycleDetails,
 	RouteOrderTargetMissingDetails,
 	SyntheticKeyCollisionDetails,
+	TokenSettingsLifetimeExceedsConfigurationDetails,
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
 // Boot planner — BootError catalogue. `createApp` is exported above (via app.mjs).
@@ -627,10 +628,12 @@ export { terminalErrorHandler } from "./middleware/terminalError.mjs";
 export {
 	type DispatchPolicy,
 	isTokenBindingMw,
+	resolveTokenBindingSettings,
 	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
 	type TokenBindingMiddlewareOptions,
 	type TokenBindingRefusal,
+	type TokenBindingSettings,
 	tokenBindingMw,
 } from "./middleware/tokenBinding.mjs";
 // Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /
@@ -984,10 +987,8 @@ export type {
 } from "./token-exchange/validator.mjs";
 // #728: what other modules read of the oauth module's token settings, through
 // the `oauthTokenSettings` slot rather than the oauth section.
-export type {
-	OAuthTokenBindingSettings,
-	OAuthTokenSettings,
-} from "./token-settings/types.mjs";
+export { checkOAuthTokenSettings } from "./token-settings/check.mjs";
+export type { OAuthTokenSettings } from "./token-settings/types.mjs";
 // The MFA ADR's D9: how a session was established and what this provider
 // vouches for, read one way by every consumer of a session.
 export {

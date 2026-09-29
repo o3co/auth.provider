@@ -45,6 +45,7 @@ import {
 	type RelocatedPath,
 	relocatedKeyMessage,
 } from "../config/removed-keys.mjs";
+import { describeValue } from "../errors/describe-value.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	FederationInstance,
@@ -53,6 +54,10 @@ import type {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import {
+	lifetimeBeyondConfiguration,
+	lifetimeBeyondConfigurationMessage,
+} from "../token-settings/check.mjs";
 import { failureSummary } from "./failure-summary.mjs";
 import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
@@ -334,33 +339,6 @@ function checkProvidesClosure(modules: readonly NormalisedModule[]): void {
 // ---------------------------------------------------------------------------
 // Authoritative keys (#728) — a module's settings slots have one source
 // ---------------------------------------------------------------------------
-
-/**
- * What `value` is, for a refusal, never rendered — a null-prototype object
- * has no `toString`, and a getter or a proxy trap may throw: `the string
- * "…"`, `the number 5`, `null`, `a Set`, `an Object`, or `an object` when its
- * prototype names no constructor.
- */
-const describeValue = (value: unknown): string => {
-	if (value === null || value === undefined) return String(value);
-	if (typeof value === "string") return `the string ${JSON.stringify(value)}`;
-	if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
-		return `the ${typeof value} ${String(value)}`;
-	}
-	if (typeof value !== "object") return `a ${typeof value}`;
-	let name: unknown;
-	try {
-		const prototype: unknown = Object.getPrototypeOf(value);
-		name =
-			prototype === null
-				? undefined
-				: (prototype as { constructor?: { name?: unknown } }).constructor?.name;
-	} catch {
-		name = undefined;
-	}
-	if (typeof name !== "string" || name === "") return "an object";
-	return `${/^[AEIOU]/.test(name) ? "an" : "a"} ${name}`;
-};
 
 /**
  * `authoritative` names keys of the module's own `provides`, as a list: a key
@@ -2630,6 +2608,51 @@ interface StageOneContext {
 	readonly plannedKeys: ReadonlySet<string>;
 }
 
+/**
+ * An `oauthTokenSettings` a host fills — through `bootstrapComponents` or
+ * `overrideComponents` — names no token lifetime longer than the one core
+ * resolves from the configuration (`lifetimeBeyondConfiguration`, the rule
+ * every reader's `checkOAuthTokenSettings` applies to a held slot, whoever
+ * provides it). A host map is known before any provider runs, so boot
+ * refuses it here, with the map it came from
+ * (`token-settings-lifetime-exceeds-configuration`), naming the member and
+ * both values; a value a module provides is refused where a reader first
+ * reads it. A member that is not a number is left to the readers' check,
+ * which refuses it by name.
+ * @internal
+ */
+function checkHostTokenSettingsLifetimes(
+	bootstrapComponents: BootstrapMap,
+	overrideComponents: Partial<ComponentMap> | undefined,
+	parsedConfig: unknown,
+): void {
+	const sources = [
+		["bootstrapComponents", (bootstrapComponents as Record<string, unknown>).oauthTokenSettings],
+		[
+			"overrideComponents",
+			(overrideComponents as Record<string, unknown> | undefined)?.oauthTokenSettings,
+		],
+	] as const;
+	for (const [source, value] of sources) {
+		if (typeof value !== "object" || value === null) continue;
+		const found = lifetimeBeyondConfiguration(value, parsedConfig);
+		if (found === undefined) continue;
+		throw new BootError({
+			stage: "validateManifests",
+			reason: "token-settings-lifetime-exceeds-configuration",
+			message: lifetimeBeyondConfigurationMessage(found, source),
+			details: {
+				reason: "token-settings-lifetime-exceeds-configuration",
+				componentKey: "oauthTokenSettings",
+				source,
+				member: found.member,
+				slotSeconds: found.slotSeconds,
+				configurationSeconds: found.configurationSeconds,
+			},
+		});
+	}
+}
+
 /** One stage-1 check: an id for humans, a spec pointer, and the run. */
 export interface StageOneCheck {
 	readonly id: string;
@@ -2824,6 +2847,16 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});
 		},
+	},
+	{
+		id: "host-token-settings-lifetimes",
+		spec: "issue #728 (a host-filled oauthTokenSettings lifetime is at most the configuration's)",
+		run: (ctx) =>
+			checkHostTokenSettingsLifetimes(
+				ctx.bootstrapComponents,
+				ctx.overrideComponents,
+				ctx.parsedConfig,
+			),
 	},
 	{
 		id: "route-order-edges",

@@ -21,8 +21,12 @@
  * A token cannot exist apart from OAuth, so its settings belong to the oauth
  * module's section, `oauth {}`. A key several modules read has one owner, and
  * the others receive it through a slot whose contract is core's: the owner
- * parses its section once and provides these values, and a reader requires
- * the slot rather than reading the section. The members are what modules
+ * parses its section once and provides these values, and a reader reads the
+ * slot rather than the section. Every reader lists it as optional, since
+ * each also runs in compositions without the oauth module, and reads the
+ * configuration only when no module provides the slot — never a member of
+ * one beside the configuration: a slot it holds is read whole, checked first
+ * with `checkOAuthTokenSettings`. The members are what modules
  * outside `packages/oauth` read today. Two settings of the section are not
  * here: the grant-type allowlist switch, which only the oauth module reads,
  * and the revocation modes (`oauth.revocation.accessToken`,
@@ -33,6 +37,27 @@
  * where they live once `oauth {}` is the oauth module's alone is decided
  * with that move.
  *
+ * Nor are the token-binding settings, `oauth.tokenBinding` — the dispatch
+ * policy and whether a confidential client's refresh tokens are bound —
+ * though they sit in `oauth {}` today: they apply across every mechanism
+ * installed at core's token-binding extension point, and the extension
+ * point's owner, core, owns them (#728). Core reads them with its own
+ * `resolveTokenBindingSettings` — boot the policy, the grants the binding
+ * rule — in every composition, and a slot that carried one would be a second
+ * source for it; the contract refuses one that does. Where the keys live is
+ * decided with the move of the configuration.
+ *
+ * Not every module can read the slot. The boot planner orders modules, not
+ * components: a module that reads a key depends on the whole module providing
+ * it. So no module in the oauth module's dependency set — the providers of its
+ * `requires` and its `optional` keys, and whatever those depend on in turn —
+ * can read this slot, because the oauth module would depend on it and it on
+ * the oauth module, and boot refuses the pair as a cycle. Such a module reads
+ * the configuration, as before: the default refresh-token family revocation
+ * module is one, since the oauth module reads the `refreshTokenFamilyRevocation`
+ * it provides. Providing the slot from a module that depends on none of them
+ * would lift the constraint; that is left for later.
+ *
  * Each value is resolved — no deprecated alias and no absence left for a
  * reader to interpret — and the whole is frozen, so a reader cannot change
  * what the others read. The contract suite and a test double are published
@@ -41,22 +66,6 @@
  */
 
 import type { AccessTokenLifetime } from "../config/application.schema.mjs";
-import type { DispatchPolicy } from "../middleware/tokenBinding.mjs";
-
-/** The settings that apply across every token-binding mechanism installed (DPoP, mTLS). */
-export interface OAuthTokenBindingSettings {
-	/**
-	 * `oauth.tokenBinding.dispatch-policy`: how core's token-binding middleware
-	 * arbitrates between the mechanisms contributed as `tokenBindingMechanisms`.
-	 */
-	readonly dispatchPolicy: DispatchPolicy;
-	/**
-	 * `oauth.tokenBinding.bindConfidentialClientRefreshTokens`, `false` when
-	 * unset: whether a confidential client's refresh token is bound to the key
-	 * or certificate presented, as a public client's always is (#275).
-	 */
-	readonly bindConfidentialClientRefreshTokens: boolean;
-}
 
 export interface OAuthTokenSettings {
 	/**
@@ -78,7 +87,6 @@ export interface OAuthTokenSettings {
 	readonly accessTokenLifetime: AccessTokenLifetime;
 	/** `oauth.refreshToken.expiresIn`, in seconds, as `resolveRefreshTokenLifetime` reads it. */
 	readonly refreshTokenExpiresIn: number;
-	readonly tokenBinding: OAuthTokenBindingSettings;
 	/**
 	 * `oauth.resourceIndicator.enabled`, `false` when unset: whether RFC 8707
 	 * resource indicators decide a token's audience.

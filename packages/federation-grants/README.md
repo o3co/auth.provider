@@ -25,7 +25,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 - the stores themselves — core's memory modules and `@o3co/auth-provider-redis`;
 - the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
 - the consent page — the deployment's;
-- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`;
+- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`; and the issuer every URL here is built on — the oauth module's, read through the `oauthTokenSettings` slot when a composition holds it and from `oauth.jwt.issuer` when not ([#728](https://github.com/o3co/auth.provider/issues/728));
 - the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, and the login page through the `loginEntry` slot its session module provides);
 - whether the session behind the browser's cookie may go on — core's session admission (`admitSession`, [the session-admission ADR](../core/docs/adr/2026-09-28-session-admission.md)): the durable session, the subject's sessions boundary and the registered session requirements. The browser half asks it at every step and keeps the flow's own checks ([below](#the-browser-half-connect-and-consent)).
 

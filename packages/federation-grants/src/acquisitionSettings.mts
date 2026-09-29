@@ -59,8 +59,14 @@ const refuse = (message: string, options?: ErrorOptions): never => {
 	throw new Error(`federationGrantsModule: ${message}`, options);
 };
 
-const issuerOrigin = (config: unknown): string => {
-	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } })?.oauth?.jwt?.issuer;
+/**
+ * The provider's browser-facing origin: the issuer's — `issuer` when the
+ * caller hands one (the `oauthTokenSettings` slot's, #728), otherwise
+ * `oauth.jwt.issuer` as the configuration carries it.
+ */
+const issuerOrigin = (config: unknown, given: unknown): string => {
+	const issuer =
+		given ?? (config as { oauth?: { jwt?: { issuer?: unknown } } })?.oauth?.jwt?.issuer;
 	if (typeof issuer !== "string") return refuse("oauth.jwt.issuer must be configured");
 	try {
 		return new URL(issuer).origin;
@@ -205,8 +211,10 @@ export function resolveFederationGrantAcquisitionSettings(
 	config: unknown,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
 	login: LoginEntry | undefined,
+	/** The issuer of the `oauthTokenSettings` slot, when the composition holds it (#728). */
+	options: { readonly issuer?: string } = {},
 ): FederationGrantAcquisitionSettings {
-	const origin = issuerOrigin(config);
+	const origin = issuerOrigin(config, options.issuer);
 	const settings: FederationGrantAcquisitionSettings = {
 		consentUrl: consentUrl(config, origin),
 		login: loginEntry(login),

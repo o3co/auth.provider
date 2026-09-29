@@ -52,7 +52,10 @@ import {
 	memoryReplaySeenSetModule,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import {
+	createTestOAuthTokenSettings,
+	makeValidCoreConfig,
+} from "@o3co/auth-provider-core/testing";
 import express, { type RequestHandler, Router } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
@@ -103,13 +106,13 @@ const ISSUER_ORIGIN = "https://auth.test";
  * is configuration. `normalizeHtu` strips query/fragment and lowercases
  * scheme + host on both sides before comparing.
  */
-const mintProof = async (jti: string = crypto.randomUUID()) => {
+const mintProof = async (jti: string = crypto.randomUUID(), origin: string = ISSUER_ORIGIN) => {
 	const { publicKey, privateKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
 	const jkt = await computeJkt(jwk);
 	const proof = await new SignJWT({
 		htm: "POST",
-		htu: `${ISSUER_ORIGIN}/oauth/token`,
+		htu: `${origin}/oauth/token`,
 		iat: Math.floor(Date.now() / 1000),
 		jti,
 	})
@@ -500,6 +503,67 @@ describe("dpopModule — integration via createApp", () => {
 		expect(received.tokenBinding).toBeUndefined();
 
 		await handle.dispose();
+	});
+
+	it("holds a proof's htu to the issuer of the oauthTokenSettings a module provides, over the configuration's (#728)", async () => {
+		// The oauth module owns `oauth {}` and provides what others read of it;
+		// a composition without it reads the configuration's issuer (above).
+		const SLOT_ORIGIN = "https://slot.test";
+		expect(dpopModule.optional).toContain("oauthTokenSettings");
+		const observerModule = defineModule({
+			name: "observer",
+			contributes: {
+				routes: [
+					() => {
+						const router = Router();
+						router.post("/token", (_req, res) => {
+							res.status(200).json({ ok: true });
+						});
+						return { id: "test-token", mountPath: "/oauth", handler: router };
+					},
+				],
+			},
+		});
+		const handle = await createApp({
+			modules: [
+				dpopModule,
+				observerModule,
+				defineModule({
+					name: "test:oauth-token-settings",
+					provides: {
+						oauthTokenSettings: () => createTestOAuthTokenSettings({ issuer: SLOT_ORIGIN }),
+					},
+				}),
+			],
+			bootstrapComponents: makeBoot(true),
+		});
+		try {
+			const app = express();
+			app.use(handle.router);
+			const post = async (origin: string) =>
+				request(app)
+					.post("/oauth/token")
+					.set("DPoP", (await mintProof(crypto.randomUUID(), origin)).proof)
+					.send({});
+			expect((await post(SLOT_ORIGIN)).status).toBe(200);
+			expect((await post(ISSUER_ORIGIN)).status).toBe(400);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("builds the mechanism on the slot's issuer when the configuration names none (#728)", () => {
+		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
+		const oauth = (boot.config as { oauth: Record<string, unknown> }).oauth;
+		delete oauth.jwt;
+		const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
+		expect(() =>
+			factory?.({
+				config: boot.config,
+				replaySeenSet: createMemoryReplaySeenSet(),
+				oauthTokenSettings: createTestOAuthTokenSettings({ issuer: "https://slot.test" }),
+			} as never),
+		).not.toThrow();
 	});
 
 	it("refuses to build a mechanism when no canonical issuer is configured (#292)", () => {

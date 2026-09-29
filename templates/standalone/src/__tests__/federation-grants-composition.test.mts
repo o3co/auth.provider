@@ -336,6 +336,43 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		});
 	});
 
+	it.each([
+		[
+			"a __Secure- name that is not secure",
+			{ SESSION_NAME: "__Secure-auth.session", SESSION_SECURE: "false" },
+			/__Secure- prefix requires session\.secure=true/,
+		],
+		[
+			"a name that is not an RFC 6265 token",
+			{ SESSION_NAME: "auth session" },
+			/is not a cookie name \(an RFC 6265 token\)/,
+		],
+	])(
+		"refuses at boot a session cookie no browser keeps, %s, once the subject revocation service is installed (#728)",
+		async (_what, cookie, refusal) => {
+			// The service lists the session store's sessionCookiePolicy to size
+			// its horizon, and it is eager, so the store's provider runs at boot
+			// with it — and with it the refusals of a cookie the store would
+			// otherwise mount: one a browser drops, or a name `cookie` throws on
+			// for every response. Fail-fast, where the deployment failed at run
+			// time before. Without the service nothing reads the slot, and the
+			// same cookie boots as it did.
+			handleRef = await boot(resolveConfig({ ...BASE_ENV, ...cookie }), true);
+			await handleRef.dispose();
+			handleRef = undefined;
+
+			const caught = await boot(resolveConfig({ ...BASE_ENV, ...GRANTS_ON, ...cookie }), true).then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
+				},
+				(err: unknown) => err,
+			);
+			expect(caught).toMatchObject({ name: "BootError", reason: "provides-factory-failed" });
+			expect(messageChain(caught)).toMatch(refusal);
+		},
+	);
+
 	it("refuses Redis grants beside memory user-session stores, naming the boundary (D13)", async () => {
 		// The grants would outlive the process; the boundary that ends them
 		// would not. The routes module refuses the pairing on a single replica

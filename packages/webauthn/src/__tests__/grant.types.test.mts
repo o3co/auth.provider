@@ -47,6 +47,8 @@ const OPTIONAL = [
 	"auditSink",
 	"logger",
 	"refreshTokenFamilyRotation",
+	// What the grant reads of `oauth {}` (#728).
+	"oauthTokenSettings",
 ] as const;
 type ModuleDeps = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

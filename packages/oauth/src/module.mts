@@ -34,6 +34,7 @@ import { z } from "zod";
 import { vouchableAcrValues } from "./acrValues.mjs";
 import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "./routes.mjs";
+import { oauthTokenSettingsFrom } from "./tokenSettings.mjs";
 
 /**
  * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
@@ -117,7 +118,9 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	//
 	// Explicit `defineModule<R, O>` generics: needed so contextual typing
 	// reaches the conditional-spread factory below (TS does not propagate
-	// the contributes element type through `...(cond ? [fn] : [])`).
+	// the contributes element type through `...(cond ? [fn] : [])`). Written
+	// out, they infer nothing, so the section schema (none: `never`) and the
+	// provided keys `authoritative` is typed against are written too.
 	return defineModule<
 		| "config"
 		| "clientRepository"
@@ -141,7 +144,9 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "federationProviders"
 		| "replaySeenSet"
 		| "loginEntry"
-		| "logger"
+		| "logger",
+		never,
+		"oauthTokenSettings"
 	>({
 		name: "oauth",
 		configSchema: oauthConfigSchema,
@@ -181,6 +186,26 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 			accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		},
+		// #728: what other modules read of `oauth {}` — the issuer, the token
+		// lifetimes and the switches — resolved once from the section this
+		// module owns, and frozen. The readers outside this package take the
+		// slot instead of reading the section. The token-binding dispatch
+		// policy is not in it: it is core's, and core reads it itself.
+		provides: {
+			oauthTokenSettings: (deps) => oauthTokenSettingsFrom(deps.config),
+		},
+		// #728: one source while this module is loaded. Its own code reads
+		// `oauth {}`, so an `overrideComponents` entry for the slot would split
+		// what the slot's readers see from what the module does; boot refuses
+		// it (`authoritative-component-overridden`). A composition without the
+		// module fills the slot itself.
+		authoritative: ["oauthTokenSettings"],
+		// Eager: core's own machinery — the discovery document's issuer, the
+		// CORS table's discovery paths, a requirement's step-up page — reads
+		// the slot beside the modules that require it, and core is no
+		// module the planner could activate the provider for. Filled whenever
+		// this module is installed.
+		lifecycle: { oauthTokenSettings: { eager: true } },
 		contributes: {
 			routes: [
 				// oauth-endpoints — always contributed (Theme D: const shape).

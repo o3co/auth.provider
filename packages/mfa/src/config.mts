@@ -269,9 +269,13 @@ function parseSection<T>(schema: z.ZodType<T>, value: unknown, prefix: string): 
 	);
 }
 
-/** The host `oauth.jwt.issuer` names, which the TOTP issuer defaults to. */
-function issuerHost(config: ConfigShape): string {
-	const issuer = config.oauth?.jwt?.issuer;
+/**
+ * The host the deployment's issuer names, which the TOTP issuer defaults to:
+ * `given` — the `oauthTokenSettings` slot's issuer, when the composition holds
+ * it (#728) — or `oauth.jwt.issuer` as the configuration carries it.
+ */
+function issuerHost(config: ConfigShape, given: string | undefined): string {
+	const issuer = given ?? config.oauth?.jwt?.issuer;
 	let host = "";
 	if (typeof issuer === "string") {
 		try {
@@ -292,6 +296,7 @@ function issuerHost(config: ConfigShape): string {
 function totpSettings(
 	totp: z.infer<typeof mfaTotpConfigSchema>,
 	config: ConfigShape,
+	issuer: string | undefined,
 ): MfaTotpSettings {
 	const parameters = {
 		algorithm: totp.algorithm,
@@ -300,19 +305,27 @@ function totpSettings(
 		window: totp.window,
 	};
 	return totp.enabled
-		? { enabled: true, ...parameters, issuer: totp.issuer ?? issuerHost(config) }
+		? { enabled: true, ...parameters, issuer: totp.issuer ?? issuerHost(config, issuer) }
 		: { enabled: false, ...parameters, issuer: totp.issuer };
 }
 
-/** `mfa.factors.totp`, read on its own — what the TOTP factor's module reads. A `RangeError` names each key refused. */
-export function readMfaTotpSettings(config: unknown): MfaTotpSettings {
+/**
+ * `mfa.factors.totp`, read on its own — what the TOTP factor's module reads. A
+ * `RangeError` names each key refused. `options.issuer` is the deployment's
+ * issuer when the composition holds the `oauthTokenSettings` slot (#728): an
+ * unset TOTP issuer defaults to its host rather than `oauth.jwt.issuer`'s.
+ */
+export function readMfaTotpSettings(
+	config: unknown,
+	options: { readonly issuer?: string } = {},
+): MfaTotpSettings {
 	const shape = (config ?? {}) as ConfigShape;
 	const section = parseSection(
 		z.object({ factors: factorsSchema }, { error: SECTION_MISSING }),
 		shape.mfa,
 		"mfa",
 	);
-	return totpSettings(section.factors.totp, shape);
+	return totpSettings(section.factors.totp, shape, options.issuer);
 }
 
 /**

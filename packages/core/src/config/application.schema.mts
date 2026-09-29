@@ -1075,9 +1075,9 @@ export const CoreConfigSchema = z.object({
 		// installed binding-mechanism modules (DPoP, mTLS, ...). Each module
 		// no longer redeclares this key in its own schema. Shape-only — the
 		// default lives in HOCON (see core reference.conf). The synthesized
-		// `tokenBindingMw` in `assembleApp` reads
-		// `config.oauth.tokenBinding["dispatch-policy"]` and falls back to
-		// `"intent-explicit"` when absent.
+		// `tokenBindingMw` in `assembleApp` reads it through
+		// `resolveTokenBindingSettings`, `"intent-explicit"` when absent:
+		// the policy is core's (#728), and no slot carries it.
 		//
 		// See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
 		// for the cross-mechanism design rationale.
@@ -1109,7 +1109,9 @@ export const CoreConfigSchema = z.object({
 				// Lives here rather than under `oauth.dpop` for the reason
 				// `dispatch-policy` does: it applies across every installed
 				// binding mechanism, so one home keeps the mechanisms from
-				// drifting apart.
+				// drifting apart — and, like it, it is core's (#728): every
+				// grant reads it through `resolveTokenBindingSettings`, and no
+				// slot carries it.
 				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 			})
 			.optional(),

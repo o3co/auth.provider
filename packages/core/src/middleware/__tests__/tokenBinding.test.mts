@@ -12,7 +12,11 @@ import { readFileSync } from "node:fs";
 import type { Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import type { TokenBinding } from "#/grants/tokenBinding.mjs";
-import { type TokenBindingMechanism, tokenBindingMw } from "#/middleware/tokenBinding.mjs";
+import {
+	resolveTokenBindingSettings,
+	type TokenBindingMechanism,
+	tokenBindingMw,
+} from "#/middleware/tokenBinding.mjs";
 
 const fakeReq = () => ({}) as Request;
 const fakeRes = () => {
@@ -573,5 +577,69 @@ describe("tokenBindingMw — response headers a mechanism asks for (#530)", () =
 			expect(req.tokenBinding).toBe(binding);
 			expect(res.setHeader).toHaveBeenCalledWith("DPoP-Nonce", "n2");
 		}
+	});
+});
+
+describe("resolveTokenBindingSettings (#728)", () => {
+	// The one reading of `oauth.tokenBinding`: the settings that apply across
+	// every mechanism installed at core's token-binding extension point, and so
+	// core's, as the point is (#728). Boot reads the dispatch policy through
+	// this and the grants the refresh-token rule; no slot carries either.
+	const settingsOf = (tokenBinding: unknown) =>
+		resolveTokenBindingSettings({ oauth: { tokenBinding } });
+
+	it("reads strict-mutual-exclusion when the configuration says so", () => {
+		expect(settingsOf({ "dispatch-policy": "strict-mutual-exclusion" }).dispatchPolicy).toBe(
+			"strict-mutual-exclusion",
+		);
+	});
+
+	it("reads intent-explicit otherwise: when it says so, says something else, or says nothing", () => {
+		for (const config of [
+			{ oauth: { tokenBinding: { "dispatch-policy": "intent-explicit" } } },
+			{ oauth: { tokenBinding: { "dispatch-policy": "STRICT-MUTUAL-EXCLUSION" } } },
+			{ oauth: { tokenBinding: {} } },
+			{ oauth: {} },
+			{},
+			undefined,
+			null,
+		]) {
+			expect(resolveTokenBindingSettings(config).dispatchPolicy, JSON.stringify(config)).toBe(
+				"intent-explicit",
+			);
+		}
+	});
+
+	it("binds a confidential client's refresh tokens only when the configuration says true", () => {
+		expect(
+			settingsOf({ bindConfidentialClientRefreshTokens: true }).bindConfidentialClientRefreshTokens,
+		).toBe(true);
+		for (const tokenBinding of [
+			{ bindConfidentialClientRefreshTokens: false },
+			// What an environment variable carries, which the schema coerces and
+			// a configuration built by hand does not.
+			{ bindConfidentialClientRefreshTokens: "true" },
+			{ bindConfidentialClientRefreshTokens: 1 },
+			{},
+			undefined,
+		]) {
+			expect(
+				settingsOf(tokenBinding).bindConfidentialClientRefreshTokens,
+				JSON.stringify(tokenBinding),
+			).toBe(false);
+		}
+	});
+
+	it("answers the two settings and nothing else, frozen", () => {
+		const settings = settingsOf({
+			"dispatch-policy": "strict-mutual-exclusion",
+			bindConfidentialClientRefreshTokens: true,
+			unknown: "ignored",
+		});
+		expect(settings).toStrictEqual({
+			dispatchPolicy: "strict-mutual-exclusion",
+			bindConfidentialClientRefreshTokens: true,
+		});
+		expect(Object.isFrozen(settings)).toBe(true);
 	});
 });

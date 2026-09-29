@@ -47,6 +47,7 @@ import { createAsymmetricKeyStore, createSymmetricKeyStore } from "../../keys/Ke
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { createTestOAuthTokenSettings } from "../../testing/slots/oauthTokenSettings.mjs";
 import { BootError } from "../types.mjs";
 
 /** Inline module providing the `keyStore` component (HS256 → algorithm "HS256"). */
@@ -248,6 +249,54 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect((await request(app).get("/.well-known/oauth-authorization-server")).status).toBe(404);
 
 		await handle.dispose();
+	});
+
+	it("serves the document on the issuer of the oauthTokenSettings the composition holds, and lets CORS read it there (#728)", async () => {
+		// The configuration names the issuer without a path; the slot the oauth
+		// module provides names it under one, and the slot is what is read.
+		const config = {
+			...withIssuer("https://auth.example.com"),
+			cors: { allowedOrigins: ["https://app.example"] },
+		};
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config,
+				pathResolver: (s) => s,
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					issuer: "https://auth.example.com/tenant-a",
+				}),
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		const inserted = await request(app).get("/.well-known/oauth-authorization-server/tenant-a");
+		expect(inserted.status).toBe(200);
+		expect(inserted.body.issuer).toBe("https://auth.example.com/tenant-a");
+		expect(inserted.body.token_endpoint).toBe("https://auth.example.com/tenant-a/oauth/token");
+		const appended = await request(app)
+			.get("/tenant-a/.well-known/openid-configuration")
+			.set("Origin", "https://app.example");
+		expect(appended.status).toBe(200);
+		expect(appended.headers["access-control-allow-origin"]).toBe("https://app.example");
+
+		await handle.dispose();
+	});
+
+	it("refuses an oauthTokenSettings without an issuer, naming the member, rather than serving on the configuration's (#728)", async () => {
+		// A slot the composition holds is read whole: a member it lacks is not
+		// taken from the configuration beside it.
+		const { issuer: _dropped, ...withoutIssuer } = createTestOAuthTokenSettings();
+		const booting = createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+				oauthTokenSettings: withoutIssuer as never,
+			},
+		});
+		await expect(booting).rejects.toThrow(/oauthTokenSettings\.issuer/);
 	});
 
 	it("an issuer path is a literal, not a route pattern: metacharacters boot and serve (#528 review)", async () => {

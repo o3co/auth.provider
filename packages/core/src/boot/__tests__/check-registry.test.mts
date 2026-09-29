@@ -78,6 +78,7 @@ describe("stage-1 check registries (#368)", () => {
 			"federation-stores-wiring",
 			"declared-absence",
 			"replica-safety",
+			"host-token-settings-lifetimes",
 			"route-order-edges",
 		]);
 	});

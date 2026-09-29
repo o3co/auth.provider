@@ -35,6 +35,10 @@ import {
 	type SubjectRevocation,
 	type SubjectRevocationService,
 } from "@o3co/auth-provider-core";
+import {
+	createTestOAuthTokenSettings,
+	createTestSessionCookiePolicy,
+} from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import { subjectRevocationServiceModule } from "../subjectRevocationService.mjs";
 
@@ -199,7 +203,9 @@ describe("subjectRevocationServiceModule", () => {
 
 	describe("what it refuses when grants are on", () => {
 		it("refuses a deployment with nowhere to read the grants from", () => {
-			expect(() => build({ config: enabled() })).toThrow(/requires a federationGrantStore/);
+			expect(() => build({ config: enabled() })).toThrow(
+				/federationGrants\.enabled = true requires a federationGrantStore/,
+			);
 		});
 
 		it("refuses an adapter that cannot carry the grants boundary", () => {
@@ -226,6 +232,18 @@ describe("subjectRevocationServiceModule", () => {
 			// The module a session deployment installs must keep working with
 			// the adapter it already has.
 			expect(() => build({ subjectRevocation: olderAdapter() })).not.toThrow();
+		});
+
+		it("decides by federationGrants.enabled: a grant store wired with the feature off is not read", () => {
+			// Whether grants are on is the flag's to say; a store alone does not
+			// turn the grants' checks on.
+			expect(() =>
+				build({
+					config: config({ federationGrants: { enabled: false } }),
+					federationGrantStore: createMemoryFederationGrantStore(),
+					subjectRevocation: olderAdapter(),
+				}),
+			).not.toThrow();
 		});
 	});
 
@@ -276,6 +294,86 @@ describe("subjectRevocationServiceModule", () => {
 					subjectRevocation: olderAdapter(),
 				}),
 			).not.toThrow();
+		});
+	});
+
+	describe("the horizon: what the boundary must outlive (#728)", () => {
+		/** A boundary that records how long each stamp is kept, in milliseconds. */
+		const recording = () => {
+			const kept: number[] = [];
+			const revocation: SubjectRevocation = {
+				kind: "memory",
+				revokeBefore: async (_subject, before, expiresAt) => {
+					kept.push(expiresAt.getTime() - before.getTime());
+				},
+				revokedBefore: async () => null,
+			};
+			return { kept, revocation };
+		};
+
+		it("sizes it from the configuration when the composition holds neither slot", async () => {
+			const { kept, revocation } = recording();
+			await build({ subjectRevocation: revocation }).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([resolveSubjectRevocationHorizonMs(config())]);
+		});
+
+		it("sizes it from the session lifetime of the sessionCookiePolicy the composition holds, over session.maxAge", async () => {
+			const { kept, revocation } = recording();
+			await build({
+				subjectRevocation: revocation,
+				sessionCookiePolicy: createTestSessionCookiePolicy({ maxAgeMs: 10 * 24 * HOUR }),
+			}).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(config({ session: { maxAge: 10 * 24 * HOUR } })),
+			]);
+		});
+
+		it("sizes it from the token lifetimes of the oauthTokenSettings the composition holds, over the configuration's", async () => {
+			const { kept, revocation } = recording();
+			await build({
+				subjectRevocation: revocation,
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					accessTokenLifetime: { defaultExpiresIn: 300, maxExpiresIn: 300 },
+					refreshTokenExpiresIn: 20 * 86_400,
+				}),
+			}).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(
+					config({
+						oauth: { accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 20 * 86_400 } },
+					}),
+				),
+			]);
+		});
+
+		it("sizes it from the access-token maximum of the oauthTokenSettings the composition holds, not its default", async () => {
+			// The access maximum (30 days) outlives the refresh token (a day) and
+			// the session (a day), and differs from the default (a minute).
+			const { kept, revocation } = recording();
+			await build({
+				subjectRevocation: revocation,
+				oauthTokenSettings: createTestOAuthTokenSettings({
+					accessTokenLifetime: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
+					refreshTokenExpiresIn: 86_400,
+				}),
+			}).revokeAllForSubject({ subject: "u-1" });
+			expect(kept).toEqual([
+				resolveSubjectRevocationHorizonMs(
+					config({
+						oauth: {
+							accessToken: { defaultExpiresIn: 60, maxExpiresIn: 30 * 86_400 },
+							refreshToken: { expiresIn: 86_400 },
+						},
+					}),
+				),
+			]);
+			expect(kept[0]).toBeGreaterThan(30 * 86_400_000);
+		});
+
+		it("lists both slots as optional", () => {
+			expect(subjectRevocationServiceModule.optional).toEqual(
+				expect.arrayContaining(["oauthTokenSettings", "sessionCookiePolicy"]),
+			);
 		});
 	});
 
