@@ -27,9 +27,10 @@ import type { FederationResult } from "./federations/types.mjs";
  * `redirect_to` is accepted. There is no "any http(s) URL" fallback — that
  * is the open redirect this module exists to prevent.
  *
- * Exact match on the normalized form (`new URL(x).href`): scheme and host
- * case, the default port, `..` and percent-encoding are insignificant; path,
- * query, fragment and port are significant. No prefix, wildcard or subdomain
+ * Exact match on the serialized form (`new URL(x).href`): scheme and host
+ * case, the default port and `..` segments normalize away; percent-encoding is
+ * kept as written (`/%61` does not match `/a`); path, query, fragment and any
+ * other port are significant. No prefix, wildcard or subdomain
  * matching — every such relaxation has turned out to be an open redirect. A
  * target with dynamic query parameters must become a fixed path, with the
  * variable part carried in the session.

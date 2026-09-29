@@ -43,8 +43,10 @@
  * - A throwing `poll` is a store outage, answered 503
  *   `temporarily_unavailable` — none of the four codes is true of it.
  *
- * `poll` consumes an approval in the same step that reads it, so after any
- * refusal or lost reply the device starts over.
+ * `poll` consumes an approval in the same step that reads it.
+ * `authorization_pending` and `slow_down` leave the code in place and the device
+ * keeps polling; once an approval is consumed, a refusal that follows it or a
+ * lost reply means the device starts over.
  */
 
 import type {

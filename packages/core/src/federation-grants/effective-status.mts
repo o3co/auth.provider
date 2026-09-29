@@ -107,7 +107,9 @@ export interface EffectiveFederationGrantStatusContext {
  *    connection, an unreadable credential, an upstream interaction code;
  * 7. a grant that cannot yield a token: an unsatisfiable
  *    `maxAccessTokenLifetime` (what `/token` answers, whatever an older marker
- *    says), then a standing ineligibility marker, which reauthorization clears.
+ *    says), then a standing ineligibility marker, which stays until a
+ *    reauthorization's callback activates the grant (lodging the request
+ *    leaves it).
  *
  * The backstop comes before expiry, unlike the federation-grants ADR's
  * listing. A key missing from the ring is an outage, not a status: the caller

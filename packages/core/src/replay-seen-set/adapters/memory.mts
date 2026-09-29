@@ -24,8 +24,9 @@ import type { ReplaySeenSet } from "../types.mjs";
 
 /**
  * How many writing `markSeen` calls pass between amortized sweeps. A sweep is
- * O(size); every 1000th write keeps the amortized cost constant while bounding
- * the resident set at live records plus at most one interval of expired ones.
+ * O(size), so running one only after this many writes, and no sooner than the
+ * minimum interval below, keeps the amortized cost constant. It is a write
+ * threshold, not a bound on how many expired records stay resident.
  */
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
 

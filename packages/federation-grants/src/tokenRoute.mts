@@ -20,10 +20,12 @@
  * serialization, correlation and audit. Every decision about the grant is core's.
  *
  * Do not add authorization checks in front of core (connection allowlist, removed
- * connection, ineligibility marker). Each changes a settled answer: a revoked
- * grant answers 410 whatever the client's permissions, and a 403 in front would
- * suggest the grant works under another registration; a grant with an
- * ineligibility marker may still have a usable cached token, which core serves.
+ * connection, ineligibility marker). Each changes a settled answer: core
+ * answers another client or subject `grant_not_found` first, and for the owning
+ * client a revoked grant answers 410 ahead of its connection allowlist, where a
+ * 403 in front would suggest the grant works under another registration; a
+ * grant with an ineligibility marker may still have a usable cached token, which
+ * core serves.
  * Nor may this route retry a denial (a second attempt can cost a second upstream
  * rotation), recompute `expires_in`, turn an unmet `min_ttl` into an error,
  * reclassify an upstream refusal, manage locks, abandon the retrieval's worker on

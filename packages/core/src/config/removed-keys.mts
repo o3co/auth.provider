@@ -59,7 +59,6 @@ export interface RemovedKey {
 	/** The key as it appeared under the section (`legacyTokenCompat`). */
 	readonly name: string;
 	/**
-	/**
 	 * The release that removed it, with a phase or PR marker
 	 * (`v0.6.0 (Phase G / M4)`). Per docs/release-policy.md R5, the tag is
 	 * filled in at release-cut time.
