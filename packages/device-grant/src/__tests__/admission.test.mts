@@ -298,7 +298,7 @@ describe("device verification on session admission", () => {
 		expect((await live.verify({ action: "lookup", user_code: USER_CODE })).status).toBe(200);
 	});
 
-	it("answers a cookie that names no user as it did, and warns admission's line", async () => {
+	it("answers a cookie that names no user 401 login_required, and warns admission's line", async () => {
 		const { verify, logger } = await harness({
 			session: { isAuthenticated: true, sid: LIVE_SID },
 		});
