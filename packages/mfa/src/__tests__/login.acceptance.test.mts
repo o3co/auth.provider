@@ -97,6 +97,12 @@ const SESSION_STORE_UNAVAILABLE = {
 	error_description: "Session store unavailable",
 };
 
+/** Admission's outage answer when the one reporting it is a requirement (core's `describeAdmissionOutage`). */
+const REQUIREMENT_UNAVAILABLE = {
+	error: "temporarily_unavailable",
+	error_description: "session requirement unavailable",
+};
+
 /** A factor store holding one TOTP factor for alice. */
 async function aliceEnrolled() {
 	const store = createMemoryMfaFactorStore();
@@ -285,7 +291,7 @@ describe("a password login while the factor store is down (F1 step 1)", () => {
 		const create = vi.spyOn(userSessionStore as UserSessionStore, "create");
 		const { res } = await login(app);
 		expect(res.status).toBe(503);
-		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expect(res.body).toEqual(REQUIREMENT_UNAVAILABLE);
 		expect(events(logger, "error")).toEqual(["session_admission_unavailable"]);
 		expect(logger.error.mock.calls[0]?.[0]).toMatchObject({
 			store: "mfa",
