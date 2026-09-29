@@ -109,6 +109,7 @@ export interface ModuleSpec<
 	R extends ComponentKey = never,
 	O extends ComponentKey = never,
 	S extends SectionSchema = SectionSchema,
+	P extends ComponentKey = ComponentKey,
 > {
 	/** Module identity — unique across all modules in a single createApp call. */
 	readonly name: string;
@@ -176,10 +177,31 @@ export interface ModuleSpec<
 	/**
 	 * Component values this module materialises into the DI graph. Each
 	 * value is `(deps) => ComponentMap[K] | Promise<ComponentMap[K]>`.
+	 *
+	 * The second member of the intersection only carries the provided keys
+	 * to `P`, which `defineModule` infers from them for `authoritative`.
 	 */
 	readonly provides?: {
 		readonly [K in ComponentKey]?: Provider<K, ProviderDeps<R, O, S>>;
-	};
+	} & { readonly [K in P]?: unknown };
+
+	/**
+	 * The keys of `provides` no composition may substitute while this module
+	 * is loaded (#728): settings other modules read as this module's own,
+	 * derived from its section. The module's own code reads that section, so
+	 * an `overrideComponents` entry for one would be a second source — its
+	 * readers would follow the override while the module went on doing what
+	 * its section says. Stage 1 refuses such an override
+	 * (`authoritative-component-overridden`), and a key named here that the
+	 * module does not provide (`authoritative-without-provides`). A
+	 * composition without the module fills the slot itself, override
+	 * included.
+	 *
+	 * Typed to the keys of `provides`: `defineModule` infers them as `P`, and
+	 * a call that writes its type arguments names `P` as the fourth to
+	 * declare any.
+	 */
+	readonly authoritative?: readonly NoInfer<P>[];
 
 	/**
 	 * Protocol-level features this module adds (grants, routes, federations,

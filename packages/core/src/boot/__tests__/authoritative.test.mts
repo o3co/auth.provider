@@ -127,7 +127,13 @@ describe("ModuleSpec.authoritative (#728)", () => {
 			}),
 		);
 		expect(err.reason).toBe("authoritative-without-provides");
-		expect(err.message).toMatch(/list/);
+		// Refused as a value, not read character by character as a list of keys.
+		expect(err.details).toEqual({
+			reason: "authoritative-without-provides",
+			module: "test:not-a-list",
+			componentKey: "oauthTokenSettings",
+		});
+		expect(err.message).toMatch(/not a list/);
 	});
 
 	it("refuses an override of an authoritative key of a loaded module, naming the module and the key", async () => {

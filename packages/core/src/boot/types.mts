@@ -167,6 +167,8 @@ export interface NormalisedModule {
 	readonly requires: readonly ComponentKey[];
 	readonly optional: readonly ComponentKey[];
 	readonly providesKeys: readonly ComponentKey[];
+	/** `authoritative` when it is a list (#728); empty otherwise — stage 1 refuses one that is not. */
+	readonly authoritativeKeys: readonly ComponentKey[];
 	readonly contributesEntries: readonly ContributionEntry[];
 	readonly overridesEntries: readonly ContributionEntry[];
 	readonly lifecycleKeys: readonly ComponentKey[];
@@ -741,7 +743,9 @@ export type BootErrorReason =
 	| "module-section-path-invalid"
 	| "contribution-kind-guarded"
 	| "contribution-malformed"
-	| "config-path-relocated";
+	| "config-path-relocated"
+	| "authoritative-without-provides"
+	| "authoritative-component-overridden";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — one per BootErrorReason, 34 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called, the session-admission ADR, #728)
@@ -910,6 +914,28 @@ export interface LifecycleWithoutProvidesDetails {
 	readonly reason: "lifecycle-without-provides";
 	readonly componentKey: ComponentKey;
 	readonly module: string;
+}
+
+/**
+ * A module names in `authoritative` a key it does not provide, or declares
+ * `authoritative` as something other than a list (#728). `componentKey` is
+ * the key named — for a value that is not a list, that value, as a string.
+ */
+export interface AuthoritativeWithoutProvidesDetails {
+	readonly reason: "authoritative-without-provides";
+	readonly module: string;
+	readonly componentKey: string;
+}
+
+/**
+ * An `overrideComponents` entry substitutes a key a loaded module provides
+ * as authoritative (#728): settings its readers take as the module's own,
+ * derived from its section, which the module's code goes on reading.
+ */
+export interface AuthoritativeComponentOverriddenDetails {
+	readonly reason: "authoritative-component-overridden";
+	readonly module: string;
+	readonly componentKey: ComponentKey;
 }
 
 /** Per A2-β §6.1. */
@@ -1321,7 +1347,9 @@ export type BootErrorDetails =
 	| ModuleSectionPathInvalidDetails
 	| ContributionKindGuardedDetails
 	| ContributionMalformedDetails
-	| ConfigPathRelocatedDetails;
+	| ConfigPathRelocatedDetails
+	| AuthoritativeWithoutProvidesDetails
+	| AuthoritativeComponentOverriddenDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1
