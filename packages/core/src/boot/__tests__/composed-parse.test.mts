@@ -319,8 +319,29 @@ describe("a loaded module's section is never stripped", () => {
 		);
 		expect(err.reason).toBe("config-validation-failed");
 		expect(err.message).toMatch(/legacy\.fixture: /);
-		expect(err.message).toMatch(/legacy/);
+		expect(err.message).toMatch(/legacy holds a number, not an object/);
 	});
+
+	it.each([
+		["null", null, "null"],
+		["a list", ["x"], "a list"],
+		["an instance", new URL("https://idp.example/"), "an object that is not plain data"],
+	])(
+		"names what stands in the way by its kind, never its value: %s",
+		async (_label, obstacle, kind) => {
+			// The value there may be a secret; what the operator needs is where,
+			// and what kind of thing, took the section's place.
+			const err = await bootRefused(
+				[sectioned("under-it", RetrySection.default({ retries: 1 }), "legacy.fixture")],
+				resolved({ legacy: obstacle }),
+			);
+			expect(err.reason).toBe("config-validation-failed");
+			expect(err.message).toMatch(
+				new RegExp(`legacy\\.fixture: .*legacy holds ${kind}, not an object`),
+			);
+			expect(err.message).not.toMatch(/idp\.example/);
+		},
+	);
 });
 
 describe("a value a schema makes nothing of", () => {
