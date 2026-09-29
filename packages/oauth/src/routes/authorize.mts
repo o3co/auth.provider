@@ -40,6 +40,7 @@ import {
 	isWellFormedClientId,
 	isWellFormedErrorCode,
 	type Logger,
+	type LoginEntry,
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
@@ -82,16 +83,16 @@ export interface AuthorizeHandlerOptions {
 	 */
 	readonly issuer: string;
 	/**
-	 * Login-page URL for unauthenticated sessions. A thunk, evaluated per
-	 * request exactly as the inline handler read `config.endpoints.login.url`,
-	 * so a hand-built config missing the key fails at the same point (request
-	 * time) it always did — `oauthModule`'s configSchema is what turns the
-	 * missing key into a boot failure for schema-validated deployments.
+	 * The login trip for a browser that must log in: `urlFor(returnTo)` is the
+	 * login page with the request to come back to. The `loginEntry` slot the
+	 * session module provides (#728) when a module provides it; otherwise
+	 * {@link loginTripFromConfig} over `config.endpoints.login.url`.
 	 */
-	readonly loginUrl: () => string;
+	readonly login: Pick<LoginEntry, "urlFor">;
 	/**
-	 * Consent-page URL for a client that is not first-party (#527). A thunk
-	 * like `loginUrl`, for the same reason.
+	 * Consent-page URL for a client that is not first-party (#527). A thunk,
+	 * evaluated per request as the login page's URL is when no module
+	 * provides the login entry.
 	 */
 	readonly consentUrl: () => string;
 	/**
@@ -133,14 +134,28 @@ export interface AuthorizeHandlerOptions {
 const REDIRECT_TO_PARAM = "redirect_to";
 
 /**
- * The login-page redirect with the request to come back to.
- * `endpoints.login.url` may already carry a query string (e.g.
- * `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
- * otherwise — a second `?` would corrupt both parameters.
+ * The login trip read from the configuration, for a composition in which no
+ * module provides the `loginEntry` slot (#728) — the oauth module boots
+ * without the session module. `loginUrl` is a thunk, evaluated per request
+ * exactly as the inline handler read `config.endpoints.login.url`, so a
+ * hand-built config missing the key fails at the same point (request time) it
+ * always did — `oauthModule`'s configSchema is what turns the missing key into
+ * a boot failure for schema-validated deployments. The page may already carry
+ * a query string (e.g. `/login?tenant=x`), so `redirect_to` joins with `&`
+ * there and `?` otherwise — a second `?` would corrupt both parameters. The
+ * session module's entry adds it the same way.
  */
-const loginRedirect = (res: Response, loginUrl: string, target: string): void => {
-	const joiner = loginUrl.includes("?") ? "&" : "?";
-	res.redirect(`${loginUrl}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(target)}`);
+export const loginTripFromConfig = (loginUrl: () => string): Pick<LoginEntry, "urlFor"> => ({
+	urlFor: (returnTo: string): string => {
+		const url = loginUrl();
+		const joiner = url.includes("?") ? "&" : "?";
+		return `${url}${joiner}${REDIRECT_TO_PARAM}=${encodeURIComponent(returnTo)}`;
+	},
+});
+
+/** The login-page redirect with the request to come back to. */
+const loginRedirect = (res: Response, login: Pick<LoginEntry, "urlFor">, target: string): void => {
+	res.redirect(login.urlFor(target));
 };
 
 /**
@@ -946,7 +961,7 @@ const sendToLogin = async (
 		stepUpAskedAt: { ...ask?.stepUpAskedAt },
 	});
 	if (askId === null) return;
-	loginRedirect(ctx.res, ctx.opts.loginUrl(), returnWithAsk(askRequest, askId));
+	loginRedirect(ctx.res, ctx.opts.login, returnWithAsk(askRequest, askId));
 };
 
 /**
@@ -1152,11 +1167,7 @@ const newLogin = async (ctx: AuthorizeContext, prompt: PromptDirective): Promise
 		redirectError(ctx, "temporarily_unavailable", "session store unavailable");
 		return;
 	}
-	loginRedirect(
-		ctx.res,
-		ctx.opts.loginUrl(),
-		authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString(),
-	);
+	loginRedirect(ctx.res, ctx.opts.login, authorizeRequestUrl(ctx.issuerOrigin, ctx.req).toString());
 };
 
 /**
@@ -1837,7 +1848,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// type, first-party, email-verified, PKCE, nonce and scope checks.
 		const claim = cookieClaim(req);
 		if (!claim.authenticated && !wantsSilentAuth) {
-			loginRedirect(res, opts.loginUrl(), authorizeRequestUrl(issuerOrigin, req).toString());
+			loginRedirect(res, opts.login, authorizeRequestUrl(issuerOrigin, req).toString());
 			return;
 		}
 

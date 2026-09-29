@@ -135,6 +135,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "pendingConsentStore"
 		| "federationProviders"
 		| "replaySeenSet"
+		| "loginEntry"
 		| "logger"
 	>({
 		name: "oauth",
@@ -163,6 +164,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"pendingConsentStore", // #552 — where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
 			"replaySeenSet", // #484 — jti single-use for private_key_jwt client assertions; server_error on that path when absent
+			"loginEntry", // #728 — the login page /authorize sends a browser to, which the session module provides; endpoints.login.url is read when absent
 			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
 		],
 		// #363/#375: optional to wire, not optional to decide. `auditSink`
@@ -203,6 +205,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						replaySeenSet: deps.replaySeenSet,
 						consentStore: deps.consentStore,
 						pendingConsentStore: deps.pendingConsentStore,
+						...(deps.loginEntry === undefined ? {} : { loginEntry: deps.loginEntry }),
 						logger: deps.logger ?? consoleLogger,
 						// Theme E structural fix: typed deps replace the v0.4.x lazy
 						// () => ctx.federationProviders closure. The closure re-wraps the
