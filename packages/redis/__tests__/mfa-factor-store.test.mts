@@ -229,6 +229,37 @@ describe("createRedisMfaFactorStore — what is Redis-specific (the MFA ADR's D7
 		await expect(store.list("user-1")).rejects.toThrow(/MfaFactorStore/);
 	});
 
+	it("answers null to an update of a value that is not exactly three lines, and leaves it as it was: the compare-and-set never rewrites a record it would have to cut", async () => {
+		// MfaFactorStoreClient.update's contract. A fourth line — even an empty
+		// one — is a record this adapter did not write; carrying over the first
+		// two lines and dropping the rest would pass it off as one it did.
+		const prefix = freshPrefix();
+		const client = makeIoredisMfaFactorStoreClient(first());
+		const key = `${prefix}{${keyPart("user-1")}}`;
+		const field = keyPart("factor-1");
+		const fixed = JSON.stringify({
+			id: "factor-1",
+			subject: "user-1",
+			kind: "totp",
+			binding: null,
+			createdAt: 1,
+		});
+		const mutable = JSON.stringify({ data: "v2.x", label: null, lastUsedAt: null });
+		for (const value of [
+			`1\n${fixed}\n${mutable}\nextra`,
+			`1\n${fixed}\n${mutable}\n`,
+			`1\n${fixed}\n${mutable}\n\n`,
+			`1\n${fixed}`,
+		]) {
+			await first().hset(key, field, value);
+			expect(
+				await client.update(key, field, { expectedVersion: "1", nextVersion: "2", mutable }),
+				JSON.stringify(value),
+			).toBeNull();
+			expect(await first().hget(key, field), JSON.stringify(value)).toBe(value);
+		}
+	});
+
 	it("refuses a keyPrefix that carries a brace, which would take the subject's hash tag over", () => {
 		for (const keyPrefix of ["mfaf:{x}:", "mfaf}:", "{mfaf:"]) {
 			expect(() => storeAt(keyPrefix), keyPrefix).toThrow(RangeError);
