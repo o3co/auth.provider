@@ -147,6 +147,14 @@ const TX = (overrides: Partial<MfaTransaction> = {}): MfaTransaction => {
 	};
 };
 
+/** A challenge a verification takes, as core's contract suite has one. */
+const CHALLENGE = {
+	factorId: "factor-1",
+	kind: "webauthn",
+	state: "sealed-challenge-state",
+	expiresAtMs: Date.now() + 10 * MINUTE,
+};
+
 const storeAt = (keyPrefix: string, connection: Redis = first()): MfaTransactionStore =>
 	createRedisMfaTransactionStore({
 		client: makeIoredisMfaTransactionStoreClient(connection),
@@ -198,6 +206,41 @@ describe("createRedisMfaTransactionStore — the transaction (the MFA ADR's D8)"
 		expect(await ahead.consume("tx-1", 1)).toBeNull();
 		// …and it refuses to create one whose expiry is already past on that clock.
 		await expect(ahead.create(TX({ id: "tx-2" }))).rejects.toThrow(RangeError);
+	});
+
+	it("answers a reservation and a take on a transaction past its expiresAtMs on its own clock as absent too, spending and taking nothing, though the server still holds it", async () => {
+		// Each is one script, so the store's clock has to reach the script: a
+		// server whose clock runs behind would otherwise spend an attempt on,
+		// and hand out the challenge of, a transaction every read calls gone.
+		const prefix = freshPrefix();
+		const onTime = storeAt(prefix);
+		const ahead = createRedisMfaTransactionStore({
+			client: makeIoredisMfaTransactionStoreClient(first()),
+			keyPrefix: prefix,
+			now: () => Date.now() + 11 * MINUTE,
+		});
+		await onTime.create(TX({ challenge: CHALLENGE }));
+		expect(await ahead.reserveAttempt("tx-1", 5)).toEqual({ ok: false, attempts: 0 });
+		expect(await ahead.takeChallenge("tx-1", 1)).toBeNull();
+		expect(await onTime.get("tx-1")).toMatchObject({ attempts: 0, challenge: CHALLENGE });
+	});
+
+	it("judges the deadline of a reservation and a take as a read does, to the fraction of a millisecond: at expiresAtMs it is gone, a moment before it is not", async () => {
+		const prefix = freshPrefix();
+		const expiresAtMs = Date.now() + 10 * MINUTE + 0.25;
+		await storeAt(prefix).create(TX({ expiresAtMs, challenge: CHALLENGE }));
+		const at = (nowMs: number): MfaTransactionStore =>
+			createRedisMfaTransactionStore({
+				client: makeIoredisMfaTransactionStoreClient(first()),
+				keyPrefix: prefix,
+				now: () => nowMs,
+			});
+		expect(await at(expiresAtMs).get("tx-1")).toBeNull();
+		expect(await at(expiresAtMs).reserveAttempt("tx-1", 5)).toEqual({ ok: false, attempts: 0 });
+		expect(await at(expiresAtMs).takeChallenge("tx-1", 1)).toBeNull();
+		const before = at(expiresAtMs - 0.125);
+		expect(await before.reserveAttempt("tx-1", 5)).toEqual({ ok: true, attempts: 1 });
+		expect(await before.takeChallenge("tx-1", 1)).toStrictEqual(CHALLENGE);
 	});
 
 	it("answers a transaction it cannot read back as absent, a consume included", async () => {
