@@ -41,6 +41,8 @@ const OPTIONAL = [
 	"accessTokenDenylist",
 	"subjectRevocation",
 	"userSessionStore",
+	// What the oauth module provides of `oauth {}` (#728).
+	"oauthTokenSettings",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 

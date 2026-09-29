@@ -37,15 +37,15 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
-import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestOAuthTokenSettings, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 import express from "express";
-import { decodeJwt } from "jose";
+import { decodeJwt, SignJWT } from "jose";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ACCESS_TOKEN_TYPE, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
-import { ISSUER, keyStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import { ISSUER, keyStore, secretKey, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
 const SECRET = "gateway-secret";
 
@@ -125,9 +125,11 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 	/** The README's "Register the grant" composition, booted for real. */
 	async function boot(
 		extra: ReadonlyArray<ReturnType<typeof defineModule>> = [],
+		overrideComponents: Record<string, unknown> = {},
 	): Promise<express.Express> {
 		const config = makeConfig();
 		handle = await createApp({
+			overrideComponents,
 			modules: [
 				...extra,
 				oauthModule({ config }),
@@ -155,6 +157,63 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 				grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
 				...form,
 			});
+
+	describe("reads what it reads of oauth {} through oauthTokenSettings (#728)", () => {
+		// oauthModule provides the slot from the same configuration; an override
+		// with other values shows which one the exchange reads.
+		const settings = (overrides: Parameters<typeof createTestOAuthTokenSettings>[0]) => ({
+			oauthTokenSettings: createTestOAuthTokenSettings({ issuer: ISSUER, ...overrides }),
+		});
+		const exchangeOf = async (app: express.Express, subjectToken: string) =>
+			exchange(app, gateway.clientId, {
+				subject_token: subjectToken,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "billing",
+				scope: "read",
+			});
+
+		it("mints the slot's default lifetime", async () => {
+			const app = await boot(
+				[],
+				settings({ accessTokenLifetime: { defaultExpiresIn: 123, maxExpiresIn: 123 } }),
+			);
+			const res = await exchangeOf(
+				app,
+				await signSelfIssuedAccessToken({ scope: "read write", aud: "billing" }),
+			);
+			expect(res.status).toBe(200);
+			expect(res.body.expires_in).toBe(123);
+		});
+
+		it("holds a subject token to the slot's issuer", async () => {
+			const app = await boot([], settings({ issuer: "https://slot.example" }));
+			const res = await exchangeOf(
+				app,
+				await signSelfIssuedAccessToken({ scope: "read write", aud: "billing" }),
+			);
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("invalid_grant");
+		});
+
+		it("accepts a subject token with no typ when the slot's legacyTypAccept is on", async () => {
+			const now = Math.floor(Date.now() / 1000);
+			// What `signSelfIssuedAccessToken` signs, with no `typ` header.
+			const untyped = await new SignJWT({
+				sub: "user-1",
+				scope: "read write",
+				iss: ISSUER,
+				aud: "billing",
+			})
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setIssuedAt(now)
+				.setExpirationTime(now + 3600)
+				.sign(secretKey);
+			expect((await exchangeOf(await boot(), untyped)).status).toBe(400);
+			await handle?.dispose();
+			const app = await boot([], settings({ legacyTypAccept: true }));
+			expect((await exchangeOf(app, untyped)).status).toBe(200);
+		});
+	});
 
 	it("issues a narrower access token for the requested audience", async () => {
 		const app = await boot();
