@@ -142,9 +142,12 @@ export function operatorPath(path: readonly PropertyKey[]): string {
  * composition root's switches move into its own section, the only one read
  * before the modules are chosen.
  *
- * A read value the schema refuses is a `RangeError` naming each operator path,
- * with the Zod error as its `cause`; so is a path the base does not declare as
- * one schema.
+ * An absent ancestor of a read path reads as the default the base declares
+ * for it, if any (with no `mfa` section, `mfa.mode` reads `"off"`, as boot
+ * does). A read value the schema refuses is a `RangeError` naming each
+ * operator path, with the Zod error as its `cause`; so is a path the base does
+ * not declare as one schema, and one beneath a value the base transforms as a
+ * whole (read the shorter path).
  *
  * Typed `AppConfig`, the type the module factories a composition root builds
  * from it take, though only `reads` is parsed: the transitional base's own
