@@ -172,6 +172,7 @@ export type {
 	CsrfGuard,
 	CsrfVerdict,
 	LoginEntry,
+	NavigationVerdict,
 	SessionCookiePolicy,
 } from "./browser-session/types.mjs";
 // Configuration
