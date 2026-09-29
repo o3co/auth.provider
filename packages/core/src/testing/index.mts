@@ -50,6 +50,17 @@
  */
 export { GrantRegistry, GrantRegistryError } from "../grants/registry.mjs";
 export {
+	MERGE_ACR,
+	MERGE_ACR_TABLE,
+	MERGE_REACH,
+	MERGE_ROW_GROUPS,
+	type MergeDecision,
+	type MergeFactors,
+	type MergeRow,
+	type MergeRowGroup,
+	mergeAdmission,
+} from "../session-admission/testing/merge.rows.mjs";
+export {
 	type ContractCase,
 	type RequirementContractInput,
 	sessionRequirementContract,

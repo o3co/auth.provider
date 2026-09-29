@@ -267,6 +267,32 @@ Module-level messages that arrive wrapped in a factory failure:
   `redisMfaTransactionStore.keyPrefix` that contains a brace is a `RangeError`
   `cause` (`packages/redis/src/internal/mfa-durability.mts`,
   `internal/mfa-keys.mts`).
+- The MFA module (`mfaModule`, `packages/mfa/src/module.mts` — private
+  until the template wires it): `mfa.mode is "off" (or unset) while the MFA
+  module is installed: remove the MFA module, or set mfa.mode to "required"
+  or "optional"` — installed is on, so an MFA-off deployment does not install
+  it; the package's settings, each a `RangeError` `cause` naming its key — the
+  key ring and the development sample key as `packages/mfa/README.md` lists
+  them, `mfa.transactionTtlSeconds` outside 60 to 1800 seconds,
+  `mfa.maxAttemptsPerTransaction` outside 1 to 10, and an
+  `mfa.lockout` core's `checkMfaLockoutPolicy` refuses (`mfa.lockout.threshold
+  must be at most mfa.lockout.hardLimit`, …); `endpoints.mfa.url is not set`
+  (`ENDPOINTS_MFA_URL`, `/mfa` in core's reference.conf), the page a step-up
+  starts on; and, from its routes' factory once every factor has registered,
+  three `cause`s with a `reason`: `mfa-factor-kind-unhintable`
+  (`the MFA factor of kind "<kind>" cannot be offered`) — an enabled factor
+  whose kind is not a hint core admits (`^[a-z][a-z0-9_-]{0,63}$`), which a
+  first binding's answer would list: contribute it under such a kind;
+  `mfa-too-many-factors` — more than 16 enabled counting factors, the most a
+  hint list carries: enable fewer; and
+  an `MfaNoCountingFactorError` `cause` whose `reason` is
+  `mfa-no-counting-factor` — `mfa.mode = "required"` with no counting factor
+  enabled, which nobody could meet: turn one on (`mfa.factors.totp.enabled`,
+  `MFA_TOTP_ENABLED`) or set `optional`. Without a `userSessionStore` the
+  module is refused at the requires-closure (`missing-required-component`),
+  naming the slot. A requirement named `mfa` whose reach is not what the
+  enabled factors reach is core's refusal (`contribute-factory-failed`,
+  naming the module).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
 - DPoP with no seen-set: `dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component`, in every `deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
 - Device grant: the seven refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, a usable `oauth.deviceAuthorization.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `oauth.deviceAuthorization.store = "unsupported"` does not stand in for (#626), and a `userSessionStore` component (`enabled = true requires a userSessionStore component`: the verification route approves only from the live `UserSession` behind the cookie; install `memorySessionStoresModule` on one replica or `redisSessionStoresModule`); and an eighth, `built from a config with the grant on, but the config createApp validated has oauth.deviceAuthorization.enabled off` (or the reverse) — hand `deviceGrantModule({ config })` the same config as `bootstrapComponents.config` (`packages/device-grant/src/module.mts`). The factory listed uncalled is `module-factory-not-called`, in the table above. There is no refusal for an enabled grant without `oauthModule`: it boots, but nothing can redeem the device codes it hands out, so compose it with the token endpoint.
@@ -782,6 +808,9 @@ stream — its level is fixed at `info`.
 | `mfa_factor_store_durability_unchecked`, `mfa_transaction_store_durability_unchecked` (warn, `store`, `adapter: "redis"`; `unread` — the parts it could not read: `maxmemory-policy`, `appendonly`, `save`; `maxmemoryPolicy` — a policy it does not know, neither `noeviction`, a `volatile-*` nor an `allkeys-*` one; `err` — the first refusal's projection; once at boot) | same | part of the check could not run, and the store booted: the server refused a question — `INFO` or `CONFIG` renamed, disabled, or not permitted to the connection's user — or answered without the value, or reports a policy the check does not know. Confirm the rest where the server is configured (`noeviction`, AOF on), or let the user run `INFO` and `CONFIG GET` |
 | `mfa_transaction_store_lock_evictable` (warn, `store`, `adapter: "redis"`, `maxmemoryPolicy`, once at boot) | same | the MFA transaction store's Redis runs a `volatile-*` policy. A subject's lock and weekly window (`mfat:lock:`, `mfat:week:`) carry a TTL once no run of failures is counted, so at `maxmemory` the server may evict them, and a weekly hold on guessable proofs ends early (D21). Set `maxmemory-policy` to `noeviction`, or give the MFA stores a Redis that never reaches `maxmemory` |
 | `mfa_factor_store_in_memory` (warn, `store`, `adapter`) | `core/src/mfa/factory.mts` (`memoryMfaFactorStoreModule`, the `memory` builder) | enrolled second factors are kept in process: a restart empties them, and every subject then reads as never enrolled (D12). Unlike `replica_unsafe_adapters` it warns under `deployment.mode = "single"` too — the loss is at restart, not across replicas. Development only; nothing installs it while `mfa.mode` is `"off"` |
+| `mfa_development_sample_key_in_use` (warn — `setting: "mfa.encryptionKeys"`, `variable: "MFA_ENCRYPTION_KEY"`; once at boot) | `mfa/src/module.mts` | the MFA key ring carries the published development sample key (`MFA_DEVELOPMENT_SAMPLE_KEY`), which the settings accept only outside production and staging and under one replica: every factor's data is sealed from nobody. Set `MFA_ENCRYPTION_KEY` to a key of your own (`openssl rand -base64 32`) before the deployment leaves development |
+| `mfa_step_up_unsupported` (warn — `store: "userSessionStore"`, `kind` the adapter's; once at boot) | `mfa/src/module.mts` | the user-session store has no `recordSecondFactor` (core's `supportsSecondFactorUpdate`), so a verified step-up could not be written into a session: under `mfa.mode = "required"` the MFA requirement sends a password session to log in again where it would step it up (the MFA ADR's D20). Use a store with the capability — both bundled ones have it — or implement it in yours |
+| `mfa_enrollment_nothing_enrollable` (warn — `kinds`, the counting factors' kinds; once per such login) | `mfa/src/requirement.mts` | a password login under `required` asked a subject with no factor for a first binding, and every counting factor refused that user (`enrollable(user)` — an email factor for an account without an address): the answer lists nothing to enroll, and the user cannot finish. Enable a factor every user can enroll (TOTP), or give the accounts what the factor needs |
 
 ### Data corruption — a stored record could not be read
 

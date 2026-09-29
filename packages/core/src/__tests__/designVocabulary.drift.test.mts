@@ -753,6 +753,31 @@ const SESSION_RECORD_READS_ALLOWED: ReadonlyArray<AllowedSessionRecordRead> = [
 		count: 1,
 		why: REDIS_STORE_WHY,
 	},
+	// The MFA requirement: what admission built for it, and the primary a login route built.
+	{
+		file: "packages/mfa/src/requirement.mts",
+		read: "{authentication}=(parameter)",
+		count: 2,
+		why: "the MFA requirement's input: the reading admission built with requirementSession, or requirementSessionFromAmr for a token (the session-admission ADR's D2, step 5) — never a record",
+	},
+	{
+		file: "packages/mfa/src/requirement.mts",
+		read: "authentication?.authentication",
+		count: 2,
+		why: "that reading's primary and mfaAt, which the baseline is decided on (the MFA ADR's D13, D16)",
+	},
+	{
+		file: "packages/mfa/src/requirement.mts",
+		read: "authentication?.amr",
+		count: 1,
+		why: "a token's own amr, as requirementSessionFromAmr read it: a factor's own second-factor value in it meets the baseline, whatever its primary (the MFA ADR's O3; a passkey token carries hwk alone)",
+	},
+	{
+		file: "packages/mfa/src/requirement.mts",
+		read: "primary.recorded.authentication",
+		count: 1,
+		why: "admitPrimary's check that the primary a login route built is a password login, the only one the baseline applies after (the MFA ADR's D13) — a primary, never a session record",
+	},
 	// Reads of a field of that name that is not a session's.
 	{
 		file: "packages/core/src/grants/authenticationClaims.mts",
