@@ -146,6 +146,8 @@ export interface HarnessOptions {
 	 * reach a timeout through the real router on the real clock.
 	 */
 	readonly limits?: Partial<FederationGrantRetrievalLimits>;
+	/** The router's `issuer`; `https://auth.test` by default. */
+	readonly issuer?: string;
 }
 
 export function harness(options: HarnessOptions = {}): Harness {
@@ -248,7 +250,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 			background,
 			now: () => world.now,
 			clientRepository,
-			issuer: "https://auth.test",
+			issuer: options.issuer ?? "https://auth.test",
 			...(sink === undefined ? {} : { auditSink: sink }),
 			rateLimiter:
 				options.rateLimiter ??

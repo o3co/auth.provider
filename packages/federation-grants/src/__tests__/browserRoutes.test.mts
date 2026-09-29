@@ -129,6 +129,8 @@ interface WorldOptions {
 	readonly withoutLogger?: boolean;
 	/** The session requirements admission asks (the session-admission ADR's D3); none by default. */
 	readonly requirements?: readonly SessionRequirement[];
+	/** The router's `issuer`; {@link ISSUER} by default. */
+	readonly issuer?: string;
 }
 
 function world(options: WorldOptions = {}) {
@@ -288,7 +290,7 @@ function world(options: WorldOptions = {}) {
 					: undefined,
 			consentUrl: "/consent/grants",
 			loginUrl: () => "/login",
-			issuer: ISSUER,
+			issuer: options.issuer ?? ISSUER,
 			grantsBoundary: async () => {
 				if (state.grantsBoundary instanceof Error) throw state.grantsBoundary;
 				return state.grantsBoundary;
@@ -3311,6 +3313,18 @@ describe("the browser half on session admission (the session-admission ADR's D8)
 		expect(() =>
 			createFederationGrantBrowserRouter({ requirements: resolverForTests([]) } as never),
 		).toThrow(/subjectRevocation/);
+	});
+
+	it("refuses to be built on an issuer that is not an absolute http(s) URL: the consent location and the connect URI are built on it, and on mailto:, urn: or data: each would throw, a 500 on every request", () => {
+		for (const issuer of [
+			"mailto:admin@example.com",
+			"urn:example:issuer",
+			"data:text/plain,issuer",
+			"auth.test/relative",
+			"/relative",
+		]) {
+			expect(() => world({ issuer }), issuer).toThrow(/issuer/);
+		}
 	});
 
 	it("refuses to be built without requirements, or with a resolver the planner did not build", () => {
