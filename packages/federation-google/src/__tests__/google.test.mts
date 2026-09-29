@@ -232,14 +232,13 @@ describe("createGoogleProvider on openid-client", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// PB-4 — Google federation OIDC compliance (nonce, jwks_uri, alg pin)
+	// Google federation OIDC compliance (nonce, jwks_uri, alg pin)
 	// -----------------------------------------------------------------------
 
 	describe("PB-4: id_token verification + nonce binding", () => {
-		// PB-4 RED-1: jwks_uri + alg pin in serverMetadata
-		// Pre-fix: serverMetadata has neither jwks_uri nor id_token_signing_alg_values_supported,
-		// so openid-client cannot verify the RS256 signature. Post-fix: both are present and the
-		// alg list is locked to RS256 (no `none`/`HS256` confusion).
+		// jwks_uri + alg pin in serverMetadata: without jwks_uri and
+		// id_token_signing_alg_values_supported, openid-client cannot verify the RS256
+		// signature. The alg list is locked to RS256 (no `none`/`HS256` confusion).
 		it("constructs serverMetadata with Google's jwks_uri and RS256 alg pin", async () => {
 			type CapturedMetadata = {
 				jwks_uri?: unknown;
@@ -263,7 +262,7 @@ describe("createGoogleProvider on openid-client", () => {
 			expect(sm.id_token_signing_alg_values_supported).toEqual(["RS256"]);
 		});
 
-		// PB-4 RED-2: jwksUri config override is honored
+		// jwksUri config override is honored
 		it("honours config.jwksUri override (test injection)", () => {
 			type CapturedMetadata = { jwks_uri?: unknown };
 			let captured: CapturedMetadata | undefined;
@@ -285,7 +284,7 @@ describe("createGoogleProvider on openid-client", () => {
 			expect((captured as CapturedMetadata).jwks_uri).toBe("https://test.example.com/jwks.json");
 		});
 
-		// PB-4 RED-3: buildAuthorizationUrl forwards nonce to upstream when supplied
+		// buildAuthorizationUrl forwards nonce to upstream when supplied
 		it("forwards nonce param to oidc.buildAuthorizationUrl when present", () => {
 			mockBuildAuthorizationUrl.mockReturnValueOnce(
 				new URL("https://accounts.google.com/o/oauth2/v2/auth?stub=1"),
@@ -304,7 +303,7 @@ describe("createGoogleProvider on openid-client", () => {
 			expect(params.nonce).toBe("session-nonce-abcdef");
 		});
 
-		// PB-4 RED-4 (Round 2 fail-closed): caller-omitted nonce throws synchronously. Google
+		// Fail-closed: caller-omitted nonce throws synchronously. Google
 		// is OIDC-only — silently dropping nonce would build an authorization URL whose returned
 		// id_token cannot be bound. The throw happens before any oidc.* call, so the upstream
 		// mock is never invoked.
@@ -320,8 +319,8 @@ describe("createGoogleProvider on openid-client", () => {
 			expect(mockBuildAuthorizationUrl).not.toHaveBeenCalled();
 		});
 
-		// PB-4 RED-4b (Round 2 fail-closed): empty-string nonce is also rejected — falsy length
-		// guard so callers cannot pass `""` and bypass the check.
+		// Fail-closed: empty-string nonce is also rejected — falsy length guard so
+		// callers cannot pass `""` and bypass the check.
 		it("buildAuthorizationUrl throws when caller passes empty-string nonce", () => {
 			const p = createGoogleProvider(baseConfig);
 			expect(() =>
@@ -334,9 +333,10 @@ describe("createGoogleProvider on openid-client", () => {
 			).toThrow(/nonce/i);
 		});
 
-		// PB-4 RED-5: exchangeCode threads nonce → expectedNonce (TD-9 M2 pattern: inspect checks
-		// argument so the test is RED for the right reason — pre-fix `checks.expectedNonce` is
-		// `undefined`, the mock rejects; post-fix it equals the provided nonce, the mock resolves.)
+		// exchangeCode threads nonce → expectedNonce. The mock inspects the checks
+		// argument, so the test fails for the right reason: unless
+		// `checks.expectedNonce` equals the provided nonce the mock rejects; when it
+		// does, the mock resolves.
 		it("threads nonce param into oidc.authorizationCodeGrant as expectedNonce", async () => {
 			const { jwt, sub: idTokenSub } = await makeTestGoogleIdToken({ nonce: "session-n" });
 			mockAuthorizationCodeGrant.mockImplementationOnce(
@@ -370,10 +370,9 @@ describe("createGoogleProvider on openid-client", () => {
 			expect(checks.expectedNonce).toBe("session-n");
 		});
 
-		// PB-4 RED-6 (Round 2 fail-closed): exchangeCode also rejects synchronously when nonce is
-		// missing. Pre-Round-2 the upstream mock would have caught this via `checks.expectedNonce`
-		// being undefined; post-Round-2 the throw fires *before* any upstream call so resource
-		// servers cannot leak a verification-skipped pathway under any test or production caller.
+		// Fail-closed: exchangeCode also rejects when nonce is missing, and the throw
+		// fires *before* any upstream call, so no test or production caller reaches a
+		// verification-skipped pathway.
 		it("exchangeCode throws when caller omits nonce (no upstream call made)", async () => {
 			const p = createGoogleProvider(baseConfig);
 			await expect(
@@ -388,11 +387,11 @@ describe("createGoogleProvider on openid-client", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// PB-5 — UserInfo sub binding (OIDC §5.3.2)
+	// UserInfo sub binding (OIDC §5.3.2)
 	// -----------------------------------------------------------------------
 
 	describe("PB-5: UserInfo sub binding against id_token sub", () => {
-		// PB-5 RED-1: when id_token has a sub, the route passes that sub (not skipSubjectCheck)
+		// When id_token has a sub, the route passes that sub (not skipSubjectCheck)
 		// as expectedSubject to fetchUserInfo. openid-client compares it against UserInfo.sub
 		// and throws on mismatch.
 		it("binds UserInfo to id_token sub when id_token claims include sub", async () => {
@@ -413,15 +412,15 @@ describe("createGoogleProvider on openid-client", () => {
 			});
 			const [, , expectedSubject] = mockFetchUserInfo.mock.calls[0] as [unknown, unknown, unknown];
 			expect(expectedSubject).toBe(idTokenSub);
-			// Critically NOT the skipSubjectCheck symbol: PB-5 fix replaces the unconditional
-			// skip with the bound id_token sub on the OIDC happy path.
+			// Critically NOT the skipSubjectCheck symbol: on the OIDC happy path the
+			// subject check is bound to the id_token sub, never skipped.
 			expect(expectedSubject).not.toBe(skipSubjectCheckSym);
 		});
 
-		// PB-5 RED-2 (Round 2 fail-closed): when id_token claims lack a string sub the helper
-		// MUST reject. Falling back to skipSubjectCheck (the original Round 1 behavior) silently
-		// downgrades the binding contract for a Google id_token we cannot identify — exactly the
-		// drift Codex flagged as fail-open for an OIDC-only provider.
+		// Fail-closed: when id_token claims lack a string sub the helper MUST reject.
+		// Falling back to skipSubjectCheck would silently downgrade the binding
+		// contract for a Google id_token we cannot identify — fail-open for an
+		// OIDC-only provider.
 		it("throws when id_token claims have no sub (no UserInfo call made)", async () => {
 			mockAuthorizationCodeGrant.mockResolvedValueOnce({
 				access_token: "at",
@@ -441,7 +440,7 @@ describe("createGoogleProvider on openid-client", () => {
 			expect(mockFetchUserInfo).not.toHaveBeenCalled();
 		});
 
-		// PB-5 RED-2b (Round 2): empty-string sub on id_token is also rejected — the length
+		// Empty-string sub on id_token is also rejected — the length
 		// guard catches the case `??` would otherwise let through (since `""` is a string).
 		it("throws when id_token sub is an empty string", async () => {
 			mockAuthorizationCodeGrant.mockResolvedValueOnce({
@@ -462,7 +461,7 @@ describe("createGoogleProvider on openid-client", () => {
 			expect(mockFetchUserInfo).not.toHaveBeenCalled();
 		});
 
-		// PB-5 RED-3: a UserInfo response with a sub mismatched against id_token's sub must
+		// A UserInfo response with a sub mismatched against id_token's sub must
 		// surface as an exchangeCode failure (openid-client throws `RPError` in production;
 		// the mock simulates that contract here).
 		it("rejects when fetchUserInfo throws (UserInfo sub mismatch)", async () => {
