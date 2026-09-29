@@ -440,6 +440,16 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/sealing/keyRing.mts",
 		definition: /(?:function|const)\s+decodeSealingKey\b/,
 	},
+	{
+		concept: "an MFA transaction's binding — the one comparison (#742)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+isMfaTransactionBoundTo\b/,
+	},
+	{
+		concept: "an MFA transaction's binding — the bound read (#742)",
+		home: "packages/core/src/mfa/transactionStore.mts",
+		definition: /(?:function|const)\s+getBoundMfaTransaction\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
