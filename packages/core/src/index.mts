@@ -696,7 +696,6 @@ export {
 	checkTrustedProxyEntry,
 	createTrustedProxyMatcher,
 	describeTrustedProxyEntryRejection,
-	isTrustedProxyEntry,
 	TRUSTED_PROXY_NAMED_RANGES,
 	type TrustedProxyEntryRejection,
 	type TrustedProxyMatcherOptions,
@@ -839,7 +838,6 @@ export {
 	producibleAmr,
 	readAcrTable,
 	SECOND_FACTOR_AMR,
-	selectAcr,
 	stepUpReach,
 	type UnsatisfiableAcrValue,
 	vouchableAcrTable,
@@ -865,14 +863,9 @@ export {
 	type TokenCarrier,
 	tokenClaim,
 } from "./session-admission/admit.mjs";
-export {
-	checkPrimaryAdditions,
-	checkPrimaryAuthentication,
-	checkPrimaryContinuation,
-} from "./session-admission/primary.mjs";
+export { checkPrimaryContinuation } from "./session-admission/primary.mjs";
 export {
 	ADMISSION_ACTIONS,
-	ADMISSION_INFRASTRUCTURE_STORES,
 	type Admission,
 	type AdmissionAction,
 	type AdmissionActionName,
@@ -888,8 +881,6 @@ export {
 	type Establishment,
 	type InterruptAdmission,
 	type InterruptionAnswer,
-	isAdmissionInfrastructureStore,
-	isHintKey,
 	isHintToken,
 	issuedRemediationActions,
 	MFA_REQUIREMENT_NAME,

@@ -175,11 +175,6 @@ export function checkTrustedProxyEntry(value: unknown): TrustedProxyEntryRejecti
 	return null;
 }
 
-/** Whether `value` is a usable trusted-proxy entry. */
-export function isTrustedProxyEntry(value: unknown): value is string {
-	return checkTrustedProxyEntry(value) === null;
-}
-
 /** Operator-facing explanation for each rejection reason. */
 export function describeTrustedProxyEntryRejection(reason: TrustedProxyEntryRejection): string {
 	const named = TRUSTED_PROXY_NAMED_RANGES.join(", ");

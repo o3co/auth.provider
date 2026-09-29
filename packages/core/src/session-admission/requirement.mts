@@ -79,7 +79,8 @@ const INFRASTRUCTURE_OUTAGES: Readonly<Record<AdmissionInfrastructureStore, stri
 
 /**
  * What an `unavailable` admission is described as to the client, by the
- * store it names (D10): one of {@link ADMISSION_INFRASTRUCTURE_STORES} by
+ * store it names (D10): one of admission's own stores (`user_session`,
+ * `revocation_boundary`, `ADMISSION_INFRASTRUCTURE_STORES`) by
  * name, anything else as a requirement's outage — never by the
  * requirement's name, which is the operator's, in the log line. One text
  * for every consumer, so none reports a requirement's outage as the
@@ -823,7 +824,7 @@ export type Admission =
 	  }
 	| {
 			readonly outcome: "unavailable";
-			/** One of {@link ADMISSION_INFRASTRUCTURE_STORES}, or the name of the requirement that could not answer; {@link describeAdmissionOutage} words it for a client. */
+			/** One of admission's own stores (`user_session`, `revocation_boundary`), or the name of the requirement that could not answer; {@link describeAdmissionOutage} words it for a client. */
 			readonly store: string;
 	  };
 
