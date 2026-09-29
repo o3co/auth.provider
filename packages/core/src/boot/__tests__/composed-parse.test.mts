@@ -166,6 +166,30 @@ describe("one composed parse over the transitional base", () => {
 		expect((config.http as Record<string, unknown>).port).toBe(3000);
 	});
 
+	it("reports only the base's refusals when the base refuses, not a module's schema reading what the base would have coerced", async () => {
+		// Run over what was written, a module's schema would refuse the
+		// environment string the base reads as a number: an error nobody made.
+		const strict = defineModule({
+			name: "strict-reader",
+			configSchema: z.object({ http: z.object({ port: z.number() }) }),
+		});
+		const err = await bootRefused(
+			[strict],
+			resolved({
+				http: { port: "3000", trustProxy: false, readinessTimeoutMs: 1000 },
+				logging: { level: "loud" },
+			}),
+		);
+		expect(err.reason).toBe("config-validation-failed");
+		expect(err.message).toMatch(/logging\.level: /);
+		expect(err.message).not.toMatch(/http\.port/);
+		expect(
+			(err.details as { issues: { path: PropertyKey[] }[] }).issues.map((issue) =>
+				issue.path.join("."),
+			),
+		).toEqual(["logging.level"]);
+	});
+
 	it("keeps what a module's configSchema does not declare under the keys it does", async () => {
 		const reader = defineModule({
 			name: "partial-reader",
