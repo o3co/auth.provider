@@ -15,91 +15,43 @@
  */
 
 /**
- * The browser half of acquisition (#593, D7, D8, slice 6), mounted at
+ * The browser half of federation-grant acquisition, mounted at
  * `/session/federation-grants`: the connect start a client sends the user to,
- * and the consent the deployment's page reads and answers.
+ * the consent the deployment's page reads and answers, and the upstream callback.
  *
- * ## Two transports, because two different things read the responses
+ * Connect and the callback are navigations: redirects and plain text, never a
+ * JSON body. `GET`/`POST /consent` mirror `/oauth/consent` for the page that
+ * already implements it: JSON data and errors, `401 login_required`, one
+ * indistinguishable answer for any challenge with nothing behind it, and `303`
+ * for both `POST` outcomes. None inherits the JSON router's client
+ * authentication, 404 or throttle body.
  *
- * - **`GET /connect` is a navigation.** Nothing but a browser sees it, so it
- *   answers with redirects and plain text — never a JSON body, which a user
- *   would see raw.
- * - **`GET` and `POST /consent` are the deployment page's contract**, and they
- *   mirror `/oauth/consent` exactly, because that page already implements the
- *   sibling: JSON page data, JSON errors, `401 login_required` for a session
- *   that died, one indistinguishable answer for every challenge with nothing
- *   behind it, and `303` for both success paths of the `POST`.
+ * Connect is cross-site by construction, so it skips the login flow's
+ * `Sec-Fetch-Site` check and `session.csrf.trustedOrigins` is not widened to
+ * client origins; consent is its CSRF defence. That holds only while connect
+ * never approves or creates an upstream transaction, every grant and renewal
+ * (first-party clients too) goes through consent, the answer needs the
+ * challenge AND the exact session binding, the consent data is never readable
+ * cross-origin with credentials, the challenge never leaks via a referrer
+ * (`Referrer-Policy: no-referrer` on every response), and the answer re-admits
+ * the session. Making consent skippable is a redesign of this exemption.
  *
- * Neither inherits the JSON router's client authentication, its 404, or its
- * throttle's body: this router has its own, and the regression test mounts the
- * real one to see every exit's representation.
+ * Whether the session may go on is core's `admitSession` on the cookie's claim,
+ * as `federation_grants.connect`, `.consent` and `.callback` (the callback asks
+ * twice: before the exchange and before activation). This file checks the
+ * flow's own conditions: the intent's subject, the browser binding (express
+ * session id and durable `sid`), the grant's current intent, the client's
+ * permission, the connection's pins and the grants boundary. Anything admission
+ * refuses, `step_up` included, gets the dead-session answer (connect: plain
+ * `403`; consent: `403 reauthentication_required`; callback:
+ * `error=reauthentication_required`); an unauthenticated cookie at connect is
+ * sent to login instead.
  *
- * ## Why connect needs no request-origin check, and what that depends on
- *
- * `GET /connect` is a cross-site navigation by construction — a client's site
- * sends the browser here — so it does not apply the login flow's
- * `Sec-Fetch-Site` refusal, and `session.csrf.trustedOrigins` is not widened to
- * client origins. That is sound because holding a handle authorizes nothing:
- * an activation needs an explicit consent answer carrying a fresh 256-bit
- * challenge issued to THIS browser session, read by a same-origin page. An
- * attacker who lodged the intent knows the handle; it cannot learn or choose
- * the victim's challenge. So the exemption holds only while:
- *
- * - connect never approves, and never creates an upstream transaction;
- * - every grant and renewal goes through consent — first-party clients too;
- * - the answer requires the challenge AND the exact session binding;
- * - the consent data is never readable cross-origin with credentials;
- * - the challenge does not leak through a referrer (`Referrer-Policy:
- *   no-referrer` is set on every response here);
- * - the answer re-admits the session: its liveness and the sessions boundary.
- *
- * Removing mandatory consent later is a redesign of this exemption, not a UI
- * preference. The `POST` additionally refuses explicit cross-site fetch
- * metadata, which costs a legitimate page nothing.
- *
- * ## The session is admission's
- *
- * Whether the browser's session may go on is core's session admission
- * (`admitSession`, the session-admission ADR's D8), asked on the cookie's
- * claim (`cookieClaim`) as `federation_grants.connect`,
- * `federation_grants.consent` — the read and the answer — and
- * `federation_grants.callback`, twice: before the exchange and again, with
- * the same claim, just before the activation. Admission reads the durable
- * session behind the cookie (live, the cookie's own subject's, not past its
- * `expiresAt`), the subject's sessions boundary through `subjectRevocation`,
- * and the registered session requirements. What stays here is the flow's
- * own: the intent's subject, the browser binding (the express session and
- * the durable `sid` the challenge was issued to), the grant's current
- * intent, the client's permission, the connection's pins, and the grants
- * boundary. Every session admission does not admit is one a new login is
- * the remedy for, and gets the answer a dead session always got: connect's
- * plain `403` "Sign in again to continue.", the consent's
- * `403 reauthentication_required`, the callback's
- * `error=reauthentication_required`. That includes a requirement's
- * `step_up`, in this release: the MFA ADR's step 14 decides whether these
- * routes send the browser on a trip instead. Connect's login redirect is for
- * a cookie that is not authenticated, which is read first, from the claim,
- * as `/authorize` reads it; a dead session keeps its plain `403`.
- *
- * ## What it logs
- *
- * Every `503`, and every `temporarily_unavailable` redirect the callback
- * answers, because something could not answer is ONE line at error —
- * `federation_grant_connect_unavailable`, `federation_grant_consent_unavailable`
- * or `federation_grant_callback_unavailable` — with `store` and `step` (or the
- * `reason`) and the error's projection; admission's own
- * `session_admission_unavailable`, with the `store` (`user_session`,
- * `revocation_boundary`, or a requirement's name) and the `action`, when the
- * session's part could not be answered — written through this router's
- * logger bound to the flow's `grantId`, the request's `correlationId` and,
- * at the consent, its `method`. Admission's audit event is registered with
- * the shutdown drain, as the route's own are. A record of another subject than the
- * cookie's is admission's warn, `session_admission_subject_mismatch`, and its
- * audit event. A client registry that cannot answer is core's
- * `client_repository_unavailable`, with this route as its `site`. A failure
- * that changed no answer — a best-effort write, an upstream that refused the
- * code — is one warn. The throttle logs and audits a limiter outage through
- * core, with the deployment's logger and audit sink.
+ * Every `503` and every callback `temporarily_unavailable` redirect writes one
+ * error line, `federation_grant_{connect,consent,callback}_unavailable`, with
+ * `store` and `step` (or `reason`). Admission, the client registry and the
+ * throttle log their own outages through core; a failure that changed no answer
+ * is one warn.
  */
 
 import { randomBytes } from "node:crypto";
@@ -158,9 +110,9 @@ import { parserRefusals, unexpectedErrors } from "./routes.mjs";
 export const FEDERATION_GRANTS_BROWSER_MOUNT_PATH = "/session/federation-grants";
 
 /**
- * What the connect flow needs of a federation (D17): the authorization URL the
- * consent answer sends the user to, and the exchange the callback makes. The
- * capability's refresh is the token route's business, not this router's.
+ * What the connect flow needs of a federation: the authorization URL the consent
+ * answer sends the user to, and the callback's code exchange. Refresh is the token
+ * route's business.
  */
 export type FederationGrantDelegatedAuthorizer = Pick<
 	SupportsDelegatedAuthorization,
@@ -174,19 +126,17 @@ export interface FederationGrantBrowserRouterOptions {
 	/** The durable sessions behind the cookie, which admission re-reads at every step. */
 	readonly userSessionStore: UserSessionStore;
 	/**
-	 * Where admission reads the subject's SESSIONS boundary (D13): a session
-	 * must have authenticated after it. Not the grants boundary, which
-	 * `grantsBoundary` reads.
+	 * Where admission reads the subject's SESSIONS boundary, which a session must have
+	 * authenticated after. The grants boundary is `grantsBoundary`.
 	 */
 	readonly subjectRevocation: SubjectRevocation;
 	/**
-	 * The synthetic key `sessionRequirementResolver` the boot planner built
-	 * (`resolverForTests` in a test): the session requirements admission asks
-	 * (the session-admission ADR's D1). Required; admission refuses any other
+	 * The `sessionRequirementResolver` the boot planner built (`resolverForTests` in
+	 * tests): the session requirements admission asks. Admission refuses any other
 	 * object.
 	 */
 	readonly requirements: SessionRequirementResolver;
-	/** The allowance the GRANTS boundary is compared with (D13). */
+	/** The clock-skew allowance the GRANTS boundary is compared with. */
 	readonly revocationSkewMs: number;
 	readonly connections: ReadonlyMap<string, FederationGrantAcquisitionConnection>;
 	/** The federation's delegated authorizer, or `undefined` when it has none. */
@@ -195,8 +145,7 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly consentUrl: string;
 	/**
 	 * The login page a browser that is not signed in is sent to, and its
-	 * `redirect_to` protocol: the `loginEntry` slot the session module
-	 * provides (#728).
+	 * `redirect_to` protocol: the session module's `loginEntry` slot.
 	 */
 	readonly login: Pick<LoginEntry, "urlFor">;
 	/** `oauth.jwt.issuer`, held to core's `checkCanonicalIssuer`: every URL this router builds is built on it. */
@@ -204,11 +153,14 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly rateLimiter: RateLimiter;
 	readonly failMode: RateLimitFailMode;
 	readonly background: FederationGrantBackground;
-	/** The subject's GRANTS boundary (D13): what the callback's backstop and re-read compare a consent with. */
+	/**
+	 * The subject's GRANTS boundary: what the callback's backstop and re-read
+	 * compare a consent with.
+	 */
 	readonly grantsBoundary: (subject: string) => Promise<Date | null>;
-	/** D7 check 5: whether an upstream account linked to another local user is refused. */
+	/** Callback check 5: whether the Store is asked who holds the upstream account. */
 	readonly identityLookup: "required" | "unsupported";
-	/** The port's own signature, not a copy of it: the two cannot drift apart (#611). */
+	/** The port's own signature, not a copy of it, so the two cannot drift apart. */
 	readonly userRepository?: Pick<UserRepository, "findSubjectByFederatedIdentity">;
 	/** Milliseconds: where the code exchange is aborted (`upstreamHardTimeoutMs`). */
 	readonly upstreamTimeoutMs: number;
@@ -318,15 +270,13 @@ type Judgement =
 			 */
 			readonly unanswered?: Unanswered;
 			/**
-			 * When it was the session's part: the store admission named — its
-			 * own (`user_session`, `revocation_boundary`) or a requirement's
-			 * name — which the consent describes as every consumer of admission
-			 * does (core's `describeAdmissionOutage`).
+			 * When it was the session's part: the store admission named, described as core's
+			 * `describeAdmissionOutage` does.
 			 */
 			readonly admissionStore?: string;
 	  };
 
-/** Each step of the browser half as admission is asked about it: its own name, graded `use` (the session-admission ADR's D4). */
+/** The admission action of each browser step, each graded `use`. */
 const CONNECT: AdmissionAction = ADMISSION_ACTIONS["federation_grants.connect"];
 const CONSENT: AdmissionAction = ADMISSION_ACTIONS["federation_grants.consent"];
 const CALLBACK: AdmissionAction = ADMISSION_ACTIONS["federation_grants.callback"];
@@ -335,12 +285,10 @@ const CALLBACK: AdmissionAction = ADMISSION_ACTIONS["federation_grants.callback"
 const NO_ACR_TABLE: AdmissionDeps["acrTable"] = Object.freeze({});
 
 /**
- * The session's part of a judgement, as admission answers it: the live
- * record; `null` for every session a new login is the remedy for — gone,
- * expired, another subject's, covered by the sessions boundary, or one a
- * requirement asks to sign in again, meet what it cannot, or step up (a
- * trip is the MFA ADR's step 14 to decide; until then a step-up here is a
- * new login); or an outage admission has logged, with the store it named.
+ * The session's part of a judgement: the live record; `null` for any session a new
+ * login is the remedy for (gone, expired, another subject's, covered by the
+ * sessions boundary, or refused by a requirement, `step_up` included); or an
+ * outage admission has already logged, with the store it named.
  */
 async function admittedSession(
 	deps: AdmissionDeps,
@@ -359,14 +307,10 @@ const isAdmissionOutage = (
 
 /**
  * Whether THIS browser may go on with THIS intent now: the cookie names the
- * intent's subject; admission admits its session as `action` — live, that
- * subject's, authenticated after the sessions boundary; the intent is still
- * the grant's current one; the client may still use the connection; and the
- * connection is still what the intent was lodged against.
- *
- * Asked at the start, when the page reads the question, and when it answers:
- * a session revoked, a grant renewed elsewhere, or a configuration changed in
- * between must stop a flow that has not finished.
+ * intent's subject, admission admits its session as `action`, the intent is still
+ * the grant's current one, the client may still use the connection, and the
+ * connection is unchanged since lodging. Asked at every step, so a revocation,
+ * renewal or configuration change mid-flow stops a flow that has not finished.
  */
 async function judge(
 	options: FederationGrantBrowserRouterOptions,
@@ -385,9 +329,8 @@ async function judge(
 		return { ok: false, status: 403, reason: "reauthentication_required" };
 	}
 
-	// The session's part — see the file header. A session that authenticated
-	// at or before the subject's sessions boundary may not mint a consent
-	// dated after it: `authTime` never changes, so signing in again is the
+	// A session that authenticated at or before the sessions boundary may not mint a
+	// consent dated after it; `authTime` never changes, so signing in again is the
 	// remedy, and the distinct error lets the page say so.
 	const session = await admittedSession(admission, claim, action);
 	if (isAdmissionOutage(session)) {
@@ -403,8 +346,8 @@ async function judge(
 		}
 		asking = { store: "client", step: "find" };
 		const client = await options.clientRepository.findById(intent.clientId);
-		// Read as a list or as nothing (`federationGrantAllowlist`, D9): a
-		// repository answering a string would otherwise match by substring.
+		// Read as a list or as nothing (`federationGrantAllowlist`): a repository
+		// answering a string would otherwise match by substring.
 		const allowed = federationGrantAllowlist(
 			(client as { allowedFederationGrantConnections?: unknown } | null)
 				?.allowedFederationGrantConnections,
@@ -420,8 +363,8 @@ async function judge(
 	const connection = options.connections.get(intent.connection);
 	if (
 		connection === undefined ||
-		// The revisions pin the issuer and client, not the federation's name;
-		// boot probed the Store under the name the connection has NOW (#611).
+		// The revisions pin the issuer and client, not the federation's name; boot
+		// probed the Store under the name the connection has NOW.
 		connection.federation !== intent.federation ||
 		federationGrantIdentityRevision(connection) !== intent.identityRevision ||
 		federationGrantAuthorizationRevision(connection) !== intent.authorizationRevision ||
@@ -437,10 +380,9 @@ async function judge(
 function consentLocation(consentUrl: string, issuer: string, challenge: string): string {
 	const url = new URL(consentUrl, issuer);
 	url.searchParams.set("challenge", challenge);
-	// Always absolute, on the issuer. Emitting the normalised path instead
-	// turned `/.//evil.example/consent` into `//evil.example/consent` — a
-	// protocol-relative Location carrying the challenge to another host (the
-	// adversarial review). Boot refuses such a path too; this is the belt.
+	// Always absolute on the issuer: a normalised path would turn
+	// `/.//evil.example/consent` into a protocol-relative `//evil.example/consent`
+	// Location carrying the challenge to another host. Boot refuses such a path too.
 	return url.href;
 }
 
@@ -463,11 +405,9 @@ export function createFederationGrantBrowserRouter(
 	// Refused where the composition is assembled, not answered 500 on every
 	// request: a missing resolver, or one the planner did not build.
 	const requirements = checkResolver(options.requirements, "createFederationGrantBrowserRouter");
-	// The sessions boundary is read by admission only when it is handed one:
-	// without it, a session the boundary has ended would be admitted. The
-	// module always hands the subject revocation it requires; a router built
-	// by hand without one is refused here, as it was when the boundary was a
-	// required function of its own.
+	// Admission reads the sessions boundary only when handed one; without it a
+	// session the boundary has ended would be admitted, so a hand-built router
+	// without it is refused.
 	const subjectRevocation = options.subjectRevocation;
 	if (typeof subjectRevocation !== "object" || subjectRevocation === null) {
 		throw new TypeError(
@@ -475,9 +415,8 @@ export function createFederationGrantBrowserRouter(
 				"boundary a session must have authenticated after (D13) is read through it",
 		);
 	}
-	// Likewise the issuer every URL here is built on — the consent location,
-	// the connect URI: on one that is not an absolute http(s) URL (`mailto:`,
-	// `urn:`) each throws, a 500 on every request. Core's canonical rule.
+	// Likewise the issuer every URL here is built on: one that is not an absolute
+	// http(s) URL would make every request a 500.
 	const issuerRejection = checkCanonicalIssuer(options.issuer);
 	if (issuerRejection !== null) {
 		throw new TypeError(
@@ -488,10 +427,8 @@ export function createFederationGrantBrowserRouter(
 	const randomId = options.randomId ?? (() => randomBytes(32).toString("base64url"));
 	const log = createFederationGrantLog(options.logger);
 	/**
-	 * The audit sink admission writes through: the deployment's, with every
-	 * write registered with the drain, as this router's own audit writes are
-	 * (`auditFor`, D12) — a shutdown that has begun waits for the
-	 * subject-mismatch event admission records as it waits for the route's.
+	 * The deployment's audit sink with every write registered with the drain, so a
+	 * shutdown also waits for the events admission records.
 	 */
 	const auditSink = options.auditSink;
 	const drainedAuditSink: AuditSink | undefined =
@@ -507,11 +444,9 @@ export function createFederationGrantBrowserRouter(
 					},
 				};
 	/**
-	 * Admission's dependencies for one request of one flow: this router's own
-	 * slots and clock, the drained audit sink, and its logger bound to the
-	 * flow's grant and this request's correlation id — and, at the consent,
-	 * its method — so the line admission writes for an outage carries them as
-	 * the route's own lines do.
+	 * Admission's dependencies for one request: its logger is bound to the flow's
+	 * grant, the request's correlation id and (at the consent) its method, so an
+	 * outage line admission writes carries them too.
 	 */
 	const admissionFor = (flow: LogFields): AdmissionDeps => ({
 		userSessionStore: options.userSessionStore,
@@ -614,11 +549,10 @@ export function createFederationGrantBrowserRouter(
 		};
 
 	/**
-	 * Admits a handler that writes into the shutdown drain, as the JSON routes
-	 * are admitted: a drain waits for what it admitted, and a callback it did
-	 * not admit could consume its transaction and then have the grant store
-	 * closed under it before the credential is written (Codex). Once the drain
-	 * has begun, new work is refused before it touches anything.
+	 * Admits a handler into the shutdown drain, as the JSON routes are: an unadmitted
+	 * callback could consume its transaction and then have the grant store closed
+	 * under it before the credential is written. Once the drain has begun, new work
+	 * is refused before it touches anything.
 	 */
 	const admitted =
 		(render: (res: Response) => void, handler: RequestHandler): RequestHandler =>
@@ -681,10 +615,8 @@ export function createFederationGrantBrowserRouter(
 					plain(res, 400, "This link has expired or has already been used. Start again.");
 					return;
 				}
-				// Not signed in: sign in first and come back to exactly this link —
-				// its handle and nothing else from the original query. The claim's
-				// flag, read before anything is asked of the session, as
-				// `/authorize` reads it.
+				// Not signed in: sign in and come back to exactly this link (its handle only).
+				// Read from the claim before the session is asked anything, as `/authorize` does.
 				const claim = claimOf(req);
 				if (!claim.authenticated) {
 					res.redirect(
@@ -835,12 +767,9 @@ export function createFederationGrantBrowserRouter(
 			if (judged.reason === "reauthentication_required") {
 				jsonError(res, 403, "reauthentication_required", "sign in again to continue");
 			} else if (judged.reason === "unavailable") {
-				// One answer for one outage: a client registry that cannot judge the
-				// question is what the page's own lookup of it answers, and the
-				// session's part is described as every consumer of admission
-				// describes it — by the store it named (core's
-				// `describeAdmissionOutage`), in this route's envelope. The
-				// route's own stores are `storage`.
+				// The description names what failed: the client registry as the GET's own lookup
+				// does, the session's part by core's `describeAdmissionOutage`, the route's own
+				// stores as `storage`.
 				jsonError(
 					res,
 					503,
@@ -862,9 +791,8 @@ export function createFederationGrantBrowserRouter(
 		return { consent, intent, binding: judged.binding, challenge: presented };
 	};
 
-	// Admitted like the POST: reading the question touches the durable session,
-	// the intent store and the client registry, and a drain that has begun must
-	// not have them closed under a read it never waited for (Copilot).
+	// Admitted like the POST: the read touches the durable session, the intent store
+	// and the client registry, which a drain must not close under it.
 	router.get(
 		"/consent",
 		consentThrottle,
@@ -890,10 +818,10 @@ export function createFederationGrantBrowserRouter(
 					connection: intent.connection,
 					scopes: [...consent.scopes],
 					...(intent.resource === undefined ? {} : { resource: intent.resource }),
-					// The grant's duration, counted from the answer — an absolute date
-					// computed now would be an estimate the grant does not keep (D3).
+					// The grant's duration, counted from the answer; an absolute date computed now
+					// would be an estimate the grant does not keep.
 					grant_expires_in: Math.floor(consent.lifetimeMs / 1000),
-					// What D8 obliges the page to say, as data rather than as prose.
+					// What the page must tell the user, as data.
 					continues_after_logout: true,
 					expires_in: Math.max(
 						0,
@@ -1061,15 +989,14 @@ export function createFederationGrantBrowserRouter(
 
 	// --- GET /callback/:connection -----------------------------------------
 	/**
-	 * Where the upstream returns the browser (D7). Query mode only: a
-	 * `form_post` callback arrives without the session cookie, and check 3
-	 * could not run — boot refuses such a federation.
+	 * Where the upstream returns the browser. Query mode only: a `form_post` callback
+	 * arrives without the session cookie, so check 3 could not run; boot refuses
+	 * such a federation.
 	 *
-	 * Check 1 decides whether there is anywhere trustworthy to send the browser
-	 * at all, so its failures are a plain 400 from here. Every later failure
-	 * goes back to the intent's own `redirect_uri` with the client's own
-	 * `state`, the `grant_id`, and one of D7's eleven codes — never an upstream's
-	 * description, a thrown message, or anything the callback carried.
+	 * Check 1's failures are a plain 400: there is nowhere trustworthy to send the
+	 * browser. Every later failure redirects to the intent's `redirect_uri` with the
+	 * client's `state`, the `grant_id` and one `CallbackError` code, never an
+	 * upstream's description, a thrown message or anything the callback carried.
 	 */
 	router.get(
 		"/callback/:connection",
@@ -1203,11 +1130,9 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 
-				// 4. The upstream's own answer, validated by the adapter. A parameter
-				// it carried twice is a malformed response (RFC 6749 §3.1), not one
-				// of its values: dropping the copies would hand the adapter a
-				// response without the `iss` it said, and whether RFC 9207's check
-				// then ran would turn on the issuer's metadata (Copilot).
+				// 4. The upstream's own answer, validated by the adapter. A repeated parameter is
+				// a malformed response (RFC 6749 §3.1): dropping copies could hand the adapter a
+				// response without the `iss` it sent, so RFC 9207's check would hinge on metadata.
 				if (Object.values(req.query).some((value) => typeof value !== "string")) {
 					await fail("upstream_error");
 					return;
@@ -1236,15 +1161,12 @@ export function createFederationGrantBrowserRouter(
 						...(intent.resource === undefined ? {} : { resource: intent.resource }),
 						callbackParams: callbackParamsOf(req),
 						signal: AbortSignal.timeout(options.upstreamTimeoutMs),
-						// #611: only what check 5 will hand the Store, and nothing
-						// when the deployment does not ask it.
+						// Only the claims check 5 hands the Store, and none when it is not asked.
 						identityClaims:
 							options.identityLookup === "required" ? [...(connection.identityClaims ?? [])] : [],
 					});
 				} catch (error) {
-					// Not reached, not in time, or answered with a 5xx — read off
-					// what the error is, never its text (core's classifier, held to
-					// the real libraries by federation-oidc's tests).
+					// Classified by what the error is, never its text (core's classifier).
 					if (isFederationUpstreamOutage(error)) {
 						// Not reached, or not in time: the outage the redirect says.
 						log.outage(
@@ -1274,9 +1196,9 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 
-				// 6. Eligibility (D5): a refresh token, and an access token this
-				// provider may disclose — judged on its lifetime and type here, and
-				// on its scope in step 7, so that each failure names its own check.
+				// 6. Eligibility: a refresh token, and an access token this provider may
+				// disclose, judged on lifetime and type here and on scope in step 7, so each
+				// failure names its own check.
 				const tokens = exchanged.tokens;
 				const refreshToken =
 					typeof tokens.refreshToken === "string" && tokens.refreshToken.length > 0
@@ -1286,11 +1208,9 @@ export function createFederationGrantBrowserRouter(
 					await fail("refresh_token_absent");
 					return;
 				}
-				// The upstream's answer, read tolerantly by RFC 6749 §3.3's grammar
-				// (`parseScopeTokens`), as every upstream answer is: a tab separates
-				// two scopes rather than joining them into one the user was never
-				// shown. Omitted means as requested; named but naming no
-				// scope-token is judged in step 7 as no answer.
+				// Parsed by RFC 6749 §3.3's grammar (`parseScopeTokens`): a tab separates two
+				// scopes rather than forming one the user was never shown. Omitted means as
+				// requested; named but empty is judged in step 7.
 				const scopeText = tokens.scope;
 				const granted =
 					scopeText === undefined
@@ -1335,13 +1255,10 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 
-				// The mandatory re-read, immediately before the write. The upstream
-				// work above may have taken seconds, and a subject-wide revocation
-				// may have landed in them — a "keep" stamps the sessions boundary
-				// and nothing else. This narrows what was an attacker-controlled
-				// window (hold the upstream redirect, finish the callback minutes
-				// later) to the gap between these reads and the activation. It does
-				// not close it; that needs write fencing (D13).
+				// The mandatory re-read, immediately before the write: a subject-wide revocation
+				// may have landed during the upstream work. This narrows an attacker-controlled
+				// window (hold the upstream redirect, finish the callback later) to the gap
+				// between these reads and the activation; closing it needs write fencing.
 				const again = await sessionHolds(admission, req, claim, transaction);
 				if (again !== "ok") {
 					await fail(again === "unavailable" ? "temporarily_unavailable" : again);
@@ -1368,7 +1285,7 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 
-				// 8. The guarded activation (D2).
+				// 8. The guarded activation.
 				const expiresAtMs = (tokens.expiresAt as Date).getTime();
 				// When the token was obtained, on the adapter's clock, held inside the
 				// window of the exchange — the retrieval's rule (retrieve.mts), so a
@@ -1454,12 +1371,10 @@ export function createFederationGrantBrowserRouter(
 	);
 
 	/**
-	 * Check 3, asked twice: before the exchange and again just before the
-	 * activation, with the same claim. The browser presents the same
-	 * express-session record and the same durable session the flow started
-	 * in, and admission admits that session — live, the intent's subject's,
-	 * authenticated after the sessions boundary — as the callback. An outage
-	 * is `"unavailable"`, whose line admission wrote.
+	 * Check 3, asked before the exchange and again before activation with the same
+	 * claim: the same express session and durable session the flow started in,
+	 * admitted as the callback. An outage is `"unavailable"`, already logged by
+	 * admission.
 	 */
 	async function sessionHolds(
 		admission: AdmissionDeps,
@@ -1481,10 +1396,9 @@ export function createFederationGrantBrowserRouter(
 	}
 
 	/**
-	 * A renewal's backstop (D13, amended in slice 5): the grant it would renew,
-	 * compared with the subject's GRANTS boundary. A hit is revoked, durably —
-	 * the one failure here meant to change the record — and audited once, by
-	 * whichever call wrote it.
+	 * A renewal's backstop: the grant it would renew, compared with the subject's
+	 * GRANTS boundary. A hit is revoked durably (the one failure here meant to
+	 * change the record) and audited once, by whichever call wrote it.
 	 */
 	async function backstop(
 		intent: FederationGrantIntent,
@@ -1522,14 +1436,12 @@ export function createFederationGrantBrowserRouter(
 	}
 
 	/**
-	 * Check 5. The verified issuer is the connection's; a renewal's upstream
-	 * account is the one already on the grant; an expectation the client
-	 * lodged is met; and — unless the deployment recorded that it cannot ask —
-	 * the Store establishes who holds the upstream account: this user, or
-	 * nobody. Another user is a conflict. An answer that establishes neither
-	 * refuses as well (#611): "I cannot see where the link would be" is not
-	 * "linked to nobody", and reading it as one is what let a dedicated
-	 * registration's pairwise `sub` through.
+	 * Check 5. The verified issuer is the connection's; a renewal's upstream account
+	 * is the one already on the grant; an expectation the client lodged is met; and,
+	 * unless the deployment recorded that it cannot ask, the Store establishes who
+	 * holds the upstream account: this user or nobody. Another user is a conflict.
+	 * An answer that establishes neither also refuses: "cannot tell" is not "linked
+	 * to nobody", and reading it so would let a pairwise `sub` through.
 	 */
 	async function accountHolds(
 		intent: FederationGrantIntent,
@@ -1571,10 +1483,8 @@ export function createFederationGrantBrowserRouter(
 			}
 		}
 		if (options.identityLookup === "unsupported") return { holds: true, outcome: "unsupported" };
-		// Called THROUGH the repository, never detached from it: a Store written
-		// as a class reads its own fields, and `this` is lost the moment the
-		// method is taken off the object — which every test stub written as an
-		// arrow function hid, and the bundled repository did not (Codex).
+		// Called through the repository, never detached: a Store written as a class needs
+		// its `this`.
 		const repository = options.userRepository;
 		if (typeof repository?.findSubjectByFederatedIdentity !== "function") {
 			// Boot refused this under "required"; a repository that lost the
@@ -1584,10 +1494,9 @@ export function createFederationGrantBrowserRouter(
 				error: new TypeError("the userRepository has no findSubjectByFederatedIdentity"),
 			});
 		}
-		// #611: every claim the connection names, as the adapter verified it, or
-		// no question at all — a lookup handed part of its evidence could answer
-		// "nobody" for want of the rest. A fresh object of exactly those names:
-		// nothing else the adapter answered reaches the Store.
+		// Every claim the connection names, as the adapter verified it, or no question at
+		// all: a lookup missing part of its evidence could answer "nobody". Only those
+		// names reach the Store.
 		const claims = requiredIdentityClaims(upstream.claims, connection.identityClaims ?? []);
 		if (claims === undefined) {
 			return refused("identity_unverifiable", "identity_claims_unavailable");
@@ -1636,10 +1545,9 @@ export function createFederationGrantBrowserRouter(
 }
 
 /**
- * D7's eleven codes: what a failed callback sends back to the client, and
- * nothing else. `identity_unverifiable` (#611) is not `temporarily_unavailable`:
- * the Store could not establish who holds the upstream account, and asking
- * again will not change that.
+ * What a failed callback sends back to the client, and nothing else.
+ * `identity_unverifiable` is not `temporarily_unavailable`: asking again will not
+ * change it.
  */
 type CallbackError =
 	| "access_denied"
@@ -1673,7 +1581,7 @@ type AccountBinding =
 
 /**
  * The named claims out of what the adapter answered, as a fresh object, or
- * `undefined` if any is not an own, non-empty string (#611).
+ * `undefined` if any is not an own, non-empty string.
  */
 function requiredIdentityClaims(
 	answered: unknown,
@@ -1681,7 +1589,7 @@ function requiredIdentityClaims(
 ): Readonly<Record<string, string>> | undefined {
 	const claims: Record<string, string> = {};
 	if (names.length === 0) return claims;
-	// An array is an object, and `"0"` a legal claim name (Copilot, #612).
+	// An array is an object, and `"0"` a legal claim name.
 	if (typeof answered !== "object" || answered === null || Array.isArray(answered)) {
 		return undefined;
 	}
@@ -1696,9 +1604,8 @@ function requiredIdentityClaims(
 
 /**
  * A lookup's answer if it is one the port defines, and `undefined` otherwise.
- * Recognised positively: the slice 6 contract answered a string or `null`, and
- * a Store still written against it — or one answering anything else — must
- * not fall through to either outcome that lets a grant through.
+ * Recognised positively: any other shape (a bare string, `null`) must not fall
+ * through to an outcome that lets a grant through.
  */
 function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
@@ -1736,16 +1643,16 @@ async function readBoundary(
 	return boundary;
 }
 
-/** Whether the connection is still what the intent was lodged against (D4). */
+/** Whether the connection is still what the intent was lodged against. */
 function pinned(
 	connection: FederationGrantAcquisitionConnection | undefined,
 	intent: FederationGrantIntent,
 ): connection is FederationGrantAcquisitionConnection {
 	return (
 		connection !== undefined &&
-		// Not in either revision, and still pinned: a connection re-pointed onto
-		// another federation entry mid-flow would have check 5 ask the Store
-		// about a registration boot never probed (Copilot, #612).
+		// Not in either revision, and still pinned: a connection re-pointed onto another
+		// federation entry mid-flow would have check 5 ask about a registration boot
+		// never probed.
 		connection.federation === intent.federation &&
 		federationGrantIdentityRevision(connection) === intent.identityRevision &&
 		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&

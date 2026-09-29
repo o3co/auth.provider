@@ -15,47 +15,28 @@
  */
 
 /**
- * `POST /oauth/federation-grants/:grantId/token` (#593, D9–D12).
+ * `POST /oauth/federation-grants/:grantId/token`: a shell around
+ * `retrieveFederationGrantToken` that adds transport, authentication,
+ * serialization, correlation and audit. Every decision about the grant is core's.
  *
- * A shell around `retrieveFederationGrantToken`, and deliberately nothing
- * more. It adds transport, authentication, serialization, correlation and
- * audit; every decision about the grant itself is core's.
+ * Do not add authorization checks in front of core (connection allowlist, removed
+ * connection, ineligibility marker). Each changes a settled answer: a revoked
+ * grant answers 410 whatever the client's permissions, and a 403 in front would
+ * suggest the grant works under another registration; a grant with an
+ * ineligibility marker may still have a usable cached token, which core serves.
+ * Nor may this route retry a denial (a second attempt can cost a second upstream
+ * rotation), recompute `expires_in`, turn an unmet `min_ttl` into an error,
+ * reclassify an upstream refusal, manage locks, abandon the retrieval's worker on
+ * a timeout of its own, delete an unreadable credential, read `lastLook`, or look
+ * in another grant or the session-bound token store.
  *
- * ### What this must not do
- *
- * The mistake this design expects is an "obvious" authorization check placed
- * in FRONT of core — rejecting a client with no connection allowlist, or a
- * grant whose connection an operator removed, or one carrying an
- * ineligibility marker, before the retrieval is called. Each of those reads
- * as a tightening and each changes a settled answer:
- *
- *   - a revoked grant answers 410 whether or not the client may use its
- *     connection, because the user revoking it is the more useful truth; an
- *     allowlist check in front turns that into 403, which tells a caller the
- *     grant would work if their registration changed;
- *   - a grant with an ineligibility marker still has a usable cached token,
- *     and core serves it; refusing here withholds a token nothing is wrong
- *     with.
- *
- * Nor does it retry a denial (a "helpful" second attempt can cost a second
- * upstream rotation), recompute `expires_in`, turn an unmet `min_ttl` into an
- * error, reclassify an upstream's refusal, manage locks, add a timeout that
- * abandons the retrieval's worker, delete a credential it could not read, or
- * look in another grant or in the session-bound token store.
- *
- * It does not read `lastLook` either. That is core's private orchestration.
- *
- * ### What it logs
- *
- * Core tells this route every failure it turns into an answer or drops
- * (`report`), and a `503` carries the one it was turned from (`failure`). The
- * route holds what it is told until the answer is in: the failure the `503`
- * carries is the outage, written once at error as
- * `federation_grant_token_unavailable`; every other one — and whatever is
- * told after the answer, the tail of a refresh — is one warn,
- * `federation_grant_token_step_failed`. A `503` for contention (`lock_timeout`,
- * `concurrent_update`) is a warn too, `federation_grant_token_contended`:
- * nothing is down.
+ * Logging: core reports every failure it turns into an answer or drops
+ * (`report`), and a `503` carries the one it came from (`failure`). Reports are
+ * held until the answer is in; the carried one is the outage, logged once at error
+ * as `federation_grant_token_unavailable`, every other one (and any reported
+ * afterwards by a refresh tail) is a `federation_grant_token_step_failed` warn. A
+ * contention `503` (`lock_timeout`, `concurrent_update`) is the warn
+ * `federation_grant_token_contended`: nothing is down.
  */
 
 import {
@@ -87,9 +68,8 @@ export interface FederationGrantTokenHandlerOptions {
 		connection: FederationGrantConnection,
 	) => FederationGrantRefresher | undefined;
 	/**
-	 * The subject's grants boundary (D13). Throwing is the honest answer when
-	 * the deployment has no subject-revocation capability: `null` would say
-	 * "nothing was revoked", which is not something an absent boundary knows.
+	 * The subject's grants boundary. Throw when the deployment has no
+	 * subject-revocation capability: `null` would claim nothing was revoked.
 	 */
 	readonly grantsBoundary: (subject: string) => Promise<Date | null>;
 	readonly limits: FederationGrantRetrievalLimits;
@@ -148,9 +128,8 @@ export function createFederationGrantTokenHandler(
 		// down so that one refusal is one event.
 		markHandlerReached(res);
 		const correlationId = requestIdOf(res);
-		// Opaque: an ID is whatever created it, and imposing the acquisition
-		// generator's shape on it would refuse every record a deployment seeded
-		// before that generator existed.
+		// Opaque: an ID is whatever created it; imposing the acquisition generator's
+		// shape would refuse records a deployment seeded otherwise.
 		const matched = req.params.grantId;
 		const grantId = typeof matched === "string" ? matched : "";
 		const client = (req as { oauthClient?: { clientId: string } }).oauthClient;
@@ -273,8 +252,8 @@ export function createFederationGrantTokenHandler(
 					grantId,
 					clientId: client.clientId,
 					subject: parsed.value.subject,
-					// Absent means nothing is allowed: a client registered before
-					// offline delegation existed does not find itself opted into it.
+					// Absent means nothing is allowed: a client registered without the field is not
+					// opted into offline delegation.
 					allowedConnections: allowedConnectionsOf(req),
 					correlationId,
 					...(parsed.value.connection === undefined ? {} : { connection: parsed.value.connection }),
