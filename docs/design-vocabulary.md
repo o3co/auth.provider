@@ -71,14 +71,9 @@ second definition it was never shown; a drift guard can.
 
 ## Provenance identifiers
 
-Campaign identifiers (`A1 §5.1`, `IH-16`, `D-6`, `Wave 5d`, …) are NOT vocabulary
-rows — they are historical provenance from development campaigns whose source
-documents were never committed. They resolve in
-[design-campaign-index.md](design-campaign-index.md), which also carries the
-forward rule: new code must not cite a session-local campaign ID as its sole
-rationale — write the rationale in place and anchor linkage in durable artifacts
-(issue/PR numbers, CHANGELOG, ADRs). The index's inventory is guarded by
-`packages/core/src/__tests__/campaignVocabulary.drift.test.mts`.
+Identifiers from past development campaigns (`IH-16`, `D-6`, `Wave 5d`, …) are
+not vocabulary rows, and the code does not cite them: a comment states its
+rationale in place, and a design decision is cited by its ADR.
 
 ## What does not belong here
 

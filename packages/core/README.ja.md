@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-29
+最終更新: 2026-09-30
 
 ## 責務と役割
 
@@ -8,7 +8,7 @@
 
 グラントタイプと `/oauth/*` エンドポイント（`@o3co/auth-provider-oauth` と各グラントパッケージ）は持ちません: core が自分でマウントするルートは discovery ドキュメントだけで、JWKS、health、readiness のルーターは composition root が組み込みます。永続アダプター（`@o3co/auth-provider-redis`）、フェデレーションアダプター（`@o3co/auth-provider-federation-*` パッケージ群）、ログインとブラウザーセッション（`@o3co/auth-provider-session`）、Store クライアント（`@o3co/auth-provider-foundation`）は持ちません。内部のどのディレクトリが何を持ち、なぜ分かれているかは [src/README.md](src/README.md) にあります。
 
-語彙: **the Store** は auth.provider の用語で、利用者側の上流ユーザーサービス — identity・クレデンシャル・メール検証状態の system of record — を指します。定義は [`src/repositories/types.mts`](src/repositories/types.mts) の `User` doc にあり、auth.provider は Store が公開した状態を読み、Store への書き込みを引き起こすのは、自身のフローが必要とする 2 つの任意の中継（`linkFederatedIdentity` と、MFA 登録の証人 `markMfaEnrolled`）だけです。このパッケージのソースが引用する design-campaign 識別子は [docs/design-campaign-index.md](../../docs/design-campaign-index.md) で解決できます。
+語彙: **the Store** は auth.provider の用語で、利用者側の上流ユーザーサービス — identity・クレデンシャル・メール検証状態の system of record — を指します。定義は [`src/repositories/types.mts`](src/repositories/types.mts) の `User` doc にあり、auth.provider は Store が公開した状態を読み、Store への書き込みを引き起こすのは、自身のフローが必要とする 2 つの任意の中継（`linkFederatedIdentity` と、MFA 登録の証人 `markMfaEnrolled`）だけです。
 
 ## インストール
 

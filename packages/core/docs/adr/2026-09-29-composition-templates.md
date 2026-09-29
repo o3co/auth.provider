@@ -181,7 +181,7 @@ Rejected:
 
 The drift tests in core that walk `templates/standalone/src` by name
 (`errorText`, `designVocabulary`, `mfaEnrollmentWitness`,
-`sessionAdmissionCallers`, `auditEventInventory`, `campaignVocabulary`) walk
+`sessionAdmissionCallers`, `auditEventInventory`) walk
 every `templates/*/src` when the second template lands, each first shown to
 miss it; `reference-env-names` reads every template's `config/`, not only
 `templates/standalone/config`. The guards that list workspaces explicitly
