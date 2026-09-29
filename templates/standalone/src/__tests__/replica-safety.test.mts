@@ -241,12 +241,12 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 
 	const cases: ReadonlyArray<readonly [variable: string, module: string]> = [
 		// The template's own modules — the three the guard could not see.
-		["USER_SESSION_STORES_ADAPTER", "standalone:in-memory-session-stores"],
-		["OAUTH_CODE_ADAPTER", "standalone:in-memory-code-repository"],
-		["FEDERATION_TOKEN_STORE_TYPE", "standalone:in-memory-federation-token-store"],
+		["USER_SESSION_STORES_ADAPTER", "standalone-in-memory-session-stores"],
+		["OAUTH_CODE_ADAPTER", "standalone-in-memory-code-repository"],
+		["FEDERATION_TOKEN_STORE_TYPE", "standalone-in-memory-federation-token-store"],
 		// #474: express-session's own store. Not a module of this template but
 		// built here from its config, which is what lets the manifest declare.
-		["SESSION_STORAGE_TYPE", "sessionStoreModule"],
+		["SESSION_STORAGE_TYPE", "session-store"],
 		// #527: the consent store, wired only when the switch says so.
 		["CONSENT_STORE_ADAPTER", "core-consent-store-memory"],
 		// Core's, selected by the same kind of switch. The guard knew these by
@@ -298,12 +298,12 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 			FEDERATION_TOKEN_STORE_TYPE: "memory",
 		});
 		const standaloneMemoryModules = modulesFor(config).filter((m) =>
-			m.name.startsWith("standalone:in-memory-"),
+			m.name.startsWith("standalone-in-memory-"),
 		);
 		expect(standaloneMemoryModules.map((m) => m.name).sort()).toEqual([
-			"standalone:in-memory-code-repository",
-			"standalone:in-memory-federation-token-store",
-			"standalone:in-memory-session-stores",
+			"standalone-in-memory-code-repository",
+			"standalone-in-memory-federation-token-store",
+			"standalone-in-memory-session-stores",
 		]);
 		for (const m of standaloneMemoryModules) {
 			expect(replicaUnsafeReason(m), m.name).toBeDefined();
@@ -343,8 +343,8 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 		const modules = modulesFor(resolveConfig(ALL_REDIS_ENV));
 		const names = modules.map((m) => m.name);
 		expect(names).toContain("redis-federation-token-store");
-		expect(names).toContain("standalone:redis-clients");
-		expect(names).not.toContain("standalone:in-memory-federation-token-store");
+		expect(names).toContain("redis-clients");
+		expect(names).not.toContain("standalone-in-memory-federation-token-store");
 		// Exactly one provider for the slot: both modules provide it, so
 		// selecting both would be a boot-time slot collision.
 		const providers = modules.filter((m) =>
@@ -368,7 +368,7 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 		});
 		const names = modulesFor(config).map((m) => m.name);
 		expect(names).toContain("redis-federation-token-store");
-		expect(names).toContain("standalone:redis-clients");
+		expect(names).toContain("redis-clients");
 	});
 
 	it("boots, and the resolved store is the Redis adapter", async () => {
@@ -396,7 +396,7 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 			DEPLOYMENT_MODE: "single",
 		});
 		const names = modulesFor(config).map((m) => m.name);
-		expect(names).toContain("standalone:in-memory-federation-token-store");
+		expect(names).toContain("standalone-in-memory-federation-token-store");
 		expect(names).not.toContain("redis-federation-token-store");
 		handleRef = await boot(config);
 		expect(handleRef.components.federationTokenStore?.kind).toBe("memory");
@@ -447,7 +447,7 @@ describe('#561: consentStore.adapter = "redis" in the standalone', () => {
 			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		}).map((m) => m.name);
 		expect(names).toContain("redis-consent-store");
-		expect(names).toContain("standalone:redis-clients");
+		expect(names).toContain("redis-clients");
 	});
 
 	it("boots under DEPLOYMENT_MODE=multi with both slots resolved to the Redis adapters", async () => {

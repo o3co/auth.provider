@@ -238,7 +238,7 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		const config = resolveConfig({ ...BASE_ENV, FEDERATION_GRANT_STORE_ADAPTER: "redis" });
 		const installed = names(config, true);
 		for (const name of GRANT_MODULES) expect(installed).not.toContain(name);
-		expect(installed).not.toContain("standalone:redis-clients");
+		expect(installed).not.toContain("redis-clients");
 
 		handleRef = await boot(config, true);
 		const app = express().use(handleRef.router);
@@ -285,7 +285,7 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		);
 		expect(installed).not.toContain("core-federation-grant-store-memory");
 		expect(installed).not.toContain("core-federation-grant-intent-store-memory");
-		const clients = modules.find((m) => m.name === "standalone:redis-clients");
+		const clients = modules.find((m) => m.name === "redis-clients");
 		expect(Object.keys(clients?.provides ?? {})).toEqual(
 			expect.arrayContaining(["federationGrantStoreClient", "federationGrantIntentStoreClient"]),
 		);
@@ -312,7 +312,7 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 			FEDERATION_GRANT_STORE_ADAPTER: "redis",
 			FEDERATION_GRANT_INTENT_STORE_ADAPTER: "redis",
 		});
-		expect(names(config, true)).toContain("standalone:redis-clients");
+		expect(names(config, true)).toContain("redis-clients");
 	});
 
 	it.each([

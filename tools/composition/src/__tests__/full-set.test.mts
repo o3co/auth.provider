@@ -148,8 +148,8 @@ const manifest = JSON.parse(
 const ADDED: Readonly<Record<string, readonly string[]>> = {
 	"@o3co/auth-provider-device-grant": ["device-grant", "core-device-code-store-memory"],
 	"@o3co/auth-provider-dpop": ["dpop"],
-	"@o3co/auth-provider-federation-apple": ["federation:apple"],
-	"@o3co/auth-provider-federation-github": ["federation:github"],
+	"@o3co/auth-provider-federation-apple": ["federation-apple"],
+	"@o3co/auth-provider-federation-github": ["federation-github"],
 	// Private until the template wires it (the MFA ADR's build-order step
 	// 20): mfaModules, over core's memory MFA stores.
 	"@o3co/auth-provider-mfa": [

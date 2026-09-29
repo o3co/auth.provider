@@ -30,7 +30,7 @@ const sessionStoreConfigSchema = fullSectionsSchema.pick({
 	session: true,
 });
 
-const MODULE_NAME = "sessionStoreModule";
+const MODULE_NAME = "session-store";
 
 /**
  * What forks per replica when `session.storage.type = "memory"` (#474). Quoted

@@ -25,7 +25,7 @@ const minBoot = {
 
 describe("memorySessionStoresModule", () => {
 	it("has the expected manifest shape", () => {
-		expect(memorySessionStoresModule.name).toBe("memorySessionStores");
+		expect(memorySessionStoresModule.name).toBe("core-session-stores-memory");
 		expect(memorySessionStoresModule.requires).toBeUndefined();
 		expect(memorySessionStoresModule.provides).toBeDefined();
 		const provides = memorySessionStoresModule.provides as Record<string, unknown>;
