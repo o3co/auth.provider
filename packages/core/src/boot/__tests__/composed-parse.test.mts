@@ -214,6 +214,12 @@ describe("one composed parse over the transitional base", () => {
 			},
 		);
 
+		it("boot when one of them declares nothing: an empty object holds no value", async () => {
+			const empty = defineModule({ name: "empty-reader", configSchema: z.object({}) });
+			const config = await bootAndRead([empty, coercing], resolved({ widget: { size: "3" } }));
+			expect(config.widget).toEqual({ size: 3 });
+		});
+
 		it("boot when they make the same value of it", async () => {
 			const alsoCoercing = defineModule({
 				name: "also-coercing-reader",
