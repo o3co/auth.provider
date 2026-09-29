@@ -257,6 +257,125 @@ describe("the manifest scan", () => {
 		]);
 	});
 
+	it("reads a shorthand property through the const it names", () => {
+		const found = manifestsIn(
+			"example.mts",
+			[
+				'const name = "s";',
+				'const requires = ["config"] as const;',
+				"defineModule({ name, requires });",
+			].join("\n"),
+		);
+		expect(found.map(({ name, requires }) => [name, requires])).toEqual([["s", ["config"]]]);
+	});
+
+	it("reads a quoted key as the key it spells", () => {
+		const found = manifestsIn(
+			"example.mts",
+			'defineModule({ "name": "q", "requires": ["config"], ["optional"]: ["logger"] });',
+		);
+		expect(found.map(({ name, requires, optional }) => [name, requires, optional])).toEqual([
+			["q", ["config"], ["logger"]],
+		]);
+	});
+
+	it("reads optional beside requires, and a manifest that lists either", () => {
+		const found = manifestsIn(
+			"example.mts",
+			[
+				'defineModule({ name: "o", optional: ["config"] });',
+				'defineModule({ name: "r", requires: ["keyStore"] });',
+				'defineModule({ name: "n" });',
+			].join("\n"),
+		);
+		expect(found.map(({ name, requires, optional }) => [name, requires, optional])).toEqual([
+			["o", [], ["config"]],
+			["r", ["keyStore"], []],
+			["n", [], []],
+		]);
+	});
+
+	it("resolves a const in the scope it is used in, not the file's last of that name", () => {
+		// The file-wide table read the last `REQUIRES` for both, so `a`'s
+		// config went unseen; and a parameter that shadows a const is no const.
+		const found = manifestsIn(
+			"example.mts",
+			[
+				"function a() {",
+				'\tconst REQUIRES = ["config"] as const;',
+				'\treturn defineModule({ name: "a", requires: REQUIRES });',
+				"}",
+				"function b() {",
+				'\tconst REQUIRES = ["keyStore"] as const;',
+				'\treturn defineModule({ name: "b", requires: REQUIRES });',
+				"}",
+				'const OUTER = ["keyStore"] as const;',
+				"function c(OUTER: readonly string[]) {",
+				'\treturn defineModule({ name: "c", requires: OUTER });',
+				"}",
+			].join("\n"),
+		);
+		expect(found.map(({ name, requires }) => [name, requires])).toEqual([
+			["a", ["config"]],
+			["b", ["keyStore"]],
+			["c", undefined],
+		]);
+	});
+
+	it("reads no binding but a const: a let, a parameter and an import are not read", () => {
+		const found = manifestsIn(
+			"example.mts",
+			[
+				'import { IMPORTED } from "./elsewhere.mjs";',
+				'let LET = ["config"];',
+				'defineModule({ name: "l", requires: LET });',
+				'defineModule({ name: "i", requires: IMPORTED });',
+				'const build = (PARAM: string[]) => defineModule({ name: "p", optional: PARAM });',
+			].join("\n"),
+		);
+		expect(found.map(({ name, requires, optional }) => [name, requires, optional])).toEqual([
+			["l", undefined, []],
+			["i", undefined, []],
+			["p", [], undefined],
+		]);
+	});
+
+	it("reads each defineModule call, and reports the ones whose manifest it cannot read", () => {
+		// Anchored on the call, as the module-name scan is: a manifest that is
+		// not an object literal, or that a spread may add a list to, is
+		// reported rather than passed over.
+		const found = manifestsIn(
+			"example.mts",
+			[
+				'const SPEC = { name: "by-const", requires: ["config"] };',
+				"defineModule(SPEC);",
+				"defineModule(spec);",
+				'defineModule({ ...base, name: "spread" });',
+				'defineModule({ ...base, name: "spread-then-lists", requires: [], optional: [] });',
+				'core.defineModule<R, O>({ name: "namespaced", requires: ["config"] });',
+			].join("\n"),
+		);
+		expect(found.map(({ name, requires, optional }) => [name, requires, optional])).toEqual([
+			["by-const", ["config"], []],
+			[undefined, undefined, undefined],
+			["spread", undefined, undefined],
+			["spread-then-lists", [], []],
+			["namespaced", ["config"], []],
+		]);
+	});
+
+	it("counts config listed in either requires or optional: deps carry it either way", () => {
+		const found = manifestsIn(
+			"example.mts",
+			[
+				'defineModule({ name: "required", requires: ["config"] });',
+				'defineModule({ name: "optional", optional: ["config"] });',
+				'defineModule({ name: "neither", requires: ["keyStore"], optional: ["logger"] });',
+			].join("\n"),
+		);
+		expect(found.filter(readsConfig).map(({ name }) => name)).toEqual(["required", "optional"]);
+	});
+
 	it("walks a plausible workspace (the guard is not vacuous)", () => {
 		expect(FOUND.length).toBeGreaterThan(20);
 		expect(FOUND.some((manifest) => manifest.name === "oauth")).toBe(true);
